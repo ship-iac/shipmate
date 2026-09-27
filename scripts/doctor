@@ -45,6 +45,7 @@ Probes:
 - GitHub App installation permission drift.
 """
 
+import contextlib
 import json
 import os
 import pathlib
@@ -91,7 +92,7 @@ _SOLE_MAINTAINER_REVIEW = (
     "`require_code_owner_review` is on, so the merge-side control a leaked App "
     "private key cannot satisfy is still in place."
 )
-# Same degrade posture as FORK_TRIGGER_UNREADABLE: unread is not misconfigured.
+# Same degrade posture as `_unverified`: unread is not misconfigured.
 _REVIEW_RULE_UNREADABLE = (
     "the `pull_request` rule on `{branch}` carried no parameters — review "
     "requirements not verified."
@@ -238,43 +239,16 @@ def _existing_env_names(ctx):
     return names
 
 
-SPLIT, SHARED = "split", "shared"
-
-# Which environments each mode's probes read, and the role each plays; see `_role_names`.
-_MODE_ROLES = {
-    SPLIT: ("plan", "apply"),
-    SHARED: ("shared",),
-}
-
-
-def _env_mode(env, shared):
-    """Which naming one logical env uses: `shared` is `_shared_envs`' set."""
-    return SHARED if env in shared else SPLIT
-
-
-def _role_names(env, mode, roles=None):
-    """[(environment name, role)] a mode's probes read for one logical env.
-    `roles` narrows it to a subset (the plan-side names). The advice texts spell
-    the suffixed names out inline; what is single here is which environments a
-    mode is probed through, and `_env_mode` is the only place the mode is
-    decided."""
-    return [
-        (env if role == "shared" else f"{env}-{role}", role)
-        for role in _MODE_ROLES[mode]
-        if roles is None or role in roles
-    ]
-
-
-def _bound_names(ctx, roles=None):
+def _bound_names(ctx):
     """[(env, environment name, role)] the default branch's table binds for each declared
-    env, narrowed like `_role_names`, or `None` when `_shared_envs` cannot tell."""
+    env, or `None` when `_shared_envs` cannot tell."""
     shared = _shared_envs(ctx)
     if shared is None:
         return None
     return [
         (env, name, role)
         for env in sorted(ctx["envs"])
-        for name, role in _role_names(env, _env_mode(env, shared), roles)
+        for name, role in bm.ec.env_names(env, shared)
     ]
 
 
@@ -323,7 +297,7 @@ ENV_PROBES_INTERPRETER_REFUSED = (
 
 
 def _environment_warnings(ctx):
-    if not ctx["envs_available"]:
+    if not ctx["envs"]:
         return [
             (
                 NOTICE,
@@ -331,8 +305,6 @@ def _environment_warnings(ctx):
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
-    if not ctx["envs"]:
-        return []
     if bm.ec.interpreter_refusal():
         return [ENV_PROBES_INTERPRETER_REFUSED]
     names = _existing_env_names(ctx)
@@ -426,7 +398,7 @@ def _env_shape_findings(name, env, data, role):
 
 def _env_protection_warnings(ctx):
     """Protection shape per environment, checked live, with the role each
-    environment plays taken from `_env_mode`. An approval-type protection rule on
+    environment plays taken from `_bound_names`. An approval-type protection rule on
     a PLAN env — a required reviewer, or a wait timer — stops plan jobs from
     starting when they should: no error, only a stalled matrix — the hardest
     shipmate misconfiguration to diagnose. An APPLY env with no approval
@@ -574,6 +546,24 @@ _ENV_TOKEN_UNCHECKED = (
 )
 
 
+@contextlib.contextmanager
+def _gh_token(value):
+    """Run the block with GH_TOKEN set to `value`, then restore it, unset included.
+    An unset or empty `value` leaves GH_TOKEN alone."""
+    if not value:
+        yield
+        return
+    saved = os.environ.get("GH_TOKEN")
+    os.environ["GH_TOKEN"] = value
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("GH_TOKEN", None)
+        else:
+            os.environ["GH_TOKEN"] = saved
+
+
 def _env_secret_names(ctx, name):
     """(names, total) of one environment's secrets.
 
@@ -589,18 +579,11 @@ def _env_secret_names(ctx, name):
     needs it. `total` comes from the payload, not the list length, because
     `bm.gh_json` does not multi-page.
     """
-    saved = os.environ.get("GH_TOKEN")
     # `.get`, never a subscript: SHIPMATE_ENV_TOKEN is optional by contract --
     # absent, the probe reports the check as not performed
     # (`_ENV_TOKEN_UNCHECKED`) rather than killing the report.
-    os.environ["GH_TOKEN"] = os.environ.get("SHIPMATE_ENV_TOKEN", "")
-    try:
+    with _gh_token(os.environ.get("SHIPMATE_ENV_TOKEN")):
         data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
-    finally:
-        if saved is None:
-            os.environ.pop("GH_TOKEN", None)
-        else:
-            os.environ["GH_TOKEN"] = saved
     names = [
         s.get("name")
         for s in (data.get("secrets") or [])
@@ -695,8 +678,8 @@ def _plan_env_secret_warnings(ctx):
     Order is load-bearing. The declared-env check comes first: a docs-only pull
     request reads nothing, so the dark-check WARNING would be a false alarm
     there. Existence then comes from `_existing_env_names`; see its docstring.
-    Scope is the plan-side environment of each mode -- `<env>-plan` in split
-    mode, the bare `<env>` in shared mode.
+    Scope is the plan-side environment of each env -- `<env>-plan`, or the
+    bare `<env>` when shared.
     Never `<env>-apply`: that is where control 7 *requires* credentials, and
     `shipmate-engine` holds the App key by design.
     """
@@ -706,13 +689,15 @@ def _plan_env_secret_warnings(ctx):
     if not os.environ.get("SHIPMATE_ENV_TOKEN"):
         return [_ENV_TOKEN_UNCHECKED]
     existing = _existing_env_names(ctx)
-    bound = _bound_names(ctx, ("plan", "shared"))
+    bound = _bound_names(ctx)
     if bound is None:
         return []  # DEFAULT_TABLE_UNREADABLE is `_environment_warnings`' finding
     out = []
     for _env, name, role in bound:
-        if name not in existing:
-            continue  # existence is _environment_warnings' finding
+        # Plan-side only: `<env>-apply` is where control 7 requires credentials. A missing
+        # environment is `_environment_warnings`' finding.
+        if role not in ("plan", "shared") or name not in existing:
+            continue
         try:
             names, total = _env_secret_names(ctx, name)
         except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
@@ -745,20 +730,27 @@ _SHA40 = re.compile(r"[0-9a-fA-F]{40}")
 
 
 _WORKFLOWS_DIR = ".github/workflows"
-# Degrade for every unreadable contents call in this probe family, NOTICE like the
-# unreadable-release degrade below: none of the ways that read fails is a misconfiguration, for
-# the reasons `_scan_workflow_texts` states. Never the generic WARNING degrade in warnings().
-PIN_UNREADABLE = (
-    NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — engine pin freshness not verified.",
-)
-# The two preconditions this probe cannot work without. Both are NOTICE, like
-# the unreadable-contents degrade above: neither is a repository
-# misconfiguration, and neither may be silently substituted with a weaker read.
-PIN_NO_COMMIT = (
-    NOTICE,
-    "engine pin freshness not verified — the commit under examination could not be determined.",
-)
+
+
+def _unverified(subject):
+    """The (UNREADABLE, NO_COMMIT) degrade pair of a workflow-directory probe checking `subject`.
+
+    Both NOTICE, never the generic WARNING degrade in warnings(): an unreadable directory is
+    not a misconfiguration, for the reasons `_scan_workflow_texts` states, and an unknown
+    commit may not be silently substituted with a weaker read.
+    """
+    return (
+        (NOTICE, f"could not read `{_WORKFLOWS_DIR}` — {subject} not verified."),
+        (
+            NOTICE,
+            f"{subject} not verified — the commit under examination could not be determined.",
+        ),
+    )
+
+
+PIN_UNREADABLE, PIN_NO_COMMIT = _unverified("engine pin freshness")
+# NOTICE: the calling step supplies the engine repository, so an unknown one is not a
+# repository misconfiguration, and no other repository is read in its place.
 PIN_NO_ENGINE = (
     NOTICE,
     "engine pin freshness not verified — the engine repository could not be determined.",
@@ -791,7 +783,7 @@ def _workflow_names(base):
     branch and silently drop every finding in the rest of the directory."""
     try:
         listing = _gh_json(base)
-    except (Exception, SystemExit):  # noqa: BLE001 - degrade, see PIN_UNREADABLE
+    except (Exception, SystemExit):  # noqa: BLE001 - degrade, see `_unverified`
         return [], False
     return [
         e["name"]
@@ -803,7 +795,7 @@ def _workflow_names(base):
 def _contents_text(path):
     """`env-config`'s contents-API read, bound to this module's `_gh_json`. `None` when the
     file cannot be read, which every caller here degrades on rather than failing — see
-    PIN_UNREADABLE for why.
+    `_unverified` for why.
 
     The binding is what keeps this module's tests intercepting the read: they patch
     `_gh_json`, which a call reaching `gh` through `env-config` would bypass.
@@ -921,22 +913,14 @@ def _latest_release_sha(slug):
     SHIPMATE_PUBLIC_TOKEN (the workflow token — enough for a public-repo read)
     for these two calls only, restoring GH_TOKEN afterwards.
     """
-    saved, public = os.environ.get("GH_TOKEN"), os.environ.get("SHIPMATE_PUBLIC_TOKEN")
-    if public:
-        os.environ["GH_TOKEN"] = public
     try:
-        tag = _gh_json(f"repos/{slug}/releases/latest").get("tag_name")
-        if not tag:
-            return None, None
-        return tag, _gh_json(f"repos/{slug}/commits/{tag}").get("sha")
+        with _gh_token(os.environ.get("SHIPMATE_PUBLIC_TOKEN")):
+            tag = _gh_json(f"repos/{slug}/releases/latest").get("tag_name")
+            if not tag:
+                return None, None
+            return tag, _gh_json(f"repos/{slug}/commits/{tag}").get("sha")
     except (Exception, SystemExit):  # noqa: BLE001 - unreadable release is a NOTICE upstream
         return None, None
-    finally:
-        if public:
-            if saved is None:
-                os.environ.pop("GH_TOKEN", None)
-            else:
-                os.environ["GH_TOKEN"] = saved
 
 
 def _pin_warnings(ctx):
@@ -968,17 +952,7 @@ def _pin_warnings(ctx):
 # Word-ish boundaries, so `pull_request_target_foo` is a different trigger. Where the search runs:
 # `declares_pull_request_target`.
 _PR_TARGET = re.compile(r"(?<![\w-])pull_request_target(?![\w-])")
-# Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
-# directory is not a misconfiguration to warn about.
-FORK_TRIGGER_UNREADABLE = (
-    NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — `pull_request_target` triggers not verified.",
-)
-FORK_TRIGGER_NO_COMMIT = (
-    NOTICE,
-    "`pull_request_target` triggers not verified — the commit under examination "
-    "could not be determined.",
-)
+FORK_TRIGGER_UNREADABLE, FORK_TRIGGER_NO_COMMIT = _unverified("`pull_request_target` triggers")
 
 # Flow-style tolerant. Why this input matters, and why the anchor and the value terminator are
 # what they are: `_unsafe_checkout_warnings`.
@@ -1175,17 +1149,7 @@ _PLAN_WORKFLOW_CALL = re.compile(r"/\.github/workflows/plan\.yml@")
 # deeper in the block belongs to something else. Read through `_job_key`.
 _JOB_KEY = re.compile(r"^[ \t]*(?P<key>name|if)[ \t]*:(?P<value>.*)$")
 _SHIM_JOB_NAME = "shipmate"
-# Same degrade posture and reason as PIN_UNREADABLE: an unreadable workflow
-# directory is not a misconfiguration to warn about.
-SHIM_JOB_UNREADABLE = (
-    NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the workflow file's calling job name not verified.",
-)
-SHIM_JOB_NO_COMMIT = (
-    NOTICE,
-    "the workflow file's calling job name not verified — the commit under examination "
-    "could not be determined.",
-)
+SHIM_JOB_UNREADABLE, SHIM_JOB_NO_COMMIT = _unverified("the workflow file's calling job name")
 
 
 def _call_region(text, pattern):
@@ -1353,15 +1317,8 @@ _VERB_OPTIONS_KEY = re.compile(r"[\s{,]options[ \t]*:[ \t]*(?P<value>\[[^\]]*\])
 # One mapping key at the start of a line, for the input names `_declared_inputs` enumerates.
 _INPUT_NAME = re.compile(r"[ \t]*([A-Za-z_][\w-]*)[ \t]*:")
 _REQUIRED_TRUE = re.compile(r"""[\s{,]required[ \t]*:[ \t]*["']?true["']?""", re.I)
-# Same degrade posture and reason as PIN_UNREADABLE.
-DISPATCH_WIRING_UNREADABLE = (
-    NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the workflow file's dispatch wiring not verified.",
-)
-DISPATCH_WIRING_NO_COMMIT = (
-    NOTICE,
-    "the workflow file's dispatch wiring not verified — the commit under examination could "
-    "not be determined.",
+DISPATCH_WIRING_UNREADABLE, DISPATCH_WIRING_NO_COMMIT = _unverified(
+    "the workflow file's dispatch wiring"
 )
 
 
@@ -1587,16 +1544,7 @@ ROUTING_IFS = {
     ),
     "unlock.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
 }
-# Same degrade posture and reason as PIN_UNREADABLE.
-ROUTING_UNREADABLE = (
-    NOTICE,
-    f"could not read `{_WORKFLOWS_DIR}` — the workflow file's event routing not verified.",
-)
-ROUTING_NO_COMMIT = (
-    NOTICE,
-    "the workflow file's event routing not verified — the commit under examination could "
-    "not be determined.",
-)
+ROUTING_UNREADABLE, ROUTING_NO_COMMIT = _unverified("the workflow file's event routing")
 
 
 def _normalize_if(value):
@@ -1684,8 +1632,8 @@ def _one_line(s, limit=200):
 
 CONFIG_PATH = bm.ec.CONFIG_PATH
 
-# Same degrade posture and reason as PIN_UNREADABLE: a branch need not carry the file at
-# all. Never an all-clear, and never a read of another revision in its place.
+# NOTICE: a branch need not carry the file at all, so an unreadable one is not a
+# misconfiguration. Never an all-clear, and never a read of another revision in its place.
 CONFIG_UNREADABLE = (
     NOTICE,
     f"could not read `{CONFIG_PATH}` at the commit under examination — its settings were "
@@ -2020,7 +1968,6 @@ def ctx_from_env():
         "app_id": os.environ["SHIPMATE_APP_ID"],
         "default_branch": os.environ["SHIPMATE_DEFAULT_BRANCH"],
         "envs": envs,
-        "envs_available": bool(envs),
         # The team probe's route marker: only the comment path's token requests
         # `members: read`, and `report` mode runs nowhere else.
         "report_mode": os.environ.get("SHIPMATE_DOCTOR_MODE") == "report",
@@ -2170,7 +2117,7 @@ def _provenance(ctx):
     probes did with it.
 
     Environment-probe coverage is stated only by `_environment_warnings`, keyed
-    on `envs_available`, because the two signals can disagree: the id set names
+    on `envs`, because the two signals can disagree: the id set names
     the plan runs this head's apply checks recorded, whether or not their cell
     summaries could then be downloaded, so a non-empty set is no evidence that
     any environment was probed. A preamble keyed on it would claim a coverage
