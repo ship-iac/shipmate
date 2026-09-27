@@ -1957,8 +1957,10 @@ with the glob pattern `cell-summary.*`. It contains verbatim:
   path, feeds the check-name construction), `environment`, `changed`
   (boolean), `fingerprint`; written by `plan-cell` at plan time. `changed`
   comes from `scripts/plan-classify`; the comment's `+add ~change -destroy`
-  counts come from `plan.txt`'s OpenTofu tally line, and a cell whose text
-  carries none renders `?`.
+  counts come from `plan.txt`'s single column-0 OpenTofu tally line, or are
+  zero when the text is a no-changes or outputs-only plan; a cell with no
+  `plan.txt`, no such line, or two tally lines renders `?` and gets one
+  warning.
 - `plan.txt` — the `tofu show -no-color` rendering of the reviewed plan. The
   `summary` job hashes these exact bytes and records the digest on the cell's
   apply check; the apply re-renders the stored plan and refuses a difference
