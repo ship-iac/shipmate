@@ -45,6 +45,7 @@ Probes:
 - GitHub App installation permission drift.
 """
 
+import contextlib
 import json
 import os
 import pathlib
@@ -547,6 +548,24 @@ _ENV_TOKEN_UNCHECKED = (
 )
 
 
+@contextlib.contextmanager
+def _gh_token(value):
+    """Run the block with GH_TOKEN set to `value`, then restore it, unset included.
+    `None` leaves GH_TOKEN alone."""
+    if value is None:
+        yield
+        return
+    saved = os.environ.get("GH_TOKEN")
+    os.environ["GH_TOKEN"] = value
+    try:
+        yield
+    finally:
+        if saved is None:
+            os.environ.pop("GH_TOKEN", None)
+        else:
+            os.environ["GH_TOKEN"] = saved
+
+
 def _env_secret_names(ctx, name):
     """(names, total) of one environment's secrets.
 
@@ -562,18 +581,11 @@ def _env_secret_names(ctx, name):
     needs it. `total` comes from the payload, not the list length, because
     `bm.gh_json` does not multi-page.
     """
-    saved = os.environ.get("GH_TOKEN")
     # `.get`, never a subscript: SHIPMATE_ENV_TOKEN is optional by contract --
     # absent, the probe reports the check as not performed
     # (`_ENV_TOKEN_UNCHECKED`) rather than killing the report.
-    os.environ["GH_TOKEN"] = os.environ.get("SHIPMATE_ENV_TOKEN", "")
-    try:
+    with _gh_token(os.environ.get("SHIPMATE_ENV_TOKEN", "")):
         data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
-    finally:
-        if saved is None:
-            os.environ.pop("GH_TOKEN", None)
-        else:
-            os.environ["GH_TOKEN"] = saved
     names = [
         s.get("name")
         for s in (data.get("secrets") or [])
@@ -900,22 +912,14 @@ def _latest_release_sha(slug):
     SHIPMATE_PUBLIC_TOKEN (the workflow token — enough for a public-repo read)
     for these two calls only, restoring GH_TOKEN afterwards.
     """
-    saved, public = os.environ.get("GH_TOKEN"), os.environ.get("SHIPMATE_PUBLIC_TOKEN")
-    if public:
-        os.environ["GH_TOKEN"] = public
     try:
-        tag = _gh_json(f"repos/{slug}/releases/latest").get("tag_name")
-        if not tag:
-            return None, None
-        return tag, _gh_json(f"repos/{slug}/commits/{tag}").get("sha")
+        with _gh_token(os.environ.get("SHIPMATE_PUBLIC_TOKEN") or None):
+            tag = _gh_json(f"repos/{slug}/releases/latest").get("tag_name")
+            if not tag:
+                return None, None
+            return tag, _gh_json(f"repos/{slug}/commits/{tag}").get("sha")
     except (Exception, SystemExit):  # noqa: BLE001 - unreadable release is a NOTICE upstream
         return None, None
-    finally:
-        if public:
-            if saved is None:
-                os.environ.pop("GH_TOKEN", None)
-            else:
-                os.environ["GH_TOKEN"] = saved
 
 
 def _pin_warnings(ctx):
