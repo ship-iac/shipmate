@@ -1319,8 +1319,8 @@ def _shim_job_name_finding(text, name):
     ]
 
 
-# The dispatch leg of the consumer's workflow file. NOT line-anchored, and the polarity is the
-# reason; see `_dispatch_wiring_finding`.
+# The dispatch leg of the consumer's workflow file. NOT line-anchored, because absence is the
+# finding; see `_dispatch_wiring_finding`.
 _DISPATCH_TRIGGER = re.compile(r"[\s{,]workflow_dispatch[ \t]*:")
 
 
@@ -1520,9 +1520,8 @@ def _dispatch_wiring_finding(text, name):
     nothing is dispatched at all, and three further remedies below that one bury it.
 
     `_DISPATCH_TRIGGER` and the `_INPUT_KEYS` are unanchored because ABSENCE is
-    the finding here: where a match IS the finding, a shape an
-    anchor misses stays silent, while the same miss here would report a
-    correctly wired file as declaring no trigger at all.
+    the finding here: a shape an anchor misses would report a correctly wired
+    file as declaring no trigger at all.
     `on: { workflow_dispatch: { inputs: { pr_number: … } } }` is legal YAML, and
     an anchor fails after `{ ` however much of the flow mapping is fed in. A
     preceding brace, comma or whitespace stands in for the line start. That is
