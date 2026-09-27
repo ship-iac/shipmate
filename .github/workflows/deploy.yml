@@ -184,4 +184,4 @@ jobs:
           # The `secrets` context is not available in a step's `if:`.
           [ -n "$SLACK" ] || exit 0
           python3 -c "import json;open('p.json','w').write(json.dumps({'text':':rotating_light: shipmate deploy failed on main — a wave apply failed or was cancelled.'}))"
-          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @p.json "$SLACK" >/dev/null
+          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @p.json "$SLACK"

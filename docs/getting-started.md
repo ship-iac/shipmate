@@ -725,8 +725,9 @@ the channel — the other five carry the same line without a comment.
 **One is a variable and one is a secret, and swapping them fails.** Setting
 `SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
 value is readable by anyone who can see the repository and nothing in it reaches
-a cell; the run fails telling you to rotate what it held, and refuses a
-`SHIPMATE_SLACK_WEBHOOK` variable the same way. The other direction cannot be
+a cell; the run fails telling you to rotate what it held. A
+`SHIPMATE_SLACK_WEBHOOK` variable is refused too, with its own message: rotate the
+webhook and set it as a secret on `shipmate-engine`. The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 

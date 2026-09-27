@@ -339,7 +339,8 @@ never used.
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
   the apply path (`apply.yml`, `apply-all.yml`, `apply-env-level.yml`,
   `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
-  passes the key by name and binds no environment of its own. Each of those
+  passes the key, and on its `deploy` and `drift` jobs the webhook, by name and
+  binds no environment of its own. Each of those
   engine jobs runs at a ref the environment's default-branch policy admits —
   the base ref under
   `pull_request_target`, the default branch under `issue_comment`, the nightly

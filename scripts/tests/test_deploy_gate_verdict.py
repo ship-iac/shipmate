@@ -98,8 +98,8 @@ def test_missing_head_sha_fails_loud():
 
 _SLACK_STEP = "Slack on failed deploy (outranks drift)"
 
-#: The Slack step's whole `if:`, `env:` and `run:`, hand-written: a value read back from the
-#: file passes whatever the file says.
+#: The Slack step, whole and hand-written: a value read back from the file passes whatever the
+#: file says, and a partial comparison passes an added key such as `continue-on-error`.
 _SLACK_IF = (
     "${{ always() && (contains(join(needs.*.result, ','), 'failure') || "
     "contains(join(needs.*.result, ','), 'cancelled')) }}"
@@ -112,8 +112,9 @@ _SLACK_RUN = (
     "python3 -c \"import json;open('p.json','w').write(json.dumps({'text':':rotating_light: "
     "shipmate deploy failed on main — a wave apply failed or was cancelled.'}))\"\n"
     "curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' "
-    '--data @p.json "$SLACK" >/dev/null\n'
+    '--data @p.json "$SLACK"\n'
 )
+_SLACK_STEP_SPEC = {"name": _SLACK_STEP, "if": _SLACK_IF, "env": _SLACK_ENV, "run": _SLACK_RUN}
 
 
 def _slack_step():
@@ -126,10 +127,11 @@ def _slack_step():
 def test_slack_step_reads_the_engine_secret_and_fails_on_a_rejected_post():
     """Mutations: read `vars.SLACK_WEBHOOK` again; restore `&& vars.SLACK_WEBHOOK != ''` in the
     `if:`; delete the empty-webhook exit; drop `--fail-with-body`, which lets a revoked
-    webhook's 4xx exit 0."""
+    webhook's 4xx exit 0; add `continue-on-error: true`, which greens a rejected post; restore
+    `>/dev/null`, which discards the body `--fail-with-body` prints."""
     step = _slack_step()
     run = step["run"].replace("\r\n", "\n").replace("\r", "\n")
-    assert (" ".join(step["if"].split()), step["env"], run) == (_SLACK_IF, _SLACK_ENV, _SLACK_RUN)
+    assert {**step, "if": " ".join(step["if"].split()), "run": run} == _SLACK_STEP_SPEC
 
 
 @bash_only

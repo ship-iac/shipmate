@@ -31,8 +31,22 @@ _ENUM_LABEL = "your GitHub variables"
 _VARS = "SHIPMATE_VARS"
 _SECRETS = "SHIPMATE_SECRETS"
 
-#: Secrets a consumer can mistakenly set as GitHub variables; `filter_enumeration` refuses them.
-_NEVER_VARIABLES = (_SECRETS, "SHIPMATE_SLACK_WEBHOOK")
+#: Secrets a consumer can mistakenly set as GitHub variables, each with the refusal
+#: `filter_enumeration` raises for it.
+_NEVER_VARIABLES = {
+    _SECRETS: (
+        f"::error::{_SECRETS} is set as a GitHub variable, and it must be a secret. "
+        "Nothing in it reaches the cell, and its value is readable by anyone who can "
+        "see the repository. Delete the variable, rotate every credential it held, "
+        "and set a secret of that name instead."
+    ),
+    "SHIPMATE_SLACK_WEBHOOK": (
+        "::error::SHIPMATE_SLACK_WEBHOOK is set as a GitHub variable, and it must be a secret "
+        "on the shipmate-engine environment. Its value is readable by anyone who can see the "
+        "repository. Delete the variable, rotate the webhook, and run gh secret set "
+        "SHIPMATE_SLACK_WEBHOOK --env shipmate-engine."
+    ),
+}
 
 #: What `$GITHUB_ENV` accepts as a name. `fullmatch` only: a prefix match leaves a
 #: key whose second line is `X=Y` writing further assignments through `write_env`.
@@ -180,16 +194,11 @@ def filter_enumeration(parsed, table):
     spelled `TF_VAR_ENV` is a different case, and CONTRACT.md states its outcome:
     it never reaches OpenTofu, so nothing collides.
     """
-    for name in _NEVER_VARIABLES:
+    for name, refusal in _NEVER_VARIABLES.items():
         if name in parsed:
             # Each is skipped by the SHIPMATE_ prefix below, so it would export nothing,
             # while its value is world-readable where it sits.
-            raise SystemExit(
-                f"::error::{name} is set as a GitHub variable, and it must be a secret. "
-                "Nothing in it reaches the cell, and its value is readable by anyone who can "
-                "see the repository. Delete the variable, rotate every credential it held, "
-                "and set a secret of that name instead."
-            )
+            raise SystemExit(refusal)
     lowered = ((_lowercase_tf_var(name), value) for name, value in parsed.items())
     return {name: value for name, value in lowered if not _is_reserved(name, table)}
 

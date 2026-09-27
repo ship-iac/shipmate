@@ -6,8 +6,8 @@ reserved set, refusing a table-derived name on a cell whose table does not deriv
 refusing an absent envelope, accepting `null` in an envelope, refusing `null` or `''`
 from the enumeration, exporting a name two channels supply, lowercasing an envelope key,
 not lowercasing an enumerated `TF_VAR_*` suffix, refusing an enumerated reserved name
-instead of skipping it, skipping an enumerated `SHIPMATE_SECRETS` instead of refusing it,
-and quoting the envelope's value in any refusal.
+instead of skipping it, skipping an enumerated `SHIPMATE_SECRETS` or `SHIPMATE_SLACK_WEBHOOK`
+instead of refusing it, and quoting the envelope's value in any refusal.
 
 Composition reddens on: writing `$GITHUB_ENV` before a secret value's mask command, masking
 a multi-line value whole instead of per line, filtering the identity table, dropping the
@@ -314,9 +314,9 @@ def test_shipmate_vars_is_lifted_out_of_the_enumeration():
         (
             "SHIPMATE_SLACK_WEBHOOK",
             "::error::SHIPMATE_SLACK_WEBHOOK is set as a GitHub variable, and it must be a "
-            "secret. Nothing in it reaches the cell, and its value is readable by anyone who "
-            "can see the repository. Delete the variable, rotate every credential it held, "
-            "and set a secret of that name instead.",
+            "secret on the shipmate-engine environment. Its value is readable by anyone who "
+            "can see the repository. Delete the variable, rotate the webhook, and run gh "
+            "secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine.",
         ),
     ],
     ids=["secrets", "slack-webhook"],
@@ -328,8 +328,9 @@ def test_a_secret_set_as_a_variable_is_refused(name, expected):
     matches the `SHIPMATE_` prefix and is skipped, so the cell exports nothing while the
     value sits world-readable in the repository UI.
 
-    Mutation: drop a name from `_NEVER_VARIABLES` in `env-inject`, and `compose` returns
-    `({}, {}, {})` for that case instead of refusing.
+    Mutations: drop a name from `_NEVER_VARIABLES` in `env-inject`, and `compose` returns
+    `({}, {}, {})` for that case instead of refusing; give the webhook the `SHIPMATE_SECRETS`
+    message, which names a repository secret the docs forbid, and its case reds alone.
     """
     enumeration = {name: '{"API_KEY": "leaked-value"}'}
     with pytest.raises(SystemExit) as exc:
