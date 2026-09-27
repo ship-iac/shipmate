@@ -1,14 +1,11 @@
 """The three detects must reach "already applied" only through the App-scoped
-query, and their actions must keep feeding it the App id.
+predicate, and their actions must keep feeding it the App id.
 
 Both halves are structural, and neither is observable from a unit test of the
-helper: `completed_apply_names` can be correct while a detect's `main()` calls
-something else, and the `SHIPMATE_APP_ID` the query is now given comes from an
-`env:` line each detect's own action file has to carry. All three detects route
-through the query, so all three are checked textually -- but for `apply-detect`,
-which both defines the query and calls it, a substring check cannot fail: its own
-definition satisfies it. That `main()` is pinned behaviourally instead, by
-test_apply_detect.test_a_forged_completed_check_does_not_mark_a_cell_applied.
+predicate: `app_done_names` can be correct while a detect's `main()` calls
+something else, and the `SHIPMATE_APP_ID` it is given comes from an `env:` line
+each detect's own action file has to carry. The behavioural pin on each `main()`
+is its detect's test_a_forged_completed_check_does_not_mark_a_cell_applied.
 
 A forged same-name check counted as done drops that stack from the wave matrix
 and the deploy reports success, so both need a guard that fails on the edit
@@ -22,57 +19,34 @@ from _loader import ACTIONS, SCRIPTS
 
 DETECTS = ("apply-detect", "deploy-detect", "apply-all-detect")
 
-# The App-scoped query, and the two unscoped predicates that must not be reached for it
-# directly: `done_names` ignores authorship entirely, and `app_done_names` is
-# `completed_apply_names`'s own internal call. Every detect calls the query, `apply-detect`
-# included; for that one the assertion is satisfied by the definition too, so it adds nothing
-# there. See the module docstring.
-_CONSUMERS = DETECTS
-_SCOPED_CALL = "completed_apply_names("
-_UNSCOPED_CALLS = (r"\bag\.done_names\(", r"\bag\.app_done_names\(")
+# The App-scoped predicate, and the unscoped one that ignores authorship entirely.
+_SCOPED_CALL = "app_done_names("
+_UNSCOPED_CALL = r"\bag\.done_names\("
 
 
 def _source(name):
     return (SCRIPTS / name).read_text(encoding="utf-8")
 
 
-def test_the_detects_reach_completed_applies_through_the_scoped_query():
-    """apply-detect's main() does route through completed_apply_names, but this assertion does
-    not show that: a substring match cannot tell a call site from a definition in the same
-    module, and apply-detect holds the definition. For it the property is pinned behaviourally,
-    by test_apply_detect.test_a_forged_completed_check_does_not_mark_a_cell_applied -- deleting
-    that test removes the only guard between apply-detect's main() and a forged same-name check
-    counting as applied."""
-    for name in _CONSUMERS:
-        text = _source(name)
-        assert _SCOPED_CALL in text, f"{name} no longer calls completed_apply_names"
+def test_the_detects_reach_completed_applies_through_the_scoped_predicate():
+    """Mutation: replace `ag.app_done_names(lines, app_id)` in any detect's main() with
+    `ag.done_names(ag.parse_jsonl(lines))` -- that detect no longer carries the call."""
+    for name in DETECTS:
+        assert _SCOPED_CALL in _source(name), f"{name} no longer calls app_done_names"
 
 
-def test_only_the_query_owner_calls_the_unscoped_predicates():
-    # apply-detect owns the single call to apply-gate's done predicate. The other two must not
-    # grow a second route to it, scoped or otherwise.
-    for name in ("deploy-detect", "apply-all-detect"):
-        text = _source(name)
-        for pattern in _UNSCOPED_CALLS:
-            assert not re.search(pattern, text), (
-                f"{name} calls {pattern} directly -- the done predicate must arrive "
-                "through apply-detect.completed_apply_names, which scopes it to the App"
-            )
+def test_no_detect_calls_the_unscoped_predicate():
+    """Mutation: the same replacement -- `ag.done_names(` appears in that detect."""
+    for name in DETECTS:
+        assert not re.search(_UNSCOPED_CALL, _source(name)), (
+            f"{name} calls ag.done_names directly -- the done predicate must be "
+            "apply-gate.app_done_names, which scopes it to the App"
+        )
 
 
-def test_the_query_owner_scopes_the_predicate_to_the_app():
-    """This pins only that "app_done_names(" and the SHIPMATE_APP_ID read appear somewhere in
-    apply-detect's source. It cannot tell whether main() is the caller, because
-    completed_apply_names' own definition satisfies the same substring, so rewriting main() to
-    bypass completed_apply_names -- calling ag.done_names directly -- leaves this green. Only
-    test_apply_detect.test_a_forged_completed_check_does_not_mark_a_cell_applied catches that.
-    Do not read this test as covering the call-site property."""
-    text = _source("apply-detect")
-    assert "app_done_names(" in text, (
-        "apply-detect must use apply-gate's App-scoped predicate; done_names alone "
-        "counts a forged same-name check from any identity as applied work"
-    )
-    assert 'os.environ["SHIPMATE_APP_ID"]' in text
+def test_the_detects_read_the_app_id():
+    for name in DETECTS:
+        assert 'os.environ["SHIPMATE_APP_ID"]' in _source(name), name
 
 
 def test_detect_actions_forward_the_app_id_to_the_script():

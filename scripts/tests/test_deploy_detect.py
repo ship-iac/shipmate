@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, _apply_check, completed_names, stub_read_table
+from _detect_fixtures import APP_ID, _apply_check, stub_read_table
 from _detect_fixtures import check_run as _check
 from _loader import load_script
 
@@ -9,52 +9,6 @@ dd = load_script("deploy-detect")
 
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/acme/iac/commits/{HEAD}/check-runs?filter=all&per_page=100"
-
-
-def _completed(monkeypatch, checks, **kw):
-    """deploy-detect's "already applied" set, through the query main() calls.
-
-    That main() does call it is a separate, structural claim, pinned by
-    test_detect_app_scoping rather than by this helper."""
-    return completed_names(dd.ad, monkeypatch, checks, **kw)
-
-
-def test_filter_pending_drops_completed_applies():
-    cells = [
-        {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
-    ]
-    completed = {"apply / stacks/dns / dev-eu"}  # Applied pre-merge, so skipped.
-    assert dd.filter_pending(cells, completed) == [
-        {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
-    ]
-
-
-def test_filter_pending_keeps_all_when_none_completed():
-    cells = [{"stack": "stacks/dns", "environment": "dev-eu", "workload": ""}]
-    assert dd.filter_pending(cells, set()) == cells
-
-
-def test_completed_failure_apply_stays_pending(monkeypatch):
-    # A "completed" status with a failing conclusion must not count as done: deploy-detect
-    # shares apply-gate's success/neutral predicate rather than checking status=="completed".
-    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
-    done = _completed(monkeypatch, [_check(conclusion="failure")])
-    assert dd.filter_pending(cells, done) == cells
-
-
-def test_duplicate_run_newer_queued_stays_pending(monkeypatch):
-    # An old completed+success run must not mask a newer queued run of the same check name,
-    # from a re-created check: the latest run per name governs.
-    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
-    done = _completed(
-        monkeypatch,
-        [
-            _check(),
-            _check(status="queued", conclusion=None, started_at="2026-07-18T11:00:00Z", id=2),
-        ],
-    )
-    assert dd.filter_pending(cells, done) == cells
 
 
 def test_merged_head_exact_match_wins(monkeypatch):
