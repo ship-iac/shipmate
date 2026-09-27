@@ -180,8 +180,7 @@ deletes any repository-level copy of the key.
 The approver team is not set here. It is `gate.approver_team` in
 `.github/shipmate.toml` on the consumer's default branch, committed with the rest
 of that repository's configuration ([`../CONTRACT.md`](../CONTRACT.md) §The gate
-table). Every repository declares its own, including one that would previously
-have read an organization-level default.
+table). Every repository declares its own.
 
 ```bash
 REPO=<owner>/<repo>
@@ -223,9 +222,8 @@ value and nothing else in the pipeline changes. Set it per repository wherever t
 App differs — one App per trust domain means one id per trust domain
 ([`hardening.md`](hardening.md) §13–14).
 
-It is the only name that shares this way. The approver team used to be the
-second, and the file replaced that: `gate.approver_team` is per repository by
-construction, so every repository declares its own team, and one that declares
+It is the only name that shares this way. `gate.approver_team` is per repository
+by construction: every repository declares its own team, and one that declares
 none authorizes nobody by comment.
 
 `gh variable set --org` defaults to `--visibility private`, which reaches
