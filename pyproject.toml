@@ -29,7 +29,7 @@ dev = [
     "ruff>=0.16.0",
     "ty>=0.0.64",  # Astral type checker — still beta; kept non-blocking in CI
     "pytest>=8",
-    "pyyaml>=6",         # parse composite action.yml in the shellcheck test
+    "pyyaml>=6",         # parse workflow and action YAML in the guard tests
     "shellcheck-py>=0.10",  # pip-packaged shellcheck binary (cross-platform)
 ]
 
