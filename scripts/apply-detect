@@ -22,7 +22,6 @@ environment, or the run refuses.
 import json
 import os
 import re
-from graphlib import CycleError
 
 from _shipmate import _load
 
@@ -174,22 +173,10 @@ def pending_apply_names(repo, head_sha):
 
 
 def run_graph_deps():
-    """The stack dependency graph, parsed, or `SystemExit` when it is cyclic. `--label
-    stack.dir` is what makes waves.parse_dot's node normalization correct -- its docstring
-    pins the argv as contract.
-
-    The cycle is refused here, where every detect reads the graph, before any caller
-    sorts it."""
-    deps = wv.parse_dot(bm._run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
-    try:
-        wv.levels(deps)
-    except CycleError as e:
-        raise SystemExit(
-            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
-            "stacks order each other through `after`/`before`; break the loop in their stack "
-            "configuration."
-        ) from e
-    return deps
+    """The stack dependency graph, parsed. `--label stack.dir` is what makes
+    waves.parse_dot's node normalization correct -- its docstring pins the argv
+    as contract."""
+    return wv.parse_dot(bm._run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
 
 
 def dag_shape_notice(deps):
@@ -203,7 +190,7 @@ def dag_shape_notice(deps):
     ordering behind in that tool's config with nothing to say so. What this line
     buys is a reader who knows the repository seeing the concurrency figure and
     knowing at once whether it is true."""
-    lv = wv.levels(deps)
+    lv = wv.stack_levels(deps)
     return (
         f"::notice::{len(deps)} stacks, {sum(len(d) for d in deps.values())} after edges, "
         f"{len(lv)} wave levels; {max((len(x) for x in lv), default=0)} stacks would apply "
@@ -375,7 +362,7 @@ def main():
 
     pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
 
-    waves = wv.assign_waves(wv.levels(deps), pending)
+    waves = wv.assign_waves(wv.stack_levels(deps), pending)
     print(dag_shape_notice(deps))
     print(
         f"::notice title=apply-detect::env={env} head={head} "

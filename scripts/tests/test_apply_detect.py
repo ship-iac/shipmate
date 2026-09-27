@@ -338,20 +338,17 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
     )
 
 
-def test_a_cyclic_run_graph_refuses_naming_the_cycle(monkeypatch):
-    """All three detects read the graph through `run_graph_deps`, so its refusal is the only
-    thing between a cycle and a raw `CycleError` traceback.
-
-    Mutation: return `deps` without the `wv.levels(deps)` probe -- nothing raises."""
-    monkeypatch.setattr(
-        ad.bm,
-        "_run",
-        lambda args: (
-            'digraph {\n\tn1[label="/stacks/a"];\n\tn2[label="/stacks/b"];\n\tn1->n2;\n\tn2->n1;\n}'
-        ),
+def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path):
+    """Mutation: `wv.levels` for `wv.stack_levels` in main's `assign_waves` call -- a raw
+    `CycleError` escapes instead of this `SystemExit`."""
+    _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}},
+        [_apply_check("stacks/a"), _apply_check("stacks/b")],
     )
     with pytest.raises(SystemExit) as exc:
-        ad.run_graph_deps()
+        ad.main()
     assert str(exc.value) == (
         "::error::dependency cycle in the Terramate stack run-graph: ('nodes are in a cycle', "
         "['stacks/a', 'stacks/b', 'stacks/a']). Two or more stacks order each other through "

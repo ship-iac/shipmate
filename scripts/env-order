@@ -80,7 +80,7 @@ def waves_by_env_level(pending, deps, levels):
     `range(MAX_ENV_LEVELS)`, so an over-deep env falls out of every level and its
     cells apply nothing under a run that still reports success."""
     guard_max_env_levels(levels)
-    stack_levels = wv.levels(deps)
+    stack_levels = wv.stack_levels(deps)
     out = []
     for lvl in range(MAX_ENV_LEVELS):
         cells = [c for c in pending if levels.get(c["environment"], 0) == lvl]

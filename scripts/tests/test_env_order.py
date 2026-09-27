@@ -86,6 +86,20 @@ def test_waves_by_env_level_refuses_an_env_beyond_the_cap():
         )
 
 
+def test_waves_by_env_level_refuses_a_cyclic_stack_graph():
+    """deploy-detect and apply-all-detect sort the stack graph only here.
+
+    Mutation: `wv.levels` for `wv.stack_levels` in `waves_by_env_level` -- a raw `CycleError`
+    escapes instead of the `SystemExit`."""
+    with pytest.raises(SystemExit) as exc:
+        eo.waves_by_env_level(
+            [{"stack": "stacks/a", "environment": "prod"}],
+            {"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}},
+            {"prod": 0},
+        )
+    assert str(exc.value).startswith("::error::dependency cycle in the Terramate stack run-graph")
+
+
 def test_env_levels_rejects_string_predecessor():
     # HCL author typo, "dev-eu" instead of ["dev-eu"]: it must not silently iterate the string
     # character by character.

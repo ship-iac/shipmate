@@ -156,3 +156,15 @@ def test_env_level_waves_refuses_a_change_deeper_than_max_waves():
         eo.waves_by_env_level(pending, deps, {"dev-eu": 0})
 
     assert "dependency levels" in str(exc.value)
+
+
+def test_stack_levels_refuses_a_cycle_naming_it():
+    """Mutation: return `levels(deps)` from `stack_levels` without the `CycleError` handler -- the
+    raw `CycleError` is not a `SystemExit`."""
+    with pytest.raises(SystemExit) as exc:
+        w.stack_levels({"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}})
+    assert str(exc.value) == (
+        "::error::dependency cycle in the Terramate stack run-graph: ('nodes are in a cycle', "
+        "['stacks/a', 'stacks/b', 'stacks/a']). Two or more stacks order each other through "
+        "`after`/`before`; break the loop in their stack configuration."
+    )

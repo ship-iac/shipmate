@@ -9,7 +9,7 @@ A module, never a program: apply-detect and env-order `_load` it.
 
 import json
 import re
-from graphlib import TopologicalSorter
+from graphlib import CycleError, TopologicalSorter
 
 MAX_WAVES = 8
 _NODE = re.compile(r'(\w+)\s*\[label="([^"]+)"\]')
@@ -50,6 +50,22 @@ def levels(deps):
         for n in ready:
             ts.done(n)
     return out
+
+
+def stack_levels(deps):
+    """`levels` over the stack run-graph, or `SystemExit` naming the cycle.
+
+    Every stack-graph sort goes through here, so no detect reaches a raw
+    `CycleError`. The env graph sorts with `levels` directly, after
+    `env-config.validate_env_order` has refused its cycles with its own message."""
+    try:
+        return levels(deps)
+    except CycleError as e:
+        raise SystemExit(
+            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
+            "stacks order each other through `after`/`before`; break the loop in their stack "
+            "configuration."
+        ) from e
 
 
 def assign_waves(levels_, cells):
