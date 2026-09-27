@@ -36,46 +36,11 @@ dev = [
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-# The helper scripts are executable, extension-less files (they run as GHA
-# steps, not as an importable module), so ruff won't discover them by glob —
-# list them explicitly.
-extend-include = [
-    "scripts/apply-all-detect",
-    "scripts/apply-cell-summary",
-    "scripts/apply-comment",
-    "scripts/apply-complete",
-    "scripts/apply-detect",
-    "scripts/apply-gate",
-    "scripts/apply-snapshot",
-    "scripts/authorize",
-    "scripts/build-matrix",
-    "scripts/comment-parse",
-    "scripts/deploy-detect",
-    "scripts/dispatch-body",
-    "scripts/doctor",
-    "scripts/doctor-cells",
-    "scripts/drift-cell-summary",
-    "scripts/drift-issues",
-    "scripts/env-config",
-    "scripts/env-inject",
-    "scripts/env-order",
-    "scripts/gate-config",
-    "scripts/gate-state",
-    "scripts/gate-status-body",
-    "scripts/lock-info",
-    "scripts/mirror-checks",
-    "scripts/onboard",
-    "scripts/pending-checks",
-    "scripts/plan-cell-summary",
-    "scripts/plan-classify",
-    "scripts/plan-crypt",
-    "scripts/pr-facts",
-    "scripts/register-app",
-    "scripts/state-path",
-    "scripts/summary-comment",
-    "scripts/verify-environments",
-    "scripts/waves",
-]
+# The helper scripts are executable, extension-less files, so ruff does not
+# discover them by suffix. The glob matches every file under scripts/ at any
+# depth; the fixtures are captured tool output, not Python.
+extend-include = ["scripts/*"]
+extend-exclude = ["scripts/tests/fixtures"]
 
 [tool.ruff.lint]
 select = [
