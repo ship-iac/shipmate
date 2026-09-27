@@ -80,25 +80,25 @@ def test_assign_waves_raises_when_stack_missing_from_graph():
     assert "stacks/does-not-exist" in str(exc_info.value)
 
 
-def test_guard_max_waves_allows_exactly_max_waves():
+def test_pad_waves_allows_exactly_max_waves():
     # Populated waves at indices 0..MAX_WAVES-1, 8 waves in total, are fine.
     waves = [[f"cell{i}"] for i in range(w.MAX_WAVES)]
-    w.guard_max_waves(waves)  # must not raise
+    w.pad_waves(waves)  # must not raise
 
 
-def test_guard_max_waves_raises_when_ninth_wave_populated():
+def test_pad_waves_raises_when_ninth_wave_populated():
     # A populated wave at index MAX_WAVES, the 9th, has no pre-declared wave{MAX_WAVES} job, so
     # it must fail loud.
     waves = [[f"cell{i}"] for i in range(w.MAX_WAVES)] + [["cell8"]]
     with pytest.raises(SystemExit):
-        w.guard_max_waves(waves)
+        w.pad_waves(waves)
 
 
-def test_guard_max_waves_ignores_empty_trailing_levels():
+def test_pad_waves_ignores_empty_trailing_levels():
     # A deep full graph with only low-level cells in the work set is fine: empty trailing levels
     # beyond MAX_WAVES must not trip the guard.
     waves = [["cell0"]] + [[] for _ in range(w.MAX_WAVES + 3)]
-    w.guard_max_waves(waves)  # must not raise
+    w.pad_waves(waves)  # must not raise
 
 
 def test_write_waves_emits_aggregate_waves_json():
@@ -147,7 +147,7 @@ def test_env_level_waves_refuses_a_change_deeper_than_max_waves():
     """The guard fires through a real caller, rather than dropping the level-8 cells into a
     silent no-op apply.
 
-    Mutation: delete `guard_max_waves(waves)` from `pad_waves`."""
+    Mutation: delete the `if over:` refusal from `pad_waves`."""
     deps = w.parse_dot(_linear_chain_dot(w.MAX_WAVES + 1))
     deep = f"stacks/s{w.MAX_WAVES + 1}"
     pending = [{"stack": deep, "environment": "dev-eu"}]

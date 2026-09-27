@@ -364,8 +364,8 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path):
     refuses instead of emitting wave0..wave7 with the deepest cells dropped. The AST test that
     used to pin this caller's reach into `write_waves` is gone; nothing else covers it.
 
-    Mutation: pad and write the waves inline in `main` without `wv.guard_max_waves` -- the run
-    writes eight truncated waves and exits 0.
+    Mutation: pad and write the waves inline in `main` without `wv.pad_waves`' refusal -- the
+    run writes eight truncated waves and exits 0.
     """
     depth = ad.wv.MAX_WAVES + 1
     stacks = [f"stacks/s{i}" for i in range(depth)]

@@ -76,25 +76,20 @@ def assign_waves(levels_, cells):
     return waves
 
 
-def guard_max_waves(waves):
-    """Fail if a populated wave lands beyond the pre-declared wave0..wave7 jobs.
-    A deep FULL graph with only low-level cells in the work set is fine — empty
-    trailing levels do not count."""
+def pad_waves(waves):
+    """`waves` as a {wave0..wave{MAX_WAVES-1}: cells} dict, short lists padded.
+
+    Refuses a populated wave beyond the pre-declared wave0..wave7 jobs before
+    truncating. A deep FULL graph with only low-level cells in the work set is
+    fine -- empty trailing levels do not count.
+
+    Every key is always present -- apply-env-level.yml indexes
+    `fromJSON(waves_json).waveN` for every N and errors on a missing one."""
     over = [i for i, w in enumerate(waves) if w and i >= MAX_WAVES]
     if over:
         raise SystemExit(
             f"::error::change spans {over[-1] + 1} dependency levels (> {MAX_WAVES}); split the PR."
         )
-
-
-def pad_waves(waves):
-    """`waves` as a {wave0..wave{MAX_WAVES-1}: cells} dict, short lists padded.
-
-    Refuses populated waves beyond MAX_WAVES before truncating empty trailing levels.
-
-    Every key is always present -- apply-env-level.yml indexes
-    `fromJSON(waves_json).waveN` for every N and errors on a missing one."""
-    guard_max_waves(waves)
     return {f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(MAX_WAVES)}
 
 
