@@ -4053,10 +4053,14 @@ def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
 def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
     """The restore must reproduce absence, not write an empty string: a later
     `gh api` call with GH_TOKEN="" authenticates as nobody instead of falling
-    back to the ambient credential."""
+    back to the ambient credential. The default branch's table must be readable, or the
+    probe returns before it swaps the token at all.
+
+    Mutation: restore GH_TOKEN as `""` instead of popping it -- this reddens."""
     monkeypatch.delenv("GH_TOKEN", raising=False)
     monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
     responses = {
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
     }
