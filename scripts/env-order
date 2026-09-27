@@ -97,7 +97,4 @@ def write_env_level_waves(fh, per_level):
     between the two detect paths would silently break that shared consumer."""
     for lvl, w in enumerate(per_level):
         fh.write(f"envlevel{lvl}_waves={json.dumps(w)}\n")
-        fh.write(
-            f"envlevel{lvl}_empty="
-            f"{'false' if any(w[f'wave{i}'] for i in range(wv.MAX_WAVES)) else 'true'}\n"
-        )
+        fh.write(f"envlevel{lvl}_empty={'false' if any(w.values()) else 'true'}\n")

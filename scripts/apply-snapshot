@@ -54,9 +54,13 @@ def snapshot(waves, check_runs, app_id):
 
 
 def main():
+    app_id = os.environ["SHIPMATE_APP_ID"]
+    # Refuses an empty id before the waves or the listing are parsed, so a misconfiguration is
+    # reported first.
+    ag.from_app([], app_id)
     waves = json.loads(os.environ["SHIPMATE_WAVES_JSON"])
     check_runs = [json.loads(line) for line in sys.stdin if line.strip()]
-    json.dump(snapshot(waves, check_runs, os.environ["SHIPMATE_APP_ID"]), sys.stdout)
+    json.dump(snapshot(waves, check_runs, app_id), sys.stdout)
 
 
 if __name__ == "__main__":

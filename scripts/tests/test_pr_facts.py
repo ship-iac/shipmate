@@ -212,8 +212,11 @@ def test_the_actions_outputs_are_exactly_the_six_step_outputs():
 
 
 def test_event_payload_degrades_to_empty_dict(tmp_path):
-    # Each of these reaches main() as {}, which has neither a pull request nor a
-    # `pr_number` and so refuses rather than emitting empty facts.
+    """Each of these reaches main() as {}, which has neither a pull request nor a `pr_number`
+    and so refuses rather than emitting empty facts.
+
+    Mutation: return `payload` without the `isinstance(payload, dict)` check -- the list case
+    returns `[1, 2]`."""
     assert pf._event_payload("") == {}
     assert pf._event_payload(str(tmp_path / "absent.json")) == {}
     bad = tmp_path / "bad.json"

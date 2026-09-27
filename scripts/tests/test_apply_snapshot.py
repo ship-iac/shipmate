@@ -107,3 +107,17 @@ def test_an_empty_app_id_refuses_before_any_check_is_read(monkeypatch):
         "::error::SHIPMATE_APP_ID is empty — set the SHIPMATE_APP_ID repo/org "
         "variable to the shipmate App id (see docs/github-app.md)."
     )
+
+
+def test_an_empty_app_id_is_reported_before_malformed_input(monkeypatch):
+    """Mutation: delete the early `ag.from_app([], app_id)` call from `main` -- the waves JSON is
+    parsed first and a `JSONDecodeError` escapes instead."""
+    monkeypatch.setenv("SHIPMATE_APP_ID", "")
+    monkeypatch.setenv("SHIPMATE_WAVES_JSON", "{not json")
+    monkeypatch.setattr(apply_snapshot.sys, "stdin", io.StringIO("{not json either"))
+    with pytest.raises(SystemExit) as exc:
+        apply_snapshot.main()
+    assert str(exc.value) == (
+        "::error::SHIPMATE_APP_ID is empty — set the SHIPMATE_APP_ID repo/org "
+        "variable to the shipmate App id (see docs/github-app.md)."
+    )
