@@ -54,10 +54,6 @@ inputs:
   head-sha:
     description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one.
     required: true
-  cells-dir:
-    description: Directory to download apply-summary.*/cell.json trees into.
-    required: false
-    default: cells
   github-token:
     description: GITHUB_TOKEN with actions:read (artifact download + run jobs listing).
     required: true
@@ -93,7 +89,7 @@ runs:
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         pattern: apply-summary.*
-        path: ${{ inputs.cells-dir }}
+        path: cells
         github-token: ${{ inputs.github-token }}
         merge-multiple: false
 
@@ -160,7 +156,7 @@ runs:
     - name: Render apply result comment
       shell: bash
       env:
-        CELLS: ${{ inputs.cells-dir }}
+        CELLS: cells
         SHIPMATE_ENVIRONMENT: ${{ inputs.environment }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_ENVLEVEL0_WAVES: ${{ inputs.envlevel0-waves }}

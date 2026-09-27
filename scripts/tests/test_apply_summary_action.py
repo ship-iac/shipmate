@@ -114,7 +114,7 @@ def test_render_step_feeds_every_env_var_the_script_reads():
 # Hand-written, never derived from the action; asserted whole by
 # test_render_step_env_block_matches_the_expected_mapping.
 _RENDER_ENV = {
-    "CELLS": "${{ inputs.cells-dir }}",
+    "CELLS": "cells",
     "SHIPMATE_ENVIRONMENT": "${{ inputs.environment }}",
     "SHIPMATE_WAVES_JSON": "${{ inputs.waves-json }}",
     "SHIPMATE_ENVLEVEL0_WAVES": "${{ inputs.envlevel0-waves }}",

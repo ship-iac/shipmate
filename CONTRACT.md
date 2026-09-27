@@ -1784,9 +1784,8 @@ trigger alone closes two paths a trigger check alone would not:
 - Terramate and OpenTofu are not assumed to be on the image: the
   `setup` action installs the versions the engine release declares in its own
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to
-  other versions is a pin bump. The action's `terramate-version` /
-  `tofu-version` inputs still override that file, but an *empty* value is not an
-  override: it resolves to the pinned version rather than to the installer's
+  other versions is a pin bump; the action takes no version input. A missing
+  file or line fails the step rather than falling back to the installer's
   latest.
 
 ## Fan-out

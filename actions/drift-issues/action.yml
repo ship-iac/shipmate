@@ -1,10 +1,6 @@
 name: shipmate drift-issues
 description: Open/update/close drift Issues from downloaded drift-summary cell artifacts, and Slack-notify each drifted cell. The only step on the drift path that mints the App key.
 inputs:
-  cells-dir:
-    description: Directory holding downloaded drift-summary.*/cell.json trees.
-    required: false
-    default: drift
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
     required: true
@@ -50,7 +46,7 @@ runs:
         # without GH_REPO every one of those calls fails with "failed to determine base
         # repository".
         GH_REPO: ${{ github.repository }}
-        SHIPMATE_CELLS_DIR: ${{ inputs.cells-dir }}
+        SHIPMATE_CELLS_DIR: drift
         SHIPMATE_SLACK_WEBHOOK: ${{ inputs.slack-webhook }}
       run: |
         set -euo pipefail
