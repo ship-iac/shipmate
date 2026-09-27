@@ -49,11 +49,6 @@ _DELETED_FORK = (
 )
 
 
-def _bool(value):
-    """A GitHub JSON boolean as the string the guards compare against."""
-    return "true" if value is True else "false"
-
-
 def _facts(pr, on_demand):
     """The six facts from a pull-request object -- payload or API, same shape.
 
@@ -74,7 +69,7 @@ def _facts(pr, on_demand):
         "head_repo": repo.get("full_name") or "",
         "base_sha": (pr.get("base") or {}).get("sha") or "",
         "pr_number": str(pr.get("number") or ""),
-        "is_draft": _bool(pr.get("draft")),
+        "is_draft": "true" if pr.get("draft") is True else "false",
         "on_demand": on_demand,
     }
     if not facts["head_repo"]:
