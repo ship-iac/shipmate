@@ -201,6 +201,17 @@ tag. Nor does it cover the comment leg — parse, authorize, route — which by
 construction runs the sample's default-branch workflows and so is only
 exercised after the re-pin.
 
+A `verb=plan` dispatch on the scratch branch runs the cells and stops at
+`plan.yml`'s `summary`, the only job holding the App key. It binds the
+`shipmate-engine` environment, whose deployment branch policy allows the
+default branch only, so the job fails at startup: zero steps, no log, and the
+reason only in the check-run annotations — `Branch "smoke/vX.Y.Z" is not
+allowed to deploy to shipmate-engine due to environment protection rules.`
+Read that run as green when every cell job succeeded and `summary` carries this
+annotation; any other `summary` failure is a finding. The gate status, the plan
+comment and the apply checks get their first live run after the tag. Do not
+loosen the branch policy to smoke them: that hands the App key to every branch.
+
 Smoke proves the dispatch wiring resolves; acceptance proves the behaviour is
 right.
 
