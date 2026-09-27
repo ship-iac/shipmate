@@ -248,14 +248,12 @@ python3 <engine-checkout>/scripts/onboard \
   --vars-at-org SHIPMATE_APP_ID
 ```
 
-The flag takes a comma-separated list of names and accepts `SHIPMATE_APP_ID`
-only; every other name is refused, an unrecognised one because it would filter
-nothing and still report success, and the remaining variables `onboard` writes
-because they are not shareable. Name it only where it is correct for this
-repository: one in a second App's trust domain keeps its own `SHIPMATE_APP_ID`
-and leaves the flag off. Asserting a name whose organization value is not the one
-this run would write is refused, and the repository copy does not satisfy the
-assertion.
+The flag takes one name, `SHIPMATE_APP_ID`; any other value is refused, because
+it would filter nothing and still report success. Name it only where it is
+correct for this repository: one in a second App's trust domain keeps its own
+`SHIPMATE_APP_ID` and leaves the flag off. Asserting a name whose organization
+value is not the one this run would write is refused, and the repository copy
+does not satisfy the assertion.
 
 **Every asserted name is verified, not trusted.** `onboard` reads
 `GET /repos/{owner}/{repo}/actions/organization-variables`, which returns
