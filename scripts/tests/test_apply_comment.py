@@ -115,7 +115,7 @@ def test_build_table_statuses_emoji_and_not_attempted_note_present():
 
 
 def test_build_table_escapes_evil_stack_display_name():
-    # stack_display is author-controlled (apply-cell's stack-name input); a
+    # stack_display is author-controlled (apply-cell's stack input); a
     # value like `x</summary><b>evil` must not survive as live HTML in the
     # table cell.
     rows = [_row(stack_display="x</summary><b>evil", environment="dev-eu")]
@@ -1159,7 +1159,7 @@ def test_unrecorded_note_lists_every_affected_cell():
 
 def test_unrecorded_note_escapes_evil_stack_and_env_names():
     # stack_display and environment are author-controlled (a Terramate tag, a GitHub
-    # Environment name, apply-cell's stack-name input). Bold, not a backtick code span:
+    # Environment name, apply-cell's stack input). Bold, not a backtick code span:
     # _md_escape does not escape a backtick, so a span could be broken out of.
     rows = [
         _row(
@@ -1391,8 +1391,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
         f"_job_url matches it as a job-name suffix (got: {sorted(set(names))})"
     )
     # The two literals agree only if the wave job hands apply-cell the same matrix keys it
-    # renders from: it already feeds two inputs off one key (`stack:`, `stack-name:`), so a
-    # display name routed through `matrix.stack` keeps both literals and breaks the name.
+    # renders from.
     wired = [
         ln.strip()
         for ln in src.splitlines()

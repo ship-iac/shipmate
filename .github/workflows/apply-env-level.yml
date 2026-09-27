@@ -77,7 +77,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
@@ -114,7 +113,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
@@ -151,7 +149,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
@@ -188,7 +185,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
@@ -225,7 +221,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
@@ -262,7 +257,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
@@ -299,7 +293,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}
@@ -336,7 +329,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           head-sha: ${{ inputs.head_sha }}
           plan-run-id: ${{ matrix.plan_run_id }}

@@ -2,7 +2,7 @@
 """Write a plan cell's cell.json from env vars.
 
 Used by actions/plan-cell's `Write cell summary` step. Built from env vars rather than shell
-interpolation so an author-controlled stack-name/env cannot inject shell or break the JSON.
+interpolation so an author-controlled stack/env cannot inject shell or break the JSON.
 """
 
 import json

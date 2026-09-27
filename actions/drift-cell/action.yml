@@ -4,9 +4,6 @@ inputs:
   stack:
     description: Stack path, e.g. stacks/app.
     required: true
-  stack-name:
-    description: Stack display name for the issue, e.g. app.
-    required: true
   env:
     description: Environment name, e.g. dev-eu.
     required: true
@@ -99,7 +96,7 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         PLAN_OUTCOME: ${{ steps.plan.outcome }}
         DRIFTED: ${{ steps.plan.outputs.changed }}

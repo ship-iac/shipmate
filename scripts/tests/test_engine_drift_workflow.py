@@ -230,6 +230,5 @@ def test_the_cell_passes_this_whole_with_block():
         "github-vars": "${{ toJSON(vars) }}",
         "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",
         "stack": "${{ matrix.stack }}",
-        "stack-name": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",
     }

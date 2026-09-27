@@ -73,7 +73,6 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
           stack: ${{ matrix.stack }}
-          stack-name: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
 
   # Completes the credentialed work drift-cell does not do: authors and closes the drift Issues

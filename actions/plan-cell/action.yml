@@ -4,9 +4,6 @@ inputs:
   stack:
     description: Stack path, e.g. stacks/app.
     required: true
-  stack-name:
-    description: Stack display name for the check, e.g. app.
-    required: true
   env:
     description: Environment name, e.g. dev-eu.
     required: true
@@ -143,7 +140,7 @@ runs:
       shell: bash
       env:
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
       run: |
         {
           echo "## $STACK_NAME / $ENV"
@@ -185,11 +182,11 @@ runs:
 
     - name: Write cell summary
       shell: bash
-      # Build via python from env vars so an author-controlled stack-name/env
+      # Build via python from env vars so an author-controlled stack/env
       # cannot inject shell or break the JSON.
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack-name }}
+        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
