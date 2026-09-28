@@ -3429,8 +3429,9 @@ def _no_required_review(envs):
     """Hand-written: the count-0 finding naming `envs`, already rendered."""
     return (
         doctor.WARNING,
-        f"the `pull_request` rule on `{_BRANCH}` requires no approving review, so "
-        f"`shipmate apply` applies these gated environments without one: {envs}. `gated` can "
+        f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews, so "
+        f"these gated environments can apply without an approving review: {envs}. One is held "
+        "only where a code-owner review is required for the changed files. `gated` can "
         "only relax a review requirement the ruleset sets (docs/hardening.md #3–5); set "
         "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
         "environments meant to apply unreviewed.",

@@ -144,8 +144,9 @@ fails closed rather than proceeding unreviewed.)
   apply` needs no approving review (a one-person repo can never self-approve
   on GitHub) — but a `CHANGES_REQUESTED` review still blocks apply until
   resolved. `shipmate doctor` warns while any environment is gated, naming
-  each: `gated` can only relax an existing review requirement, never create
-  one.
+  each when it can read the default branch's table: `gated` can only relax an
+  existing review requirement, never create one, so a gated environment is
+  held only where a code-owner review is required for the changed files.
 - **Team mode** (`required_approving_review_count` ≥ 1 and/or code-owner
   review): GitHub enforces the approval count / CODEOWNERS / last-push-approval.
   `shipmate apply` stays blocked until `reviewDecision` clears — for every

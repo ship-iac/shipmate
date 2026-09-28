@@ -319,9 +319,13 @@ Two things to know before relying on it:
   complement, the gated environments.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
   environment is already ungated there, so `gated = false` on some narrows nothing. It
-  can only relax an existing requirement, never create one. `shipmate doctor`
-  warns about the combination, naming the environments still marked gated: each
-  of them applies without a review. The apply result comment also names each
+  can only relax an existing requirement, never create one. When it can read the
+  default branch's table, `shipmate doctor` warns about the combination, naming
+  the environments still marked gated: each of them can apply without an
+  approving review, and is held only where a code-owner review is required for
+  the changed files. With the table unreadable it names none, and reports only
+  the sole-maintainer note, or only the code-owner warning when that review is
+  off. The apply result comment also names each
   gated environment a run applied while `reviewDecision` was `NONE`, stating that
   no approving review was required.
 

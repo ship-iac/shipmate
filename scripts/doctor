@@ -93,8 +93,9 @@ _SOLE_MAINTAINER_REVIEW = (
     "private key cannot satisfy is still in place."
 )
 _NO_REQUIRED_REVIEW = (
-    "the `pull_request` rule on `{branch}` requires no approving review, so "
-    "`shipmate apply` applies these gated environments without one: {envs}. `gated` can "
+    "the `pull_request` rule on `{branch}` requires 0 approving reviews, so "
+    "these gated environments can apply without an approving review: {envs}. One is held "
+    "only where a code-owner review is required for the changed files. `gated` can "
     "only relax a review requirement the ruleset sets (docs/hardening.md #3–5); set "
     "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
     "environments meant to apply unreviewed."
@@ -183,8 +184,9 @@ def _review_rule_warnings(ctx):
     read as the sole-maintainer note.
 
     Count 0 is a finding in its own right while any environment is gated: `gated`
-    only relaxes a review the ruleset requires, so with none required `shipmate
-    apply` applies every gated environment unreviewed. It is reported beside the
+    only relaxes a review the ruleset requires, so with no count required a gated
+    environment is held only where a code-owner review is required for the changed
+    files. It is reported beside the
     code-owner finding, and it is the sole-maintainer note only when no environment
     is gated or the default branch's table cannot be read (`_no_review_findings`).
 

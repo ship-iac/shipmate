@@ -1335,7 +1335,9 @@ no branch rule requires an approving review, the decision is `NONE` (unless a
 requested-changes review stands, which still refuses), and both paths apply a
 gated environment without one. The apply result comment names
 each gated environment that applied that way (§Apply result comment), and
-`shipmate doctor` warns about the combination.
+`shipmate doctor` warns about the combination when it can read the default
+branch's table. With the table unreadable, doctor reports only the
+sole-maintainer note, or only the code-owner warning when that review is off.
 
 What bounds the exemption is the default branch, not an admin boundary. Anyone who
 can open a pull request can propose `gated = false`; what they cannot do is have it take
