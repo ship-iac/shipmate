@@ -1325,6 +1325,13 @@ stays blocked — and environments ordered after it are skipped. The apply resul
 comment names both halves: which environments were held for review, and which
 applied under the exemption (§Apply result comment).
 
+`gated` can only relax an existing review requirement, never create one. When
+no branch rule requires an approving review, the decision is `NONE` (unless a
+requested-changes review stands, which still refuses), and both paths apply a
+gated environment without one. The apply result comment names
+each gated environment that applied that way (§Apply result comment), and
+`shipmate doctor` warns about the combination.
+
 What bounds the exemption is the default branch, not an admin boundary. Anyone who
 can open a pull request can propose `gated = false`; what they cannot do is have it take
 effect on that pull request, because all three readers resolve the file from the
@@ -1334,7 +1341,8 @@ benefits from it. This is the inverse of the reasoning that held while the
 exemption was a repository variable, where the point was that it could *not* be a commit:
 a variable edit is governed by GitHub's permission settings and reviewed by
 nobody. `shipmate doctor` validates the file it is in and reports a malformed
-entry, but does not echo the ungated set itself. `gated` accepts no variable
+entry, but does not list the `gated = false` entries; its count-0 warning names
+their complement, the gated environments. `gated` accepts no variable
 reference (§Variable references), so the decision stays a merged commit.
 
 `shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
@@ -1999,7 +2007,8 @@ same waves JSON `apply-detect` / `apply-all-detect` already compute, and a
 cell counts as attempted when its artifact actually downloaded or its apply
 check is already done — the render can never claim nothing is pending while
 holding evidence that an apply ran. The footer carries the bare-apply form's
-environment-disposition sentences, a gate-completion sentence (complete
+environment-disposition sentences, the no-review-required sentence in both
+forms, a gate-completion sentence (complete
 or still-pending, from the gate verdict), and the run link.
 
 The disposition sentences are four, one per cause, and both render paths carry
@@ -2010,7 +2019,7 @@ either path. Excluded environments name the
 `shipmate apply <env>` that applies them; skipped ones do not name a cause, since
 being skipped can mean either an unapplied explicit environment or a held
 one — the excluded and held sentences carry that distinction instead. The
-two review sentences (see §Comment-ops) are:
+three review sentences (see §Comment-ops) are:
 
 - **held** — "the pull request's review state does not permit applying",
   naming the environments and asking for an approving review, or for a
@@ -2023,12 +2032,22 @@ two review sentences (see §Comment-ops) are:
   which one, since the decision never reaches this renderer;
 - **applied ungated** — the environments the run was permitted to apply
   without an approving review, per `gated = false` on their entries. It is the only
-  audit trail an unreviewed apply leaves: `reviewDecision` is a live value
+  audit trail such an apply leaves: `reviewDecision` is a live value
   with no history, so once the review lands nothing else in a run
   distinguishes an apply that waited for it from one that did not. It states a
   permission, never an outcome — the set is derived before any wave runs, so
   it points at the run for what actually applied and reserves "applied" for
-  the ✅ rows.
+  the ✅ rows;
+- **no review required** — the gated environments a `NONE` decision
+  authorized: no branch rule on the repository requires an approving review, so
+  `gated` had nothing to enforce. It has its own cause, so it has its own detect
+  output (`review_not_required_envs`, from both detects) rather than widening
+  applied ungated. It renders in the targeted and the all-environments form, and
+  names only environments with an applied, failed or unrecorded row — apply ran
+  there, so infrastructure may have changed — so the short form, which has no
+  rows, never carries it. It states the authorization fact and never that
+  nobody reviewed: a code-owner review can still be required at an approval
+  count of 0.
 
 Row status is derived from both the per-cell artifact and the real state of
 that cell's `apply / <stack> / <env>` check on the head SHA, which

@@ -56,6 +56,7 @@ jobs:
       waves: ${{ steps.d.outputs.waves }}
       empty: ${{ steps.d.outputs.empty }}
       head_sha: ${{ steps.d.outputs.head_sha }}
+      review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
@@ -137,6 +138,7 @@ jobs:
           head-sha: ${{ inputs.ref }}
           environment: ${{ inputs.environment }}
           waves-json: ${{ needs.detect.outputs.waves }}
+          review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           results: ${{ join(needs.*.result, ',') }}
           gate-verdict: ${{ steps.gate.outputs.verdict }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}

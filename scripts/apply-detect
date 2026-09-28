@@ -338,7 +338,12 @@ def main():
     # `validate` re-runs it below, which costs nothing and parses nothing again.
     table = bm.ec.read_table()
     bm.ec.validate_structure(table)
-    refuse_unreviewed(env, table, os.environ.get("SHIPMATE_REVIEW_DECISION", ""))
+    decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
+    refuse_unreviewed(env, table, decision)
+    # A null decision authorizes a gated env only because no branch rule requires a review.
+    no_review_required = (
+        [env] if decision == "NONE" and env.casefold() not in bm.ec.ungated_envs(table) else []
+    )
 
     deps = run_graph_deps()
 
@@ -375,6 +380,7 @@ def main():
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         wv.write_waves(fh, waves)
         fh.write(f"head_sha={head}\n")
+        fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
 
 
 if __name__ == "__main__":

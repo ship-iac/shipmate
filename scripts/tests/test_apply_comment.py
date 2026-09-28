@@ -671,7 +671,7 @@ def test_footer_carries_held_and_ungated_sentences():
 
 def test_held_and_ungated_lines_escape_evil_env_names():
     evil = "x</summary><b>evil"
-    joined = " ".join(ac._footer_parts("pending", RUN_URL, [], [], "", [evil], [evil])[:-2])
+    joined = " ".join(ac._footer_parts("pending", RUN_URL, [], [], "", [evil], [evil], [evil])[:-2])
     assert "</summary><b>evil" not in joined
     assert "&lt;/summary&gt;&lt;b&gt;evil" in joined
 
@@ -680,10 +680,65 @@ def test_comment_is_unchanged_when_held_and_ungated_are_empty():
     rows = [_row()]
     baseline = ac.build_comment(rows, [], RUN_URL, "pending", ["prod"], ["staging"], "")
     assert baseline == ac.build_comment(
-        rows, [], RUN_URL, "pending", ["prod"], ["staging"], "", "", [], []
+        rows, [], RUN_URL, "pending", ["prod"], ["staging"], "", "", [], [], []
     )
     assert "Held" not in baseline
     assert "without an approving review" not in baseline
+
+
+_NO_REVIEW_SENTENCE = (
+    "No approving review was required to apply the gated environment(s) `sbx`: no branch "
+    "rule on this repository requires one, so `gated` had nothing to enforce "
+    "(docs/hardening.md #3–5)."
+)
+
+
+def test_no_review_required_line_follows_the_ungated_line():
+    """Pinned whole: the sentence states the authorization fact and never claims nobody
+    reviewed, since a code-owner review can still apply at count 0. It sits after the
+    applied-ungated sentence and before the gate sentence."""
+    lines = ac._footer_parts("pending", RUN_URL, [], [], "", [], ["dev-eu"], ["sbx"])[:-2]
+    assert lines == [_UNGATED_SENTENCE, _NO_REVIEW_SENTENCE]
+
+
+def test_no_review_required_line_renders_in_the_targeted_form():
+    """Mutation: render the sentence only when `not env_name` -- red."""
+    body = ac.build_comment(
+        [_row(environment="sbx")], [], RUN_URL, "pending", [], [], "sbx", "success", [], [], ["sbx"]
+    )
+    assert _NO_REVIEW_SENTENCE in body.split("\n\n")
+
+
+def test_no_review_required_line_skips_an_env_whose_apply_never_ran():
+    """sbx's only row is blocked, so nothing in it applied and there is nothing to disclose.
+
+    Mutation: skip the row filter in build_comment -- the sentence renders, red."""
+    body = ac.build_comment(
+        [_row(environment="sbx", status="blocked", reason="upstream failed")],
+        [],
+        RUN_URL,
+        "pending",
+        [],
+        [],
+        "sbx",
+        "success",
+        [],
+        [],
+        ["sbx"],
+    )
+    assert "No approving review was required" not in body
+
+
+def test_main_reads_the_review_not_required_envs(monkeypatch, tmp_path):
+    """Mutation: read the wrong env var name in main() -- the set arrives empty, red."""
+    cells = tmp_path / "cells"
+    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
+    waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
+    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS", json.dumps(["dev-eu"]))
+    ac.main()
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert _NO_REVIEW_SENTENCE.replace("`sbx`", "`dev-eu`") in body.split("\n\n")
 
 
 def _render_held_ungated(monkeypatch, tmp_path, waves):

@@ -655,6 +655,29 @@ def test_apply_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_pa
     assert len(reads) == 1
 
 
+@pytest.mark.parametrize(
+    ("decision", "table", "expected"),
+    [
+        ("NONE", None, ["dev-eu"]),
+        ("NONE", _gate("dev-eu"), []),
+        ("APPROVED", None, []),
+    ],
+)
+def test_main_names_a_gated_env_applied_with_no_review_required(
+    monkeypatch, tmp_path, decision, table, expected
+):
+    """A null decision authorizes a gated env only because no branch rule requires a review;
+    an ungated env's `gated = false` entry already declares it applies unreviewed, and an
+    approval needs no disclosure.
+
+    Mutation: compare `decision != "NONE"` -- the NONE/gated and APPROVED cases swap and go red.
+    Mutation: drop the ungated check -- the NONE/ungated case names dev-eu and goes red."""
+    out = _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    ad.main()
+    assert json.loads(_parsed(out)["review_not_required_envs"]) == expected
+
+
 def _unlock_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
     """Env for a main() run, unlock unless `SHIPMATE_MODE` is overridden. Returns the
     GITHUB_OUTPUT path.
@@ -920,7 +943,8 @@ def test_unlock_notice_names_the_mode(monkeypatch, tmp_path, capsys):
 
 def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
-    key on the apply path is caught. apply.yml reads `waves`, `empty` and `head_sha`."""
+    key on the apply path is caught. apply.yml reads `waves`, `empty`, `head_sha` and
+    `review_not_required_envs`."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
@@ -935,6 +959,7 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
         '"wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []}\n'
         "empty=false\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        "review_not_required_envs=[]\n"
     )
 
 

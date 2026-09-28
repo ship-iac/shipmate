@@ -543,6 +543,28 @@ def test_main_omits_a_listed_explicit_env_from_the_applied_report(tmp_path, monk
     assert _wave_envs(parsed) == ["dev-eu"]
 
 
+@pytest.mark.parametrize(("decision", "expected"), [("NONE", ["dev-eu"]), ("APPROVED", [])])
+def test_main_names_the_gated_envs_applied_with_no_review_required(
+    tmp_path, monkeypatch, decision, expected
+):
+    """dev-eu is gated and runnable; dev-us is ungated, and its `gated = false` entry already
+    declares it applies unreviewed; prod-eu is gated but explicit, so it never runs and must
+    not be named.
+
+    Mutation: derive the set from `pending` instead of `runnable` -- prod-eu is named, red.
+    Mutation: compare `decision != "NONE"` -- both cases go red."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "dev-us", "prod-eu"],
+        explicit=["prod-eu"],
+        ungated="dev-us",
+        decision=decision,
+    )
+    assert _wave_envs(parsed) == ["dev-eu", "dev-us"]
+    assert json.loads(parsed["review_not_required_envs"]) == expected
+
+
 def test_main_holds_every_env_unreviewed_when_the_list_is_unset(tmp_path, monkeypatch):
     # REVIEW_REQUIRED with no list exempts nothing, so nothing applies. The audit line stays
     # empty, because no env was permitted to apply without a review.
