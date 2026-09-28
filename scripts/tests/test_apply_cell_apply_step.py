@@ -31,7 +31,7 @@ import os
 import subprocess
 
 import pytest
-from _loader import action_steps, action_yaml, usable_bash
+from _loader import action_steps, action_yaml, step_by, usable_bash
 
 _BASH = usable_bash()
 
@@ -43,14 +43,8 @@ _BASH = usable_bash()
 _STEP_IDS = ("digest-input", "init", "plan-digest", "apply")
 
 
-def _step(step_id):
-    matches = [s for s in action_steps("apply-cell") if s.get("id") == step_id]
-    assert len(matches) == 1, f"expected exactly one step with id {step_id!r}, got {len(matches)}"
-    return matches[0]
-
-
 def _apply_step():
-    return _step("apply")
+    return step_by("apply-cell", id="apply")
 
 
 def test_the_apply_half_is_split_across_its_four_attributable_steps():
@@ -120,7 +114,7 @@ def _run_step(
     # The four step bodies concatenated in runner order. They are separate steps so that each
     # refusal carries its own blocked reason, but composite-action steps share one workspace and
     # run in sequence, so one script under one set of stubs is what they amount to at runtime.
-    run = "\n".join(_step(step_id)["run"] for step_id in _STEP_IDS)
+    run = "\n".join(step_by("apply-cell", id=step_id)["run"] for step_id in _STEP_IDS)
     # The step calls terramate twice: a plain `init` line, then the teed apply. `terramate_body`
     # ends in `exit`, which dies in a subshell inside the pipeline but would kill this whole
     # script on the init line, so the stub dispatches on the tofu subcommand.

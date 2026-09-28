@@ -16,30 +16,24 @@ materialize in the tree -- `stack.otplan`, `fingerprint.txt`, `.terraform/`, the
 are covered by CONTRACT.md's gitignore requirement instead.
 """
 
-from _loader import SCRIPTS, action_steps
-
-
-def _step(name):
-    matches = [s for s in action_steps("apply-cell") if s.get("name") == name]
-    assert len(matches) == 1, f"expected exactly one {name!r} step, got {len(matches)}"
-    return matches[0]
+from _loader import SCRIPTS, step_by
 
 
 def test_compose_cell_summary_has_continue_on_error():
-    assert _step("Compose cell summary").get("continue-on-error") is True
+    assert step_by("apply-cell", name="Compose cell summary").get("continue-on-error") is True
 
 
 def test_upload_apply_summary_has_continue_on_error():
-    assert _step("Upload apply summary").get("continue-on-error") is True
+    assert step_by("apply-cell", name="Upload apply summary").get("continue-on-error") is True
 
 
 def test_upload_apply_summary_has_overwrite():
-    with_ = _step("Upload apply summary").get("with") or {}
+    with_ = step_by("apply-cell", name="Upload apply summary").get("with") or {}
     assert with_.get("overwrite") is True
 
 
 def test_upload_apply_summary_paths_are_under_runner_temp_not_repo_tree():
-    with_ = _step("Upload apply summary").get("with") or {}
+    with_ = step_by("apply-cell", name="Upload apply summary").get("with") or {}
     lines = [ln for ln in (with_.get("path") or "").splitlines() if ln.strip()]
     assert lines == ["${{ runner.temp }}/cell.json", "${{ runner.temp }}/apply.txt"]
 
@@ -57,6 +51,6 @@ def test_both_new_steps_still_run_always():
     # continue-on-error must not be paired with dropping if: always(): a blocked or failed cell
     # still needs its cell.json composed and uploaded.
     for name in ("Compose cell summary", "Upload apply summary"):
-        step = _step(name)
+        step = step_by("apply-cell", name=name)
         raw = str(step.get("if", "")).strip()
         assert raw in ("always()", "${{ always() }}"), f"{name} if: changed to {raw!r}"

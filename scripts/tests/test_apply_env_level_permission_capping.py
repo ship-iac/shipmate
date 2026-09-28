@@ -12,8 +12,7 @@ caller, is covered instead of silently falling outside a stale list.
 
 import re
 
-import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, workflow_yaml
 
 CALLEE = "apply-env-level.yml"
 _CALLEE_REF = re.compile(r"apply-env-level\.yml(?:@|$)")
@@ -29,7 +28,7 @@ def _rank(level):
 
 
 def _workflow(name):
-    return yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+    return workflow_yaml(name)
 
 
 def _callee_permission_union():

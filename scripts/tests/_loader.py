@@ -1,9 +1,9 @@
 """Shared test-side helpers: load a ``scripts/`` helper, or read an action.yml.
 
 Two jobs: ``load_script`` for the extension-less helpers, and
-``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus ``action_steps`` for the YAML-shape guards. The step
-parser is load-bearing, because a guard that silently parses to ``[]`` asserts nothing, so it has
-one definition.
+``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus ``action_yaml``, ``workflow_yaml``, ``action_steps`` and
+``step_by`` for the YAML-shape guards. The parser is load-bearing, because a guard that silently
+parses to ``[]`` asserts nothing, so it has one definition.
 
 Loading a helper script
 -----------------------
@@ -87,8 +87,8 @@ ENGINE_CALL_SECRETS = {
 
 
 @functools.cache
-def _parse_action(path):
-    """Parsed ``action.yml``, cached: nothing in the suite rewrites these files."""
+def _parse_yaml(path):
+    """Parsed engine YAML file, cached: nothing in the suite rewrites these files."""
     spec = yaml.safe_load(path.read_text(encoding="utf-8"))
     # Never fall back to ``{}``: a file that parses to None, emptied by a bad merge or fully
     # commented out, would hand every guard zero steps, and a guard over zero steps passes while
@@ -111,13 +111,35 @@ def action_yaml(action):
     in a full-suite run.
     """
     path = action if isinstance(action, pathlib.Path) else ACTIONS / action / "action.yml"
-    return copy.deepcopy(_parse_action(path))
+    return copy.deepcopy(_parse_yaml(path))
+
+
+def workflow_yaml(workflow):
+    """Parsed engine workflow: a file name under ``.github/workflows/``, or a path to it. A deep
+    copy per call, for the reason ``action_yaml`` gives."""
+    path = workflow if isinstance(workflow, pathlib.Path) else WORKFLOWS / workflow
+    return copy.deepcopy(_parse_yaml(path))
 
 
 def action_steps(action):
     """``runs.steps`` for ``action``, or ``[]`` for one that declares none. A non-composite
     action is legal, and has no bash for a guard to read."""
     return (action_yaml(action).get("runs") or {}).get("steps") or []
+
+
+def step_by(action, *, name=None, id=None):
+    """The one step of ``action`` whose ``name``, or ``id``, equals the value given.
+
+    Exactly one, asserted: a guard that takes the first of two same-named steps pins one and
+    leaves the other free, and one that finds none must fail rather than check nothing.
+    """
+    assert (name is None) != (id is None), "pass exactly one of name= and id="
+    key, value = ("name", name) if id is None else ("id", id)
+    matches = [s for s in action_steps(action) if s.get(key) == value]
+    assert len(matches) == 1, (
+        f"{action}: expected exactly one step with {key} {value!r}, got {len(matches)}"
+    )
+    return matches[0]
 
 
 def run_lines(step):

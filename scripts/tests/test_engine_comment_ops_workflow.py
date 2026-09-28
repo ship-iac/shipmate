@@ -8,14 +8,13 @@ the dispatch step is lost, any commenter's apply reaches the apply path with an 
 authorization decision is made exactly once, in the first step, and read exactly once, here.
 """
 
-import yaml
-from _loader import WORKFLOWS, local_action
+from _loader import WORKFLOWS, local_action, workflow_yaml
 
 WF = WORKFLOWS / "comment-ops.yml"
 
 
 def _doc():
-    return yaml.safe_load(WF.read_text(encoding="utf-8"))
+    return workflow_yaml(WF)
 
 
 def _job():

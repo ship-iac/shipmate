@@ -19,7 +19,7 @@ import os
 import subprocess
 
 import pytest
-from _loader import ACTIONS, action_steps, usable_bash
+from _loader import ACTIONS, step_by, usable_bash
 
 _BASH = usable_bash()
 
@@ -38,16 +38,14 @@ gh() {
 """
 
 
-def _complete_step():
-    matches = [s for s in action_steps("gate-refresh") if s.get("name") == "Complete gate"]
-    assert len(matches) == 1, f"expected exactly one Complete gate step, got {len(matches)}"
-    return matches[0]
-
-
 def _run_step(tmp_path, gate_state):
     assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     script = tmp_path / "step.sh"
-    script.write_text(GH_STUB + _complete_step()["run"], encoding="utf-8", newline="\n")
+    script.write_text(
+        GH_STUB + step_by("gate-refresh", name="Complete gate")["run"],
+        encoding="utf-8",
+        newline="\n",
+    )
     wrote = tmp_path / "wrote"
     env = dict(os.environ)
     env.update(
@@ -92,7 +90,7 @@ GREEN_ARGV = [
 def test_the_gate_is_read_before_it_is_written():
     # Structural companion to the behavioural tests: an ordering inversion would read the status
     # that the write itself made.
-    run = _complete_step()["run"]
+    run = step_by("gate-refresh", name="Complete gate")["run"]
     assert run.index("held=$(gh api") < run.index("/statuses/$HEAD_SHA")
 
 

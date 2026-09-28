@@ -15,7 +15,7 @@ import textwrap
 
 import pytest
 import yaml
-from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, load_script
+from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, load_script, workflow_yaml
 
 DOCS = ENGINE / "docs"
 
@@ -159,7 +159,7 @@ def _workflow_call_inputs(target):
     Read from the callee itself: this guard compares two files that must agree, so one side has
     to come from the file it is checking. The hand-written side is the documented wrapper.
     """
-    doc = yaml.safe_load((WORKFLOWS / target).read_text(encoding="utf-8"))
+    doc = workflow_yaml(target)
     on = doc.get("on", doc.get(True))
     return (on["workflow_call"].get("inputs") or {}) if isinstance(on, dict) else {}
 
@@ -218,7 +218,7 @@ def _workflow_call_secrets(target):
     Read from the callee, like `_workflow_call_inputs`: here the hand-written side is the
     registry itself.
     """
-    doc = yaml.safe_load((WORKFLOWS / target).read_text(encoding="utf-8"))
+    doc = workflow_yaml(target)
     on = doc.get("on", doc.get(True))
     return (on["workflow_call"].get("secrets") or {}) if isinstance(on, dict) else {}
 
@@ -256,7 +256,7 @@ def _callee_permissions_union(target):
     Derived from the callee, not hand-written: this guard compares two files that must agree, and
     the callee is the side that changes. The documented shim is the hand-written side.
     """
-    doc = yaml.safe_load((WORKFLOWS / target).read_text(encoding="utf-8"))
+    doc = workflow_yaml(target)
     union = {}
     for job_id, job in doc["jobs"].items():
         perms = job.get("permissions")

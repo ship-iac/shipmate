@@ -6,8 +6,7 @@ Two properties, because a rail can come back at either end: no workflow declares
 the input, and every wave job reads the value off its matrix row.
 """
 
-import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, workflow_yaml
 
 #: Every `workflow_call`/`workflow_dispatch` input name in the engine, per file. Hand-written,
 #: never read back from the files it guards: the property is that no entry says `plan_run_id`, and
@@ -37,10 +36,6 @@ EXPECTED_WAVE_JOBS = ["wave0", "wave1", "wave2", "wave3", "wave4", "wave5", "wav
 PER_CELL_PLAN_RUN = "${{ matrix.plan_run_id }}"
 
 
-def _workflow(path):
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
-
-
 def _inputs(spec):
     """Input names per trigger, for the triggers that declare any.
 
@@ -58,12 +53,12 @@ def _inputs(spec):
 
 
 def test_no_engine_workflow_declares_a_plan_run_id_input():
-    found = {p.name: _inputs(_workflow(p)) for p in sorted(WORKFLOWS.glob("*.y*ml"))}
+    found = {p.name: _inputs(workflow_yaml(p)) for p in sorted(WORKFLOWS.glob("*.y*ml"))}
     assert found == EXPECTED_INPUTS, f"engine workflow inputs changed: {found}"
 
 
 def test_every_wave_job_takes_the_plan_run_id_from_its_matrix_cell():
-    jobs = _workflow(WORKFLOWS / "apply-env-level.yml")["jobs"]
+    jobs = workflow_yaml("apply-env-level.yml")["jobs"]
     wave_jobs = sorted(j for j in jobs if j.startswith("wave"))
     assert wave_jobs == EXPECTED_WAVE_JOBS, f"wave fan-out changed: {wave_jobs}"
     for job_id in wave_jobs:

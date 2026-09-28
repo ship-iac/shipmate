@@ -15,8 +15,7 @@ operator can contain the same substring as the real guard; it cannot produce the
 value.
 """
 
-import yaml
-from _loader import WORKFLOWS, local_action
+from _loader import WORKFLOWS, local_action, workflow_yaml
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -49,7 +48,7 @@ EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary"]
 
 
 def _summary_job():
-    doc = yaml.safe_load(WF.read_text(encoding="utf-8"))
+    doc = workflow_yaml(WF)
     jobs = doc["jobs"]
     assert list(jobs) == EXPECTED_JOB_IDS, (
         f"plan.yml's jobs are {list(jobs)}; these guards cover only {EXPECTED_JOB_IDS}, and "

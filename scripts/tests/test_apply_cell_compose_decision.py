@@ -18,20 +18,14 @@ never as a specific fail-safe's message that in fact never ran.
 import json
 
 import pytest
-from _loader import action_steps, load_script, run_lines
-
-
-def _compose_step():
-    matches = [s for s in action_steps("apply-cell") if s.get("name") == "Compose cell summary"]
-    assert len(matches) == 1, f"expected exactly one Compose cell summary step, got {len(matches)}"
-    return matches[0]
+from _loader import load_script, run_lines, step_by
 
 
 def test_the_compose_step_runs_the_script_this_file_exercises():
     # A whole run line, not a substring: a commented-out invocation writes no cell.json, and
     # apply-comment then renders an applied cell as never attempted.
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"' in run_lines(
-        _compose_step()
+        step_by("apply-cell", name="Compose cell summary")
     )
 
 

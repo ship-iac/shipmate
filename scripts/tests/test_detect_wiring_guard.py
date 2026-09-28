@@ -19,7 +19,7 @@
 
 import pytest
 import yaml
-from _loader import ACTIONS, ENGINE
+from _loader import ACTIONS, ENGINE, WORKFLOWS, action_yaml, workflow_yaml
 
 RETIRED = ("SHIPMATE_SHARED_ENVS", "shared-envs")
 
@@ -129,7 +129,7 @@ def test_no_workflow_or_action_names_the_retired_shared_env_variable():
 @pytest.mark.parametrize("action", sorted(_SCRIPT_ENV))
 def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(action):
     """Mutation: delete `SHIPMATE_REVIEW_DECISION` from `apply-all-detect`'s script step."""
-    doc = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
+    doc = action_yaml(action)
     steps = [s for s in doc["runs"]["steps"] if "/../../scripts/" in str(s.get("run", ""))]
     assert len(steps) == 1, f"{action}: expected one script step, got {len(steps)}"
     assert steps[0]["env"] == _SCRIPT_ENV[action]
@@ -144,7 +144,7 @@ def test_every_table_reader_declares_the_variables_input(action):
     Mutation: delete the `github-vars:` input block from `apply-all-detect`, `comment-ops` or
     `summary`.
     """
-    doc = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
+    doc = action_yaml(action)
     declared = dict(doc["inputs"].get("github-vars") or {})
     declared.pop("description", None)
     assert declared == {"required": False, "default": ""}
@@ -154,7 +154,7 @@ def test_every_table_reader_declares_the_variables_input(action):
 def test_the_detect_step_passes_exactly_these_inputs(workflow):
     """Mutation: delete the `github-vars:` line from `deploy.yml`'s detect step."""
     uses, expected = _DETECT_WITH[workflow]
-    doc = yaml.safe_load((ENGINE / ".github/workflows" / workflow).read_text(encoding="utf-8"))
+    doc = workflow_yaml(workflow)
     steps = [s for s in doc["jobs"]["detect"]["steps"] if s.get("uses") == uses]
     assert len(steps) == 1, f"{workflow}: {len(steps)} {uses} steps"
     assert steps[0]["with"] == expected
@@ -168,8 +168,8 @@ def test_only_the_listed_steps_carry_the_variables():
     step.
     """
     found = set()
-    for path in sorted((ENGINE / ".github/workflows").glob("*.yml")):
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        doc = workflow_yaml(path)
         for job_id, job in (doc.get("jobs") or {}).items():
             steps = job.get("steps") or []
             rest = {k: v for k, v in job.items() if k != "steps"}

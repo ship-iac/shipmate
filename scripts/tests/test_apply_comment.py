@@ -4,9 +4,8 @@ import pathlib
 import re
 
 import pytest
-import yaml
 from _loader import ENGINE as _ENGINE
-from _loader import load_script
+from _loader import load_script, workflow_yaml
 
 ac = load_script("apply-comment")
 eo = load_script("env-order")
@@ -1385,9 +1384,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     Mutation: change the `apply / ...` literal on wave0's `name: &wave-name`, or replace one wave's
     `name: *wave-name` or `steps: *wave-steps` with a variant, or feed apply-cell's `stack:` from
     another matrix key."""
-    jobs = yaml.safe_load(
-        (_ENGINE / ".github" / "workflows" / "apply-env-level.yml").read_text(encoding="utf-8")
-    )["jobs"]
+    jobs = workflow_yaml("apply-env-level.yml")["jobs"]
     expected = "apply / ${{ matrix.stack }} / ${{ matrix.environment }}"
     # Width from waves.MAX_WAVES, so a bump cannot leave this asserting the old count.
     max_waves = wv.MAX_WAVES

@@ -12,8 +12,7 @@ passes an entry whose expression was mistyped; a substring check is satisfied by
 """
 
 import pytest
-import yaml
-from _loader import ACTIONS, WORKFLOWS, action_steps, run_lines
+from _loader import WORKFLOWS, action_steps, action_yaml, run_lines, workflow_yaml
 
 #: The jobs that run a cell, hand-written. `test_the_registry_names_every_job_that_runs_a_cell`
 #: derives the same set from the files, so a twelfth cell job reds rather than going unguarded.
@@ -71,7 +70,7 @@ _ELEVEN = [(wf, job) for wf, jobs in _CELL_JOBS.items() for job in jobs]
 
 
 def _doc(name):
-    return yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+    return workflow_yaml(name)
 
 
 def _jobs(doc):
@@ -187,7 +186,7 @@ def test_each_cell_action_declares_the_identity_input_without_a_default(action):
 
     Mutation: add `default: "{}"` to one action's `tf-vars`.
     """
-    spec = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
+    spec = action_yaml(action)
     for name in _IDENTITY_INPUTS:
         assert "default" not in spec["inputs"][name], name
         assert spec["inputs"][name]["required"] is True, name
@@ -217,7 +216,7 @@ def test_each_cell_action_declares_both_consumer_channels(action):
 
     Mutation: delete the `github-vars:` input block from one action's `inputs:`.
     """
-    spec = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
+    spec = action_yaml(action)
     for name in _CHANNEL_STEP_WITH:
         declared = dict(spec["inputs"].get(name) or {})
         declared.pop("description", None)

@@ -24,7 +24,7 @@ import re
 import textwrap
 
 import yaml
-from _loader import ENGINE, WORKFLOWS
+from _loader import ENGINE, workflow_yaml
 
 CELL_ENV = "${{ matrix.env_binding }}"
 
@@ -72,7 +72,7 @@ def test_every_page_documents_the_cell_job_expression():
 
 
 def test_the_engine_binds_the_documented_expression():
-    spec = yaml.safe_load((WORKFLOWS / "apply-env-level.yml").read_text(encoding="utf-8"))
+    spec = workflow_yaml("apply-env-level.yml")
     assert spec["jobs"]["wave0"]["environment"] == CELL_ENV, (
         "apply-env-level.yml's wave binding and the documented expression have "
         "diverged -- one of the two was updated alone"

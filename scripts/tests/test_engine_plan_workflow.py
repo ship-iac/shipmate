@@ -11,14 +11,13 @@ passes an entry whose expression was mistyped; a substring test is satisfied by 
 
 import re
 
-import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, workflow_yaml
 
 WF = WORKFLOWS / "plan.yml"
 
 
 def _doc():
-    return yaml.safe_load(WF.read_text(encoding="utf-8"))
+    return workflow_yaml(WF)
 
 
 def _job(job_id):

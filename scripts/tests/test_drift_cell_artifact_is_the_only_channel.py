@@ -12,15 +12,9 @@ namesakes, whose artifact carries only comment data. Asserted on the parsed acti
 """
 
 import pytest
-from _loader import action_steps, run_lines
+from _loader import run_lines, step_by
 
 LOAD_BEARING = ("Compose cell summary", "Upload drift summary")
-
-
-def _step(name):
-    matches = [s for s in action_steps("drift-cell") if s.get("name") == name]
-    assert len(matches) == 1, f"expected exactly one {name!r} step, got {len(matches)}"
-    return matches[0]
 
 
 def test_the_compose_step_runs_the_cell_summary_writer():
@@ -28,13 +22,13 @@ def test_the_compose_step_runs_the_cell_summary_writer():
     # no cell.json at all, and drift-issues reads an absent cell as a cell that does not exist.
     # A whole run line, not a substring, so a commented-out invocation cannot satisfy it.
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/drift-cell-summary"' in run_lines(
-        _step("Compose cell summary")
+        step_by("drift-cell", name="Compose cell summary")
     )
 
 
 @pytest.mark.parametrize("name", LOAD_BEARING)
 def test_the_cell_artifact_path_is_not_continue_on_error(name):
-    step = _step(name)
+    step = step_by("drift-cell", name=name)
     assert step.get("continue-on-error") in (None, False), (
         f"{name!r} is continue-on-error: losing the cell artifact would hide real drift"
     )
@@ -44,4 +38,4 @@ def test_the_cell_artifact_path_is_not_continue_on_error(name):
 def test_the_cell_artifact_path_runs_even_after_a_failed_plan(name):
     # `if: always()` is the other half: drift-issues needs a result for every attempted-or-blocked
     # cell, so it never auto-closes an Issue for a stack x env whose plan attempt did not succeed.
-    assert _step(name).get("if") == "always()"
+    assert step_by("drift-cell", name=name).get("if") == "always()"

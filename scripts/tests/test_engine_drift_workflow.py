@@ -9,7 +9,7 @@ matrix (skip) from a lost artifact (fail); collapsing the two greens a run that 
 """
 
 import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, workflow_yaml
 
 WF = WORKFLOWS / "drift.yml"
 
@@ -29,7 +29,7 @@ _CELL_ENV = "${{ matrix.env_binding }}"
 
 
 def _doc():
-    return yaml.safe_load(WF.read_text(encoding="utf-8"))
+    return workflow_yaml(WF)
 
 
 def _job(job_id):

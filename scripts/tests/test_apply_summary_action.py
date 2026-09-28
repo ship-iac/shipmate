@@ -22,8 +22,7 @@ assertion, but still required to come out of `_read_names()`, so a rename in the
 
 import re
 
-import yaml
-from _loader import ENGINE, WORKFLOWS, action_steps, action_yaml, load_script
+from _loader import ENGINE, action_steps, action_yaml, load_script, workflow_yaml
 
 SCRIPT = ENGINE / "scripts" / "apply-comment"
 _APPLY_COMMENT = load_script("apply-comment")
@@ -298,7 +297,7 @@ def test_scan_step_uses_the_app_token_not_the_workflow_token():
 
 def test_engine_callers_pass_head_sha_to_apply_summary():
     for wf in ("apply.yml", "apply-all.yml"):
-        spec = yaml.safe_load((WORKFLOWS / wf).read_text(encoding="utf-8"))
+        spec = workflow_yaml(wf)
         steps = spec["jobs"]["summary"]["steps"]
         step = _find_step(steps, uses_contains="actions/apply-summary")
         assert step is not None, f"{wf} has no apply-summary step"
@@ -311,7 +310,7 @@ def test_apply_all_passes_the_held_and_ungated_outputs_to_apply_summary():
     """apply-all.yml is the only caller carrying these, apply.yml being the targeted form. Four
     detect outputs are JSON arrays of env names with identical shape, so a crossed wire renders
     a plausible-looking comment naming the wrong environments for the wrong reason."""
-    spec = yaml.safe_load((WORKFLOWS / "apply-all.yml").read_text(encoding="utf-8"))
+    spec = workflow_yaml("apply-all.yml")
     step = _find_step(spec["jobs"]["summary"]["steps"], uses_contains="actions/apply-summary")
     with_ = step.get("with") or {}
     assert with_.get("review-held-envs") == "${{ needs.detect.outputs.review_held_envs }}"

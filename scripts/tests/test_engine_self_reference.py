@@ -7,12 +7,13 @@ it, the pin cascade this replaced. A `./` step would resolve in the consumer's w
 
 import re
 
-import yaml
 from _loader import (
     ACTIONS,
     ENGINE,
     WORKFLOWS,
+    action_yaml,
     local_action,
+    workflow_yaml,
 )
 
 MANIFEST_LOAD = "manifest-load.yml"
@@ -27,7 +28,7 @@ SHA_PIN = re.compile(r"ship-iac/shipmate/[^@\s'\"]+@[0-9a-f]{40}")
 
 def _docs():
     for path in sorted(WORKFLOWS.glob("*.yml")):
-        yield path.name, yaml.safe_load(path.read_text(encoding="utf-8"))
+        yield path.name, workflow_yaml(path)
 
 
 def _uses(step):
@@ -56,7 +57,7 @@ def _steps(skip=MANIFEST_LOAD):
             for step in job.get("steps") or []:
                 yield f"{name}:{job_name}", step
     for path in sorted(ACTIONS.glob("*/action.yml")):
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        doc = action_yaml(path)
         for step in doc["runs"].get("steps") or []:
             yield path.relative_to(ENGINE).as_posix(), step
 
@@ -158,7 +159,7 @@ def test_composite_actions_reach_nested_actions_through_the_local_path_only():
     assert len(manifests) == ACTION_COUNT, f"{len(manifests)} action manifests"
     local = set()
     for path in manifests:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        doc = action_yaml(path)
         for step in doc["runs"].get("steps") or []:
             if _uses(step).startswith("$/"):
                 local.add(_uses(step))

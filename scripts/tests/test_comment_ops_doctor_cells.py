@@ -13,7 +13,7 @@ import subprocess
 import sys
 
 import pytest
-from _loader import ACTIONS, SCRIPTS, action_steps, usable_bash
+from _loader import ACTIONS, SCRIPTS, step_by, usable_bash
 
 _START = "--plan-runs"
 _END = "plan_run_ids=$("
@@ -21,7 +21,7 @@ _END = "plan_run_ids=$("
 
 def _cells_block():
     """The plan-record read through the line that publishes the id set."""
-    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gatherdoc")
+    step = step_by("comment-ops", id="gatherdoc")
     lines = (step["run"] or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
     starts = [i for i, ln in enumerate(lines) if _START in ln]
     ends = [i for i, ln in enumerate(lines) if _END in ln]

@@ -12,10 +12,10 @@ import pytest
 from _loader import (
     ACTIONS,
     SCRIPTS,
-    action_steps,
     action_yaml,
     load_script,
     run_lines,
+    step_by,
     usable_bash,
 )
 
@@ -26,28 +26,18 @@ DISPATCH_ACTION = "dispatch"
 CONSUMER_WORKFLOW = "shipmate.yml"
 
 
-def _dispatch_step():
-    """The workflow_dispatch apply step."""
-    steps = action_steps(DISPATCH_ACTION)
-    matches = [s for s in steps if s.get("name") == "workflow_dispatch apply"]
-    assert len(matches) == 1, (
-        f"expected exactly one 'workflow_dispatch apply' step, got {len(matches)}"
-    )
-    return matches[0]
-
-
 def test_the_dispatch_step_runs_the_body_builder_this_file_exercises():
     # A whole run line, not a substring: the recording `gh` stub never opens body.json, so a
     # commented-out builder would leave every body assertion here exercising a script nothing
     # runs, and production would POST an empty --input.
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json' in run_lines(
-        _dispatch_step()
+        step_by(DISPATCH_ACTION, name="workflow_dispatch apply")
     )
 
 
 def _extract_dispatch_run_block():
     """The full run: block of the dispatch step, exactly as written."""
-    run = _dispatch_step().get("run", "")
+    run = step_by(DISPATCH_ACTION, name="workflow_dispatch apply").get("run", "")
     assert run.strip(), "dispatch step has no run block"
     return run
 
@@ -296,7 +286,7 @@ def test_dispatch_step_env_mapping_is_complete():
     Mutation: rename VERB in the env: block, re-add WORKFLOW, or set
     `DISPATCH_REF: ${{ github.head_ref }}`.
     """
-    assert _dispatch_step().get("env") == {
+    assert step_by(DISPATCH_ACTION, name="workflow_dispatch apply").get("env") == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "REPO": "${{ github.repository }}",
         "DISPATCH_REF": "${{ github.event.repository.default_branch }}",

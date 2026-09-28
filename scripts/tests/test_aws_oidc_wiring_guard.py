@@ -20,8 +20,7 @@ Whole parsed values, never substrings. An inverted gate must fail here.
 """
 
 import pytest
-import yaml
-from _loader import WORKFLOWS
+from _loader import workflow_yaml
 
 CRED_ACTION = "aws-actions/configure-aws-credentials"
 #: Hand-written, never derived from the workflow files: a derived constant passes whatever the
@@ -41,7 +40,7 @@ CELL_JOBS = [
 
 
 def _load(name):
-    spec = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+    spec = workflow_yaml(name)
     assert isinstance(spec, dict), f"{name} did not parse to a mapping"
     return spec
 

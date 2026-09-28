@@ -28,8 +28,7 @@ whole-value comparison per job, plus a derived job set compared to the hand-writ
 it.
 """
 
-import yaml
-from _loader import WORKFLOWS, local_action
+from _loader import WORKFLOWS, local_action, workflow_yaml
 
 CELL_ENV = "${{ matrix.env_binding }}"
 WAVES = [f"wave{i}" for i in range(8)]
@@ -56,7 +55,7 @@ SNAPSHOT_STEPS = [
 
 
 def _jobs(workflow="apply-env-level.yml"):
-    spec = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
+    spec = workflow_yaml(workflow)
     assert isinstance(spec, dict), f"{workflow} did not parse to a mapping"
     return spec["jobs"]
 

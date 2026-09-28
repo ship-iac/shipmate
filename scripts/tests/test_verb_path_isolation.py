@@ -45,8 +45,7 @@ wrong output, a step re-aimed at the apply family -- not a hostile edit to files
 reviews.
 """
 
-import yaml
-from _loader import WORKFLOWS, local_action
+from _loader import local_action, workflow_yaml
 
 APPLY = "apply.yml"
 UNLOCK = "unlock.yml"
@@ -152,7 +151,7 @@ PREFLIGHT_WITH = {
 
 
 def _spec(workflow):
-    spec = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
+    spec = workflow_yaml(workflow)
     assert isinstance(spec, dict), f"{workflow} did not parse to a mapping"
     return spec
 

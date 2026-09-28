@@ -20,7 +20,7 @@ import os
 import subprocess
 
 import pytest
-from _loader import action_steps, action_yaml, load_script, usable_bash
+from _loader import action_steps, action_yaml, load_script, step_by, usable_bash
 
 _BASH = usable_bash()
 
@@ -206,20 +206,13 @@ def test_the_mirror_step_runs_before_the_comment_is_built():
     assert [s["name"] for s in action_steps("summary")] == EXPECTED_STEP_NAMES
 
 
-def _mirror_step():
-    steps = [
-        s
-        for s in action_steps("summary")
-        if s.get("name") == "Mirror this run's per-cell plan checks onto the head"
-    ]
-    assert len(steps) == 1
-    return steps[0]
+_MIRROR = "Mirror this run's per-cell plan checks onto the head"
 
 
 def test_the_mirror_runs_only_for_an_on_demand_plan():
     """Unconditional would put a second producer behind every plan check name on a pull-request
     run, where those checks are already on the head."""
-    assert _mirror_step()["if"] == "${{ inputs.on-demand == 'true' }}"
+    assert step_by("summary", name=_MIRROR)["if"] == "${{ inputs.on-demand == 'true' }}"
 
 
 def test_the_action_declares_the_on_demand_input_it_decides_on():
@@ -254,7 +247,9 @@ def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
     step still exits 0."""
     assert _BASH is not None
     script = tmp_path / "step.sh"
-    script.write_text(_GH_STUB + _mirror_step()["run"], encoding="utf-8", newline="\n")
+    script.write_text(
+        _GH_STUB + step_by("summary", name=_MIRROR)["run"], encoding="utf-8", newline="\n"
+    )
     posted = tmp_path / "posted"
     env = dict(os.environ)
     env.update(

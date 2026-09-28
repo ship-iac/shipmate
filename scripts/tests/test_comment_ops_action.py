@@ -21,6 +21,7 @@ from _loader import (
     action_steps,
     action_yaml,
     load_script,
+    step_by,
     usable_bash,
 )
 
@@ -167,7 +168,7 @@ def test_a_lost_job_summary_write_does_not_cost_the_comment():
 def test_help_does_not_require_the_app():
     """help must answer even when the App is not installed — the state where a newcomer most needs
     it — so it posts with the workflow token."""
-    post = next(s for s in action_steps("comment-ops") if s.get("name") == "Post help")
+    post = step_by("comment-ops", name="Post help")
     assert post["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
@@ -491,7 +492,7 @@ _CHECK_RUNS_PROJECTION = (
 
 
 def _gatherdoc_step():
-    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gatherdoc")
+    step = step_by("comment-ops", id="gatherdoc")
     assert step.get("run"), "the gatherdoc step runs no shell"
     return step
 
@@ -553,14 +554,13 @@ def _mint_with(action, step_id):
     can be deleted unnoticed. And it reads raw file text, where a commented-out `#
     permission-environments: read` satisfies the same assertion as the live key. So: exact id,
     asserted to really be a mint, compared as parsed values."""
-    steps = [s for s in action_steps(action) if s.get("id") == step_id]
-    assert len(steps) == 1, f"expected exactly one `id: {step_id}` step in {action}, got {steps}"
-    uses = steps[0].get("uses") or ""
+    step = step_by(action, id=step_id)
+    uses = step.get("uses") or ""
     assert "actions/create-github-app-token" in uses, (
         f"{action}'s `{step_id}` step is not an App-token mint (uses: {uses!r}) — "
         "the permission assertions against it would pin nothing"
     )
-    return steps[0].get("with") or {}
+    return step.get("with") or {}
 
 
 def _requested_permissions(mint_with):
@@ -659,13 +659,13 @@ def test_both_prose_permission_lists_name_every_manifest_permission():
 
 
 def _authorize_step():
-    step = next(s for s in action_steps("comment-ops") if s.get("name") == "Authorize")
+    step = step_by("comment-ops", name="Authorize")
     assert step.get("env"), "the Authorize step declares no env: block"
     return step
 
 
 def _gather_step():
-    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gather")
+    step = step_by("comment-ops", id="gather")
     assert step.get("run"), "the gather step runs no shell"
     return step
 
@@ -743,9 +743,7 @@ _EXEMPTION_BODY = (
 
 
 def _exemption_step():
-    return next(
-        s for s in action_steps("comment-ops") if s.get("name") == "Report the review exemption"
-    )
+    return step_by("comment-ops", name="Report the review exemption")
 
 
 def test_the_exemption_report_fires_only_when_the_exemption_fired():
@@ -932,7 +930,7 @@ def test_the_action_runs_exactly_these_steps_in_this_order():
 
 
 def _by_id(step_id):
-    step = next(s for s in action_steps("comment-ops") if s.get("id") == step_id)
+    step = step_by("comment-ops", id=step_id)
     assert step.get("run"), f"the {step_id} step runs no shell"
     return step
 
@@ -1031,9 +1029,7 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
 
-    reject = next(
-        s for s in action_steps("comment-ops") if s.get("name") == "Reject an unauthorized plan"
-    )
+    reject = step_by("comment-ops", name="Reject an unauthorized plan")
     assert reject["if"] == (
         "${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}"
     )

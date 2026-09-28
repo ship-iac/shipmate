@@ -3,7 +3,7 @@ import json
 
 import pytest
 from _loader import ENGINE as _ENGINE
-from _loader import action_steps, load_script, run_lines
+from _loader import load_script, run_lines, step_by
 
 sc = load_script("summary-comment")
 
@@ -482,10 +482,9 @@ def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeyp
     # And the step still runs that writer: a guard over a script nothing invokes pins nothing.
     # Matched as a whole run line, so neither prose elsewhere in the file nor a commented-out
     # invocation satisfies it.
-    steps = [s for s in action_steps("plan-cell") if s.get("name") == "Write cell summary"]
-    assert len(steps) == 1, f"expected one Write cell summary step, got {len(steps)}"
-    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"' in run_lines(steps[0])
-    assert steps[0]["env"] == {
+    step = step_by("plan-cell", name="Write cell summary")
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"' in run_lines(step)
+    assert step["env"] == {
         "STACK": "${{ inputs.stack }}",
         "STACK_NAME": "${{ inputs.stack }}",
         "ENV": "${{ inputs.env }}",

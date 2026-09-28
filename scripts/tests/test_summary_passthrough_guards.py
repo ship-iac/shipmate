@@ -9,8 +9,7 @@ import json
 import re
 
 import pytest
-import yaml
-from _loader import ACTIONS, SCRIPTS
+from _loader import SCRIPTS, step_by
 
 EXPECTED_GATE_ENV = {
     "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
@@ -22,10 +21,7 @@ EXPECTED_GATE_ENV = {
 
 
 def _summary_action_gate_step():
-    doc = yaml.safe_load((ACTIONS / "summary/action.yml").read_text(encoding="utf-8"))
-    gate = [s for s in doc["runs"]["steps"] if s.get("id") == "gate"]
-    assert len(gate) == 1, f"expected exactly one gate step, got {len(gate)}"
-    return gate[0]
+    return step_by("summary", id="gate")
 
 
 def test_the_action_hands_gate_state_exactly_these_env_vars():

@@ -22,7 +22,7 @@ import re
 import subprocess
 
 import pytest
-from _loader import SCRIPTS, action_steps, usable_bash
+from _loader import SCRIPTS, action_steps, step_by, usable_bash
 
 _BASH = usable_bash()
 
@@ -35,20 +35,8 @@ def _steps():
     return action_steps("apply-cell")
 
 
-def _step_by_id(step_id):
-    matches = [s for s in _steps() if s.get("id") == step_id]
-    assert len(matches) == 1, f"expected exactly one step with id {step_id!r}, got {len(matches)}"
-    return matches[0]
-
-
 def _index_of(step_id):
     return [s.get("id") for s in _steps()].index(step_id)
-
-
-def _compose_step():
-    matches = [s for s in _steps() if s.get("name") == "Compose cell summary"]
-    assert len(matches) == 1, f"expected exactly one Compose cell summary step, got {len(matches)}"
-    return matches[0]
 
 
 def _failsafe_env_keys():
@@ -70,7 +58,7 @@ def test_verification_sits_between_the_download_and_the_decrypt():
 
 
 def test_the_step_is_attributable_in_the_cell_summary():
-    env = _compose_step().get("env") or {}
+    env = step_by("apply-cell", name="Compose cell summary").get("env") or {}
     assert env.get("PLANNED_HEAD_OUTCOME") == "${{ steps.planned-head.outcome }}"
     # The whole ordered vector, hand-written: FAILSAFES is checked in pipeline order, so each
     # row belongs where its step does -- planned-head after download, before decrypt -- and a
@@ -100,7 +88,7 @@ def _run_step(tmp_path, *, record=None, observed=_PLANNED):
     assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     harness = (
         f'git() {{ printf "%s\n" "{observed}" ; return 0 ; }}\n'
-        + _step_by_id("planned-head")["run"]
+        + step_by("apply-cell", id="planned-head")["run"]
     )
     work = tmp_path / "work"
     work.mkdir()

@@ -15,14 +15,14 @@ import subprocess
 
 import pytest
 import yaml
-from _loader import WORKFLOWS, usable_bash
+from _loader import usable_bash, workflow_yaml
 
 _STEP = "Complete gate on the merged PR head SHA"
 _WRITE_MARKER = 'gh api "repos/$GITHUB_REPOSITORY/statuses/'
 
 
 def _jobs():
-    return yaml.safe_load((WORKFLOWS / "deploy.yml").read_text(encoding="utf-8"))["jobs"]
+    return workflow_yaml("deploy.yml")["jobs"]
 
 
 def _summary_step(name):

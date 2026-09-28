@@ -17,7 +17,7 @@ import re
 import subprocess
 
 import pytest
-from _loader import ENGINE, action_steps, action_yaml, usable_bash
+from _loader import ENGINE, action_steps, action_yaml, step_by, usable_bash
 
 _BASH = usable_bash()
 _ACTION = "setup"
@@ -45,12 +45,6 @@ _EXPECTED_WITH = {
 _FIXTURE_VERSIONS = "terramate=9.9.9\ntofu=8.8.8\n"
 
 
-def _step(name):
-    matches = [s for s in action_steps(_ACTION) if s.get("name") == name]
-    assert len(matches) == 1, f"expected exactly one step named {name!r}, got {len(matches)}"
-    return matches[0]
-
-
 def test_the_steps_run_in_this_order():
     """Reds when the resolve step is moved after the installers."""
     assert [s.get("name") for s in action_steps(_ACTION)] == _EXPECTED_STEPS
@@ -58,9 +52,9 @@ def test_the_steps_run_in_this_order():
 
 def test_both_installers_read_the_resolve_steps_outputs():
     """Reds when an installer is pointed at anything but the resolve step's outputs."""
-    got = {name: _step(name).get("with") for name in _EXPECTED_WITH}
+    got = {name: step_by(_ACTION, name=name).get("with") for name in _EXPECTED_WITH}
     assert got == _EXPECTED_WITH
-    assert _step("Resolve versions").get("id") == "versions"
+    assert step_by(_ACTION, name="Resolve versions").get("id") == "versions"
 
 
 def test_the_action_takes_no_input():
@@ -81,7 +75,9 @@ def _resolve(tmp_path, versions=_FIXTURE_VERSIONS):
     if versions is not None:
         (tmp_path / "VERSIONS").write_text(versions, encoding="utf-8", newline="\n")
     script = tmp_path / "resolve.sh"
-    script.write_text(_step("Resolve versions")["run"], encoding="utf-8", newline="\n")
+    script.write_text(
+        step_by(_ACTION, name="Resolve versions")["run"], encoding="utf-8", newline="\n"
+    )
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     full = dict(os.environ)

@@ -16,7 +16,7 @@ that module's `_SHARED_ROUTE_IFS`, so that one condition governs the resolve and
 """
 
 import pytest
-from _loader import action_steps, load_script
+from _loader import load_script, step_by
 
 #: The one expression `gather` and `authorize` must both read for the team, hand-written.
 _TEAM = "${{ steps.gate.outputs.approvers_team }}"
@@ -30,13 +30,9 @@ _GATE_ENV = {
 }
 
 
-def _step(name):
-    return next(s for s in action_steps("comment-ops") if s.get("name") == name)
-
-
 def test_the_resolve_step_runs_the_gate_config_script_on_the_workflow_token():
     """Mutation: drop a binding from the `env:` block, or point `run:` at another script."""
-    step = _step("Resolve gate configuration")
+    step = step_by("comment-ops", name="Resolve gate configuration")
     assert step["env"] == _GATE_ENV
     assert step["run"].strip() == 'python3 "$GITHUB_ACTION_PATH/../../scripts/gate-config"'
 
@@ -51,8 +47,8 @@ def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
     Mutations: delete `continue-on-error` from the resolve step, so the report never runs;
     delete the `exit 1`, so the job ends green with nothing applied and nothing refused.
     """
-    assert _step("Resolve gate configuration")["continue-on-error"] is True
-    report = _step("Gate configuration unreadable")
+    assert step_by("comment-ops", name="Resolve gate configuration")["continue-on-error"] is True
+    report = step_by("comment-ops", name="Gate configuration unreadable")
     assert report["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
@@ -72,7 +68,7 @@ def test_the_resolve_step_carries_the_id_its_three_readers_name():
 
     Mutation: rename the step's `id:` to `gateconfig`, or delete it.
     """
-    assert _step("Resolve gate configuration").get("id") == "gate"
+    assert step_by("comment-ops", name="Resolve gate configuration").get("id") == "gate"
 
 
 def test_the_resolve_step_and_gather_share_one_condition():
@@ -86,7 +82,10 @@ def test_the_resolve_step_and_gather_share_one_condition():
     Mutation: append ` && github.event_name == 'issue_comment'` to `gather`'s `if:` and to
     its `_SHARED_ROUTE_IFS` entry, leaving the resolve step alone.
     """
-    assert _step("Resolve gate configuration")["if"] == _step("Gather authorization inputs")["if"]
+    assert (
+        step_by("comment-ops", name="Resolve gate configuration")["if"]
+        == step_by("comment-ops", name="Gather authorization inputs")["if"]
+    )
 
 
 def test_gather_and_authorize_read_one_identical_team_expression():
@@ -97,8 +96,8 @@ def test_gather_and_authorize_read_one_identical_team_expression():
     Mutations: restore `${{ inputs.approvers-team }}` on `Gather authorization inputs`; do it
     on `Authorize` instead; do it on both.
     """
-    gather = _step("Gather authorization inputs")["env"]["TEAM"]
-    authorize = _step("Authorize")["env"]["APPROVERS_TEAM"]
+    gather = step_by("comment-ops", name="Gather authorization inputs")["env"]["TEAM"]
+    authorize = step_by("comment-ops", name="Authorize")["env"]["APPROVERS_TEAM"]
     assert gather == _TEAM
     assert authorize == _TEAM
     assert gather == authorize
@@ -112,7 +111,10 @@ def test_the_doctor_step_takes_no_team_binding():
     Mutation: bind `SHIPMATE_TEAM` here again. Nothing reads it, so a binding is a second
     source for a value that has one.
     """
-    assert "SHIPMATE_TEAM" not in _step("Doctor — render and upsert the sticky comment")["env"]
+    assert (
+        "SHIPMATE_TEAM"
+        not in step_by("comment-ops", name="Doctor — render and upsert the sticky comment")["env"]
+    )
 
 
 def _resolve(monkeypatch, tmp_path, table):
