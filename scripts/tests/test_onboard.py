@@ -1752,7 +1752,9 @@ def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monk
     """
     shim = tmp_path / ".github" / "workflows" / "shipmate.yml"
     shim.parent.mkdir(parents=True)
-    shim.write_text(onboard._render(ENGINE, "a" * 40, "v0.26.0"), encoding="utf-8", newline="\n")
+    shim.write_text(
+        onboard._render(ENGINE, "a" * 40, "v0.26.0", "main"), encoding="utf-8", newline="\n"
+    )
     fake, exit_ = run_main(monkeypatch, tmp_path, {}, [])
     assert exit_.code == 0
     assert [c for c in fake.calls if "repos/o/r/rulesets" in c] == []
@@ -1962,7 +1964,7 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     - edit the fence's top-level `name:` line -> the locator matches zero fences and refuses;
     - edit a `uses:` filename in the fence -> the callee list differs.
     """
-    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9"))}
+    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"))}
     assert found == _EXPECTED_CALLEES
 
 
@@ -1975,7 +1977,7 @@ def test_the_rendered_file_passes_no_state_setting_to_any_engine_call():
     Mutation: add `state_suffix: ""` to the `drift` job's `with:` in the
     `docs/getting-started.md` fence.
     """
-    jobs = yaml.safe_load(onboard._render(ENGINE, "c" * 40, "v9.9.9"))["jobs"]
+    jobs = yaml.safe_load(onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"))["jobs"]
     callers = {name for name, job in jobs.items() if _CALL_PATH in (job.get("uses") or "")}
     assert callers == {"plan", "comment-ops", "deploy", "drift", "targeted", "all", "unlock"}
     assert [n for n in sorted(callers) if "state_suffix" in (jobs[n].get("with") or {})] == []
@@ -2003,14 +2005,14 @@ def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_pa
     wf = tmp_path / ".github" / "workflows"
     wf.mkdir(parents=True)
     (wf / "shipmate.yml").write_text(
-        onboard._render(ENGINE, "c" * 40, "v9.9.9"), encoding="utf-8", newline="\n"
+        onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"), encoding="utf-8", newline="\n"
     )
     # The real release writer, not an imitation of it. `docs/releasing.md` runs
     # `repin_consumer.main`, which reaches this planner through `_rewrite_and_report` and
     # writes the planned text unchanged.
     planned = repin_consumer._plan_consumer(tmp_path, "d" * 40, "v9.9.10")
     assert len(planned) == 1
-    assert planned[0].text == onboard._render(ENGINE, "d" * 40, "v9.9.10"), (
+    assert planned[0].text == onboard._render(ENGINE, "d" * 40, "v9.9.10", "main"), (
         "onboard and repin_consumer disagree on the pin line, so a re-pinned consumer "
         "never reports `ok`"
     )
@@ -2038,7 +2040,7 @@ def test_every_shim_is_pinned_at_every_site():
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """
-    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9")}
+    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")}
     assert {name: text.count(f"@{'c' * 40} # v9.9.9") for name, text in rendered.items()} == (
         _EXPECTED_PINS
     )
@@ -2053,7 +2055,36 @@ def _plan_shim(tmp_path):
     """(path to the consumer's shipmate.yml, the text this script would render for it)."""
     path = tmp_path / ".github" / "workflows" / "shipmate.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9")
+    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
+
+
+def test_the_rendered_push_trigger_names_the_default_branch():
+    """The fence says `branches: [main]`, and on a repository whose default branch is
+    anything else `deploy` never fires. The whole text is compared, so the substitution
+    can touch nothing but that one line.
+
+    Mutation: drop the substitution from `_render`.
+    """
+    main = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
+    assert onboard._render(ENGINE, "c" * 40, "v9.9.9", "develop") == main.replace(
+        "    branches: [main]\n", "    branches: [develop]\n"
+    )
+
+
+def test_a_file_rendered_for_the_default_branch_reports_ok(tmp_path):
+    """A re-run on a `develop` repository reads back the file the first run wrote for it.
+    Rendered for `main` instead, it reports `differs` there on every run.
+
+    Mutation: drop the substitution from `_render`.
+    """
+    path, main = _plan_shim(tmp_path)
+    path.write_text(
+        main.replace("    branches: [main]\n", "    branches: [develop]\n"),
+        encoding="utf-8",
+        newline="\n",
+    )
+    onboard._reconcile_shim({**_shim_ctx(tmp_path), "default_branch": "develop"})
+    assert onboard.REPORT == [("ok", "shipmate.yml", "")]
 
 
 def test_an_identical_file_reports_ok_through_crlf(tmp_path):
@@ -2080,7 +2111,7 @@ def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     reads as `differs`.
     """
     path, _text = _plan_shim(tmp_path)
-    older = onboard._render(ENGINE, "d" * 40, "v9.9.8")
+    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "main")
     path.write_text(older, encoding="utf-8", newline="\n")
     onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [("pin-only", "shipmate.yml", "run dev/repin_consumer.py")]
@@ -2205,6 +2236,15 @@ _CHECKLIST_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-
 
 """
 
+#: GitHub refuses required reviewers on a private repository below Enterprise, and the
+#: first private consumer is on Team, so the private block says so.
+_CHECKLIST_PRIVATE_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-eu-apply
+  (docs/getting-started.md §Environment setup). On a private repository below
+  Enterprise, GitHub refuses required reviewers, so the apply gate is the gate
+  ruleset's approving review and `[gate] approver_team`.
+
+"""
+
 _CHECKLIST_TAIL = """  A CODEOWNERS entry covering /.github/workflows/.
 
   Commit the workflow file and the table together, in a commit that changes no
@@ -2248,6 +2288,19 @@ def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys):
     """
     onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared={"dev-eu"}))
     assert capsys.readouterr().out == SHARED_CHECKLIST
+
+
+def test_the_checklist_qualifies_the_reviewer_step_on_a_private_repository(capsys):
+    """Printed unqualified, the reviewer step sends a Team-plan operator to a setting GitHub
+    refuses, with no word on what gates the apply instead. A public repository keeps the
+    unqualified step, which the split constant pins.
+
+    Mutation: invert the `is_private` condition in `_checklist`.
+    """
+    onboard._checklist(ctx(is_private=True))
+    assert capsys.readouterr().out == (
+        _CHECKLIST_HEAD + _CHECKLIST_PRIVATE_REVIEWERS + _CHECKLIST_TAIL
+    )
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):

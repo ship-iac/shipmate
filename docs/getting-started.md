@@ -516,6 +516,9 @@ jobs:
       ref: ${{ inputs.ref }}
 ```
 
+On a repository whose default branch is not `main`, change `branches: [main]`
+to that branch; `scripts/onboard` writes the file that way.
+
 **The `permissions:` block on each calling job is not optional.** A called
 workflow's permissions are capped at the `uses:` boundary, so each block above
 has to grant every scope the callee's own jobs request. Grant less and the run

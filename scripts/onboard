@@ -791,12 +791,20 @@ def _fence(page_text, name):
     return bodies[0]
 
 
-def _render(engine, sha, version):
-    """The full text of one consumer workflow file, LF-delimited and newline-terminated."""
+def _render(engine, sha, version, default_branch):
+    """The full text of one consumer workflow file, LF-delimited and newline-terminated,
+    with its `push` trigger on `default_branch`."""
     text = _fence(
         (pathlib.Path(engine) / "docs" / "getting-started.md").read_text(encoding="utf-8"),
         "shipmate",
     )
+    trigger = "    branches: [main]\n"
+    if text.count(trigger) != 1:
+        raise SystemExit(
+            f"the documented shipmate fence holds {text.count(trigger)} `branches: [main]` "
+            "lines; expected exactly one, the push trigger this script retargets."
+        )
+    text = text.replace(trigger, f"    branches: [{default_branch}]\n")
     return _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
 
 
@@ -813,7 +821,7 @@ def _reconcile_shim(ctx):
     """
     filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
-    text = _render(ctx["engine"], ctx["sha"], ctx["version"])
+    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"])
     if not path.is_file():
         write_file(path, text, filename)
         return
@@ -897,8 +905,15 @@ def _checklist(ctx):
         out += [
             "",
             f"  Required reviewers and `Prevent self-review` on {', '.join(reviewed)}",
-            "  (docs/getting-started.md §Environment setup).",
         ]
+        if ctx["is_private"]:
+            out += [
+                "  (docs/getting-started.md §Environment setup). On a private repository below",
+                "  Enterprise, GitHub refuses required reviewers, so the apply gate is the gate",
+                "  ruleset's approving review and `[gate] approver_team`.",
+            ]
+        else:
+            out.append("  (docs/getting-started.md §Environment setup).")
     verb = "Re-run without --dry-run, then commit" if _DRY else "Commit"
     out += [
         "",
