@@ -27,21 +27,69 @@ does with that wiring.
 - **Nothing to set for the Terramate and OpenTofu versions.** They are in
   [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
   engine commit your workflow file pins. Moving to other versions is a pin bump
-  ([`upgrading.md`](upgrading.md)), not a repository variable.
+  ([`../CONTRACT.md`](../CONTRACT.md) §Consumption), not a repository variable.
 - **`gh` authenticated with admin on the repository.** Every tier creates
   environments, variables or rulesets.
+- **A GitHub plan that carries the controls you intend to use.** On a private
+  repository, environment required reviewers and wait timers need GitHub
+  Enterprise, and rulesets and environments need Pro, Team or Enterprise.
+  [`hardening.md`](hardening.md) §Plan prerequisites has the table.
 - **Remote state you control, or a local backend materialized in the working
   tree.** AWS S3 is what [`aws.md`](aws.md) covers.
 - **A `.gitignore` covering what shipmate writes into your working tree:**
-  `*.otplan`, `fingerprint.txt`, `planned-head.txt`, `.terraform/`, and a
-  local backend's state path. Left untracked, they show up as something
-  to commit, and a `terramate run` of your own that omits `--no-recursive`
-  refuses on them (`git-untracked`). [`../CONTRACT.md`](../CONTRACT.md)
-  §Consumer gitignore requirement is the rule.
+  `*.otplan`, `fingerprint.txt`, `planned-head.txt`, `plan.txt`, `plan.json`,
+  `cell.json`, `.terraform/`, and a local backend's state path. Left
+  untracked, they show up as something to commit, and a `terramate run` of
+  your own that omits `--no-recursive` refuses on them (`git-untracked`).
+  [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards states the rule.
 
 The four tiers are ordered and each depends on the one before. Tier 1 alone is
 not a working installation; read tier 2's first paragraphs before deciding to
 stop early.
+
+### Arriving from another TACO
+
+A repository that already works under another Terraform automation tool arrives
+with four things expressed somewhere shipmate does not read. None of them is a
+shipmate defect and none of them announces itself, so each is worth a deliberate
+pass before the first plan run.
+
+**Ordering.** Wave ordering comes only from the Terramate `after` DAG. If
+your ordering lives in the outgoing tool's configuration, it must be ported into
+`after`. Nothing will report the omission, because a missing edge is
+indistinguishable from a stack that is genuinely independent. Treat the outgoing
+tool's config as a *lower bound* on the real graph, not as the graph: one
+migration that audited the OpenTofu code instead of porting the config went from
+6 declared edges to 105, and from 2 wave levels to 6.
+
+Two detect jobs report the shape as a `::notice::` line — stack count, `after`
+edge count, wave levels, and how many stacks would apply concurrently. A reader
+who knows the repository can judge that last number immediately; nobody else
+can. Exactly two print it: the detect job of a dispatched `shipmate apply <env>`
+and the post-merge deploy's detect, so it arrives after the pull request
+that would have been the place to fix the graph. A plan run does not print
+it, and neither does a bare `shipmate apply` — seeing no such line there says
+nothing about the graph. Before that point the equivalent is
+`terramate experimental run-graph --label stack.dir` run locally.
+
+**Tags.** Environment membership is derived from `env/<name>` tags and nothing
+else; [Before you start](#before-you-start) covers re-tagging an existing
+repository.
+
+**A named AWS profile in generated HCL.** The apply path holds only the OIDC
+session, so a literal `profile` in a `provider` or `backend` block fails there
+while still planning fine locally. See [`aws.md`](aws.md).
+
+**`terramate.config.run.env` rewriting `TF_VAR_*`.** Terramate applies `run.env`
+after the ambient environment, so an assignment to a name the environment table
+resolves for a cell — `TF_VAR_env` and `TF_VAR_region` under the `tf_vars` layout,
+`TF_WORKSPACE` under `workspace`, any name in an environment's `tf_vars` — wins
+over whatever the cell was given, invisibly, because the fingerprint is computed
+outside `terramate run` and so agrees on both sides. Each cell reads those names
+back through `terramate run` before `tofu init` and refuses when one comes back
+changed or unset. A name the table does not resolve for the cell is yours to
+set. [`../CONTRACT.md`](../CONTRACT.md) §Env model has the rule and the
+`tm_try` form that keeps a local default.
 
 ## Required — plan
 
@@ -122,10 +170,11 @@ what you are getting, and to configure a repository by hand instead.
 
 Every logical environment needs a GitHub Environment pair (`<env>-plan`,
 `<env>-apply`), plus the one fixed `shipmate-engine` environment that holds the
-App key ([`github-app.md`](github-app.md)) and the Slack webhook
-([`drift.md`](drift.md)). Neither half is ever named in workflow YAML: the
-logical env comes from Terramate stack tags at runtime, and detect adds the
-suffix when it stamps the cell's binding.
+App key ([`github-app.md`](github-app.md)) and the optional Slack webhook
+([`drift.md`](drift.md)); with no webhook set, no Slack message is sent.
+Neither half of a pair is ever named in workflow YAML: the logical env comes
+from Terramate stack tags at runtime, and detect adds the suffix when it stamps
+the cell's binding.
 
 This tier needs `<env>-plan` and `shipmate-engine`. `<env>-apply` is the apply
 tier's, but create it now anyway — unless that env shares one environment
@@ -207,9 +256,11 @@ creates all of them, including `shipmate-engine` and its branch policy:
   else.
 
   The same file carries `[gate]`, which names the team whose members may apply
-  and unlock by pull request comment and the environments that apply without an
-  approving review (§Required — apply). Put it above the first
-  `[environments.*]` header, with the other repository-wide settings:
+  and unlock by pull request comment. An environment applies without an
+  approving review through `gated = false` on its own `[environments.<name>]`
+  entry (§"Applying chosen environments without an approving review"). Put
+  `[gate]` above the first `[environments.*]` header, with the other
+  repository-wide settings:
 
   ```toml
   layout = "tf_vars"
@@ -239,7 +290,9 @@ creates all of them, including `shipmate-engine` and its branch policy:
   **The table has to be on the default branch before your first plan run.** The
   engine reads it from `origin/<default>`, so a pull request that only adds the
   table is refused by the branch it is compared against. Put it in the same
-  commit as the workflow file, on the default branch.
+  commit as the workflow file, on the default branch. That commit must change
+  no stack: its push to the default branch runs `deploy`, and a changed stack
+  there has no plan run to apply from, so that deploy fails.
 
 ### The workflow file
 
@@ -250,10 +303,13 @@ reusable workflow SHA-pinned. The jobs behind those calls — `facts`, `detect`,
 paths — live in the engine, so none of what they decide is wiring you can get
 wrong.
 
-The whole file goes in at tier 1, but only two of its jobs are this tier's: `plan`
-and `comment-ops`, which need `<env>-plan`, `shipmate-engine` and the App key and
-nothing else. The other five wait for the environments and secrets the apply tier
-creates.
+The whole file goes in at tier 1, and three of its jobs are this tier's:
+`plan`, `comment-ops` and `drift`, which need `<env>-plan`, `shipmate-engine`
+and the App key and nothing else. `deploy` runs from the start too: on every
+push to the default branch it applies the merged pull request's cells still
+pending, in the `<env>-apply` this tier has you create (a shared env's bare
+`<env>`). The other three, `targeted`, `all` and `unlock`, wait for the
+environments and secrets the apply tier creates.
 
 The plan triggers are `pull_request_target` for the automatic plan on every push
 to a pull request, and `workflow_dispatch` with `verb: plan` for the plan a
@@ -290,10 +346,11 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: apply` with no `environment` | `all` | `apply-all.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
-The engine's jobs run on `ubuntu-latest` unless a calling job passes a `runs_on:`
-input — the fence below omits it, as `repo-example-stacks-aws` does. Pass it
+Only the `plan` and `drift` jobs accept a `runs_on:` input; the engine's jobs
+behind every other call run on `ubuntu-latest`. The fence below omits it, as
+`repo-example-stacks-aws` does, so those two run on `ubuntu-latest` too. Pass it
 only for a different label your plan actually offers; one it does not leaves
-every job waiting for a runner that never arrives.
+every job of that call waiting for a runner that never arrives.
 
 ```yaml
 name: shipmate
@@ -467,10 +524,7 @@ block gets nothing.
 default.** One schema serves four verbs, and GitHub reads an empty value for a
 `required: true` input as not provided, answering HTTP 422 before the run starts
 — so requiring `pr_number` would refuse every `unlock`, whose dispatch body does
-not carry one, and every hand-dispatched `drift`. That is how every
-`shipmate unlock` dispatch failed while the old `apply.yml` shim still declared the
-plan-run input the engine has since retired: unlock applies no plan, so the engine
-sent that value empty. No human
+not carry one, and every hand-dispatched `drift`. No human
 fills a form here either — `actions/dispatch` mints an App token and sends a body
 the engine builds — so `required: true` protects no real caller.
 
@@ -508,9 +562,11 @@ time and every later apply fails its plaintext-artifact check
 
 ## Required — apply
 
-This tier gets you `shipmate apply` in a pull request comment (a pre-merge apply
-of the reviewed plan) and an idempotent post-merge apply on push to the default
-branch.
+This tier gets you `shipmate apply` and `shipmate unlock` in a pull request
+comment (a pre-merge apply of the reviewed plan, through the `targeted` and `all`
+jobs, and a lock release through `unlock`), and the environment protection that
+also governs the idempotent post-merge apply the tier-1 `deploy` job runs on
+push to the default branch.
 
 `shipmate apply` runs only for a member of the team named by
 `gate.approver_team` in `.github/shipmate.toml` on your default branch
@@ -557,23 +613,29 @@ rules from Settings → Environments → `<name>` (or the API):
   pauses for a named team, and that pause is the one gate an App installation
   token cannot forge, since a reviewer decision is a human action a minted
   token cannot take. Without them the tier is self-service and applies proceed
-  unattended. Teams commonly gate production and leave dev self-service; the
-  maximally-hardened position gates every apply environment.
+  unattended. On a private repository below Enterprise, GitHub refuses required
+  reviewers and wait timers, so the apply gate is the ruleset's approving review
+  and `[gate] approver_team`. Teams commonly gate production and leave dev
+  self-service; the maximally-hardened position gates every apply environment
+  where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
 - **Pair a reviewer-gated environment with `explicit = true` in
   `.github/shipmate.toml`.**
   Set it on the bare env's entry (`[environments.prod]` — neither `prod-plan`
-  nor `prod-apply`). A bare `shipmate apply` then skips it, and it is only ever reached via the targeted
-  `shipmate apply prod`, which pauses for the environment reviewer.
+  nor `prod-apply`). A bare `shipmate apply` then skips it. While
+  `shipmate / gate` is a required check, it is only ever reached via the
+  targeted `shipmate apply prod`, which pauses for the environment reviewer;
+  without that check, a cell left pending at merge applies post-merge, because
+  the `deploy` job holds no environment back.
 
 ### The apply jobs
 
-This tier adds no file. The `targeted`, `all`, `unlock` and `deploy` jobs are
-already in the `shipmate.yml` published above
-(§[The workflow file](#the-workflow-file)); what this tier does is create the
-environments and secrets they need. The `comment-ops` job that dispatches them is
-tier 1's, and is described here because this is where its verbs land.
+This tier adds no file. The `targeted`, `all` and `unlock` jobs are already in
+the `shipmate.yml` published above (§[The workflow file](#the-workflow-file));
+what this tier does is create the environments and secrets they need. The
+`comment-ops` job that dispatches them and the `deploy` job are tier 1's;
+`comment-ops` is described here because this is where its verbs land.
 
 The `comment-ops` job turns a `shipmate <verb>` pull request comment into an
 authorized `workflow_dispatch` of `shipmate.yml` itself, carrying the parsed verb
@@ -646,12 +708,14 @@ run with no job and no log.
 
 ### Consumers outside the engine's organization
 
-Nothing else changes. In particular the key placement does not: it stays a
-secret on your own `shipmate-engine` environment, with a deployment branch
-policy naming your default branch ([`github-app.md`](github-app.md) §5), and
-it never becomes a repository or organization secret. A called workflow's
-`environment:` resolves in the calling repository, so only the workflow *file*
-comes from the engine's organization — the credential never leaves yours.
+Register and install your own App in your own organization
+([`github-app.md`](github-app.md) steps 1–4). Nothing else changes. In
+particular the key placement does not: it stays a secret on your own
+`shipmate-engine` environment, with a deployment branch policy naming your
+default branch ([`github-app.md`](github-app.md) §5), and it never becomes a
+repository or organization secret. A called workflow's `environment:` resolves
+in the calling repository, so only the workflow *file* comes from the engine's
+organization — the credential never leaves yours.
 
 An environment's value also wins over whatever the caller passes, empty
 included. A calling job that binds no environment therefore passes
@@ -673,8 +737,8 @@ matches a check-run. The ruleset must also pin `integration_id` to the shipmate
 App's numeric id (`SHIPMATE_APP_ID`), so that a status of that name posted by any
 other identity does not satisfy the rule.
 
-[`branch-protection.md`](branch-protection.md) has the pasteable ruleset, the
-gate's state table, and the upgrade notes. Configure it from there.
+[`branch-protection.md`](branch-protection.md) has the pasteable ruleset and the
+gate's state table. Configure it from there.
 `scripts/onboard` creates a `shipmate-gate` ruleset carrying that one rule; the
 `pull_request`, `non_fast_forward` and `deletion` rules on that page stay a
 choice you make, so that a repository already carrying a `pull_request` rule
@@ -837,15 +901,16 @@ gated  = false
 Your workflow file needs no line for it, and neither does a repository setting.
 Comment-ops and both apply paths each resolve the flag themselves, from the file
 on your **default branch** — so an edit takes effect when it merges, and a pull
-request cannot exempt itself. Set it on no entry and *what applies* is
-unchanged: every environment keeps the ruleset's requirement.
+request cannot exempt itself. Set it on no entry and every environment keeps
+the ruleset's requirement.
 
 The second part is a pin. An apply is authorized by the engine
 `comment-ops.yml` the `comment-ops` job calls and enforced by the engine
 `apply.yml` and `apply-all.yml` the `targeted` and `all` jobs call, so those
-three pins must sit at the same release (or the enforcing two later). One file
-carrying all seven pins is what makes that automatic: `dev/repin_consumer.py`
-moves them together, and there is no longer a second file to bump on its own.
+three pins must sit at the same commit. An apply authorized under a newer pin
+than the engine that enforces it is enforced by nothing, so the `comment-ops`,
+`targeted` and `all` jobs keep one pin. One file carrying all seven pins is what
+makes that automatic: `dev/repin_consumer.py` moves them together.
 
 Both edges need an entry declaring `gated = false` — the exemption is opt-in and
 there is no consumer-written input that could authorize a dispatch without it.
@@ -860,7 +925,8 @@ applied with a review in hand. Ungating an environment is a commit to
 the default branch, under whatever your ruleset requires of one, so the pull
 request that benefits from the exemption cannot also grant it. That is all
 it claims. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)
-§Comment-ops; the trade-off against environment reviewers is in
+§Comment-ops. An environment's `required_reviewers` still gates the deployment:
+it is a separate control, and the trade-off against it is in
 [`hardening.md`](hardening.md) §3–5.
 
 ### Further hardening

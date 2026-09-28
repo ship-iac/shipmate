@@ -8,21 +8,14 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-The version line stays `v0.x` while action inputs, check names, and the comment
-grammar are declared unstable in `README.md`.
-
 ## [0.40.0] — 2026-09-28
 
 Tags `30ba9e7`.
 
-A simplification pass: about 1,700 fewer lines, 750 of them in tests. No consumer workflow
-input, secret or required check changes, so the re-pin is pins-only.
-
 ### Added
 
 - **`actions/verify-app-key`**, the App-key precondition that runs before every App-token
-  mint except comment-ops'. It replaces eight inline copies; the `<owner>/shipmate/*@*`
-  allowed-actions pattern in `docs/hardening.md` already covers it.
+  mint except comment-ops'. It replaces eight inline copies.
 
 ### Changed
 
@@ -30,27 +23,24 @@ input, secret or required check changes, so the re-pin is pins-only.
   retired `plan_run_id` or `mode` input in `shipmate.yml` are gone.
 - **The apply review job shows as `<caller> / review / decision`.** Both apply paths call one
   engine `apply-review.yml`.
-- **`scripts/onboard --vars-at-org` takes only `SHIPMATE_APP_ID`** (compared
-  case-insensitively; empty means not asserted). Any other value, a comma list included, is
-  refused, and the checklist no longer carries the older-pin caveat for
+- **`scripts/onboard --vars-at-org` takes only `SHIPMATE_APP_ID`**; any other value, a comma
+  list included, is refused. The checklist drops the older-pin caveat for
   `[gate] approver_team`.
 - **`apply-snapshot`'s empty-App-id refusal** uses `apply-gate`'s wording, which points at
   `docs/github-app.md`.
 
 ### Removed
 
-- **Composite action inputs every engine caller set to the same value:** `github-token` (nine
-  actions read `github.token` themselves), `stack-name` on the cell actions, `setup`'s
-  `terramate-version` / `tofu-version`, `cells-dir`, plan-cell's `retention-days`, and
-  dispatch's `dispatch-ref` / `repository`. A direct caller still passing one gets GitHub's
-  undeclared-input warning and the default: `setup` then installs the versions in the
-  release's `VERSIONS` file, whatever it was passed. comment-ops' unread `is-command` output
-  is gone too.
+- **Composite action inputs every engine caller set to the same value:** `github-token`,
+  `stack-name` on the cell actions, `setup`'s `terramate-version` / `tofu-version`,
+  `cells-dir`, plan-cell's `retention-days`, and dispatch's `dispatch-ref` / `repository`.
+  `setup` installs the versions in the release's `VERSIONS` file. comment-ops' unread
+  `is-command` output is gone too.
 
 ### Fixed
 
 - **A missing `checks.jsonl` is annotated.** The apply result step logs a `::warning::`
-  instead of rendering the comment without apply-check state and no message anywhere.
+  instead of rendering the comment without apply-check state.
 
 ## [0.39.0] — 2026-09-27
 
@@ -58,25 +48,15 @@ Tags `ca75e4e`.
 
 ### Changed — BREAKING
 
-- **The Slack webhook is a `shipmate-engine` secret.** `deploy.yml` and `drift.yml` read
-  `secrets.SHIPMATE_SLACK_WEBHOOK` and no longer read the `SLACK_WEBHOOK` variable: every
-  plan cell receives the repository's variables, and a step's inputs print in its log.
-  Delete the `SLACK_WEBHOOK` variable, set `SHIPMATE_SLACK_WEBHOOK` as a secret on the
-  `shipmate-engine` environment, and add
-  `SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}` to the `secrets:` block of
-  the `deploy` and `drift` jobs and of every drift slice file. Mapping it before re-pinning
-  to this release fails the workflow at load. A cell refuses a variable named
-  `SHIPMATE_SLACK_WEBHOOK`.
-- **A `SHIPMATE_SLACK_WEBHOOK` variable fails the deploy and drift runs.** The last step of
-  `deploy.yml`'s `summary` job and of `drift.yml`'s `issues` job fails when a variable of that
-  name is set, including one on the `shipmate-engine` environment, which no cell binds. It
-  runs after the gate write and the Issue authoring, so it blocks neither.
+- **The Slack webhook is the secret `SHIPMATE_SLACK_WEBHOOK` on `shipmate-engine`,** mapped
+  by name on the `deploy` and `drift` jobs. The `SLACK_WEBHOOK` variable is no longer read.
+- **A `SHIPMATE_SLACK_WEBHOOK` variable fails the deploy and drift runs** in the last step of
+  `deploy.yml`'s `summary` job and `drift.yml`'s `issues` job. A cell refuses one too.
 
 ### Fixed
 
-- **The deploy failure notice fails its step on a rejected webhook.** Its `curl` carries
-  `--fail-with-body`, so a revoked or rotated webhook no longer leaves the step green with no
-  message sent.
+- **The deploy failure notice fails its step on a rejected webhook** (`curl
+  --fail-with-body`).
 
 ## [0.38.0] — 2026-09-27
 
@@ -84,14 +64,10 @@ Tags `2435bdb`.
 
 ### Fixed
 
-- **An import-only plan counts as a change.** `scripts/plan-classify` read an `import` block's
-  resource, which OpenTofu renders as a `no-op` action with `importing` set, as unchanged, so
-  its cell got a neutral apply check and the import never applied. A resource whose import
-  has already applied stays unchanged.
-- **The plan comment's counts come from the plan text the apply verifies.** The
-  `+add ~change -destroy` tally was read from the plan cell's `cell.json`, which
-  the author's pipeline writes, so it could disagree with the bound `plan.txt`.
-  `cell.json` no longer carries `add`, `change` or `destroy`.
+- **An import-only plan counts as a change.** `scripts/plan-classify` read an `import`
+  block's resource as unchanged, so its cell got a neutral apply check and never applied.
+- **The plan comment's counts come from the plan text the apply verifies**, not from the plan
+  cell's `cell.json`, which no longer carries `add`, `change` or `destroy`.
 
 ## [0.37.0] — 2026-09-27
 
@@ -102,12 +78,10 @@ Tags `352eb83`.
 - **`.github/shipmate.toml` takes its final key names.** Top level: `schema_version`,
   `layout` (`tf_vars`, `workspace` or `folder`), `[environments.<name>]` and `[gate]`.
   `[gate]` holds `approver_team`. An entry holds `region`, `tf_vars`, `aws`, `shared`,
-  `needs` (the environments that fully apply first), `explicit` (a bare `shipmate apply`
-  skips it) and `gated` (`false`: a targeted apply needs no approving review). A variable
-  reference is `{ vars = "NAME" }`. Any other key refuses as unknown.
+  `needs`, `explicit` and `gated`. A variable reference is `{ vars = "NAME" }`. Any other
+  key refuses as unknown.
 - An entry name outside the env-name charset, or with a `-plan` / `-apply` suffix, refuses.
-  `explicit` and `gated` are TOML booleans and accept no variable reference. See
-  `CONTRACT.md` §Environment table.
+  `explicit` and `gated` are TOML booleans and accept no variable reference.
 
 ## [0.36.0] — 2026-09-26
 
@@ -115,16 +89,10 @@ Tags `836b768`.
 
 ### Added
 
-- **Any string value in `.github/shipmate.toml` can name a GitHub variable.** Write
-  `{ var = "NAME" }` in place of a string, list items and `[gate]` included, and every reader
-  of the file replaces it with that repository or organization variable's value: every
-  detect, comment-ops, `shipmate doctor` and `scripts/onboard`. A value then changes with a
-  variable edit and no pull request. An unset or empty variable, a lowercase name, or a name
-  that is not a GitHub variable name refuses naming the key and the variable. A resolved
-  value is public, so reference variables, never secrets. `shipmate doctor` lists every
-  reference. The detect actions, `comment-ops` and
-  `summary` take a new `github-vars` input, which the engine's reusable workflows pass; a file
-  with no reference behaves as before. See `CONTRACT.md` §Variable references.
+- **Any string value in `.github/shipmate.toml` can name a GitHub variable** with
+  `{ var = "NAME" }`, resolved by every reader of the file. An unset or empty variable or an
+  invalid name refuses. `shipmate doctor` lists every reference. The detect actions,
+  `comment-ops` and `summary` take a new `github-vars` input.
 
 ## [0.35.0] — 2026-09-26
 
@@ -132,20 +100,16 @@ Tags `6c6aed1`.
 
 ### Changed
 
-- **A `run.env` override is refused in the cell, not at detect.** `scripts/env-inject` reads
-  the row's `tf_vars` back through `terramate run` for the cell's own stack and refuses before
-  `tofu init` when one comes back changed or unset. A repository with an overriding `run.env`
-  now fails once per affected cell. The check covers only what the row holds, so `run.env` may
-  now set `TF_VAR_env` under `layout = "folder"` and `TF_WORKSPACE` under `dry` and `folder`,
-  which detect refused. See `CONTRACT.md` §Env model.
+- **A `run.env` override is refused in the cell, not at detect.** `scripts/env-inject`
+  refuses before `tofu init` when a row's `tf_vars` come back changed or unset through
+  `terramate run`. `run.env` may now set `TF_VAR_env` under `layout = "folder"` and
+  `TF_WORKSPACE` under `dry` and `folder`.
 
 ### Fixed
 
-- **A `run.env` that rewrites a table-resolved variable no longer passes.** Detect probed one
-  stack with a fixed set of three names, so it missed a rewrite conditional on the stack, a
-  `terramate.config.run.env` block below the root, and a name from an environment's `vars`. A
-  `run.env` reading a variable only the cell has made `terramate run` fail at detect, which
-  warned and continued. The dispatched `shipmate apply` path never reached the probe.
+- **A `run.env` that rewrites a table-resolved variable no longer passes**, including a
+  stack-conditional rewrite, a `run.env` block below the root, a name from an environment's
+  `vars`, and the dispatched `shipmate apply` path.
 
 ## [0.34.0] — 2026-09-25
 
@@ -154,11 +118,9 @@ Tags `3c9c71e`.
 ### Changed — BREAKING
 
 - **The state path is read from `tofu init`, not declared.** `state_suffix` is removed from
-  every reusable workflow; delete it from each calling job's `with:`, and a `with:` it leaves
-  empty. The `plan-cell`, `drift-cell` and `apply-cell` actions' `state-path` input is gone.
-  Each cell reads its local backend's state path from the record `tofu init` writes
-  and `TF_WORKSPACE`; a backend other than `local` skips the state steps, as `state_suffix: ""`
-  did. `scripts/onboard` drops `--state-suffix`.
+  every reusable workflow, and the `plan-cell`, `drift-cell` and `apply-cell` actions'
+  `state-path` input is gone. A backend other than `local` skips the state steps.
+  `scripts/onboard` drops `--state-suffix`.
 
 ## [0.33.0] — 2026-09-25
 
@@ -166,14 +128,11 @@ Tags `c22c2c3`.
 
 ### Changed — BREAKING
 
-- **A shared environment is declared in the table.** `shared = true` in an
-  `[environments.<env>]` entry of `.github/shipmate.toml`, read from the default branch,
-  binds one bare `<env>` on both paths. The `SHIPMATE_SHARED_ENVS` repository variable is
-  no longer read, the `shared-envs` action inputs are gone, and `scripts/onboard` drops
-  `--shared` and reads the key from the checkout's file. Every cell job binds
-  `${{ matrix.env_binding }}`, which detect stamps on each row. `shipmate doctor` reads
-  the mode from the default branch's file, as the runs do, and no longer reports a repository holding both namings;
-  `scripts/onboard` still refuses to create one beside the other.
+- **A shared environment is declared in the table** with `shared = true` in an
+  `[environments.<env>]` entry. The `SHIPMATE_SHARED_ENVS` variable is no longer read, the
+  `shared-envs` action inputs are gone, and `scripts/onboard` drops `--shared`. Every cell
+  job binds `${{ matrix.env_binding }}`. `shipmate doctor` reads the mode from the default
+  branch's file.
 
 ## [0.32.0] — 2026-09-25
 
@@ -181,158 +140,83 @@ Tags `10d16e0`.
 
 ### Changed
 
-- **Engine actions resolve through `$/`, with no checkout.** Every engine step calls
-  `$/actions/<name>`, GitHub's self-repository syntax, so the 25 `actions/checkout` steps and
-  the `.shipmate-engine/` directory are gone. The commit you pin is still the whole tree that
-  runs. Self-hosted runners need 2.336.0 or newer; github.com only, as before. The
-  `.shipmate-engine/` gitignore entry is no longer needed and is harmless if left.
+- **Engine actions resolve through `$/`, with no checkout.** The 25 `actions/checkout` steps
+  and the `.shipmate-engine/` directory are gone. Self-hosted runners need 2.336.0 or newer.
 
 ## [0.31.0] — 2026-09-20
 
 Tags `4172108`.
 
-**Breaking: the approvers team and the ungated-environment list move into
-`.github/shipmate.toml`.** `SHIPMATE_APPROVERS_TEAM` becomes
-`gate.approvers_team` and `SHIPMATE_UNGATED_ENVS` becomes `gate.ungated_envs`,
-in a `[gate]` table read from the default branch with the rest of that file.
-Neither variable is read any more, at any level: the file is the only source.
-A repository that declares no `approvers_team` authorizes nobody by comment, and
-one that declares no `ungated_envs` exempts no environment from the review
-requirement.
+### Changed — BREAKING
+
+- **The approvers team and the ungated-environment list move into `.github/shipmate.toml`**
+  as `gate.approvers_team` and `gate.ungated_envs`, read from the default branch.
+  `SHIPMATE_APPROVERS_TEAM` and `SHIPMATE_UNGATED_ENVS` are no longer read at any level.
 
 ### Added
 
-- **`[gate]` in `.github/shipmate.toml`**, holding `approvers_team` (a bare
-  GitHub team slug) and `ungated_envs` (a list of bare logical env names). Both
-  are optional, both are strict about their key names, and a declared empty value
-  means what it says: `approvers_team = ""` authorizes nobody and
-  `ungated_envs = []` exempts nothing — indistinguishable from an absent key,
-  because there is no second source to fall through to.
-- **An optional `version` key.** Written, it must be the integer `1`; absent, it
-  reads as 1. `version = true` is refused by name rather than read as 1.
+- **`[gate]` in `.github/shipmate.toml`**, holding `approvers_team` (a bare team slug) and
+  `ungated_envs` (a list of bare env names). An empty value means what it says.
+- **An optional `version` key**, which must be the integer `1`.
 
 ### Changed
 
-- **The engine pins nothing of itself.** Every job that runs an engine action
-  checks `ship-iac/shipmate` out at `job.workflow_sha` and runs its actions from
-  that checkout, so the commit you pin is the whole tree that runs. One
-  `actions/checkout` step is added to each of those jobs; `actions/checkout` is
-  GitHub-owned, so an `allowed_actions` list needs no new pattern. The ref falls
-  back to an all-zero SHA, so a runner without that context fails the checkout
-  instead of fetching the engine's default branch. The supported consumer
-  surface is the seven reusable workflows; the composite actions are
-  engine-internal and unsupported as a consumer entry point, and `apply-cell`,
-  `plan-cell` and `drift-cell` now fail outright where they reach
-  `./.shipmate-engine/actions/state`. A consumer must gitignore
-  `.shipmate-engine/`, the directory every engine job now writes into its
-  checkout, or its own recursive `terramate run` refuses on untracked files
-  (`docs/upgrading.md` §Gitignore the engine checkout).
-  The internal pin cascade, `internal-pins.yml`, `dev/pin_status.py` and
-  `dev/repin_internal.py` are gone.
-- **Three readers, one source.** `actions/comment-ops` and both apply paths'
-  detect each resolve `gate.ungated_envs` from the default branch's file. The
-  comment-ops job checks out no consumer content, so it reads through the
-  contents API — same file, same branch, same refusal wording as `git show`.
-- **An unresolvable gate table refuses the comment.** `shipmate apply` and
-  `shipmate unlock` now read `.github/shipmate.toml` from the default branch
-  before they authorize, so a file that is missing there, does not parse or does
-  not validate refuses every such comment — an `:x:` comment naming the cause,
-  no 🚀 reaction, and a failed comment-ops run.
-- **The user-facing sentences name the setting, not the variable**: the apply
-  comment's ungated-audit line, the comment-ops exemption comment, and
-  `authorize`'s refusal for an env that is not listed.
-- **`shipmate doctor` reports the approvers team from the file** at the commit
-  under examination — named in the report beside `env_order` and
-  `explicit_envs`, since an absent `approvers_team` authorizes nobody and no
-  validator can say so — and warns when the slug does not resolve in the org, so
-  a bad one is caught before it merges. The resolvability probe runs in `report`
-  mode only; the plan path's App token lacks `members: read`.
-- **`scripts/onboard` no longer writes `SHIPMATE_APPROVERS_TEAM`.** `--team` is
-  printed in the closing by-hand checklist, with the file the key belongs in and
-  the pin it needs first. `--vars-at-org` accepts `SHIPMATE_APP_ID` only; the
-  two-name form now exits with an error.
+- **The engine pins nothing of itself.** Every job that runs an engine action checks
+  `ship-iac/shipmate` out at `job.workflow_sha` into `.shipmate-engine/` and runs its actions
+  from there. The composite actions are engine-internal. `internal-pins.yml`,
+  `dev/pin_status.py` and `dev/repin_internal.py` are gone.
+- **`actions/comment-ops` and both apply paths' detect resolve `gate.ungated_envs` from the
+  default branch's file.** comment-ops reads it through the contents API.
+- **An unresolvable gate table refuses `shipmate apply` and `shipmate unlock` comments.**
+- **The user-facing sentences name the setting, not the variable.**
+- **`shipmate doctor` reports the approvers team from the file** and warns when the slug does
+  not resolve in the org (`report` mode only).
+- **`scripts/onboard` no longer writes `SHIPMATE_APPROVERS_TEAM`;** `--team` is printed in
+  the by-hand checklist. `--vars-at-org` accepts `SHIPMATE_APP_ID` only.
 
 ### Removed
 
-- **The `SHIPMATE_APPROVERS_TEAM` and `SHIPMATE_UNGATED_ENVS` repository
-  variables, and the action inputs that carried them.** `actions/comment-ops`
-  drops `approvers-team` and `ungated-envs`; `actions/apply-detect` and
-  `actions/apply-all-detect` drop `ungated-envs`. A caller still passing one gets
-  the usual unknown-input behaviour. Nothing reads a `vars.*` value for either
-  setting on any path.
-- **`scripts/onboard` stops reporting the retired six-file workflow layout** —
-  `plan.yml`, `apply.yml`, `comment-ops.yml`, `unlock.yml`, `deploy.yml`,
-  `drift.yml` beside `shipmate.yml` — **and the superseded `TERRAMATE_VERSION`
-  and `TOFU_VERSION` repository variables.** Both detected a state predating
-  `shipmate.yml` and the release-pinned tool versions.
-- **`docs/upgrading.md` §Past migrations.** The per-release procedures for
-  `0.28.0` through this release described moves between engine versions, and
-  each release's `CHANGELOG.md` entry remains the record of what changed.
+- **The `SHIPMATE_APPROVERS_TEAM` and `SHIPMATE_UNGATED_ENVS` repository variables,** and the
+  `approvers-team` / `ungated-envs` inputs of `actions/comment-ops`, `actions/apply-detect`
+  and `actions/apply-all-detect`.
+- **`scripts/onboard` stops reporting the retired six-file workflow layout** and the
+  `TERRAMATE_VERSION` and `TOFU_VERSION` repository variables.
+- **`docs/upgrading.md` §Past migrations.**
 
 ### Fixed
 
-- **An uppercase entry in `explicit_envs` or `gate.ungated_envs` is refused
-  rather than silently matching nothing.**
-  Terramate refuses an uppercase letter in a tag and env names come from
-  `env/<name>` tags, so an uppercase entry could never name an environment.
-  `explicit_envs` is intersected case-sensitively, so `explicit_envs = ["Prod"]`
-  excluded nothing and a bare `shipmate apply` applied production while the file
-  read as holding it back. `gate.ungated_envs` only appeared to work because it
-  casefolds. Breaking for a file carrying such an entry, which the refusal names.
-- **A key that references an environment no stack tags now warns by name.**
-  `explicit_envs`, `env_order` — keys and predecessors — and
-  `gate.ungated_envs` join the environment table's own unused-entry diagnostic,
-  under the same whole-tree-scan rule, and each names what the entry therefore
-  fails to do. The charset refusal catches only entries no environment name could
-  take; a plain misspelling reached nothing at all before this.
+- **An uppercase entry in `explicit_envs` or `gate.ungated_envs` is refused** rather than
+  silently matching nothing. Breaking for a file carrying such an entry.
+- **A key that references an environment no stack tags now warns by name:** `explicit_envs`,
+  `env_order` keys and predecessors, and `gate.ungated_envs`.
 
 ## [0.30.0] — 2026-09-15
 
 Tags `f1688c0`.
 
-**Breaking: the environment table moves out of Terramate globals into
-`.github/shipmate.toml`.** A cell's identity, credentials, wave ordering and
-bare-apply exclusions are now four top-level keys — `layout`, `environments`,
-`env_order`, `explicit_envs` — in one flat TOML file on the default branch, read
-with `tomllib`. The engine reads the new location only; there is no dual-support
-window. Migration is two merges per repository — add the file under the current
-pin, then bump the pin and delete the `globals "shipmate"` block —
-`docs/upgrading.md` §0.30.0 has the procedure and a worked translation.
+### Changed — BREAKING
+
+- **The environment table moves out of Terramate globals into `.github/shipmate.toml`,** as
+  four top-level keys — `layout`, `environments`, `env_order`, `explicit_envs` — read from
+  the default branch with `tomllib`. The `globals "shipmate"` block is no longer read.
 
 ### Changed
 
-- **`env_order` and `explicit_envs` are read from the default branch.** They
-  used to be evaluated out of the checked-out tree, so a feature branch could
-  reorder its own apply waves or drop its own production exclusion and have the
-  edit take effect on that branch. Both now come from the same default-branch
-  file as the identity table. An edit takes effect when it merges.
-- **Validation is strict about top-level keys and reserved names.** A fifth
-  top-level key is refused by name — which catches a misspelled `environments`
-  that previously yielded zero environments and skipped every cell's credentials
-  step — and a top-level control name used as an `env_order` key is refused with
-  the TOML placement hazard named as the likely cause.
-- **One validation entry point covers all four fields.** `env_order` and
-  `explicit_envs` are checked wherever the table is, rather than only when an
-  apply operation reads them.
-- **`shipmate doctor` validates the file at the commit under examination**,
-  through the contents API, and echoes the two tolerant defaults. It runs the
-  structural checks only and names the ones it did not run. It reports; nothing
-  it reads reaches a run.
-- **Reading the table needs Python 3.11 on the runner.** `CONTRACT.md` §Runner
-  prerequisites has always required it; `tomllib` is the first thing to exercise
-  it. `scripts/env-config` checks the version ahead of the import and refuses
-  with the version it found.
-- **`scripts/onboard`'s by-hand checklist asks for `.github/shipmate.toml`**, in
-  canonical dotted-key form, instead of a `globals "shipmate"` block.
+- **`env_order` and `explicit_envs` are read from the default branch**, not the checked-out
+  tree.
+- **Validation is strict about top-level keys and reserved names.** A fifth top-level key is
+  refused by name, as is a top-level control name used as an `env_order` key.
+- **One validation entry point covers all four fields.**
+- **`shipmate doctor` validates the file at the commit under examination** through the
+  contents API.
+- **Reading the table needs Python 3.11 on the runner.** `scripts/env-config` refuses with
+  the version it found.
+- **`scripts/onboard`'s by-hand checklist asks for `.github/shipmate.toml`.**
 
 ### Removed
 
-- **The Terramate worktree-and-evaluate read path.** No `git worktree
-  add/remove/prune`, no `terramate experimental eval` subprocess, and no second
-  independent evaluation in `scripts/env-order`. With it goes the defect class
-  behind it: Terramate drops an attribute it cannot evaluate and exits 0, which
-  produced a table byte-identical to a legitimate one naming no roles. There is
-  no lazy evaluation left on this path to drop anything.
+- **The Terramate worktree-and-evaluate read path**: no `git worktree`, no
+  `terramate experimental eval`, no second evaluation in `scripts/env-order`.
 - **The `layout = null` refusal**, which TOML cannot express.
 
 ## [0.29.0] — 2026-09-14
@@ -341,911 +225,305 @@ Tags `1923428`.
 
 ### Added
 
-- **A consumer's GitHub variables and a `SHIPMATE_SECRETS` envelope reach every
-  cell.** The variables a calling repository and the bound environment expose are
-  exported into the cell process, with `TF_VAR_*` suffixes lowercased so a
-  conventionally-named OpenTofu variable resolves. `SHIPMATE_VARS` and
-  `SHIPMATE_SECRETS` are JSON envelopes whose keys keep their case; the secret
-  one is masked line by line before anything is written. Reserved names, keys
-  that are not environment variable names, and names two channels supply are
-  refused — while the enumeration skips a reserved name silently, because it
-  sweeps up configuration nobody aimed at a cell. `CONTRACT.md` §Consumer
-  variables and secrets is the policy, and it changes nothing about what
-  shipmate publishes.
+- **A consumer's GitHub variables and a `SHIPMATE_SECRETS` envelope reach every cell.**
+  `TF_VAR_*` suffixes are lowercased; `SHIPMATE_VARS` and `SHIPMATE_SECRETS` are JSON
+  envelopes, the secret one masked line by line. Reserved names, invalid keys and names two
+  channels supply are refused. `CONTRACT.md` §Consumer variables and secrets is the policy.
 
 ### Changed
 
-- **Every callable workflow whose jobs run a cell declares `SHIPMATE_SECRETS`,
-  and the consumer's jobs must map it.** `plan`, `deploy`, `drift`, `targeted`,
-  `all` and `unlock` in `.github/workflows/shipmate.yml` each add
-  `SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}`, and `unlock` gains a
-  `secrets:` block it did not have. The line is harmless for a repository that
-  sets no such secret; skipping it means the envelope never reaches a cell.
-  `docs/upgrading.md` §0.29.0 is the migration.
+- **Every callable workflow whose jobs run a cell declares `SHIPMATE_SECRETS`,** and the
+  `plan`, `deploy`, `drift`, `targeted`, `all` and `unlock` jobs of `shipmate.yml` map it.
 
 ## [0.28.0] — 2026-09-13
 
 Tags `b0d9a41`.
 
-**Breaking: the engine release declares the Terramate and OpenTofu versions, and
-a consumer no longer can.** A repository that pinned `TERRAMATE_VERSION` or
-`TOFU_VERSION` to hold a tool version back loses that lever — its next pin bump
-installs the versions in the release's own `VERSIONS` file instead, silently. To
-keep an older version, stay on the prior engine release, or raise an issue for a
-per-consumer override. `actions/setup` and the engine's reusable workflows
-changed, so every engine pin moves in one commit as usual; the `scripts/onboard`
-change below is run by hand and never pinned. No check name moves.
-
-**Breaking: a cell's identity and credentials come from an environment table on
-the default branch, and a repository without one is refused.** The GitHub
-Environment variables that carried them are no longer read: `AWS_ROLE_ARN`,
-`AWS_REGION`, `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE`, along with any
-`AWS_ROLE_ARN_<WORKLOAD>`. The table is declared in a `globals "shipmate"` block
-and must be on the default branch before the first plan run, because that is the
-branch the engine reads it from.
-
 ### Added
 
 - **A repository declares its environment identity, roles and regions in a
-  `globals "shipmate"` table read from the default branch.**
-  `global.shipmate.layout` is required, and the engine resolves each cell's
-  identity variables, role and region from that table. It evaluates the table in
-  a detached worktree of `origin/<default>`, so a pull request cannot change
-  which role its own plan assumes, which region it authenticates against, or
-  which workspace it plans.
-
-  A repository declaring no `globals "shipmate"` block is refused by Terramate
-  itself; a block that evaluates but declares no `layout` is refused at detect.
-  Terramate drops an attribute it cannot evaluate rather than failing, so a
-  `layout` set to an expression that does not resolve arrives as an undeclared
-  one and is refused with it. An `environments` that does not resolve is dropped
-  the same way and cannot be refused — it is indistinguishable from a table
-  deliberately declaring none, which a bare `layout` legitimately is. Such a
-  cell resolves no role and fails at `tofu init`; `docs/troubleshooting.md` has
-  the diagnosis.
-
-  An environment that needs a table entry arrives and leaves over two pull
-  requests — configuration first when adding, last when removing — because the
-  table comes from the default branch while the environment list comes from the
-  branch's tags. An unused entry therefore warns instead of refusing; refusing
-  both sides would deadlock every add and every remove. That warning fires only
-  where a whole-tree scan already happened, so a typo'd key surfaces on the next
-  nightly drift run rather than on the pull request that introduced it.
-
-  `CONTRACT.md` §Environment table is the schema and the semantics, and its
-  §"Adding and removing an environment" has that sequence;
-  `docs/upgrading.md` §0.28.0 has the bootstrap order. The four `actions/*-cell/action.yml` gain a `tf-vars` input and the
-  four detect actions a `shared-envs` one; eight action files and seven reusable
-  workflows changed in all, so every workflow pinning them needs the normal
-  internal-pin bump after merge.
-
-- **`scripts/onboard --vars-at-org` skips the variables an organization already
-  sets.** The flag takes a comma-separated list of variable names the operator
-  asserts are set at organization level — `SHIPMATE_APP_ID` and
-  `SHIPMATE_APPROVERS_TEAM` are the only two it accepts — and `onboard` then
-  writes neither of them per repository. Every other name is refused. Every
-  asserted name is verified rather than trusted: `onboard` reads the
-  organization variables that actually reach the repository and refuses, before
-  its first write, when a name is missing from that list or holds a value other
-  than the one the run would have written. A repository-level copy still
-  overrides the organization value, so one is reported as a `differs` line with
-  exit 2 and never deleted.
-
-  `gh variable set --org` defaults to `--visibility private`, which reaches no
-  public repository; set the variable `--visibility all` or
-  `--visibility selected --repos <list>`. Private consumers need GitHub Team or
-  Enterprise — organization variables do not reach a private repository on
-  GitHub Free at all — and `onboard` refuses there rather than let the empty
-  value reach a run. The flag needs a `gh` carrying `gh api --slurp`, tested with
-  `gh` 2.93.0; nothing else in the engine depends on a `gh` version.
-  `docs/github-app.md` §6 is the procedure.
+  `globals "shipmate"` table read from the default branch.** `global.shipmate.layout` is
+  required; a repository without the block is refused. An unused entry warns. The four
+  `actions/*-cell` gain a `tf-vars` input and the four detect actions a `shared-envs` one.
+- **`scripts/onboard --vars-at-org` skips the variables an organization already sets**
+  (`SHIPMATE_APP_ID`, `SHIPMATE_APPROVERS_TEAM`), after verifying each against the
+  organization variables that reach the repository.
 
 ### Changed — BREAKING
 
-- **One writer sets a cell's identity variables.** `TF_VAR_env`,
-  `TF_VAR_region` and `TF_WORKSPACE` used to reach a cell as a job-level `env:`
-  block read from the GitHub Environment it binds; `scripts/env-inject` now
-  writes what the table resolved into `$GITHUB_ENV` instead. A consumer calling
-  the engine's reusable workflows configures nothing, and no check name or
-  comment verb changes.
-
-  A consumer who copied one of the engine's cell jobs into a workflow of their
-  own drops those three `env:` keys and passes the cell action's `tf-vars` input
-  instead, as the row's `tf_vars` serialised with `toJSON`. It has no default,
-  and an omitted or malformed value is refused rather than assumed.
-
-  Every matrix row carries `role_arn`, `cred_region`, `tf_vars` and
-  `config_path`. The table's workload tier is keyed by the raw `workload/<name>`
-  tag, so the `AWS_ROLE_ARN_<WORKLOAD>` name-mangling rule and its collision
-  guard are gone with the variables.
-
-  The four `actions/*-cell/action.yml` and `apply-env-level.yml` changed, so every
-  workflow pinning them needs the normal internal-pin bump after merge.
-
-- **`scripts/onboard` no longer tells a consumer to create the five identity
-  variables.** Its checklist asked for `AWS_ROLE_ARN`, `AWS_REGION`,
-  `TF_VAR_env`, `TF_VAR_region` and `TF_WORKSPACE` as `gh variable set` lines;
-  it now names the environment table instead. `onboard` never set them itself,
-  so a repository that followed the old checklist has variables to delete rather
-  than a migration to run.
-
-- **The Terramate and OpenTofu versions come from the engine release, not from
-  repository variables.** `actions/setup` reads the release's own root-level
-  `VERSIONS` file at the commit the consumer pins, and the engine's workflows no
-  longer pass `vars.TERRAMATE_VERSION` / `vars.TOFU_VERSION` to it. A consumer
-  stops maintaining both variables, and moving to other tool versions becomes a
-  pin bump. `scripts/onboard` no longer writes either name: a copy left behind is
-  inert and reported as a `differs` line with exit 2, never deleted. Delete it
-  only once `.github/workflows/shipmate.yml` is on a pin carrying this change —
-  workflows on an older pin still pass the variable to `setup`, so deleting it
-  first blanks an input they read. `docs/upgrading.md` §0.28.0 has the
-  ordered steps and the rollback caveat.
-
-  The action's `terramate-version` / `tofu-version` inputs survive as overrides,
-  but a consumer calls the reusable workflows rather than the action, so the
-  override is engine-internal and does not replace the variables. An explicitly
-  empty value is not an override either: it now resolves to the release's pinned
-  version rather than to the installer's latest.
-
-  `actions/setup/action.yml` changed, so every workflow pinning it needs the
-  normal internal-pin bump after merge. `VERSIONS` is now one of that action's
-  pinned dependencies, so a later tool-version bump makes the same pins stale
-  (`docs/releasing.md` §Bumping a tool version is the same cascade).
+- **A cell's identity and credentials come from the environment table.** The GitHub
+  Environment variables `AWS_ROLE_ARN`, `AWS_REGION`, `TF_VAR_env`, `TF_VAR_region`,
+  `TF_WORKSPACE` and `AWS_ROLE_ARN_<WORKLOAD>` are no longer read.
+- **One writer sets a cell's identity variables:** `scripts/env-inject` writes what the table
+  resolved into `$GITHUB_ENV`. Every matrix row carries `role_arn`, `cred_region`, `tf_vars`
+  and `config_path`; the table's workload tier is keyed by the raw `workload/<name>` tag.
+- **`scripts/onboard` no longer tells a consumer to create the five identity variables.**
+- **The Terramate and OpenTofu versions come from the engine release's `VERSIONS` file,** not
+  from the `TERRAMATE_VERSION` / `TOFU_VERSION` repository variables. `scripts/onboard` no
+  longer writes either name. An explicitly empty `setup` version input resolves to the
+  pinned version.
 
 ## [0.27.1] — 2026-09-12
 
 Tags `55bf06b`.
 
-**Re-pinning is all it takes**: no action input or output, check name, comment
-verb, environment or workflow fragment changes, and there is nothing to migrate.
-This release is an internal refactor of the helper scripts — 247 lines removed
-against 98 added outside the tests. One observable difference, and only inside a
-run that already fails: a change spanning more dependency levels than the
-pre-declared wave jobs can hold now prints the DAG-shape and `apply-detect`
-notices before it refuses, rather than refusing first. Same refusal, same
-message, two more diagnostic lines before it.
-
 ### Changed
 
-- **The helper scripts share one module loader.** `scripts/` helpers run as
-  Actions steps, so they carry no `.py` suffix and cannot be imported by name;
-  each one that reached a sibling carried its own copy of the `SourceFileLoader`
-  shim that works around it. They now import `scripts/_shipmate.py`, the first
-  and only `.py` module in that directory. The internal-pin derivation follows
-  the new edge — `dev/pinrefs.py` adds `_shipmate.py` to every pinned action's
-  transitive script set — so a change to the loader makes the pins that run it
-  stale, exactly as a change to any other helper does, and
-  `scripts/tests/test_pin_derivation_premises.py` reddens on a second `.py`
-  sibling, which `load_refs` would not see.
-
-- **The wave and environment-level limits are enforced inside the functions that
-  emit them.** `guard_max_waves` runs inside `pad_waves`, and
-  `guard_max_env_levels` inside `waves_by_env_level`, rather than at each call
-  site. No caller can omit the refusal and write `wave0..wave7` with the deepest
-  cells silently dropped under a run that reports success — previously a
-  structural property of the call sites, asserted by reading their syntax trees,
-  and now a property of the functions themselves.
-
+- **The helper scripts share one module loader,** `scripts/_shipmate.py`.
+- **The wave and environment-level limits are enforced inside the functions that emit
+  them** (`pad_waves`, `waves_by_env_level`). A change spanning too many levels now prints
+  the DAG-shape and `apply-detect` notices before it refuses.
 - **`shipmate doctor`'s five `shipmate.yml` probes share one warning renderer.**
-  Each probe named its own unreadable-file and no-commit findings inline; they
-  now pass that pair to `_shipmate_yml_warnings`, so the five cannot disagree
-  about how an unreadable or uncommitted `shipmate.yml` is reported.
-
-- **Drift reporting reuses the shared command runner**, and onboarding drops the
-  one-entry table that mapped its single rendered file to its documentation
-  fence. Both are fail-closed exactly as before.
+- **Drift reporting reuses the shared command runner.**
 
 ### Fixed
 
-- **CodeQL code-quality findings**, and the `SIM` and `RET` ruff rule sets that
-  find them are now enforced in CI. The only semantic change among them is
-  `scripts/doctor-cells` reading its input through `Path.read_text` instead of
-  leaving a file handle to the garbage collector.
+- **CodeQL code-quality findings**; the `SIM` and `RET` ruff rule sets are enforced in CI.
 
 ## [0.27.0] — 2026-09-07
 
 Tags `457ea2b`.
 
-Breaking for every consumer. The six workflow files become one, and the pin and
-the file must move in the same commit. `docs/upgrading.md` section 0.27.0 has
-the migration, the two half-states and why the migration pull request needs an
-administrative bypass.
+### Changed — BREAKING
+
+- **One `.github/workflows/shipmate.yml` per consumer, replacing `plan.yml`,
+  `comment-ops.yml`, `deploy.yml`, `drift.yml`, `apply.yml` and `unlock.yml`.** Five
+  triggers and seven jobs, each selected by its own `if:`. Check names are unchanged.
 
 ### Changed
 
-- **One `.github/workflows/shipmate.yml` per consumer, replacing `plan.yml`,
-  `comment-ops.yml`, `deploy.yml`, `drift.yml`, `apply.yml` and `unlock.yml`.**
-  Five triggers and seven jobs, each selected by its own `if:` on the event and,
-  for a dispatch, on a `verb` input. Every job calls the same engine reusable
-  workflow its own file called; no engine reusable workflow changed behaviour.
-  Every check-run name is unchanged — `shipmate / <stack> / <env>`,
-  `apply / <stack> / <env>`, `shipmate / gate` — as are the environments,
-  variables, secrets, and the pin count of seven.
-- **`actions/dispatch` sends every verb to that one filename** and names the
-  verb in the dispatch body; the job whose `if:` matches it runs. The value
-  travels one hop, into a file the consumer owns, and never enters the engine.
-- **`actions/build-matrix` requires `.github/workflows/shipmate.yml`**, the one
-  path `CONTRACT.md` lets the consumer's workflow live at.
-- **`scripts/mirror-checks` copies only check-runs named `shipmate / …`.** The
-  six jobs that do not run complete as `skipped` check-runs in the same suite,
-  and mirroring those onto the pull-request head would read as an apply that
-  was skipped for the commit.
-- **`scripts/onboard` writes the one file** and reports each of the six retired
-  filenames as `differs`, never deleting one.
+- **`actions/dispatch` sends every verb to that one filename** and names the verb in the
+  dispatch body.
+- **`actions/build-matrix` requires `.github/workflows/shipmate.yml`.**
+- **`scripts/mirror-checks` copies only check-runs named `shipmate / …`.**
+- **`scripts/onboard` writes the one file** and reports each retired filename as `differs`.
 
 ### Added
 
-- **A routing probe in `shipmate doctor`**, comparing each of the seven `if:`
-  expressions whole against the fence `docs/getting-started.md` publishes. A
-  wrong one routes a verb nowhere and its dispatched run completes with every
-  job skipped, which reads as success everywhere else. The dispatch-wiring
-  probe also now requires all four `workflow_dispatch` inputs, the exact `verb`
-  option list, and no other input declared `required: true` — one that is
-  refuses that verb with HTTP 422 and no run. Fifteen live probes.
+- **A routing probe in `shipmate doctor`**, comparing each of the seven `if:` expressions
+  whole against the `docs/getting-started.md` fence. The dispatch-wiring probe requires all
+  four `workflow_dispatch` inputs and the exact `verb` option list.
 
 ## [0.26.0] — 2026-09-06
 
 Tags `c622ff7`.
 
-Additive. No consumer has to change anything to take this release; the new
-script is hand-run from an engine checkout and is never invoked from a workflow.
-
 ### Added
 
-- **`scripts/onboard` — one command per consumer repository.** It reconciles a
-  repository to the setup `docs/getting-started.md` and `docs/github-app.md`
-  describe: the `shipmate-engine` environment and its default-branch policy, the
-  `<env>-plan` / `<env>-apply` pair per environment (or a shared bare `<env>`),
-  the App private key on `shipmate-engine` plus deletion of any repository-level
-  copy, `SHIPMATE_APP_ID`, `SHIPMATE_APPROVERS_TEAM`, `TERRAMATE_VERSION` and
-  `TOFU_VERSION`, the `shipmate-gate` ruleset, and the six workflow shims. Run
-  it from inside the consumer's checkout:
-
-  ```bash
-  python <engine-checkout>/scripts/onboard --team <approvers-team-slug> \
-      --app-id <id> --key shipmate-app.private-key.pem
-  ```
-
-  It is a reconciler, not a create-once onboarder. Every setting is read the way
-  `shipmate doctor` reads it, written only when absent, and reported as `differs`
-  when present and different — a value a consumer chose is never overwritten. A
-  second run over a configured repository writes nothing and prints every line as
-  `ok`. `--dry-run` reports every change and performs no write. Exit 0 when
-  nothing differs, 2 when something does, 1 on a refusal.
-
-  Two disagreements are refused rather than reported, because proceeding would
-  leave the repository worse than it started: a `SHIPMATE_APP_ID` variable that
-  differs from `--app-id`, since the same run pins the gate ruleset's
-  `integration_id` to the flag and a ruleset the workflows cannot satisfy blocks
-  the default branch; and an environment whose unused naming already exists,
-  since creating the bound naming beside it produces the ambiguity `shipmate
-  doctor` reports and neither naming can then be reconciled.
-
-  The six shim bodies are not a second copy of the documented ones — they are
-  rendered at run time from the ```yaml fences in `docs/getting-started.md` and
-  `docs/drift.md`, with the pin and `state_suffix` substituted, so the files the
-  script writes and the files the docs publish cannot drift. The pin it writes is
-  byte-identical to what `dev/repin_consumer.py` writes at the next release.
-
-  What it cannot know it prints as a checklist: the cloud role and region, the
-  per-environment `TF_VAR_*` or `TF_WORKSPACE` your layout injects,
-  `SHIPMATE_PLAN_PASSPHRASE`, `SLACK_WEBHOOK`, environment reviewers, a
-  `CODEOWNERS` entry, and adding the repository to the App installation, which the
-  API does not allow a `gh` OAuth token to do. It writes files and stops: the
-  branch, commit and pull request are yours, and that first pull request is the
-  ungatable one (`CONTRACT.md` §Post-plan topology).
+- **`scripts/onboard` — one command per consumer repository.** It reconciles the
+  `shipmate-engine` environment, the per-environment pair, the App key, the repository
+  variables, the `shipmate-gate` ruleset and the workflow shims: writes only what is absent,
+  reports `differs` otherwise, supports `--dry-run`, and prints a checklist for what it
+  cannot set. Shim bodies are rendered from the docs' YAML fences.
 
 ### Changed
 
-- `docs/github-app.md` §Appendix's shell loop over repositories is replaced by a
-  loop over checkouts calling the script. Two implementations of one spec drift,
-  and the evidence was in this organization: `repo-example-stacks-aws` had no
-  deployment branch policy on `shipmate-engine`, `dev-eu-apply` or `dev-us-apply`
-  after the runbook had been followed by hand, and `shipmate doctor` warned on
-  every plan run without that getting it fixed.
-- `docs/getting-started.md` gains a Quick path, and its tier sections each say
-  which step the script performs. `docs/troubleshooting.md` gains a section
-  explaining every line the script reports.
-- `scripts/register-app` now points at `scripts/onboard` for the per-repository
-  half it does not cover.
+- `docs/github-app.md` §Appendix's shell loop is replaced by a loop calling the script.
+- `docs/getting-started.md` gains a Quick path; `docs/troubleshooting.md` explains every
+  line the script reports.
+- `scripts/register-app` points at `scripts/onboard` for the per-repository half.
 
 ## [0.25.0] — 2026-09-06
 
 Tags `9e12610`.
 
-**Breaking for every consumer: the pin bump and a body rewrite of `plan.yml`,
-`drift.yml` and `comment-ops.yml` land in one commit.** A new shim against an
-old pin, or an old inline body against the new pin, is a load-time rejection
-with no job, no check run and no log. `docs/upgrading.md` §0.25.0 is the
-migration.
+### Changed — BREAKING
+
+- **The plan, drift and comment-ops job graphs move into the engine.** A consumer's
+  `plan.yml`, `drift.yml` and `comment-ops.yml` are shims: triggers, `permissions:`, and one
+  job named `shipmate` calling the engine's `plan.yml`, `drift.yml` or `comment-ops.yml`.
+- **Plan and drift check names gain a `shipmate / ` prefix:** `shipmate / <stack> / <env>`,
+  `shipmate / facts`, `shipmate / detect` and `shipmate / summary`. `shipmate / gate` is
+  unchanged.
+- **`plan.yml` and `drift.yml` take a required `state_suffix` input**, and their calling jobs
+  must grant `id-token: write`.
 
 ### Changed
 
-- **The plan, drift and comment-ops job graphs move into the engine.** A
-  consumer's `plan.yml`, `drift.yml` and `comment-ops.yml` are now shims — a
-  trigger block, a `permissions:` block, and one job named `shipmate` calling
-  `.github/workflows/plan.yml`, `drift.yml` or `comment-ops.yml`. Every fact the
-  plan path's trust guards decide on is now produced and compared inside the
-  same engine file, so the three mis-wirings a consumer could previously make —
-  a constant `head-repo`, a literal `is-draft: false`, a literal
-  `on-demand: true` — have no site left to be written at. `CONTRACT.md`
-  §Post-plan topology is the written form.
-- **The engine's reusable `summary.yml` is gone.** Its job is now the `summary`
-  job of the engine's `plan.yml`, unchanged in what it does and in the
-  environment it binds.
-- **Plan and drift check names gain a `shipmate / ` prefix**, from the shim's
-  calling job: `shipmate / <stack> / <env>`, plus `shipmate / facts`,
-  `shipmate / detect` and `shipmate / summary`. A per-cell plan check named in a
-  ruleset must be updated. The aggregate `shipmate / gate` is unchanged.
-- **The plan and drift cells run the apply path's AWS OIDC step**, workload
-  override included: a cell carrying a `workload/<name>` tag assumes
-  `AWS_ROLE_ARN_<WORKLOAD>` from the plan environment it binds, falling back to
-  `AWS_ROLE_ARN`, and holds no cloud credential when neither is set. This is a
-  widening — the consumer-authored plan workflow it replaces had a credentials
-  step only where its author wrote one, and never resolved a per-workload role.
-  The consequential case is a role set *above* the environment: `vars` resolve
-  organization → repository → environment, so an `AWS_ROLE_ARN` set at
-  repository or organization level for the apply path is now assumed by every
-  plan and drift cell, and a plan cell executes branch-authored HCL. Only the
-  role's own trust policy bounds that — a claim condition naming
-  `environment:<env>-apply` refuses the `<env>-plan` token and the cell fails at
-  the credentials step; a repository-wide one does not.
-  `CONTRACT.md` §AWS OIDC, `docs/hardening.md` §7–9.
-- **`plan.yml` and `drift.yml` take a required `state_suffix` input**, and their
-  calling jobs must grant `id-token: write`.
-- **`SHIPMATE_UNGATED_ENVS` is now read by the engine's `comment-ops.yml`.**
-  `vars` inherit into a called workflow, so the variable resolves in the
-  consumer's repository exactly as their own `ungated-envs:` line did. Opting in
-  is now the variable plus the two `apply.yml` pins; the consumer-written input
-  is gone, and with it the mis-wiring where a literal list authorized a dispatch
-  the variable never exempted.
-- **`shipmate doctor` retires five probe halves and gains one.** The summary
-  call's fork, draft and on-demand wiring, the `build-matrix` step's
-  `head-repo`/`head-sha`, the `no-pull-request` check and the dispatch probe's
-  `pr-facts` half all described a file consumers no longer write. The new probe
-  reports a `plan.yml` shim whose calling job is not named `shipmate`, which
-  costs every `[plan]` link in the plan comment. `PROBES` stays at 14.
+- **The engine's reusable `summary.yml` is gone;** its job is the `summary` job of the
+  engine's `plan.yml`.
+- **The plan and drift cells run the apply path's AWS OIDC step**, workload override
+  included. A role set at repository or organization level is now assumed by every plan and
+  drift cell; only the role's trust policy bounds that.
+- **`SHIPMATE_UNGATED_ENVS` is read by the engine's `comment-ops.yml`;** the consumer-written
+  `ungated-envs:` input is gone.
+- **`shipmate doctor` retires five probe halves and gains one**, reporting a `plan.yml` shim
+  whose calling job is not named `shipmate`.
 
 ## [0.24.0] — 2026-09-05
 
 Tags `9916735`.
 
-**No wrapper change is required, but re-plan open pull requests after re-pinning.**
-The digest travels on rails the engine owns, so no wrapper declares or forwards
-anything new. A plan produced before this release carries an apply check with no
-digest, and such a cell is refused rather than applied unverified.
-`docs/upgrading.md` §0.24.0 has the remedy for both the pre-merge and the
-post-merge case.
-
 ### Added
 
-- **The reviewed plan text is bound to the plan that executes.** `plan.txt` is
-  what a reviewer approves, and the job that writes it runs the pull request's
-  own code — the same job that produces the `.otplan`. An author who could push
-  a branch could therefore publish a plan text that did not describe the plan an
-  apply would run, and nothing downstream compared the two. Atlantis and
-  Terrateam render server-side and do not have this gap.
-
-  The trusted `summary` job already reads each cell's `plan.txt` into the
-  pull-request comment. It now also records `sha256` over that file on the
-  cell's apply check, in the `external_id` record beside the fingerprint and the
-  plan run — computed there, never copied from the cell. `actions/apply-cell`
-  re-renders the stored plan with the command that wrote the file
-  (`tofu -chdir=<stack> show -no-color stack.otplan`) and refuses any
-  difference, before `tofu apply`.
-
-  Four refusals hold the chain closed, each fail-closed: a cell summary with no
-  `plan.txt` fails the `summary` job; an apply check carrying no digest is
-  refused at detect; a digest that never reached the apply cell fails it before
-  `tofu init`; and a render disagreeing with the recorded digest fails the cell
-  with nothing applied.
-
-  Determinism was measured rather than assumed. `tofu show -no-color` of a
-  stored plan is byte-identical across runners with no committed
-  `.terraform.lock.hcl`, and the two ways the plan and apply runs could
-  otherwise disagree are refusals OpenTofu already makes on the existing apply
-  path: a plan file from another OpenTofu version cannot be read at all, and a
-  moved provider fails the apply on the plan's own dependency snapshot. The
-  digest therefore carries no version field.
-
-  What this does not fix is written down in `docs/hardening.md`: plan-time code
-  execution itself is untouched, and the `+add ~change -destroy` counts in the
-  plan comment still come from the untrusted cell summary — on a plan too large
-  to embed in full, that tally can cover text the reviewer never saw.
+- **The reviewed plan text is bound to the plan that executes.** The `summary` job records
+  `sha256` over each cell's `plan.txt` on its apply check, and `actions/apply-cell` re-renders
+  the stored plan and refuses any difference before `tofu apply`. A plan produced before
+  this release carries no digest and is refused.
 
 ### Changed
 
-- **Each of `actions/apply-cell`'s fail-safes has a step of its own.** The apply
-  half is now four steps — `digest-input`, `init`, `plan-digest`, `apply` — so
-  each refusal names its own blocked reason in the cell summary instead of
-  reporting a bare failure in the same bucket as a real `tofu apply` error. A
-  failed `tofu init` gains a reason of its own for the first time.
+- **Each of `actions/apply-cell`'s fail-safes has a step of its own** — `digest-input`,
+  `init`, `plan-digest`, `apply` — so each refusal names its own blocked reason.
 
 ## [0.23.0] — 2026-09-05
 
 Tags `d780e60`.
 
-**No wrapper change is required.** Both changes are engine-side and need only
-the pin bump. The comment described below is posted with the workflow token the
-`comment-ops` job already holds, so a repository that narrowed that job's
-`pull-requests: write` gets the refusal without the comment rather than a failed
-run. `docs/upgrading.md` §0.23.0 has the summary.
-
 ### Added
 
-- **A dispatched verb that never starts now says so on the pull request.**
-  `shipmate plan`, `apply` and `unlock` answer a commenter with a rocket
-  reaction and then dispatch. Every failure between that reaction and the
-  dispatched run's `summary` job landed on the comment-handling run, whose
-  checks attach to the dispatch ref — so the pull request showed no check, no
-  comment and no gate change, and the last signal the commenter had was
-  positive. Two shapes were seen in practice: a consumer whose `comment-ops.yml`
-  did not forward the verb, and a wrapper predating the verb it was sent.
-
-  `actions/dispatch` now posts one comment on the pull request for each of its
-  three refusals — an unwired verb, an unknown one, and a dispatch the API
-  rejected — carrying fixed text and a link to the run that holds the error. The
-  API's own answer is never pasted into it: that has no bounded length and a
-  comment body does.
-
-  The comment uses the workflow token, not the App installation token the same
-  step mints for the dispatch: that one is minted `actions: write` and cannot
-  comment. No consumer permission widens, because the `comment-ops` job already
-  holds `pull-requests: write` for the refusals `actions/comment-ops` posts.
-  Nothing changes on a dispatch that succeeds — the dispatched run's `summary`
-  job owns the pull request from there.
-
-- **`shipmate plan` naming a fork's pull request is refused before it is
-  dispatched, in its own words.** `actions/build-matrix` refuses a fork head
-  inside the dispatched run, on checks that land on the dispatch ref, so that
-  refusal was invisible to the pull request that asked for it.
-
-  This is a message, not a second gate. It reads the same head repository
-  `build-matrix` reads, and a head it cannot read — an unreadable API answer, or
-  a deleted fork — is dispatched anyway, leaving the refusal where it is
-  enforced and emitting a `::notice::` saying which case it was. `build-matrix`
-  and the engine's `summary.yml` trust guards are unchanged.
+- **A dispatched verb that never starts now says so on the pull request.** `actions/dispatch`
+  posts one comment for each of its three refusals — an unwired verb, an unknown one, and a
+  rejected dispatch — with a link to the run that holds the error.
+- **`shipmate plan` naming a fork's pull request is refused before it is dispatched.** A
+  head it cannot read is dispatched anyway with a `::notice::`.
 
 ### Changed
 
-- `shipmate doctor`'s two plan-wrapper dispatch findings said the error lands
-  where nobody on the pull request sees it. Both now name the comment.
+- `shipmate doctor`'s two plan-wrapper dispatch findings name the comment.
 
 ## [0.22.2] — 2026-09-05
 
 Tags `83d69cb`.
 
-**No wrapper change is required, and nothing changes at runtime.** Six Python
-blocks that lived inside `action.yml` files moved to `scripts/` helpers, byte
-for byte. Every input, output, check name, artifact name, JSON body and runtime
-message is identical to `0.22.1`; the suite is 1526 → 1529.
-
 ### Changed
 
-- **The embedded Python in `actions/` moved to `scripts/`, where the toolchain
-  lints it.** Nothing reads Python out of a YAML scalar, so `ruff` never saw
-  these six blocks — 133 lines across `apply-cell`, `dispatch`, `drift-cell`,
-  `plan-cell`, `comment-ops` and `gate-refresh`. The gap was not theoretical:
-  `0.22.1`'s writing pass added three lines to `drift-cell`'s block with
-  nothing checking the result. Each block is now `scripts/apply-cell-summary`,
-  `dispatch-body`, `drift-cell-summary`, `plan-cell-summary`, `doctor-cells` and
-  `gate-status-body`, invoked the way every other helper already is, and all six
-  are in `pyproject.toml`'s `extend-include`.
-- **The guards over that logic read the scripts, and pin that the actions still
-  run them.** A guard reading a script no action invokes asserts nothing, so
-  each moved script has a test matching its invocation as a whole `run:` line —
-  a commented-out call reddens it. `test_gate_refresh_hold.py` also stopped
-  stubbing `python3` away and now compares the whole posted `shipmate / gate`
-  body against a hand-written constant.
-
-One block stays inline, in `deploy.yml`'s `summary` job: that job checks out no
-engine tree, so reaching a script from it is a new checkout step rather than a
-move.
+- **The embedded Python in `actions/` moved to `scripts/`, where `ruff` lints it:**
+  `apply-cell-summary`, `dispatch-body`, `drift-cell-summary`, `plan-cell-summary`,
+  `doctor-cells` and `gate-status-body`. One block stays inline in `deploy.yml`'s `summary`
+  job.
+- **The guards over that logic read the scripts, and pin that the actions still run them.**
 
 ## [0.22.1] — 2026-09-05
 
 Tags `71e1aa4`.
 
-**No wrapper change is required, and nothing changes at runtime.** Every
-comment, docstring, action and workflow `description:`, and docs page now
-follows the writing convention published in `docs/development.md` §Writing.
-Runtime strings, input and output names, check names, the comment grammar, and
-every YAML fragment the docs show consumers are byte-identical to `0.22.0`; the
-test suite is unchanged at 1526.
-
 ### Changed
 
-- **Comments and docstrings cut to the repository cap.** Inline comments are at
-  most three lines in Python and one fact per line in YAML; rationale a constant
-  used to carry sits in the docstring of the function that consumes it. Test
-  docstrings state what the test pins and the mutation that reddens it. Comment
-  lines: 2412 → 1641 in Python, 1072 → 804 in YAML.
-- **Docs pages read one claim per sentence.** `README.md`, `CONTRIBUTING.md`,
-  `CONTRACT.md`, and every page under `docs/` drop filler words and bold inside
-  sentences, split compound sentences, and turn enumerating paragraphs into
-  lists. Headings, fenced examples, link targets, commands, and setting values
-  are unchanged, so every `§` cross-reference still resolves.
-- **`docs/development.md` gains §Writing**, the convention this release applies:
-  the two comment regimes, what earns a comment in this repository, the test
-  docstring shape, and the commit and pull-request form.
+- **Comments and docstrings cut to the repository cap.**
+- **Docs pages read one claim per sentence.** Headings, examples, link targets, commands and
+  setting values are unchanged.
+- **`docs/development.md` gains §Writing.**
 
 ## [0.22.0] — 2026-08-31
 
 Tags `cda2a93`.
 
-**No wrapper change is required.** `tags` is optional and defaults to empty,
-which is today's behaviour exactly, so a repository that does not want to scope
-its sweep needs only the pin bump. To actually spread a sweep,
-`docs/drift.md` §Spreading a sweep across the week has the shape and
-`docs/upgrading.md` §0.22.0 the summary.
-
 ### Added
 
-- **`actions/build-matrix` takes a `tags` query, so a drift sweep can cover a
-  slice of the repository instead of every cell.** A repository's only choices
-  were every stack × environment nightly or no drift at all; at around a hundred
-  cells one nightly sweep is roughly a Team plan's whole monthly allowance
-  before any plan or apply runs. The lever is spreading the sweep — by
-  environment, by workload, or by any tag a repository already uses.
-
-  `,` is OR, `:` is AND, in the on-disk tag form: `env/dev-eu,env/dev-us` is
-  either environment, `env/dev-eu:workload/app` is both, and `a:b,c` parses as
-  `(a AND b) OR c`. Terramate forbids `:` inside a tag value, so a `:` in a
-  query can only be the operator.
-
-  The query narrows **cells**, not the stacks Terramate is asked to list. Cells
-  are stack × env-tags, so a stack tagged both `env/dev-eu` and `env/prod-eu`
-  would survive a stack-level filter and still fan out to both environments;
-  each cell is instead matched against its stack's tags with every `env/*` tag
-  other than its own removed. Keeping the stack list whole is also what
-  preserves the repo-wide backstop: `env_membership` still inspects every stack
-  and still fails the run on one carrying no `env/*` tag, whether or not that
-  stack is in tonight's slice.
-
-  All three outputs — `matrix`, `empty` and `count` — come from that one
-  narrowed list, so they cannot disagree. Filtering the matrix downstream
-  instead leaves `empty` and `count` describing a set the run no longer has.
-
-  It fails closed four ways. The input is **refused unless
-  `no-pull-request: true`**, and `all-stacks: true` does not exempt it —
-  narrowing a plan run would leave changed stacks with no plan cell and no apply
-  check, greening `shipmate / gate` over a change that then merges and never
-  applies. An empty term, a term no stack carries, and a query matching no cell
-  each fail the run: a typo must not quietly disable a slice's drift forever,
-  and a sweep that covers nothing must not look like a healthy quiet night. The
-  256-cell limit and the reserved-path, slug and workload-variable collision
-  guards all see the narrowed set.
+- **`actions/build-matrix` takes a `tags` query, so a drift sweep can cover a slice of the
+  repository.** `,` is OR, `:` is AND, in the on-disk tag form; the query narrows cells. It is
+  refused unless `no-pull-request: true`, and an empty term, a term no stack carries or a
+  query matching no cell fails the run.
 
 ### Changed
 
-- **The drift Issue body no longer promises a close it cannot keep.** It said
-  `Auto-closed on the next clean drift run`, which a scoped sweep makes untrue —
-  the Issue closes on the next clean run **that covers that cell**, which for a
-  weekly slice may be days away. That sentence and its siblings in `docs/` now
-  say so. Nothing about *when* an Issue closes changed; `drift-issues` was
-  already per-cell and has never swept open Issues for absence, so a scoped run
-  leaves an uncovered cell's Issue untouched rather than closing it.
-
-  One consequence worth knowing before you spread a sweep: `guard_slug_collisions`
-  runs over the run's own cells, so a fully spread schedule has no run that sees
-  the whole tree, and two stacks whose paths slug to one artifact name in
-  different slices are first reported by a plan run rather than by a sweep.
-  `CONTRACT.md` §Plan artifacts and `docs/drift.md` both name the remedy — keep
-  one unscoped run on a longer cron.
+- **The drift Issue body says it closes on the next clean run that covers that cell.**
 
 ## [0.21.0] — 2026-08-29
 
 Tags `11b31b5`.
 
-**Three wrapper changes, and they must land in the same commit as the pin bump.**
-Author `.github/workflows/unlock.yml`, delete the `mode` input and its `with:`
-line from `apply.yml`, and forward `verb:` instead of `mode:` in
-`comment-ops.yml` (`docs/upgrading.md` §0.21.0 has the files). Split across two
-commits it fails both ways, and both ways are quiet: a new wrapper set against
-the old pin routes **every** verb at `apply.yml` — the old `actions/dispatch`
-defaults an absent `mode` to the apply wrapper, so `shipmate unlock` applies the
-reviewed plan instead of releasing a lock — while an old `comment-ops.yml`
-against the new pin forwards nothing and every verb is refused.
+### Changed — BREAKING
+
+- **One entry point per verb.** A comment's verb selects a consumer workflow file —
+  `plan.yml`, `apply.yml`, `unlock.yml`. `actions/comment-ops` exposes the route as `verb`;
+  `actions/dispatch` maps it to a filename and refuses an empty one. The `mode` rail is
+  retired.
+- **`shipmate unlock` no longer runs on the apply path.** The new reusable
+  `.github/workflows/unlock.yml` takes `{environment, ref}` and declares no secrets. The
+  engine's `apply.yml` loses the `mode` input and the unlock job.
 
 ### Changed
 
-- **One entry point per verb.** A comment's verb now selects a consumer
-  **workflow file** — `plan.yml`, `apply.yml`, `unlock.yml` — and the value stops
-  there. `actions/comment-ops` exposes the parsed route as `verb`;
-  `actions/dispatch` maps it to a filename, refuses an empty one, and puts no
-  verb in the dispatch body. A consumer's `.github/workflows/` directory now
-  reads as the verb list.
-
-  This retires the `mode` rail, which threaded one value across seven hops in
-  three repositories so that one wrapper could serve two verbs. The rail's cost
-  was not theoretical: a missing `with:` line on one of those hops left
-  `shipmate plan` dead on three repositories for two days, routed to the apply
-  wrapper and refused with an HTTP 422 that no pull request ever showed. The
-  replacement makes that failure loud instead of adding a probe for it — an
-  absent `verb` is refused by name, and a verb naming a wrapper the repository
-  does not have answers a 404 that says which file to author.
-
-- **`shipmate unlock` no longer runs on the apply path.** The new reusable
-  `.github/workflows/unlock.yml` takes `{environment, ref}`, declares no secrets
-  and no `state_suffix`, and carries neither a review job nor a summary job:
-  unlock consumes no reviewed plan, and it completes no apply check to refresh a
-  gate over. What it keeps is what makes it safe — the bot-actor guard, the
-  `<env>-apply` environment binding, the environment pre-flight, and a
-  serialization group byte-identical to the wave jobs', so an unlock queues
-  behind a live apply of the same cell rather than racing it.
-
-  The engine's `apply.yml` loses the `mode` input, the unlock job, the unlock
-  pre-flight and three `inputs.mode != 'unlock'` conditions. Each of those
-  conditions was one deletion away from an unlock that also applied; the split is
-  now structural rather than conditional, and pinned in both directions.
-
-- **`plan_workflow_error` states what it enforces.** The refusal and its trigger
-  are unchanged; the message now names the `CONTRACT.md` path it enforces instead
-  of describing runtime consequences that per-cell plan-run discovery had already
-  removed. `actions/dispatch` selects the plan workflow by filename, so a plan
-  workflow living elsewhere cannot be dispatched either.
+- **`plan_workflow_error` names the `CONTRACT.md` path it enforces.**
 
 ### Added
 
 - **`shipmate doctor` reports a consumer `apply.yml` that still carries `mode`.**
-  Declaring it is dead weight — nothing fills it in. Forwarding it to the
-  engine's reusable `apply.yml` is worse and quieter: a load-time rejection of
-  the whole run, with no job, no check run and no retrievable log. The probe
-  tells the two apart and names the remedy for each.
 
 ## [0.20.0] — 2026-08-27
 
 Tags `dbcc4c5`.
 
-**Re-pinning alone is not enough: the pin bump and the wrapper edits must land in
-one commit.** `plan.yml` gains a `workflow_dispatch` trigger with a `pr_number`
-input, a `facts` job calling the new `actions/pr-facts`, `head-sha` on its
-`build-matrix` step, and `on-demand` on its `summary` call — and every
-`github.event.pull_request.*` reference inside the jobs becomes
-`needs.facts.outputs.*`. Split across two commits it fails both ways: the new
-wrapper against the old pin passes `on-demand` to a `summary.yml` that declares
-no such input, which is a **load-time rejection** — no job, no check run, no
-retrievable log — while the old wrapper against the new pin states no `head-sha`,
-which `build-matrix` refuses on every plan including the autoplan. The refusal is
-the loud direction; the load-time rejection is the quiet one
-(`docs/upgrading.md` §0.20.0).
+### Changed — BREAKING
+
+- **`plan.yml` gains a `workflow_dispatch` trigger with a `pr_number` input, a `facts` job
+  calling `actions/pr-facts`, `head-sha` on its `build-matrix` step and `on-demand` on its
+  `summary` call.** Every `github.event.pull_request.*` reference in the jobs becomes
+  `needs.facts.outputs.*`.
 
 ### Added
 
-- **`shipmate plan` is a verb.** A collaborator can comment `shipmate plan` on a
-  pull request and get the same plan a push produces — same provenance, same
-  per-cell checks, same gate. Plan was previously the only thing this engine did
-  that had no name: the most-exercised operation in the system, the object every
-  other verb refers to, and absent from `shipmate help`. It now takes **no
-  arguments**: there is one plan of record per head commit, because a run holding
-  one environment's artifacts leaves every other environment's workset empty at
-  the next apply.
-
-- **A plan can be requested on a draft pull request.** Autoplan still skips
-  drafts — that is its economy — but an explicit `shipmate plan` is someone asking
-  for exactly that plan, so it runs. Applying a draft is refused in the same
-  release that makes it reachable: planning a draft authors apply checks on a
-  draft head for the first time, and a conflict-free draft reports
-  `mergeable: true`, so the refusal is deliberate rather than incidental.
-
-- **`actions/pr-facts`, one producer for every pull-request fact the plan path
-  decides on.** Payload-preferred: a pull-request event reads its own event
-  payload, so the autoplan leg spends no API call and cannot disagree with the
-  event that started it; a dispatch resolves the same facts from the pull-request
-  number. Nothing head-related is ever read from a dispatch input — the fork
-  refusal keys on the head repository, and a caller holding `actions: write` must
-  not be able to state one. A number cannot lie about its own head repository.
-
-- **A dispatched plan's per-cell checks are mirrored onto the pull-request
-  head.** GitHub attaches a dispatched run's job check-runs to the ref that was
-  dispatched, so without this a `shipmate plan` showed the pull request none of
-  its `<stack> / <env>` rows — including a failed cell, which is the state the
-  verb exists to recover from.
-
-- **A thirteenth `shipmate doctor` probe** reports a plan wrapper that cannot be
-  dispatched. A missing trigger or a missing `pr_number` input fails at dispatch
-  time with no run created, which is invisible from the pull request: the
-  commenter gets a reaction and then nothing.
+- **`shipmate plan` is a verb.** It takes no arguments and produces the same plan a push
+  does.
+- **A plan can be requested on a draft pull request.** Autoplan still skips drafts; applying
+  a draft is refused.
+- **`actions/pr-facts`, one producer for every pull-request fact the plan path decides on.**
+  A dispatch resolves the facts from the pull-request number.
+- **A dispatched plan's per-cell checks are mirrored onto the pull-request head.**
+- **A thirteenth `shipmate doctor` probe** reports a plan wrapper that cannot be dispatched.
 
 ### Changed
 
-- **`build-matrix` refuses a checkout that is not the commit the run states it is
-  planning, on every trigger.** The guard previously keyed on the event payload
-  and made no check at all outside `pull_request_target`. Both plan triggers check
-  out something else by default — the base branch, or the dispatch ref — so a
-  wrapper that omits `ref:` planned the wrong tree, reported no changes, and
-  greened the gate with nothing queued to apply. It now compares against a
-  wrapper-stated `head-sha` and **refuses by default**; `no-pull-request` remains
-  the only opt-out, for a workflow with no pull request at all (nightly drift).
-
-- **`detect` refuses a fork before `terramate` reads its tree.** The reference
-  wrapper runs the `build-matrix` step ahead of `fmt --check` and
-  `generate --detailed-exit-code`. Under `pull_request_target` `actions/checkout`
-  turns a fork head away itself, but a dispatched run carries no pull-request
-  context for that outer refusal to key on, so on that leg the inner refusal is
-  the only one left and it has to decide first.
+- **`build-matrix` refuses a checkout that is not the commit the run states it is planning,
+  on every trigger**, comparing against `head-sha` and refusing by default.
+  `no-pull-request` remains the only opt-out.
+- **`detect` refuses a fork before `terramate` reads its tree.**
 
 ## [0.19.0] — 2026-08-25
 
 Tags `270c03b`.
 
-**Re-pinning alone is not enough, and the edit touches two consumer files.**
-Delete the `plan_run_id` `workflow_dispatch` input and its `with:` pass-throughs
-from `apply.yml` (and a split `apply-all.yml`), and the
-`plan-run-id: ${{ steps.authz.outputs.plan-run-id }}` line from `comment-ops.yml`'s
-`actions/dispatch` step, in the same change that moves your pins. The two fail
-nothing alike: forwarding the retired input to a **reusable workflow** is a
-load-time rejection — the run dies at startup with no job, no check run and no
-log — while the same line on a **composite action** is only an `Unexpected
-input(s)` warning and the run continues. Fix only the first and the pipeline
-works while every `shipmate apply` carries an unexplained warning
-(`docs/upgrading.md` §0.19.0).
+### Changed — BREAKING
+
+- **The plan run id travels on each apply check, not through the wrappers.** Each
+  `apply / <stack> / <env>` check records its plan run in its `external_id`, and every apply
+  path reads it per cell. The `plan_run_id` dispatch input and `authorize` output are gone.
 
 ### Changed
 
-- **The plan run id travels on each apply check, not through the wrappers.**
-  Every `apply / <stack> / <env>` check now records the plan run its plan came
-  from in its `external_id`, alongside the apply-match fingerprint, and the
-  dispatched, bare and post-merge apply paths each read that run **per cell**.
-  The `plan_run_id` rail — a dispatch input threaded through the consumer's
-  wrapper, the engine's reusable apply workflows and comment-ops' `authorize`
-  output — is gone. One run id for a whole command could only ever be right when
-  one run planned every cell, which stops being true the moment a single plan
-  cell is re-run.
-
-- **A partially failed plan run's healthy cells are now individually
-  applicable, pre-merge.** The apply path resolved its plan run from the plan
-  workflow's `status=success` runs, so one failed cell made the whole run
-  invisible and every cell of it refused, the ones that planned perfectly
-  included. Deliberate, and bounded: a cell whose check records no plan run still
-  cannot be applied, `apply-cell` still refuses a missing or expired artifact, the
-  plan-to-tree binding is unchanged, and `shipmate / gate` stays red while any
-  planned cell is incomplete — so a partial plan still merges nothing.
-
-- **`shipmate doctor` reads a partially failed run's cell summaries too**, by the
-  same change: it takes the plan runs this commit's apply checks name rather than
-  the newest successful run of the plan workflow. A run that lost one cell used to
-  cost the whole report its environment probes.
-
-- **`shipmate doctor` reports a wrapper that still declares or forwards
-  `plan_run_id`**, as two separate findings — the declaration is dead weight, the
-  forward is the load-time kill. It reads a file named exactly `apply.yml`, so it
-  has nothing to say about `comment-ops.yml` or a split layout's `apply-all.yml`.
-
-- **The stack-path slug collision now refuses at matrix construction, and every
-  matrix-building path carries it.** `apply-detect` used to raise when two stack
-  paths in one environment slugged to the same `plan.<env>.<slug>` artifact name,
-  which meant discovering the clash only once a plan had already run. The refusal
-  moved into `build-matrix`, so it fires before any artifact exists — but it now
-  also reaches two paths the old one never did. **A repository with a latent
-  colliding pair** (`net/edge` beside `net-edge`, both tagged into one env, never
-  changed together in a single pull request) **kept planning quietly and now sees
-  its nightly drift run refuse**, since the drift path builds the whole tree in
-  one matrix. That refusal is warranted rather than collateral: `drift-cell`
-  uploads `drift-summary.<env>.<slug>` with `overwrite: true`, so a colliding
-  pair was silently overwriting one of the two stacks' drift results — the
-  refusal surfaces a loss that was already happening. `shipmate unlock <env>`
-  also refuses, because the unlock queue reuses `build-matrix` for its
-  matrix-limit and reserved-path checks even though it consumes no plan artifact
-  and so cannot be harmed by the collision; that one is inherited, not intended.
-  Rename one path so the path→`-` slug is unique; there is no opt-out.
-
-- **Three refusals were re-worded to what is still true.** The missing-plan-workflow
-  refusal named three downstream consequences this release removes and now names
-  the one that remains (doctor keys its plan-wrapper probes on the filename); the
-  absent-plan-run refusal shared by all three detects now states a remedy that
-  exists post-merge as well; and `apply-cell`'s absent-record refusal states its
-  presumed cause as a likelihood rather than a fact.
+- **A partially failed plan run's healthy cells are individually applicable, pre-merge.**
+- **`shipmate doctor` reads a partially failed run's cell summaries too.**
+- **`shipmate doctor` reports a wrapper that still declares or forwards `plan_run_id`.**
+- **The stack-path slug collision refuses at matrix construction in `build-matrix`,** on
+  every matrix-building path, drift and `shipmate unlock` included.
+- **Three refusals were re-worded to what is still true:** the missing-plan-workflow
+  refusal, the absent-plan-run refusal, and `apply-cell`'s absent-record refusal.
 
 ## [0.18.0] — 2026-08-23
 
 Tags `468429a`.
 
-**Re-pinning alone is not enough.** The fork refusal and the draft skip now
-decide on values your `plan.yml` states rather than on the event payload, so add
-three `with:` lines in the same change that moves your pins:
-`head-repo: ${{ github.event.pull_request.head.repo.full_name }}` on the
-`build-matrix` step of `detect`, and that same line plus
-`is-draft: ${{ github.event.pull_request.draft }}` on the `summary` job's call of
-the engine's `summary.yml` (`docs/getting-started.md` §Required — plan). A drift
-wrapper adds `no-pull-request: "true"` to its `build-matrix` step instead. Miss
-the first and `detect` fails loudly on every pull request; miss the other two and
-the summary job is skipped, which writes no gate at all — recovery needs a
-one-time ruleset bypass (`docs/upgrading.md` §0.18.0).
+### Changed — BREAKING
+
+- **The fork refusal keys on the head repository the wrapper states, and refuses by
+  default.** `actions/build-matrix` takes a `head-repo` input and no longer reads the event
+  payload for this decision; `no-pull-request: "true"` is the one opt-out.
+- **The trusted summary job decides on inputs, not on `github.event.*`.** The engine's
+  `summary.yml` takes `head-repo` and `is-draft`, and an empty one skips the job.
 
 ### Changed
 
-- **The fork refusal keys on the head repository the wrapper states, and refuses
-  by default.** `actions/build-matrix` takes a new optional `head-repo` input and
-  no longer reads `GITHUB_EVENT_NAME` or the event payload for this decision. An
-  empty or absent value is a refusal, not a pass, so a plan wrapper that forgets
-  the input turns pull requests away instead of planning a fork; the one opt-out,
-  `no-pull-request: "true"`, states that the run has no pull request at all and
-  belongs only in a workflow that has none (nightly drift). The event name could
-  not carry the distinction any longer: the drift path already triggers on both
-  `schedule` and `workflow_dispatch`, so a dispatched plan and a manual drift run
-  are the same event. The refusal message is unchanged in kind — loud, naming the
-  stated head repository — and no input permits a fork.
-
-- **The trusted summary job decides on inputs, not on `github.event.*`.** The
-  engine's reusable `summary.yml` takes `head-repo` and `is-draft`, both optional
-  with an empty default, and its job `if:` refuses an empty one: the caller
-  states the two facts, the callee compares them, and an omitted input is a
-  refusal — so a consumer wrapper can fail the decision closed but cannot weaken
-  it. The cost of omitting one is a **skipped** job: no gate status, no plan
-  comment, and nothing on the run page saying why the pull request cannot merge.
-  That is the deliberate trade against minting an App-authored gate over a head
-  repository the engine was never told about (`CONTRACT.md` §Post-plan topology).
-
-- **`shipmate doctor` gained an eleventh probe, over the caller's own wiring.**
-  It reads the `plan.yml` at the commit under examination and reports both sides
-  of that file's wiring, absent *or constant*: the `summary.yml` call's
-  `head-repo` / `is-draft`, and the `build-matrix` step's own `head-repo`. A
-  literal `false`, or the running repository, states the safe answer for every
-  run, fork pull requests and drafts included, and nothing else in the system can
-  see it — on the `build-matrix` step that is the fork refusal itself, so it also
-  reports a `no-pull-request` anywhere in `plan.yml`, the one opt-out from that
-  refusal, which belongs only in a workflow with no pull request (drift). Its
-  fork-trigger probe additionally reports every occurrence of
-  `allow-unsafe-pr-checkout` set to anything but `false`: that input turns off
-  `actions/checkout`'s own refusal to check out a fork's head, the outermost
-  guard on this path — under `pull_request_target` the job may hold this
-  repository's secrets, and under `pull_request` a fork's code still runs on your
-  runners with everything the job's environment exposes as variables
-  (`docs/hardening.md` §"Contributors without push access", which now documents
-  the ordering).
+- **`shipmate doctor` gained an eleventh probe** over `plan.yml`'s `head-repo` / `is-draft`
+  wiring and any `no-pull-request`. Its fork-trigger probe also reports
+  `allow-unsafe-pr-checkout` set to anything but `false`.
 
 ### Fixed
 
-- **A `pull_request_target` plan run whose event payload carries no head commit
-  is now refused rather than skipped.** That payload is the only source of the
-  head SHA `build-matrix` compares its checkout against, so an unset or
-  unreadable `GITHUB_EVENT_PATH` left the check unmade — and unmade is the
-  direction that greens a gate over a pull request nobody planned. It previously
-  leaned on the fork guard having already rejected an unreadable payload, which
-  is no longer how that guard works. A genuine `pull_request_target` event always
-  carries the field, so no legitimate run pays for this.
+- **A `pull_request_target` plan run whose event payload carries no head commit is refused
+  rather than skipped.**
 
 ## [0.17.0] — 2026-08-23
 
 Tags `5f4a022`.
 
-**Re-pinning alone is not enough.** `plan-cell` takes a new **required**
-`expected-head` input, so a wrapper that bumps its pins without adding it has
-every plan cell refuse on its next pull request. Add
-`expected-head: ${{ github.event.pull_request.head.sha }}` to the `plan-cell`
-step of your `plan.yml` in the same change that moves the pins
-(`docs/getting-started.md` §Required — plan), and land the re-pin with **no
-applies pending** (`docs/upgrading.md` §0.17.0).
-
 ### Added
 
-- **A reviewed plan now carries the commit it was produced from, and an apply
-  refuses a plan produced from a different tree.** `plan-cell` reads
-  `git rev-parse HEAD` as its first step — before any repository content
-  executes — refuses an `expected-head` that is empty or that it did not check
-  out, and ships the observed commit as `planned-head.txt` inside
-  `plan.<env>.<slug>`. `apply-cell` compares that record against its own
-  checkout before the decrypt, the state restore and the apply, and refuses when
-  the two disagree or when no record is present at all. The refusal is
-  attributable in the cell summary, so a blocked apply names its cause rather
-  than going red without one (`CONTRACT.md` §Apply-match fingerprint,
-  `docs/troubleshooting.md`).
-
-  This closes a hazard the plan path previously only warned about in prose: a
-  `pull_request_target` wrapper that does not name the head SHA on its checkout
-  plans the **base** branch and reports a clean plan for code it never read. The
-  run-level head check the apply path already performed is unchanged — the new
-  per-cell check is additive, not a replacement.
-
-  **A plan produced before this release cannot be applied after it.** Such an
-  artifact carries no `planned-head.txt`, and the absent record is refused rather
-  than tolerated — there is nothing to compare, so tolerating it would be the
-  fail-open reading. Pre-merge the remedy is a re-plan: push to the pull request. A
-  *re-run* of the old plan run is not one — it replays the workflow file of the
-  commit that triggered it, so it plans on the pre-re-pin engine pin. Post-merge there is no pull request left to push to, so the remedy
-  is a follow-up pull request touching those stacks; draining pending applies
-  before the re-pin merges is what avoids meeting it at all.
+- **A reviewed plan carries the commit it was produced from, and an apply refuses a plan
+  produced from a different tree.** `plan-cell` takes a required `expected-head` input and
+  ships `planned-head.txt`; `apply-cell` refuses a mismatch or a missing record. BREAKING: a
+  plan produced before this release cannot be applied after it.
 
 ## [0.16.2] — 2026-08-22
 
@@ -1253,16 +531,9 @@ Tags `69da4e4`.
 
 ### Fixed
 
-- **`shipmate unlock` could not recognise a lock it was looking straight at.**
-  OpenTofu colours its diagnostics on a runner, so a live cell reads
-  `ESC[31m|ESC[0m ESC[0mLock Info:`; `scripts/lock-info` stripped the box prefix
-  but not the escape sequences, so the block never matched and the cell reported
-  the lock state as **undetermined** and went red — correctly refusing to claim
-  "no lock held", but leaving a releasable lock in place. The apply result
-  comment was unaffected: that path strips colour before this parser runs. The
-  fixtures missed it because the captures they were built from had been put
-  through a colour-stripping filter as they were taken; the new fixture is the
-  verbatim probe output of a real unlock run, escape sequences intact.
+- **`shipmate unlock` could not recognise a lock it was looking straight at:**
+  `scripts/lock-info` did not strip OpenTofu's colour escape sequences, so the cell reported
+  the lock state as undetermined.
 
 ## [0.16.1] — 2026-08-22
 
@@ -1270,23 +541,12 @@ Tags `da5a5ff`.
 
 ### Fixed
 
-- **`v0.16.0`'s `actions/apply-detect` manifest does not load, which breaks the
-  apply and deploy paths.** One output description was written unquoted inside a
-  `{ }` flow mapping with a comma in it, so the comma split the value and GitHub
-  refused the file: `Unexpected value 'which consumes no plan run)'`. Every job
-  using the action died at manifest load, before any step ran. Plan runs are
-  unaffected — they do not use this action — so a consumer on `v0.16.0` sees
-  green plans and a dead apply. **Re-pin to this release.** A guard now asserts
-  every action manifest's inputs and outputs carry only keys GitHub defines,
-  because `yaml.safe_load` accepts the split form and GitHub does not.
-- The consumer `apply.yml` wrapper's `plan_run_id` input must be `required:
-  false` with an empty default: `shipmate unlock` applies no plan, and GitHub
-  rejects an empty value for a required `workflow_dispatch` input as "not
-  provided", so every unlock dispatch failed with an HTTP 422 before reaching the
-  engine. `docs/getting-started.md` now shows the corrected shape.
-- The dispatch failure message no longer blames a missing `mode` input for any
-  unlock-path 422. It says that only when GitHub names `mode` as unexpected; any
-  other 422 now prints the API's own message without a misleading explanation.
+- **`v0.16.0`'s `actions/apply-detect` manifest does not load, which breaks the apply and
+  deploy paths.** An unquoted comma split an output description. A guard asserts every
+  manifest's inputs and outputs carry only keys GitHub defines.
+- The consumer `apply.yml` wrapper's `plan_run_id` input must be `required: false` with an
+  empty default, or every unlock dispatch fails with HTTP 422.
+- The dispatch failure message blames a missing `mode` input only when GitHub names `mode`.
 
 ## [0.16.0] — 2026-08-22
 
@@ -1294,1210 +554,373 @@ Tags `4fda446`.
 
 ### Added
 
-- **A stranded state lock is now visible and releasable from the pull request.**
-  A cancelled or killed apply can die holding the backend's state lock, and every
-  later apply of that cell then fails acquiring it. Two stages: the apply result
-  comment now carries a 🔒 line under its table naming each cell whose apply was
-  blocked by a lock, the lock's id and, when the backend reported a usable
-  timestamp, when it was taken; and a new verb, `shipmate unlock <env>`,
-  releases it. The environment is required — a destructive verb gets no wildcard.
-  It probes every cell in that environment whose `apply / <stack> / <env>` check
-  is still pending and force-unlocks only the id the probe read back, reporting
-  per cell in its own job rather than in a comment. A cell that cannot determine
-  its lock state fails red; it is never reported as unlocked.
-
-  **Adopting it takes two lines in your wrappers**: `mode: ${{
-  steps.authz.outputs.mode }}` on the dispatch step of `comment-ops.yml`, and a
-  `mode` input on `apply.yml` passed through to the engine's `apply.yml`
-  (`docs/getting-started.md` has both). Wire the first without the second and the
-  dispatch is rejected, with an error naming the missing `mode` input and telling
-  you to re-pin — GitHub refuses a `workflow_dispatch` carrying an input the
-  target workflow does not declare. Wire neither and nothing tells the engine the
-  command was an unlock: it dispatches as an ordinary apply with no plan run and
-  dies on the plan run id, an error that names neither unlock nor `mode`.
-  `shipmate apply` is unaffected in every case — the mode travels in the dispatch
-  body only when it is `unlock`.
-
-  Two things worth knowing before you need it. It needs **no IAM change**:
-  releasing a lock is the same `s3:DeleteObject` on the `.tflock` object that
-  taking one already requires. And **unlocking is not recovery** — a cancelled
-  apply usually advanced the state, so the reviewed plan may now be stale and the
-  next apply refuses under the exact-plan fail-safe. Unlock, re-apply, re-plan if
-  that refuses (`docs/troubleshooting.md` §"A state lock is held").
+- **A stranded state lock is visible and releasable from the pull request.** The apply
+  result comment carries a 🔒 line per lock-blocked cell, and `shipmate unlock <env>`
+  force-unlocks only the lock id its probe read back. Wiring needs a `mode` input on
+  `apply.yml` and `comment-ops.yml`'s dispatch step.
 
 ### Changed
 
-- **The plan comment's verdict is two-state.** It rendered `🔴` whenever a cell
-  had a non-zero destroy count, and a destroy count also covers ordinary
-  replacements — an immutable attribute changing, a `keepers` value moving, a
-  provider forcing replacement — so a routine version bump rendered every
-  affected cell red, in the table a reader scans when something has actually
-  broken. The verdict is now `🟢` no changes / `🟡` changes; impact is carried by
-  the add/change/destroy counts already in the row and the section header. A
-  large teardown and a one-line change render the same `🟡` — the counts beside
-  them are what differ. No input, output or check name changes. Reported by the
-  cross-organization consumer.
+- **The plan comment's verdict is two-state:** `🟢` no changes, `🟡` changes. A destroy
+  count no longer renders `🔴`.
 
 ### Documentation
 
-- `docs/hardening.md` gains a **Plan prerequisites** section: which checklist rows
-  a GitHub plan can actually configure. Row 6 (environment required reviewers, wait
-  timers) needs **Enterprise** on a private repository — below it the API refuses
-  to create one with an `HTTP 422` naming the billing plan (measured on Team;
-  on Free the rule may instead be created and ignored) — while rows
-  3–5, 16 and 17 hold from Pro/Team up. The section also states the posture that is
-  left without row 6, and that it contains no apply-time human approval at all. The
-  old claim that rows 6, 16 and 17 "presuppose a public repository or Team/Pro and
-  above" was wrong for row 6. Same correction in `docs/branch-protection.md`'s
-  private-repo caveat. Reported by the cross-organization consumer.
+- `docs/hardening.md` gains a **Plan prerequisites** section. Row 6 (environment required
+  reviewers, wait timers) needs Enterprise on a private repository;
+  `docs/branch-protection.md`'s private-repo caveat is corrected the same way.
 
 ## [0.15.0] — 2026-08-17
 
 Tags `19de76c`.
 
-**Re-pinning is not enough to use the feature, and re-pinning alone still
-changes behaviour.** Opting in takes three things — the `SHIPMATE_UNGATED_ENVS`
-repository variable, the `ungated-envs:` line on your `comment-ops` step, and
-both engine references in your `apply.yml` pinned at or past this release. A
-stale engine pin against a wired `comment-ops.yml` is the one way this feature
-fails open; `docs/upgrading.md` §"Opt-in: per-environment review gating" ranks
-the two edges.
-
-**Re-pinning changes behaviour for every consumer**, opted in or not. Both apply
-workflows now run an unconditional `review` job that re-reads the pull request's
-`reviewDecision` server-side before anything applies. Three consequences:
-
-- **One extra `shipmate-engine` deployment record per apply run** — the `summary`
-  job already creates one; this is the second. If your repository has put
-  required reviewers on the `shipmate-engine` environment, that approval is now
-  requested at the **start** of an apply run rather than at its end — no
-  shipmate doc recommends that configuration, but the timing change is real.
-- **A broken App-key wiring becomes a loud early failure.** The `review` job
-  mints an App token before any wave, so a repository whose
-  `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_APP_ID` never reaches the engine now
-  fails the run at the start, with the three-cause diagnosis, instead of applying
-  and then failing to complete its apply checks.
-- **A pre-existing TOCTOU is closed for everyone.** Only `comment-ops` used to
-  read the review decision, so an approval dismissed between the comment and the
-  dispatch still applied. The engine now re-reads it at apply time and holds.
-
-*What applies* is unchanged for a repository that sets no
-`SHIPMATE_UNGATED_ENVS`: every environment keeps the branch ruleset's review
-requirement.
-
 ### Added
 
-- **Per-environment review gating (`SHIPMATE_UNGATED_ENVS`).** A repository
-  variable naming the logical environments `shipmate apply` may apply without an
-  approving review, while the ruleset keeps requiring one for the merge and every
-  unnamed environment keeps it for apply. It exempts `REVIEW_REQUIRED` and
-  nothing else — `CHANGES_REQUESTED`, approvers-team membership, mergeable and
-  the exact-plan rule all still decide. A bare `shipmate apply` on an unreviewed
-  pull request applies the named environments and **holds** the rest, their apply
-  checks left pending so `shipmate / gate` keeps blocking the merge; a targeted
-  `shipmate apply <env>` on an unnamed environment is refused. Opting in also
-  takes one line in `comment-ops.yml` — `docs/getting-started.md` §"Applying
-  chosen environments without an approving review" and `docs/upgrading.md`
-  §"Opt-in: per-environment review gating".
+- **Per-environment review gating (`SHIPMATE_UNGATED_ENVS`).** A repository variable naming
+  the environments `shipmate apply` may apply without an approving review; it exempts
+  `REVIEW_REQUIRED` only. A bare `shipmate apply` on an unreviewed pull request holds the
+  unnamed environments; a targeted apply of one is refused. `comment-ops` takes an
+  `ungated-envs` input.
 
-  The repository variable is the **only** source of this policy, and only
-  engine-owned workflows read it. `comment-ops`' `ungated-envs` input buys the
-  crisp early refusal and nothing more: an input wider than the variable costs a
-  dispatched run the engine refuses, not an unreviewed apply.
+### Changed
+
+- **Both apply workflows run an unconditional `review` job** that re-reads the pull
+  request's `reviewDecision` before anything applies. It adds one `shipmate-engine`
+  deployment record per apply run and mints an App token before any wave.
 
 ## [0.14.2] — 2026-08-13
 
 Tags `741118f`.
 
-**Re-pinning is all it takes**: no action input, check name, comment grammar,
-environment or workflow edit changes, and there is nothing to migrate. One
-behavioural difference worth knowing before you re-pin — `shipmate doctor`'s
-ambiguous-naming warning is now reported without a successful plan run behind it,
-and for every logical environment in the repository rather than only the ones the
-pull request planned.
-
 ### Fixed
 
 - **`shipmate doctor` reports ambiguous environment naming even when the declared
-  environment set is unknown.** doctor's environment probes read the declared set
-  from the cell summaries of a plan run that **succeeded**, so a single cell lost
-  to something unrelated — a provider-registry timeout in a 13-cell fan-out —
-  withheld *every* environment finding, including the ambiguous-naming warnings
-  that are the reason to run doctor between a migration's merge and its delete.
-
-  That one check needs no declared set: it compares GitHub Environment **names**
-  against each other (a bare `<env>` beside `<env>-plan` or `<env>-apply`), which
-  is why it survives doctor not being able to read `SHIPMATE_SHARED_ENVS` either.
-  It is now derived from the environments listing alone and reported either way.
-  Two consequences: it covers every logical environment in the repository rather
-  than only the ones a given pull request changed, and the warning has one text
-  source, so a mid-migration report cannot disagree with a post-migration one. The
-  probes that genuinely need the declared set — the missing half of a split pair,
-  the plan/apply protection shape, the secrets a plan environment holds — are
-  unchanged and still say when they were skipped.
-
-- **A documented claim that was wrong in the fail-open direction.**
-  `docs/upgrading.md` §0.13.0 and `CONTRACT.md` §Env model both argued that a
-  layout whose `TF_VAR_env` has no fallback default fails **loudly** when a plan
-  cell binds an environment GitHub auto-created empty. It does not. Measured on
-  Terramate 0.17.1 / OpenTofu 1.12.4: `${{ vars.TF_VAR_env }}` for a variable the
-  environment does not hold still sets the `env:` key, to the empty string; a
-  `run.env` chain of the form `tm_try(env.TF_VAR_env, env.env, "dev")` passes that
-  empty string through rather than falling back, because an empty value is a value
-  and not a miss; and `TF_VAR_env=` satisfies a `variable "env"` that declares no
-  default. So the layouts differ only in **which** wrong environment gets planned —
-  a fallback default's name, or an empty one, which is a different state address —
-  not in whether the plan is quiet. Both pages carry the measurement now and say
-  not to count on a missing default.
+  environment set is unknown**, from the environments listing alone, for every logical
+  environment in the repository.
+- **A documented claim that was wrong in the fail-open direction:** a layout whose
+  `TF_VAR_env` has no default does not fail loudly when a plan cell binds an auto-created
+  empty environment. `docs/upgrading.md` §0.13.0 and `CONTRACT.md` §Env model are corrected.
 
 ### Added
 
-Five documentation sites, all from a cross-organization consumer's report after it
-performed the `0.13.0` environment rename on a layout with **per-workload** OIDC
-roles rather than per-environment ones:
-
-- `docs/upgrading.md` §0.13.0 — **the split/shared asymmetry is stated first**,
-  before both ordered lists instead of after them: in split mode
-  `SHIPMATE_SHARED_ENVS` does nothing and the workflow edit flips the binding, in
-  shared mode the variable flips it and the delete is cleanup. Establishing that an
-  all-split repository never sets the variable previously took reading both lists
-  plus the mixed-repository note. Step 3 also says to **verify the binding in
-  `drift.yml`** by dispatching a run: a green plan run is no evidence about a file
-  the engine cannot read, and the nightly path is where a mis-set binding surfaces
-  last.
-- `docs/aws.md` §GitHub OIDC — what a **stale environment subject reaches**, which
-  is what makes dropping it after the rename more than tidying: follow the closure
-  of what the role can assume, not the role's name, and a read-only plan role that
-  may `sts:AssumeRole` a state role ends at state **write**.
-- `docs/hardening.md` §7–9 — read `SHIPMATE_SHARED_ENVS` at the granularity of what
-  it spends rather than where it is set. The list is per environment, which invites
-  reading a shared cell as revisitable; what it gives up is shipmate's ability to
-  say *plan may read, apply may write* for that cell, and the only way back is
-  splitting the environment again.
-- `docs/hardening.md` §3–5 and `docs/branch-protection.md` — **GitHub evaluates
-  `CODEOWNERS` from the pull request's base branch**, so a sole maintainer's
-  narrowing cannot travel with the workflow-touching change it exists to unblock; it
-  has to merge first, on its own. With a floor: an entry owning `/.github/` (or
-  `CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as the
-  only way out.
-- `docs/troubleshooting.md` — the ambiguity exemption above, its widened scope, and
-  why it is deliberate.
+- Documentation from a consumer's per-workload-role rename: the split/shared asymmetry in
+  `docs/upgrading.md` §0.13.0, stale OIDC subjects in `docs/aws.md`, `SHIPMATE_SHARED_ENVS`
+  in `docs/hardening.md` §7–9, base-branch `CODEOWNERS` in `docs/hardening.md` §3–5 and
+  `docs/branch-protection.md`, and the ambiguity exemption in `docs/troubleshooting.md`.
 
 ## [0.14.1] — 2026-08-12
 
 Tags `8cceb4a`.
 
-**Re-pinning is all it takes**: no action input, check name, comment grammar,
-environment or workflow edit changes, and there is nothing to migrate. One
-behavioural difference worth knowing before you re-pin — every cell now moves a
-restored `terraform.tfstate.d` aside for the duration of `tofu init` and back
-afterwards.
-
 ### Fixed
 
-- **A `local` backend selecting its environment through `TF_WORKSPACE` can plan
-  at all.** `actions/state` restores `<stack>/terraform.tfstate.d` into a fresh
-  checkout that holds no `.terraform` record marking the backend initialised, so
-  `tofu init` classified it as legacy state awaiting migration and asked whether
-  to copy it — and `-input=false` turns that question into `Error asking for
-  state migration action: input is disabled`, before any plan output exists to
-  read. The shape is nastier than a plain failure: the **first** apply on such a
-  repository succeeds, because nothing is cached yet and nothing is restored, and
-  every run after it fails, starting with the next pull request's plan.
-
-  `plan-cell`, `drift-cell` and `apply-cell` now move the directory aside for the
-  init and move it back afterwards, on the failure path too. Both halves are
-  load-bearing: without the move-aside the init dies, without the move-back the
-  cell plans or applies against no state at all. The hidden path comes from
-  `mktemp -du` rather than a fixed name, so it cannot collide with something
-  already in `RUNNER_TEMP` and swallow the state that holds. The single-state
-  case — one `terraform.tfstate`, as the folder-per-env layout has — is
-  short-circuited by OpenTofu and is deliberately not hidden.
-
-  Nothing regressed here: the path had never executed. It surfaced on
-  `repo-example-workspaces`, whose resources carry no keeper, so
-  `terramate list --changed` had always returned nothing and no cell of that
-  flavour had ever planned.
-
-- **`scripts/register-app` refuses a `--repo` owner beginning with `-`.** The
-  value is its own argv element in `gh variable set --repo <value>`, where one
-  starting with a hyphen is the shape a CLI reads as a flag rather than a value;
-  GitHub logins cannot start with one either, so the pattern now anchors both
-  halves alphanumeric. Hand-run bootstrap only, and `argparse` already refused
-  the space-separated form — the `--repo=` form is what reached the regex.
+- **A `local` backend selecting its environment through `TF_WORKSPACE` can plan at all.**
+  `plan-cell`, `drift-cell` and `apply-cell` move a restored `terraform.tfstate.d` aside for
+  `tofu init` and back afterwards.
+- **`scripts/register-app` refuses a `--repo` owner beginning with `-`.**
 
 ### Added
 
-- **Three documentation limits that cost a consumer a round trip each**, all
-  reported from a real AWS bootstrap outside this organization:
-  - `docs/aws.md` — a plan against **empty state** refreshes nothing, so none of
-    the resource reads the run will need are attempted: a too-tight policy on
-    either role first surfaces at the **apply**, and once state exists the plan
-    role is exercised only as far as the refresh reaches. Plus the trap that
-    survives an otherwise careful policy — an action taking no resource-level
-    permission (`ssm:DescribeParameters`) can never be satisfied by an ARN-scoped
-    statement.
-  - `docs/troubleshooting.md` — a retry is not a re-plan. A failed apply leaves
-    its `apply / <stack> / <env>` check *pending*, so `snapshot` accepts a retry,
-    which is the right recovery only when nothing moved; a partial apply that
-    advanced the state serial needs a re-plan, and the exact-plan fail-safe
-    refuses the retry instead. And no supported route aims an apply at a
-    superseded plan, so those fail-safes sit behind a control that already
-    prevents the situation.
-  - `docs/branch-protection.md` — a single maintainer with a `CODEOWNERS`
-    covering the changed files cannot satisfy `require_last_push_approval` and
-    `require_code_owner_review` together: narrow the `CODEOWNERS` or add a bypass
-    actor, which spends exactly the control a leaked App key cannot get past.
+- **Three documentation limits:** empty-state plans in `docs/aws.md`, retry versus re-plan in
+  `docs/troubleshooting.md`, and the single-maintainer `CODEOWNERS` conflict in
+  `docs/branch-protection.md`.
 
 ## [0.14.0] — 2026-08-12
 
 Tags `f485a78`.
 
-**Re-pinning is enough for this release, with one exception: grep your
-`global.shipmate.explicit_envs` for entries carrying a `-plan` or `-apply`
-suffix before you bump the pin.** Such an entry used to validate and then match
-nothing; it now fails the run, naming the entry and the bare env name to write
-instead (`docs/upgrading.md` §0.14.0). Nothing else needs consumer action — no
-workflow edit, no environment to create, rename or delete, no permission to
-grant. The previous release's per-env migration has no counterpart here.
-
 ### Added
 
-- **An apply that binds a GitHub Environment which does not exist is now
-  refused before any wave runs.** `actions/verify-environments` runs as one step
-  in `apply-env-level.yml`'s `snapshot` job, which every apply route fans
-  through and which already runs before `wave0` holding no credential. GitHub
-  creates a missing environment on demand — no variables, no secrets, no
-  reviewers, no wait timer, no deployment branch policy — and the apply-match
-  fingerprint cannot catch that: it compares variable *content*, so a
-  legitimately empty shared environment and an auto-created one hash identically
-  for any layout that injects no non-empty `TF_VAR_*` and no `TF_WORKSPACE`.
-  Existence, checked before the waves, is the only discriminator. It is
-  fail-closed in the three places that would otherwise have defaulted open — a
-  listing that could not be read fails the run (a re-run clears a transient
-  failure), a listing whose `total_count` exceeds what it returned fails the
-  run, and a hand-off carrying no cell is malformed rather than an idle pass.
-
-  **No consumer change.** The `snapshot` job additionally declares
-  `actions: read`, which is measured rather than decorative: on a **private**
-  repository the environments endpoint returns 403 under the `checks: read` the
-  job declared, and a scope matrix on that repository isolated `actions: read`
-  as the scope that works — `contents: read` and `deployments: read` both 403.
-  All nine jobs calling `apply-env-level.yml` across the documented `apply.yml`,
-  `apply-all.yml` and `deploy.yml` already grant it for their wave jobs, so the
-  permission cap at each `uses:` boundary is already high enough and no wrapper
-  changes. Worth knowing only if you wrote your wrappers by hand.
-
-  Read the scope for what it is. This closes the apply side for **every**
-  layout, the folder-per-env one the fingerprint cannot help included; it does
-  *not* make a mis-set naming mode loud in general, because the plan-side
-  binding is consumer YAML the engine cannot read. Out of scope by design: a
-  race between the pre-flight and the waves, and an environment that exists but
-  is wrong — including one an earlier mis-set run auto-created, which satisfies
-  existence from then on. The pre-flight runs per env-level, so a later level's
-  refusal can follow an earlier level's applies.
+- **An apply that binds a GitHub Environment which does not exist is refused before any wave
+  runs.** `actions/verify-environments` runs in `apply-env-level.yml`'s `snapshot` job, which
+  now declares `actions: read`. An unreadable or truncated listing fails the run.
 
 ### Changed
 
-- **BREAKING for consumers — `global.shipmate.explicit_envs` rejects an entry
-  carrying a `-plan` or `-apply` suffix.** The value is matched against the bare
-  logical env name on the apply checks, so a suffixed entry validated and then
-  excluded nothing: the env an author meant to hold back from a bare
-  `shipmate apply` was applied by it. That is now a loud failure naming the
-  entry and the bare name to write instead. Every documented environment name
-  now carries a suffix, which is what makes the mistake likely — a configuration
-  that worked before this release can fail on the pin bump alone.
-  `CONTRACT.md` and `docs/hardening.md` state the rule rather than the old
-  silent failure.
+- **BREAKING: `global.shipmate.explicit_envs` rejects an entry carrying a `-plan` or `-apply`
+  suffix**, naming the bare name to write instead.
 - **`shipmate doctor` fails loud when the environments listing is truncated.**
-  It read one unpaged request as complete; a partial page infers a naming mode
-  the repository is not in, which asserts the wrong mode and redirects the
-  plan-secret probe to the wrong environment. `total_count` is read strictly —
-  absence of the key means completeness is unknown, not complete. Consumer-
-  visible edge: a repository with more than 100 GitHub Environments now gets
-  doctor's degrade warnings for the environment probes where it used to get
-  environment findings.
 
 ### Fixed
 
-- **`shipmate doctor` reports what the environment names actually imply.** In
-  ambiguous naming — a bare `<env>` beside a suffixed sibling — it had stopped
-  running the per-role existence loop, so a repository holding `prod` and
-  `prod-plan` and no `prod-apply` was no longer told the half was missing; and
-  the bare environment's deployment-branch-policy finding had dropped to shared
-  mode's NOTICE, whose text calls that policy correct, when while the naming is
-  ambiguous that environment is what an unmigrated `plan.yml` still binds and
-  the policy refuses those plan cells. Both are restored.
-
-  The ambiguity WARNING no longer asserts that the unused naming's protection
-  rules are inert, and no longer advises deleting that environment: the plan
-  side is bound by the consumer's own `plan.yml`, which the engine cannot read,
-  so with a static `-plan` binding and the env shared **both** namings are live.
-  It names what decides each side and says either naming may be the unbound one.
-  The App-key and secret findings take their noun from the environment's role
-  rather than the repository's mode, so shared mode no longer reads "plan
-  environment `dev-eu`" beside a sibling notice calling the same environment
-  shared. And the findings for a name that does not exist no longer say stacks
-  "cannot plan or apply" — the binding resolves to a name GitHub auto-creates
-  empty, so the jobs run and describe whatever the layout defaults to.
-- **A mode/name mismatch fails loud only where the environment injects
-  something the fingerprint reads.** `0.13.0` said it does so "by
-  construction". The fingerprint hashes non-empty `TF_VAR_*` plus
-  `TF_WORKSPACE`, so a folder-per-env layout hashes the empty set on both sides,
-  matches, and — before this release's pre-flight — applied inside the
-  auto-created environment. The condition is now stated once normatively in
-  `CONTRACT.md` §Env model, and every site that leaned on the claim references
-  it: this changelog's `0.13.0` entry, `docs/upgrading.md` §0.13.0,
-  `docs/troubleshooting.md`, and the apply-binding guard's docstring. Also
-  corrected: on such a layout what a mismatch silently loses is the
-  environment's protection rules and its OIDC subject binding, not the code
-  applied or the state file addressed. An environment holding only
-  `AWS_ROLE_ARN` gets no refusal either.
-- **The static plan-side bindings are now pinned by a guard**, not only the
-  mixed-mode expression in the contract. `docs/getting-started.md`'s `plan.yml`
-  and `docs/drift.md`'s `drift.yml` — the fences a new consumer copies
-  wholesale — had nothing but "does it parse" behind them, so a binding could
-  lose its suffix in a docs edit. Same shape as the existing assertions: a
-  hand-written constant, the whole `(job, environment)` value compared, and
-  exactly one env-bearing job asserted per page.
+- **`shipmate doctor` reports what the environment names actually imply** in ambiguous
+  naming: the missing half is reported again, and findings take their noun from the
+  environment's role.
+- **A mode/name mismatch fails loud only where the environment injects something the
+  fingerprint reads.** `CONTRACT.md` §Env model states the condition; the `0.13.0` claim is
+  corrected.
+- **The static plan-side bindings in `docs/getting-started.md` and `docs/drift.md` are pinned
+  by a guard.**
 
 ## [0.13.0] — 2026-08-12
 
 Tags `181413c`.
 
-**Re-pinning is not enough for this release: every GitHub Environment is renamed,
-and `plan.yml` / `drift.yml` change one line each.** There is no compatibility
-shim — `docs/upgrading.md` §0.13.0 is the per-env migration, and it must happen in
-the same change that moves your pins.
-
 ### Changed
 
-- **BREAKING for consumers — plan and apply bind `<env>-plan` and
-  `<env>-apply`.** The plan side was the bare `<env>`; it is now `<env>-plan`, so
-  per logical env: create `<env>-plan`, copy the bare environment's variables to
-  it, bind `${{ matrix.environment }}-plan` in `plan.yml`'s `plan` job and
-  `drift.yml`'s `drift` job, **merge that**, and only then delete the bare
-  `<env>` — `plan.yml` is `pull_request_target`, so until the edit is on the
-  default branch every plan run still binds the bare environment. Create the environments
-  **before** editing the workflows: a job binding an environment that does not
-  exist gets an empty one auto-created by GitHub, and a flavor whose `TF_VAR_env`
-  has a fallback default then plans the wrong environment instead of failing. Only
-  the engine's apply waves read `SHIPMATE_SHARED_ENVS`; your plan-side binding is
-  one expression for the whole repository, so a repository running **mixed** modes
-  carries the engine's expression there rather than a static suffix
-  (`CONTRACT.md` §Env model, `docs/upgrading.md` §0.13.0).
-
-  Nothing else moves — `matrix.environment`, check names, tags, `explicit_envs`,
-  artifact names and comment grammar all key on the bare logical env name; the
-  suffix exists only where a job binds an environment.
-
-  The rename is what makes a mis-set mode loud wherever the environment injects a
-  non-empty `TF_VAR_*` or `TF_WORKSPACE`. Under the old naming the dangerous direction was silent: an apply
-  wave falling back to the bare `<env>` landed on the live *plan* environment and
-  applied with plan variables, no reviewer and no apply role. Now either mismatch
-  resolves to an environment nobody created, and the apply-match fingerprint
-  refuses the cell — except on a folder-per-env layout, which injects nothing, so
-  both sides hash the empty set and the apply runs inside that auto-created
-  environment. There the mismatch is `shipmate doctor`'s finding, not the apply's
-  (`CONTRACT.md` §Env model states the condition).
+- **BREAKING: plan and apply bind `<env>-plan` and `<env>-apply`.** The plan side was the
+  bare `<env>`; `plan.yml` and `drift.yml` bind `${{ matrix.environment }}-plan`.
+  `matrix.environment`, check names, tags, `explicit_envs`, artifact names and comment
+  grammar key on the bare name.
 
 ### Added
 
-- **`SHIPMATE_SHARED_ENVS` — one environment for both paths, opt in per env.** A
-  logical env named in this repository variable (comma-separated logical names,
-  **no spaces after the commas**, matched case-insensitively on comma boundaries)
-  binds the bare `<env>` for plan and apply alike. `-plan` and `-apply` are
-  reserved suffixes for logical env names.
-
-  What it costs, for that env: the **reviewer gate** — not relocated, removed,
-  because a protection rule gates every job binding the environment and would
-  stall the plan cells and the nightly drift run — and the **OIDC subject split**:
-  plan and apply tokens become identical in `sub`, so no trust policy can separate
-  them and plan-time branch code can assume the write role. A deployment branch
-  policy scoped to the default branch becomes conditional too, since plan runs at
-  the pull request's base ref. `docs/hardening.md` §6 and §7–9 state the full
-  price; choose it for envs where the plan path holds no credentials at all.
-- **`shipmate doctor` infers the naming per env and words its findings for it.**
-  Split, shared, or ambiguous — a bare `<env>` beside a suffixed sibling warns
-  that which naming each path binds is undetermined, so either one may be bound
-  by nothing with its protection rules reading as a control in no code path, and
-  the missing half of the split pair is still reported.
-  It reads environment *names*, never the variable (that needs a permission
-  the App manifest does not declare), so a repository with a bare `<env>` and the
-  variable unset gets no *existence* finding — bare-only is what shared mode looks
-  like, and it is reported as a shared environment.
+- **`SHIPMATE_SHARED_ENVS` — one environment for both paths, opt in per env.** A logical env
+  named in it binds the bare `<env>` for plan and apply, giving up the reviewer gate and the
+  OIDC subject split. `-plan` and `-apply` are reserved suffixes.
+- **`shipmate doctor` infers the naming per env** — split, shared or ambiguous — and words
+  its findings for it.
 
 ## [0.12.0] — 2026-08-11
 
 Tags `e9eb27d`.
 
-**Re-pinning is not enough for this release: rewrite your wrapper `secrets:`
-blocks in the same change.** Every documented wrapper now passes secrets by
-name, and `secrets: inherit` is no longer a supported call shape.
-
 ### Changed
 
-- **BREAKING for consumers — pass the engine's secrets by name.** In your
-  `plan.yml`, `apply.yml` and `deploy.yml`, replace `secrets: inherit` with the
-  block `docs/getting-started.md` shows. Pass only what each callee declares:
-  `summary.yml` takes `SHIPMATE_APP_PRIVATE_KEY` alone, while `apply.yml`,
-  `apply-all.yml` and `deploy.yml` take `SHIPMATE_PLAN_PASSPHRASE` as well —
-  naming a secret a callee does not declare kills the run at load time. Keeping
-  `inherit` still works inside the engine's own organization, so this is not an
-  immediate breakage there, but it is the only supported shape from here.
-
-  Two reasons. `inherit` forwards *every* secret the calling repository can see
-  — cloud keys, PATs, anything a later workflow added — to a workflow that is
-  upgraded by moving a SHA. And it works only within one organization or
-  enterprise: called from outside, it delivers nothing **and** suppresses the
-  value the callee's `environment: shipmate-engine` binding would have supplied,
-  so the App key never arrives and no App-authored surface exists at all — no
-  `shipmate / gate`, no pending apply checks, no comment. Measured in a
-  cross-organization consumer, both halves.
-
-  Key placement does **not** change: the key stays a secret on your
-  `shipmate-engine` environment. A called workflow's `environment:` resolves in
-  the *calling* repository, and an environment's value wins over whatever the
-  caller passes, empty included — which is why the same snippets serve
-  consumers inside and outside the engine's organization.
-- **The engine's own reusable calls pass named secrets too.** `apply.yml`,
-  `apply-all.yml` and `deploy.yml` inherited into `apply-env-level.yml`. Both
-  files live in one organization, but `inherit` is evaluated against the *run*,
-  which belongs to the consumer — so a cross-organization consumer's applies
-  would have executed and then stranded their `apply / <stack> / <env>` checks
-  pending forever. No consumer-side change could have reached that hop.
-  Adding a secret to a reusable workflow now follows an ordering rule
-  (`docs/releasing.md`): declare in the callee, merge, bump the pin, then map.
+- **BREAKING: pass the engine's secrets by name.** `secrets: inherit` is no longer a
+  supported call shape. `summary.yml` takes `SHIPMATE_APP_PRIVATE_KEY`; `apply.yml`,
+  `apply-all.yml` and `deploy.yml` also take `SHIPMATE_PLAN_PASSPHRASE`. The key stays a
+  secret on the `shipmate-engine` environment.
+- **The engine's own reusable calls into `apply-env-level.yml` pass named secrets too.**
 
 ### Added
 
-- **An empty App key now names its cause.** Every job whose App-token mint is
-  mandatory first checks that the key arrived and, if it did not, reports which
-  of the three wiring mistakes to look at. The upstream mint reported only "must
-  be set to a non-empty string", which three unrelated causes produce.
-  `comment-ops` is deliberately excluded: its mints already fall back to a PR
-  comment that says the same thing, and `shipmate help` answers with no App
-  token at all.
+- **An empty App key now names its cause.** Every job whose App-token mint is mandatory
+  reports which of the three wiring mistakes to look at. `comment-ops` is excluded.
 
 ## [0.11.0] — 2026-08-11
 
 Tags `4034746`.
 
-**Re-pinning is enough for this release, but read the two notes first.** No
-consumer workflow file has to be rewritten. However, one new `detect`-time
-assertion can fail a repository that has been planning green, and it does so
-because that repository was already applying under the wrong environment — see
-below. The one-time App bootstrap also changed shape; that only matters if you
-are registering a new App.
-
 ### Added
 
-- **`AWS_ROLE_ARN_<WORKLOAD>` selects the apply role per workload.** The engine
-  read exactly one `AWS_ROLE_ARN` from the Environment a cell binds to, which
-  forced one GitHub Environment per (workload × env × region) on any repository
-  whose Environments are shared across workloads. Each wave job now prefers
-  `AWS_ROLE_ARN_<WORKLOAD>` when the cell carries a `workload/<name>` tag and
-  falls back to `AWS_ROLE_ARN`, so one Environment can serve several workloads.
-  `<WORKLOAD>` is the tag upper-cased with `-` mapped to `_`. Opt-in: a
-  repository that sets only `AWS_ROLE_ARN` is unaffected on every path. The
-  suffix is carried onto artifact-derived cells too, so the dispatched and bare
-  `shipmate apply` paths behave like the post-merge deploy.
+- **`AWS_ROLE_ARN_<WORKLOAD>` selects the apply role per workload**, falling back to
+  `AWS_ROLE_ARN`. `<WORKLOAD>` is the `workload/<name>` tag upper-cased with `-` mapped to
+  `_`.
 - **`detect` asserts that the injected environment survives `terramate run`.**
-  See Changed — this is the note to read before re-pinning.
-- **The apply DAG's shape is reported.** The dispatched `shipmate apply` detect
-  and the post-merge deploy detect print stack count, `after` edge count,
-  topological level count and the size of the largest level. A missing `after`
-  edge cannot be detected — "no declared dependency" is a legitimate state — so
-  this reports the shape and lets a reviewer who knows the repository judge it.
-  A plan run does not print it; `docs/upgrading.md` says so and points at
-  `terramate experimental run-graph --label stack.dir` for the point where the
-  information is still actionable.
-- **`docs/upgrading.md` gains a migrating-from-another-tool section.** Ordering,
-  tags, conditional AWS profiles and `run.env` are all the same shape: things a
-  working repository already expresses somewhere the engine does not read.
+- **The apply DAG's shape is reported** by the dispatched and post-merge detects: stack
+  count, `after` edge count, level count and largest level.
+- **`docs/upgrading.md` gains a migrating-from-another-tool section.**
 
 ### Changed
 
-- **`detect` now fails when `terramate.config.run.env` rewrites `TF_VAR_env`,
-  `TF_VAR_region` or `TF_WORKSPACE`.** `run.env` is applied to the child process
-  *after* the ambient environment, so it wins over what the GitHub Environment
-  injected — and `plan-classify --fingerprint-only` runs outside `terramate run`,
-  so plan and apply both hash the correct job environment while `tofu` on both
-  sides ran under the rewritten one. The fingerprint agrees, the exact-plan
-  invariant holds, and every cell can collapse onto one state key with plan,
-  gate and apply all green. `detect` injects a sentinel and asserts it comes
-  back unchanged. To keep a local default, put the injected name first in the
-  chain: `tm_try(env.TF_VAR_env, env.env, "dev")`. `TF_DATA_DIR` needs the same
-  resolution or the per-environment `.terraform` split drifts from what `tofu`
-  actually receives. A config that cannot be evaluated in `detect` at all — a
-  bare `env.X` supplied only by the plan Environment — is reported as a warning
-  rather than failing the run.
-- **A workload-variable collision fails loud.** `workload/net-edge` and
-  `workload/net_edge` both map to `AWS_ROLE_ARN_NET_EDGE`, so one Environment
-  variable would serve two workloads and a wave job would apply under the wrong
-  IAM identity. `detect` refuses rather than picking one, naming both tags.
-- **The untagged-stack failure names every untagged stack and the count**, not
-  the first one it hit, so a migration can be re-run and watched shrink.
-- **The matrix-ceiling error points at remedies that exist.** `MATRIX_LIMIT` is
-  enforced only where cells are built from Terramate tags, so when it trips
-  there is no successful plan run and no reviewed `.otplan` — a targeted
-  `shipmate apply <env>` is not a way past it. Splitting the change is the
-  general remedy; where the fan-out comes from a shared local module, which is
-  one atomic change by nature, the only lever is reducing the environments in
-  play. `CONTRACT.md` §Fan-out states the ceiling.
-- **BREAKING for the bootstrap only — `scripts/register-app` takes `--name` and
-  `--out` and creates no repository secret.** It previously wrote the App
-  private key to a repository secret, readable by any workflow on any branch,
-  which is the exposure the engine's key placement exists to prevent. It now
-  writes the PEM to `--out` with `O_EXCL` and mode `0600` (POSIX; on Windows the
-  mode is not applied and the file inherits the directory's ACLs). The three
-  paragraphs of remediation `docs/github-app.md` §2 carried are gone with it.
-  Registration is one command: a one-shot `127.0.0.1` listener captures the
-  manifest code, matched against a per-run `state`, so the code never leaves the
-  machine and there is no copy-paste step. This affects you only if you register
-  a new App; an existing installation is untouched.
+- **`detect` fails when `terramate.config.run.env` rewrites `TF_VAR_env`, `TF_VAR_region` or
+  `TF_WORKSPACE`.** A config `detect` cannot evaluate is a warning.
+- **A workload-variable collision fails loud**, naming both tags.
+- **The untagged-stack failure names every untagged stack and the count.**
+- **The matrix-ceiling error points at remedies that exist.**
+- **BREAKING for the bootstrap only: `scripts/register-app` takes `--name` and `--out` and
+  creates no repository secret.** It writes the PEM to `--out` and captures the manifest code
+  on a one-shot `127.0.0.1` listener.
 
 ### Fixed
 
-- **`app/manifest.json` had no `redirect_url`,** so GitHub rejected the manifest
-  POST outright and step 1 of `docs/github-app.md` failed for everyone.
-- **The manifest's App name was one GitHub already reserves globally.** App
-  names are unique across all of GitHub, so a verbatim paste was rejected with
-  "Name has already been taken". It is a placeholder now.
-- **`terramate experimental run-graph` needs `--label stack.dir`** to emit stack
-  paths. Without it nodes are labelled by stack *name*, so same-named stacks in
-  different directories collapse into one node — the norm in a
-  `{workload}/{stack}` layout.
-- **The `disable_safeguards` prohibition is narrowed** to `outdated-code` and
-  `all`, which are what actually break `checkGenCode`. The two working-tree
-  checks are never evaluated on a `--no-recursive` cell.
-- **A named AWS `profile` in generated HCL is documented as a requirement**, not
-  an example: the apply path holds only the OIDC session and there is no
-  consumer step in which to write an `~/.aws/config`, so a literal `profile`
-  must be conditional on a variable defaulting to false.
-- **`explicit_envs`' boundary is stated.** It constrains the bare pre-merge
-  `shipmate apply` only. Honouring it post-merge would strand those cells: the
-  pull request is closed by then and the apply requirements include
-  `mergeable`, so nothing could ever apply them.
+- **`app/manifest.json` had no `redirect_url`,** so GitHub rejected the manifest POST.
+- **The manifest's App name was one GitHub already reserves globally.** It is a placeholder.
+- **`terramate experimental run-graph` needs `--label stack.dir`** to emit stack paths.
+- **The `disable_safeguards` prohibition is narrowed** to `outdated-code` and `all`.
+- **A named AWS `profile` in generated HCL is documented as a requirement** to be
+  conditional on a variable defaulting to false.
+- **`explicit_envs`' boundary is stated:** it constrains the bare pre-merge `shipmate apply`
+  only.
 
 ## [0.10.0] — 2026-08-09
 
 Tags `bbd9a74`.
 
-**Re-pinning alone is not enough for this release.** The consumer contract for
-the plan path changed: you must rewrite `.github/workflows/plan.yml` and delete
-`.github/workflows/summary.yml` in the same change that moves your pins. A
-repository that re-pins without rewriting gets no `shipmate / gate`, so its pull
-requests cannot merge. `CONTRACT.md` §Post-plan topology is the written form,
-and the `repo-example-*` samples carry the new shape from this release onward.
-
 ### Changed
 
-- **BREAKING — the plan path is one workflow now, and every consumer must
-  rewrite `plan.yml` and delete `summary.yml`.** `plan.yml` moves to
-  `pull_request_target` and gains a third job, `summary`, which is
-  `uses: <owner>/shipmate/.github/workflows/summary.yml@<sha>` with
-  `secrets: inherit` and five inputs (`pr-number`, `head-sha`, `detect-result`,
-  `plan-result`, `planned-cells`). Because `pull_request_target` checks out the
-  base by default, `detect` and `plan` must now name
-  `ref: ${{ github.event.pull_request.head.sha }}` on their checkout explicitly
-  — without it they plan the base branch and report a clean plan for a pull
-  request they never read. The consumer's `.github/workflows/summary.yml` is
-  deleted; the engine's is now a `workflow_call` workflow whose single job binds
-  `shipmate-engine`, checks out nothing, and carries both trust conditions (the
-  fork refusal and the draft skip) on its own `if:`, where a consumer cannot
-  drop them. The old `workflow_run` topology is **not supported** — a repository
-  that re-pins without rewriting gets no gate, so the pull request cannot merge.
-  **The migration pull request cannot gate itself, and needs a one-time
-  bypass.** A `pull_request` run uses the workflow file from the pull request's
-  own head, which no longer declares that trigger; a `pull_request_target` run
-  uses the file on the default branch, which does not declare it yet. So the
-  pull request that performs the migration produces no plan run, no checks and
-  no `shipmate / gate` at all — verified, not predicted. No ordering avoids it:
-  the first commit whose head declares only `pull_request_target` is
-  ungatable by construction. Merge that one pull request with an administrative
-  bypass (an org-admin `bypass_actor` on the ruleset, or a temporary
-  `enforcement: evaluate`), and restore enforcement immediately afterwards. Every
-  pull request after it gates normally.
-  Nothing matches on the plan workflow's `name:` any longer, but its **file
-  path stays load-bearing** and unguarded: `apply-detect`'s provenance gate,
-  `deploy-detect`'s post-merge lookup, comment-ops' reviewed-plan lookup and
-  doctor's `pull_request_target` exemption all address it as `plan.yml`. The
-  `repo-example-*` samples carry the new shape from the release that ships this
-  change onward; `CONTRACT.md` §Post-plan topology is the written form. The
-  `summary` job must also grant `permissions: contents: read`: a callee's
-  permissions are capped by the calling job's, and granting less kills the whole
-  run at startup with no job, no log and no annotation to explain it.
-- **Plans now run against the branch tip, not the merge commit.** The old
-  `pull_request` trigger checked out `refs/pull/<n>/merge`; the explicit
-  `head.sha` checkout does not produce a merge ref. A pull request behind its
-  base now plans what the branch says rather than what the merge would produce.
-  The surviving safety net is the stale-plan refusal at apply time, which still
-  fails a plan whose state has moved; **require branches to be up to
-  date before merging** (`docs/branch-protection.md`) is the setting that closes
-  the rest.
-- **A summary-job failure now reds the whole plan run.** The summary job lives
-  inside the plan run rather than in a separate `workflow_run` run, so a run
-  whose gate could not be written no longer reports `success`. Queries that look
-  for a *successful* plan run — comment-ops' reviewed-plan lookup, its
-  cell-summary fetch for `shipmate doctor`, and `deploy-detect`'s post-merge
-  artifact lookup — stop finding it. Fail-closed (apply refuses, and re-running
-  the run fixes it), but it is new coupling between the summary step and every
-  consumer of the plan run's conclusion.
-- **Two open pull requests sharing one head SHA both write the gate.** The
-  newest-run-for-this-SHA arbitration went with `workflow_run`, and the caller's
-  `concurrency: plan-<pr number>` group is keyed on the pull request number, so
-  it does not cover this case. Last write wins, as before.
-- **`shipmate doctor` has ten probes, not eleven.** The consumer plan/summary
-  wiring probe is gone with the coupling it policed; `scripts/wiring` and its
-  `detect`-time gate are deleted with it. Doctor's `pull_request_target` probe
-  now exempts `.github/workflows/plan.yml` by exact name and warns for every
-  other workflow file, because the trigger is safe only in the shape the engine
-  ships — the credentialed job checking nothing out.
-- **The `plan-matrix.<N>` marker artifact is gone.** `detect` declares the
-  planned cell count as an action output and the caller passes it to the summary
-  job as `planned-cells`, so the gate no longer reconciles an artifact listing;
-  `actions/summary` loses its `artifact-count` input. The gate still holds
-  whenever the cell summaries read disagree with the planned count, in either
-  direction.
+- **BREAKING: the plan path is one workflow.** `plan.yml` moves to `pull_request_target` and
+  gains a `summary` job calling the engine's `summary.yml` with five inputs; `detect` and
+  `plan` check out `github.event.pull_request.head.sha`. The consumer's `summary.yml` is
+  deleted, and the `workflow_run` topology is not supported.
+- **Plans run against the branch tip, not the merge commit.**
+- **A summary-job failure reds the whole plan run.**
+- **Two open pull requests sharing one head SHA both write the gate;** last write wins.
+- **`shipmate doctor` has ten probes, not eleven.** `scripts/wiring` is deleted; the
+  `pull_request_target` probe exempts `.github/workflows/plan.yml` by exact name.
+- **The `plan-matrix.<N>` marker artifact is gone.** `detect` outputs the planned cell count
+  as `planned-cells`; `actions/summary` loses its `artifact-count` input.
 
 ### Fixed
 
-- **`CONTRACT.md` § Terramate safeguards described a protection that does not
-  run.** It said `git-untracked` and `git-uncommitted` stay live on the cells and
-  that "a real dirty tree must block". Terramate evaluates both only on the
-  recursive path (0.17.1, `commands/run/run.go`), and every cell passes
-  `--no-recursive`, so neither is ever reached: an untracked file or a modified
-  tracked file in the checkout does **not** block a plan or an apply. Documented
-  behaviour only — no engine behaviour changed. `outdated-code` and
-  `git-out-of-sync` do run, and the engine's
-  `--disable-safeguards=git-out-of-sync` is load-bearing: without it a cell on a
-  reviewed SHA behind the default branch refuses outright. Two things follow for
-  a consuming repository: `outdated-code`, now the only working safeguard on a
-  cell, is **overridable from your own `terramate.config`** and the engine cannot
-  re-enable it — do not set `disable_safeguards` there; and
-  `.terraform.lock.hcl` has come **out** of the mandatory gitignore list, since
-  committing it is OpenTofu's recommendation for pinning providers and a cell
-  tolerates it either way. The rest of that list is unchanged and still a MUST.
-  See `CONTRACT.md` § Terramate safeguards, and `docs/hardening.md` § What none
-  of this fixes for the stray-`.tf` residual this leaves on reused runners.
+- **`CONTRACT.md` § Terramate safeguards described a protection that does not run:**
+  `git-untracked` and `git-uncommitted` are never evaluated on a `--no-recursive` cell.
+  `.terraform.lock.hcl` leaves the mandatory gitignore list. Documentation only.
 
 ## [0.9.0] — 2026-08-09
 
 Tags `12bdceb`.
 
-No action inputs, outputs, check names or comment grammar changed — but read
-the `script`-block note below before re-pinning: this is the one release where
-re-pinning alone can change what runs in your repository.
-
 ### Changed
 
-- **The cells invoke `terramate run … -- tofu …` and name the commands
-  themselves.** `plan-cell`, `apply-cell`, and `drift-cell` ran `terramate
-  script run <name>`, whose command list lives in the consuming repository's
-  HCL — author-controlled on a pull request, so the exact-plan invariant (apply
-  the reviewed `stack.otplan`, nothing else) was enforced by the branch rather
-  than by the engine. Terramate stays in the path for the stack working
-  directory and the safeguard policy, which is unchanged
-  (`--disable-safeguards=git-out-of-sync`, now asserted on every invocation
-  rather than on one line per cell). See `CONTRACT.md` § Engine-owned tofu
-  invocation.
-
-  Two behaviour deltas to know before you re-pin. The apply no longer passes
-  `-lock=false`, so it now takes whatever lock the configured backend has (the
-  plan still runs unlocked — a plan is read-only); on a remote backend, an apply
-  killed outright — a cancelled run, a concurrency displacement — can leave that
-  lock held, and the next apply then fails acquiring it until someone runs
-  `tofu force-unlock`. And `tofu init` runs
-  outside the teed pipeline, so its output no longer reaches `apply.txt`: a cell
-  whose init fails is reported `failed` and renders link-only in the apply
-  comment ("Apply output unavailable"), with the error in the job log.
-
-  A repository that still defines `script "plan"` / `script "apply"` keeps
-  working, because the engine stops reading those blocks. That is also the
-  behaviour change: **any command a `script` block added is no longer executed,
-  and nothing signals it.** A `tofu validate` gate, a pre-step, or a wrapper
-  around plan or apply stops running the moment you re-pin, so a check you added
-  to fail closed fails open instead.
-
-  New repositories need neither those blocks nor
-  `terramate.config.experiments = ["scripts"]`.
+- **The cells invoke `terramate run … -- tofu …` and name the commands themselves**, instead
+  of `terramate script run <name>`. The engine no longer reads `script "plan"` /
+  `script "apply"` blocks, so any command one added no longer runs.
+- **The apply no longer passes `-lock=false`.**
+- **`tofu init` runs outside the teed pipeline**, so its output no longer reaches
+  `apply.txt`.
 
 ## [0.8.1] — 2026-08-08
 
 Tags `bec15e4`.
 
-Re-pinning is all it takes: no action inputs, outputs, check names or comment
-grammar changed. One behavioural difference worth knowing before you re-pin —
-the `complete` step can now spend up to two minutes re-reading the run's jobs
-listing before it gives up, where it previously read once.
-
 ### Fixed
 
-- **`apply-complete` no longer strands apply checks when the run's jobs listing
-  lags.** It selected check-run ids from `GET /actions/runs/{id}/jobs` by
-  `conclusion == "success"`, so a cell whose conclusion had not yet propagated
-  was indistinguishable from one that never ran: its ids were dropped and the
-  step still exited 0. Seen live — an apply whose eight cells all succeeded left
-  one check `queued` and `shipmate / gate` blocked the PR permanently, while
-  every surface a human reads showed success. The step now classifies each
-  snapshot cell (terminal, absent, or not yet terminal), re-reads the listing
-  until nothing is unresolved, and fails loudly naming whatever it could not
-  resolve.
-
-  This is the gate failing *closed* either way — the danger was never a bad
-  merge, it was that nothing said the check would sit pending forever.
-
+- **`apply-complete` no longer strands apply checks when the run's jobs listing lags.** It
+  re-reads the listing for up to two minutes and fails naming what it could not resolve.
 - **Running out of retries no longer discards the completions the run earned.**
-  The first cut of the retry loop exited before the PATCH step, so one lagging
-  cell in a thirty-cell level stranded all thirty checks where previously
-  twenty-nine completed. Earned ids now accumulate across attempts, are
-  completed, and only then does the step fail on what is left.
-
 - **An empty listing, a failed fetch, and the zero-match floor are retried too.**
-  Each previously hard-failed on the first attempt — the most extreme forms of
-  the very lag the loop exists to absorb were the cases that got none of its
-  budget. Since a failed `complete` fails its env-level and `deploy.yml` skips
-  every successor, that turned a transient blip into a halted multi-region
-  deploy over infrastructure that had already applied.
-
-- **Cells left pending are named, whatever the reason.** Cells that are terminal
-  but not successful (a skipped or failed wave) were dropped as silently as the
-  lagging ones. Nothing that leaves an apply check pending is silent now.
+- **Cells left pending are named, whatever the reason.**
 
 ## [0.8.0] — 2026-08-08
 
 Tags `5ee006b`.
 
-**Re-pinning requires one edit if your workflows read the per-wave outputs
-directly** — see below; grep for `outputs.wave` first. Otherwise re-pinning is
-all it takes. The rest of this release is internal: dead surface removed and
-comment prose cut, with no behaviour change.
-
 ### Removed — breaking
 
-- `actions/apply-detect` no longer declares the per-wave outputs `wave0` …
-  `wave7`. Use the aggregate `waves` object (`fromJSON(...).waveN`), which
-  `apply.yml` and `apply-env-level.yml` have consumed since 0.6.0.
-
-  **This break is silent.** GitHub Actions resolves a read of an undeclared
-  composite-action output to the empty string rather than erroring, so a
-  workflow still on the old shape gets `needs.detect.outputs.wave0 == ''`:
-  the `!= '[]'` skip condition stays true, the wave job is not skipped, and
-  `fromJSON('')` then fails at matrix expansion — the apply run dies before
-  any cell applies and every apply check stays pending. Before re-pinning past
-  this release, grep your workflows for `outputs.wave` and move them to
-  `fromJSON(needs.detect.outputs.waves).waveN`.
-
-- `dev/repin_consumer.rewrite_consumer`, `dev/repin_consumer._survivors` and
-  `dev/repin_internal.rewrite`, and `scripts/waves`' command-line entry point
-  (`main`, `--reverse`, `SHIPMATE_WORKSET`). None had a production caller;
-  `dev/` is maintainer tooling and `scripts/waves` is only ever `_load`ed as a
-  module, so no consumer surface is affected.
+- `actions/apply-detect` no longer declares the per-wave outputs `wave0` … `wave7`. Use the
+  aggregate `waves` object (`fromJSON(needs.detect.outputs.waves).waveN`). A read of the old
+  outputs resolves to the empty string and fails at matrix expansion.
+- `dev/repin_consumer.rewrite_consumer`, `dev/repin_consumer._survivors`,
+  `dev/repin_internal.rewrite`, and `scripts/waves`' command-line entry point.
 
 ### Added
 
 - **A guard pinning that `guard_max_waves` runs before the wave map is padded.**
-  No behaviour changed and no release was ever affected — the guard call was
-  present and correct in every shipped version. What was missing was anything
-  holding it there: removing the call from both live callers (`apply-detect`,
-  `env-order`) left the entire suite green, in this release and every one before
-  it. Since `pad_waves` truncates, an unguarded regression would have dropped
-  the deepest cells of a change spanning more than 8 dependency levels — the
-  apply run finishing green having applied nothing for them, their apply checks
-  left pending. Now pinned over the parsed AST for each caller, plus a
-  behavioural test through `waves_by_env_level`.
 
 ## [0.7.2] — 2026-08-07
 
 Tags `6973262`.
 
-**No consumer action beyond re-pinning**, and re-pinning matters here: the fix
-lives in `scripts/`, which `actions/summary` runs out of its own pinned
-checkout, so a consumer still pinned to v0.7.1 keeps the old behaviour.
-
 ### Fixed
 
-- **A plan that produced exactly one changed cell created no pending apply
-  check**, so that change could not be applied by either path. `pending-checks`
-  and `doctor` globbed `cell-summary.*/cell.json`, but
-  `actions/download-artifact` extracts into `path` itself, with no per-artifact
-  subdirectory, whenever exactly one artifact matches the pattern — so a
-  one-cell plan lands at `cells/cell.json` and both readers saw an empty
-  directory. Pre-merge, `shipmate apply <env>` then failed in `waves / snapshot`
-  with `no App-authored apply check named 'apply / <stack> / <env>' on the head
-  SHA before apply`; post-merge, `deploy-detect` read an empty work queue,
-  because the pending apply checks **are** that queue. The gate stayed pending
-  throughout — this failed closed, never green over unapplied infrastructure —
-  but the only way past it was a second changed cell. `doctor` was also silently
-  skipping every environment probe on such a plan. Both readers now glob
-  recursively, matching `summary-comment`, which already did, which is why the
-  plan comment and gate looked healthy while the apply path was dead.
+- **A plan that produced exactly one changed cell created no pending apply check.**
+  `pending-checks` and `doctor` now glob `cell.json` recursively.
 
 ## [0.7.1] — 2026-08-07
 
 Tags `2fdf60f`.
 
-**No consumer action beyond re-pinning.** If your pre-merge `shipmate apply
-<env>` has been failing with `Secret SHIPMATE_APP_PRIVATE_KEY is required, but
-not provided while calling`, this release is the fix and re-pinning is all it
-takes.
-
 ### Fixed
 
 - **`apply.yml`, `apply-all.yml` and `summary.yml` no longer declare
-  `SHIPMATE_APP_PRIVATE_KEY` a *required* `workflow_call` secret**, which made
-  the documented way of storing that key unusable on the pre-merge apply path.
-  `docs/github-app.md` §5 puts the key on the `shipmate-engine` **environment**,
-  and deliberately not in a repository secret — but `secrets: inherit` forwards
-  only what is in the caller's context, and an environment secret never is. A
-  required declaration is therefore unsatisfiable, and GitHub rejects the call
-  before any step of the first callee job that binds no `environment:` — `guard`
-  — so a dispatched `shipmate apply <env>` died red with **zero steps executed**.
-  Nothing was applied and nothing partially applied; only the verb was dead.
-  Post-merge `deploy.yml` was unaffected because its declaration was already
-  optional, and `summary.yml` carried the requirement without failing only
-  because its single job binds `environment: shipmate-engine`, which resolves the
-  key. The credential still reaches everything that needs it: every job that
-  mints an App token binds that environment and reads it there. A consumer that
-  keeps the key as a repository secret instead trades a load-time rejection for a
-  red run at the mint step — the behaviour `deploy.yml` has always had — and
-  `shipmate doctor` names a missing key directly.
+  `SHIPMATE_APP_PRIVATE_KEY` a *required* `workflow_call` secret**, which made a dispatched
+  `shipmate apply <env>` fail with the key on the `shipmate-engine` environment.
 
 ## [0.7.0] — 2026-08-07
 
 Tags `6be3d34`.
 
-**One consumer action beyond re-pinning, and it is not optional:** a wrapper
-that calls `apply.yml`, `apply-all.yml` or `deploy.yml` must add
-`id-token: write` to the calling job — and to the workflow's top-level
-`permissions:` block if it declares one — in the same change that re-pins to
-this release. **Including consumers that use no cloud credentials at all.**
-GitHub caps a called workflow's permissions at each `uses:` boundary, so without
-the grant the run fails at workflow-resolution time, taking every wave job with
-it — nothing applies and nothing partially applies. Opting *in* to AWS OIDC is a
-separate, later step: two variables, `AWS_ROLE_ARN` and `AWS_REGION`, on each
-`<env>-apply` environment you want cloud access from. With them unset the
-credentials step is skipped and the job holds no cloud credential, which is why
-the sample repos on the local backend still run credential-free.
-
 ### Added
 
-- **The apply path can mint an AWS OIDC token.** Every wave job in
-  `apply-env-level.yml` carries `id-token: write` and runs a `Configure cloud
-  credentials (AWS OIDC)` step gated on `vars.AWS_ROLE_ARN != ''`, before the
-  cell — so the assumed role's session variables are in place for the plan
-  restore and `tofu`. They are `AWS_*`, so the apply-match fingerprint excludes
-  them (`CONTRACT.md` §Apply-match fingerprint). `snapshot` and `complete`
-  deliberately get no token: neither reaches a provider. The nine jobs across
-  `apply.yml`, `apply-all.yml` and `deploy.yml` that call `apply-env-level.yml`
-  grant `id-token: write` so it survives the `uses:` boundary. The plan path is
-  not wired for this.
-- **`actions/apply-cell` and `actions/drift-cell` accept an empty `state-path`**
-  (`required: false`, default `""`), with every `actions/state` step gated on
-  it, so a consumer whose state lives in a remote backend skips artifact state
-  entirely instead of round-tripping a directory the backend owns. On that path
-  the restore is `skipped` rather than `failure`, so a remote-backend cell can
-  never be blocked on artifact state it never had. The exact-plan `.otplan`
-  artifact flow is unchanged — that is how an apply proves it is applying the
-  reviewed plan, and it is not state.
+- **The apply path can mint an AWS OIDC token.** Every wave job in `apply-env-level.yml`
+  carries `id-token: write` and runs a credentials step gated on `vars.AWS_ROLE_ARN != ''`.
+  BREAKING: a job calling `apply.yml`, `apply-all.yml` or `deploy.yml` must grant
+  `id-token: write`.
+- **`actions/apply-cell` and `actions/drift-cell` accept an empty `state-path`**, which skips
+  artifact state for a remote backend.
 
 ### Changed
 
-- `apply-env-level.yml` declares a top-level `permissions: {}` floor. Every job
-  in it already sets its own block; the floor means a job that later loses one
-  inherits nothing rather than everything the caller granted — which now
-  includes `id-token: write`.
-- `docs/hardening.md` controls 7–9, and checklist rows 7, 9, 18 and 19, now
-  describe the credential path that exists rather than one that did not.
-  Including what it does *not* bound: `id-token: write` on the wave jobs is
-  unconditional, because a GitHub Actions `permissions:` block cannot be an
-  expression, so an apply job can always *request* a token. What decides which
-  role it can actually assume is the role's own trust policy and its
-  `environment:` claim condition — not the location of the `AWS_ROLE_ARN`
-  variable, which resolves organization → repository → environment and is
-  therefore advisory scoping only.
-
-### Known, and deliberately not changed here
-
-- **`state_suffix` stays required on all four apply-path workflows**, including
-  for consumers on a remote backend, who pass `state_suffix: ""` explicitly.
-  Making it optional would be one line, and it is the wrong line: an *omitted*
-  input would then read as "a remote backend owns state" — the same silence for
-  a consumer who meant it and one who forgot. On a new or empty stack the second
-  case is not visible either, because there is no state to fail against. That
-  run applies real resources, skips the state save, and leaves the required gate
-  green over infrastructure nothing recorded. An explicit empty string costs the
-  remote-backend consumer one character and makes the choice legible in the
-  wrapper.
+- `apply-env-level.yml` declares a top-level `permissions: {}` floor.
+- `docs/hardening.md` controls 7–9 and checklist rows 7, 9, 18 and 19 describe the credential
+  path that exists.
 
 ## [0.6.0] — 2026-08-06
 
 Tags `4fbb572`.
 
-**One consumer action beyond re-pinning:** accept the shipmate App's pending
-permission request (`environments: read`). Until an org owner does, the new
-probe reports itself as not performed — in every `shipmate doctor` report, and
-in the annotations the summary run writes for any pull request that planned at
-least one cell (a docs-only or pin-bump pull request declares no environment, so
-the probe has nothing to read and says nothing). The permission is minted in its
-own non-fatal step, so the gate status and the apply checks are unaffected — but expect one further symptom of
-that same one cause, and it is not a bug. The App-permission-drift probe stops
-being silent: the full-manifest mint `shipmate doctor` attempts now asks for
-`environments: read` too, so it fails on an installation that has not accepted
-the request, and every `shipmate doctor` report carries a second warning
-saying the installation is missing a permission the manifest declares. Both
-clear on Accept.
-
 ### Added
 
-- **`shipmate doctor` gained an eleventh probe: the secrets a *plan*
-  environment holds.** A plan cell runs the pull request branch's own code, and
-  a plan environment cannot carry approval rules or a deployment branch policy
-  without stalling every cell — so whatever it holds is readable by anyone who
-  can push a branch, and until now nothing observed it. The probe counts each
-  declared plan environment's secrets and names them (names only — no GitHub API
-  returns a secret's value), as a note pointing at `docs/hardening.md` control 8:
-  the count is exact, while the printed name list is capped so one crowded
-  environment cannot spend the whole report's size budget — its later names are
-  not printed. A warning if `SHIPMATE_APP_PRIVATE_KEY` is among them, and — when
-  the listing was too long to read whole — a warning that whether the
-  environment holds it could not be determined, rather than silence.
-  `<env>-apply` is deliberately not read: that is where credentials belong.
-  With no `environments: read` token the finding says the check was not
-  performed — never that the environment is clean.
-- **`docs/hardening.md` control 8 now states the credential-free plan
-  posture**: prefer a provider read path that needs no long-lived credential,
-  and, when the engine's credential path exists, a read-only OIDC role
-  conditioned on the *plan* environment's claim.
+- **`shipmate doctor` gained an eleventh probe: the secrets a *plan* environment holds**,
+  counted and named, with a warning if `SHIPMATE_APP_PRIVATE_KEY` is among them. The shipmate
+  App requests `environments: read`.
+- **`docs/hardening.md` control 8 states the credential-free plan posture.**
 
 ## [0.5.0] — 2026-08-04
 
 Tags `a5a823f`.
 
-**Carries the `0.4.0` section below as well**, which was written but never
-tagged — so a repository re-pinning from `v0.3.1` picks up both the artifact
-listing fixes described there and everything described here, in one move.
-
-No consumer YAML change: **re-pinning is the only action required** — and the
-re-pin pull request is itself where a repository with already-broken
-plan/summary wiring finds out. GitHub resolves a workflow file, and with it the
-`uses:` pins inside it, from the pull request's own branch, so that pull
-request's `detect` job already runs the new `actions/build-matrix` and goes red
-on the spot. Expect it, rather than reading it as a regression: the finding
-names the condition and the file to fix, and fixing it in the same pull request
-greens the run.
+Carries the `0.4.0` changes, which were never tagged.
 
 ### Added
 
-- **The consumer wiring the `shipmate / gate` status depends on is now
-  checked on every plan run.** Four conditions live in files the engine does
-  not own — the plan workflow at `.github/workflows/plan.yml`, its top-level
-  `name:` being exactly `shipmate · plan` (U+00B7 middle dot), that workflow
-  triggering on `pull_request` (`pull_request_target` is a different event and
-  does not satisfy the engine's guard), and some workflow triggering on
-  `workflow_run` for that name and calling the engine's reusable
-  `.github/workflows/summary.yml` — and until now nothing checked any
-  of them: a break produced a plan that ran to completion, no apply checks, no
-  sticky comment, no gate status, and no error anywhere. `actions/build-matrix`
-  now reads the workflow files out of the checkout it already has and **fails
-  `detect`** on a confident break for a `pull_request` or
-  `pull_request_target` event. On any other event — the drift schedule — the
-  same finding is a warning instead, so one merged mistake cannot take nightly
-  drift down in every consumer; anything uncertain is a notice and never
-  blocks.
-- **`shipmate doctor` gained a tenth probe** reporting those same three
-  conditions on demand, at the commit under examination. Comment-ops is
-  triggered by `issue_comment` and is not downstream of the summary wiring, so
-  the report still answers when the wiring is broken. Doctor never fails a run,
-  so the probe is `WARNING`/`NOTICE` only; `detect` is the half that blocks.
+- **The consumer wiring the `shipmate / gate` status depends on is checked on every plan
+  run.** `actions/build-matrix` fails `detect` on a confident break of the plan workflow's
+  path, `name:`, `pull_request` trigger or `workflow_run` summary caller; on other events it
+  warns.
+- **`shipmate doctor` gained a tenth probe** reporting the same conditions.
 
 ### Fixed
 
-- **`CONTRACT.md` described the name-side failure wrongly, and the correction
-  is the reason `detect` is where the check lives.** It said a renamed `name:`
-  means the consumer's `workflow_run` trigger "simply never fires". GitHub in
-  fact resolves `workflow_run.workflows:` against the workflow entity's
-  **default-branch** name, so the renaming pull request still fires the
-  trigger, still gets its gate, and merges green; the breakage begins at merge
-  and applies to every pull request afterwards — including the one opened to
-  fix it, which is gateless and needs an administrator. The same holds for an
-  edit to the consumer's own `summary.yml`, for the neighbouring reason. Only
-  the **path** half fails closed before the merge, via the engine's
-  `workflow_run.path` guard. Two of the three breaks therefore merge green,
-  which is why the check runs in `detect` on the pull request that introduces
-  them rather than being left to doctor.
-- **Doctor's `pull_request_target` probe missed the trigger in a workflow file
-  written with a byte-order mark.** Doctor now decodes workflow bytes through
-  the shared wiring decoder, which strips one leading U+FEFF. A BOM'd file with
-  `on:` on line 1 previously failed the column-0 anchor, so the probe found no
-  `on:` block at all and reported nothing — a false negative on a hardening
-  probe. The pin probe was unaffected; its match is not column-anchored.
+- **`CONTRACT.md` described the name-side failure wrongly:** a renamed `name:` breaks the
+  gate from the merge onward, not on the renaming pull request.
+- **Doctor's `pull_request_target` probe missed the trigger in a workflow file written with
+  a byte-order mark.**
 
 ## [0.4.0] — 2026-08-03
 
-**Never tagged.** This section was written but no release was cut, so `v0.4.0`
-does not exist and no consumer ever pinned it — the changes below reached
-consumers as part of `v0.5.0` instead. It could not be cut retroactively either:
-the commit it described carries a stale `actions/summary` self-pin, so its tree
-runs its own old code, and `docs/releasing.md` forbids tagging such a commit.
-The section is kept rather than folded upward because the changes are real and
-this is where their reasoning lives.
-
-Two more green-gate-over-unapplied-infrastructure fixes, both rooted in the
-Actions artifact listing. No consumer YAML change: **re-pinning is the only
-action required** — but every engine reference must move in one change, because
-the marker's writer lives in `actions/build-matrix` and its reader in
-`.github/workflows/summary.yml`. A repository that re-pins the summary caller and
-not `actions/build-matrix` publishes no marker, and every pull request holds until
-both match.
+Never tagged; these changes shipped in `0.5.0`.
 
 ### Fixed
 
-- **A `cell-summary.*` count of zero was read as "the plan matrix was empty".**
-  That reading is right for a docs-only or pin-bump pull request, and the gate
-  greens quietly on it. But the artifacts listing is read-after-write eventually
-  consistent and the trusted job reads it seconds after the plan run ends, so zero
-  also arrived for a run that had planned stacks — indistinguishable from inside a
-  job that sees only the plan run's artifacts. The gate went green, no
-  `apply / <stack> / <env>` checks were created, and because `deploy.yml`'s work
-  queue *is* the pending apply checks, the reviewed changes merged and were never
-  applied. `detect` now publishes the planned cell count as the artifact **name**
-  `plan-matrix.<N>` — a `workflow_run` event carries no job outputs, so a name in
-  the listing the trusted job already reads is the only channel — and the gate
-  holds unless exactly one such marker is readable. Zero now means an empty matrix
-  only when the marker says so.
-- **A *partial* listing greened the gate just as quietly.** The same lag could
-  return some of the cell summaries: three of five listed, all three downloaded
-  and parsed, so the existing shortfall check (parsed < listed) saw nothing wrong.
-  One apply check per listed cell, and the two stacks missing from the listing
-  merged reviewed with no apply check at all. The gate now holds unless the listed
-  count equals the planned count. The counting step retries a disagreeing listing
-  up to three times, five seconds apart, which narrows the eventual-consistency
-  window without pretending to close it, and then warns once per cause —
-  unreadable listing, no readable marker, or a listed count that disagrees with
-  the marker — because the gate description is capped at 140 characters and the run
-  page is where the reason has to be legible.
+- **A `cell-summary.*` count of zero was read as "the plan matrix was empty".** `detect`
+  publishes the planned cell count as the artifact name `plan-matrix.<N>`, and the gate holds
+  unless exactly one such marker is readable.
+- **A *partial* listing greened the gate just as quietly.** The gate holds unless the listed
+  count equals the planned count; the counting step retries up to three times.
 
 ## [0.3.1] — 2026-08-03
 
 Tags `1efbee8`.
 
-Fail-safe fixes to the paths 0.3.0 relocated. No interface change: re-pinning is
-the only action required.
-
 ### Fixed
 
-- **The gate could be written green over plan evidence that was never read.** An
-  unreadable artifact listing reported a count of `1`, and the hold fires only on
-  a shortfall against the parsed cell count — so with one cell downloaded (that
-  download is best-effort) `1 < 1` was false, one apply check was created for a
-  five-stack plan, and the remaining four merged with no check at all. Because
-  `deploy.yml`'s work queue *is* the pending apply checks, those changes would
-  never have been applied. The sentinel is now non-numeric, and the hold fires on
-  it before any comparison a cell count could satisfy.
-- **A held gate was clearable by the apply it existed to prevent.** `gate-refresh`
-  wrote `success` from apply check-runs alone, and `scripts/authorize` consults
-  the review decision, never the gate — so `shipmate apply` on a held pull request
-  greened it. `gate-refresh` now refuses to overwrite a failing gate and says why;
-  the only exit from a hold is a fresh plan.
-- **Two steps could lose the gate write entirely.** The supersede check aborted
-  the whole job on a transient paginated API error, and the pull-request probe
-  folded an API failure into "is a draft" and skipped every later step behind a
-  plain `echo` — a green run with no gate, and a required check that never
-  arrives. The first now warns and proceeds; the second distinguishes unreadable
-  from draft and fails loudly.
-- **A cell with no queued apply check applied anyway.** The refusal that used to
-  run before `terramate apply` became a warning that fired only when *every* cell
-  was affected, so one cell could mutate infrastructure and advance state while
-  its check stayed pending forever — recoverable only by re-planning over
-  already-applied infrastructure. The per-cell refusal is restored.
-- **Drift could be lost silently.** Drift issues are now authored from an
-  artifact, but the compose and upload steps were best-effort, so a dropped cell
-  simply vanished from the glob: no issue, no Slack, green run. Both steps are
-  required again. Separately, a dead Slack webhook no longer leaves the nightly
-  run green — those failures are collected and re-raised like the API ones
-  already were.
+- **The gate could be written green over plan evidence that was never read.** The
+  unreadable-listing sentinel is non-numeric.
+- **A held gate was clearable by the apply it existed to prevent.** `gate-refresh` refuses to
+  overwrite a failing gate.
+- **Two steps could lose the gate write entirely:** the supersede check now warns and
+  proceeds, and the pull-request probe fails loudly when unreadable.
+- **A cell with no queued apply check applied anyway.** The per-cell refusal is restored.
+- **Drift could be lost silently.** The compose and upload steps are required, and Slack
+  webhook failures fail the nightly run.
 
 ### Changed
 
-- `docs/hardening.md` stated the environment-secret release rule inverted,
-  contradicting `docs/github-app.md`. Both now read: an environment secret is
-  released only to a job that *names* the environment; a repository secret is
-  readable by any workflow on any branch without naming anything.
-- The apply-cell credentials guard asserted raw text substrings and would not
-  have caught a direct `secrets.SHIPMATE_APP_PRIVATE_KEY`; it is now a parsed
-  assertion over the action YAML, covering `drift-cell` as well, which had none.
-
-### Known, and deliberately not changed here
-
-- `shipmate doctor` has no probe for the consumer `summary.yml`/`plan.yml` wiring
-  the reusable workflow hard-codes. doctor runs inside the job that wiring gates,
-  so a probe there cannot report its own absence. Until that is addressed, a
-  consumer whose plan workflow is misnamed or missing its summary caller gets no
-  gate and no diagnostic — see `CONTRACT.md` for the exact required names.
+- `docs/hardening.md` states the environment-secret release rule the same way as
+  `docs/github-app.md`.
+- The apply-cell credentials guard is a parsed assertion over the action YAML, covering
+  `drift-cell` as well.
 
 ## [0.3.0] — 2026-08-03
 
 Tags `e576103`.
 
-**Adopting this release requires a consumer YAML change.** The post-plan summary
-moved out of `plan.yml` into a `workflow_run` workflow, so a repository that
-re-pins without adding `summary.yml` gets a plan that runs to completion and
-never writes `shipmate / gate` — silent and permanent, the failure mode
-`CONTRACT.md` warns about. Add `.github/workflows/summary.yml` calling this
-release's reusable `summary.yml`, drop `plan.yml`'s in-run `summary` job, and
-declare `environment: shipmate-engine` on `comment-ops.yml`'s `ops` job and
-`drift.yml`'s new `issues` job. Note a `workflow_run` workflow only fires once it
-is on the default branch, so land `summary.yml` before removing the in-run job —
-otherwise the pull request making the change cannot be gated by it.
-
 ### Changed
 
-- **No `pull_request`-triggered job holds the App private key.** The summary that
-  authors the `apply / …` checks, the sticky comment and the `shipmate / gate`
-  status now runs in a trusted `workflow_run` workflow at the default-branch ref,
-  and the key is scoped to the `shipmate-engine` GitHub Environment whose
-  deployment branch policy names that branch only. A branch- *or* tag-authored
-  workflow naming that environment is refused before a runner starts. Apply and
-  drift cells hold no App credentials at all.
-- **`actions/summary` inputs are reshaped** — `run-conclusion` and
-  `artifact-count` replace `plan-result` and `detect-result`, and `plan-run-url`
-  is new. Breaking for anything invoking the action directly.
+- **BREAKING: no `pull_request`-triggered job holds the App private key.** The summary runs
+  in a trusted `workflow_run` workflow, consumer `.github/workflows/summary.yml`, with the key
+  on the `shipmate-engine` environment. `comment-ops.yml`'s `ops` job and `drift.yml`'s new
+  `issues` job declare `environment: shipmate-engine`.
+- **`actions/summary` inputs are reshaped** — `run-conclusion` and `artifact-count` replace
+  `plan-result` and `detect-result`, and `plan-run-url` is new. Breaking for a direct caller.
 
 ### Added
 
-- **Fork pull requests are refused outright.** `actions/build-matrix` fails
-  `detect` when a `pull_request` or `pull_request_target` event's head repository
-  is not the running repository, with no input to permit it. A fork's plan would
-  otherwise execute its own Terramate/OpenTofu code on the consumer's runners
-  with the plan environment's variables. The refusal is loud rather than an empty
-  matrix, because no `shipmate / gate` is ever written for a fork head.
-- `actions/apply-complete`, `actions/apply-snapshot` and `actions/drift-issues` —
-  the trailing trusted jobs that complete apply checks and author drift issues,
-  split out of the cells that used to do it while holding the key.
-- **Two `shipmate doctor` probes.** One reports any workflow file declaring
-  `pull_request_target`, the fork-reachable form of the branch-authored-workflow
-  attack. One reports whether the default branch's ruleset requires **code-owner**
-  review: an approval count is no substitute, because the App can submit a review
-  that counts toward it, and only a `CODEOWNERS` review is beyond a leaked key.
-  Both state their limits rather than implying more than they check —
-  `require_code_owner_review` is not proof a `CODEOWNERS` entry covers the paths
-  the IaC lives in, and classic branch protection is not visible on the endpoint
-  the probe reads.
+- **Fork pull requests are refused outright** by `actions/build-matrix`.
+- `actions/apply-complete`, `actions/apply-snapshot` and `actions/drift-issues`, the trailing
+  trusted jobs that complete apply checks and author drift issues.
+- **Two `shipmate doctor` probes:** workflow files declaring `pull_request_target`, and
+  whether the default branch's ruleset requires code-owner review.
 
 ### Fixed
 
-- The `shipmate-engine` environment must not keep a repository secret of the same
-  name beside it: an environment secret is only withheld from jobs that *name*
-  the environment, so a leftover repository secret defeats the scoping entirely.
-  `docs/github-app.md` §6 now deletes it and shows how to confirm, because no
-  probe can — listing repository secrets needs a permission the App manifest does
-  not declare.
-- `docs/hardening.md` claimed in four places that the `<env>-apply` reviewer was
-  the *only* control a leaked App key cannot satisfy. There are two, unforgeable
-  at different points: a `CODEOWNERS` review at the merge, the environment
-  reviewer at the apply.
+- `docs/github-app.md` §6 deletes a repository secret of the same name beside the
+  `shipmate-engine` environment secret.
+- `docs/hardening.md` names two controls a leaked App key cannot satisfy: a `CODEOWNERS`
+  review at the merge and the environment reviewer at the apply.
 
 ## [0.2.3] — 2026-07-31
 
@@ -2505,17 +928,9 @@ Tags `07c2de1`.
 
 ### Changed
 
-- `terramate-io/terramate-action` **v2.0.0 → v3.3.0**, which carries a
-  template-injection patch. v3's breaking change is the removal of the
-  fallback-to-latest when no version is given; shipmate always passes an explicit
-  `terramate-version`, so behaviour is unchanged — but a consumer wiring an empty
-  value now fails instead of silently installing latest.
-- `actions/download-artifact` **v7.0.0 → v8.0.1** in `actions/apply-summary` (ESM
-  migration upstream, no interface change).
-
-Both had been invisible to Dependabot until 0.2.1 widened its scan to
-`actions/*` — the Terramate installer, which runs in every plan, apply and drift
-job, was two majors behind.
+- `terramate-io/terramate-action` **v2.0.0 → v3.3.0**, which carries a template-injection
+  patch. An empty version value now fails instead of installing latest.
+- `actions/download-artifact` **v7.0.0 → v8.0.1** in `actions/apply-summary`.
 
 ## [0.2.2] — 2026-07-31
 
@@ -2523,14 +938,8 @@ Tags `28d28f7`.
 
 ### Fixed
 
-- **An approvers-team member could be refused their own apply.** comment-ops
-  decided team membership with `gh api … | grep -q active`: `grep -q` exits at
-  its first match, `gh` upstream can take SIGPIPE, and `pipefail` hands the `if`
-  a 141 that reads as *not a member*. Same shape as the gate verdict fixed in
-  0.2.1, failing closed rather than open. The state is now read into a variable
-  and compared for equality, so `inactive` no longer matches as a substring
-  either. Covered by `test_comment_ops_membership.py`, which runs the block
-  against a stubbed API.
+- **An approvers-team member could be refused their own apply** when `grep -q` under
+  `pipefail` returned 141. The membership state is compared for equality.
 
 ## [0.2.1] — 2026-07-31
 
@@ -2538,24 +947,15 @@ Tags `8beba59`.
 
 ### Fixed
 
-- **The post-merge gate could green a failed deploy.** `deploy.yml` decided its
-  verdict with `echo "$RESULTS" | tr | grep -qvE`: `grep -q` exits at its first
-  match, the writer ahead of it takes SIGPIPE, and `pipefail` hands the `if` a
-  141 that reads as *no bad result found*. Unreachable at real input sizes (tens
-  of bytes against a 64 KiB pipe buffer) and never observed, but wrong in the
-  dangerous direction. The scan is now in-process, and an empty result string
-  keeps meaning incomplete rather than all-clean.
-- Drift issues link the run that found the drift. The body is rewritten on every
-  drift run, so an issue that stays open points at the newest evidence.
+- **The post-merge gate could green a failed deploy** through a `grep -q` / SIGPIPE verdict.
+  The scan is in-process.
+- Drift issues link the run that found the drift.
 
 ### Internal
 
-- Dependabot scans `actions/*` for third-party pins; `directory: /` had covered
-  `.github/workflows/` and a root manifest only, so the pins inside each
-  composite action had never been offered an update.
+- Dependabot scans `actions/*` for third-party pins.
 - The detect queries, `dev/` pin helpers and test loaders are single-sourced.
-- Test guards that execute an action's shell body probe for a working `bash`
-  first, instead of trusting a `bash.exe` that may be the Windows Store alias.
+- Test guards that execute an action's shell body probe for a working `bash` first.
 
 ## [0.2.0] — 2026-07-29
 
@@ -2564,61 +964,38 @@ Tags `c77e2cd`.
 ### Changed — BREAKING
 
 - **The apply check name flips field order**: `apply / <env> / <stack>` becomes
-  `apply / <stack> / <env>`. The check is load-bearing — it is the work queue the
-  post-merge deploy reads — so old-order checks left on a head SHA break both
-  ways: while **pending** they hold `shipmate / gate` open, and once **complete**
-  the gate greens and the deploy re-queues already-applied cells into the
-  stale-plan fail-safe. A re-plan clears neither. **Migration: after re-pinning,
-  every PR planned before the bump needs a fresh commit.** Runbook in
-  `docs/branch-protection.md` § Upgrading.
-- Workflow and job display names read as shipmate (`shipmate · plan`,
-  `shipmate / detect`, `shipmate / summary`). The check *icon* cannot follow: a
-  job's check run is always authored by the `github-actions` app, so only the
-  App-authored surfaces (apply checks, gate, comments, drift issues) carry
-  shipmate's. `CONTRACT.md` § Check names now fixes the naming rule — ASCII and
-  slash-delimited for anything matched by machine, the middot reserved for
-  workflow names.
+  `apply / <stack> / <env>`.
+- Workflow and job display names read as shipmate (`shipmate · plan`, `shipmate / detect`,
+  `shipmate / summary`). `CONTRACT.md` § Check names fixes the naming rule.
 
 ### Added
 
-- A pull request that changed no stacks no longer gets a plan comment. The
-  suppression is create-only and applies **only** when a zero cell count means
-  no stacks changed (detect succeeded, empty matrix); every other zero leaves the
-  plan unknown, so nothing is written and an existing comment stands rather than
-  being overwritten with a claim about a plan nobody read. A run where `doctor`
-  warned still posts — that comment's footer is doctor's only PR-visible pointer.
+- A pull request that changed no stacks no longer gets a plan comment.
 
 ### Fixed
 
-- App installation tokens are minted with `client-id` (the `app-id` input is
-  deprecated upstream), and a `doctor` report survives losing its comment.
-- `build-matrix` reserves a stack path of exactly `shipmate`, whose plan check
-  would otherwise land in the namespace the summary comment's exact-name lookup
-  reads.
+- App installation tokens are minted with `client-id`, and a `doctor` report survives losing
+  its comment.
+- `build-matrix` reserves a stack path of exactly `shipmate`.
 
 ### Internal
 
-- The engine's own SHA pins are maintained by `dev/` tooling rather than a
-  documented `sed`, `dev/pin_status.py` answers "is this commit safe to pin?",
-  and two silent-failure paths in the pins guard are closed (a dangling pin in a
-  non-shallow clone now fails instead of skipping; a failed `git ls-tree` raises
-  instead of reading as "no references").
+- The engine's own SHA pins are maintained by `dev/` tooling, `dev/pin_status.py` answers "is
+  this commit safe to pin?", and two silent-failure paths in the pins guard are closed.
 
 ## [0.1.0] — 2026-07-27
 
 Tags `aa4d8b7`. First tagged release — the baseline every section above is
-relative to, and what made `shipmate doctor`'s pin-freshness comparison and a
-consumer's Dependabot able to resolve a pin at all.
+relative to.
 
-What it carries: per stack × environment plan fan-out with a check each and the
-plan published as a sticky PR comment; wave-ordered applies over the Terramate
-`after` DAG with environment-level ordering on top; exact-plan applies from the
-reviewed, encrypted plan artifact, with a stale-plan fail-safe; the pre-merge
-comment grammar (`shipmate apply [env]`, plus read-only `help` and `doctor`);
-the aggregate `shipmate / gate` commit status, authored by the shipmate GitHub
-App and pinned by `integration_id` in the consumer's ruleset; post-merge deploy
-driven by the pending apply checks as its work queue; per-run apply result
-comments; and nightly drift detection as auto-closing issues.
+- Per stack × environment plan fan-out with a check each and a sticky PR plan comment.
+- Wave-ordered applies over the Terramate `after` DAG with environment-level ordering.
+- Exact-plan applies from the reviewed, encrypted plan artifact, with a stale-plan fail-safe.
+- The pre-merge comment grammar: `shipmate apply [env]`, plus read-only `help` and `doctor`.
+- The aggregate `shipmate / gate` commit status, authored by the shipmate GitHub App and
+  pinned by `integration_id` in the consumer's ruleset.
+- Post-merge deploy driven by the pending apply checks; per-run apply result comments.
+- Nightly drift detection as auto-closing issues.
 
 [0.3.1]: https://github.com/ship-iac/shipmate/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ship-iac/shipmate/compare/v0.2.3...v0.3.0

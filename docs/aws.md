@@ -92,9 +92,10 @@ nothing.
 
 **Write the trust condition from the subject your own logs show, not from the
 documented shape.** GitHub Actions issues the `sub` claim with the numeric
-organization and repository ids embedded — captured from that sample repository
-before its environments were renamed, so the environment segment here is a bare
-`dev-us` where a split repository reads `dev-us-plan` / `dev-us-apply`:
+organization and repository ids embedded, captured from that sample repository.
+Under the split naming the environment segment reads `dev-us-plan` or
+`dev-us-apply`; an environment with `shared = true` binds the bare `dev-us`, the
+form this capture shows:
 
 ```
 repo:ship-iac@305536692/repo-example-stacks-aws@1325724489:environment:dev-us
@@ -161,7 +162,7 @@ Six things to know beyond the schema:
   [`../CONTRACT.md`](../CONTRACT.md) §Environment table has the ordered sequence.
   The same rule governs the first table of all: it has to be on the default
   branch before the first plan run, so it lands in the commit that adds the
-  workflow files rather than in a pull request of its own.
+  workflow file rather than in a pull request of its own.
 - **A workload tier is keyed by the `<name>` of the `workload/<name>` tag**,
   exactly as written, so two workloads whose names differ only in punctuation
   resolve separately.
@@ -214,13 +215,14 @@ prefix.
 ## Runner choice
 
 The documented fences in [`getting-started.md`](getting-started.md) and
-[`drift.md`](drift.md) use `runs-on: ubuntu-slim`, which suits the three
-credential-free samples: their cells download no provider. An AWS repository
-does — every cell pulls `hashicorp/aws` — and if `.terraform.lock.hcl` is
-gitignored, as it is in `repo-example-stacks-aws`, every `init -reconfigure`
-re-resolves it from scratch. On a cloud repository weigh the slim image against
-that download before copying the label. `ubuntu-latest` remains the safe
-default.
+[`drift.md`](drift.md) pass no `runs_on:`, so every job runs on the
+`ubuntu-latest` default. Only the `plan` and `drift` jobs accept `runs_on:`.
+The three credential-free samples pass `runs_on: ubuntu-slim` to both, which
+suits them: their cells download no provider. An AWS repository does — every
+cell pulls `hashicorp/aws` — and if `.terraform.lock.hcl` is gitignored, as it
+is in `repo-example-stacks-aws`, every `init -reconfigure` re-resolves it from
+scratch. On a cloud repository weigh the slim image against that download
+before passing it to `plan` or `drift`.
 
 ## The sample's workload
 

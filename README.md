@@ -17,8 +17,7 @@ or branch name: a commit SHA is immutable, so a consumer's workflow behavior
 cannot change underneath it without an explicit, reviewed bump. shipmate
 publishes a GitHub Release per release SHA, which lets Dependabot's
 `github-actions` ecosystem propose that bump. `shipmate doctor` names any pin
-that differs from the latest release. See [`CONTRACT.md`](CONTRACT.md) §Consumption
-and [`docs/upgrading.md`](docs/upgrading.md).
+that differs from the latest release. See [`CONTRACT.md`](CONTRACT.md) §Consumption.
 
 ## Why setup is not two clicks
 
@@ -45,7 +44,6 @@ and what it deliberately does not claim.
 | [`docs/github-app.md`](docs/github-app.md) | Register and install the App; the `shipmate-engine` environment |
 | [`docs/branch-protection.md`](docs/branch-protection.md) | Require `shipmate / gate`; the reproducible ruleset |
 | [`docs/drift.md`](docs/drift.md) | Optional nightly drift detection |
-| [`docs/upgrading.md`](docs/upgrading.md) | Re-pinning, Dependabot, arriving from another TACO |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | `shipmate doctor` and the failures consumers hit |
 | [`docs/concepts.md`](docs/concepts.md) | How it works: fan-out, checks, comment-ops, the env/tag model |
 | [`docs/hardening.md`](docs/hardening.md) | Who can make the engine act at all, and what none of it fixes |

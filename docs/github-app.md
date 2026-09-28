@@ -36,7 +36,7 @@ does the whole leg:
 ```bash
 python3 scripts/register-app \
   --name shipmate-<your-org> \
-  --repo <your-org>/shipmate \
+  --repo <your-org>/<your-repo> \
   --out shipmate-app.private-key.pem
 ```
 
@@ -45,6 +45,10 @@ browser, and receives GitHub's redirect on a loopback listener it started
 first, so the `code` never leaves the machine and there is nothing to copy.
 Confirm the registration in the GitHub UI when the browser lands on it; the
 terminal continues by itself. §2 covers what the command then stores.
+
+`--repo` does two jobs. Its owner half is the organization the App is
+registered under, and the whole value is the repository `SHIPMATE_APP_ID` is
+written to.
 
 **Edit the name.** GitHub App names are unique across all of GitHub, and
 `ship-iac` already holds `shipmate`, so a verbatim paste is rejected with "Name
@@ -68,8 +72,8 @@ with the port its listener actually bound.
 The command in step 1 converts the captured code
 (`gh api -X POST app-manifests/<code>/conversions`) and then stores two things:
 
-- `SHIPMATE_APP_ID` — a repository variable on `--repo` (typically the
-  App-owning repo itself, e.g. `<org>/shipmate`). The app id is not a secret.
+- `SHIPMATE_APP_ID` — a repository variable on `--repo`, the repository you
+  are setting up. The app id is not a secret.
   It also prints it, as `App created: id=… slug=…`.
 - The private key — the file named by `--out`, which must not already exist:
   the command refuses rather than overwrite, because the key it replaced could
@@ -481,17 +485,16 @@ themselves — the consumer's `shipmate.yml`, and the engine's `plan.yml`,
 branch, where they *would* satisfy the environment's policy. That path runs
 through an ordinary pull request and merge — no `pull_request`- or
 `pull_request_target`-triggered job that checks out branch content is ever in a
-position to skip review and reach the key directly, unlike the
-old repository-secret model. The backstop there is `require_code_owner_review`
-on the branch ruleset (`docs/hardening.md` #4): a GitHub App cannot be a
-CODEOWNER, so the App itself can never approve a change to its own trust
-boundary — a human owner has to.
+position to skip review and reach the key directly. The backstop there is
+`require_code_owner_review` on the branch ruleset (`docs/hardening.md` #4): a
+GitHub App cannot be a CODEOWNER, so the App itself can never approve a change
+to its own trust boundary — a human owner has to.
 
 Push access to a consumer repository is still meaningful authority: it lets
 someone author the pull request that proposes such a change and, on a
 sole-maintainer repository with `required_approving_review_count: 0`, merge
-it too (see `docs/hardening.md` §1 and §3–5). It is no longer, by itself,
-enough to read the key outright the way an unreviewed branch push once was.
+it too (see `docs/hardening.md` §1 and §3–5). It is not, by itself, enough
+to read the key outright.
 
 ## Appendix: onboarding several repositories at once
 

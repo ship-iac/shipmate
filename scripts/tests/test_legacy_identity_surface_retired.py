@@ -9,7 +9,7 @@ either name by accident.
 
 Scope is the shipped trees — `scripts/`, `actions/`, `.github/workflows/`.
 Deliberately not `scripts/tests/`, `CHANGELOG.md`, `docs/` or `CONTRACT.md`:
-release history and the upgrade note must be able to name what was retired, and
+release history must be able to name what was retired, and
 `test_aws_oidc_wiring_guard.py` names `vars.AWS_ROLE_ARN` as the mutation it
 reds on.
 

@@ -14,7 +14,6 @@ In reading order.
 | [`github-app.md`](github-app.md) | Register and install the App; the `shipmate-engine` environment. |
 | [`branch-protection.md`](branch-protection.md) | Require `shipmate / gate`; the reproducible ruleset. |
 | [`drift.md`](drift.md) | Optional nightly drift detection, and what it costs. |
-| [`upgrading.md`](upgrading.md) | Re-pinning, Dependabot, arriving from another TACO. |
 | [`troubleshooting.md`](troubleshooting.md) | `shipmate doctor`, who may ask for its report, and the failures consumers hit. |
 | [`concepts.md`](concepts.md) | How it works: fan-out, checks-first, comment-ops, the environment/tag model. |
 | [`hardening.md`](hardening.md) | Who can make the engine act at all, and what none of it fixes. |
