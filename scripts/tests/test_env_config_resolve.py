@@ -431,3 +431,129 @@ def test_plan_and_apply_resolve_identical_tf_vars():
     expected = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
     assert env_config.resolve(table, "dev-eu", "plan", "")["tf_vars"] == expected
     assert env_config.resolve(table, "dev-eu", "apply", "")["tf_vars"] == expected
+
+
+# --- 10: an unlisted workload tag on a tier with no role to fall back to --------------
+
+#: An apply tier holding only workload roles: an unlisted tag resolves no credential here.
+_WORKLOAD_ONLY = """
+[environments.dev-eu]
+region = "eu-west-1"
+
+[environments.dev-eu.aws.apply.workloads.net-edge]
+role = "arn:aws:iam::9817:role/net-edge"
+
+[environments.dev-eu.aws.apply.workloads.app]
+role = "arn:aws:iam::9817:role/app"
+"""
+
+
+def _unlisted(toml, path, workload, env="dev-eu"):
+    """`unlisted_workload` over `toml` as a consumer would merge it, validated first."""
+    table = env_config.parse_table(f'layout = "folder"\n{toml}', {})
+    return env_config.unlisted_workload(env_config.validate_structure(table), env, path, workload)
+
+
+def test_an_unlisted_tag_on_a_tier_with_only_workload_roles_refuses():
+    """Mutation: return None where the refusal returns -- this case reds. The conditions it
+    rests on are pinned by the listed-tag case ("not a key") and the mixed shape ("no role")."""
+    assert _unlisted(_WORKLOAD_ONLY, "apply", "net") == ("aws.apply", ["app", "net-edge"])
+
+
+def test_a_listed_tag_is_not_refused():
+    """Mutation: drop the "not a key" condition -- this case refuses."""
+    assert _unlisted(_WORKLOAD_ONLY, "apply", "net-edge") is None
+
+
+def test_an_untagged_cell_is_not_refused():
+    """A stack with no workload tag and no cloud access is a valid credential-free cell.
+
+    Mutation: remove the empty-tag early return -- this case refuses with every key listed.
+    """
+    assert _unlisted(_WORKLOAD_ONLY, "apply", "") is None
+
+
+def test_a_tag_differing_only_in_punctuation_is_unlisted():
+    """Workload keys are matched as written, so `net_edge` is not `net-edge`.
+
+    Mutation: normalize `-` to `_` before the key lookup -- this case returns None.
+    """
+    assert _unlisted(_WORKLOAD_ONLY, "apply", "net_edge") == ("aws.apply", ["app", "net-edge"])
+
+
+def test_the_mixed_shape_keeps_its_fallback():
+    """Mutation: drop the "no role" condition -- this case refuses."""
+    toml = """
+[environments.dev-eu]
+region = "eu-west-1"
+
+[environments.dev-eu.aws.apply]
+role = "arn:aws:iam::9817:role/apply"
+
+[environments.dev-eu.aws.apply.workloads.net-edge]
+role = "arn:aws:iam::9817:role/net-edge"
+"""
+    assert _unlisted(toml, "apply", "net") is None
+
+
+def test_a_role_inherited_from_the_block_is_a_fallback():
+    """The tier is judged after inheritance: the block's role reaches `aws.apply`.
+
+    Mutation: read `entry["aws"]["apply"].get("role")` instead of the merged tier -- this
+    case refuses.
+    """
+    toml = """
+[environments.dev-eu]
+region = "eu-west-1"
+
+[environments.dev-eu.aws]
+role = "arn:aws:iam::9817:role/block"
+
+[environments.dev-eu.aws.apply.workloads.x]
+role = "arn:aws:iam::9817:role/x"
+"""
+    assert _unlisted(toml, "apply", "y") is None
+
+
+def test_a_shared_environment_is_judged_on_apply_from_the_plan_path():
+    """A shared environment resolves `aws.apply` on both paths, so the plan cell consults it.
+
+    Mutation: consult `aws.<path>` instead of the shared-aware tier -- `aws.plan` lists no
+    workloads, and this case returns None.
+    """
+    toml = """
+[environments.dev-eu]
+region = "eu-west-1"
+shared = true
+
+[environments.dev-eu.aws.apply.workloads.net-edge]
+role = "arn:aws:iam::9817:role/net-edge"
+"""
+    assert _unlisted(toml, "plan", "net") == ("aws.apply", ["net-edge"])
+
+
+def test_a_tier_listing_no_workloads_is_not_refused():
+    """An apply-only block on the plan path resolves no role and lists no workloads: the
+    cell stays credential-free, as before.
+
+    Mutation: refuse on "no role" alone, without requiring listed workloads -- this case
+    refuses.
+    """
+    toml = """
+[environments.dev-eu]
+region = "eu-west-1"
+
+[environments.dev-eu.aws.apply]
+role = "arn:aws:iam::9817:role/apply"
+"""
+    assert _unlisted(toml, "plan", "net") is None
+
+
+def test_no_entry_and_no_aws_block_are_not_refused():
+    """Mutation: drop the `aws` presence check -- the entry without a block raises KeyError."""
+    toml = """
+[environments.dev-eu]
+region = "eu-west-1"
+"""
+    assert _unlisted(toml, "apply", "net") is None
+    assert _unlisted(toml, "apply", "net", env="prod-us") is None

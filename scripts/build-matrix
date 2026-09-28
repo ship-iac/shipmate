@@ -258,7 +258,22 @@ def stamp_rows(cells, table, tier):
     A row whose `env_binding` is not a non-empty string refuses before any caller writes a
     matrix: every cell job binds `environment:` from it, and GitHub binds no environment for
     an empty one, so the cell would run outside every environment control.
+
+    A cell whose `workload/<name>` tag the consulted tier does not list refuses when that
+    tier has no role to fall back to (`env-config`'s `unlisted_workload`): it would
+    otherwise run with no cloud credentials.
     """
+    for cell in cells:
+        refused = ec.unlisted_workload(table, cell["environment"], tier, cell["workload"])
+        if refused:
+            label, keys = refused
+            raise SystemExit(
+                f"::error::{cell['stack']} in {cell['environment']} carries "
+                f"workload/{cell['workload']}, which {label}.workloads does not list (it lists: "
+                f"{', '.join(keys)}), and {label} sets no role to fall back to. The cell would "
+                "run with no cloud credentials. Retag the stack, or add the workload to "
+                f"{ec.CONFIG_PATH}."
+            )
     rows = [
         {**cell, **ec.resolve(table, cell["environment"], tier, cell["workload"])} for cell in cells
     ]

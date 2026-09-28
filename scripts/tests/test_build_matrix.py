@@ -1321,3 +1321,35 @@ def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         _run_main(monkeypatch, tmp_path, env, head_sha="cafe1234")
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == ""
+
+
+def test_a_workload_tag_the_tier_does_not_list_refuses_when_it_has_no_fallback_role():
+    """The tier holds only workload roles, so an unlisted tag would run with no credentials.
+
+    Mutation: remove the `unlisted_workload` call from `stamp_rows` -- no refusal is raised.
+    """
+    table = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {
+                "region": "eu-west-1",
+                "aws": {
+                    "apply": {
+                        "workloads": {
+                            "net-edge": {"role": "arn:aws:iam::9817:role/net-edge"},
+                            "app": {"role": "arn:aws:iam::9817:role/app"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
+    with pytest.raises(SystemExit) as exc:
+        bm.stamp_rows(cells, table, "apply")
+    assert str(exc.value) == (
+        "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
+        "list (it lists: app, net-edge), and aws.apply sets no role to fall back to. The cell "
+        "would run with no cloud credentials. Retag the stack, or add the workload to "
+        ".github/shipmate.toml."
+    )

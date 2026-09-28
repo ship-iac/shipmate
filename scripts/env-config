@@ -822,3 +822,27 @@ def resolve(table, env, path, workload):
         "config_path": config_path,
         "env_binding": names["shared" if shared else path],
     }
+
+
+def unlisted_workload(table, env, path, workload):
+    """`(label, keys)` when the cell must be refused, else None.
+
+    Refused when `workload` is non-empty, is not a key of the consulted tier's
+    `workloads`, that tier lists at least one workload, and the tier resolves no role
+    after inheritance: the cell would run with no cloud credentials. `label` is the tier
+    `resolve` consults (`aws.apply` on both paths for a shared environment) and `keys`
+    its sorted workload names. An untagged cell, a tier with a role of its own, an
+    entry without an `aws` block and an environment without an entry are never refused.
+    """
+    environments = _mapping(table.get("environments", {}), "environments")
+    entry = _mapping(environments.get(env, {}), f"environment {env}")
+    if not workload or "aws" not in entry:
+        return None
+    shared = env in shared_envs(table)
+    label = f"aws.{'apply' if shared else path}"
+    resolved = dict(tiers(entry["aws"], env, entry.get("region")))
+    prefix = f"{label}.workloads."
+    keys = sorted(name[len(prefix) :] for name in resolved if name.startswith(prefix))
+    if not keys or workload in keys or "role" in resolved[label]:
+        return None
+    return label, keys

@@ -559,7 +559,10 @@ is a provider field. A field may sit at provider-block level, under `plan` or
 tier overrides the last field by field. The workload tier is keyed by the `<name>`
 of the cell's `workload/<name>` tag, exactly as written. `workloads`
 directly under a provider block is malformed shape, not a fourth tier: a
-workload role means nothing without the path it applies to.
+workload role means nothing without the path it applies to. A cell whose
+`workload/<name>` tag the consulted tier's `workloads` does not list is refused
+at detect when that tier, after inheritance, sets no role to fall back to. An
+untagged cell and a tier with a role of its own are not refused.
 
 The environment's own `region` inheriting into `aws.region` is the schema's only
 cross-level default. Every other field resolves inside its own provider block.

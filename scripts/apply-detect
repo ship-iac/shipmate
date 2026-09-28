@@ -289,7 +289,10 @@ def run_unlock(repo, env, head):
     hold, and keeps the reserved-path and slug-collision guards `build_matrix`
     also carries. Neither can affect an unlock — it consumes no plan artifact —
     so each is a refusal inherited from the reuse, and the slug one can make a
-    repository with a latent colliding pair unable to unlock at all.
+    repository with a latent colliding pair unable to unlock at all. Two more
+    refuse unlock for the whole of `env`: a stack in it carrying two
+    `workload/*` tags (`build_matrix`), and a cell in it whose workload tag its
+    tier does not list with no role to fall back to (`stamp_rows`).
 
     `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
     applies none — the run-time half of the decision `scripts/authorize` already

@@ -13,6 +13,7 @@ section below names the SHA the release tags.
 ### Changed
 
 - **A stack carrying two `workload/*` tags is refused at detect.**
+- **A workload tag the environment does not list is refused at detect when its tier has no role to fall back to.**
 
 ## [0.41.0] — 2026-09-28
 
