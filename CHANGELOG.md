@@ -13,7 +13,7 @@ grammar are declared unstable in `README.md`.
 
 ## [0.40.0] — 2026-09-28
 
-Tags `<sha>`.
+Tags `30ba9e7`.
 
 A simplification pass: about 1,700 fewer lines, 750 of them in tests. No consumer workflow
 input, secret or required check changes, so the re-pin is pins-only.
