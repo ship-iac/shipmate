@@ -166,12 +166,6 @@ def test_issues_refuses_the_webhook_set_as_a_variable_last():
     assert {**last, "if": " ".join(last.get("if", "").split()), "run": run} == _REFUSE_STEP_SPEC
 
 
-def test_the_workflow_permissions_floor_is_empty():
-    """Mutation: `permissions: { contents: read }` at workflow level. A job that then loses its
-    own block silently inherits instead of getting nothing."""
-    assert _doc()["permissions"] == {}
-
-
 def test_every_job_declares_its_own_permissions():
     """Whole map. Mutation: delete the `drift` job's block, and it silently gets the floor
     instead of the `id-token: write` its OIDC step needs."""

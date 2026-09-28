@@ -12,9 +12,10 @@ Invariants:
   real credentials from a branch-editable value for exactly the cell the table declined to give
   a role. The jobs may read repository variables elsewhere, and this says nothing about those;
 - every wave job in apply-env-level.yml carries id-token: write;
-- apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}` floor, and
-  apply-env-level's snapshot and complete jobs declare exactly the scopes they need. Neither gets
-  id-token: neither touches the cloud, and complete holds the App key.
+- apply-env-level.yml, comment-ops.yml, drift.yml, plan.yml and unlock.yml declare a
+  workflow-level `permissions: {}` floor, and apply-env-level's snapshot and complete jobs
+  declare exactly the scopes they need. Neither gets id-token: neither touches the cloud, and
+  complete holds the App key.
 
 Whole parsed values, never substrings. An inverted gate must fail here.
 """
@@ -66,8 +67,14 @@ def test_every_wave_job_grants_id_token_write():
         assert perms.get("id-token") == "write", f"{wave}: permissions must include id-token: write"
 
 
-@pytest.mark.parametrize("name", ["apply-env-level.yml", "unlock.yml"])
+#: Every engine workflow whose empty workflow-level floor is pinned. Hand-written, never globbed:
+#: a glob would pin whatever the directory holds.
+_FLOORED = ["apply-env-level.yml", "comment-ops.yml", "drift.yml", "plan.yml", "unlock.yml"]
+
+
+@pytest.mark.parametrize("name", _FLOORED)
 def test_workflow_level_permissions_are_an_empty_floor(name):
+    """Mutation: `permissions: { contents: read }` at workflow level in any listed file."""
     spec = _load(name)
     assert spec.get("permissions") == {}, (
         f"{name} must declare a workflow-level `permissions: {{}}` floor "

@@ -59,12 +59,6 @@ def test_the_guard_step_runs_before_the_dispatch_step():
     ]
 
 
-def test_the_workflow_permissions_floor_is_empty():
-    """Mutation: `permissions: { contents: read }` at workflow level. A job that then loses its
-    own block silently inherits instead of getting nothing."""
-    assert _doc()["permissions"] == {}
-
-
 def test_every_job_declares_its_own_permissions():
     """Whole map, so the single job is pinned too. A callee's permissions cap at the caller's
     job block; granting less kills the run at load time with no job and no log, so the shim's

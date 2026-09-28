@@ -50,12 +50,6 @@ def test_the_workflow_call_secrets_are_exactly_these():
     }
 
 
-def test_the_workflow_permissions_floor_is_empty():
-    """Mutation: `permissions: { contents: read }` at workflow level. A job that then loses its
-    own block silently inherits instead of getting nothing."""
-    assert _doc()["permissions"] == {}
-
-
 def test_every_job_declares_its_own_permissions():
     jobs = _doc()["jobs"]
     assert {j: v.get("permissions") for j, v in jobs.items()} == {
