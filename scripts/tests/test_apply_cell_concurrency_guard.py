@@ -46,9 +46,7 @@ SERIALIZED = {
 
 
 def _jobs(workflow):
-    spec = workflow_yaml(workflow)
-    assert isinstance(spec, dict), f"{workflow} did not parse to a mapping"
-    return spec["jobs"]
+    return workflow_yaml(workflow)["jobs"]
 
 
 def test_every_cell_job_serializes_on_environment_and_stack():

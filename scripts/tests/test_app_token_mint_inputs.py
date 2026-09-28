@@ -36,9 +36,9 @@ change. On any bump, re-read the new version's input resolution and confirm the 
 reaches the JWT `iss` claim unvalidated before merging.
 """
 
-import yaml
 from _loader import ACTIONS as _ACTIONS
 from _loader import ENGINE as _ROOT
+from _loader import action_yaml, workflow_yaml
 
 _GITHUB = _ROOT / ".github"
 
@@ -83,9 +83,8 @@ def _mint_steps():
     """
     found = []
     for path in _engine_yaml():
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if not isinstance(doc, dict):
-            continue
+        # Both loaders refuse a file that parses to no mapping rather than skipping it.
+        doc = (action_yaml if path.is_relative_to(_ACTIONS) else workflow_yaml)(path)
         label = path.relative_to(_ROOT).as_posix()
         found += _mints_in((doc.get("runs") or {}).get("steps"), label)
         for job_name, job in (doc.get("jobs") or {}).items():

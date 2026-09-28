@@ -987,8 +987,7 @@ def _run_planauthz(tmp_path, *, privileged, head_repo="org/repo"):
     return result, outputs, (argv_file.read_text() if argv_file.exists() else "")
 
 
-@bash_only
-def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises(tmp_path):
+def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     """The shipped help footer tells every commenter that `plan` answers only organization
     members and repository collaborators. Three claims, coupled here so none can drift:
 
@@ -1005,8 +1004,11 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises(tmp
     already in the action, in doctor's refusal, so a plan route wired with no gate at all
     leaves every phrase-level assertion green.
 
-    Mutations: invert the `!= "true"` test; add a login or team lookup to the `env:` vector;
-    reword either half of the reason.
+    The third claim is executed by
+    test_a_commenter_without_standing_is_refused_in_plans_own_words.
+
+    Mutations: add a login or team lookup to the `env:` vector; drop the reject step's
+    `authorized != 'true'` condition.
     """
     footer = cp.help_markdown().rsplit("\n", 1)[-1]
     promise = next(s for s in footer.split(";") if _CLAIM in s)
@@ -1032,6 +1034,11 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises(tmp
     }
     assert reject["run"] == _PLAN_REJECT_RUN
 
+
+@bash_only
+def test_a_commenter_without_standing_is_refused_in_plans_own_words(tmp_path):
+    """The third claim above, executed. Mutations: invert the `!= "true"` test; reword either
+    half of the reason."""
     result, outputs, argv = _run_planauthz(tmp_path, privileged=False)
     assert result.returncode == 0, result.stderr
     assert outputs == {"authorized": "false", "reason": _PLAN_ASSOCIATION_REASON}

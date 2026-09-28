@@ -150,21 +150,15 @@ PREFLIGHT_WITH = {
 }
 
 
-def _spec(workflow):
-    spec = workflow_yaml(workflow)
-    assert isinstance(spec, dict), f"{workflow} did not parse to a mapping"
-    return spec
-
-
 def _inputs(workflow):
     # pyyaml parses a bare `on:` key as boolean True.
-    spec = _spec(workflow)
+    spec = workflow_yaml(workflow)
     on = spec.get("on") or spec.get(True)
     return (on["workflow_call"].get("inputs") or {}) if isinstance(on, dict) else {}
 
 
 def _jobs(workflow):
-    return _spec(workflow)["jobs"]
+    return workflow_yaml(workflow)["jobs"]
 
 
 def _job(workflow, job_id):

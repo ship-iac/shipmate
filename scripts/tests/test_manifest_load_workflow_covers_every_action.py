@@ -17,22 +17,14 @@ retriggered anywhere else -- a pull request, where the ref is stale -- or nowher
 leave 19 correct steps that never run.
 """
 
-import glob
-import os
-import pathlib
-
-from _loader import workflow_yaml
-
-WORKFLOW = ".github/workflows/manifest-load.yml"
+from _loader import ACTIONS, workflow_yaml
 
 
 def test_manifest_load_workflow_lists_every_action_as_a_skipped_remote_step():
-    actions = sorted(
-        os.path.basename(os.path.dirname(p)) for p in glob.glob("actions/*/action.yml")
-    )
+    actions = sorted(p.parent.name for p in ACTIONS.glob("*/action.yml"))
     assert len(actions) > 15, f"expected the full action set, found {actions}"
 
-    doc = workflow_yaml(pathlib.Path(WORKFLOW))
+    doc = workflow_yaml("manifest-load.yml")
     # `on:` is YAML 1.1's true, hence the doc.get(True) fallback.
     assert doc.get("on", doc.get(True)) == {
         "push": {"branches": ["main"]},

@@ -72,13 +72,15 @@ def _resolve(tmp_path, versions=_FIXTURE_VERSIONS):
         (tmp_path / "VERSIONS").write_text(versions, encoding="utf-8", newline="\n")
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
-    # The cwd holds no VERSIONS, so a body that read one relative to it instead of to the action
-    # finds nothing rather than the fixture.
+    # Two levels below the cwd's `../../` holds no VERSIONS, so a body that read `../../VERSIONS`
+    # relative to the cwd instead of to the action finds nothing rather than the fixture.
+    cwd = tmp_path / "elsewhere" / "a" / "b"
+    cwd.mkdir(parents=True)
     r = run_step(
         tmp_path,
         step_by(_ACTION, name="Resolve versions")["run"],
         {**os.environ, "GITHUB_ACTION_PATH": action_path.as_posix(), "GITHUB_OUTPUT": str(out)},
-        cwd=action_path,
+        cwd=cwd,
     )
     return r, out.read_text(encoding="utf-8"), f"{action_path.as_posix()}/../../VERSIONS"
 

@@ -73,10 +73,6 @@ def _read_names():
     return names
 
 
-def _load_action():
-    return action_yaml("apply-summary")
-
-
 def _find_step(steps, *, uses_contains=None, run_contains=None):
     for step in steps:
         if uses_contains and uses_contains in (step.get("uses") or ""):
@@ -92,7 +88,7 @@ def test_render_step_feeds_every_env_var_the_script_reads():
         "no os.environ reads found in scripts/apply-comment -- parser or script changed?"
     )
 
-    steps = _load_action()["runs"]["steps"]
+    steps = action_yaml("apply-summary")["runs"]["steps"]
     render_step = _find_step(steps, run_contains="scripts/apply-comment")
     assert render_step is not None, "no run step invokes scripts/apply-comment"
 
@@ -140,20 +136,24 @@ def test_render_step_env_block_matches_the_expected_mapping():
     and names the wrong environments under the wrong sentence, "held" naming what applied
     unreviewed and the reverse. A second selector for two of the keys would relocate the hole
     rather than close it."""
-    render_step = _find_step(_load_action()["runs"]["steps"], run_contains="scripts/apply-comment")
+    render_step = _find_step(
+        action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
+    )
     assert (render_step.get("env") or {}) == _RENDER_ENV
 
 
 def test_render_step_never_interpolates_expr_directly():
     """A second guard alongside test_actions_shellcheck.py: every author-controlled value must
     reach the script through env:, never a ${{ }} interpolated into the shell body."""
-    steps = _load_action()["runs"]["steps"]
+    steps = action_yaml("apply-summary")["runs"]["steps"]
     render_step = _find_step(steps, run_contains="scripts/apply-comment")
     assert "${{" not in (render_step.get("run") or "")
 
 
 def test_download_pattern_matches_apply_cell_upload_prefix():
-    upload_step = _find_step(_load_action()["runs"]["steps"], uses_contains="download-artifact")
+    upload_step = _find_step(
+        action_yaml("apply-summary")["runs"]["steps"], uses_contains="download-artifact"
+    )
     assert upload_step is not None, "no download-artifact step found"
     pattern = (upload_step.get("with") or {}).get("pattern")
 
@@ -174,12 +174,14 @@ def test_download_step_tolerates_failure():
     # For comment-ops the comment is the feedback channel: a transient artifact-API 5xx or 403
     # must not skip the token mint and the POST, leaving a developer whose apply fully succeeded
     # with no pull-request comment.
-    download_step = _find_step(_load_action()["runs"]["steps"], uses_contains="download-artifact")
+    download_step = _find_step(
+        action_yaml("apply-summary")["runs"]["steps"], uses_contains="download-artifact"
+    )
     assert download_step.get("continue-on-error") is True
 
 
 def test_download_step_failure_is_warned_not_silently_swallowed():
-    steps = _load_action()["runs"]["steps"]
+    steps = action_yaml("apply-summary")["runs"]["steps"]
     download_step = _find_step(steps, uses_contains="download-artifact")
     step_id = download_step.get("id")
     assert step_id, "download step needs an id so a later step can check its outcome"
@@ -203,18 +205,20 @@ def test_download_step_does_not_fail_on_zero_matches():
     `name:` and `artifact-ids:` single-artifact modes, so no extra 'ignore missing' option is
     needed. This guards against silently switching to `name:`, the single-artifact mode, which
     does throw on a miss."""
-    download_step = _find_step(_load_action()["runs"]["steps"], uses_contains="download-artifact")
+    download_step = _find_step(
+        action_yaml("apply-summary")["runs"]["steps"], uses_contains="download-artifact"
+    )
     with_ = download_step.get("with") or {}
     assert "pattern" in with_
     assert "name" not in with_
 
 
 def _steps():
-    return _load_action()["runs"]["steps"]
+    return action_yaml("apply-summary")["runs"]["steps"]
 
 
 def test_head_sha_is_a_required_input():
-    inputs = _load_action()["inputs"]
+    inputs = action_yaml("apply-summary")["inputs"]
     assert "head-sha" in inputs, "apply-summary needs the head SHA to read the apply checks"
     assert inputs["head-sha"]["required"] is True
     assert "${{" not in inputs["head-sha"]["description"]  # GHA evaluates descriptions.

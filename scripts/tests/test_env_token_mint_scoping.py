@@ -88,8 +88,12 @@ def test_each_doctor_step_receives_the_env_token():
 
 def test_the_check_ids_step_is_not_a_consumer():
     """`check-ids` mode reduces a check-runs listing and runs no probe, so it has no use for the
-    token. Passing it there would only widen exposure."""
-    for step in action_steps("comment-ops"):
-        env = step.get("env") or {}
-        if env.get("SHIPMATE_DOCTOR_MODE") == "check-ids":
-            assert "SHIPMATE_ENV_TOKEN" not in env
+    token. Passing it there would only widen exposure. Mutation: rename the step's mode, and
+    the count assert reds instead of the loop passing over nothing."""
+    found = [
+        s
+        for s in action_steps("comment-ops")
+        if (s.get("env") or {}).get("SHIPMATE_DOCTOR_MODE") == "check-ids"
+    ]
+    assert len(found) == 1, f"expected exactly one check-ids step, got {len(found)}"
+    assert "SHIPMATE_ENV_TOKEN" not in found[0]["env"]

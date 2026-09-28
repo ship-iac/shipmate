@@ -13,12 +13,8 @@ from _loader import WORKFLOWS, local_action, workflow_yaml
 WF = WORKFLOWS / "comment-ops.yml"
 
 
-def _doc():
-    return workflow_yaml(WF)
-
-
 def _job():
-    return _doc()["jobs"]["ops"]
+    return workflow_yaml(WF)["jobs"]["ops"]
 
 
 def _step(needle):
@@ -30,7 +26,7 @@ def _step(needle):
 def test_the_workflow_declares_no_inputs_and_one_secret():
     """Mutation: add any `workflow_call` input, or make the secret `required: true` -- which
     fails at load time for every consumer scoping the key to an environment."""
-    call = _doc()[True]["workflow_call"]
+    call = workflow_yaml(WF)[True]["workflow_call"]
     assert call.get("inputs") is None
     assert call["secrets"] == {"SHIPMATE_APP_PRIVATE_KEY": {"required": False}}
 
@@ -67,7 +63,7 @@ def test_every_job_declares_its_own_permissions():
     Mutations: drop `issues: write`, and the reaction and refusal comment fail; delete the whole
     block, and the job silently gets the empty floor.
     """
-    assert {j: v.get("permissions") for j, v in _doc()["jobs"].items()} == {
+    assert {j: v.get("permissions") for j, v in workflow_yaml(WF)["jobs"].items()} == {
         "ops": {
             "contents": "read",
             "issues": "write",
@@ -83,7 +79,7 @@ def test_every_job_binds_the_engine_environment():
 
     Mutation: delete the `environment:`.
     """
-    bound = {j: v.get("environment") for j, v in _doc()["jobs"].items()}
+    bound = {j: v.get("environment") for j, v in workflow_yaml(WF)["jobs"].items()}
     assert bound == {"ops": "shipmate-engine"}
 
 

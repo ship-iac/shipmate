@@ -26,8 +26,7 @@ visible answer with a red run and a log annotation, and would take `shipmate hel
 no App token at all, down with it.
 """
 
-import yaml
-from _loader import ACTIONS, WORKFLOWS, action_yaml
+from _loader import ACTIONS, WORKFLOWS, action_yaml, workflow_yaml
 
 # One physical line each in the shell body: a `::error::` annotation ends at the first newline,
 # so a wrapped message loses everything after cause (1).
@@ -99,7 +98,7 @@ def _minting_files():
 
 
 def _steps(path, keys):
-    node = yaml.safe_load(path.read_text(encoding="utf-8"))
+    node = (action_yaml if path.is_relative_to(ACTIONS) else workflow_yaml)(path)
     for key in keys:
         node = node[key]
     return node

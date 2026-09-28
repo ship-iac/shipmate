@@ -27,14 +27,10 @@ def _rank(level):
     return _RANK.get(level, 0)
 
 
-def _workflow(name):
-    return workflow_yaml(name)
-
-
 def _callee_permission_union():
     """The union, per scope, of every job's `permissions:` inside the callee: the ceiling a
     caller must clear for every one of the callee's jobs to run."""
-    jobs = _workflow(CALLEE)["jobs"]
+    jobs = workflow_yaml(CALLEE)["jobs"]
     union = {}
     for job in jobs.values():
         for scope, level in (job.get("permissions") or {}).items():
@@ -50,7 +46,7 @@ def _callers():
     for path in sorted(WORKFLOWS.glob("*.yml")):
         if path.name == CALLEE:
             continue
-        spec = _workflow(path.name)
+        spec = workflow_yaml(path.name)
         for job_id, job in (spec.get("jobs") or {}).items():
             uses = job.get("uses")
             if uses and _CALLEE_REF.search(uses):

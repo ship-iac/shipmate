@@ -113,10 +113,8 @@ _ALL_SUCCESS = {
             "no plan-text digest reached this action — re-pin every engine reference to one commit",
             id="digest_input",
         ),
-        # Before the apply step was split, a failed init reported result="failed" with no reason
-        # -- the bucket a real apply error lands in, which may have mutated infrastructure. Its
-        # own row rather than the digest's, so that pre-existing gap is not hidden behind a new
-        # message.
+        # A failed init once reported result="failed" with no reason, the bucket for a real apply
+        # error that may have mutated infrastructure. Its own row keeps that gap from hiding.
         pytest.param("init", "tofu init failed — see the job log", id="init"),
         pytest.param(
             "locate",

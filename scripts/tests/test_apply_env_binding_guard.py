@@ -55,9 +55,7 @@ SNAPSHOT_STEPS = [
 
 
 def _jobs(workflow="apply-env-level.yml"):
-    spec = workflow_yaml(workflow)
-    assert isinstance(spec, dict), f"{workflow} did not parse to a mapping"
-    return spec["jobs"]
+    return workflow_yaml(workflow)["jobs"]
 
 
 def _wave_jobs():
