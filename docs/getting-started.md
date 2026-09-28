@@ -888,7 +888,7 @@ The second part is a pin. An apply is authorized by the engine
 `comment-ops.yml` the `comment-ops` job calls and enforced by the engine
 `apply.yml` and `apply-all.yml` the `targeted` and `all` jobs call, so those
 three pins must sit at the same release (or the enforcing two later). An apply
-authorized under one pin and dispatched into an engine on another is enforced by
+authorized under a newer pin than the engine that enforces it is enforced by
 nothing, so the `comment-ops`, `targeted` and `all` jobs keep one pin. One file
 carrying all seven pins is what makes that automatic: `dev/repin_consumer.py`
 moves them together, and there is no longer a second file to bump on its own.

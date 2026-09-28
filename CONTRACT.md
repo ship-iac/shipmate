@@ -1748,11 +1748,14 @@ trigger alone closes two paths a trigger check alone would not:
   which GitHub resolves in this repository at the commit the consumer's `uses:` resolved to, so
   the consumer's one pin names the whole tree that runs. The consumer surface is the seven
   reusable workflows; the composite actions are engine-internal.
-  `dev/repin_consumer.py` is the hand-run tool that moves a consumer's pins together.
-- Releases are annotated tags, so `git/ref/tags/<tag>` returns the tag object's SHA, which a
-  workflow cannot check out. Resolve a tag with
+- Every engine reference moves in one change: a repository that bumps some refs and leaves
+  others behind runs two engine versions against one contract.
+  `dev/repin_consumer.py` is the hand-run tool that moves a consumer's pins together. The SHA
+  of record for a release is named in that release's section of `CHANGELOG.md`.
+- A release tag may be annotated, so `git/ref/tags/<tag>` can return the tag object's SHA,
+  which a workflow cannot check out. Resolve a tag with
   `gh api repos/<owner>/shipmate/commits/<tag> --jq .sha`, or locally
-  `git rev-parse <tag>^{commit}`.
+  `git rev-parse <tag>^{commit}`; both resolve an annotated and a lightweight tag alike.
 - **Upgrade path.** shipmate publishes a GitHub Release per release SHA. A
   consumer with Dependabot's `github-actions` ecosystem enabled therefore
   receives a pull request bumping its shipmate pins to the new release's SHA —
