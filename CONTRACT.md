@@ -950,11 +950,9 @@ job. That file carries five triggers; `workflow_dispatch` is the one a
 commented verb reaches, and the other four (`pull_request_target`,
 `issue_comment`, `push`, `schedule`) fire from their own events. `doctor` and
 `help` dispatch nothing: both are answered inside the comment-ops run itself. A
-repository whose comment-handling workflow is not
-`.github/workflows/shipmate.yml`, or whose `shipmate.yml` declares no
-`workflow_dispatch` trigger or not the `verb`, `environment`, `ref` and
-`pr_number` inputs every dispatch sends, fails at dispatch time on that
-comment-handling run — for every verb alike, since they share the file. That
+repository with no `.github/workflows/shipmate.yml`, or one that declares no
+`workflow_dispatch` trigger or not the inputs a verb's dispatch sends, fails at
+dispatch time on that comment-handling run — for every verb alike, since they share the file. That
 run is not visible from the pull request, so every refusal in the dispatch step
 — an unwired verb, an unknown one, and a rejected API call alike — also posts a
 one-line comment there linking the run. The run holds the error; the comment

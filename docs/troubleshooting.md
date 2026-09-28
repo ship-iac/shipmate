@@ -405,8 +405,9 @@ Each check refuses:
   the cell would plan the base and report a clean plan for a pull request it
   never read, so the mismatch is refused. `build-matrix` holds the same line
   one job earlier, in `detect`, and states its half of it two ways:
-  `this run checked out <sha>, which is not the commit it is planning` when the `ref:` is missing, and `this run did not state
-  the commit it is planning` when the step's own `head-sha` input is absent.
+  `this run checked out <sha>, which is not the commit it is planning` when the
+  `ref:` is missing, and `this run did not state the commit it is planning` when
+  the step's own `head-sha` input is absent.
   Neither is optional and neither has a quiet mode — a run that cannot name its
   head is refused, not planned.
 

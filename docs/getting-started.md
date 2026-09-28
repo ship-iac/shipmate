@@ -562,9 +562,11 @@ time and every later apply fails its plaintext-artifact check
 
 ## Required — apply
 
-This tier gets you `shipmate apply` in a pull request comment (a pre-merge apply
-of the reviewed plan) and an idempotent post-merge apply on push to the default
-branch.
+This tier gets you `shipmate apply` and `shipmate unlock` in a pull request
+comment (a pre-merge apply of the reviewed plan, through the `targeted` and `all`
+jobs, and a lock release through `unlock`), and the environment protection that
+also governs the idempotent post-merge apply the tier-1 `deploy` job runs on
+push to the default branch.
 
 `shipmate apply` runs only for a member of the team named by
 `gate.approver_team` in `.github/shipmate.toml` on your default branch
@@ -629,11 +631,11 @@ rules from Settings → Environments → `<name>` (or the API):
 
 ### The apply jobs
 
-This tier adds no file. The `targeted`, `all`, `unlock` and `deploy` jobs are
-already in the `shipmate.yml` published above
-(§[The workflow file](#the-workflow-file)); what this tier does is create the
-environments and secrets they need. The `comment-ops` job that dispatches them is
-tier 1's, and is described here because this is where its verbs land.
+This tier adds no file. The `targeted`, `all` and `unlock` jobs are already in
+the `shipmate.yml` published above (§[The workflow file](#the-workflow-file));
+what this tier does is create the environments and secrets they need. The
+`comment-ops` job that dispatches them and the `deploy` job are tier 1's;
+`comment-ops` is described here because this is where its verbs land.
 
 The `comment-ops` job turns a `shipmate <verb>` pull request comment into an
 authorized `workflow_dispatch` of `shipmate.yml` itself, carrying the parsed verb
