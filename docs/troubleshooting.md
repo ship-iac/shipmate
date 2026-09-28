@@ -183,27 +183,6 @@ deprecation warning from a pinned action reads the same as a shipmate warning.
 That is intended — a known-noise denylist would eventually swallow a real
 warning — so treat an unfamiliar line as upstream's until you have checked.
 
-The line you are most likely to meet is
-`Input 'app-id' has been deprecated with message: Use 'client-id' instead.`,
-once per token mint on the commit, from `actions/create-github-app-token`.
-**It is upstream deprecation noise, not a setting to fix.** Nothing in your
-repository causes it and nothing you can configure removes it. Do not go looking
-for a second App credential or change `SHIPMATE_APP_ID`; that is a dead end.
-
-Engine releases from the one that introduced this note onward do not emit it:
-their mints identify the App with `client-id` rather than the deprecated
-`app-id` input. Only the input's *name* changed — the value threaded is still
-the one numeric App id you set as `SHIPMATE_APP_ID`, because upstream passes
-either input through unaltered as the JWT `iss` claim, which GitHub accepts as
-the App id or the Client id. No second credential, and that same numeric id
-keeps satisfying the gate ruleset's `integration_id` pin and the apply-check
-author filter.
-
-Expect the warnings to persist for a while regardless. Adoption is re-pin-only
-and staggered, so a repository pinned to an earlier engine SHA keeps emitting
-them until it re-pins. Seeing the line is not evidence that your wiring is
-wrong.
-
 `shipmate doctor` never blocks the gate, and it needs no team membership,
 review or reviewed plan, unlike `shipmate apply` — but because it reports this
 repository's own settings, the engine limits it to organization members and
@@ -297,7 +276,6 @@ mandate. Each one names what to do.
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
 | `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
-| `<file>.yml` — the retired six-file layout | the repository still carries one of the six files `shipmate.yml` replaced (`plan.yml`, `apply.yml`, `comment-ops.yml`, `unlock.yml`, `deploy.yml`, `drift.yml`). It is never deleted for you: it may hold an edit of yours, and one of them still fires on its own trigger, running a job `shipmate.yml` now runs too. Delete the named file by hand. |
 | `<file>.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `dev/repin_consumer.py` cannot move. Delete the file and run the script again. |
 | `<file>.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
 
@@ -410,23 +388,19 @@ plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
 failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 
-Both are wiring errors in your `.github/workflows/shipmate.yml`, and each names its
-own fix:
+Engine `plan.yml` supplies both values the checks compare:
 
 - **`expected-head` is missing or empty.** `plan-cell` requires it — the commit
   the run is planning — and refuses rather than publishing a plan whose
-  provenance nobody can verify. Add
-  `expected-head: ${{ needs.facts.outputs.head-sha }}` to the `plan-cell`
-  step ([`getting-started.md`](getting-started.md) §Required — plan). This is the
-  first thing a repository meets after re-pinning to the release that introduced
-  the input.
+  provenance nobody can verify. Engine `plan.yml` passes
+  `expected-head: ${{ needs.facts.outputs.head-sha }}` to the `plan-cell` step.
 - **The commit checked out is not the commit the run says it is planning.**
   Neither plan trigger checks out the pull request's head — `pull_request_target`
-  takes the base branch, `workflow_dispatch` the dispatch ref — so `detect`
-  and `plan` must name
+  takes the base branch, `workflow_dispatch` the dispatch ref — so engine
+  `plan.yml`'s `detect` and `plan` jobs name
   `ref: ${{ needs.facts.outputs.head-sha }}` on their checkout. Without it
-  the cell plans the base and would report a clean plan for a pull request it
-  never read; that is now a refusal instead. Fix the checkout — passing the
+  the cell would plan the base and report a clean plan for a pull request it
+  never read, so the mismatch is refused. Passing the
   base SHA as `expected-head` to make the comparison agree is the one wrong
   reading of this error, and it restores exactly the hazard the check exists to
   close. `build-matrix` holds the same line one job earlier, in `detect`, and
@@ -452,21 +426,20 @@ remedy differs:
   applied or silently re-planned — as with a stale plan, there is no force. The
   fix is a re-plan and an apply of the fresh plan.
 - **There is no record at all.** There is nothing to compare, so the absent
-  record is refused rather than tolerated. Most often the plan predates the
-  release that binds a plan to the tree it was produced from, though a
-  mismatched engine revision produces the same absence. A push does not always
-  fix this one. Pre-merge it does: push to the pull request and the fresh plan
-  carries a record — a *re-run* of the old plan run does not, because a re-run
-  replays the workflow file of the commit that triggered it, so it produces
-  another old-format plan from the pre-re-pin engine pin. But the post-merge
-  deploy path can meet an old-format artifact for a cell that was still pending
-  when the re-pin merged, and there is no pull request left to push to — the
-  remedy there is a follow-up pull request touching those stacks. The way to
-  avoid meeting it at all is to land the re-pin with nothing pending.
+  record is refused rather than tolerated. The plan came from an engine revision
+  that records none, which a plan pin that differs from the apply pin produces.
+  A push does not always fix this one. Pre-merge it does: push to the pull
+  request and the fresh plan carries a record — a *re-run* of the old plan run
+  does not, because a re-run replays the workflow file of the commit that
+  triggered it, and with it that commit's engine pin. But the post-merge deploy
+  path can meet a record-less artifact for a cell that was still pending when a
+  re-pin merged, and there is no pull request left to push to — the remedy there
+  is a follow-up pull request touching those stacks. The way to avoid meeting it
+  at all is to land a re-pin with nothing pending.
 
 This check is per cell and additive: the apply path's plan-run binding — each
-cell's plan run read from an App-authored apply check on that same head — is
-unchanged, and a repository sees this error only for a plan run that binding
+cell's plan run read from an App-authored apply check on that same head — still
+holds, and a repository sees this error only for a plan run that binding
 accepted.
 
 ### `no plan-text digest recorded for`, or `the stored plan does not render to the plan text that was reviewed`
@@ -485,8 +458,8 @@ job records the digest of the `plan.txt` it publishes in the comment
 ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), and the applying
 cell re-renders the stored plan with the command that wrote it and compares.
 
-- **No digest is recorded.** The apply check was written before the release that
-  records one. Nothing is compared, so it is refused rather than applied
+- **No digest is recorded.** The apply check was written by an engine revision
+  that records none. Nothing is compared, so it is refused rather than applied
   unverified. Pre-merge the fix is a push and an apply of the fresh plan; a
   *re-run* of the old plan run does not help, because it replays the workflow
   file of the commit that triggered it. Post-merge, a follow-up pull request
@@ -604,8 +577,7 @@ The fix in every case is the same: put the top-level settings above the first
 declare the same table, and `tomllib` refuses with `Cannot declare
 ('environments', 'dev-eu', 'aws', 'plan') twice`. Pick one notation per
 environment; dotted keys are canonical. A repeated key refuses the same way,
-with `Cannot overwrite a value` — where the old Terramate form let a second
-definition silently win.
+with `Cannot overwrite a value`.
 
 A leading byte-order mark is `Invalid statement (at line 1, column 1)`. Save the
 file as UTF-8 without a BOM; nothing strips it, deliberately, so that
@@ -724,8 +696,8 @@ planned. A pull request whose head is in a fork is refused earlier still, at
 only when every shipmate-App-authored check on that commit whose name begins
 `apply / ` has a latest run completed as `success` or `neutral`, and the apply
 paths complete only the names the current plan run produced. A leftover pending
-check under a name no current cell reconstructs — an earlier engine revision's
-check-name grammar, a renamed or deleted stack — therefore holds the gate
+check under a name no current cell reconstructs — one from another engine
+revision's check-name grammar, a renamed or deleted stack — therefore holds the gate
 indefinitely. GitHub has no way to delete a check run, so the recovery is a new
 head SHA: push a commit, and the plan run re-creates only the checks that exist
 now.
@@ -878,10 +850,8 @@ cannot arrive.
 
 The refusal keys on the `head-repo` input, and it refuses by default: a run
 that states no head repository is refused too, with a message naming the input.
-Engine `plan.yml` fills that input from its own `facts` job, so on a current pin
-the message means what it says — the head really is elsewhere. On an older pin
-the same message can come from a hand-written consumer workflow
-whose `build-matrix` step never passed the input. Engine `drift.yml` says it
+Engine `plan.yml` fills that input from its own `facts` job, so the message
+means what it says — the head really is elsewhere. Engine `drift.yml` says it
 has no pull request at all with `no-pull-request: "true"` instead
 (`docs/drift.md`).
 

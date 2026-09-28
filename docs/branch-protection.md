@@ -103,7 +103,7 @@ committed alongside the change it is meant to unblock does not apply to that
 pull request — the old ownership still decides, and the pull request stays
 unmergeable. This bites precisely on a `CODEOWNERS` covering
 `/.github/workflows/`, because the pull requests it blocks are the ones that
-edit a workflow — an engine migration that moves an `environment:` line, say. It
+edit a workflow — an engine re-pin, say. It
 also has a floor: the narrowing is itself mergeable only because
 `.github/CODEOWNERS` is not under a path it owns. A `CODEOWNERS` entry covering
 `/.github/` — or the file's own path — owns the fix, and then a bypass actor is

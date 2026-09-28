@@ -11,7 +11,7 @@ inputs:
     description: The commit this run is planning, e.g. the pull request's head SHA. Empty is refused — a plan whose provenance is unrecorded cannot be applied.
     required: true
   plan-passphrase:
-    description: Passphrase to encrypt the .otplan artifact at rest. Empty = plaintext (backward compatible).
+    description: Passphrase to encrypt the .otplan artifact at rest. Empty = plaintext.
     required: false
     default: ""
   tf-vars:

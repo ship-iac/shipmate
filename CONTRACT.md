@@ -249,14 +249,7 @@ never used.
   control.
 
   A repository may therefore mix modes freely — some envs shared, some split —
-  and no workflow file names either. The failure this arrangement exists to
-  prevent was a plan-side binding a consumer wrote by hand: a static bare
-  `${{ matrix.environment }}` in a repository where only some envs are shared
-  made the split envs' plan cells bind a bare `<env>` nobody created, and GitHub
-  auto-created it empty. What a cell plans no longer depends on that — identity
-  comes from `matrix.environment` and the default-branch table — but the cell
-  still runs inside an environment carrying none of the protection rules the
-  real one has, and nothing about its plan output says so.
+  and no workflow file names either.
 - **A logical env may opt into one shared environment (shared mode).**
   `shared = true` in its `[environments.<env>]` entry makes both paths bind the
   bare `<env>` — one environment, no suffix. The price is stated in
@@ -521,14 +514,10 @@ each entry declares it as `gated = false` (§Comment-ops).
 nobody — which is also what an absent key does. The file is the only source, so
 emptying the setting removes what it granted and nothing else grants it back.
 
-The team and the review exemption once lived in the `SHIPMATE_APPROVERS_TEAM` and
-`SHIPMATE_UNGATED_ENVS` repository variables. Neither is read any more, at any
-level, unless the file references it (§Variable references).
-
 ### The schema version
 
 `schema_version` is optional and, when written, must be the integer `1`. An
-absent `schema_version` reads as 1, so no existing file has to gain the line.
+absent `schema_version` reads as 1.
 `schema_version = true` is refused explicitly: Python compares `True == 1`, and
 a bool left to a plain comparison would read as version 1.
 
@@ -556,7 +545,7 @@ closed.
   `[environments.dev-eu]` plus a later `[environments.dev-eu.aws.plan]` header
   refuses with *"Cannot declare ('environments', 'dev-eu', 'aws', 'plan')
   twice"*. Pick one notation per environment. Duplicate keys refuse the same
-  way, where the old form let a second definition silently win.
+  way.
 
 A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and both read
 mechanisms — the cell paths' `git show`, and the contents-API read that
@@ -850,9 +839,8 @@ condition (`docs/hardening.md` §7–9).
 **The plan and drift paths run that same step, workload tier included.** An
 `aws.plan` tier is what a consumer sets for plan-time and drift-time cloud
 access, with a `plan.workloads[<name>]` tier for the per-workload role. The
-engine owns the step, which is a widening over the consumer-authored plan
-workflow it replaced: that had a credentials step only where its author wrote
-one, and never resolved a per-workload role at all.
+engine owns the step, so no consumer file decides whether a cell gets
+credentials or which per-workload role it resolves.
 
 **A plan cell executes branch-authored Terramate/OpenTofu** — a provider or an
 `external` data source runs at plan time — so whatever the `aws.plan` tier
@@ -927,9 +915,8 @@ carries no apply check and so contributes no cell anyway, and an unrelated
 one must not abort an apply. Failing the whole run rather than the one stack is
 deliberate too: a silently skipped stack plans and applies nothing while the
 gate goes green over it, which is the one failure this contract will not trade
-for convenience. The failure names every untagged stack it found, so an
-incremental migration is worked down from that list rather than one re-run per
-stack.
+for convenience. The failure names every untagged stack it found, so they are
+tagged from that list rather than found one re-run per stack.
 
 The drift path's optional `tags` filter does not retire that backstop: it
 narrows the cells a run covers, not the set of stacks it inspects, and the
@@ -964,7 +951,7 @@ commented verb reaches, and the other four (`pull_request_target`,
 `issue_comment`, `push`, `schedule`) fire from their own events. `doctor` and
 `help` dispatch nothing: both are answered inside the comment-ops run itself. A
 repository whose
-`shipmate.yml` is missing, or which predates this layout, fails at dispatch time
+`shipmate.yml` is missing fails at dispatch time
 on that comment-handling run — for every verb alike, since they share the file.
 That run is not visible from the pull request, so every refusal in the dispatch
 step — an unwired verb, an unknown one, and a rejected API call alike — also
@@ -1078,7 +1065,7 @@ freshness was not verified rather than falling back to a weaker read.
 Those warnings are not read from the sticky plan comment — a plan run writes the
 full plan comment (overview table, per-changed-cell details, and a one-line
 footer pointing at `shipmate help`, the only thing in that comment that mentions
-the comment commands at all) but no longer appends doctor findings to it. A run
+the comment commands at all) but does not append doctor findings to it. A run
 with nothing planned writes no comment at all *unless* doctor emitted a warning,
 precisely so that footer never goes missing on a run that has something to point
 at (see §Plan comment). Instead, `actions/summary` runs
@@ -1267,22 +1254,21 @@ when it is not. The entry's own name is held to the env-name charset and the
 rather than left to exempt nothing.
 
 **Absent means gated**: an entry without `gated`, or with `gated = true`, keeps
-the ruleset's review requirement, so *what applies* is what applied before the
-setting existed. There is no second source for an absent key to fall through to.
+the ruleset's review requirement. There is no second source for an absent key to fall through to.
 
 Opting in takes two things, and the setting alone is not enough:
 
 1. `gated = false` on the environment's entry on the default branch, and
 2. the consumer's `shipmate.yml` pinning both engine references —
    `.github/workflows/apply.yml@` (the `targeted` job) and
-   `.github/workflows/apply-all.yml@` (the `all` job) — at or past the release
-   that carries this feature. §Consumption's one-change rule already requires
-   it; here breaking it fails open, not loudly, and once per reference: a
-   bare `shipmate apply` authorized under `REVIEW_REQUIRED` by a fresh
-   `comment-ops.yml` and dispatched into an engine older than the partition
-   applies every pending environment with no approving review, and a
-   targeted `shipmate apply <env>` dispatched into an engine older than the
-   `review` job applies that environment unreviewed. Both edges need an entry
+   `.github/workflows/apply-all.yml@` (the `all` job) — to the same commit as
+   its `comment-ops.yml` reference, as §Consumption's one-change rule requires.
+   Here breaking that rule fails open, not loudly, and once per reference: a
+   bare `shipmate apply` authorized under `REVIEW_REQUIRED` by `comment-ops.yml`
+   and dispatched into an engine revision without the partition applies every
+   pending environment with no approving review, and a targeted
+   `shipmate apply <env>` dispatched into a revision without the `review` job
+   applies that environment unreviewed. Both edges need an entry
    declaring `gated = false`: no consumer-written input can authorize a dispatch
    without it.
 
@@ -1407,7 +1393,7 @@ Beyond minting the `workflow_dispatch`
 token for comment-ops (events created with the default `GITHUB_TOKEN` never
 trigger other workflows, so a private App is the only way to kick off the
 apply workflow from a comment) and reading team membership for
-authorization, the App now authors every check/status/comment/issue that
+authorization, the App authors every check/status/comment/issue that
 crosses a workflow-run boundary:
 
 - **Apply checks** (`apply / <stack> / <env>`) — created pending by
@@ -1510,23 +1496,12 @@ names beside them. `scripts/summary-comment` resolves each row's `[plan]` link
 by that exact name. A job named anything else plans correctly and every such
 link falls back to the workflow-run page; `shipmate doctor` reports it.
 
-**Adopting this topology takes one ungatable pull request.** A `pull_request`
-run uses the workflow file from the pull request's own head; a
-`pull_request_target` run uses the file on the default branch. The commit that
-switches the trigger therefore satisfies neither — its head no longer declares
-`pull_request`, and the default branch does not yet declare
-`pull_request_target` — so it produces no plan run and no `shipmate / gate`.
-Merge that one pull request with an administrative bypass and restore
-enforcement straight after; every pull request following it gates normally.
-
-The move from the six files this layout replaces — `plan.yml`,
-`comment-ops.yml`, `deploy.yml`, `drift.yml`, `apply.yml` and `unlock.yml` — to
-this one is
-ungatable for the same reason, and needs the same bypass: the plan that runs on
-it is the old consumer `plan.yml` on the default branch, whose pinned engine
-`build-matrix` refuses a checkout carrying no `.github/workflows/plan.yml` —
-which the pull request has just deleted. Merge it with an administrative bypass;
-the next pull request gates normally.
+**Adopting this topology takes one ungatable pull request.** A
+`pull_request_target` run uses the workflow file on the default branch, which
+does not yet declare the trigger on the pull request that adds `shipmate.yml`,
+so that pull request produces no plan run and no `shipmate / gate`. Merge it
+with an administrative bypass and restore enforcement straight after; every pull
+request following it gates normally.
 
 For a repository migrating from another TACO, that same pull request is
 ungated by both systems at once: the outgoing tool's checks are being removed
@@ -1643,7 +1618,7 @@ The four jobs:
   `shipmate-engine` to author the drift Issues, and a scheduled or manually
   dispatched run evaluates at the default branch.
 
-Nothing matches on the workflow's `name:` any more. Doctor reads the consumer's
+Nothing matches on the workflow's `name:`. Doctor reads the consumer's
 workflow files for five probes — stale engine pins, `pull_request_target`
 triggers, and `shipmate.yml`'s plan-calling job name, dispatch wiring and event
 routing; the last three observe whether the plan comment's per-cell links
@@ -1690,11 +1665,10 @@ step: `detect` can fail on a fmt check or stale codegen, and `summary` must
 still be told which head to gate.
 
 **A consumer states none of these facts and can weaken none of them.**
-Producing them and comparing them are now the same file, so the three
-mis-wirings this contract used to enumerate — a constant
-`head-repo: ${{ github.repository }}`, a literal `is-draft: false`, a literal
-`on-demand: true`, each of which stated the safe answer for every run, forks and
-drafts included — have no site left to be written at. The consumer's file passes
+Producing them and comparing them are the same file, so a consumer has no site
+at which to write a constant `head-repo: ${{ github.repository }}`, a literal
+`is-draft: false` or a literal `on-demand: true`, each of which would state the
+safe answer for every run, forks and drafts included. The consumer's file passes
 secrets and permissions; the engine decides everything else.
 
 `summary` deliberately does not require `detect` or `plan` to have succeeded: a
@@ -1840,11 +1814,10 @@ at all: the apply workset comes from the head's own apply checks.
 The delimiter is `.` and the environment comes first on purpose. Terramate tag
 values (the source of every env name) cannot contain `.`, so the first `.`
 after the `plan.` prefix is always the env↔slug boundary. This makes the name
-unambiguous across all `(slug, env)` pairs — unlike the earlier
-`plan-<slug>-<env>` form, where `-` appears in both fields and
-`(stacks/app-dev, eu)` and `(stacks/app, dev-eu)` both rendered
-`plan-stacks-app-dev-eu`, letting apply-detect enrol the wrong stack into a
-wave. A slug may itself contain `.` (a path character); that is harmless
+unambiguous across all `(slug, env)` pairs. A delimiter that can appear in both
+fields cannot: with `-`, `(stacks/app-dev, eu)` and `(stacks/app, dev-eu)` would
+both render `plan-stacks-app-dev-eu`, letting apply-detect enrol the wrong stack
+into a wave. A slug may itself contain `.` (a path character); that is harmless
 because the name is only ever built forward, never split. Two distinct stack
 paths that slug to the same value still collide by construction and fail loud
 in `build-matrix`, at matrix construction — before any artifact exists, so the
@@ -1857,14 +1830,13 @@ guard runs over the cells the run will produce, so two stacks that slug alike
 but fall in different slices are caught by no scoped sweep. An unscoped drift
 run stays the whole-tree check for that.
 
-This naming contract is breaking for any in-flight plan artifacts: land the
-change when no applies are mid-flight. It also spans two engine references
-pinned independently in the consumer's `shipmate.yml` — its `plan.yml` reference
-pins `plan-cell` (the uploader) and its `apply.yml` reference pins the engine's
-reusable apply workflows, which pin `apply-cell` (the downloader) internally.
-Bump both pins together when adopting a build that changes this name: a partial
-bump (uploader on the new name, downloader on the old, or vice versa) makes
-every apply fail its reviewed-plan download fail-safe until the pins agree.
+A change to this name breaks every in-flight plan artifact: move pins across it
+when no applies are mid-flight. The name also spans two engine references in the
+consumer's `shipmate.yml`: `plan-cell` (the uploader) runs at the commit its
+`plan.yml` reference names, and `apply-cell` (the downloader) at the commit its
+apply references name, each called as `$/actions/<name>` (§Consumption). If
+those commits disagree on the name, every apply fails its reviewed-plan download
+fail-safe until the pins agree.
 
 ## Apply summary artifacts
 
@@ -2119,7 +2091,7 @@ that produced the cell and the digest of that cell's plan text, below):
 `sha256` over the sorted JSON of every non-empty
 `TF_VAR_*` environment variable (name→value) plus `TF_WORKSPACE` when it is set.
 Ephemeral credential vars (`AWS_*`, etc.) are excluded. A set-but-empty
-`TF_VAR_*` is excluded from the payload, so it now hashes identically to that
+`TF_VAR_*` is excluded from the payload, so it hashes identically to that
 variable being absent altogether — a flavor that injects nothing and a flavor
 that injects an empty string for the same name fingerprint the same way.
 `TF_WORKSPACE` is included because it is the workspaces-flavor env identity and
@@ -2143,9 +2115,8 @@ file at its repo root — and compares it against its own `git rev-parse HEAD`
 before the decrypt, the state restore and the apply — a plan of another tree is
 refused at the cheapest point. A record that disagrees with the checkout is
 refused, and so is an absent record: there is nothing to compare, so it is
-refused rather than tolerated. Most often such a plan predates the release that
-binds a plan to its tree, though a mismatched engine revision produces the same
-absence; either way the remedy is a re-plan. This
+refused rather than tolerated. A mismatched engine pin is the usual cause of an
+absent record; the remedy is a re-plan. This
 is additive to the plan-run binding the apply path already carries: each cell's
 plan run is read from an App-authored apply check on that same head, so no plan
 run from another head can be named. That binding bounds which plan run may be
@@ -2358,7 +2329,7 @@ all (`docs/hardening.md` §6), so any branch's workflow can name one and read it
 Unlike the App private key, this secret must be readable wherever plans are
 produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
-- **Backward compatible.** An empty/unset `plan-passphrase` leaves the plan
+- **Optional.** An empty/unset `plan-passphrase` leaves the plan
   plaintext and the uploaded bytes byte-identical to a no-encryption run.
 - **Fail-safe on mismatch.** apply-cell refuses to proceed rather than apply the
   wrong thing: a plaintext artifact when a passphrase is configured, or an
@@ -2373,10 +2344,9 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
   machine plan at rest and nothing else; redaction in the published text comes
   from `sensitive` marking (see Secrets in published output, above).
-- **Both sides must agree.** `plan-cell` (encrypt) and `apply-cell` (decrypt) are
-  pinned independently (the `plan.yml` and `apply.yml` references in the
-  consumer's `shipmate.yml`); the passphrase and the engine SHA must match on
-  both. A mismatch surfaces as the fail-safe above, not a silent wrong apply.
+- **Both sides must agree.** `plan-cell` (encrypt) runs at the commit of the
+  consumer's `plan.yml` reference and `apply-cell` (decrypt) at the commit of its
+  `apply.yml` reference; the passphrase and the engine SHA must match on both. A mismatch surfaces as the fail-safe above, not a silent wrong apply.
 
 ## Engine-owned tofu invocation
 

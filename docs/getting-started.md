@@ -511,10 +511,7 @@ block gets nothing.
 default.** One schema serves four verbs, and GitHub reads an empty value for a
 `required: true` input as not provided, answering HTTP 422 before the run starts
 — so requiring `pr_number` would refuse every `unlock`, whose dispatch body does
-not carry one, and every hand-dispatched `drift`. That is how every
-`shipmate unlock` dispatch failed while the old `apply.yml` shim still declared the
-plan-run input the engine has since retired: unlock applies no plan, so the engine
-sent that value empty. No human
+not carry one, and every hand-dispatched `drift`. No human
 fills a form here either — `actions/dispatch` mints an App token and sends a body
 the engine builds — so `required: true` protects no real caller.
 
@@ -891,7 +888,7 @@ three pins must sit at the same release (or the enforcing two later). An apply
 authorized under a newer pin than the engine that enforces it is enforced by
 nothing, so the `comment-ops`, `targeted` and `all` jobs keep one pin. One file
 carrying all seven pins is what makes that automatic: `dev/repin_consumer.py`
-moves them together, and there is no longer a second file to bump on its own.
+moves them together.
 
 Both edges need an entry declaring `gated = false` — the exemption is opt-in and
 there is no consumer-written input that could authorize a dispatch without it.

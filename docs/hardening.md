@@ -66,7 +66,7 @@ fork refusal above, which only governs the plan path. That is the shape a
 labeler or commenter workflow usually takes — don't add one to a repository that
 holds the App key. `shipmate doctor` warns for every workflow file declaring the
 trigger except `shipmate.yml`, matched by exact name. Every trigger the engine
-uses lives in that one file, so what separates them is no longer which file holds
+uses lives in that one file, so what separates them is not which file holds
 which trigger but each job's `if:` — a `pull_request_target` event selects the
 `plan` job and no other. doctor's routing probe compares all seven of those
 expressions, whole, against the fence `getting-started.md` publishes. See
@@ -343,7 +343,7 @@ coverage, and it never fails a run, so that is a warning, not enforcement.
 evaluates it from the pull request's base branch, so narrowing or widening
 ownership never applies to the pull request carrying the edit — it has to merge
 first, on its own. That timing is the difference between a sole maintainer being
-able to merge an engine migration that touches a workflow file and not being
+able to merge an engine re-pin that touches a workflow file and not being
 able to. The rule also has a floor to check now: an entry that owns `/.github/`
 (or `CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as
 the only way out — and that spends the one merge-time control a leaked App key
@@ -643,8 +643,8 @@ no split of its own.
   it is shipmate's ability to say *plan may read, apply may write* for that
   cell, and the only way back is splitting the environment again. A repository
   that shares every cell cannot express the read/write split anywhere, for any
-  environment. So decide it as a posture, per cell, before the migration rather
-  than after: shared where plan-time branch code holding the write role is
+  environment. So decide it as a posture, per cell, before an environment is
+  first shared: shared where plan-time branch code holding the write role is
   genuinely acceptable, split everywhere you would ever want a reviewer or a
   read-only plan role.
 - **The key is default-branch content.** The engine reads `shared` from the
@@ -689,7 +689,7 @@ Settings → Actions → General:
   three third-party actions above, plus
   `aws-actions/configure-aws-credentials` on every cell path — plan, drift,
   apply and unlock — even when no cell ever resolves a role (the step is gated,
-  the `uses:` is not). Omit it and a plan run now fails at "Set up job", not
+  the `uses:` is not). Omit it and a plan run fails at "Set up job", not
   only an apply. Allowing
   GitHub-owned actions covers the engine's other transitive dependencies
   (`actions/cache`, `actions/create-github-app-token`,
@@ -838,15 +838,15 @@ and on demand; it cannot check the third:
 That third condition is the one to be careful about, because it is invisible.
 Listing a repository's secrets needs a `secrets` permission `app/manifest.json`
 does not declare, so the probe can only observe the environment's *shape*. A
-repository that had the key as a repository secret first — the ordinary
-migration path — and then created the environment without deleting it ends up
-with the key still branch-readable and `shipmate doctor` reporting all clear.
+repository that keeps the key as a repository secret after creating the
+environment ends up with the key still branch-readable and `shipmate doctor`
+reporting all clear.
 Delete it as the last step of `docs/github-app.md` §6, and confirm with
 `gh secret list --repo <owner>/<repo>`: `SHIPMATE_APP_PRIVATE_KEY` must not
 appear there.
 
-A re-pin of the engine that never creates this environment — the other ordinary
-way to regress this — leaves the key a repository secret again, readable by any
+A re-pin of the engine that never creates this environment — the other way to
+regress this — leaves the key a repository secret again, readable by any
 branch's workflow. That one the probe does catch.
 
 **Measured, not inferred.** The branch policy is evaluated against the ref the
@@ -923,7 +923,7 @@ anything about). The direction is the point. A plan workflow that forgot the
 `ref:` would plan the base branch, report no changes for a pull request it had
 never read, and green `shipmate / gate` with nothing queued to apply — a silent,
 reviewable-looking pass over unreviewed code. That is a red `detect` naming the
-input, and the `ref:` now lives in SHA-pinned engine YAML rather than in a file
+input, and the `ref:` lives in SHA-pinned engine YAML rather than in a file
 each consumer writes.
 
 The stated commit is not something a commenter or a dispatcher supplies: it comes
@@ -949,8 +949,7 @@ warning:
   it would let an author publish no text, leave no bytes to hash, and switch the
   comparison off by omission.
 - An apply check carrying no digest is refused at detect, before any apply job
-  starts. Most often the plan predates the release that began recording one;
-  the remedy is a re-plan.
+  starts. The remedy is a re-plan.
 - A digest that never reached the apply cell fails it before `tofu init`. A
   composite action's `required: true` is not enforced, so an unwired input
   arrives empty; accepting it would skip the comparison silently. The remedy is
@@ -965,7 +964,7 @@ refuses: it rejects a plan file from another version, and an apply under drifted
 providers fails on the dependency lock.
 
 What this binds is agreement, not honesty. A privileged author still authors
-both the plan text and the `.otplan`; what they can no longer do is have the two
+both the plan text and the `.otplan`; what they cannot do is have the two
 disagree. The `+add ~change -destroy` counts in the comment are read from that
 same bound text, which is checked against the stored plan only when the cell
 applies.
@@ -1016,9 +1015,9 @@ nothing keeping a fork out of a plan cell depends on it.
 it, so a plan cell reached by a fork would read the plan environment's
 variables *and its secrets* (engine `plan.yml` passes
 `secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`) while executing the
-pull request's own Terramate/OpenTofu code. Under the old `pull_request`
-trigger, GitHub withholding secrets from a fork was a second, independently
-enforced layer; that layer is gone. Keep both of the layers that remain —
+pull request's own Terramate/OpenTofu code. GitHub withholds secrets from a
+fork only under `pull_request`, so that layer does not exist here. Keep both of
+the layers that do —
 dropping the `needs:` edge, moving `plan` off `detect`'s matrix, or turning the
 checkout's own refusal off, each re-opens the surface to anyone who can fork.
 
@@ -1027,7 +1026,7 @@ checkout's own refusal off, each re-opens the surface to anyone who can fork.
 repository the standing residual is arbitrary code execution offered to anyone
 who can open a pull request *from a branch in the repository*.
 
-**The App key is now inside a workflow a fork pull request can start.** The
+**The App key is inside a workflow a fork pull request can start.** The
 reason is the trigger: the consumer's `plan` job runs on `pull_request_target`,
 which fires for a fork. Two things keep it out of reach, and they are both structural
 rather than conventions. The trusted `summary` job declines unless the head
@@ -1105,7 +1104,7 @@ for exactly the exposure control 1 exists to limit.
   greens a quiet gate over stacks that were planned. The check catches a
   download or parse that came up short, not a privileged author, who can already
   fabricate the whole artifact surface the summary reads: the cell summaries,
-  the `cell.json` verdicts, the `.otplan` files. What that author can no longer
+  the `cell.json` verdicts, the `.otplan` files. What that author cannot
   do is publish a `plan.txt` describing a different plan from the `.otplan`
   beside it — the artifacts are still theirs, but they have to agree (see "The
   plan text a reviewer approves"). Nothing here makes the gate

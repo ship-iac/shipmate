@@ -481,8 +481,7 @@ themselves — the consumer's `shipmate.yml`, and the engine's `plan.yml`,
 branch, where they *would* satisfy the environment's policy. That path runs
 through an ordinary pull request and merge — no `pull_request`- or
 `pull_request_target`-triggered job that checks out branch content is ever in a
-position to skip review and reach the key directly, unlike the
-old repository-secret model. The backstop there is `require_code_owner_review`
+position to skip review and reach the key directly. The backstop there is `require_code_owner_review`
 on the branch ruleset (`docs/hardening.md` #4): a GitHub App cannot be a
 CODEOWNER, so the App itself can never approve a change to its own trust
 boundary — a human owner has to.
@@ -490,8 +489,8 @@ boundary — a human owner has to.
 Push access to a consumer repository is still meaningful authority: it lets
 someone author the pull request that proposes such a change and, on a
 sole-maintainer repository with `required_approving_review_count: 0`, merge
-it too (see `docs/hardening.md` §1 and §3–5). It is no longer, by itself,
-enough to read the key outright the way an unreviewed branch push once was.
+it too (see `docs/hardening.md` §1 and §3–5). It is not, by itself, enough
+to read the key outright.
 
 ## Appendix: onboarding several repositories at once
 
