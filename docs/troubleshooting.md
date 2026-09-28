@@ -403,12 +403,9 @@ Each check refuses:
   `plan.yml`'s `detect` and `plan` jobs name
   `ref: ${{ needs.facts.outputs.head-sha }}` on their checkout. Without it
   the cell would plan the base and report a clean plan for a pull request it
-  never read, so the mismatch is refused. Passing the
-  base SHA as `expected-head` to make the comparison agree is the one wrong
-  reading of this error, and it restores exactly the hazard the check exists to
-  close. `build-matrix` holds the same line one job earlier, in `detect`, and
-  states its half of it two ways: `this run checked out <sha>, which is not the
-  commit it is planning` when the `ref:` is missing, and `this run did not state
+  never read, so the mismatch is refused. `build-matrix` holds the same line
+  one job earlier, in `detect`, and states its half of it two ways:
+  `this run checked out <sha>, which is not the commit it is planning` when the `ref:` is missing, and `this run did not state
   the commit it is planning` when the step's own `head-sha` input is absent.
   Neither is optional and neither has a quiet mode — a run that cannot name its
   head is refused, not planned.
@@ -430,8 +427,7 @@ remedy differs:
   fix is a re-plan and an apply of the fresh plan.
 - **There is no record at all.** There is nothing to compare, so the absent
   record is refused rather than tolerated. The plan came from an engine revision
-  that records none — the shape a plan pin that differs from the apply pin
-  produces. The remedy is to align the pins, then re-plan.
+  that records none, and the remedy is a re-plan.
   A push does not always fix this one. Pre-merge it does: push to the pull
   request and the fresh plan carries a record — a *re-run* of the old plan run
   does not, because a re-run replays the workflow file of the commit that

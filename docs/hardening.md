@@ -845,9 +845,10 @@ Delete it as the last step of `docs/github-app.md` §6, and confirm with
 `gh secret list --repo <owner>/<repo>`: `SHIPMATE_APP_PRIVATE_KEY` must not
 appear there.
 
-A re-pin of the engine that never creates this environment — the other way to
-regress this — leaves the key a repository secret again, readable by any
-branch's workflow. That one the probe does catch.
+A repository with no `shipmate-engine` environment — the other way to regress
+this — has nothing scoping the key; if the key is a repository secret, any
+branch's workflow can read it. That one the probe does catch: `shipmate doctor`
+warns that the environment does not exist.
 
 **Measured, not inferred.** The branch policy is evaluated against the ref the
 run itself is at, and a job that declares this environment from a non-default

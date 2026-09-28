@@ -145,27 +145,24 @@ the release commit, from `repo-example-stacks-aws`:
    than from a consumer. When it does: add the pattern to `docs/hardening.md`'s
    list — it is a setting the consumer has to change by hand before they re-pin.
 
-2. Drive the consumer's workflow file directly at that ref — but **skip this
-   step for a release that introduces that file.** `shipmate.yml` is not on any
-   sample's default branch until this release lands, so there is nothing here
-   to drive; it gets its first live exercise after the tag, like every other
-   new path. From the release after, run it with the body `actions/dispatch`
-   would build — exactly those keys, and no others:
+   Name each change a consumer makes by hand — a new third-party action to
+   allow-list, a changed `shipmate.yml` input contract — as a bullet in the
+   release's `CHANGELOG.md` section: what changed, not a procedure.
+
+2. Drive the consumer's workflow file directly at that ref, with the body
+   `actions/dispatch` would build — exactly those keys, and no others:
 
    ```bash
    gh workflow run shipmate.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
      -f verb=apply -f environment=sbx -f ref=<40-char-sha> -f pr_number=<n>
    ```
 
-   **Why the skip, and not a `--ref` away.** A `workflow_dispatch` runs a
-   workflow only if the file exists on the repository's default branch — the
-   same resolution constraint as the paragraph below — so `--ref` picks which
-   branch's copy runs, not whether the file is dispatchable at all. A file the
-   release *adds* is on the scratch branch only, and dispatching it answers a
-   404 indistinguishable from the failure this exercise exists to detect. Drive
-   a file the release *changed*, never one it introduces; the command above
-   sends exactly the keys `actions/dispatch` builds for the verb `-f verb=`
-   names.
+   A `workflow_dispatch` runs a workflow only if the file exists on the
+   repository's default branch — the same resolution constraint as the
+   paragraph below — so `--ref` picks which branch's copy runs, not whether the
+   file is dispatchable at all. `shipmate.yml` is on every sample's default
+   branch, so `--ref` runs the scratch branch's copy. The command above sends
+   exactly the keys `actions/dispatch` builds for the verb `-f verb=` names.
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
    the repository's default branch, and the engine's `actions/dispatch` dispatches

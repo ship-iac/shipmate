@@ -950,13 +950,15 @@ job. That file carries five triggers; `workflow_dispatch` is the one a
 commented verb reaches, and the other four (`pull_request_target`,
 `issue_comment`, `push`, `schedule`) fire from their own events. `doctor` and
 `help` dispatch nothing: both are answered inside the comment-ops run itself. A
-repository whose
-`shipmate.yml` is missing fails at dispatch time
-on that comment-handling run — for every verb alike, since they share the file.
-That run is not visible from the pull request, so every refusal in the dispatch
-step — an unwired verb, an unknown one, and a rejected API call alike — also
-posts a one-line comment there linking the run. The run holds the error; the
-comment never carries the API's answer.
+repository whose comment-handling workflow is not
+`.github/workflows/shipmate.yml`, or whose `shipmate.yml` declares no
+`workflow_dispatch` trigger or not the `verb`, `environment`, `ref` and
+`pr_number` inputs every dispatch sends, fails at dispatch time on that
+comment-handling run — for every verb alike, since they share the file. That
+run is not visible from the pull request, so every refusal in the dispatch step
+— an unwired verb, an unknown one, and a rejected API call alike — also posts a
+one-line comment there linking the run. The run holds the error; the comment
+never carries the API's answer.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -2117,10 +2119,11 @@ file at its repo root — and compares it against its own `git rev-parse HEAD`
 before the decrypt, the state restore and the apply — a plan of another tree is
 refused at the cheapest point. A record that disagrees with the checkout is
 refused, and so is an absent record: there is nothing to compare, so it is
-refused rather than tolerated. A mismatched engine pin is the usual cause of an
-absent record; the remedy is to align the pins, then re-plan. This is additive to the plan-run binding the apply path already carries: each cell's
-plan run is read from an App-authored apply check on that same head, so no plan
-run from another head can be named. That binding bounds which plan run may be
+refused rather than tolerated. An absent record means the plan was produced by
+an engine revision that records none; the remedy is a re-plan. This is additive
+to the plan-run binding the apply path already carries: each cell's plan run
+is read from an App-authored apply check on that same head, so no plan run from
+another head can be named. That binding bounds which plan run may be
 applied; this one binds each individual plan to the tree it was produced from.
 
 A third record binds the plan *text* to the plan that executes. The trusted

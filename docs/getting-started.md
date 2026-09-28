@@ -303,10 +303,13 @@ reusable workflow SHA-pinned. The jobs behind those calls — `facts`, `detect`,
 paths — live in the engine, so none of what they decide is wiring you can get
 wrong.
 
-The whole file goes in at tier 1, but only three of its jobs are this tier's:
+The whole file goes in at tier 1, and three of its jobs are this tier's:
 `plan`, `comment-ops` and `drift`, which need `<env>-plan`, `shipmate-engine`
-and the App key and nothing else. The other four wait for the environments and
-secrets the apply tier creates.
+and the App key and nothing else. `deploy` runs from the start too: on every
+push to the default branch it applies the merged pull request's cells still
+pending, in the `<env>-apply` this tier has you create (a shared env's bare
+`<env>`). The other three, `targeted`, `all` and `unlock`, wait for the
+environments and secrets the apply tier creates.
 
 The plan triggers are `pull_request_target` for the automatic plan on every push
 to a pull request, and `workflow_dispatch` with `verb: plan` for the plan a
