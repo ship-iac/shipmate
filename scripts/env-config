@@ -831,7 +831,7 @@ def unlisted_workload(table, env, path, workload):
     `workloads`, that tier lists at least one workload, and the tier resolves no role
     after inheritance: the cell would run with no cloud credentials. `label` is the tier
     `resolve` consults (`aws.apply` on both paths for a shared environment) and `keys`
-    its sorted workload names. An untagged cell, a tier with a role of its own, an
+    its sorted workload names. An untagged cell, a tier that resolves a role, an
     entry without an `aws` block and an environment without an entry are never refused.
     """
     environments = _mapping(table.get("environments", {}), "environments")

@@ -261,10 +261,12 @@ def stamp_rows(cells, table, tier):
 
     A cell whose `workload/<name>` tag the consulted tier does not list refuses when that
     tier has no role to fall back to (`env-config`'s `unlisted_workload`): it would
-    otherwise run with no cloud credentials.
+    otherwise run with no cloud credentials. The plan tier checks the apply tier too, so a
+    gap only the apply path would hit refuses before merge rather than failing the deploy.
     """
-    for cell in cells:
-        refused = ec.unlisted_workload(table, cell["environment"], tier, cell["workload"])
+    paths = (tier, "apply") if tier == "plan" else (tier,)
+    for cell, path in ((c, p) for c in cells for p in paths):
+        refused = ec.unlisted_workload(table, cell["environment"], path, cell["workload"])
         if refused:
             label, keys = refused
             raise SystemExit(

@@ -562,7 +562,8 @@ directly under a provider block is malformed shape, not a fourth tier: a
 workload role means nothing without the path it applies to. A cell whose
 `workload/<name>` tag the consulted tier's `workloads` does not list is refused
 at detect when that tier, after inheritance, sets no role to fall back to. An
-untagged cell and a tier with a role of its own are not refused.
+untagged cell and a tier that resolves a role are not refused; the plan detect
+checks the apply tier too, so an apply-tier gap refuses before merge.
 
 The environment's own `region` inheriting into `aws.region` is the schema's only
 cross-level default. Every other field resolves inside its own provider block.

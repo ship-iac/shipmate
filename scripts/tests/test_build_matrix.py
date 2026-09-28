@@ -1353,3 +1353,56 @@ def test_a_workload_tag_the_tier_does_not_list_refuses_when_it_has_no_fallback_r
         "would run with no cloud credentials. Retag the stack, or add the workload to "
         ".github/shipmate.toml."
     )
+
+
+#: A plan tier with a role of its own and an apply tier holding only workload roles.
+_APPLY_GAP = {
+    "layout": "folder",
+    "environments": {
+        "dev-eu": {
+            "region": "eu-west-1",
+            "aws": {
+                "plan": {"role": "arn:aws:iam::9817:role/plan"},
+                "apply": {"workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/net-edge"}}},
+            },
+        }
+    },
+}
+
+
+def test_the_plan_path_refuses_a_gap_only_the_apply_tier_has():
+    """The apply-tier gap refuses at plan detect, before merge, not first at deploy.
+
+    Mutation: check only the requested tier in `stamp_rows` -- no refusal is raised.
+    """
+    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
+    with pytest.raises(SystemExit) as exc:
+        bm.stamp_rows(cells, _APPLY_GAP, "plan")
+    assert str(exc.value) == (
+        "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
+        "list (it lists: net-edge), and aws.apply sets no role to fall back to. The cell would "
+        "run with no cloud credentials. Retag the stack, or add the workload to "
+        ".github/shipmate.toml."
+    )
+
+
+def test_the_apply_path_does_not_refuse_a_gap_only_the_plan_tier_has():
+    """Mutation: check both tiers on the apply path too -- the plan-tier gap refuses."""
+    table = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {
+                "region": "eu-west-1",
+                "aws": {
+                    "plan": {
+                        "workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/net-edge"}}
+                    },
+                    "apply": {"role": "arn:aws:iam::9817:role/apply"},
+                },
+            }
+        },
+    }
+    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
+    assert [row["role_arn"] for row in bm.stamp_rows(cells, table, "apply")] == [
+        "arn:aws:iam::9817:role/apply"
+    ]
