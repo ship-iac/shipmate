@@ -127,7 +127,7 @@ def test_a_head_the_step_did_not_check_out_is_refused_naming_both_commits(tmp_pa
     assert r.stdout.strip() == (
         f"::error::plan-cell has {_SHA} checked out but this run reports {_OTHER_SHA} as the "
         "commit it is planning. The plan would describe a tree nobody reviewed — the checkout "
-        "ref is not the planned commit. The engine's plan workflow supplies it, so no consumer "
+        "ref is not the planned commit. The engine's plan workflow supplies both, so no consumer "
         "setting causes this. Report it with this run's link through the bug report template."
     )
     assert written == "", written

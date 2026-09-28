@@ -1504,7 +1504,8 @@ declaring the trigger, so that pull request produces no plan run and no
 `shipmate / gate`. `scripts/onboard` therefore creates the gate ruleset only
 once the file is on the remote default branch, so that pull request merges
 without one; re-running `onboard` after the merge creates it, and every pull
-request following it gates normally.
+request following it gates normally. A ruleset created by hand follows the same
+order: create it after that pull request merges.
 
 For a repository migrating from another TACO, that same pull request is
 ungated by both systems at once: the outgoing tool's checks are being removed
@@ -2316,14 +2317,15 @@ as the optional `SHIPMATE_PLAN_PASSPHRASE` secret into the reusable
 `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, via the engine `apply-all.yml` for the bare form, and via
 the engine `apply.yml` for the targeted form. Consumers set
-`SHIPMATE_PLAN_PASSPHRASE` as a repository secret and forward it by name
-in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`, `targeted`
-and `all` jobs. Never `secrets: inherit`: it hands the engine the caller's whole
+`SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret and forward it
+by name in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`,
+`targeted` and `all` jobs. Never `secrets: inherit`: it hands the engine the caller's whole
 secret set, and across an organization boundary it delivers nothing at all.
 
-Not a variable and not an environment secret: a secret on one environment is
-released only to a job that *names* that environment, and a plan cell names its
-own plan environment. Every other placement fails:
+Not a variable, and not a secret on one half of a split environment alone: a
+secret on one environment is released only to a job that *names* that
+environment, and a plan cell names its own plan environment. The same value on both `<env>-plan` and
+`<env>-apply` works. These placements fail:
 
 - **As a variable**, every cell refuses it by name (`scripts/env-inject`).
 - **As a secret on `shipmate-engine`**, no plan or apply cell binds that

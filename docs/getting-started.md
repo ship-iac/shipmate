@@ -565,9 +565,10 @@ page's S3 example owns its state, and the engine's state steps are skipped
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
 `SHIPMATE_PLAN_PASSPHRASE` is optional — unset, plan artifacts are stored
-unencrypted. If you set it, it must be a repository secret. An environment
-secret reaches only a job that binds that environment, and a plan cell binds its
-own plan environment, so every other placement fails
+unencrypted. If you set it, set it as a repository or organization secret, or
+as the same value on both `<env>-plan` and `<env>-apply`. An environment secret
+reaches only a job that binds that environment, and a plan cell binds its own
+plan environment, so these placements fail
 ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
 - As a variable, every plan cell refuses it by name.
@@ -630,8 +631,10 @@ rules from Settings → Environments → `<name>` (or the API):
   token cannot forge, since a reviewer decision is a human action a minted
   token cannot take. Without them the tier is self-service and applies proceed
   unattended. On a private repository below Enterprise, GitHub refuses required
-  reviewers and wait timers, so the apply gate is the ruleset's approving review
-  and `[gate] approver_team`. Teams commonly gate production and leave dev
+  reviewers and wait timers, so the apply gate is then an approving-review
+  `pull_request` rule on the default branch, which `scripts/onboard` does not
+  create ([`branch-protection.md`](branch-protection.md) §Reproducible
+  ruleset), and `[gate] approver_team`. Teams commonly gate production and leave dev
   self-service; the maximally-hardened position gates every apply environment
   where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
@@ -741,8 +744,8 @@ cross-organization consumers.
 
 `SHIPMATE_PLAN_PASSPHRASE` is the exception, and it is not affected by the
 boundary. The wave jobs bind the env's apply environment, not `shipmate-engine`,
-so that secret has no environment to be read from and must travel down the call
-chain as a repository secret you pass by name.
+so `shipmate-engine` cannot supply that secret: it travels down the call chain as
+a repository or organization secret you pass by name.
 
 ## Required — enforce the gate
 
@@ -754,7 +757,9 @@ App's numeric id (`SHIPMATE_APP_ID`), so that a status of that name posted by an
 other identity does not satisfy the rule.
 
 [`branch-protection.md`](branch-protection.md) has the pasteable ruleset and the
-gate's state table. Configure it from there.
+gate's state table. Configure it from there, after the pull request adding
+`.github/workflows/shipmate.yml` merges: a ruleset created earlier blocks that
+pull request, which cannot produce the gate.
 `scripts/onboard` creates a `shipmate-gate` ruleset carrying that one rule; the
 `pull_request`, `non_fast_forward` and `deletion` rules on that page stay a
 choice you make, so that a repository already carrying a `pull_request` rule

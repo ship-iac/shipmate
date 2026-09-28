@@ -365,25 +365,20 @@ def _declared_engine_secrets(workflows=WORKFLOWS):
 
 def test_every_declared_engine_secret_is_refused_as_a_variable():
     """A secret an engine workflow declares is one a consumer can set as a variable instead,
-    where the `SHIPMATE_` prefix skips it silently.
+    where the `SHIPMATE_` prefix skips it silently. The declared set is compared whole, so a
+    derivation that finds no workflow reds rather than passing as an empty subset.
 
-    Mutations: drop `SHIPMATE_PLAN_PASSPHRASE` from `_NEVER_VARIABLES`; declare a fake
-    secret in a copy of `plan.yml` and point the derivation at the copy.
+    Mutations: drop `SHIPMATE_PLAN_PASSPHRASE` from `_NEVER_VARIABLES`; point the derivation
+    at an empty directory.
     """
-    assert _declared_engine_secrets() <= set(env_inject._NEVER_VARIABLES)
-
-
-def test_the_four_engine_secrets_are_refused_as_variables():
-    """The literal case for the derived guard above, which passes on an empty derivation.
-
-    Mutation: drop `SHIPMATE_PLAN_PASSPHRASE` from `_NEVER_VARIABLES`.
-    """
-    assert {
+    engine_secrets = {
         "SHIPMATE_APP_PRIVATE_KEY",
         "SHIPMATE_PLAN_PASSPHRASE",
         "SHIPMATE_SECRETS",
         "SHIPMATE_SLACK_WEBHOOK",
-    } <= set(env_inject._NEVER_VARIABLES)
+    }
+    assert _declared_engine_secrets() == engine_secrets
+    assert engine_secrets <= set(env_inject._NEVER_VARIABLES)
 
 
 def _no_run_env_check(table, pairs, environ, run=subprocess.run):
