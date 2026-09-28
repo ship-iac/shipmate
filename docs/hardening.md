@@ -1016,8 +1016,8 @@ it, so a plan cell reached by a fork would read the plan environment's
 variables *and its secrets* (engine `plan.yml` passes
 `secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`) while executing the
 pull request's own Terramate/OpenTofu code. GitHub withholds secrets from a
-fork only under `pull_request`, so that layer does not exist here. Keep both of
-the layers that do —
+fork under `pull_request`, not `pull_request_target`, so that layer does not
+exist here. Keep both of the layers that do —
 dropping the `needs:` edge, moving `plan` off `detect`'s matrix, or turning the
 checkout's own refusal off, each re-opens the surface to anyone who can fork.
 

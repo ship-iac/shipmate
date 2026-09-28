@@ -388,7 +388,10 @@ plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
 failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 
-Engine `plan.yml` supplies both values the checks compare:
+Engine `plan.yml` supplies both values the checks compare, so no consumer setting
+produces either error; report it, with the run link, through the bug report
+template ([`.github/ISSUE_TEMPLATE/bug.yml`](../.github/ISSUE_TEMPLATE/bug.yml)).
+Each check refuses:
 
 - **`expected-head` is missing or empty.** `plan-cell` requires it — the commit
   the run is planning — and refuses rather than publishing a plan whose
@@ -698,10 +701,10 @@ only when every shipmate-App-authored check on that commit whose name begins
 `apply / ` has a latest run completed as `success` or `neutral`, and the apply
 paths complete only the names the current plan run produced. A leftover pending
 check under a name no current cell reconstructs — one from another engine
-revision's check-name grammar, a renamed or deleted stack — therefore holds the gate
-indefinitely. GitHub has no way to delete a check run, so the recovery is a new
-head SHA: push a commit, and the plan run re-creates only the checks that exist
-now.
+revision's check-name grammar, a renamed or deleted stack — therefore holds the
+gate indefinitely. GitHub has no way to delete a check run, so the recovery is a
+new head SHA: push a commit, and the plan run re-creates only the checks that
+exist now.
 
 **The gate is deliberately held.** A gate whose state is `failure` with a
 description telling you what to re-run is not "no changes"; it is a hold.

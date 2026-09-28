@@ -92,9 +92,9 @@ nothing.
 
 **Write the trust condition from the subject your own logs show, not from the
 documented shape.** GitHub Actions issues the `sub` claim with the numeric
-organization and repository ids embedded — captured from that sample repository
-with a bare `dev-us` environment segment, where a split repository reads
-`dev-us-plan` / `dev-us-apply`:
+organization and repository ids embedded, captured from that sample repository.
+The environment segment in this capture is a bare `dev-us`; a split repository
+reads `dev-us-plan` / `dev-us-apply`:
 
 ```
 repo:ship-iac@305536692/repo-example-stacks-aws@1325724489:environment:dev-us

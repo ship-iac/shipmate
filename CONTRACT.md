@@ -839,8 +839,8 @@ condition (`docs/hardening.md` §7–9).
 **The plan and drift paths run that same step, workload tier included.** An
 `aws.plan` tier is what a consumer sets for plan-time and drift-time cloud
 access, with a `plan.workloads[<name>]` tier for the per-workload role. The
-engine owns the step, so no consumer file decides whether a cell gets
-credentials or which per-workload role it resolves.
+engine runs the step on every cell path, so no consumer workflow file decides
+whether a cell gets credentials; the environment table alone decides the role.
 
 **A plan cell executes branch-authored Terramate/OpenTofu** — a provider or an
 `external` data source runs at plan time — so whatever the `aws.plan` tier
@@ -1254,7 +1254,8 @@ when it is not. The entry's own name is held to the env-name charset and the
 rather than left to exempt nothing.
 
 **Absent means gated**: an entry without `gated`, or with `gated = true`, keeps
-the ruleset's review requirement. There is no second source for an absent key to fall through to.
+the ruleset's review requirement. There is no second source for an absent key
+to fall through to.
 
 Opting in takes two things, and the setting alone is not enough:
 
@@ -1832,12 +1833,12 @@ but fall in different slices are caught by no scoped sweep. An unscoped drift
 run stays the whole-tree check for that.
 
 A change to this name breaks every in-flight plan artifact: move pins across it
-when no applies are mid-flight. The name also spans two engine references in the
-consumer's `shipmate.yml`: `plan-cell` (the uploader) runs at the commit its
-`plan.yml` reference names, and `apply-cell` (the downloader) at the commit its
-apply references name, each called as `$/actions/<name>` (§Consumption). If
-those commits disagree on the name, every apply fails its reviewed-plan download
-fail-safe until the pins agree.
+when no applies are mid-flight. The name also spans the plan and apply paths:
+`plan-cell` (the uploader) and `apply-cell` (the downloader) each run as
+`$/actions/<name>` at the commit of the engine reference that called them, and
+§Consumption's one-change rule keeps every engine reference at one commit. A
+consumer that breaks the rule across a change to this name makes every apply
+fail its reviewed-plan download fail-safe until the pins agree.
 
 ## Apply summary artifacts
 
@@ -2345,9 +2346,11 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
   machine plan at rest and nothing else; redaction in the published text comes
   from `sensitive` marking (see Secrets in published output, above).
-- **Both sides must agree.** `plan-cell` (encrypt) runs at the commit of the
-  consumer's `plan.yml` reference and `apply-cell` (decrypt) at the commit of its
-  `apply.yml` reference; the passphrase and the engine SHA must match on both. A mismatch surfaces as the fail-safe above, not a silent wrong apply.
+- **Both sides must agree.** `plan-cell` (encrypt) and `apply-cell` (decrypt)
+  run at the commit of the engine reference that called them, which
+  §Consumption's one-change rule keeps the same on both paths; the passphrase
+  must match on both too. A mismatch surfaces as the fail-safe above, not a
+  silent wrong apply.
 
 ## Engine-owned tofu invocation
 
