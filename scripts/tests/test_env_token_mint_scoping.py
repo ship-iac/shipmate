@@ -21,8 +21,7 @@ the dedicated mints exist, are scoped and are non-fatal, and the two load-bearin
 carry the permission.
 """
 
-import yaml
-from _loader import ACTIONS
+from _loader import action_steps, step_by
 
 _PERM = "permission-environments"
 # Not named `..._TOKEN_...`: ruff's S105 hardcoded-password rule keys on the name.
@@ -37,20 +36,9 @@ _GATE_MINTS = {"summary": "token", "comment-ops": "doctortoken"}
 _PROBE_MODES = frozenset({"annotate", "report"})
 
 
-def _steps(action):
-    doc = yaml.safe_load((ACTIONS / action / "action.yml").read_text(encoding="utf-8"))
-    return doc["runs"]["steps"]
-
-
-def _by_id(steps, step_id):
-    found = [s for s in steps if s.get("id") == step_id]
-    assert len(found) == 1, f"expected exactly one step with id {step_id!r}, got {len(found)}"
-    return found[0]
-
-
 def test_each_action_mints_the_environments_permission_in_its_own_step():
     for action in _GATE_MINTS:
-        step = _by_id(_steps(action), "envtoken")
+        step = step_by(action, id="envtoken")
         assert _MINT in step["uses"], f"{action}: envtoken must be a create-github-app-token step"
         assert step.get("continue-on-error") is True, (
             f"{action}: the envtoken mint must not be fatal — it fails on every "
@@ -63,14 +51,14 @@ def test_the_environments_mint_requests_nothing_else():
     permission the gate path already has under a token that works, and adding it widens what a
     failed Accept takes down."""
     for action in _GATE_MINTS:
-        with_ = _by_id(_steps(action), "envtoken")["with"]
+        with_ = step_by(action, id="envtoken")["with"]
         perms = {k: v for k, v in with_.items() if k.startswith("permission-")}
         assert perms == {_PERM: "read"}, f"{action}: envtoken requests {perms}"
 
 
 def test_the_gate_path_mints_do_not_request_the_environments_permission():
     for action, mint_id in _GATE_MINTS.items():
-        with_ = _by_id(_steps(action), mint_id)["with"]
+        with_ = step_by(action, id=mint_id)["with"]
         assert _PERM not in with_, (
             f"{action}: `{mint_id}` must not request `{_PERM}` — an installation that "
             "has not accepted the request yet would lose everything that mint gates"
@@ -87,7 +75,7 @@ def test_each_doctor_step_receives_the_env_token():
     for action in _GATE_MINTS:
         consumers = [
             s
-            for s in _steps(action)
+            for s in action_steps(action)
             if (s.get("env") or {}).get("SHIPMATE_DOCTOR_MODE") in _PROBE_MODES
         ]
         assert consumers, f"{action}: no doctor probe step to receive SHIPMATE_ENV_TOKEN"
@@ -100,8 +88,12 @@ def test_each_doctor_step_receives_the_env_token():
 
 def test_the_check_ids_step_is_not_a_consumer():
     """`check-ids` mode reduces a check-runs listing and runs no probe, so it has no use for the
-    token. Passing it there would only widen exposure."""
-    for step in _steps("comment-ops"):
-        env = step.get("env") or {}
-        if env.get("SHIPMATE_DOCTOR_MODE") == "check-ids":
-            assert "SHIPMATE_ENV_TOKEN" not in env
+    token. Passing it there would only widen exposure. Mutation: rename the step's mode, and
+    the count assert reds instead of the loop passing over nothing."""
+    found = [
+        s
+        for s in action_steps("comment-ops")
+        if (s.get("env") or {}).get("SHIPMATE_DOCTOR_MODE") == "check-ids"
+    ]
+    assert len(found) == 1, f"expected exactly one check-ids step, got {len(found)}"
+    assert "SHIPMATE_ENV_TOKEN" not in found[0]["env"]

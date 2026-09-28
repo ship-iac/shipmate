@@ -18,20 +18,14 @@ never as a specific fail-safe's message that in fact never ran.
 import json
 
 import pytest
-from _loader import action_steps, load_script, run_lines
-
-
-def _compose_step():
-    matches = [s for s in action_steps("apply-cell") if s.get("name") == "Compose cell summary"]
-    assert len(matches) == 1, f"expected exactly one Compose cell summary step, got {len(matches)}"
-    return matches[0]
+from _loader import load_script, run_lines, step_by
 
 
 def test_the_compose_step_runs_the_script_this_file_exercises():
     # A whole run line, not a substring: a commented-out invocation writes no cell.json, and
     # apply-comment then renders an applied cell as never attempted.
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"' in run_lines(
-        _compose_step()
+        step_by("apply-cell", name="Compose cell summary")
     )
 
 
@@ -77,91 +71,72 @@ def _run_compose(
     return json.loads(cell_path.read_text(encoding="utf-8"))
 
 
-def test_download_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    cell = _run_compose(monkeypatch, tmp_path, download="failure")
-    assert cell["result"] == "blocked"
-    assert cell["reason"] == "reviewed plan artifact missing or expired — re-run plan"
+#: Every outcome an all-green cell reads: each fail-safe and the apply succeeded. Hand-written, as
+#: is the table below, never derived from FAILSAFES: a derived row passes whatever that list says.
+_ALL_SUCCESS = {
+    "download": "success",
+    "planned_head": "success",
+    "decrypt": "success",
+    "fingerprint": "success",
+    "restore": "success",
+    "digest_input": "success",
+    "init": "success",
+    "locate": "success",
+    "plan_digest": "success",
+    "apply": "success",
+}
 
 
-def test_planned_head_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    cell = _run_compose(monkeypatch, tmp_path, planned_head="failure")
-    assert cell["result"] == "blocked"
-    assert (
-        cell["reason"]
-        == "reviewed plan records no commit or was produced from a different one — re-plan"
-    )
-
-
-def test_decrypt_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    cell = _run_compose(monkeypatch, tmp_path, decrypt="failure")
-    assert cell["result"] == "blocked"
-    assert cell["reason"] == "plan artifact could not be decrypted — passphrase/config mismatch"
-
-
-def test_fingerprint_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    cell = _run_compose(monkeypatch, tmp_path, fingerprint="failure")
-    assert cell["result"] == "blocked"
-    assert cell["reason"] == "environment does not match the reviewed plan's fingerprint — re-plan"
-
-
-def test_restore_state_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    cell = _run_compose(monkeypatch, tmp_path, restore="failure")
-    assert cell["result"] == "blocked"
-    assert cell["reason"] == "state restore failed"
-
-
-def test_digest_input_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    cell = _run_compose(monkeypatch, tmp_path, digest_input="failure")
-    assert cell["result"] == "blocked"
-    assert (
-        cell["reason"]
-        == "no plan-text digest reached this action — re-pin every engine reference to one commit"
-    )
-
-
-def test_init_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    # Before the apply step was split, a failed init reported result="failed" with no reason --
-    # the bucket a real apply error lands in, which may have mutated infrastructure. Its own row
-    # rather than the digest's, so that pre-existing gap is not hidden behind a new message.
-    cell = _run_compose(monkeypatch, tmp_path, init="failure")
-    assert cell["result"] == "blocked"
-    assert cell["reason"] == "tofu init failed — see the job log"
-
-
-def test_locate_state_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    """Mutation: drop the `LOCATE_OUTCOME` row from FAILSAFES."""
-    cell = _run_compose(monkeypatch, tmp_path, locate="failure")
-    assert cell["result"] == "blocked"
-    assert (
-        cell["reason"]
-        == "shipmate cannot tell where this stack's local state lives — see the job log"
-    )
-
-
-def test_plan_digest_failure_blocks_with_its_own_reason(monkeypatch, tmp_path):
-    cell = _run_compose(monkeypatch, tmp_path, plan_digest="failure")
-    assert cell["result"] == "blocked"
-    assert (
-        cell["reason"]
-        == "the stored plan does not render to the plan text that was reviewed — re-plan"
-    )
+@pytest.mark.parametrize(
+    ("failed", "reason"),
+    [
+        pytest.param(
+            "download", "reviewed plan artifact missing or expired — re-run plan", id="download"
+        ),
+        pytest.param(
+            "planned_head",
+            "reviewed plan records no commit or was produced from a different one — re-plan",
+            id="planned_head",
+        ),
+        pytest.param(
+            "decrypt",
+            "plan artifact could not be decrypted — passphrase/config mismatch",
+            id="decrypt",
+        ),
+        pytest.param(
+            "fingerprint",
+            "environment does not match the reviewed plan's fingerprint — re-plan",
+            id="fingerprint",
+        ),
+        pytest.param(
+            "digest_input",
+            "no plan-text digest reached this action — re-pin every engine reference to one commit",
+            id="digest_input",
+        ),
+        # A failed init once reported result="failed" with no reason, the bucket for a real apply
+        # error that may have mutated infrastructure. Its own row keeps that gap from hiding.
+        pytest.param("init", "tofu init failed — see the job log", id="init"),
+        pytest.param(
+            "locate",
+            "shipmate cannot tell where this stack's local state lives — see the job log",
+            id="locate_state",
+        ),
+        pytest.param("restore", "state restore failed", id="restore_state"),
+        pytest.param(
+            "plan_digest",
+            "the stored plan does not render to the plan text that was reviewed — re-plan",
+            id="plan_digest",
+        ),
+    ],
+)
+def test_a_failed_failsafe_blocks_with_its_own_reason(monkeypatch, tmp_path, failed, reason):
+    """Mutation: drop a row from FAILSAFES, `LOCATE_OUTCOME` for instance, and that row reds."""
+    cell = _run_compose(monkeypatch, tmp_path, **{failed: "failure"})
+    assert (cell["result"], cell["reason"]) == ("blocked", reason)
 
 
 def test_apply_success_is_applied_with_empty_reason(monkeypatch, tmp_path):
-    cell = _run_compose(
-        monkeypatch,
-        tmp_path,
-        download="success",
-        planned_head="success",
-        decrypt="success",
-        fingerprint="success",
-        restore="success",
-        digest_input="success",
-        init="success",
-        locate="success",
-        plan_digest="success",
-        apply="success",
-    )
+    cell = _run_compose(monkeypatch, tmp_path, **_ALL_SUCCESS)
     assert cell["result"] == "applied"
     assert cell["reason"] == ""
 
@@ -171,58 +146,19 @@ def test_remote_backend_skipped_restore_is_applied_with_empty_reason(monkeypatch
     # restore reads 'skipped' while everything else succeeded. 'skipped' matches no fail-safe,
     # which match 'failure' exactly, and that is what makes a remote-backend cell unblockable on
     # artifact state.
-    cell = _run_compose(
-        monkeypatch,
-        tmp_path,
-        download="success",
-        planned_head="success",
-        decrypt="success",
-        fingerprint="success",
-        restore="skipped",
-        digest_input="success",
-        init="success",
-        locate="success",
-        plan_digest="success",
-        apply="success",
-    )
+    cell = _run_compose(monkeypatch, tmp_path, **{**_ALL_SUCCESS, "restore": "skipped"})
     assert cell["result"] == "applied"
     assert cell["reason"] == ""
 
 
 def test_apply_failure_is_failed_with_empty_reason(monkeypatch, tmp_path):
-    cell = _run_compose(
-        monkeypatch,
-        tmp_path,
-        download="success",
-        planned_head="success",
-        decrypt="success",
-        fingerprint="success",
-        restore="success",
-        digest_input="success",
-        init="success",
-        locate="success",
-        plan_digest="success",
-        apply="failure",
-    )
+    cell = _run_compose(monkeypatch, tmp_path, **{**_ALL_SUCCESS, "apply": "failure"})
     assert cell["result"] == "failed"
     assert cell["reason"] == ""
 
 
 def test_apply_cancelled_is_failed_with_empty_reason(monkeypatch, tmp_path):
-    cell = _run_compose(
-        monkeypatch,
-        tmp_path,
-        download="success",
-        planned_head="success",
-        decrypt="success",
-        fingerprint="success",
-        restore="success",
-        digest_input="success",
-        init="success",
-        locate="success",
-        plan_digest="success",
-        apply="cancelled",
-    )
+    cell = _run_compose(monkeypatch, tmp_path, **{**_ALL_SUCCESS, "apply": "cancelled"})
     assert cell["result"] == "failed"
     assert cell["reason"] == ""
 
@@ -268,30 +204,8 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
     "kwargs",
     [
         {"download": "failure"},
-        {
-            "download": "success",
-            "planned_head": "success",
-            "decrypt": "success",
-            "fingerprint": "success",
-            "restore": "success",
-            "digest_input": "success",
-            "init": "success",
-            "locate": "success",
-            "plan_digest": "success",
-            "apply": "success",
-        },
-        {
-            "download": "success",
-            "planned_head": "success",
-            "decrypt": "success",
-            "fingerprint": "success",
-            "restore": "success",
-            "digest_input": "success",
-            "init": "success",
-            "locate": "success",
-            "plan_digest": "success",
-            "apply": "failure",
-        },
+        _ALL_SUCCESS,
+        {**_ALL_SUCCESS, "apply": "failure"},
         {},
     ],
 )

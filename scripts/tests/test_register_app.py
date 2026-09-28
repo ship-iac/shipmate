@@ -231,15 +231,12 @@ def test_run_error_never_echoes_the_argv(monkeypatch, capsys):
     # broken gh.
     _failing_gh(monkeypatch, "gh: HTTP 403\n")
 
-    try:
+    with pytest.raises(SystemExit) as exc:
         ra._run(
             ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--body", "SECRET_PEM"],
             secrets=("SECRET_PEM",),
         )
-    except SystemExit as exc:
-        message = str(exc)
-    else:
-        raise AssertionError("a nonzero gh exit must raise")
+    message = str(exc.value)
 
     assert "SECRET_PEM" not in message
     assert "SECRET_PEM" not in capsys.readouterr().err

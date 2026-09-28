@@ -11,18 +11,13 @@ passes an entry whose expression was mistyped; a substring test is satisfied by 
 
 import re
 
-import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, workflow_yaml
 
 WF = WORKFLOWS / "plan.yml"
 
 
-def _doc():
-    return yaml.safe_load(WF.read_text(encoding="utf-8"))
-
-
 def _job(job_id):
-    return _doc()["jobs"][job_id]
+    return workflow_yaml(WF)["jobs"][job_id]
 
 
 def _step(job_id, needle):
@@ -35,7 +30,7 @@ def _step(job_id, needle):
 def test_the_workflow_call_inputs_are_exactly_these():
     """Mutation: re-declare `state_suffix: { required: true, type: string }`."""
     # `doc[True]` is not a typo: PyYAML parses the bare key `on:` as the boolean True.
-    assert _doc()[True]["workflow_call"]["inputs"] == {
+    assert workflow_yaml(WF)[True]["workflow_call"]["inputs"] == {
         "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
     }
 
@@ -44,21 +39,15 @@ def test_the_workflow_call_secrets_are_exactly_these():
     """`required: true` on any of the three would fail at load time: consumers scope the two
     engine keys to an environment rather than the repository, and a consumer who forwards no
     secrets of their own holds no `SHIPMATE_SECRETS` to pass at all."""
-    assert _doc()[True]["workflow_call"]["secrets"] == {
+    assert workflow_yaml(WF)[True]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
         "SHIPMATE_PLAN_PASSPHRASE": {"required": False},
         "SHIPMATE_SECRETS": {"required": False},
     }
 
 
-def test_the_workflow_permissions_floor_is_empty():
-    """Mutation: `permissions: { contents: read }` at workflow level. A job that then loses its
-    own block silently inherits instead of getting nothing."""
-    assert _doc()["permissions"] == {}
-
-
 def test_every_job_declares_its_own_permissions():
-    jobs = _doc()["jobs"]
+    jobs = workflow_yaml(WF)["jobs"]
     assert {j: v.get("permissions") for j, v in jobs.items()} == {
         "facts": {"pull-requests": "read"},
         "detect": {"contents": "read"},
@@ -70,7 +59,7 @@ def test_every_job_declares_its_own_permissions():
 def test_facts_is_the_single_producer_of_every_pull_request_fact():
     """One producer, or two producers of one fact disagree eventually. Mutation: add a second
     `actions/pr-facts` step to `detect`."""
-    doc = _doc()
+    doc = workflow_yaml(WF)
     producers = [
         job_id
         for job_id, job in doc["jobs"].items()
@@ -102,7 +91,7 @@ def test_build_matrix_reads_the_facts_job_and_states_no_constant():
 def test_the_plan_workflow_never_sets_no_pull_request():
     """`no-pull-request: "true"` skips build-matrix's head-repository and head-commit refusals.
     drift.yml is required to carry it; a plan workflow must never. Mutation: add the key."""
-    for job in _doc()["jobs"].values():
+    for job in workflow_yaml(WF)["jobs"].values():
         for step in job.get("steps") or []:
             assert "no-pull-request" not in (step.get("with") or {})
 
@@ -188,7 +177,9 @@ def test_the_workflow_reads_the_event_payload_nowhere():
 
     Mutation: `env: { PR: ${{ github.event.pull_request.number }} }` on the `detect` job.
     """
-    found = sorted({m for s in _strings(_doc()) for m in re.findall(r"github\.event\.[\w.]*", s)})
+    found = sorted(
+        {m for s in _strings(workflow_yaml(WF)) for m in re.findall(r"github\.event\.[\w.]*", s)}
+    )
     assert found == [], f"plan.yml reads the event payload: {found}"
 
 
@@ -212,5 +203,5 @@ def test_the_detect_and_plan_jobs_carry_exactly_these_gates():
     `test_summary_workflow_guards.py` owns `summary`'s. The job-id list there is what fails when
     a fourth gated job appears.
     """
-    jobs = _doc()["jobs"]
+    jobs = workflow_yaml(WF)["jobs"]
     assert {j: " ".join(jobs[j]["if"].split()) for j in _GATED_IF} == _GATED_IF

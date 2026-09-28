@@ -11,18 +11,16 @@ refuses `SHIPMATE_SLACK_WEBHOOK` set as a variable. So is the rule that no other
 names the webhook, which keeps it off apply-env-level.yml's wave jobs.
 """
 
-import subprocess
-
 import pytest
 import yaml
-from _loader import WORKFLOWS, usable_bash
+from _loader import bash_only, run_step, workflow_yaml
 
 _STEP = "Complete gate on the merged PR head SHA"
 _WRITE_MARKER = 'gh api "repos/$GITHUB_REPOSITORY/statuses/'
 
 
 def _jobs():
-    return yaml.safe_load((WORKFLOWS / "deploy.yml").read_text(encoding="utf-8"))["jobs"]
+    return workflow_yaml("deploy.yml")["jobs"]
 
 
 def _summary_step(name):
@@ -47,13 +45,10 @@ def _verdict_block():
     return head
 
 
-def _run(results, head_sha="deadbeef"):
+def _run(tmp_path, results, head_sha="deadbeef"):
     script = _verdict_block() + '\nprintf "%s|%s\\n" "$concl" "$title"\n'
-    return subprocess.run(
-        [usable_bash(), "-c", script],
-        capture_output=True,
-        text=True,
-        env={"RESULTS": results, "HEAD_SHA": head_sha, "PATH": "/usr/bin:/bin"},
+    return run_step(
+        tmp_path, script, {"RESULTS": results, "HEAD_SHA": head_sha, "PATH": "/usr/bin:/bin"}
     )
 
 
@@ -74,9 +69,6 @@ def test_verdict_scan_is_pipeline_free():
     )
 
 
-bash_only = pytest.mark.skipif(usable_bash() is None, reason="no working bash on PATH")
-
-
 @bash_only
 @pytest.mark.parametrize(
     ("results", "expected"),
@@ -94,8 +86,8 @@ bash_only = pytest.mark.skipif(usable_bash() is None, reason="no working bash on
         ("", "failure"),
     ],
 )
-def test_verdict(results, expected):
-    r = _run(results)
+def test_verdict(tmp_path, results, expected):
+    r = _run(tmp_path, results)
     assert r.returncode == 0, r.stderr
     concl, _, title = r.stdout.strip().partition("|")
     assert concl == expected, f"{results!r} -> {concl} ({title}), expected {expected}"
@@ -137,12 +129,10 @@ def test_status_body(tmp_path, results):
     instead of `$HEAD_SHA`; add `-X GET`."""
     wrote = tmp_path / "wrote"
     stub = 'gh() { printf \'%s\\n\' "$@" > "$WROTE" ; }\n'
-    r = subprocess.run(
-        [usable_bash(), "-c", stub + _gate_run()],
-        capture_output=True,
-        text=True,
-        cwd=tmp_path,
-        env={
+    r = run_step(
+        tmp_path,
+        stub + _gate_run(),
+        {
             "RESULTS": results,
             "HEAD_SHA": _HEAD,
             # A different SHA, so posting to the merge commit instead of the head reddens.
@@ -159,9 +149,9 @@ def test_status_body(tmp_path, results):
 
 
 @bash_only
-def test_missing_head_sha_fails_loud():
+def test_missing_head_sha_fails_loud(tmp_path):
     """detect died, so no head SHA: fail rather than post a gate on nothing."""
-    r = _run("success", head_sha="")
+    r = _run(tmp_path, "success", head_sha="")
     assert r.returncode == 1, r.stdout
     assert "::error::" in r.stdout
 
@@ -207,12 +197,10 @@ def test_slack_step_with_no_webhook_calls_nothing(tmp_path):
         stub = stubs / name
         stub.write_text(f'#!/bin/sh\necho {name} >> "{marker.as_posix()}"\nexit 0\n')
         stub.chmod(0o755)
-    r = subprocess.run(
-        [usable_bash(), "-c", _lf(_summary_step(_SLACK_STEP)["run"])],
-        capture_output=True,
-        text=True,
-        cwd=tmp_path,
-        env={"SLACK": "", "PATH": f"{stubs.as_posix()}:/usr/bin:/bin"},
+    r = run_step(
+        tmp_path,
+        _lf(_summary_step(_SLACK_STEP)["run"]),
+        {"SLACK": "", "PATH": f"{stubs.as_posix()}:/usr/bin:/bin"},
     )
     assert r.returncode == 0, r.stderr
     assert not marker.exists(), f"called with no webhook: {marker.read_text()}"

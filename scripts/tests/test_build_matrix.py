@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _loader import load_script
+from _loader import action_yaml, load_script
 
 bm = load_script("build-matrix")
 
@@ -711,10 +711,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
     # name -> wiring; descriptions are prose and deliberately not pinned.
-    import yaml
-    from _loader import ACTIONS
-
-    doc = yaml.safe_load((ACTIONS / "build-matrix/action.yml").read_text(encoding="utf-8"))
+    doc = action_yaml("build-matrix")
     assert {name: spec["value"] for name, spec in doc["outputs"].items()} == {
         "matrix": "${{ steps.build.outputs.matrix }}",
         "empty": "${{ steps.build.outputs.empty }}",

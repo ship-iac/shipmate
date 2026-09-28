@@ -15,8 +15,7 @@ refs. Hand-written, never derived from the files it checks: a derived vector pas
 tree says.
 """
 
-import yaml
-from _loader import ACTIONS, WORKFLOWS
+from _loader import ACTIONS, WORKFLOWS, action_yaml, workflow_yaml
 
 #: What `docs/hardening.md` and every consumer repository's allowed-actions list name. Changing
 #: this constant alone does not make a new action work; the failure message says what does.
@@ -53,12 +52,11 @@ def _uses(node):
 
 
 def test_engine_uses_no_third_party_action_consumers_do_not_allow():
-    files = sorted(ACTIONS.glob("*/action.yml")) + sorted(WORKFLOWS.glob("*.yml"))
-    assert len(files) > 20, f"expected the whole engine tree, found {files}"
+    docs = [action_yaml(p) for p in sorted(ACTIONS.glob("*/action.yml"))]
+    docs += [workflow_yaml(p) for p in sorted(WORKFLOWS.glob("*.yml"))]
+    assert len(docs) > 20, f"expected the whole engine tree, found {len(docs)} files"
 
-    refs = {
-        u.split("@")[0] for f in files for u in _uses(yaml.safe_load(f.read_text(encoding="utf-8")))
-    }
+    refs = {u.split("@")[0] for doc in docs for u in _uses(doc)}
     assert any(r.startswith("ship-iac/") for r in refs), (
         f"no engine action found among {sorted(refs)} -- the collection is broken, "
         "and an empty set would compare green against an empty expectation"

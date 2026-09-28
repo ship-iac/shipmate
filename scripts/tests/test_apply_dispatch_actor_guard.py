@@ -26,8 +26,7 @@ reopened, `||` instead of `&&` -- and against a guard step moved to the end of `
 the dispatcher-controlled ref had already been checked out.
 """
 
-import yaml
-from _loader import WORKFLOWS
+from _loader import workflow_yaml
 
 GUARD_JOB = "guard"
 GUARD_IF = "${{ !endsWith(github.actor, '[bot]') }}"
@@ -97,7 +96,7 @@ APPLY_PATHS = ("apply.yml", "apply-all.yml")
 
 
 def _jobs(name):
-    spec = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
+    spec = workflow_yaml(name)
     return spec["jobs"]
 
 

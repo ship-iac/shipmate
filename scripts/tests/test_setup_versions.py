@@ -14,12 +14,9 @@ checks reds the missing-key case, and deleting the file check reds the missing-f
 
 import os
 import re
-import subprocess
 
-import pytest
-from _loader import ENGINE, action_steps, action_yaml, usable_bash
+from _loader import ENGINE, action_steps, action_yaml, bash_only, run_step, step_by
 
-_BASH = usable_bash()
 _ACTION = "setup"
 
 #: Every step, in order. Hand-written: the resolve step must precede both installers, and one
@@ -45,12 +42,6 @@ _EXPECTED_WITH = {
 _FIXTURE_VERSIONS = "terramate=9.9.9\ntofu=8.8.8\n"
 
 
-def _step(name):
-    matches = [s for s in action_steps(_ACTION) if s.get("name") == name]
-    assert len(matches) == 1, f"expected exactly one step named {name!r}, got {len(matches)}"
-    return matches[0]
-
-
 def test_the_steps_run_in_this_order():
     """Reds when the resolve step is moved after the installers."""
     assert [s.get("name") for s in action_steps(_ACTION)] == _EXPECTED_STEPS
@@ -58,9 +49,9 @@ def test_the_steps_run_in_this_order():
 
 def test_both_installers_read_the_resolve_steps_outputs():
     """Reds when an installer is pointed at anything but the resolve step's outputs."""
-    got = {name: _step(name).get("with") for name in _EXPECTED_WITH}
+    got = {name: step_by(_ACTION, name=name).get("with") for name in _EXPECTED_WITH}
     assert got == _EXPECTED_WITH
-    assert _step("Resolve versions").get("id") == "versions"
+    assert step_by(_ACTION, name="Resolve versions").get("id") == "versions"
 
 
 def test_the_action_takes_no_input():
@@ -75,36 +66,33 @@ def _resolve(tmp_path, versions=_FIXTURE_VERSIONS):
 
     `versions=None` writes no file, which is the missing-release-file case.
     """
-    assert _BASH is not None  # callers are skipif-gated; also narrows the type
     action_path = tmp_path / "actions" / "setup"
     action_path.mkdir(parents=True)
     if versions is not None:
         (tmp_path / "VERSIONS").write_text(versions, encoding="utf-8", newline="\n")
-    script = tmp_path / "resolve.sh"
-    script.write_text(_step("Resolve versions")["run"], encoding="utf-8", newline="\n")
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
-    full = dict(os.environ)
-    full.update(
-        {
-            "GITHUB_ACTION_PATH": action_path.as_posix(),
-            "GITHUB_OUTPUT": str(out),
-        }
-    )
-    r = subprocess.run(
-        [_BASH, str(script)], env=full, capture_output=True, encoding="utf-8", timeout=30
+    # Two levels below the cwd's `../../` holds no VERSIONS, so a body that read `../../VERSIONS`
+    # relative to the cwd instead of to the action finds nothing rather than the fixture.
+    cwd = tmp_path / "elsewhere" / "a" / "b"
+    cwd.mkdir(parents=True)
+    r = run_step(
+        tmp_path,
+        step_by(_ACTION, name="Resolve versions")["run"],
+        {**os.environ, "GITHUB_ACTION_PATH": action_path.as_posix(), "GITHUB_OUTPUT": str(out)},
+        cwd=cwd,
     )
     return r, out.read_text(encoding="utf-8"), f"{action_path.as_posix()}/../../VERSIONS"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_both_versions_come_from_the_file(tmp_path):
     r, out, _ = _resolve(tmp_path)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert out == "terramate=9.9.9\ntofu=8.8.8\n"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_the_repositorys_own_versions_file_resolves(tmp_path):
     """The cases above prove the logic; this one proves the file it runs against.
 
@@ -122,7 +110,7 @@ def test_the_repositorys_own_versions_file_resolves(tmp_path):
     assert re.fullmatch(r"terramate=\S+\ntofu=\S+\n", out), out
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_missing_versions_file_fails_the_step_and_writes_nothing(tmp_path):
     r, out, versions = _resolve(tmp_path, versions=None)
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
@@ -133,7 +121,7 @@ def test_a_missing_versions_file_fails_the_step_and_writes_nothing(tmp_path):
     )
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_missing_key_fails_the_step_and_writes_nothing(tmp_path):
     """A present file missing one key is the case an "install latest" fallback would hide."""
     r, out, versions = _resolve(tmp_path, versions="terramate=9.9.9\n")

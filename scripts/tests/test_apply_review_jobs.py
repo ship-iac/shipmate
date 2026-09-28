@@ -24,8 +24,7 @@ satisfied by a comment and by an inverted operator.
 import re
 
 import pytest
-import yaml
-from _loader import ENGINE, WORKFLOWS, action_yaml
+from _loader import ENGINE, action_yaml, workflow_yaml
 
 _MINT = "actions/create-github-app-token"
 _CHECKOUT = "actions/checkout"
@@ -65,7 +64,7 @@ _MINT_PERMISSIONS = {"permission-pull-requests": "read"}
 
 
 def _jobs(workflow):
-    return yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))["jobs"]
+    return workflow_yaml(workflow)["jobs"]
 
 
 def _review():
@@ -88,7 +87,7 @@ def test_the_decision_output_reaches_the_callers():
     """An unmapped output arrives empty, which detect holds everything on: fail-closed, but every
     apply would then refuse. Mutation: point the workflow output at a job output that does not
     exist."""
-    spec = yaml.safe_load((WORKFLOWS / _REVIEW_WORKFLOW).read_text(encoding="utf-8"))
+    spec = workflow_yaml(_REVIEW_WORKFLOW)
     # PyYAML reads the bare key `on` as the boolean True.
     assert spec[True]["workflow_call"]["outputs"]["decision"]["value"] == (
         "${{ jobs.review.outputs.decision }}"

@@ -1,9 +1,12 @@
-"""Shared test-side helpers: load a ``scripts/`` helper, or read an action.yml.
+"""Shared test-side helpers: load a ``scripts/`` helper, read an engine YAML file or a docs code
+fence, or run a shipped shell body.
 
-Two jobs: ``load_script`` for the extension-less helpers, and
-``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus ``action_steps`` for the YAML-shape guards. The step
-parser is load-bearing, because a guard that silently parses to ``[]`` asserts nothing, so it has
-one definition.
+Four jobs: ``load_script`` for the extension-less helpers;
+``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus ``action_yaml``, ``workflow_yaml``, ``action_steps`` and
+``step_by`` for the YAML-shape guards; ``doc_fences`` and ``assert_every_fence_discovered`` for
+the docs fence guards; and ``bash_only`` plus ``run_step`` for the tests that execute a step's
+bash. The parser is load-bearing, because a guard that silently parses to ``[]``
+asserts nothing, so it has one definition.
 
 Loading a helper script
 -----------------------
@@ -27,7 +30,9 @@ import functools
 import pathlib
 import shutil
 import subprocess
+import textwrap
 
+import pytest
 import yaml
 from _shipmate import _load
 
@@ -87,8 +92,8 @@ ENGINE_CALL_SECRETS = {
 
 
 @functools.cache
-def _parse_action(path):
-    """Parsed ``action.yml``, cached: nothing in the suite rewrites these files."""
+def _parse_yaml(path):
+    """Parsed engine YAML file, cached: nothing in the suite rewrites these files."""
     spec = yaml.safe_load(path.read_text(encoding="utf-8"))
     # Never fall back to ``{}``: a file that parses to None, emptied by a bad merge or fully
     # commented out, would hand every guard zero steps, and a guard over zero steps passes while
@@ -111,13 +116,35 @@ def action_yaml(action):
     in a full-suite run.
     """
     path = action if isinstance(action, pathlib.Path) else ACTIONS / action / "action.yml"
-    return copy.deepcopy(_parse_action(path))
+    return copy.deepcopy(_parse_yaml(path))
+
+
+def workflow_yaml(workflow):
+    """Parsed engine workflow: a file name under ``.github/workflows/``, or a path to it. A deep
+    copy per call, for the reason ``action_yaml`` gives."""
+    path = workflow if isinstance(workflow, pathlib.Path) else WORKFLOWS / workflow
+    return copy.deepcopy(_parse_yaml(path))
 
 
 def action_steps(action):
     """``runs.steps`` for ``action``, or ``[]`` for one that declares none. A non-composite
     action is legal, and has no bash for a guard to read."""
     return (action_yaml(action).get("runs") or {}).get("steps") or []
+
+
+def step_by(action, *, name=None, id=None):
+    """The one step of ``action`` whose ``name``, or ``id``, equals the value given.
+
+    Exactly one, asserted: a guard that takes the first of two same-named steps pins one and
+    leaves the other free, and one that finds none must fail rather than check nothing.
+    """
+    assert (name is None) != (id is None), "pass exactly one of name= and id="
+    key, value = ("name", name) if id is None else ("id", id)
+    matches = [s for s in action_steps(action) if s.get(key) == value]
+    assert len(matches) == 1, (
+        f"{action}: expected exactly one step with {key} {value!r}, got {len(matches)}"
+    )
+    return matches[0]
 
 
 def run_lines(step):
@@ -132,6 +159,41 @@ def run_lines(step):
         for ln in (step.get("run") or "").splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
+
+
+def doc_fences(pages, fence):
+    """Every code fence ``fence`` pairs in ``pages``, as (page, 1-based line of its opener,
+    dedented body).
+
+    ``fence`` is the caller's compiled pattern with a ``body`` group, because what counts as a
+    fence differs per language and, for ```yaml, is owned by ``scripts/onboard``. Indented
+    fences, those inside a list item, are dedented rather than skipped: a fence this misses is a
+    fence nothing checks.
+    """
+    for page in pages:
+        text = page.read_text(encoding="utf-8")
+        for m in fence.finditer(text):
+            yield page, text[: m.start()].count("\n") + 1, textwrap.dedent(m.group("body"))
+
+
+def assert_every_fence_discovered(pages, fences, opener, lang):
+    """Fail unless ``fences`` holds one entry per ``opener`` match in ``pages``.
+
+    A fence pattern skips whatever it cannot pair, so a relabelled opener, an info string or a
+    mangled closing delimiter would drop a fence out of a parametrization and leave the suite
+    green over an unchecked example. ``opener`` counts openers as a reader sees them, not as the
+    fence pattern pairs them.
+    """
+    where = " + ".join(p.relative_to(ENGINE).as_posix() for p in pages)
+    openers = sum(len(opener.findall(p.read_text(encoding="utf-8"))) for p in pages)
+    # A discovery bug that finds nothing parametrizes zero cases and checks nothing, which is
+    # green either way without this.
+    assert openers > 0, f"found no ```{lang} fence openers in {where}"
+    assert len(fences) == openers, (
+        f"{openers} ```{lang} fence openers but only {len(fences)} paired into checkable "
+        "fences -- the unpaired ones are not parsed by anything (relabelled opener, info "
+        f"string, or a broken closing delimiter); pages: {where}"
+    )
 
 
 @functools.cache
@@ -157,3 +219,32 @@ def usable_bash():
         if probe.returncode == 0 and probe.stdout.strip() == "ok":
             return cand
     return None
+
+
+#: Marks a test that executes a shipped shell body. `conftest.py` skips it on a host with no
+#: working bash, probing only when a marked test runs rather than at every import.
+bash_only = pytest.mark.bash_only
+
+
+def run_step(tmp_path, body, env, *, cwd=None, timeout=30):
+    """Run ``body`` as a bash script written under ``tmp_path``; return the CompletedProcess.
+
+    ``env`` is the whole environment, passed as given: a test that wants the host's variables
+    spreads ``os.environ`` into it, and a hermetic one does not. The script is written with LF
+    endings, because bash reads a CR as part of the command. The run's cwd is ``cwd``, or
+    ``tmp_path`` when that is not given. Output is decoded as UTF-8, not the locale default: the
+    shipped messages carry em dashes, and a cp1252 decode mangles them into a mismatch that looks
+    like a real diff.
+    """
+    bash = usable_bash()
+    assert bash is not None, "callers are bash_only-gated"
+    script = tmp_path / "step.sh"
+    script.write_text(body, encoding="utf-8", newline="\n")
+    return subprocess.run(
+        [bash, str(script)],
+        cwd=cwd or tmp_path,
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        timeout=timeout,
+    )

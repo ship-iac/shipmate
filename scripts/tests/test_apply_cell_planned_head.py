@@ -19,12 +19,8 @@ because a mismatched engine revision produces the same absence.
 import ast
 import os
 import re
-import subprocess
 
-import pytest
-from _loader import SCRIPTS, action_steps, usable_bash
-
-_BASH = usable_bash()
+from _loader import SCRIPTS, action_steps, bash_only, run_step, step_by
 
 # Any 40-char lowercase hex will do; these only ever meet each other.
 _PLANNED = "a" * 40
@@ -35,20 +31,8 @@ def _steps():
     return action_steps("apply-cell")
 
 
-def _step_by_id(step_id):
-    matches = [s for s in _steps() if s.get("id") == step_id]
-    assert len(matches) == 1, f"expected exactly one step with id {step_id!r}, got {len(matches)}"
-    return matches[0]
-
-
 def _index_of(step_id):
     return [s.get("id") for s in _steps()].index(step_id)
-
-
-def _compose_step():
-    matches = [s for s in _steps() if s.get("name") == "Compose cell summary"]
-    assert len(matches) == 1, f"expected exactly one Compose cell summary step, got {len(matches)}"
-    return matches[0]
 
 
 def _failsafe_env_keys():
@@ -70,7 +54,7 @@ def test_verification_sits_between_the_download_and_the_decrypt():
 
 
 def test_the_step_is_attributable_in_the_cell_summary():
-    env = _compose_step().get("env") or {}
+    env = step_by("apply-cell", name="Compose cell summary").get("env") or {}
     assert env.get("PLANNED_HEAD_OUTCOME") == "${{ steps.planned-head.outcome }}"
     # The whole ordered vector, hand-written: FAILSAFES is checked in pipeline order, so each
     # row belongs where its step does -- planned-head after download, before decrypt -- and a
@@ -97,38 +81,21 @@ def _run_step(tmp_path, *, record=None, observed=_PLANNED):
     The stub `return`s rather than `exit`s: `git rev-parse` is called in a command substitution
     here, but an `exit` body would kill the harness script outright if the call site ever moved
     out of one, and the test could then no longer fail on the regression it names."""
-    assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     harness = (
         f'git() {{ printf "%s\n" "{observed}" ; return 0 ; }}\n'
-        + _step_by_id("planned-head")["run"]
+        + step_by("apply-cell", id="planned-head")["run"]
     )
     work = tmp_path / "work"
     work.mkdir()
-    script = tmp_path / "step.sh"
-    script.write_text(harness, encoding="utf-8", newline="\n")
     if record is not None:
         (work / "planned-head.txt").write_text(record, encoding="utf-8", newline="\n")
     runner_temp = tmp_path / "rt"
     runner_temp.mkdir()
-    env = dict(os.environ)
-    env["RUNNER_TEMP"] = str(runner_temp)
-    env["ENV"] = "dev-eu"
-    env["STACK_NAME"] = "app"
-    return subprocess.run(
-        [_BASH, str(script)],
-        cwd=work,
-        env=env,
-        capture_output=True,
-        text=True,
-        # Explicit, not the locale default: the step's messages carry em dashes, and a cp1252
-        # console would decode them to replacement characters, so
-        # test_an_absent_record_aborts_and_says_to_re_plan could never pass on the real text.
-        encoding="utf-8",
-        timeout=30,
-    ), work
+    env = {**os.environ, "RUNNER_TEMP": str(runner_temp), "ENV": "dev-eu", "STACK_NAME": "app"}
+    return run_step(tmp_path, harness, env, cwd=work), work
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_an_absent_record_aborts_and_says_to_re_plan(tmp_path):
     # Whole message, written by hand: the two faults this pins against are a presumed cause
     # asserted as fact, and a remedy that only exists pre-merge. A substring check on either half
@@ -146,7 +113,7 @@ def test_an_absent_record_aborts_and_says_to_re_plan(tmp_path):
     )
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_record_disagreeing_with_head_aborts_naming_both_commits(tmp_path):
     r, _ = _run_step(tmp_path, record=_PLANNED + "\n", observed=_OTHER)
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
@@ -158,7 +125,7 @@ def test_a_record_disagreeing_with_head_aborts_naming_both_commits(tmp_path):
     assert re.search(r"re-plan", out, re.IGNORECASE)
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_matching_record_proceeds_and_leaves_no_file_in_the_checkout(tmp_path):
     r, work = _run_step(tmp_path, record=_PLANNED + "\n", observed=_PLANNED)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"

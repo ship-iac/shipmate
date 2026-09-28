@@ -16,12 +16,8 @@ greening runs also pin the write's whole argv: endpoint, method and every field.
 """
 
 import os
-import subprocess
 
-import pytest
-from _loader import ACTIONS, action_steps, usable_bash
-
-_BASH = usable_bash()
+from _loader import ACTIONS, bash_only, run_step, step_by
 
 HEAD_SHA = "a" * 40
 
@@ -38,20 +34,13 @@ gh() {
 """
 
 
-def _complete_step():
-    matches = [s for s in action_steps("gate-refresh") if s.get("name") == "Complete gate"]
-    assert len(matches) == 1, f"expected exactly one Complete gate step, got {len(matches)}"
-    return matches[0]
-
-
 def _run_step(tmp_path, gate_state):
-    assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
-    script = tmp_path / "step.sh"
-    script.write_text(GH_STUB + _complete_step()["run"], encoding="utf-8", newline="\n")
     wrote = tmp_path / "wrote"
-    env = dict(os.environ)
-    env.update(
+    proc = run_step(
+        tmp_path,
+        GH_STUB + step_by("gate-refresh", name="Complete gate")["run"],
         {
+            **os.environ,
             "GH_TOKEN": "x",
             "GITHUB_ACTION_PATH": str(ACTIONS / "gate-refresh"),
             "HEAD_SHA": HEAD_SHA,
@@ -62,10 +51,7 @@ def _run_step(tmp_path, gate_state):
             "GITHUB_RUN_ID": "999",
             "FAKE_GATE_STATE": gate_state,
             "WROTE": str(wrote),
-        }
-    )
-    proc = subprocess.run(
-        [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30
+        },
     )
     posted = wrote.read_text(encoding="utf-8").splitlines() if wrote.exists() else None
     return proc, posted
@@ -92,11 +78,11 @@ GREEN_ARGV = [
 def test_the_gate_is_read_before_it_is_written():
     # Structural companion to the behavioural tests: an ordering inversion would read the status
     # that the write itself made.
-    run = _complete_step()["run"]
+    run = step_by("gate-refresh", name="Complete gate")["run"]
     assert run.index("held=$(gh api") < run.index("/statuses/$HEAD_SHA")
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_refuses_to_green_a_held_gate(tmp_path):
     proc, posted = _run_step(tmp_path, "failure")
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
@@ -105,7 +91,7 @@ def test_refuses_to_green_a_held_gate(tmp_path):
     assert posted is None, f"a held gate was overwritten with {posted!r}"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_pending_gate_still_greens(tmp_path):
     # The legitimate transition this refusal must not break: gate-state writes `pending` while
     # applies are outstanding, and completing them is what gate-refresh exists to record.
@@ -114,7 +100,7 @@ def test_a_pending_gate_still_greens(tmp_path):
     assert posted == GREEN_ARGV
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_an_absent_gate_still_greens(tmp_path):
     # `.[0].state // empty` yields an empty string when no gate status exists for the head SHA
     # at all. That is not a hold.

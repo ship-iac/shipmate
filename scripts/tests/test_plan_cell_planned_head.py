@@ -21,12 +21,8 @@ about the planned tree while still looking exactly like it is.
 """
 
 import os
-import subprocess
 
-import pytest
-from _loader import action_steps, action_yaml, usable_bash
-
-_BASH = usable_bash()
+from _loader import action_steps, action_yaml, bash_only, run_step
 
 _SHA = "0123456789abcdef0123456789abcdef01234567"
 _OTHER_SHA = "fedcba9876543210fedcba9876543210fedcba98"
@@ -94,17 +90,7 @@ def _run(tmp_path, script_body, env):
     """Execute a real, unmodified `run:` body from action.yml with `git` replaced by a bash
     function. Bash resolves a function before searching PATH, so this needs no fake executable
     and no exec bit."""
-    assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
-    script = tmp_path / "step.sh"
-    script.write_text(script_body, encoding="utf-8", newline="\n")
-    return subprocess.run(
-        [_BASH, str(script)],
-        env={**os.environ, **env},
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    return run_step(tmp_path, script_body, {**os.environ, **env})
 
 
 def _run_planned(tmp_path, *, expected_head, rev_parse=_SHA):
@@ -120,7 +106,7 @@ def _run_record(tmp_path, *, planned_head):
     return _run(tmp_path, body, {"PLANNED_HEAD": planned_head})
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_an_empty_expected_head_is_refused_and_emits_nothing(tmp_path):
     r, written = _run_planned(tmp_path, expected_head="")
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
@@ -130,7 +116,7 @@ def test_an_empty_expected_head_is_refused_and_emits_nothing(tmp_path):
     assert written == "", written
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_head_the_step_did_not_check_out_is_refused_naming_both_commits(tmp_path):
     r, written = _run_planned(tmp_path, expected_head=_OTHER_SHA, rev_parse=_SHA)
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
@@ -138,21 +124,21 @@ def test_a_head_the_step_did_not_check_out_is_refused_naming_both_commits(tmp_pa
     assert written == "", written
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_matching_head_is_emitted_as_the_step_output(tmp_path):
     r, written = _run_planned(tmp_path, expected_head=_SHA, rev_parse=_SHA)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert written == f"head={_SHA}\n", written
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_record_head_writes_the_captured_commit_with_a_trailing_newline(tmp_path):
     r = _run_record(tmp_path, planned_head=_SHA)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert (tmp_path / "planned-head.txt").read_bytes() == f"{_SHA}\n".encode()
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_an_uncaptured_commit_writes_no_record(tmp_path):
     r = _run_record(tmp_path, planned_head="")
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"

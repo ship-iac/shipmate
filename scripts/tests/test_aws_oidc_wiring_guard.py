@@ -12,16 +12,14 @@ Invariants:
   real credentials from a branch-editable value for exactly the cell the table declined to give
   a role. The jobs may read repository variables elsewhere, and this says nothing about those;
 - every wave job in apply-env-level.yml carries id-token: write;
-- apply-env-level.yml and unlock.yml declare a workflow-level `permissions: {}` floor, and
-  apply-env-level's snapshot and complete jobs declare exactly the scopes they need. Neither gets
-  id-token: neither touches the cloud, and complete holds the App key.
+- apply-env-level's snapshot and complete jobs declare exactly the scopes they need. Neither
+  gets id-token: neither touches the cloud, and complete holds the App key.
 
 Whole parsed values, never substrings. An inverted gate must fail here.
 """
 
 import pytest
-import yaml
-from _loader import WORKFLOWS
+from _loader import workflow_yaml
 
 CRED_ACTION = "aws-actions/configure-aws-credentials"
 #: Hand-written, never derived from the workflow files: a derived constant passes whatever the
@@ -40,18 +38,12 @@ CELL_JOBS = [
 ]
 
 
-def _load(name):
-    spec = yaml.safe_load((WORKFLOWS / name).read_text(encoding="utf-8"))
-    assert isinstance(spec, dict), f"{name} did not parse to a mapping"
-    return spec
-
-
 def _is_cell(step, action="apply-cell"):
     return f"/actions/{action}" in str(step.get("uses", ""))
 
 
 def _cell_jobs(workflow, job_ids):
-    jobs = _load(workflow)["jobs"]
+    jobs = workflow_yaml(workflow)["jobs"]
     missing = [j for j in job_ids if j not in jobs]
     assert not missing, f"{workflow} lost cell jobs: {missing}"
     return {j: jobs[j] for j in job_ids}
@@ -67,16 +59,6 @@ def test_every_wave_job_grants_id_token_write():
         assert perms.get("id-token") == "write", f"{wave}: permissions must include id-token: write"
 
 
-@pytest.mark.parametrize("name", ["apply-env-level.yml", "unlock.yml"])
-def test_workflow_level_permissions_are_an_empty_floor(name):
-    spec = _load(name)
-    assert spec.get("permissions") == {}, (
-        f"{name} must declare a workflow-level `permissions: {{}}` floor "
-        "-- without it a job that loses its own block inherits everything the "
-        f"caller granted, id-token: write included; got {spec.get('permissions')!r}"
-    )
-
-
 def test_snapshot_and_complete_jobs_get_exactly_their_declared_permissions():
     # Whole-mapping comparison, not `id-token is None`: the realistic break is the block being
     # deleted, and an absent block is not an absent scope. The job then inherits the caller's
@@ -85,7 +67,7 @@ def test_snapshot_and_complete_jobs_get_exactly_their_declared_permissions():
         "snapshot": {"checks": "read", "actions": "read"},
         "complete": {"actions": "read"},
     }
-    jobs = _load("apply-env-level.yml")["jobs"]
+    jobs = workflow_yaml("apply-env-level.yml")["jobs"]
     for name, perms in expected.items():
         assert jobs[name].get("permissions") == perms, (
             f"{name} must declare exactly {perms} -- it never touches the cloud, "

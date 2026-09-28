@@ -20,8 +20,7 @@ rather than on the next merge.
 
 import re
 
-import yaml
-from _loader import ACTIONS, SCRIPTS
+from _loader import SCRIPTS, action_yaml
 
 DETECTS = ("apply-detect", "deploy-detect", "apply-all-detect")
 
@@ -62,7 +61,7 @@ def test_detect_actions_forward_the_app_id_to_the_script():
     # scripts alone looks complete while the env: line that supplies it is dropped, which fails
     # that detect with a KeyError.
     for name in DETECTS:
-        spec = yaml.safe_load((ACTIONS / name / "action.yml").read_text(encoding="utf-8"))
+        spec = action_yaml(name)
         env_blocks = [step.get("env") or {} for step in (spec["runs"].get("steps") or [])]
         assert any("SHIPMATE_APP_ID" in env for env in env_blocks), (
             f"actions/{name} must pass SHIPMATE_APP_ID to the detect script"

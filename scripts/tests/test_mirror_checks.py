@@ -17,12 +17,16 @@ moving.
 import io
 import json
 import os
-import subprocess
 
 import pytest
-from _loader import action_steps, action_yaml, load_script, usable_bash
-
-_BASH = usable_bash()
+from _loader import (
+    action_steps,
+    action_yaml,
+    bash_only,
+    load_script,
+    run_step,
+    step_by,
+)
 
 mc = load_script("mirror-checks")
 
@@ -206,20 +210,13 @@ def test_the_mirror_step_runs_before_the_comment_is_built():
     assert [s["name"] for s in action_steps("summary")] == EXPECTED_STEP_NAMES
 
 
-def _mirror_step():
-    steps = [
-        s
-        for s in action_steps("summary")
-        if s.get("name") == "Mirror this run's per-cell plan checks onto the head"
-    ]
-    assert len(steps) == 1
-    return steps[0]
+_MIRROR = "Mirror this run's per-cell plan checks onto the head"
 
 
 def test_the_mirror_runs_only_for_an_on_demand_plan():
     """Unconditional would put a second producer behind every plan check name on a pull-request
     run, where those checks are already on the head."""
-    assert _mirror_step()["if"] == "${{ inputs.on-demand == 'true' }}"
+    assert step_by("summary", name=_MIRROR)["if"] == "${{ inputs.on-demand == 'true' }}"
 
 
 def test_the_action_declares_the_on_demand_input_it_decides_on():
@@ -247,18 +244,17 @@ python3() { cat > /dev/null ; printf '%s\\n' "$FAKE_BODIES" ; }
 """
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
     """The listing is unordered, so abandoning the remaining bodies drops an arbitrary suffix of
     them, which can be exactly the failed cell the mirror exists to put on the pull request. The
     step still exits 0."""
-    assert _BASH is not None
-    script = tmp_path / "step.sh"
-    script.write_text(_GH_STUB + _mirror_step()["run"], encoding="utf-8", newline="\n")
     posted = tmp_path / "posted"
-    env = dict(os.environ)
-    env.update(
+    proc = run_step(
+        tmp_path,
+        _GH_STUB + step_by("summary", name=_MIRROR)["run"],
         {
+            **os.environ,
             "GH_TOKEN": "x",
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_SHA": RUN_COMMIT,
@@ -268,10 +264,7 @@ def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
                 json.dumps({"name": name, "head_sha": HEAD}) for name in ("first cell", "second")
             ),
             "POSTED": str(posted),
-        }
-    )
-    proc = subprocess.run(
-        [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30
+        },
     )
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     attempted = [json.loads(line)["name"] for line in posted.read_text().splitlines()]

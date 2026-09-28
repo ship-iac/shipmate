@@ -20,14 +20,13 @@ A fence holding `{ vars = "NAME" }` references is validated with every reference
 to `_PLACEHOLDER`, a value every string position accepts, so the example is judged on its
 shape rather than on this runner's variables.
 
-Sibling of `test_docs_yaml_parses.py`, whose fence-discovery shape this copies.
+Sibling of `test_docs_yaml_parses.py`; both discover fences through `_loader.doc_fences`.
 """
 
 import re
-import textwrap
 
 import pytest
-from _loader import ENGINE, load_script
+from _loader import ENGINE, assert_every_fence_discovered, doc_fences, load_script
 
 DOCS = ENGINE / "docs"
 ec = load_script("env-config")
@@ -46,44 +45,19 @@ _OPENER = re.compile(r"^[ \t]*```toml\b", re.M)
 _PLACEHOLDER = "dev"
 
 
-def _fences():
-    """Every fence as (page, 1-based line of its opening ```toml, dedented body).
-
-    Discovery is by glob, so a page added later is covered without editing this file, and
-    indented fences, those inside a list item, are dedented rather than skipped: a fence this
-    misses is a fence nothing checks.
-    """
-    for page in _PAGES:
-        text = page.read_text(encoding="utf-8")
-        for m in _FENCE.finditer(text):
-            yield page, text[: m.start()].count("\n") + 1, textwrap.dedent(m.group("body"))
-
-
-_FENCES = list(_fences())
+# Discovery is by glob, so a page added later is covered without editing this file.
+_FENCES = list(doc_fences(_PAGES, _FENCE))
 
 
 def test_every_fence_was_discovered():
     """No fence is silently dropped: _FENCE pairs as many as the pages open.
-
-    _FENCE skips whatever it cannot pair, so a relabelled opener, an info string, or a mangled
-    closing delimiter would drop a fence out of the parametrization and leave the suite green
-    over an unchecked example.
 
     Mutation: put an info string after one opener (```toml title=x) -- `_OPENER` still counts
     it and `_FENCE` no longer pairs it. Relabelling an opener outright does NOT red here: that
     removes the opener too, and the counts stay equal. This guard catches a fence that is
     *announced* and not parsed, not one that stops being announced.
     """
-    openers = sum(len(_OPENER.findall(p.read_text(encoding="utf-8"))) for p in _PAGES)
-    # A discovery bug that finds nothing parametrizes zero cases and checks nothing, which is
-    # green either way without this.
-    assert openers > 0, "found no ```toml fence openers in CONTRACT.md + README.md + docs/*.md"
-    assert len(_FENCES) == openers, (
-        f"{openers} ```toml fence openers in CONTRACT.md + README.md + docs/*.md but only "
-        f"{len(_FENCES)} paired into checkable fences -- the unpaired ones are "
-        "not parsed by anything (relabelled opener, info string, or a broken "
-        "closing delimiter)"
-    )
+    assert_every_fence_discovered(_PAGES, _FENCES, _OPENER, "toml")
 
 
 @pytest.mark.parametrize(

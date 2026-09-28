@@ -24,7 +24,7 @@ today fails loud anyway, because `probe_status` then survives into the equality.
 
 import re
 
-from _loader import SCRIPTS, action_steps, action_yaml
+from _loader import SCRIPTS, action_yaml, step_by
 
 _MAIN = (SCRIPTS / "lock-info").read_text(encoding="utf-8").split("\ndef main():", 1)[1]
 _ACTION = "unlock-cell"
@@ -48,10 +48,9 @@ def test_lock_info_writes_exactly_the_probe_outputs_unlock_cell_consumes():
     consumed = set(
         re.findall(r"steps\.probe\.outputs\.([a-z_]+)", "\n".join(_strings(action_yaml(_ACTION))))
     )
-    probe = [s for s in action_steps(_ACTION) if s.get("id") == "probe"]
-    assert len(probe) == 1, f"expected exactly one step with id 'probe', got {len(probe)}"
+    probe = step_by(_ACTION, id="probe")
     step_written = set(
-        re.findall(r'([a-z_]+)=[^"\n]*" *>> *"\$GITHUB_OUTPUT"', probe[0].get("run", ""))
+        re.findall(r'([a-z_]+)=[^"\n]*" *>> *"\$GITHUB_OUTPUT"', probe.get("run", ""))
     )
     from_lock_info = consumed - step_written
 

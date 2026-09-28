@@ -9,11 +9,9 @@ directory reports whichever copy extraction order happened to leave behind.
 
 import json
 import pathlib
-import subprocess
 import sys
 
-import pytest
-from _loader import ACTIONS, SCRIPTS, action_steps, usable_bash
+from _loader import ACTIONS, SCRIPTS, bash_only, run_step, step_by
 
 _START = "--plan-runs"
 _END = "plan_run_ids=$("
@@ -21,7 +19,7 @@ _END = "plan_run_ids=$("
 
 def _cells_block():
     """The plan-record read through the line that publishes the id set."""
-    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gatherdoc")
+    step = step_by("comment-ops", id="gatherdoc")
     lines = (step["run"] or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
     starts = [i for i, ln in enumerate(lines) if _START in ln]
     ends = [i for i, ln in enumerate(lines) if _END in ln]
@@ -35,8 +33,6 @@ def _cells_block():
     )
     return "\n".join(block)
 
-
-bash_only = pytest.mark.skipif(usable_bash() is None, reason="no working bash on PATH")
 
 _APP_ID = "4326562"
 #: (check name, check-run id, `external_id` record). The same cell planned twice on this head,
@@ -112,14 +108,10 @@ def _run_block(tmp_path, undownloadable=()):
         ' [ -d "artifacts/$rid" ] || return 1 ;'
         ' mkdir -p "$dir" ; cp -r "artifacts/$rid/." "$dir/" ; }\n'
     ) + _cells_block()
-    script = tmp_path / "cells.sh"
-    script.write_text(harness, encoding="utf-8", newline="\n")
-    r = subprocess.run(
-        [usable_bash(), str(script)],
-        capture_output=True,
-        text=True,
-        cwd=tmp_path,
-        env={
+    r = run_step(
+        tmp_path,
+        harness,
+        {
             "GITHUB_ACTION_PATH": str(ACTIONS / "comment-ops"),
             "GITHUB_OUTPUT": str(tmp_path / "gh_output"),
             "GITHUB_REPOSITORY": "o/r",

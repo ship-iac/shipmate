@@ -13,7 +13,7 @@ the kind of thing that silently goes stale.
 import ast
 import re
 
-from _loader import SCRIPTS, action_steps
+from _loader import SCRIPTS, action_steps, step_by
 
 #: Ids in the guarded range that are deliberately not fail-safes wired into the Compose step's
 #: decision, such as a step added only to expose an output with no bearing on whether the apply
@@ -28,12 +28,6 @@ def _steps():
     return action_steps("apply-cell")
 
 
-def _step_by_id(step_id):
-    matches = [s for s in _steps() if s.get("id") == step_id]
-    assert len(matches) == 1, f"expected exactly one step with id {step_id!r}, got {len(matches)}"
-    return matches[0]
-
-
 def _ids_between_slug_and_apply():
     """Every id'd step strictly between "Stack slug" (id: ids, the first step, apply-cell minting
     no App token of its own) and "Apply the stored plan" (id: apply): the range whose steps can
@@ -46,16 +40,10 @@ def _ids_between_slug_and_apply():
     return [s.get("id") for s in steps[start + 1 : end] if s.get("id")]
 
 
-def _compose_step():
-    matches = [s for s in _steps() if s.get("name") == "Compose cell summary"]
-    assert len(matches) == 1, f"expected exactly one Compose cell summary step, got {len(matches)}"
-    return matches[0]
-
-
 def _compose_env_id_mapping():
     """Map each `steps.<id>.outcome` referenced in the Compose step's `env:` block back to its
     env var name, both directions."""
-    env_block = _compose_step().get("env") or {}
+    env_block = step_by("apply-cell", name="Compose cell summary").get("env") or {}
     pattern = re.compile(r"steps\.([A-Za-z0-9_-]+)\.outcome")
     envvar_to_id = {}
     for var_name, expr in env_block.items():

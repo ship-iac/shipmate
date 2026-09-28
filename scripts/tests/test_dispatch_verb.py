@@ -5,18 +5,18 @@ verb rides in the body — selecting the job that runs — alongside one body sh
 import json
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
 from _loader import (
     ACTIONS,
     SCRIPTS,
-    action_steps,
     action_yaml,
+    bash_only,
     load_script,
     run_lines,
-    usable_bash,
+    run_step,
+    step_by,
 )
 
 DISPATCH_ACTION = "dispatch"
@@ -26,28 +26,18 @@ DISPATCH_ACTION = "dispatch"
 CONSUMER_WORKFLOW = "shipmate.yml"
 
 
-def _dispatch_step():
-    """The workflow_dispatch apply step."""
-    steps = action_steps(DISPATCH_ACTION)
-    matches = [s for s in steps if s.get("name") == "workflow_dispatch apply"]
-    assert len(matches) == 1, (
-        f"expected exactly one 'workflow_dispatch apply' step, got {len(matches)}"
-    )
-    return matches[0]
-
-
 def test_the_dispatch_step_runs_the_body_builder_this_file_exercises():
     # A whole run line, not a substring: the recording `gh` stub never opens body.json, so a
     # commented-out builder would leave every body assertion here exercising a script nothing
     # runs, and production would POST an empty --input.
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json' in run_lines(
-        _dispatch_step()
+        step_by(DISPATCH_ACTION, name="workflow_dispatch apply")
     )
 
 
 def _extract_dispatch_run_block():
     """The full run: block of the dispatch step, exactly as written."""
-    run = _dispatch_step().get("run", "")
+    run = step_by(DISPATCH_ACTION, name="workflow_dispatch apply").get("run", "")
     assert run.strip(), "dispatch step has no run block"
     return run
 
@@ -141,23 +131,23 @@ def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
 RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" > argv.txt\necho '{}'\n"
 
 
-def _create_stub_commands(tmpdir):
+def _create_stub_commands(tmp_path):
     """Create stub `gh` and `python3` commands on PATH; returns (dir, python3, gh)."""
-    python3_path = Path(tmpdir) / "python3"
+    python3_path = tmp_path / "python3"
     python3_path.write_text(f'#!/bin/bash\nexec "{__import__("sys").executable}" "$@"\n')
     python3_path.chmod(0o755)
 
-    gh_path = Path(tmpdir) / "gh"
+    gh_path = tmp_path / "gh"
     gh_path.write_text("#!/bin/bash\necho '{}'\n")  # The default stub succeeds.
     gh_path.chmod(0o755)
 
-    return str(tmpdir), str(python3_path), str(gh_path)
+    return str(tmp_path), str(python3_path), str(gh_path)
 
 
-def _run_dispatch(tmpdir, verb, environment="", gh_stub=RECORDING_GH_STUB):
+def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB):
     """Run the shipped step with a gh stub that records its argv; returns the
     CompletedProcess and the recorded argv text."""
-    path_dir, _, gh_path = _create_stub_commands(tmpdir)
+    path_dir, _, gh_path = _create_stub_commands(tmp_path)
     Path(gh_path).write_text(gh_stub)
     Path(gh_path).chmod(0o755)
 
@@ -177,19 +167,8 @@ def _run_dispatch(tmpdir, verb, environment="", gh_stub=RECORDING_GH_STUB):
     env["GITHUB_SERVER_URL"] = "https://github.com"
     env["GITHUB_RUN_ID"] = "7777"
 
-    result = subprocess.run(
-        [usable_bash(), "-c", _extract_dispatch_run_block()],
-        env=env,
-        capture_output=True,
-        text=True,
-        # Explicit, not the locale default: the action's messages hold non-ASCII punctuation,
-        # and decoding them as cp1252 on a Windows checkout would make a whole-message
-        # comparison pass in CI and fail locally.
-        encoding="utf-8",
-        cwd=tmpdir,
-        timeout=30,
-    )
-    argv_file = Path(tmpdir) / "argv.txt"
+    result = run_step(tmp_path, _extract_dispatch_run_block(), env)
+    argv_file = tmp_path / "argv.txt"
     return result, (argv_file.read_text() if argv_file.exists() else "")
 
 
@@ -199,7 +178,8 @@ def _run_dispatch(tmpdir, verb, environment="", gh_stub=RECORDING_GH_STUB):
 _DISPATCH_PATH = "/actions/workflows/"
 
 
-def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request():
+@bash_only
+def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_path):
     """No verb, no dispatch, and the refusal names what the caller must wire. Without it the
     body carries an empty `verb`, which GitHub reads as not provided for a `required: true`
     input and answers HTTP 422 — a raw API error on a run nobody is watching, where the wiring
@@ -211,57 +191,50 @@ def test_an_empty_verb_dispatches_nothing_and_says_so_on_the_pull_request():
     alone leaves the case's `*)` arm refusing, so the pair is the hole; drop the branch's
     `say_no_run_started` call, and the comment does not appear.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, argv = _run_dispatch(tmpdir, verb="", gh_stub=RECORDING_GH_STUB)
-        output = result.stdout + result.stderr
-        assert result.returncode != 0, f"an empty verb must be refused: {output}"
-        assert _DISPATCH_PATH not in argv, f"an empty verb must dispatch nothing: {argv!r}"
-        assert "did not pass a verb" in output and "comment-ops" in output, (
-            f"the refusal must name the missing input and where it comes from: {output}"
-        )
-        assert "/issues/42/comments" in argv and _RUN_URL in argv, (
-            f"the commenter must be told no run started: {argv!r}"
-        )
+    result, argv = _run_dispatch(tmp_path, verb="", gh_stub=RECORDING_GH_STUB)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, f"an empty verb must be refused: {output}"
+    assert _DISPATCH_PATH not in argv, f"an empty verb must dispatch nothing: {argv!r}"
+    assert "did not pass a verb" in output and "comment-ops" in output, (
+        f"the refusal must name the missing input and where it comes from: {output}"
+    )
+    assert "/issues/42/comments" in argv and _RUN_URL in argv, (
+        f"the commenter must be told no run started: {argv!r}"
+    )
 
 
-def test_an_unknown_verb_dispatches_nothing_and_says_so_on_the_pull_request():
+@bash_only
+def test_an_unknown_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_path):
     """A verb outside {plan, apply, unlock} reaches no workflow, and says so.
 
     Mutations: add a fourth value to the `case` list; drop that arm's `say_no_run_started`.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, argv = _run_dispatch(tmpdir, verb="bogus", gh_stub=RECORDING_GH_STUB)
-        output = result.stdout + result.stderr
-        assert result.returncode != 0, "an unknown verb must be refused"
-        assert _DISPATCH_PATH not in argv, f"an unknown verb must dispatch nothing: {argv!r}"
-        assert "::error::verb must be plan, apply or unlock (got: bogus)" in output, (
-            f"expected error message not found in output: {output}"
-        )
-        assert "/issues/42/comments" in argv and _RUN_URL in argv, (
-            f"the commenter must be told no run started: {argv!r}"
-        )
+    result, argv = _run_dispatch(tmp_path, verb="bogus", gh_stub=RECORDING_GH_STUB)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, "an unknown verb must be refused"
+    assert _DISPATCH_PATH not in argv, f"an unknown verb must dispatch nothing: {argv!r}"
+    assert "::error::verb must be plan, apply or unlock (got: bogus)" in output, (
+        f"expected error message not found in output: {output}"
+    )
+    assert "/issues/42/comments" in argv and _RUN_URL in argv, (
+        f"the commenter must be told no run started: {argv!r}"
+    )
 
 
 @pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
-def test_every_verb_dispatches_the_one_consumer_file(verb):
+@bash_only
+def test_every_verb_dispatches_the_one_consumer_file(tmp_path, verb):
     """One entry point for every verb: the file is fixed, and the body's `verb` selects the
     job. What kept the verbs apart before was the filename; what keeps them apart now is the
     seven `if:` expressions `shipmate doctor`'s routing probe compares whole.
 
     Mutation: make the `case` resolve a per-verb filename again.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, argv = _run_dispatch(tmpdir, verb=verb, environment="dev-eu")
-        assert result.returncode == 0, f"{verb} dispatch failed: {result.stdout}{result.stderr}"
-        assert f"repos/org/repo/actions/workflows/{CONSUMER_WORKFLOW}/dispatches" in argv, (
-            f"{verb} must be dispatched at {CONSUMER_WORKFLOW}, gh saw: {argv!r}"
-        )
+    result, argv = _run_dispatch(tmp_path, verb=verb, environment="dev-eu")
+    assert result.returncode == 0, f"{verb} dispatch failed: {result.stdout}{result.stderr}"
+    assert f"repos/org/repo/actions/workflows/{CONSUMER_WORKFLOW}/dispatches" in argv, (
+        f"{verb} must be dispatched at {CONSUMER_WORKFLOW}, gh saw: {argv!r}"
+    )
 
 
 def test_the_action_declares_no_workflow_input():
@@ -296,7 +269,7 @@ def test_dispatch_step_env_mapping_is_complete():
     Mutation: rename VERB in the env: block, re-add WORKFLOW, or set
     `DISPATCH_REF: ${{ github.head_ref }}`.
     """
-    assert _dispatch_step().get("env") == {
+    assert step_by(DISPATCH_ACTION, name="workflow_dispatch apply").get("env") == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "REPO": "${{ github.repository }}",
         "DISPATCH_REF": "${{ github.event.repository.default_branch }}",
@@ -321,7 +294,8 @@ def test_the_verb_output_of_comment_ops_is_the_parsed_route_alone():
     )
 
 
-def test_every_route_comment_ops_can_dispatch_is_accepted_here():
+@bash_only
+def test_every_route_comment_ops_can_dispatch_is_accepted_here(tmp_path):
     """comment-parse's dispatching routes and this action's `case` cannot drift. Nothing else
     couples them: a route comment-ops emits that the case rejects fails only at runtime, with
     the whole suite green. The literal below sits beside the derivation because a check
@@ -330,9 +304,6 @@ def test_every_route_comment_ops_can_dispatch_is_accepted_here():
     Mutations: remove `plan` (or `unlock`) from the case list; add a fourth dispatching route
     to VERBS.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-
     parse = load_script("comment-parse")
     # `doctor` and `help` are answered in place, and `destroy` is reserved.
     # What is left is exactly what can reach a dispatch.
@@ -346,27 +317,25 @@ def test_every_route_comment_ops_can_dispatch_is_accepted_here():
     )
 
     for route in sorted(routes):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            result, _ = _run_dispatch(tmpdir, verb=route, environment="dev-eu")
-            output = result.stdout + result.stderr
-            assert result.returncode == 0, f"verb={route!r} was rejected: {output}"
-            assert "::error::verb must be" not in output, (
-                f"verb={route!r} is emitted by comment-ops but rejected here: {output}"
-            )
+        (tmp_path / route).mkdir()
+        result, _ = _run_dispatch(tmp_path / route, verb=route, environment="dev-eu")
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, f"verb={route!r} was rejected: {output}"
+        assert "::error::verb must be" not in output, (
+            f"verb={route!r} is emitted by comment-ops but rejected here: {output}"
+        )
 
 
-def test_dispatch_success_exits_zero():
+@bash_only
+def test_dispatch_success_exits_zero(tmp_path):
     """When gh succeeds, the script exits 0.
 
     Mutation: make the wrapper return non-zero on success.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="unlock", environment="dev-eu")
-        assert result.returncode == 0, (
-            f"success should exit 0, got {result.returncode}: {result.stderr}"
-        )
+    result, _ = _run_dispatch(tmp_path, verb="unlock", environment="dev-eu")
+    assert result.returncode == 0, (
+        f"success should exit 0, got {result.returncode}: {result.stderr}"
+    )
 
 
 # Only a failure that matches the skew shape gets the skew explanation: a 403 or a rate limit
@@ -399,7 +368,10 @@ _LAYOUT_MESSAGE = (
 
 @pytest.mark.parametrize("stub", [_NOT_FOUND_STUB, _NO_TRIGGER_STUB, _UNEXPECTED_INPUTS_STUB])
 @pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
-def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_message(verb, stub):
+@bash_only
+def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_message(
+    tmp_path, verb, stub
+):
     """All three shapes an absent or outdated `shipmate.yml` produces get the layout message,
     for every verb — every verb now aims at that one file. Measured: a workflow file that does
     not exist answers 404; one with no such trigger answers `Workflow does not have
@@ -412,43 +384,39 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
     whole-value comparison reddens; drop the `printf` that echoes `$out` and the hint prints
     without the answer it explains.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb=verb, environment="dev-eu", gh_stub=stub)
-        output = result.stdout + result.stderr
-        assert result.returncode != 0, f"a {verb} failure must exit non-zero: {output}"
-        # The hint explains the answer; it does not replace it. Pinned per shape, because the
-        # remaining two carry no distinctive sentence of their own -- and against stdout alone,
-        # because the refusal comment's own gh call leaks the same text on stderr, which is what
-        # made the `"HTTP 4" in output` this replaces unable to fail.
-        if stub is _NO_TRIGGER_STUB:
-            assert "Workflow does not have" in result.stdout, (
-                f"the API's own answer must still print beside the hint: {output}"
-            )
-        assert _LAYOUT_MESSAGE in output.splitlines(), (
-            f"the layout message must be emitted whole and unchanged: {output}"
+    result, _ = _run_dispatch(tmp_path, verb=verb, environment="dev-eu", gh_stub=stub)
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, f"a {verb} failure must exit non-zero: {output}"
+    # The hint explains the answer; it does not replace it. Pinned per shape, because the
+    # remaining two carry no distinctive sentence of their own -- and against stdout alone,
+    # because the refusal comment's own gh call leaks the same text on stderr, which is what
+    # made the `"HTTP 4" in output` this replaces unable to fail.
+    if stub is _NO_TRIGGER_STUB:
+        assert "Workflow does not have" in result.stdout, (
+            f"the API's own answer must still print beside the hint: {output}"
         )
+    assert _LAYOUT_MESSAGE in output.splitlines(), (
+        f"the layout message must be emitted whole and unchanged: {output}"
+    )
 
 
 @pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
-def test_a_403_prints_no_skew_message(verb):
+@bash_only
+def test_a_403_prints_no_skew_message(tmp_path, verb):
     """A 403 is not version skew, on any verb: the raw output prints, the message does not.
 
     Mutation: drop the whole `[[ ... ]]` message-text condition, so any failure is reported as
     skew. No single one of its three halves reddens it, because a 403 is none of them.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb=verb, environment="dev-eu", gh_stub=_FORBIDDEN_STUB)
-        output = result.stdout + result.stderr
-        assert result.returncode == 1, f"gh's exit status must survive, got {result.returncode}"
-        assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
-        assert _LAYOUT_SKEW not in output, f"a 403 is not a missing consumer file: {output}"
+    result, _ = _run_dispatch(tmp_path, verb=verb, environment="dev-eu", gh_stub=_FORBIDDEN_STUB)
+    output = result.stdout + result.stderr
+    assert result.returncode == 1, f"gh's exit status must survive, got {result.returncode}"
+    assert "HTTP 403: Forbidden" in output, f"raw gh output missing: {output}"
+    assert _LAYOUT_SKEW not in output, f"a 403 is not a missing consumer file: {output}"
 
 
-def test_a_422_about_another_input_is_not_reported_as_skew():
+@bash_only
+def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
     """A 422 naming an input the wrapper does not expect is not a missing wrapper. The v0.16.0
     E2E hit this class: a consumer wrapper declared `plan_run_id` required, the dispatch sent it
     empty, and GitHub answered `Required input 'plan_run_id' not provided (HTTP 422)`. Matching
@@ -457,23 +425,20 @@ def test_a_422_about_another_input_is_not_reported_as_skew():
 
     Mutation: match any `HTTP 422` and this reddens.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
     stub = (
         "#!/bin/bash\n"
         "echo \"gh: Required input 'plan_run_id' not provided (HTTP 422)\" >&2\n"
         "exit 22\n"
     )
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="unlock", environment="dev-eu", gh_stub=stub)
-        output = result.stdout + result.stderr
-        assert result.returncode == 22, f"gh's exit status must survive, got {result.returncode}"
-        assert "Required input 'plan_run_id' not provided" in output, (
-            f"the API's own message must still print: {output}"
-        )
-        assert _LAYOUT_SKEW not in output, (
-            f"a 422 about plan_run_id is not a missing consumer file: {output}"
-        )
+    result, _ = _run_dispatch(tmp_path, verb="unlock", environment="dev-eu", gh_stub=stub)
+    output = result.stdout + result.stderr
+    assert result.returncode == 22, f"gh's exit status must survive, got {result.returncode}"
+    assert "Required input 'plan_run_id' not provided" in output, (
+        f"the API's own message must still print: {output}"
+    )
+    assert _LAYOUT_SKEW not in output, (
+        f"a 422 about plan_run_id is not a missing consumer file: {output}"
+    )
 
 
 #: Fails like `_NOT_FOUND_STUB` and records every argv, so what the failure branch
@@ -486,7 +451,8 @@ _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
 
 
 @pytest.mark.parametrize("verb", ["plan", "apply", "unlock"])
-def test_a_failed_dispatch_says_so_on_the_pull_request(verb):
+@bash_only
+def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
     """Every failure here lands on a run whose checks attach to the dispatch ref, so the pull
     request that asked for the verb shows no check, no comment and no gate change -- and the
     commenter's last signal was comment-ops' rocket. One comment, on the pull request, carrying
@@ -495,47 +461,41 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(verb):
     Mutations: delete the comment call; scope it to one verb; swap `$COMMENT_TOKEN` back to
     `$GH_TOKEN`, which is minted `actions: write` and cannot comment.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, argv = _run_dispatch(
-            tmpdir, verb=verb, environment="dev-eu", gh_stub=_RECORDING_FAILURE_STUB
-        )
-        assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
-        # Both calls, in one argv: the comment must not erase the record of the dispatch it
-        # is reporting on.
-        assert _DISPATCH_PATH in argv, f"the dispatch was never attempted: {argv!r}"
-        assert "repos/org/repo/issues/42/comments" in argv, (
-            f"a failed {verb} dispatch must comment on the pull request, gh saw: {argv!r}"
-        )
-        assert _RUN_URL in argv, f"the comment must carry the run link, gh saw: {argv!r}"
-        assert "Not Found (HTTP 404)" not in argv, (
-            f"the API's answer is unbounded and must not be pasted into a comment: {argv!r}"
-        )
+    result, argv = _run_dispatch(
+        tmp_path, verb=verb, environment="dev-eu", gh_stub=_RECORDING_FAILURE_STUB
+    )
+    assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
+    # Both calls, in one argv: the comment must not erase the record of the dispatch it
+    # is reporting on.
+    assert _DISPATCH_PATH in argv, f"the dispatch was never attempted: {argv!r}"
+    assert "repos/org/repo/issues/42/comments" in argv, (
+        f"a failed {verb} dispatch must comment on the pull request, gh saw: {argv!r}"
+    )
+    assert _RUN_URL in argv, f"the comment must carry the run link, gh saw: {argv!r}"
+    assert "Not Found (HTTP 404)" not in argv, (
+        f"the API's answer is unbounded and must not be pasted into a comment: {argv!r}"
+    )
 
 
-def test_a_successful_dispatch_comments_nothing():
+@bash_only
+def test_a_successful_dispatch_comments_nothing(tmp_path):
     """`summary` owns the pull request on a run that starts. This comment exists only for the
     window before it, so a dispatch that succeeded must leave no trace here.
 
     Mutation: move the comment call out of the `if [ "$rc" -ne 0 ]` branch.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        _, argv = _run_dispatch(tmpdir, verb="plan")
-        assert "/issues/42/comments" not in argv, f"a successful dispatch commented: {argv!r}"
+    _, argv = _run_dispatch(tmp_path, verb="plan")
+    assert "/issues/42/comments" not in argv, f"a successful dispatch commented: {argv!r}"
 
 
-def test_a_failed_comment_does_not_mask_the_dispatch_failure():
+@bash_only
+def test_a_failed_comment_does_not_mask_the_dispatch_failure(tmp_path):
     """The comment is cosmetic -- a repository whose workflow token cannot write pull requests
     still has to see the dispatch fail. `|| true` is what keeps `$rc` the exit status under
     `set -e`.
 
     Mutation: drop the `|| true` and this exits 1 (the comment's status) instead of 22.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
     # Succeeds at the dispatch, then refuses the comment: exactly a job without
     # `pull-requests: write`.
     stub = (
@@ -544,26 +504,23 @@ def test_a_failed_comment_does_not_mask_the_dispatch_failure():
         "echo \"gh: Workflow does not have 'workflow_dispatch' trigger (HTTP 422)\" >&2\n"
         "exit 22\n"
     )
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="plan", gh_stub=stub)
-        assert result.returncode == 22, (
-            f"the dispatch's own status must survive a failed comment: {result.returncode}"
-        )
+    result, _ = _run_dispatch(tmp_path, verb="plan", gh_stub=stub)
+    assert result.returncode == 22, (
+        f"the dispatch's own status must survive a failed comment: {result.returncode}"
+    )
 
 
-def test_the_plan_notice_states_neither_an_environment_nor_a_ref():
+@bash_only
+def test_the_plan_notice_states_neither_an_environment_nor_a_ref(tmp_path):
     """A plan has neither, so its success notice claims neither.
 
     Mutation: unbranch the notice, leaving the apply wording for every verb.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, _ = _run_dispatch(tmpdir, verb="plan")
-        output = result.stdout + result.stderr
-        assert "::notice title=dispatch::dispatched shipmate.yml on main for PR #42" in output, (
-            f"the plan notice must name the workflow, the dispatch ref and the PR: {output}"
-        )
-        assert "all environments" not in output and "(ref " not in output, (
-            f"a plan carries no environment and no ref: {output}"
-        )
+    result, _ = _run_dispatch(tmp_path, verb="plan")
+    output = result.stdout + result.stderr
+    assert "::notice title=dispatch::dispatched shipmate.yml on main for PR #42" in output, (
+        f"the plan notice must name the workflow, the dispatch ref and the PR: {output}"
+    )
+    assert "all environments" not in output and "(ref " not in output, (
+        f"a plan carries no environment and no ref: {output}"
+    )

@@ -21,14 +21,13 @@ the file it checks passes whatever that file says.
 """
 
 import re
-import textwrap
 
 import yaml
-from _loader import ENGINE, WORKFLOWS
+from _loader import ENGINE, doc_fences, workflow_yaml
 
 CELL_ENV = "${{ matrix.env_binding }}"
 
-_FENCE = re.compile(r"```yaml\n(.*?)```", re.S)
+_FENCE = re.compile(r"```yaml\n(?P<body>.*?)```", re.S)
 PAGES = ("CONTRACT.md",)
 
 
@@ -39,12 +38,11 @@ def _fences(page):
     altogether. Reported against the page, because a bare ScannerError names only the YAML
     stream.
     """
-    text = (ENGINE / page).read_text(encoding="utf-8")
-    for body in _FENCE.findall(text):
+    for _, line, body in doc_fences([ENGINE / page], _FENCE):
         try:
-            yield yaml.safe_load(textwrap.dedent(body))
+            yield yaml.safe_load(body)
         except yaml.YAMLError as e:
-            raise AssertionError(f"{page}: a ```yaml fence no longer parses: {e}") from e
+            raise AssertionError(f"{page}:{line}: a ```yaml fence no longer parses: {e}") from e
 
 
 def _documented_binding(page):
@@ -72,7 +70,7 @@ def test_every_page_documents_the_cell_job_expression():
 
 
 def test_the_engine_binds_the_documented_expression():
-    spec = yaml.safe_load((WORKFLOWS / "apply-env-level.yml").read_text(encoding="utf-8"))
+    spec = workflow_yaml("apply-env-level.yml")
     assert spec["jobs"]["wave0"]["environment"] == CELL_ENV, (
         "apply-env-level.yml's wave binding and the documented expression have "
         "diverged -- one of the two was updated alone"

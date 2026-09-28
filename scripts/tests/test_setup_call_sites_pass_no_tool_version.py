@@ -7,8 +7,7 @@ file. A composite action only warns on an undeclared input, so a call site passi
 Each step's whole `with:` block is asserted: an empty block is the whole known value.
 """
 
-import yaml
-from _loader import WORKFLOWS, local_action
+from _loader import WORKFLOWS, local_action, workflow_yaml
 
 #: Both spellings of the action: every engine job reaches it through `$/`, and
 #: `manifest-load.yml`'s remote `@main` probe is the one call site that cannot.
@@ -36,8 +35,7 @@ def _setup_steps():
     """
     found = {}
     for path in sorted(WORKFLOWS.glob("*.yml")):
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert isinstance(doc, dict), f"{path} did not parse to a mapping ({doc!r})"
+        doc = workflow_yaml(path)
         for job in (doc.get("jobs") or {}).values():
             for step in job.get("steps") or []:
                 if str(step.get("uses", "")).split("@")[0] in SETUP:

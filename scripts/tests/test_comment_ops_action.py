@@ -9,9 +9,6 @@ import json
 import os
 import re
 import shlex
-import subprocess
-import tempfile
-from pathlib import Path
 
 import pytest
 from _loader import (
@@ -20,8 +17,10 @@ from _loader import (
     SCRIPTS,
     action_steps,
     action_yaml,
+    bash_only,
     load_script,
-    usable_bash,
+    run_step,
+    step_by,
 )
 
 _ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
@@ -167,7 +166,7 @@ def test_a_lost_job_summary_write_does_not_cost_the_comment():
 def test_help_does_not_require_the_app():
     """help must answer even when the App is not installed — the state where a newcomer most needs
     it — so it posts with the workflow token."""
-    post = next(s for s in action_steps("comment-ops") if s.get("name") == "Post help")
+    post = step_by("comment-ops", name="Post help")
     assert post["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
@@ -491,7 +490,7 @@ _CHECK_RUNS_PROJECTION = (
 
 
 def _gatherdoc_step():
-    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gatherdoc")
+    step = step_by("comment-ops", id="gatherdoc")
     assert step.get("run"), "the gatherdoc step runs no shell"
     return step
 
@@ -553,14 +552,13 @@ def _mint_with(action, step_id):
     can be deleted unnoticed. And it reads raw file text, where a commented-out `#
     permission-environments: read` satisfies the same assertion as the live key. So: exact id,
     asserted to really be a mint, compared as parsed values."""
-    steps = [s for s in action_steps(action) if s.get("id") == step_id]
-    assert len(steps) == 1, f"expected exactly one `id: {step_id}` step in {action}, got {steps}"
-    uses = steps[0].get("uses") or ""
+    step = step_by(action, id=step_id)
+    uses = step.get("uses") or ""
     assert "actions/create-github-app-token" in uses, (
         f"{action}'s `{step_id}` step is not an App-token mint (uses: {uses!r}) — "
         "the permission assertions against it would pin nothing"
     )
-    return steps[0].get("with") or {}
+    return step.get("with") or {}
 
 
 def _requested_permissions(mint_with):
@@ -659,13 +657,13 @@ def test_both_prose_permission_lists_name_every_manifest_permission():
 
 
 def _authorize_step():
-    step = next(s for s in action_steps("comment-ops") if s.get("name") == "Authorize")
+    step = step_by("comment-ops", name="Authorize")
     assert step.get("env"), "the Authorize step declares no env: block"
     return step
 
 
 def _gather_step():
-    step = next(s for s in action_steps("comment-ops") if s.get("id") == "gather")
+    step = step_by("comment-ops", id="gather")
     assert step.get("run"), "the gather step runs no shell"
     return step
 
@@ -743,9 +741,7 @@ _EXEMPTION_BODY = (
 
 
 def _exemption_step():
-    return next(
-        s for s in action_steps("comment-ops") if s.get("name") == "Report the review exemption"
-    )
+    return step_by("comment-ops", name="Report the review exemption")
 
 
 def test_the_exemption_report_fires_only_when_the_exemption_fired():
@@ -932,7 +928,7 @@ def test_the_action_runs_exactly_these_steps_in_this_order():
 
 
 def _by_id(step_id):
-    step = next(s for s in action_steps("comment-ops") if s.get("id") == step_id)
+    step = step_by("comment-ops", id=step_id)
     assert step.get("run"), f"the {step_id} step runs no shell"
     return step
 
@@ -960,41 +956,34 @@ _PLAN_REJECT_RUN = (
 )
 
 
-def _run_planauthz(tmpdir, *, privileged, head_repo="org/repo"):
+def _run_planauthz(tmp_path, *, privileged, head_repo="org/repo"):
     """Run `planauthz`'s shipped body against a stub `gh`; returns (result, outputs, gh argv).
 
     `head_repo=None` stubs a `gh` that fails, which is the head this step cannot read.
     """
-    gh_path = Path(tmpdir) / "gh"
+    gh_path = tmp_path / "gh"
     answer = "exit 1\n" if head_repo is None else f"printf '%s\\n' {shlex.quote(head_repo)}\n"
     gh_path.write_text("#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\n" + answer)
     gh_path.chmod(0o755)
 
-    out_file = Path(tmpdir) / "github_output"
+    out_file = tmp_path / "github_output"
     out_file.write_text("", encoding="utf-8")
 
     env = os.environ.copy()
-    env["PATH"] = f"{tmpdir}{os.pathsep}{env.get('PATH', '')}"
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
     env["PRIVILEGED"] = "true" if privileged else "false"
     env["GH_TOKEN"] = "test_token"  # noqa: S105
     env["PR_NUMBER"] = "42"
     env["GITHUB_REPOSITORY"] = "org/repo"
     env["GITHUB_OUTPUT"] = str(out_file)
 
-    result = subprocess.run(
-        [usable_bash(), "-c", _by_id("planauthz")["run"]],
-        env=env,
-        capture_output=True,
-        text=True,
-        cwd=tmpdir,
-        timeout=30,
-    )
+    result = run_step(tmp_path, _by_id("planauthz")["run"], env)
     outputs = dict(
         line.split("=", 1)
         for line in out_file.read_text(encoding="utf-8").splitlines()
         if "=" in line
     )
-    argv_file = Path(tmpdir) / "argv.txt"
+    argv_file = tmp_path / "argv.txt"
     return result, outputs, (argv_file.read_text() if argv_file.exists() else "")
 
 
@@ -1015,8 +1004,11 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     already in the action, in doctor's refusal, so a plan route wired with no gate at all
     leaves every phrase-level assertion green.
 
-    Mutations: invert the `!= "true"` test; add a login or team lookup to the `env:` vector;
-    reword either half of the reason.
+    The third claim is executed by
+    test_a_commenter_without_standing_is_refused_in_plans_own_words.
+
+    Mutations: add a login or team lookup to the `env:` vector; drop the reject step's
+    `authorized != 'true'` condition.
     """
     footer = cp.help_markdown().rsplit("\n", 1)[-1]
     promise = next(s for s in footer.split(";") if _CLAIM in s)
@@ -1031,9 +1023,7 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
 
-    reject = next(
-        s for s in action_steps("comment-ops") if s.get("name") == "Reject an unauthorized plan"
-    )
+    reject = step_by("comment-ops", name="Reject an unauthorized plan")
     assert reject["if"] == (
         "${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}"
     )
@@ -1044,32 +1034,33 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     }
     assert reject["run"] == _PLAN_REJECT_RUN
 
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, outputs, argv = _run_planauthz(tmpdir, privileged=False)
-        assert result.returncode == 0, result.stderr
-        assert outputs == {"authorized": "false", "reason": _PLAN_ASSOCIATION_REASON}
-        assert argv == "", f"an unauthorized commenter must cost no API call: {argv!r}"
+
+@bash_only
+def test_a_commenter_without_standing_is_refused_in_plans_own_words(tmp_path):
+    """The third claim above, executed. Mutations: invert the `!= "true"` test; reword either
+    half of the reason."""
+    result, outputs, argv = _run_planauthz(tmp_path, privileged=False)
+    assert result.returncode == 0, result.stderr
+    assert outputs == {"authorized": "false", "reason": _PLAN_ASSOCIATION_REASON}
+    assert argv == "", f"an unauthorized commenter must cost no API call: {argv!r}"
 
 
-def test_a_privileged_commenter_planning_this_repositorys_own_head_is_authorized():
+@bash_only
+def test_a_privileged_commenter_planning_this_repositorys_own_head_is_authorized(tmp_path):
     """The path that must stay open: standing plus a head in this repository dispatches.
 
     Mutation: compare `$HEAD_REPO` to anything but `$GITHUB_REPOSITORY`, and this repository's
     own pull requests stop planning.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, outputs, argv = _run_planauthz(tmpdir, privileged=True, head_repo="org/repo")
-        assert result.returncode == 0, result.stderr
-        assert outputs == {"authorized": "true"}
-        assert "-X" not in argv, f"the authorization step writes nothing, it reads: {argv!r}"
-        assert "repos/org/repo/pulls/42" in argv, f"the head was never read: {argv!r}"
+    result, outputs, argv = _run_planauthz(tmp_path, privileged=True, head_repo="org/repo")
+    assert result.returncode == 0, result.stderr
+    assert outputs == {"authorized": "true"}
+    assert "-X" not in argv, f"the authorization step writes nothing, it reads: {argv!r}"
+    assert "repos/org/repo/pulls/42" in argv, f"the head was never read: {argv!r}"
 
 
-def test_a_forks_head_is_refused_here_rather_than_in_a_run_the_pull_request_cannot_see():
+@bash_only
+def test_a_forks_head_is_refused_here_rather_than_in_a_run_the_pull_request_cannot_see(tmp_path):
     """`build-matrix` refuses a fork head inside the dispatched run, whose checks land on the
     dispatch ref -- so a fork's `shipmate plan` shows the pull request nothing at all. The
     refusal is stated here, in its own words, before the dispatch it would have wasted.
@@ -1080,16 +1071,14 @@ def test_a_forks_head_is_refused_here_rather_than_in_a_run_the_pull_request_cann
     why test_a_privileged_commenter_planning_this_repositorys_own_head_is_authorized is the
     other half of the pair.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, outputs, _ = _run_planauthz(tmpdir, privileged=True, head_repo="someone/fork")
-        assert result.returncode == 0, result.stderr
-        assert outputs == {"authorized": "false", "reason": _PLAN_FORK_REASON}
+    result, outputs, _ = _run_planauthz(tmp_path, privileged=True, head_repo="someone/fork")
+    assert result.returncode == 0, result.stderr
+    assert outputs == {"authorized": "false", "reason": _PLAN_FORK_REASON}
 
 
 @pytest.mark.parametrize("head_repo", [None, "null"])
-def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(head_repo):
+@bash_only
+def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(tmp_path, head_repo):
     """A failed read and a deleted head repository both fall through to `build-matrix`, which is
     where a fork is actually refused. This step explains that refusal; it must never become a
     second, quieter version of it that answers on a fact it does not have.
@@ -1102,15 +1091,12 @@ def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(he
     refusing pull requests of this repository's own branches; drop the notice, and the
     fall-through goes silent.
     """
-    if not usable_bash():
-        pytest.skip("bash not available on this platform")
-    with tempfile.TemporaryDirectory() as tmpdir:
-        result, outputs, _ = _run_planauthz(tmpdir, privileged=True, head_repo=head_repo)
-        assert result.returncode == 0, result.stderr
-        assert outputs == {"authorized": "true"}
-        assert "could not read this pull request's head repository" in result.stdout, (
-            f"the fall-through must say why it dispatched: {result.stdout!r}"
-        )
+    result, outputs, _ = _run_planauthz(tmp_path, privileged=True, head_repo=head_repo)
+    assert result.returncode == 0, result.stderr
+    assert outputs == {"authorized": "true"}
+    assert "could not read this pull request's head repository" in result.stdout, (
+        f"the fall-through must say why it dispatched: {result.stdout!r}"
+    )
 
 
 def test_no_step_on_the_plan_route_touches_the_app_key():

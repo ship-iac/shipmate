@@ -26,8 +26,7 @@ The realistic failure is accidental regression -- a dropped expression, one wave
 edit, an inverted boolean -- not a hostile edit to a SHA-pinned file every consumer reviews.
 """
 
-import yaml
-from _loader import WORKFLOWS
+from _loader import workflow_yaml
 
 CONCURRENCY = {
     "group": "apply-${{ matrix.environment }}-${{ matrix.stack }}",
@@ -47,9 +46,7 @@ SERIALIZED = {
 
 
 def _jobs(workflow):
-    spec = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
-    assert isinstance(spec, dict), f"{workflow} did not parse to a mapping"
-    return spec["jobs"]
+    return workflow_yaml(workflow)["jobs"]
 
 
 def test_every_cell_job_serializes_on_environment_and_stack():

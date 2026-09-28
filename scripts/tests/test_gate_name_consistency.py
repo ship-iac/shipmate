@@ -6,8 +6,7 @@ byte-identical name, or the gate greens on one path and sticks on another. This 
 invariant the same way test_check_runs_filter_aligned guards the check-runs read discipline.
 """
 
-import yaml
-from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS
+from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, workflow_yaml
 
 # Generated, third-party and VCS dirs are never shipmate source, and their contents -- .pyc
 # constant pools, vendored packages -- can carry the retired token for reasons unrelated to
@@ -216,7 +215,7 @@ def test_inline_gate_write_job_mints_app_statuses_token():
     """
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
-        doc = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
+        doc = workflow_yaml(wf)
         for job_name, job in (doc.get("jobs") or {}).items():
             if not isinstance(job, dict) or not _job_writes_gate(job):
                 continue
@@ -267,7 +266,7 @@ def test_no_engine_job_grants_stale_checks_or_statuses_write():
     """
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
-        doc = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
+        doc = workflow_yaml(wf)
         workflow_perms = doc.get("permissions")
         for name, job in (doc.get("jobs") or {}).items():
             if isinstance(job, dict) and _grants_stale_perm(job, workflow_perms):
@@ -309,7 +308,7 @@ def test_app_key_secret_interface_is_never_required():
     """
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
-        doc = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
+        doc = workflow_yaml(wf)
         on = doc.get("on") or doc.get(True) or {}
         decl = ((on.get("workflow_call") or {}).get("secrets") or {}).get(
             "SHIPMATE_APP_PRIVATE_KEY"
@@ -396,10 +395,7 @@ def test_credentialed_action_steps_thread_app_credentials():
     job would hold no key to complete them with.
     """
     offenders = []
-    workflow_docs = {
-        wf.name: yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
-        for wf in sorted(WORKFLOWS.glob("*.yml"))
-    }
+    workflow_docs = {wf.name: workflow_yaml(wf) for wf in sorted(WORKFLOWS.glob("*.yml"))}
     for wf_name, doc in workflow_docs.items():
         for job_name, job in (doc.get("jobs") or {}).items():
             if not isinstance(job, dict):
@@ -441,7 +437,7 @@ def test_detect_action_steps_thread_app_id():
     would only surface as a runtime crash."""
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
-        doc = yaml.safe_load(wf.read_text(encoding="utf-8")) or {}
+        doc = workflow_yaml(wf)
         for job_name, job in (doc.get("jobs") or {}).items():
             if not isinstance(job, dict):
                 continue

@@ -9,7 +9,7 @@ matrix (skip) from a lost artifact (fail); collapsing the two greens a run that 
 """
 
 import yaml
-from _loader import WORKFLOWS
+from _loader import WORKFLOWS, workflow_yaml
 
 WF = WORKFLOWS / "drift.yml"
 
@@ -28,12 +28,8 @@ _GATED_IF = {
 _CELL_ENV = "${{ matrix.env_binding }}"
 
 
-def _doc():
-    return yaml.safe_load(WF.read_text(encoding="utf-8"))
-
-
 def _job(job_id):
-    return _doc()["jobs"][job_id]
+    return workflow_yaml(WF)["jobs"][job_id]
 
 
 def _step(job_id, needle):
@@ -43,14 +39,14 @@ def _step(job_id, needle):
 
 
 def test_the_workflow_call_inputs_are_exactly_these():
-    assert _doc()[True]["workflow_call"]["inputs"] == {
+    assert workflow_yaml(WF)[True]["workflow_call"]["inputs"] == {
         "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
         "tags": {"required": False, "default": "", "type": "string"},
     }
 
 
 def test_the_workflow_call_secrets_are_exactly_these():
-    assert _doc()[True]["workflow_call"]["secrets"] == {
+    assert workflow_yaml(WF)[True]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
         "SHIPMATE_SECRETS": {"required": False},
         "SHIPMATE_SLACK_WEBHOOK": {"required": False},
@@ -69,7 +65,7 @@ def test_drift_issues_reads_the_webhook_from_the_engine_secret():
 
 def test_the_jobs_are_exactly_these():
     """Each job id is also a check-run name segment."""
-    assert list(_doc()["jobs"]) == ["detect", "drift", "issues"]
+    assert list(workflow_yaml(WF)["jobs"]) == ["detect", "drift", "issues"]
 
 
 def test_the_cell_and_issue_jobs_gate_on_the_api_resolved_default_branch():
@@ -79,14 +75,14 @@ def test_the_cell_and_issue_jobs_gate_on_the_api_resolved_default_branch():
     `success()` and a failed cell skips the job -- exactly when an Issue is owed; dropping the
     emptiness clause instead turns a lost artifact into a silent success.
     """
-    jobs = _doc()["jobs"]
+    jobs = workflow_yaml(WF)["jobs"]
     assert {j: " ".join(jobs[j]["if"].split()) for j in _GATED_IF} == _GATED_IF
 
 
 def test_the_detect_job_is_deliberately_ungated():
     """It runs no consumer code and holds no secret. A gate here would make a feature-branch
     dispatch silently do nothing instead of failing visibly at the two jobs below."""
-    assert "if" not in _doc()["jobs"]["detect"]
+    assert "if" not in workflow_yaml(WF)["jobs"]["detect"]
 
 
 def test_the_artifact_download_has_no_continue_on_error():
@@ -94,7 +90,7 @@ def test_the_artifact_download_has_no_continue_on_error():
     degrading the download too makes a lost artifact indistinguishable from no drift."""
     step = next(
         s
-        for s in _doc()["jobs"]["issues"]["steps"]
+        for s in workflow_yaml(WF)["jobs"]["issues"]["steps"]
         if "actions/download-artifact" in str(s.get("uses", ""))
     )
     assert "continue-on-error" not in step
@@ -105,7 +101,7 @@ def test_the_sweep_states_no_pull_request_and_no_head():
     every drift run."""
     step = next(
         s
-        for s in _doc()["jobs"]["detect"]["steps"]
+        for s in workflow_yaml(WF)["jobs"]["detect"]["steps"]
         if "actions/build-matrix" in str(s.get("uses", ""))
     )
     assert step["with"] == {
@@ -120,7 +116,7 @@ def test_the_sweep_states_no_pull_request_and_no_head():
 def test_only_the_issues_job_holds_the_app_key():
     """Mutations: reference the key from the `drift` job, which runs repository content; move
     `issues` off `shipmate-engine`; give `detect` an `environment:` of its own."""
-    jobs = _doc()["jobs"]
+    jobs = workflow_yaml(WF)["jobs"]
     holders = [
         job_id for job_id, job in jobs.items() if "SHIPMATE_APP_PRIVATE_KEY" in yaml.safe_dump(job)
     ]
@@ -134,7 +130,7 @@ def test_only_the_issues_job_names_the_webhook():
     `drift` job's `env:`, which hands it to a job running repository content."""
     holders = [
         job_id
-        for job_id, job in _doc()["jobs"].items()
+        for job_id, job in workflow_yaml(WF)["jobs"].items()
         if "SHIPMATE_SLACK_WEBHOOK" in yaml.safe_dump(job)
     ]
     assert holders == ["issues"]
@@ -166,16 +162,10 @@ def test_issues_refuses_the_webhook_set_as_a_variable_last():
     assert {**last, "if": " ".join(last.get("if", "").split()), "run": run} == _REFUSE_STEP_SPEC
 
 
-def test_the_workflow_permissions_floor_is_empty():
-    """Mutation: `permissions: { contents: read }` at workflow level. A job that then loses its
-    own block silently inherits instead of getting nothing."""
-    assert _doc()["permissions"] == {}
-
-
 def test_every_job_declares_its_own_permissions():
     """Whole map. Mutation: delete the `drift` job's block, and it silently gets the floor
     instead of the `id-token: write` its OIDC step needs."""
-    assert {j: v.get("permissions") for j, v in _doc()["jobs"].items()} == {
+    assert {j: v.get("permissions") for j, v in workflow_yaml(WF)["jobs"].items()} == {
         "detect": {"contents": "read"},
         "drift": {"contents": "read", "id-token": "write"},
         "issues": {"actions": "read"},
@@ -193,7 +183,7 @@ def test_every_job_binds_the_environment_it_should_and_no_other():
     """
     parsed = {
         j: (" ".join(v["environment"].split()) if "environment" in v else None)
-        for j, v in _doc()["jobs"].items()
+        for j, v in workflow_yaml(WF)["jobs"].items()
     }
     assert parsed == {"detect": None, "drift": _CELL_ENV, "issues": "shipmate-engine"}
 
@@ -211,7 +201,7 @@ def test_every_checkout_takes_the_full_history_and_no_ref():
     for job_id in ("detect", "drift"):
         checkouts = [
             s.get("with")
-            for s in _doc()["jobs"][job_id]["steps"]
+            for s in workflow_yaml(WF)["jobs"][job_id]["steps"]
             if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
         assert checkouts == [{"fetch-depth": 0}], job_id

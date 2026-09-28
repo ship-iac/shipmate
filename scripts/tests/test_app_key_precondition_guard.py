@@ -26,8 +26,7 @@ visible answer with a red run and a log annotation, and would take `shipmate hel
 no App token at all, down with it.
 """
 
-import yaml
-from _loader import ACTIONS, WORKFLOWS
+from _loader import ACTIONS, WORKFLOWS, action_yaml, workflow_yaml
 
 # One physical line each in the shell body: a `::error::` annotation ends at the first newline,
 # so a wrapped message loses everything after cause (1).
@@ -99,7 +98,7 @@ def _minting_files():
 
 
 def _steps(path, keys):
-    node = yaml.safe_load(path.read_text(encoding="utf-8"))
+    node = (action_yaml if path.is_relative_to(ACTIONS) else workflow_yaml)(path)
     for key in keys:
         node = node[key]
     return node
@@ -139,7 +138,7 @@ def test_comment_ops_answers_instead_of_aborting():
     """comment-ops must not gain the precondition: every one of its mints is
     `continue-on-error` with a fallback that posts the diagnosis as a pull request comment, and
     `shipmate help` needs no App token at all."""
-    doc = yaml.safe_load((ACTIONS / "comment-ops" / "action.yml").read_text(encoding="utf-8"))
+    doc = action_yaml("comment-ops")
     steps = doc["runs"]["steps"]
     assert not [
         s for s in steps if s.get("name") == _NAME or "verify-app-key" in (s.get("uses") or "")

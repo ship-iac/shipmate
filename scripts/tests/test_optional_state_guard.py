@@ -10,8 +10,7 @@ dropped `always()` or a condition moved into a comment must fail these guards.
 """
 
 import pytest
-import yaml
-from _loader import ACTIONS, WORKFLOWS, action_steps, local_action
+from _loader import ACTIONS, WORKFLOWS, action_yaml, local_action, step_by, workflow_yaml
 
 _CELLS = ["apply-cell", "drift-cell", "plan-cell"]
 
@@ -60,12 +59,6 @@ _SAVE = {
 }
 
 
-def _step(action, name):
-    matches = [s for s in action_steps(action) if s.get("name") == name]
-    assert len(matches) == 1, f"expected exactly one {name!r} step in {action}, got {len(matches)}"
-    return matches[0]
-
-
 def _with_keys(where, node):
     for job_id, job in (node.get("jobs") or {}).items():
         yield f"{where} jobs.{job_id}", job.get("with") or {}
@@ -85,7 +78,7 @@ def test_no_workflow_or_action_carries_a_state_path_setting():
     """
     found = []
     for path in sorted(WORKFLOWS.glob("*.yml")):
-        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        spec = workflow_yaml(path)
         on = spec.get("on", spec.get(True)) or {}
         call = on.get("workflow_call") if isinstance(on, dict) else None
         if "state_suffix" in ((call or {}).get("inputs") or {}):
@@ -97,7 +90,7 @@ def test_no_workflow_or_action_carries_a_state_path_setting():
             if key in keys
         ]
     for path in sorted(ACTIONS.glob("*/action.yml")):
-        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        spec = action_yaml(path)
         where = path.parent.name
         if "state-path" in (spec.get("inputs") or {}):
             found.append(f"{where} inputs.state-path")
@@ -113,18 +106,18 @@ def test_no_workflow_or_action_carries_a_state_path_setting():
 @pytest.mark.parametrize("cell", _CELLS)
 def test_locate_state_reads_the_init_record_inside_terramate_run(cell):
     """Mutation: run `python3 .../scripts/state-path` bare, outside `terramate run`."""
-    assert _step(cell, "Locate state") == _LOCATE
+    assert step_by(cell, name="Locate state") == _LOCATE
 
 
 @pytest.mark.parametrize("cell", _CELLS)
 def test_restore_state_uses_the_located_path(cell):
     """Mutation: restore `path: ${{ inputs.state-path }}`, or `env: ${{ inputs.stack }}`."""
-    assert _step(cell, "Restore state") == _RESTORE
+    assert step_by(cell, name="Restore state") == _RESTORE
 
 
 def test_apply_cell_saves_state_to_the_located_path():
     """Mutation: drop `always()` from the `if`, or save with `mode: restore`."""
-    assert _step("apply-cell", "Save state") == _SAVE
+    assert step_by("apply-cell", name="Save state") == _SAVE
 
 
 @pytest.mark.parametrize("cell", _CELLS)
@@ -132,10 +125,12 @@ def test_a_failed_init_skips_locate_and_restore(cell):
     """A one-line `run:` fails the step on a non-zero init, so the default `success()` condition
     skips what follows. An `always()` or `failure()` on either would locate or restore state for
     a stack init could not set up. Mutation: `if: always()` on `Locate state`."""
-    init = _step(cell, "Initialize the stack")
+    init = step_by(cell, name="Initialize the stack")
     assert init["run"] == _INIT_RUN
     assert "if" not in init
-    assert {name: _step(cell, name).get("if") for name in ("Locate state", "Restore state")} == {
+    assert {
+        name: step_by(cell, name=name).get("if") for name in ("Locate state", "Restore state")
+    } == {
         "Locate state": None,
         "Restore state": "${{ steps.locate-state.outputs.path != '' }}",
     }
