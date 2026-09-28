@@ -96,6 +96,8 @@ def ctx(**over):
         "at_org": False,
         "is_private": False,
         "org_plan": "",
+        "shim_on_default": False,
+        "ruleset_deferred": False,
     }
     base.update(over)
     return base
@@ -336,6 +338,52 @@ def test_repo_facts_refuses_an_unusable_slug(monkeypatch):
     assert "unusable repository slug" in str(e.value)
 
 
+def _facts_with_branch(monkeypatch, branch):
+    monkeypatch.setattr(
+        onboard,
+        "_run",
+        lambda args, secrets=(), stdin=None: json.dumps(
+            {"nameWithOwner": "o/r", "defaultBranchRef": {"name": branch}, "isPrivate": False}
+        ),
+    )
+
+
+@pytest.mark.parametrize("branch", ["a,b", "1.0", "main+"])
+def test_repo_facts_refuses_a_branch_the_trigger_cannot_carry_unquoted(monkeypatch, branch):
+    """The branch lands unquoted in `branches: [<branch>]`: `a,b` is two YAML list items,
+    `1.0` a float, and `main+` a GitHub filter pattern rather than the branch. One case per
+    class; the message is compared whole.
+
+    Mutation: drop the `_BRANCH_RE` check from `_repo_facts`.
+    """
+    _facts_with_branch(monkeypatch, branch)
+    with pytest.raises(SystemExit) as e:
+        onboard._repo_facts()
+    assert str(e.value) == (
+        f"the default branch {branch!r} cannot be written unquoted into the workflow file's "
+        "`push: branches:` filter, so this script does not onboard it. Follow "
+        "docs/getting-started.md by hand and edit `branches:` to match the branch."
+    )
+
+
+def test_a_branch_with_a_slash_is_accepted_and_quoted_in_every_api_path(monkeypatch):
+    """`/` and `.` are legal in a branch and in the trigger, but `/` inside a path segment
+    or a query value must be escaped; GitHub decodes both spellings.
+
+    Mutations: drop `safe=""` from the `_gate_entry` quote; drop it from the
+    `_shim_on_default` quote.
+    """
+    _facts_with_branch(monkeypatch, "release/1.x")
+    assert onboard._repo_facts() == ("o/r", "release/1.x", False)
+    rules = "repos/o/r/rules/branches/release%2F1.x?per_page=100"
+    shim = "repos/o/r/contents/.github/workflows/shipmate.yml?ref=release%2F1.x"
+    fake = make_gh({rules: [], shim: {"type": "file"}})
+    monkeypatch.setattr(onboard, "_run", fake)
+    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None)
+    assert onboard._shim_on_default("o/r", "release/1.x") is True
+    assert fake.calls == [["gh", "api", rules], ["gh", "api", shim]]
+
+
 def test_run_passes_stdin_as_bytes_with_text_mode_off(monkeypatch):
     r"""`text=True` wraps the child's stdin in a `TextIOWrapper` that rewrites every
     \n to `os.linesep`, so the PEM stored on Windows is not the PEM that was read.
@@ -465,7 +513,8 @@ def test_main_calls_every_stage_in_order():
     `_refuse_unreachable_org_variables(ctx)`, which leaves a private Free repository
     onboarded with names that resolve to empty; delete
     `_refuse_org_assertion_mismatch(ctx)`, which leaves the `--vars-at-org` name filtered
-    with nothing verifying the assertion behind it.
+    with nothing verifying the assertion behind it; move the `"shim_on_default"` read into
+    `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -483,6 +532,7 @@ def test_main_calls_every_stage_in_order():
         "_refuse_diverging_app_id(args.app_id, variables)",
         "_resolve_shared(root, envs, repo, variables)",
         "_org_plan(repo.split('/', 1)[0])",
+        "_shim_on_default(repo, default_branch)",
         "_refuse_unreachable_org_variables(ctx)",
         "_refuse_org_assertion_mismatch(ctx)",
         "_reconcile_env(ctx, ENGINE_ENV, 'apply')",
@@ -1014,8 +1064,8 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     The engine environment exists with a null policy (the update path) and a
     repository-level copy of the key exists (the delete path); everything else is absent,
     and the repository has no variable, no rule and no workflow file in the checkout. The
-    remote default branch holds one, or the ruleset POST would be deferred rather than
-    reached.
+    remote default branch holds one (`shim_on_default`), or the ruleset POST would be
+    deferred rather than reached.
 
     Mutations, each proven: swap any one of the seven `write(...)` calls for a direct
     `_run(...)`, which appears in the call list below; and make `write_file` fall through to
@@ -1036,7 +1086,6 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
             "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": absent,
             VARIABLE_LIST: [],
             RULES: [],
-            REMOTE_SHIM: {"type": "file"},
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1045,7 +1094,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     onboard._reconcile_key(ctx())
     onboard._reconcile_envs(ctx())
     onboard._reconcile_variables(ctx())
-    onboard._reconcile_ruleset(ctx())
+    onboard._reconcile_ruleset(ctx(shim_on_default=True))
     onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE))
     onboard._checklist(ctx())
     assert list(tmp_path.iterdir()) == []
@@ -1059,7 +1108,6 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
         ["gh", "api", RULES],
-        ["gh", "api", REMOTE_SHIM],
     ]
     assert [verb for verb, _subject, _detail in onboard.REPORT] == [
         "would update",
@@ -1485,6 +1533,9 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
     variable write that should have been filtered cannot hide in a membership check. The one
     name this script writes is asserted at organization level, so no variable is written.
 
+    The workflow file is on the remote default branch, so the run reaches the ruleset POST
+    and the list covers every reconciler's writes.
+
     Mutation: refuse unconditionally, which reds this while the two refusal properties stay
     green.
     """
@@ -1493,12 +1544,14 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
         tmp_path,
         {
             ORG_VARS: ORG_APP_ID_MATCHES,
+            REMOTE_SHIM: {"type": "file"},
         },
         ["--vars-at-org", "SHIPMATE_APP_ID"],
     )
     assert exit_.code == 0
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "api", REMOTE_SHIM],
         ["gh", "api", "repos/o/r/actions/organization-variables", "--paginate", "--slurp"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
@@ -1531,7 +1584,7 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
             "name=main",
         ],
         ["gh", "api", RULES],
-        ["gh", "api", REMOTE_SHIM],
+        ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"],
     ]
 
 
@@ -1718,11 +1771,11 @@ def test_missing_gate_rule_creates_the_ruleset(monkeypatch):
     Mutations: drop `strict_required_status_checks_policy` from the body; treat the
     remote workflow file as always absent.
     """
-    fake = make_gh({RULES: [], REMOTE_SHIM: {"type": "file"}})
+    fake = make_gh({RULES: []})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_ruleset(ctx(app_id="4326562"))
+    onboard._reconcile_ruleset(ctx(app_id="4326562", shim_on_default=True))
     post = ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"]
-    assert fake.calls == [["gh", "api", RULES], ["gh", "api", REMOTE_SHIM], post]
+    assert fake.calls == [["gh", "api", RULES], post]
     assert body_of(fake, post) == {
         "name": "shipmate-gate",
         "target": "branch",
@@ -1763,10 +1816,55 @@ def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monk
             "deferred",
             "gate ruleset",
             "`.github/workflows/shipmate.yml` is not on main yet, or this token cannot read "
-            "it: a private repository answers 404 for both. No pull request can produce "
-            "`shipmate / gate` before the file is there. Merge the pull request that adds "
-            "it, then run this again to create the ruleset.",
+            "it and GitHub answered 404. No pull request can produce `shipmate / gate` "
+            "before the file is there. Merge the pull request that adds it, then run this "
+            "again to create the ruleset.",
         )
+    ]
+
+
+def test_a_required_gate_without_the_workflow_file_is_reported(monkeypatch):
+    """A gate already required -- by hand, at organization level, or by an earlier run --
+    while the workflow file is not on the default branch blocks the pull request that adds
+    the file, because nothing can produce the status for it.
+
+    Mutation: drop the `chk is not None and not ctx["shim_on_default"]` arm, so a
+    conforming gate reports `ok`.
+    """
+    fake = make_gh({RULES: _rules()})
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_ruleset(ctx())
+    assert fake.calls == [["gh", "api", RULES]]
+    assert onboard.REPORT == [
+        (
+            "differs",
+            "gate ruleset",
+            "`shipmate / gate` is already required, but `.github/workflows/shipmate.yml` is "
+            "not on main yet, or this token cannot read it and GitHub answered 404. The pull "
+            "request adding the file cannot get the gate: disable the gate rule until it "
+            "merges, or merge it through a bypass actor.",
+        )
+    ]
+    assert onboard._exit_code() == 2
+
+
+def test_a_forbidden_workflow_file_read_stops_the_run_before_any_write(monkeypatch, tmp_path):
+    """A token without Contents read answers the presence read 403, which is not absence.
+    Read after the first write, that leaves environments and secrets written and the run
+    dead; read in the facts phase, nothing is written.
+
+    Mutation: move the `"shim_on_default"` read into `_reconcile_ruleset`.
+    """
+    fake, exit_ = run_main(
+        monkeypatch,
+        tmp_path,
+        {REMOTE_SHIM: SystemExit("gh: Resource not accessible (HTTP 403)")},
+        [],
+    )
+    assert str(exit_) == "gh: Resource not accessible (HTTP 403)"
+    assert fake.calls == [
+        ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "api", REMOTE_SHIM],
     ]
 
 
@@ -1796,7 +1894,7 @@ def test_gate_under_another_integration_id_is_reported_not_edited(monkeypatch):
     """
     fake = make_gh({RULES: _rules(integration_id=15368)})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_ruleset(ctx(app_id="4326562"))
+    onboard._reconcile_ruleset(ctx(app_id="4326562", shim_on_default=True))
     assert fake.calls == [["gh", "api", RULES]]
     assert onboard.REPORT == [
         (
@@ -1817,7 +1915,7 @@ def test_conforming_gate_is_ok(monkeypatch):
     """
     fake = make_gh({RULES: _rules()})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_ruleset(ctx())
+    onboard._reconcile_ruleset(ctx(shim_on_default=True))
     assert fake.calls == [["gh", "api", RULES]]
     assert onboard.REPORT == [("ok", "gate ruleset", "")]
     assert onboard._exit_code() == 0
@@ -1832,7 +1930,7 @@ def test_a_gate_without_strict_is_reported(monkeypatch):
     """
     fake = make_gh({RULES: _rules(strict=False)})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_ruleset(ctx())
+    onboard._reconcile_ruleset(ctx(shim_on_default=True))
     assert fake.calls == [["gh", "api", RULES]]
     assert onboard.REPORT == [
         (
@@ -1863,7 +1961,7 @@ def test_ruleset_post_forbidden_is_reported_with_the_plan_sentence(monkeypatch, 
         return json.dumps([])
 
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_ruleset(ctx())
+    onboard._reconcile_ruleset(ctx(shim_on_default=True))
     assert onboard.REPORT == [
         (
             "differs",
@@ -1891,7 +1989,7 @@ def test_an_invisible_shipmate_gate_ruleset_is_reported_not_fatal(monkeypatch):
         return json.dumps([])
 
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_ruleset(ctx())
+    onboard._reconcile_ruleset(ctx(shim_on_default=True))
     assert onboard.REPORT == [
         (
             "differs",
@@ -1921,7 +2019,7 @@ def test_an_unrecognised_ruleset_post_failure_propagates(monkeypatch):
 
     monkeypatch.setattr(onboard, "_run", fake)
     with pytest.raises(SystemExit) as e:
-        onboard._reconcile_ruleset(ctx())
+        onboard._reconcile_ruleset(ctx(shim_on_default=True))
     assert "HTTP 500" in str(e.value)
 
 
@@ -2248,12 +2346,17 @@ _CHECKLIST_PRIVATE_REVIEWERS = """  Required reviewers and `Prevent self-review`
 
 """
 
-_CHECKLIST_TAIL = """  A CODEOWNERS entry covering /.github/workflows/.
-
-  Commit the workflow file and the table together, in a commit that changes no
-  stack, and open the pull request. The table is read from the default branch, so
-  the first plan needs it merged.
+_CHECKLIST_CODEOWNERS = """  A CODEOWNERS entry covering /.github/workflows/.
 """
+
+#: Printed only while the workflow file is not on the remote default branch.
+_CHECKLIST_COMMIT = """
+  Commit the workflow file and the table together, in a pull request that
+  changes no stack. The table is read from the default branch, so the first
+  plan needs it merged.
+"""
+
+_CHECKLIST_TAIL = _CHECKLIST_CODEOWNERS + _CHECKLIST_COMMIT
 
 #: Printed only by the run that deferred the gate ruleset: the re-run after the merge
 #: creates it, so asking that run to run again is false.
@@ -2317,7 +2420,7 @@ def test_the_checklist_asks_for_a_re_run_after_deferring_the_gate_ruleset(monkey
 
     Mutation: drop the deferred-report condition, so the ask never prints.
     """
-    fake = make_gh({RULES: [], REMOTE_SHIM: SystemExit("gh: Not Found (HTTP 404)")})
+    fake = make_gh({RULES: []})
     monkeypatch.setattr(onboard, "_run", fake)
     c = ctx()
     onboard._reconcile_ruleset(c)
@@ -2327,17 +2430,21 @@ def test_the_checklist_asks_for_a_re_run_after_deferring_the_gate_ruleset(monkey
 
 
 def test_the_checklist_asks_for_no_re_run_after_creating_the_gate_ruleset(monkeypatch, capsys):
-    """The re-run after the merge creates the ruleset, so asking it to run again is false.
+    """The re-run after the merge creates the ruleset, so asking it to run again is false,
+    and the workflow file it would ask to commit is already on the default branch.
 
-    Mutation: print the re-run ask unconditionally.
+    Mutations: print the re-run ask unconditionally; print the commit paragraph
+    unconditionally.
     """
-    fake = make_gh({RULES: [], REMOTE_SHIM: {"name": "shipmate.yml"}})
+    fake = make_gh({RULES: []})
     monkeypatch.setattr(onboard, "_run", fake)
-    c = ctx()
+    c = ctx(shim_on_default=True)
     onboard._reconcile_ruleset(c)
     assert capsys.readouterr().out == "create gate ruleset: shipmate / gate\n"
     onboard._checklist(c)
-    assert capsys.readouterr().out == SPLIT_CHECKLIST
+    assert capsys.readouterr().out == (
+        _CHECKLIST_HEAD + _CHECKLIST_REVIEWERS + _CHECKLIST_CODEOWNERS
+    )
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):

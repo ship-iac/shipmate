@@ -18,8 +18,10 @@ section below names the SHA the release tags.
 ### Changed
 
 - **`onboard` creates the gate ruleset once `.github/workflows/shipmate.yml` is on the default
-  branch**, so the first pull request merges without a bypass.
-- **`onboard` renders the repository's default branch into `push: branches`.**
+  branch**, so the first pull request merges without a bypass. A gate required before then is
+  reported.
+- **`onboard` renders the repository's default branch into `push: branches`**, and refuses one
+  it cannot write there unquoted.
 - **`onboard` qualifies the reviewer step on private repositories.**
 - **Four error messages name the current cause.**
 

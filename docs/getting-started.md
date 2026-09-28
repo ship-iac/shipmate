@@ -295,10 +295,10 @@ creates all of them, including `shipmate-engine` and its branch policy:
   **The table has to be on the default branch before your first plan run.** The
   engine reads it from `origin/<default>`, so a pull request that only adds the
   table is refused by the branch it is compared against. Put it in the same
-  commit as the workflow file, on the default branch. That commit must change
-  no stack: its push to the default branch runs `deploy`, and a changed stack
+  pull request as the workflow file. That pull request must change no stack:
+  its merge pushes to the default branch and runs `deploy`, and a changed stack
   there has no plan run to apply from, so that deploy fails. The pull request
-  carrying it merges normally, because no ruleset requires `shipmate / gate`
+  merges normally, because no ruleset requires `shipmate / gate`
   yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
   then `shipmate doctor` reports that no active ruleset requires the gate.
 
