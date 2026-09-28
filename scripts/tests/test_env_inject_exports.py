@@ -6,8 +6,9 @@ reserved set, refusing a table-derived name on a cell whose table does not deriv
 refusing an absent envelope, accepting `null` in an envelope, refusing `null` or `''`
 from the enumeration, exporting a name two channels supply, lowercasing an envelope key,
 not lowercasing an enumerated `TF_VAR_*` suffix, refusing an enumerated reserved name
-instead of skipping it, skipping an enumerated `SHIPMATE_SECRETS` or `SHIPMATE_SLACK_WEBHOOK`
-instead of refusing it, and quoting the envelope's value in any refusal.
+instead of skipping it, skipping an enumerated engine secret instead of refusing it, an
+engine workflow declaring a secret `_NEVER_VARIABLES` does not refuse, and quoting the
+envelope's value in any refusal.
 
 Composition reddens on: writing `$GITHUB_ENV` before a secret value's mask command, masking
 a multi-line value whole instead of per line, filtering the identity table, dropping the
@@ -19,7 +20,7 @@ import json
 import subprocess
 
 import pytest
-from _loader import load_script
+from _loader import WORKFLOWS, load_script, workflow_yaml
 
 env_inject = load_script("env-inject")
 
@@ -318,13 +319,27 @@ def test_shipmate_vars_is_lifted_out_of_the_enumeration():
             "can see the repository. Delete the variable, rotate the webhook, and run gh "
             "secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine.",
         ),
+        (
+            "SHIPMATE_APP_PRIVATE_KEY",
+            "::error::SHIPMATE_APP_PRIVATE_KEY is set as a GitHub variable, and it must be a "
+            "secret on the shipmate-engine environment. Its value is readable by anyone who "
+            "can see the repository. Delete the variable, rotate the key, and run gh "
+            "secret set SHIPMATE_APP_PRIVATE_KEY --env shipmate-engine.",
+        ),
+        (
+            "SHIPMATE_PLAN_PASSPHRASE",
+            "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable, and it must be a "
+            "repository secret. Its value is readable by anyone who can see the repository. "
+            "Delete the variable, choose a new passphrase, and run gh secret set "
+            "SHIPMATE_PLAN_PASSPHRASE.",
+        ),
     ],
-    ids=["secrets", "slack-webhook"],
+    ids=["secrets", "slack-webhook", "app-key", "plan-passphrase"],
 )
 def test_a_secret_set_as_a_variable_is_refused(name, expected):
     """`SHIPMATE_SECRETS` is a secret and `SHIPMATE_VARS` a variable, same shape and adjacent
     names, so setting the secret one on the variable surface is the likely mistake; the
-    webhook was a variable before it became a secret. Either arrives in the enumeration,
+    webhook was a variable before it became a secret. Each arrives in the enumeration,
     matches the `SHIPMATE_` prefix and is skipped, so the cell exports nothing while the
     value sits world-readable in the repository UI.
 
@@ -336,6 +351,39 @@ def test_a_secret_set_as_a_variable_is_refused(name, expected):
     with pytest.raises(SystemExit) as exc:
         env_inject.compose({"SHIPMATE_TF_VARS": "{}", ENUM: json.dumps(enumeration)})
     assert str(exc.value) == expected
+
+
+def _declared_engine_secrets(workflows=WORKFLOWS):
+    names = set()
+    for path in sorted(workflows.glob("*.yml")):
+        spec = workflow_yaml(path)
+        on = spec.get(True, spec.get("on"))
+        call = on.get("workflow_call") if isinstance(on, dict) else None
+        names |= set(((call or {}).get("secrets") or {}).keys())
+    return names
+
+
+def test_every_declared_engine_secret_is_refused_as_a_variable():
+    """A secret an engine workflow declares is one a consumer can set as a variable instead,
+    where the `SHIPMATE_` prefix skips it silently.
+
+    Mutations: drop `SHIPMATE_PLAN_PASSPHRASE` from `_NEVER_VARIABLES`; declare a fake
+    secret in a copy of `plan.yml` and point the derivation at the copy.
+    """
+    assert _declared_engine_secrets() <= set(env_inject._NEVER_VARIABLES)
+
+
+def test_the_four_engine_secrets_are_refused_as_variables():
+    """The literal case for the derived guard above, which passes on an empty derivation.
+
+    Mutation: drop `SHIPMATE_PLAN_PASSPHRASE` from `_NEVER_VARIABLES`.
+    """
+    assert {
+        "SHIPMATE_APP_PRIVATE_KEY",
+        "SHIPMATE_PLAN_PASSPHRASE",
+        "SHIPMATE_SECRETS",
+        "SHIPMATE_SLACK_WEBHOOK",
+    } <= set(env_inject._NEVER_VARIABLES)
 
 
 def _no_run_env_check(table, pairs, environ, run=subprocess.run):

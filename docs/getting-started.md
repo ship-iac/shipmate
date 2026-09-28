@@ -565,11 +565,16 @@ page's S3 example owns its state, and the engine's state steps are skipped
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
 `SHIPMATE_PLAN_PASSPHRASE` is optional — unset, plan artifacts are stored
-unencrypted. If you set it, it must be a repository secret, not an
-environment one, and specifically not on `shipmate-engine`: a plan cell names its
-own plan environment, so a passphrase scoped elsewhere resolves to empty at plan
-time and every later apply fails its plaintext-artifact check
-([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption).
+unencrypted. If you set it, it must be a repository secret. An environment
+secret reaches only a job that binds that environment, and a plan cell binds its
+own plan environment, so every other placement fails
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
+
+- As a variable, every plan cell refuses it by name.
+- As a secret on `shipmate-engine`, it reaches no cell: no plan or apply cell
+  binds that environment, so plans upload unencrypted with no message.
+- As a secret on `<env>-apply` alone, plans upload unencrypted and every apply
+  in that environment refuses its plaintext-artifact check.
 
 ## Required — apply
 
@@ -802,8 +807,10 @@ the channel — the other five carry the same line without a comment.
 `SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
 value is readable by anyone who can see the repository and nothing in it reaches
 a cell; the run fails telling you to rotate what it held. A
-`SHIPMATE_SLACK_WEBHOOK` variable is refused too, with its own message: rotate the
-webhook and set it as a secret on `shipmate-engine`. The other direction cannot be
+`SHIPMATE_SLACK_WEBHOOK`, `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE`
+variable is refused too, each with its own message: rotate the webhook or the key
+and set it as a secret on `shipmate-engine`; choose a new passphrase and set it as
+a repository secret. The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 
