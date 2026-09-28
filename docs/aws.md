@@ -169,6 +169,9 @@ Six things to know beyond the schema:
   refused at detect when that tier, after inheritance, sets no role to fall back
   to; an untagged cell and a tier that resolves a role are not refused. The plan
   detect checks the apply tier too, so an apply-tier gap refuses before merge.
+  On a tier with no role to fall back to, a workload key follows the
+  environment order above: merge the key before the branch that tags the stack,
+  and remove it after the branch that drops the tag.
 
 ## Where the credentials step goes
 

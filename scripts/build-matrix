@@ -274,7 +274,8 @@ def stamp_rows(cells, table, tier):
                 f"workload/{cell['workload']}, which {label}.workloads does not list (it lists: "
                 f"{', '.join(keys)}), and {label} sets no role to fall back to. The cell would "
                 "run with no cloud credentials. Retag the stack, or add the workload to "
-                f"{ec.CONFIG_PATH}."
+                f"{ec.CONFIG_PATH} on the default branch, which is where this table is read "
+                "from: merge the workload entry there on its own pull request first."
             )
     rows = [
         {**cell, **ec.resolve(table, cell["environment"], tier, cell["workload"])} for cell in cells

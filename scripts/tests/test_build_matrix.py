@@ -1351,7 +1351,8 @@ def test_a_workload_tag_the_tier_does_not_list_refuses_when_it_has_no_fallback_r
         "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
         "list (it lists: app, net-edge), and aws.apply sets no role to fall back to. The cell "
         "would run with no cloud credentials. Retag the stack, or add the workload to "
-        ".github/shipmate.toml."
+        ".github/shipmate.toml on the default branch, which is where this table is read "
+        "from: merge the workload entry there on its own pull request first."
     )
 
 
@@ -1382,7 +1383,8 @@ def test_the_plan_path_refuses_a_gap_only_the_apply_tier_has():
         "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
         "list (it lists: net-edge), and aws.apply sets no role to fall back to. The cell would "
         "run with no cloud credentials. Retag the stack, or add the workload to "
-        ".github/shipmate.toml."
+        ".github/shipmate.toml on the default branch, which is where this table is read "
+        "from: merge the workload entry there on its own pull request first."
     )
 
 

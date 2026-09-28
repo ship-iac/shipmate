@@ -655,6 +655,7 @@ Every condition below refuses at detect, before any cell starts.
 | The table declares no `layout` | it is the only source of a cell's environment identity, and a scalar written below a `[table]` header lands inside that table rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
 | `layout` is not `tf_vars`, `workspace` or `folder` | a typo would silently disable injection |
 | `layout = "tf_vars"` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
+| A cell's `workload/<name>` tag the consulted tier's `workloads` does not list, where that tier resolves no role to fall back to | the cell would run with no cloud credentials; the plan detect checks the apply tier too, so the gap refuses before merge |
 | A tier resolves a role but no region | the credentials step requires one |
 | A tier sets an empty role | that resolves to a skipped credentials step, not to a credential |
 | A provider block resolves no role on any tier | dead config; apply-only is legal, all-empty is not |
@@ -710,6 +711,10 @@ any environment that needs an entry: every environment under the `tf_vars`
 layout, and under
 `workspace` or `folder` any environment declaring a provider block. An
 environment needing no entry at all lands in one pull request.
+
+The same order applies to a `workloads` key on a tier with no role to fall back
+to: merge the key before the branch that adds its `workload/<name>` tag, and
+remove it after the branch that drops the tag.
 
 **An unused entry warns rather than refusing, and that is what makes the
 sequence available.** Refusing both the missing entry and the unused one leaves
