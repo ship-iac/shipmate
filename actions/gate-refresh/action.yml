@@ -72,5 +72,7 @@ runs:
           echo "::error::shipmate / gate is held for $HEAD_SHA because the plan run's evidence was incomplete — some planned stacks may carry no apply check. Re-plan this pull request; the gate cannot be greened from apply checks alone."
           exit 1
         fi
-        python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status-body" > gate.json
-        gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input gate.json >/dev/null
+        # Commit status, not a check-run (see actions/summary for why).
+        gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state=success \
+          -f context="shipmate / gate" -f description="all applies complete — nothing left to apply" \
+          -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null

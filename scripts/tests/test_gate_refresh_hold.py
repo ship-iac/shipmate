@@ -10,17 +10,13 @@ read have no check at all.
 
 Invariant: the only exit from a hold is a fresh plan run.
 
-The tests execute the real, unmodified `Complete gate` step with `gh` and `python3` replaced by
-bash functions. Bash resolves a function before searching PATH, so this needs no fake
-executables. `python3` forwards to the real interpreter, so the greening runs also pin the whole
-body `scripts/gate-status-body` produces.
+The tests execute the real, unmodified `Complete gate` step with `gh` replaced by a bash
+function. Bash resolves a function before searching PATH, so this needs no fake executable. The
+greening runs also pin the write's whole argv: endpoint, method and every field.
 """
 
-import json
 import os
-import pathlib
 import subprocess
-import sys
 
 import pytest
 from _loader import ACTIONS, action_steps, usable_bash
@@ -30,19 +26,15 @@ _BASH = usable_bash()
 HEAD_SHA = "a" * 40
 
 # Dispatches on the two `gh api` calls the step makes: the pre-write gate read
-# (`/commits/<sha>/status --jq ...`), and the write (`/statuses/<sha>`). `python3` resolves to
-# the real interpreter rather than a stub printing `{}`, so `scripts/gate-status-body` runs as
-# shipped: a body builder that died or printed nothing would leave `gh api --input gate.json`
-# reading an empty file, which these tests would otherwise never see.
-GH_STUB = f"""
-gh() {{
+# (`/commits/<sha>/status --jq ...`), and the write (`/statuses/<sha>`), whose argv it records.
+GH_STUB = """
+gh() {
   case "$*" in
     *"/status --jq"*) printf '%s' "$FAKE_GATE_STATE" ;;
-    *"/statuses/"*) cp gate.json "$WROTE" ;;
+    *"/statuses/"*) printf '%s\\n' "$@" > "$WROTE" ;;
     *) printf 'unexpected gh call: %s\\n' "$*" >&2 ; return 1 ;;
   esac
-}}
-python3() {{ '{pathlib.Path(sys.executable).as_posix()}' "$@" ; }}
+}
 """
 
 
@@ -63,6 +55,8 @@ def _run_step(tmp_path, gate_state):
             "GH_TOKEN": "x",
             "GITHUB_ACTION_PATH": str(ACTIONS / "gate-refresh"),
             "HEAD_SHA": HEAD_SHA,
+            # A different SHA, so posting to the merge commit instead of the head reddens.
+            "GITHUB_SHA": "b" * 40,
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_SERVER_URL": "https://example.invalid",
             "GITHUB_RUN_ID": "999",
@@ -73,20 +67,26 @@ def _run_step(tmp_path, gate_state):
     proc = subprocess.run(
         [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30
     )
-    posted = json.loads(wrote.read_text(encoding="utf-8")) if wrote.exists() else None
+    posted = wrote.read_text(encoding="utf-8").splitlines() if wrote.exists() else None
     return proc, posted
 
 
-#: The whole body a greening run must POST, hand-written rather than read back from
-#: `scripts/gate-status-body`: a derived expectation passes whatever that file says, and this is
-#: the one place the context, the state and the run link are pinned together. Matches the
-#: GITHUB_* values `_run_step` supplies.
-GREEN_BODY = {
-    "state": "success",
-    "context": "shipmate / gate",
-    "description": "all applies complete — nothing left to apply",
-    "target_url": "https://example.invalid/acme/demo/actions/runs/999",
-}
+#: The whole `gh` argv a greening run must send, hand-written rather than read back from the
+#: `Complete gate` run block: a derived expectation passes whatever that block says. This is the one
+#: place the endpoint, the method (POST, implied by the fields), the context, the state and the run
+#: link are pinned together. Matches the values `_run_step` supplies.
+GREEN_ARGV = [
+    "api",
+    f"repos/acme/demo/statuses/{HEAD_SHA}",
+    "-f",
+    "state=success",
+    "-f",
+    "context=shipmate / gate",
+    "-f",
+    "description=all applies complete — nothing left to apply",
+    "-f",
+    "target_url=https://example.invalid/acme/demo/actions/runs/999",
+]
 
 
 def test_the_gate_is_read_before_it_is_written():
@@ -111,7 +111,7 @@ def test_a_pending_gate_still_greens(tmp_path):
     # applies are outstanding, and completing them is what gate-refresh exists to record.
     proc, posted = _run_step(tmp_path, "pending")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert posted == GREEN_BODY
+    assert posted == GREEN_ARGV
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not installed")
@@ -120,4 +120,4 @@ def test_an_absent_gate_still_greens(tmp_path):
     # at all. That is not a hold.
     proc, posted = _run_step(tmp_path, "")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert posted == GREEN_BODY
+    assert posted == GREEN_ARGV

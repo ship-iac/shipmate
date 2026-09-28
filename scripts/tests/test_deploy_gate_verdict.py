@@ -18,7 +18,7 @@ import yaml
 from _loader import WORKFLOWS, usable_bash
 
 _STEP = "Complete gate on the merged PR head SHA"
-_PY_MARKER = 'python3 - "$concl" "$title"'
+_WRITE_MARKER = 'gh api "repos/$GITHUB_REPOSITORY/statuses/'
 
 
 def _jobs():
@@ -40,10 +40,10 @@ def _gate_run():
 
 
 def _verdict_block():
-    """The gate step's bash up to, and not including, the status-body heredoc: the HEAD_SHA guard
-    and the concl/title decision, with nothing that calls out."""
-    head, sep, _ = _gate_run().partition(_PY_MARKER)
-    assert sep, f"gate step no longer computes concl/title before {_PY_MARKER!r}"
+    """The gate step's bash up to, and not including, the status write: the HEAD_SHA guard and
+    the concl/title decision, with nothing that calls out."""
+    head, sep, _ = _gate_run().partition(_WRITE_MARKER)
+    assert sep, f"gate step no longer computes concl/title before {_WRITE_MARKER!r}"
     return head
 
 
@@ -100,6 +100,62 @@ def test_verdict(results, expected):
     concl, _, title = r.stdout.strip().partition("|")
     assert concl == expected, f"{results!r} -> {concl} ({title}), expected {expected}"
     assert title == ("all env-levels applied" if expected == "success" else "deploy incomplete")
+
+
+_HEAD = "a" * 40
+
+
+def _status_argv(state, title):
+    return [
+        "api",
+        f"repos/acme/demo/statuses/{_HEAD}",
+        "-f",
+        f"state={state}",
+        "-f",
+        "context=shipmate / gate",
+        "-f",
+        f"description={title} — deploy env-level applies completed",
+        "-f",
+        "target_url=https://example.invalid/acme/demo/actions/runs/999",
+    ]
+
+
+#: The whole `gh` argv each verdict sends, hand-written: a value read back from the step passes
+#: whatever the step says. Pins the endpoint, the method (POST, implied by the fields) and every
+#: field. The values match the env `test_status_body` supplies.
+_POSTED = {
+    "success": _status_argv("success", "all env-levels applied"),
+    "failure,success": _status_argv("failure", "deploy incomplete"),
+}
+
+
+@bash_only
+@pytest.mark.parametrize("results", sorted(_POSTED))
+def test_status_body(tmp_path, results):
+    """The whole step runs with `gh` stubbed to record its argv. Mutations: drop the description
+    suffix; post `context="shipmate/gate"`; post `-F` for any field; post to `$GITHUB_SHA`
+    instead of `$HEAD_SHA`; add `-X GET`."""
+    wrote = tmp_path / "wrote"
+    stub = 'gh() { printf \'%s\\n\' "$@" > "$WROTE" ; }\n'
+    r = subprocess.run(
+        [usable_bash(), "-c", stub + _gate_run()],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={
+            "RESULTS": results,
+            "HEAD_SHA": _HEAD,
+            # A different SHA, so posting to the merge commit instead of the head reddens.
+            "GITHUB_SHA": "b" * 40,
+            "GITHUB_REPOSITORY": "acme/demo",
+            "GITHUB_SERVER_URL": "https://example.invalid",
+            "GITHUB_RUN_ID": "999",
+            "WROTE": str(wrote),
+            "PATH": "/usr/bin:/bin",
+        },
+    )
+    assert r.returncode == 0, r.stderr
+    assert wrote.read_text(encoding="utf-8").splitlines() == _POSTED[results]
 
 
 @bash_only
