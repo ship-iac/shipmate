@@ -58,8 +58,8 @@ def cells_for_env(env, paths, tags_by_stack):
     carries no workload. A stack missing from the map carries "" and applies with
     the environment's generic role; the map itself is REQUIRED, so a caller that
     stops deriving it raises here instead of silently applying every cell with
-    the generic role."""
-    workloads = {p: bm.workload_of(tags_by_stack.get(p, [])) for p in paths}
+    the generic role. A stack carrying two `workload/*` tags refuses (`workload_of`)."""
+    workloads = {p: bm.workload_of(tags_by_stack.get(p, []), p) for p in paths}
     return [
         {
             "stack": p,
@@ -289,7 +289,10 @@ def run_unlock(repo, env, head):
     hold, and keeps the reserved-path and slug-collision guards `build_matrix`
     also carries. Neither can affect an unlock — it consumes no plan artifact —
     so each is a refusal inherited from the reuse, and the slug one can make a
-    repository with a latent colliding pair unable to unlock at all.
+    repository with a latent colliding pair unable to unlock at all. Two more
+    refuse unlock for the whole of `env`: a stack in it carrying two
+    `workload/*` tags (`build_matrix`), and a cell in it whose workload tag its
+    tier does not list with no role to fall back to (`stamp_rows`).
 
     `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
     applies none — the run-time half of the decision `scripts/authorize` already
@@ -335,7 +338,12 @@ def main():
     # `validate` re-runs it below, which costs nothing and parses nothing again.
     table = bm.ec.read_table()
     bm.ec.validate_structure(table)
-    refuse_unreviewed(env, table, os.environ.get("SHIPMATE_REVIEW_DECISION", ""))
+    decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
+    refuse_unreviewed(env, table, decision)
+    # A null decision authorizes a gated env only because no branch rule requires a review.
+    no_review_required = (
+        [env] if decision == "NONE" and env.casefold() not in bm.ec.ungated_envs(table) else []
+    )
 
     deps = run_graph_deps()
 
@@ -372,6 +380,7 @@ def main():
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         wv.write_waves(fh, waves)
         fh.write(f"head_sha={head}\n")
+        fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
 
 
 if __name__ == "__main__":

@@ -8,6 +8,18 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Added
+
+- **`shipmate doctor` warns at 0 required approvals, naming each gated environment.**
+- **The apply comment says when a gated environment applied with no approving review required.**
+
+### Changed
+
+- **A stack carrying two `workload/*` tags is refused at detect.**
+- **A workload tag the environment does not list is refused at detect when its tier has no role to fall back to.**
+
 ## [0.41.0] — 2026-09-28
 
 Tags `7ff9345`.

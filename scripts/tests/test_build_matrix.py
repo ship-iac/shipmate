@@ -102,6 +102,52 @@ def test_nested_shipmate_stack_is_allowed():
     assert cells == [{"stack": "infra/shipmate", "environment": "dev-eu", "workload": ""}]
 
 
+_TWO_WORKLOADS_ERROR = (
+    "::error::stack 'stacks/dns' carries 2 workload tags (workload/net, workload/network), "
+    "and a stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` "
+    "and remove the rest."
+)
+
+
+def test_two_workload_tags_refuse_naming_the_stack_and_every_tag():
+    """Reddens on restoring the first-match `return` loop in `workload_of` (returns "net",
+    no SystemExit), and on any edit to the message: it is compared whole."""
+    with pytest.raises(SystemExit) as exc_info:
+        bm.workload_of(["env/dev-eu", "workload/net", "workload/network"], "stacks/dns")
+    assert exc_info.value.code == _TWO_WORKLOADS_ERROR
+
+
+def test_one_or_zero_workload_tags_keep_their_values():
+    """Reddens on `workload_of` returning "" unconditionally."""
+    assert bm.workload_of(["env/dev-eu", "workload/net"], "stacks/dns") == "net"
+    assert bm.workload_of(["env/dev-eu"], "stacks/dns") == ""
+
+
+def test_build_matrix_refuses_a_stack_with_two_workload_tags():
+    """Reddens on replacing the `workload_of` call in `build_matrix` with an inline first-match
+    over the tags, and on dropping the sort of the named tags (they arrive unsorted here)."""
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(
+            ["dev-eu"],
+            {"dev-eu": ["stacks/dns"]},
+            {"stacks/dns": ["workload/network", "env/dev-eu", "workload/net"]},
+        )
+    assert exc_info.value.code == _TWO_WORKLOADS_ERROR
+
+
+def test_apply_detect_cells_refuse_a_stack_with_two_workload_tags():
+    """Reddens on replacing the `workload_of` call in `apply-detect.cells_for_env` with an
+    inline first-match over the tags."""
+    ad = load_script("apply-detect")
+    with pytest.raises(SystemExit) as exc_info:
+        ad.cells_for_env(
+            "dev-eu",
+            ["stacks/dns"],
+            {"stacks/dns": ["env/dev-eu", "workload/net", "workload/network"]},
+        )
+    assert exc_info.value.code == _TWO_WORKLOADS_ERROR
+
+
 def test_list_stacks_changed_uses_changed_flag(monkeypatch):
     captured = {}
     monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or "stacks/a\n")
@@ -1275,3 +1321,90 @@ def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         _run_main(monkeypatch, tmp_path, env, head_sha="cafe1234")
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == ""
+
+
+def test_a_workload_tag_the_tier_does_not_list_refuses_when_it_has_no_fallback_role():
+    """The tier holds only workload roles, so an unlisted tag would run with no credentials.
+
+    Mutation: remove the `unlisted_workload` call from `stamp_rows` -- no refusal is raised.
+    """
+    table = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {
+                "region": "eu-west-1",
+                "aws": {
+                    "apply": {
+                        "workloads": {
+                            "net-edge": {"role": "arn:aws:iam::9817:role/net-edge"},
+                            "app": {"role": "arn:aws:iam::9817:role/app"},
+                        }
+                    }
+                },
+            }
+        },
+    }
+    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
+    with pytest.raises(SystemExit) as exc:
+        bm.stamp_rows(cells, table, "apply")
+    assert str(exc.value) == (
+        "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
+        "list (it lists: app, net-edge), and aws.apply sets no role to fall back to. The cell "
+        "would run with no cloud credentials. Retag the stack, or add the workload to "
+        ".github/shipmate.toml on the default branch, which is where this table is read "
+        "from: merge the workload entry there on its own pull request first."
+    )
+
+
+#: A plan tier with a role of its own and an apply tier holding only workload roles.
+_APPLY_GAP = {
+    "layout": "folder",
+    "environments": {
+        "dev-eu": {
+            "region": "eu-west-1",
+            "aws": {
+                "plan": {"role": "arn:aws:iam::9817:role/plan"},
+                "apply": {"workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/net-edge"}}},
+            },
+        }
+    },
+}
+
+
+def test_the_plan_path_refuses_a_gap_only_the_apply_tier_has():
+    """The apply-tier gap refuses at plan detect, before merge, not first at deploy.
+
+    Mutation: check only the requested tier in `stamp_rows` -- no refusal is raised.
+    """
+    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
+    with pytest.raises(SystemExit) as exc:
+        bm.stamp_rows(cells, _APPLY_GAP, "plan")
+    assert str(exc.value) == (
+        "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
+        "list (it lists: net-edge), and aws.apply sets no role to fall back to. The cell would "
+        "run with no cloud credentials. Retag the stack, or add the workload to "
+        ".github/shipmate.toml on the default branch, which is where this table is read "
+        "from: merge the workload entry there on its own pull request first."
+    )
+
+
+def test_the_apply_path_does_not_refuse_a_gap_only_the_plan_tier_has():
+    """Mutation: check both tiers on the apply path too -- the plan-tier gap refuses."""
+    table = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {
+                "region": "eu-west-1",
+                "aws": {
+                    "plan": {
+                        "workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/net-edge"}}
+                    },
+                    "apply": {"role": "arn:aws:iam::9817:role/apply"},
+                },
+            }
+        },
+    }
+    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
+    assert [row["role_arn"] for row in bm.stamp_rows(cells, table, "apply")] == [
+        "arn:aws:iam::9817:role/apply"
+    ]

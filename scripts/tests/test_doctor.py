@@ -3406,6 +3406,123 @@ def test_review_rule_missing_parameters_key_is_unverified(monkeypatch):
     assert out == [(doctor.NOTICE, doctor._REVIEW_RULE_UNREADABLE.format(branch=_BRANCH))]
 
 
+_GATED_AND_UNGATED_TABLE = """\
+layout = "tf_vars"
+
+[environments.dev-eu]
+region = "eu-west-1"
+
+[environments.sandbox]
+region = "eu-west-1"
+gated = false
+"""
+_ALL_UNGATED_TABLE = """\
+layout = "tf_vars"
+
+[environments.dev-eu]
+region = "eu-west-1"
+gated = false
+"""
+
+
+def _no_required_review(envs):
+    """Hand-written: the count-0 finding naming `envs`, already rendered."""
+    return (
+        doctor.WARNING,
+        f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews, so "
+        f"these gated environments can apply without an approving review: {envs}. One is held "
+        "only where a code-owner review is required for the changed files. `gated` can "
+        "only relax a review requirement the ruleset sets (docs/hardening.md #3–5); set "
+        "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
+        "environments meant to apply unreviewed.",
+    )
+
+
+def _review_probe(monkeypatch, rules, table, envs=_ENVS):
+    responses = _rules_only(*rules)
+    if table is not None:
+        responses[_CONFIG_ON_DEFAULT] = _wf_file(table)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    return doctor._review_rule_warnings(_ctx(envs=set(envs)))
+
+
+def test_review_rule_count_zero_names_only_the_gated_environments(monkeypatch):
+    """Count 0 with code-owner review on warns, naming the gated environments only.
+
+    Mutation: drop the `ungated_envs` subtraction -- `sandbox` is named too."""
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE)
+    assert out == [_no_required_review("`dev-eu`")]
+
+
+def test_review_rule_count_zero_without_code_owner_review_reports_both(monkeypatch):
+    """Code-owner review off and count 0 are two findings, in that order.
+
+    Mutation: restore the early `return` on `not code_owner` -- the count finding is lost."""
+    rules = [_pull_request_rule(code_owner=False, count=0)]
+    out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE)
+    assert out == [
+        (doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH)),
+        _no_required_review("`dev-eu`"),
+    ]
+
+
+def test_review_rule_count_zero_with_every_environment_ungated_is_the_notice(monkeypatch):
+    """No gated environment leaves count 0 the supported sole-maintainer mode.
+
+    Mutation: emit the count finding for an empty gated set -- a warning naming nothing."""
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    out = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE)
+    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+
+
+def test_review_rule_count_zero_with_an_unreadable_table_is_the_notice(monkeypatch):
+    """An unreadable default-branch table names no environment: which are gated is unknown.
+
+    Mutation: treat an unreadable table as an empty one, so every `ctx["envs"]` entry
+    reads as gated -- `dev-eu` is warned about."""
+
+    def gh(path):
+        if path == _CONFIG_ON_DEFAULT:
+            raise SystemExit("::error::command failed (1): gh api ...")
+        return [_pull_request_rule(code_owner=True, count=0)]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    out = doctor._review_rule_warnings(_ctx())
+    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+
+
+@pytest.mark.parametrize("table", [_INVALID_TABLE, "layout = "], ids=["invalid", "not-toml"])
+def test_review_rule_count_zero_with_an_invalid_table_is_the_notice(monkeypatch, table):
+    """An invalid or unparseable default-branch table degrades like an unreadable one, and
+    never raises: `warnings()` would drop the code-owner finding with it.
+
+    Mutation: remove the `except SystemExit` in `_default_branch_table` -- the probe raises."""
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    out = _review_probe(monkeypatch, rules, table)
+    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+
+
+def test_review_rule_count_zero_names_a_declared_environment_the_table_lacks(monkeypatch):
+    """An environment only a cell declares is gated: no entry holds `gated = false` for it.
+
+    Mutation: drop the union with `ctx["envs"]` -- `prod-us` is not named."""
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE, {"dev-eu", "prod-us"})
+    assert out == [_no_required_review("`dev-eu`, `prod-us`")]
+
+
+def test_review_rule_count_is_the_highest_across_layered_rulesets(monkeypatch):
+    """GitHub enforces the union, so one ruleset requiring a review satisfies the count.
+
+    Mutation: aggregate the count with `min` instead of `max` -- the count finding fires."""
+    rules = [
+        _pull_request_rule(code_owner=True, count=0),
+        _pull_request_rule(code_owner=True, count=1),
+    ]
+    assert _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE) == []
+
+
 _COUNT_WORDS = {
     3: "three",
     4: "four",

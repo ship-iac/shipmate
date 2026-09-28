@@ -165,7 +165,13 @@ Six things to know beyond the schema:
   workflow file rather than in a pull request of its own.
 - **A workload tier is keyed by the `<name>` of the `workload/<name>` tag**,
   exactly as written, so two workloads whose names differ only in punctuation
-  resolve separately.
+  resolve separately. A tag the consulted tier's `workloads` does not list is
+  refused at detect when that tier, after inheritance, sets no role to fall back
+  to; an untagged cell and a tier that resolves a role are not refused. The plan
+  detect checks the apply tier too, so an apply-tier gap refuses before merge.
+  On a tier with no role to fall back to, a workload key follows the
+  environment order above: merge the key before the branch that tags the stack,
+  and remove it after the branch that drops the tag.
 
 ## Where the credentials step goes
 
@@ -196,7 +202,8 @@ that tag.
 role on the tier that cell's path consulted — an environment with no entry, an
 entry with no `aws` block, or an apply-only block on the plan path. There is no
 level above the entry to fall back to, so an environment that names no role is
-credential-free on its own.
+credential-free on its own. A tagged cell on a tier that lists workloads but
+not its tag, and resolves no role, is not skipped: detect refuses it.
 
 ## A green plan does not size either policy
 

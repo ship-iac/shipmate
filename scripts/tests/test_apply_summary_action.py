@@ -123,6 +123,7 @@ _RENDER_ENV = {
     "SHIPMATE_SKIPPED_ENVS": "${{ inputs.skipped-envs }}",
     "SHIPMATE_REVIEW_HELD_ENVS": "${{ inputs.review-held-envs }}",
     "SHIPMATE_APPLIED_UNGATED_ENVS": "${{ inputs.applied-ungated-envs }}",
+    "SHIPMATE_REVIEW_NOT_REQUIRED_ENVS": "${{ inputs.review-not-required-envs }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
 }
@@ -311,11 +312,37 @@ def test_engine_callers_pass_head_sha_to_apply_summary():
 
 
 def test_apply_all_passes_the_held_and_ungated_outputs_to_apply_summary():
-    """apply-all.yml is the only caller carrying these, apply.yml being the targeted form. Four
-    detect outputs are JSON arrays of env names with identical shape, so a crossed wire renders
-    a plausible-looking comment naming the wrong environments for the wrong reason."""
+    """Five detect outputs are JSON arrays of env names with identical shape, so a crossed wire
+    renders a plausible-looking comment naming the wrong environments for the wrong reason. The
+    detect job's `outputs:` entry is compared too: an input wired to an output the job never
+    declares resolves to the empty string, which renders as no sentence at all.
+
+    Mutation: wire `applied_ungated_envs` into `review-not-required-envs` -- red.
+    Mutation: delete the detect job's `review_not_required_envs` output -- red."""
     spec = workflow_yaml("apply-all.yml")
     step = _find_step(spec["jobs"]["summary"]["steps"], uses_contains="actions/apply-summary")
     with_ = step.get("with") or {}
     assert with_.get("review-held-envs") == "${{ needs.detect.outputs.review_held_envs }}"
     assert with_.get("applied-ungated-envs") == "${{ needs.detect.outputs.applied_ungated_envs }}"
+    assert with_.get("review-not-required-envs") == (
+        "${{ needs.detect.outputs.review_not_required_envs }}"
+    )
+    assert spec["jobs"]["detect"]["outputs"]["review_not_required_envs"] == (
+        "${{ steps.d.outputs.review_not_required_envs }}"
+    )
+
+
+def test_apply_passes_the_review_not_required_output_to_apply_summary():
+    """The targeted form carries the no-review-required set too: a targeted apply of a gated env
+    under a null decision is the case the sentence exists for.
+
+    Mutation: delete the `review-not-required-envs` line from apply.yml -- red.
+    Mutation: delete the detect job's `review_not_required_envs` output -- red."""
+    spec = workflow_yaml("apply.yml")
+    step = _find_step(spec["jobs"]["summary"]["steps"], uses_contains="actions/apply-summary")
+    assert (step.get("with") or {}).get("review-not-required-envs") == (
+        "${{ needs.detect.outputs.review_not_required_envs }}"
+    )
+    assert spec["jobs"]["detect"]["outputs"]["review_not_required_envs"] == (
+        "${{ steps.d.outputs.review_not_required_envs }}"
+    )

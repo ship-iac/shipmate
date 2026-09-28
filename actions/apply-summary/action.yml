@@ -44,6 +44,10 @@ inputs:
     description: "JSON array of environments applied without an approving review, per `gated = false` on their entries (all-environments form only). Empty = []."
     required: false
     default: ""
+  review-not-required-envs:
+    description: "JSON array of gated environments authorized under a null review decision, because the pull request's review state required none (both forms). Only those with an applied, failed or unrecorded row are named. Empty = []."
+    required: false
+    default: ""
   results:
     description: "join(needs.*.result, ',') from the caller — feeds the short-form nothing-pending sentence."
     required: true
@@ -158,6 +162,7 @@ runs:
         SHIPMATE_SKIPPED_ENVS: ${{ inputs.skipped-envs }}
         SHIPMATE_REVIEW_HELD_ENVS: ${{ inputs.review-held-envs }}
         SHIPMATE_APPLIED_UNGATED_ENVS: ${{ inputs.applied-ungated-envs }}
+        SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |

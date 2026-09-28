@@ -559,7 +559,11 @@ is a provider field. A field may sit at provider-block level, under `plan` or
 tier overrides the last field by field. The workload tier is keyed by the `<name>`
 of the cell's `workload/<name>` tag, exactly as written. `workloads`
 directly under a provider block is malformed shape, not a fourth tier: a
-workload role means nothing without the path it applies to.
+workload role means nothing without the path it applies to. A cell whose
+`workload/<name>` tag the consulted tier's `workloads` does not list is refused
+at detect when that tier, after inheritance, sets no role to fall back to. An
+untagged cell and a tier that resolves a role are not refused; the plan detect
+checks the apply tier too, so an apply-tier gap refuses before merge.
 
 The environment's own `region` inheriting into `aws.region` is the schema's only
 cross-level default. Every other field resolves inside its own provider block.
@@ -651,6 +655,7 @@ Every condition below refuses at detect, before any cell starts.
 | The table declares no `layout` | it is the only source of a cell's environment identity, and a scalar written below a `[table]` header lands inside that table rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
 | `layout` is not `tf_vars`, `workspace` or `folder` | a typo would silently disable injection |
 | `layout = "tf_vars"` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
+| A cell's `workload/<name>` tag the consulted tier's `workloads` does not list, where that tier resolves no role to fall back to | the cell would run with no cloud credentials; the plan detect checks the apply tier too, so the gap refuses before merge |
 | A tier resolves a role but no region | the credentials step requires one |
 | A tier sets an empty role | that resolves to a skipped credentials step, not to a credential |
 | A provider block resolves no role on any tier | dead config; apply-only is legal, all-empty is not |
@@ -706,6 +711,10 @@ any environment that needs an entry: every environment under the `tf_vars`
 layout, and under
 `workspace` or `folder` any environment declaring a provider block. An
 environment needing no entry at all lands in one pull request.
+
+The same order applies to a `workloads` key on a tier with no role to fall back
+to: merge the key before the branch that adds its `workload/<name>` tag, and
+remove it after the branch that drops the tag.
 
 **An unused entry warns rather than refusing, and that is what makes the
 sequence available.** Refusing both the missing entry and the unused one leaves
@@ -897,6 +906,8 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 `workload/<name>` form. A stack may carry several `env/*` tags at once (for
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
+A stack carries at most one `workload/<name>` tag; a stack carrying two
+is refused at detect.
 
 Terramate refuses an uppercase letter in a tag, so an environment name is
 lowercase letters, digits, `-` and `_` — never uppercase. The `environments`
@@ -1319,6 +1330,15 @@ stays blocked — and environments ordered after it are skipped. The apply resul
 comment names both halves: which environments were held for review, and which
 applied under the exemption (§Apply result comment).
 
+`gated` can only relax an existing review requirement, never create one. When
+no branch rule requires an approving review, the decision is `NONE` (unless a
+requested-changes review stands, which still refuses), and both paths apply a
+gated environment without one. The apply result comment names
+each gated environment that applied that way (§Apply result comment), and
+`shipmate doctor` warns about the combination when it can read the default
+branch's table. With the table unreadable, doctor reports only the
+sole-maintainer note, or only the code-owner warning when that review is off.
+
 What bounds the exemption is the default branch, not an admin boundary. Anyone who
 can open a pull request can propose `gated = false`; what they cannot do is have it take
 effect on that pull request, because all three readers resolve the file from the
@@ -1328,7 +1348,8 @@ benefits from it. This is the inverse of the reasoning that held while the
 exemption was a repository variable, where the point was that it could *not* be a commit:
 a variable edit is governed by GitHub's permission settings and reviewed by
 nobody. `shipmate doctor` validates the file it is in and reports a malformed
-entry, but does not echo the ungated set itself. `gated` accepts no variable
+entry, but does not list the `gated = false` entries; its count-0 warning names
+their complement, the gated environments. `gated` accepts no variable
 reference (§Variable references), so the decision stays a merged commit.
 
 `shipmate unlock <env>` releases an OpenTofu state lock stranded by a cancelled
@@ -1993,7 +2014,8 @@ same waves JSON `apply-detect` / `apply-all-detect` already compute, and a
 cell counts as attempted when its artifact actually downloaded or its apply
 check is already done — the render can never claim nothing is pending while
 holding evidence that an apply ran. The footer carries the bare-apply form's
-environment-disposition sentences, a gate-completion sentence (complete
+environment-disposition sentences, the no-review-required sentence in both
+forms, a gate-completion sentence (complete
 or still-pending, from the gate verdict), and the run link.
 
 The disposition sentences are four, one per cause, and both render paths carry
@@ -2004,7 +2026,7 @@ either path. Excluded environments name the
 `shipmate apply <env>` that applies them; skipped ones do not name a cause, since
 being skipped can mean either an unapplied explicit environment or a held
 one — the excluded and held sentences carry that distinction instead. The
-two review sentences (see §Comment-ops) are:
+three review sentences (see §Comment-ops) are:
 
 - **held** — "the pull request's review state does not permit applying",
   naming the environments and asking for an approving review, or for a
@@ -2017,12 +2039,22 @@ two review sentences (see §Comment-ops) are:
   which one, since the decision never reaches this renderer;
 - **applied ungated** — the environments the run was permitted to apply
   without an approving review, per `gated = false` on their entries. It is the only
-  audit trail an unreviewed apply leaves: `reviewDecision` is a live value
+  audit trail such an apply leaves: `reviewDecision` is a live value
   with no history, so once the review lands nothing else in a run
   distinguishes an apply that waited for it from one that did not. It states a
   permission, never an outcome — the set is derived before any wave runs, so
   it points at the run for what actually applied and reserves "applied" for
-  the ✅ rows.
+  the ✅ rows;
+- **no review required** — the gated environments a `NONE` decision
+  authorized: the pull request's review state required no approving review, so
+  `gated` had nothing to enforce. It has its own cause, so it has its own detect
+  output (`review_not_required_envs`, from both detects) rather than widening
+  applied ungated. It renders in the targeted and the all-environments form, and
+  names only environments with an applied, failed or unrecorded row — apply ran
+  there, so infrastructure may have changed — so the short form, which has no
+  rows, never carries it. It states the authorization fact and never that
+  nobody reviewed: a code-owner review can still be required at an approval
+  count of 0.
 
 Row status is derived from both the per-cell artifact and the real state of
 that cell's `apply / <stack> / <env>` check on the head SHA, which

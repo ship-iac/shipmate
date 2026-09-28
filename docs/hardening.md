@@ -315,12 +315,19 @@ Two things to know before relying on it:
   one, and a reviewer reads it as code. Anyone who can push a branch can still
   *propose* the entry, so this bounds when it takes effect, not who may ask.
   `shipmate doctor` validates the file and reports a malformed entry, but does not
-  echo the ungated set.
+  list the `gated = false` entries; its count-0 warning below names their
+  complement, the gated environments.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
   environment is already ungated there, so `gated = false` on some narrows nothing. It
-  can only relax an existing requirement, never create one, and nothing
-  warns about the combination — a repository that sets both, and believes prod is
-  gated, gets no signal that it is not.
+  can only relax an existing requirement, never create one. When it can read the
+  default branch's table, `shipmate doctor` warns about the combination, naming
+  the environments still marked gated: each of them can apply without an
+  approving review, and is held only where a code-owner review is required for
+  the changed files. With the table unreadable it names none, and reports only
+  the sole-maintainer note, or only the code-owner warning when that review is
+  off. The apply result comment also names each
+  gated environment a run applied while `reviewDecision` was `NONE`, stating that
+  no approving review was required.
 
 `require_code_owner_review` is doing more work here than the approval count.
 A GitHub App cannot be listed in `CODEOWNERS`, so a code-owner review is one of

@@ -119,6 +119,13 @@ def main():
         if ungated and decision == "REVIEW_REQUIRED"
         else []
     )
+    # From `runnable` for the same reason; a null decision authorizes a gated env only
+    # because no branch rule requires a review.
+    no_review_required = (
+        sorted({c["environment"] for c in runnable if c["environment"].casefold() not in ungated})
+        if decision == "NONE"
+        else []
+    )
 
     deps = ad.run_graph_deps()
     levels = eo.env_levels(order, {c["environment"] for c in runnable})
@@ -142,6 +149,7 @@ def main():
         fh.write(f"skipped_envs={json.dumps(skipped)}\n")
         fh.write(f"review_held_envs={json.dumps(held)}\n")
         fh.write(f"applied_ungated_envs={json.dumps(applied_ungated)}\n")
+        fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
 
 
 if __name__ == "__main__":

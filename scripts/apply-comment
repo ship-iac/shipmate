@@ -510,11 +510,20 @@ def _gate_sentence(gate):
     )
 
 
-def _footer_parts(gate, run_url, excluded, skipped, env_name, held=(), applied_ungated=()):
+def _footer_parts(
+    gate,
+    run_url,
+    excluded,
+    skipped,
+    env_name,
+    held=(),
+    applied_ungated=(),
+    review_not_required=(),
+):
     """The comment's closing lines: in the all-environments form, one sentence per env
     disposition this run produced (excluded, skipped, held for review, applied ungated);
-    then the gate sentence and the run link. Env names are author-controlled, so
-    `_md_escape`d.
+    in both forms, the no-review-required sentence; then the gate sentence and the run
+    link. Env names are author-controlled, so `_md_escape`d.
 
     The held sentence names no command: a held env can also be an explicit env
     (the held cause wins, so it is not in `excluded`), and a bare `shipmate
@@ -525,8 +534,8 @@ def _footer_parts(gate, run_url, excluded, skipped, env_name, held=(), applied_u
 
     An empty `applied_ungated` renders NOTHING, and never "zero environments
     applied" -- it is populated only under a REVIEW_REQUIRED decision with
-    an env's entry holding `gated = false`. That sentence is the only audit trail an
-    unreviewed apply leaves: `reviewDecision` is a live value with no history,
+    an env's entry holding `gated = false`. That sentence is the only audit trail
+    such an apply leaves: `reviewDecision` is a live value with no history,
     so once the review lands nothing in the run tells an apply that waited for
     it from one that did not. No clause of it uses a completion
     verb for the named envs -- detect derives the set from `runnable`, before
@@ -534,7 +543,15 @@ def _footer_parts(gate, run_url, excluded, skipped, env_name, held=(), applied_u
     here that never applied, and this comment's own legend reserves "applied"
     for the ✅ state (_EMOJI), so a completion verb would contradict the table
     beside it. It points at the run rather than the table because the short
-    form has no table."""
+    form has no table.
+
+    `review_not_required` names gated envs a null (`NONE`) decision authorized:
+    the pull request's review state required none, so `gated` enforced nothing. It
+    is a different cause from `applied_ungated`, so it gets its own sentence,
+    which states the authorization fact and never that nobody reviewed -- a
+    code-owner review can still be required at count 0. `build_comment` narrows
+    it to envs with an applied, failed or unrecorded row, where infrastructure
+    may have changed; the short form has no rows and never receives it."""
     lines = []
     if not env_name:
         if excluded:
@@ -562,6 +579,13 @@ def _footer_parts(gate, run_url, excluded, skipped, env_name, held=(), applied_u
                 f"per `gated = false` on their entries in `.github/shipmate.toml`: {envs} — "
                 "see this run for what actually applied."
             )
+    if review_not_required:
+        envs = ", ".join(f"`{sc._md_escape(e)}`" for e in review_not_required)
+        lines.append(
+            f"No approving review was required to apply the gated environment(s) {envs}: the "
+            "pull request's review state required none, so `gated` had nothing to enforce "
+            "(docs/hardening.md #3–5)."
+        )
     lines.append(_gate_sentence(gate))
     lines.append(f"[Logs & artifacts]({run_url})")
     return lines
@@ -661,6 +685,7 @@ def build_comment(
     results_csv="",
     held=(),
     applied_ungated=(),
+    review_not_required=(),
 ):
     """Assemble the comment under SIZE_BUDGET. Sections render in table order:
     attempted cells get a details section, blocked cells a single no-fence
@@ -671,7 +696,17 @@ def build_comment(
     later cell's link, and hundreds of blocked cells starve the first attempted
     cell's guaranteed minimum by going uncounted until too late."""
     top = _top_section(env_name, results_csv, rows, jobs, run_url)
-    footer_parts = _footer_parts(gate, run_url, excluded, skipped, env_name, held, applied_ungated)
+    ran = {r["environment"] for r in rows if r["status"] in _SECTION_STATUSES}
+    footer_parts = _footer_parts(
+        gate,
+        run_url,
+        excluded,
+        skipped,
+        env_name,
+        held,
+        applied_ungated,
+        [e for e in review_not_required if e in ran],
+    )
     footer = "\n\n" + "\n\n".join(footer_parts)
     used = len(top) + len(footer)
 
@@ -735,6 +770,7 @@ def main():
     skipped = json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]")
     held = json.loads(os.environ.get("SHIPMATE_REVIEW_HELD_ENVS") or "[]")
     applied_ungated = json.loads(os.environ.get("SHIPMATE_APPLIED_UNGATED_ENVS") or "[]")
+    review_not_required = json.loads(os.environ.get("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS") or "[]")
     results_csv = os.environ.get("SHIPMATE_RESULTS", "") or ""
 
     if not rows:
@@ -753,6 +789,7 @@ def main():
             results_csv,
             held,
             applied_ungated,
+            review_not_required,
         )
 
     with open("comment.md", "w", encoding="utf-8") as fh:
