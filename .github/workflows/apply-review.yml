@@ -2,8 +2,8 @@ name: apply-review
 # The review state an apply rests on, re-read server-side rather than trusted from comment-ops:
 # `guard` admits any bot actor holding actions:write, so a dispatch input would be a claim that
 # surface could forge. Its own job because `detect` checks out the PR head and runs Terramate over
-# branch-controlled HCL, where no token belongs. `apply-detect` and `apply-all-detect` refuse on
-# the decision; this workflow only fetches it.
+# branch-controlled HCL, where no token belongs. `apply-detect` refuses and `apply-all-detect`
+# holds on the decision; this workflow only fetches it.
 on:
   workflow_call:
     inputs:

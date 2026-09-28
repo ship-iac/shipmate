@@ -11,6 +11,40 @@ section below names the SHA the release tags.
 The version line stays `v0.x` while action inputs, check names, and the comment
 grammar are declared unstable in `README.md`.
 
+## [0.40.0] — 2026-09-28
+
+Tags `<sha>`.
+
+A simplification pass: about 1,700 fewer lines, 750 of them in tests. No consumer workflow
+input, secret or required check changes, so the re-pin is pins-only.
+
+### Changed
+
+- **`shipmate doctor` has fourteen probes, not sixteen.** The probes that warned about a
+  retired `plan_run_id` or `mode` input in `shipmate.yml` are gone.
+- **The apply review job shows as `<caller> / review / decision`.** Both apply paths call one
+  engine `apply-review.yml`.
+- **`scripts/onboard --vars-at-org` takes exactly `SHIPMATE_APP_ID`.** Any other value,
+  a comma list included, is refused, and the checklist no longer carries the older-pin caveat
+  for `[gate] approver_team`.
+- **`apply-snapshot`'s empty-App-id refusal** uses `apply-gate`'s wording, which points at
+  `docs/github-app.md`.
+
+### Removed
+
+- **Composite action inputs every engine caller set to the same value:** `github-token` (nine
+  actions read `github.token` themselves), `stack-name` on the cell actions, `setup`'s
+  `terramate-version` / `tofu-version`, `cells-dir`, plan-cell's `retention-days`, and
+  dispatch's `dispatch-ref` / `repository`. A direct caller still passing one gets GitHub's
+  undeclared-input warning. comment-ops' unread `is-command` output is gone too.
+
+### Fixed
+
+- **The apply result comment warns when `checks.jsonl` is missing** instead of rendering
+  without apply-check state and no message.
+- **A stack dependency cycle is refused by the one sort every detect uses**, with the same
+  message, so no path reaches a raw `CycleError`.
+
 ## [0.39.0] — 2026-09-27
 
 Tags `ca75e4e`.
