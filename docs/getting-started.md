@@ -885,9 +885,9 @@ The second part is a pin. An apply is authorized by the engine
 `comment-ops.yml` the `comment-ops` job calls and enforced by the engine
 `apply.yml` and `apply-all.yml` the `targeted` and `all` jobs call, so those
 three pins must sit at the same release. An apply authorized under a newer pin
-than the engine that enforces it is enforced by nothing, so the `comment-ops`, `targeted` and `all` jobs keep one pin. One file
-carrying all seven pins is what makes that automatic: `dev/repin_consumer.py`
-moves them together.
+than the engine that enforces it is enforced by nothing, so the `comment-ops`,
+`targeted` and `all` jobs keep one pin. One file carrying all seven pins is what
+makes that automatic: `dev/repin_consumer.py` moves them together.
 
 Both edges need an entry declaring `gated = false` — the exemption is opt-in and
 there is no consumer-written input that could authorize a dispatch without it.

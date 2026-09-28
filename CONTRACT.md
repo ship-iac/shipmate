@@ -2341,8 +2341,9 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   the exact-plan invariant catches it — `tofu apply` rejects the garbage plan and
   the apply check stays pending.
 - **Scope: the machine plan file only.** `fingerprint.txt` and
-  `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered plan `plan.txt` — in the `cell-summary` artifact, the PR
-  sticky comment, and the job step summary — stays plaintext: it is the
+  `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
+  plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and
+  the job step summary — stays plaintext: it is the
   deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
   machine plan at rest and nothing else; redaction in the published text comes
   from `sensitive` marking (see Secrets in published output, above).
