@@ -1392,9 +1392,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     # Width from waves.MAX_WAVES, so a bump cannot leave this asserting the old count.
     max_waves = wv.MAX_WAVES
     waves = [f"wave{i}" for i in range(max_waves)]
-    names = [
-        job["name"] for job in jobs.values() if str(job.get("name", "")).startswith("apply / ")
-    ]
+    names = [jobs[w].get("name") for w in waves]
     assert names == [expected] * max_waves, (
         f"all {max_waves} wave job display names must stay byte-identical to the "
         "'apply / <stack path> / <env>' check-name grammar -- scripts/apply-comment's "

@@ -137,8 +137,8 @@ def test_every_cell_step_passes_the_identity_input_from_its_matrix_row(workflow,
     authoring time does not stop a twelfth step from omitting it, so the eleven are checked
     against the same registry every other property here uses.
 
-    Mutations: delete the `tf-vars:` line from one wave job's `with:`; drop the `toJSON()` and
-    pass `${{ matrix.tf_vars }}`.
+    Mutations: replace one wave job's `steps: *wave-steps` with a copy of wave0's steps minus
+    the `tf-vars:` line; drop the `toJSON()` and pass `${{ matrix.tf_vars }}`.
     """
     steps = [s for s in (_jobs(_doc(workflow))[job_id].get("steps") or []) if _runs_a_cell(s)]
     assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"
@@ -200,7 +200,8 @@ def test_every_cell_step_binds_both_consumer_channels(workflow, job_id):
     unbound channel reaches the action as its empty default, so that cell silently carries none
     of the consumer's variables or secrets while the other ten do.
 
-    Mutation: delete the `consumer-secrets:` line from ONE wave job's `with:`.
+    Mutation: replace ONE wave job's `steps: *wave-steps` with a copy of wave0's steps minus
+    the `consumer-secrets:` line.
     """
     steps = [s for s in (_jobs(_doc(workflow))[job_id].get("steps") or []) if _runs_a_cell(s)]
     assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"

@@ -79,8 +79,9 @@ def test_no_workflow_or_action_carries_a_state_path_setting():
     """The state path comes from the init record alone, so no caller can name one. Parsed keys,
     not text: the three cells legitimately run the helper `scripts/state-path`.
 
-    Mutations: a `state-path:` key back in `apply-env-level.yml` `wave3`'s cell `with:`, and
-    `state_suffix` re-declared under `plan.yml`'s `workflow_call.inputs`.
+    Mutations: `apply-env-level.yml` `wave3`'s `steps: *wave-steps` replaced with a copy of
+    wave0's steps plus a `state-path:` key in the cell `with:`, and `state_suffix` re-declared
+    under `plan.yml`'s `workflow_call.inputs`.
     """
     found = []
     for path in sorted(WORKFLOWS.glob("*.yml")):

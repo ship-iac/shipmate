@@ -56,13 +56,14 @@ jobs:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
     name: &wave-name apply / ${{ matrix.stack }} / ${{ matrix.environment }}
+    # wave1..wave7 alias this list, so an edit here changes all eight waves. A change for one
+    # wave needs that wave's `steps:` written out in full instead of `*wave-steps`.
     steps: &wave-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
       - uses: $/actions/setup
       # The table chooses role and region; detect resolves a reference in it from a repository or
       # organization variable. A vars.* fallback would pick a role the table did not and stay green.
-      # wave1..wave7 alias this step list (scripts/tests/test_aws_oidc_wiring_guard.py).
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
