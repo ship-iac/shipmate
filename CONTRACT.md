@@ -1497,9 +1497,10 @@ by that exact name. A job named anything else plans correctly and every such
 link falls back to the workflow-run page; `shipmate doctor` reports it.
 
 **Adopting this topology takes one ungatable pull request.** A
-`pull_request_target` run uses the workflow file on the default branch, which
-does not yet declare the trigger on the pull request that adds `shipmate.yml`,
-so that pull request produces no plan run and no `shipmate / gate`. Merge it
+`pull_request_target` run uses the workflow file on the default branch. On the
+pull request that adds `shipmate.yml`, the default branch holds no file
+declaring the trigger, so that pull request produces no plan run and no
+`shipmate / gate`. Merge it
 with an administrative bypass and restore enforcement straight after; every pull
 request following it gates normally.
 

@@ -427,7 +427,8 @@ remedy differs:
   fix is a re-plan and an apply of the fresh plan.
 - **There is no record at all.** There is nothing to compare, so the absent
   record is refused rather than tolerated. The plan came from an engine revision
-  that records none, which a plan pin that differs from the apply pin produces.
+  that records none — the shape a plan pin that differs from the apply pin
+  produces.
   A push does not always fix this one. Pre-merge it does: push to the pull
   request and the fresh plan carries a record — a *re-run* of the old plan run
   does not, because a re-run replays the workflow file of the commit that
