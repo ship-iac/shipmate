@@ -1,9 +1,11 @@
-"""Shared test-side helpers: load a ``scripts/`` helper, or read an action.yml.
+"""Shared test-side helpers: load a ``scripts/`` helper, read an engine YAML file, or run a
+shipped shell body.
 
-Two jobs: ``load_script`` for the extension-less helpers, and
+Three jobs: ``load_script`` for the extension-less helpers;
 ``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus ``action_yaml``, ``workflow_yaml``, ``action_steps`` and
-``step_by`` for the YAML-shape guards. The parser is load-bearing, because a guard that silently
-parses to ``[]`` asserts nothing, so it has one definition.
+``step_by`` for the YAML-shape guards; and ``bash_only`` plus ``run_step`` for the tests that
+execute a step's bash. The parser is load-bearing, because a guard that silently parses to ``[]``
+asserts nothing, so it has one definition.
 
 Loading a helper script
 -----------------------
@@ -28,6 +30,7 @@ import pathlib
 import shutil
 import subprocess
 
+import pytest
 import yaml
 from _shipmate import _load
 
@@ -179,3 +182,31 @@ def usable_bash():
         if probe.returncode == 0 and probe.stdout.strip() == "ok":
             return cand
     return None
+
+
+#: The skip for a test that executes a shipped shell body on a host with no working bash.
+bash_only = pytest.mark.skipif(usable_bash() is None, reason="no working bash on this host")
+
+
+def run_step(tmp_path, body, env, *, cwd=None, timeout=30):
+    """Run ``body`` as a bash script written under ``tmp_path``; return the CompletedProcess.
+
+    ``env`` is the whole environment, passed as given: a test that wants the host's variables
+    spreads ``os.environ`` into it, and a hermetic one does not. The script is written with LF
+    endings, because bash reads a CR as part of the command. The run's cwd is ``cwd``, or
+    ``tmp_path`` when that is not given. Output is decoded as UTF-8, not the locale default: the
+    shipped messages carry em dashes, and a cp1252 decode mangles them into a mismatch that looks
+    like a real diff.
+    """
+    bash = usable_bash()
+    assert bash is not None, "callers are bash_only-gated"
+    script = tmp_path / "step.sh"
+    script.write_text(body, encoding="utf-8", newline="\n")
+    return subprocess.run(
+        [bash, str(script)],
+        cwd=cwd or tmp_path,
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        timeout=timeout,
+    )

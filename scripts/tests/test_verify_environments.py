@@ -15,15 +15,13 @@ exit status -- is what ships.
 
 import json
 import os
-import subprocess
 import sys
 
 import pytest
-from _loader import ACTIONS, action_steps, load_script, usable_bash
+from _loader import ACTIONS, action_steps, bash_only, load_script, run_step
 
 vf = load_script("verify-environments")
 
-_BASH = usable_bash()
 
 WAVES = {
     "wave0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu-apply"}],
@@ -91,7 +89,6 @@ def test_a_complete_listing_yields_its_names():
 
 
 def _run_step(tmp_path, listing, waves_json, gh_exit=0):
-    assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     stub = (
         "gh() { "
         f'[ "{gh_exit}" = 0 ] || return {gh_exit}; '
@@ -100,11 +97,11 @@ def _run_step(tmp_path, listing, waves_json, gh_exit=0):
     )
     step = [s for s in action_steps("verify-environments") if s.get("shell") == "bash"]
     assert len(step) == 1, f"expected exactly one bash step, got {len(step)}"
-    script = tmp_path / "step.sh"
-    script.write_text(stub + step[0]["run"], encoding="utf-8", newline="\n")
-    env = dict(os.environ)
-    env.update(
+    return run_step(
+        tmp_path,
+        stub + step[0]["run"],
         {
+            **os.environ,
             "GH_TOKEN": "x",
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_ACTION_PATH": str(ACTIONS / "verify-environments"),
@@ -114,14 +111,7 @@ def _run_step(tmp_path, listing, waves_json, gh_exit=0):
             "PYTHON": sys.executable,
             # The refusals carry an em dash; pinned both ends so the host locale cannot garble it.
             "PYTHONIOENCODING": "utf-8",
-        }
-    )
-    return subprocess.run(
-        [_BASH, str(script)],
-        cwd=tmp_path,
-        env=env,
-        capture_output=True,
-        encoding="utf-8",
+        },
         timeout=60,
     )
 
@@ -132,14 +122,14 @@ def _out(proc):
     return proc.stdout + proc.stderr
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_an_existing_apply_environment_passes(tmp_path):
     proc = _run_step(tmp_path, _listing(["dev-eu-plan", "dev-eu-apply"]), json.dumps(WAVES))
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "::notice::" in _out(proc)
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp_path):
     """Whole text on stderr, where SystemExit writes it: the action's own `echo` is stdout."""
     waves = {
@@ -161,7 +151,7 @@ def test_a_missing_environment_fails_the_run_naming_every_one_and_both_fixes(tmp
     )
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_failed_listing_fails_the_run_and_says_a_re_run_clears_it(tmp_path):
     proc = _run_step(tmp_path, _listing([]), json.dumps(WAVES), gh_exit=1)
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
@@ -172,21 +162,21 @@ def test_a_failed_listing_fails_the_run_and_says_a_re_run_clears_it(tmp_path):
     )
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_truncated_listing_fails_the_run_through_the_step(tmp_path):
     proc = _run_step(tmp_path, _listing(["dev-eu-apply"], total=200), json.dumps(WAVES))
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "truncated" in _out(proc)
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_unparseable_waves_json_fails_the_run(tmp_path):
     proc = _run_step(tmp_path, _listing(["dev-eu-apply"]), "not json")
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert "did not parse as JSON" in _out(proc)
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_shared_env_is_satisfied_by_the_bare_environment(tmp_path):
     # The other half of the branch: with dev-eu shared, `dev-eu-apply` need not exist and
     # `dev-eu` must.

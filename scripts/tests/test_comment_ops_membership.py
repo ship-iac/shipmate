@@ -7,10 +7,9 @@ the reverse is a bypass.
 """
 
 import re
-import subprocess
 
 import pytest
-from _loader import action_steps, usable_bash
+from _loader import action_steps, bash_only, run_step
 
 _START = "state=$(GH_TOKEN="
 _PIPE = re.compile(r"(?<!\|)\|(?!\|)")
@@ -46,9 +45,6 @@ def test_membership_read_is_not_a_pipeline():
     )
 
 
-bash_only = pytest.mark.skipif(usable_bash() is None, reason="no working bash on PATH")
-
-
 def _decide(tmp_path, *, stdout, rc):
     """What the block writes to GITHUB_OUTPUT with `gh` stubbed to this answer."""
     out = tmp_path / "gh_output"
@@ -58,15 +54,7 @@ def _decide(tmp_path, *, stdout, rc):
         f"gh() {{ printf '%s\\n' {stdout!r} ; return {rc} ; }}\n"
         "APP_TOKEN=t OWNER=o TEAM=deployers USER=someone\n"
     ) + _membership_block()
-    script = tmp_path / "membership.sh"
-    script.write_text(harness, encoding="utf-8", newline="\n")
-    r = subprocess.run(
-        [usable_bash(), str(script)],
-        capture_output=True,
-        text=True,
-        env={"GITHUB_OUTPUT": str(out), "PATH": "/usr/bin:/bin"},
-        timeout=30,
-    )
+    r = run_step(tmp_path, harness, {"GITHUB_OUTPUT": str(out), "PATH": "/usr/bin:/bin"})
     assert r.returncode == 0, f"step died: {r.stdout!r} {r.stderr!r}"
     return out.read_text(encoding="utf-8").strip()
 

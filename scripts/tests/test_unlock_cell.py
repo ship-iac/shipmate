@@ -23,12 +23,9 @@ out of the file under test passes whatever that file says.
 
 import os
 import re
-import subprocess
 
-import pytest
-from _loader import ACTIONS, action_steps, action_yaml, step_by, usable_bash
+from _loader import ACTIONS, action_steps, action_yaml, bash_only, run_step, step_by
 
-_BASH = usable_bash()
 _ACTION = ACTIONS / "unlock-cell" / "action.yml"
 
 _WRAPPER = 'terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" --'
@@ -120,35 +117,29 @@ def _run_body(tmp_path, step_id, env, *, terramate_body="return 0"):
     the current shell, so an `exit` body would end the script there and every assertion would
     read an empty stdout as agreement. Returning leaves errexit to decide, which is the behaviour
     under test."""
-    assert _BASH is not None  # callers are skipif-gated; also narrows the type
-    script = tmp_path / f"{step_id}.sh"
     body = f"terramate() {{ {terramate_body} ; }}\n" + step_by(_ACTION, id=step_id)["run"]
-    script.write_text(body, encoding="utf-8", newline="\n")
     summary = tmp_path / "summary.md"
     summary.write_text("", encoding="utf-8")
-    full = dict(os.environ)
-    full["GITHUB_STEP_SUMMARY"] = str(summary)
-    full["GITHUB_OUTPUT"] = str(tmp_path / "out.txt")
-    full.update(env)
-    # encoding, not text=True: the messages carry an em dash, and the default locale decode
-    # mangles it into a mismatch that looks like a real diff.
-    r = subprocess.run(
-        [_BASH, str(script)], env=full, capture_output=True, encoding="utf-8", timeout=30
-    )
-    return r, summary.read_text(encoding="utf-8")
+    full = {
+        **os.environ,
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+        **env,
+    }
+    return run_step(tmp_path, body, full), summary.read_text(encoding="utf-8")
 
 
 _REPORT_ENV = {"STACK_NAME": "app", "ENV": "dev-eu"}
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_clean_probe_reports_no_lock_held(tmp_path):
     r, _ = _run_body(tmp_path, "report", {**_REPORT_ENV, "PROBE_STATUS": "0"})
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout.strip() == _NO_LOCK
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_failed_probe_with_no_lock_reports_undetermined_never_no_lock(tmp_path):
     """The distinction that must not collapse: telling an operator "no lock held" when the truth
     is "could not look" reads as a clean cell."""
@@ -167,7 +158,7 @@ _RELEASE_ENV = {
 }
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_the_release_notice_renders_the_optional_fields_when_present(tmp_path):
     r, summary = _run_body(
         tmp_path,
@@ -184,7 +175,7 @@ def test_the_release_notice_renders_the_optional_fields_when_present(tmp_path):
     assert _RELEASE_ENV["LOCK_ID"] in summary
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_the_release_notice_omits_the_optional_fields_when_blank(tmp_path):
     """`scripts/lock-info` blanks `created` and `operation` rather than rejecting a lock over a
     display-only field, so neither may be rendered unconditionally."""
@@ -197,7 +188,7 @@ def test_the_release_notice_omits_the_optional_fields_when_blank(tmp_path):
     assert _RELEASE_ENV["LOCK_ID"] in summary
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_failed_force_unlock_fails_the_cell(tmp_path):
     """Finding a lock and failing to release it is a real failure: the operator must not read a
     green cell as a released lock."""

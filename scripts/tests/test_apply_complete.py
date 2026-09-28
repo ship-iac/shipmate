@@ -5,12 +5,10 @@ import os
 import subprocess
 import sys
 
-import pytest
-from _loader import ENGINE, SCRIPTS, action_steps, load_script, usable_bash
+from _loader import ENGINE, SCRIPTS, action_steps, bash_only, load_script, run_step
 
 apply_complete = load_script("apply-complete")
 
-_BASH = usable_bash()
 
 SNAP = {
     "stacks/dns\x00dev-eu": [1],
@@ -296,15 +294,6 @@ def _jsonl(jobs):
     return "".join(json.dumps(j) + "\n" for j in jobs)
 
 
-def _run_body(tmp_path, body, env):
-    assert _BASH is not None  # Callers are skipif-gated on this, and it narrows the type.
-    script = tmp_path / f"step-{abs(hash(body)) % 10**8}.sh"
-    script.write_text(GH_STUB + body, encoding="utf-8", newline="\n")
-    return subprocess.run(
-        [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120
-    )
-
-
 def _select(tmp_path, listings, snapshot=None):
     """Execute the selection step with `listings[n]` served on attempt n.
 
@@ -336,7 +325,7 @@ def _select(tmp_path, listings, snapshot=None):
         "ATTEMPT": str(tmp_path / "attempt").replace("\\", "/"),
         "PYEXE": sys.executable.replace("\\", "/"),
     }
-    proc = _run_body(tmp_path, _loop_body(), env)
+    proc = run_step(tmp_path, GH_STUB + _loop_body(), env, timeout=120)
     ids = (runner_temp / "complete-ids.txt").read_text(encoding="utf-8").split()
     attempts = int((tmp_path / "attempt").read_text(encoding="utf-8"))
     return proc, ids, attempts, env
@@ -346,7 +335,7 @@ def _all_success(*cells):
     return _jsonl([job(f"L0 / apply / {c} / dev-eu", "success") for c in cells])
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_the_listing_is_refetched_on_every_attempt(tmp_path):
     # The property that makes this a retry at all: hoisting the fetch above the `for` re-reads
     # one frozen snapshot twelve times and sleeps 110s over it.
@@ -365,7 +354,7 @@ def test_the_listing_is_refetched_on_every_attempt(tmp_path):
     assert sorted(ids) == ["11", "22", "33"]
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_an_empty_listing_is_retried_rather_than_failed_on_the_first_attempt(tmp_path):
     proc, ids, attempts, _ = _select(tmp_path, ["", "", _all_success("dns", "app", "web")])
     assert proc.returncode == 0, proc.stderr
@@ -373,7 +362,7 @@ def test_an_empty_listing_is_retried_rather_than_failed_on_the_first_attempt(tmp
     assert sorted(ids) == ["11", "22", "33"]
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_failed_fetch_never_feeds_its_half_written_file_to_the_selection(tmp_path):
     # A truncated listing matches a subset of cells, so it slips past the all-cells-unmatched
     # floor and completes only the rows that survived.
@@ -383,7 +372,7 @@ def test_a_failed_fetch_never_feeds_its_half_written_file_to_the_selection(tmp_p
     assert sorted(ids) == ["11", "22", "33"]
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_listing_matching_no_cell_at_all_is_retried_and_completes_nothing_meanwhile(tmp_path):
     # The zero-match floor routed through the loop rather than around it.
     proc, ids, attempts, _ = _select(
@@ -394,7 +383,7 @@ def test_a_listing_matching_no_cell_at_all_is_retried_and_completes_nothing_mean
     assert sorted(ids) == ["11", "22", "33"]
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_an_id_earned_by_one_attempt_survives_a_staler_later_listing(tmp_path):
     # Replicas differ, so a later read can be missing a row an earlier one had. A later read
     # may add a completion; it may never revoke one.
@@ -411,7 +400,7 @@ def test_an_id_earned_by_one_attempt_survives_a_staler_later_listing(tmp_path):
     assert sorted(ids) == ["11", "22", "33"]
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_stranded(tmp_path):
     """One cell resolves, one is unmatched by skip-propagation, one never resolves. The earned
     id must still reach the PATCH step, the unmatched cell must be a warning rather than the
@@ -429,7 +418,7 @@ def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_
     assert proc.stderr.count("::warning::") == 1
     assert "app / dev-eu" in proc.stderr
 
-    fail = _run_body(tmp_path, _fail_body(), env)
+    fail = run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120)
     assert fail.returncode == 1
     errors = [ln for ln in fail.stdout.splitlines() if "::error::" in ln]
     assert len(errors) == 1
@@ -438,9 +427,9 @@ def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_
     assert "::warning::" not in errors[0]
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tmp_path):
     proc, ids, _, env = _select(tmp_path, [_all_success("dns", "app", "web")])
     assert proc.returncode == 0, proc.stderr
     assert sorted(ids) == ["11", "22", "33"]
-    assert _run_body(tmp_path, _fail_body(), env).returncode == 0
+    assert run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120).returncode == 0

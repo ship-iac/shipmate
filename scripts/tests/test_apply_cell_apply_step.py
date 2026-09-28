@@ -28,13 +28,9 @@ exits non-zero all the same and protects nothing.
 
 import hashlib
 import os
-import subprocess
 
 import pytest
-from _loader import action_steps, action_yaml, step_by, usable_bash
-
-_BASH = usable_bash()
-
+from _loader import action_steps, action_yaml, bash_only, run_step, step_by
 
 #: The four steps the apply half of the cell is split across, in the order the runner executes
 #: them. The three ahead of the apply each carry a blocked reason of their own -- a wiring slip, a
@@ -110,7 +106,6 @@ def _run_step(
     The script runs in its own empty directory, standing in for the consumer's checkout: the
     action must leave nothing at its root, and pytest's own cwd is the engine tree.
     """
-    assert _BASH is not None  # callers are skipif-gated on this; narrows the type too
     # The four step bodies concatenated in runner order. They are separate steps so that each
     # refusal carries its own blocked reason, but composite-action steps share one workspace and
     # run in sequence, so one script under one set of stubs is what they amount to at runtime.
@@ -124,33 +119,26 @@ def _run_step(
         f"tofu() {{ {tofu_body} ; }}\n"
         f"tee() {{ {tee_body} ; }}\n"
     ) + run
-    script = tmp_path / "step.sh"
-    script.write_text(harness, encoding="utf-8", newline="\n")
     runner_temp = tmp_path / "rt"
     runner_temp.mkdir()
     checkout = tmp_path / "checkout"
     checkout.mkdir()
-    env = dict(os.environ)
-    env["STACK"] = "stacks/app"
-    env["RUNNER_TEMP"] = str(runner_temp)
-    env["PLAN_SHA256"] = plan_sha256
-    env["ENV"] = "dev-eu"
-    env["STACK_NAME"] = "app"
-    return subprocess.run(
-        [_BASH, str(script)],
-        env=env,
-        cwd=str(checkout),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    env = {
+        **os.environ,
+        "STACK": "stacks/app",
+        "RUNNER_TEMP": str(runner_temp),
+        "PLAN_SHA256": plan_sha256,
+        "ENV": "dev-eu",
+        "STACK_NAME": "app",
+    }
+    return run_step(tmp_path, harness, env, cwd=checkout)
 
 
 def _ran(tmp_path, marker):
     return (tmp_path / "rt" / marker).exists()
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_successful_apply_survives_a_failing_tee(tmp_path):
     # tee copies the output but reports failure, a disk-full write for instance. The apply itself
     # was fine.
@@ -162,7 +150,7 @@ def test_successful_apply_survives_a_failing_tee(tmp_path):
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_failed_apply_still_fails_the_step_even_if_tee_succeeds(tmp_path):
     # The pending-check invariant: a real apply failure must still fail the step, leaving the
     # apply check pending, regardless of tee's own outcome.
@@ -174,7 +162,7 @@ def test_failed_apply_still_fails_the_step_even_if_tee_succeeds(tmp_path):
     assert r.returncode == 7, f"stdout={r.stdout!r} stderr={r.stderr!r}"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_failed_apply_and_failed_tee_still_fails_the_step(tmp_path):
     r = _run_step(
         tmp_path,
@@ -184,7 +172,7 @@ def test_failed_apply_and_failed_tee_still_fails_the_step(tmp_path):
     assert r.returncode == 7, f"stdout={r.stdout!r} stderr={r.stderr!r}"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_failed_init_fails_the_step_before_the_apply(tmp_path):
     """init runs outside the pipeline, and errexit must stop the step there rather than fall
     through to an apply of a plan against an uninitialized directory. On the runner errexit comes
@@ -217,7 +205,7 @@ def test_the_action_declares_a_plan_sha256_input():
     )
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_an_empty_plan_sha256_refuses_before_init(tmp_path):
     """An unwired input arrives empty -- `required: true` is not enforced for a composite action --
     and must be refused before any work, `init` included. Asserted on the init marker, because
@@ -232,7 +220,7 @@ def test_an_empty_plan_sha256_refuses_before_init(tmp_path):
     assert not _ran(tmp_path, "init-ran"), "init ran before the digest shape was checked"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 @pytest.mark.parametrize(
     "digest",
     ["a" * 63, "a" * 65, "A" * 64, "z" * 64],
@@ -252,14 +240,14 @@ def test_a_malformed_plan_sha256_refuses_before_init(tmp_path, digest):
     assert not _ran(tmp_path, "init-ran"), "init ran before the digest shape was checked"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_matching_render_reaches_the_apply(tmp_path):
     r = _run_step(tmp_path, terramate_body="echo applied ; exit 0", tee_body='cat > "$1"')
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert _ran(tmp_path, "apply-ran"), "the apply was skipped for a plan that renders as reviewed"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_a_mismatched_render_refuses_and_never_applies(tmp_path):
     """The stored plan renders to text other than the reviewed one. Nothing may be applied: a
     warning here would be this step's only fail-open check."""
@@ -273,7 +261,7 @@ def test_a_mismatched_render_refuses_and_never_applies(tmp_path):
     assert not _ran(tmp_path, "apply-ran"), "applied a plan whose text was never reviewed"
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash not installed")
+@bash_only
 def test_the_render_lands_in_runner_temp_and_not_the_checkout(tmp_path):
     """The action runs in the consumer's checkout and must leave nothing at its root."""
     r = _run_step(tmp_path, terramate_body="echo applied ; exit 0", tee_body='cat > "$1"')
