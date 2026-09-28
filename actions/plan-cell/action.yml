@@ -38,12 +38,12 @@ runs:
       run: |
         set -euo pipefail
         if [ -z "${EXPECTED_HEAD:-}" ]; then
-          echo "::error::plan-cell needs the expected-head input — the commit this run is planning, usually the pull request's head SHA. Add it to the plan-cell step of your plan workflow (docs/getting-started.md). Refusing rather than publishing a plan whose provenance is unrecorded."
+          echo "::error::plan-cell needs the expected-head input — the commit this run is planning — and it is empty. The engine's plan workflow supplies it, so no consumer setting causes this. Report it with this run's link through the bug report template."
           exit 1
         fi
         observed=$(git rev-parse HEAD)
         if [ "$observed" != "$EXPECTED_HEAD" ]; then
-          echo "::error::plan-cell has $observed checked out but this run reports $EXPECTED_HEAD as the commit it is planning. The plan would describe a tree nobody reviewed — name the head SHA on the checkout step."
+          echo "::error::plan-cell has $observed checked out but this run reports $EXPECTED_HEAD as the commit it is planning. The plan would describe a tree nobody reviewed — the checkout ref is not the planned commit. The engine's plan workflow supplies it, so no consumer setting causes this. Report it with this run's link through the bug report template."
           exit 1
         fi
         echo "head=$observed" >> "$GITHUB_OUTPUT"

@@ -110,7 +110,11 @@ def _run_record(tmp_path, *, planned_head):
 def test_an_empty_expected_head_is_refused_and_emits_nothing(tmp_path):
     r, written = _run_planned(tmp_path, expected_head="")
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert "expected-head" in r.stdout, r.stdout
+    assert r.stdout.strip() == (
+        "::error::plan-cell needs the expected-head input — the commit this run is planning — "
+        "and it is empty. The engine's plan workflow supplies it, so no consumer setting causes "
+        "this. Report it with this run's link through the bug report template."
+    )
     # Nothing emitted: a downstream step reading an output that was never set gets the empty
     # string, which `record-head` refuses, but only if this step wrote no plausible value first.
     assert written == "", written
@@ -120,7 +124,12 @@ def test_an_empty_expected_head_is_refused_and_emits_nothing(tmp_path):
 def test_a_head_the_step_did_not_check_out_is_refused_naming_both_commits(tmp_path):
     r, written = _run_planned(tmp_path, expected_head=_OTHER_SHA, rev_parse=_SHA)
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert _SHA in r.stdout and _OTHER_SHA in r.stdout, r.stdout
+    assert r.stdout.strip() == (
+        f"::error::plan-cell has {_SHA} checked out but this run reports {_OTHER_SHA} as the "
+        "commit it is planning. The plan would describe a tree nobody reviewed — the checkout "
+        "ref is not the planned commit. The engine's plan workflow supplies it, so no consumer "
+        "setting causes this. Report it with this run's link through the bug report template."
+    )
     assert written == "", written
 
 

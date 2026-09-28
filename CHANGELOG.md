@@ -8,6 +8,21 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Added
+
+- **A cell refuses `SHIPMATE_APP_PRIVATE_KEY` and `SHIPMATE_PLAN_PASSPHRASE` set as GitHub
+  variables.**
+
+### Changed
+
+- **`onboard` creates the gate ruleset once `.github/workflows/shipmate.yml` is on the default
+  branch**, so the first pull request merges without a bypass.
+- **`onboard` renders the repository's default branch into `push: branches`.**
+- **`onboard` qualifies the reviewer step on private repositories.**
+- **Four error messages name the current cause.**
+
 ## [0.40.0] — 2026-09-28
 
 Tags `30ba9e7`.
