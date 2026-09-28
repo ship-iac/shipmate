@@ -11,11 +11,18 @@ sample repos' CI remains the executed copy of record that proves a documented wo
 """
 
 import re
-import textwrap
 
 import pytest
 import yaml
-from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, load_script, workflow_yaml
+from _loader import (
+    ENGINE,
+    ENGINE_CALL_SECRETS,
+    WORKFLOWS,
+    assert_every_fence_discovered,
+    doc_fences,
+    load_script,
+    workflow_yaml,
+)
 
 DOCS = ENGINE / "docs"
 
@@ -30,39 +37,17 @@ _FENCE = load_script("onboard")._FENCE
 _OPENER = re.compile(r"^[ \t]*```ya?ml\b", re.M)
 
 
-def _fences():
-    """Every fence as (page, 1-based line of its opening ```yaml, dedented body).
-
-    Discovery is by glob, so a page added later is covered without editing this file, and
-    indented fences, those inside a list item, are dedented rather than skipped: a fence this
-    misses is a fence nothing checks.
-    """
-    for page in _PAGES:
-        text = page.read_text(encoding="utf-8")
-        for m in _FENCE.finditer(text):
-            yield page, text[: m.start()].count("\n") + 1, textwrap.dedent(m.group("body"))
-
-
-_FENCES = list(_fences())
+# Discovery is by glob, so a page added later is covered without editing this file.
+_FENCES = list(doc_fences(_PAGES, _FENCE))
 
 
 def test_every_fence_was_discovered():
     """No fence is silently dropped: _FENCE pairs as many as the pages open.
 
-    _FENCE skips whatever it cannot pair, so a relabelled opener, an info string, or a mangled
-    closing delimiter would drop a fence out of the parametrization and leave the suite green
-    over an unchecked workflow.
+    Mutation: write ```yml for one opener -- `_OPENER` still counts it and `_FENCE` no longer
+    pairs it.
     """
-    openers = sum(len(_OPENER.findall(p.read_text(encoding="utf-8"))) for p in _PAGES)
-    # A discovery bug that finds nothing parametrizes zero cases and checks nothing, which is
-    # green either way without this.
-    assert openers > 0, "found no ```yaml fence openers in README.md + docs/*.md"
-    assert len(_FENCES) == openers, (
-        f"{openers} ```yaml fence openers in README.md + docs/*.md but only "
-        f"{len(_FENCES)} paired into checkable fences -- the unpaired ones are "
-        "not parsed by anything (relabelled opener, info string, or a broken "
-        "closing delimiter)"
-    )
+    assert_every_fence_discovered(_PAGES, _FENCES, _OPENER, "yaml")
 
 
 @pytest.mark.parametrize(

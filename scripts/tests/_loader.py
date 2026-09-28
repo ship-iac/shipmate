@@ -29,6 +29,7 @@ import functools
 import pathlib
 import shutil
 import subprocess
+import textwrap
 
 import pytest
 import yaml
@@ -157,6 +158,41 @@ def run_lines(step):
         for ln in (step.get("run") or "").splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
+
+
+def doc_fences(pages, fence):
+    """Every code fence ``fence`` pairs in ``pages``, as (page, 1-based line of its opener,
+    dedented body).
+
+    ``fence`` is the caller's compiled pattern with a ``body`` group, because what counts as a
+    fence differs per language and, for ```yaml, is owned by ``scripts/onboard``. Indented
+    fences, those inside a list item, are dedented rather than skipped: a fence this misses is a
+    fence nothing checks.
+    """
+    for page in pages:
+        text = page.read_text(encoding="utf-8")
+        for m in fence.finditer(text):
+            yield page, text[: m.start()].count("\n") + 1, textwrap.dedent(m.group("body"))
+
+
+def assert_every_fence_discovered(pages, fences, opener, lang):
+    """Fail unless ``fences`` holds one entry per ``opener`` match in ``pages``.
+
+    A fence pattern skips whatever it cannot pair, so a relabelled opener, an info string or a
+    mangled closing delimiter would drop a fence out of a parametrization and leave the suite
+    green over an unchecked example. ``opener`` counts openers as a reader sees them, not as the
+    fence pattern pairs them.
+    """
+    where = " + ".join(p.relative_to(ENGINE).as_posix() for p in pages)
+    openers = sum(len(opener.findall(p.read_text(encoding="utf-8"))) for p in pages)
+    # A discovery bug that finds nothing parametrizes zero cases and checks nothing, which is
+    # green either way without this.
+    assert openers > 0, f"found no ```{lang} fence openers in {where}"
+    assert len(fences) == openers, (
+        f"{openers} ```{lang} fence openers but only {len(fences)} paired into checkable "
+        "fences -- the unpaired ones are not parsed by anything (relabelled opener, info "
+        f"string, or a broken closing delimiter); pages: {where}"
+    )
 
 
 @functools.cache
