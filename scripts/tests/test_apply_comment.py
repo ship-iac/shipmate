@@ -26,6 +26,13 @@ def _cell(**kw):
     return base
 
 
+def _write_cell(cells_dir, env, slug, cell):
+    d = cells_dir / f"apply-summary.{env}.{slug}"
+    d.mkdir(parents=True)
+    (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
+    return d
+
+
 def _row(**kw):
     base = {
         "environment": "dev-eu",
@@ -374,29 +381,23 @@ def test_resources_ignores_embedded_lookalike_in_later_output_line():
 
 
 def test_load_cells_fails_loud_on_missing_schema_key(tmp_path):
-    d = tmp_path / "apply-summary.dev-eu.stacks-app"
-    d.mkdir()
     bad = _cell()
     del bad["reason"]
-    (d / "cell.json").write_text(json.dumps(bad))
+    _write_cell(tmp_path, "dev-eu", "stacks-app", bad)
     with pytest.raises(SystemExit, match="reason"):
         ac.load_cells(str(tmp_path))
 
 
 def test_load_cells_fails_loud_on_wrong_type(tmp_path):
-    d = tmp_path / "apply-summary.dev-eu.stacks-app"
-    d.mkdir()
     bad = _cell(reason=123)
-    (d / "cell.json").write_text(json.dumps(bad))
+    _write_cell(tmp_path, "dev-eu", "stacks-app", bad)
     with pytest.raises(SystemExit, match="reason"):
         ac.load_cells(str(tmp_path))
 
 
 def test_load_cells_fails_loud_on_out_of_enum_result(tmp_path):
-    d = tmp_path / "apply-summary.dev-eu.stacks-app"
-    d.mkdir()
     bad = _cell(result="cancelled")
-    (d / "cell.json").write_text(json.dumps(bad))
+    _write_cell(tmp_path, "dev-eu", "stacks-app", bad)
     with pytest.raises(SystemExit, match="result"):
         ac.load_cells(str(tmp_path))
 
@@ -443,9 +444,7 @@ def test_read_tail_tolerates_non_utf8_byte(tmp_path):
 def test_load_cells_preserves_trailing_error_in_huge_failed_apply(tmp_path):
     # A long failed apply whose fatal diagnostic is the very last line: head-first
     # reading or truncation drops it entirely.
-    d = tmp_path / "apply-summary.dev-eu.stacks-app"
-    d.mkdir()
-    (d / "cell.json").write_text(json.dumps(_cell(result="failed")))
+    d = _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(result="failed"))
     body = "\n".join("Still creating..." for _ in range(6_000))
     text = body + "\nError: Provider produced inconsistent result after apply\n"
     assert len(text) > 100_000
@@ -459,9 +458,7 @@ def test_load_cells_preserves_trailing_error_in_huge_failed_apply(tmp_path):
 
 
 def test_load_cells_reads_resources_line_from_large_successful_apply(tmp_path):
-    d = tmp_path / "apply-summary.dev-eu.stacks-app"
-    d.mkdir()
-    (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    d = _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(result="applied"))
     noise = "\n".join(f"aws_instance.node[{i}]: Creation complete" for i in range(3_000))
     text = noise + "\nApply complete! Resources: 1200 added, 0 changed, 0 destroyed.\n"
     assert len(text) > 60_000
@@ -472,9 +469,7 @@ def test_load_cells_reads_resources_line_from_large_successful_apply(tmp_path):
 
 
 def test_load_cells_tolerates_non_utf8_byte_in_apply_txt(tmp_path):
-    d = tmp_path / "apply-summary.dev-eu.stacks-app"
-    d.mkdir()
-    (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    d = _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(result="applied"))
     (d / "apply.txt").write_bytes(
         b"Apply complete! Resources: 1 added, 0 changed, 0 destroyed.\n"
         b"trailer with a bad byte: \xff\n"
@@ -488,9 +483,7 @@ def test_load_cells_tolerates_non_utf8_byte_in_apply_txt(tmp_path):
 def test_load_cells_strips_ansi_from_realistic_apply_output(tmp_path):
     # `tofu init`/`apply` stdout+stderr teed raw (no -no-color) carries SGR colour codes,
     # which must not survive into the rendered comment as literal garbage in the fence.
-    d = tmp_path / "apply-summary.dev-eu.stacks-auth"
-    d.mkdir()
-    (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    d = _write_cell(tmp_path, "dev-eu", "stacks-auth", _cell(result="applied"))
     text = (
         "/stacks/auth (script:1 job:0.0)> tofu init -input=false\n"
         "\x1b[0m\x1b[1m\n"
@@ -513,9 +506,7 @@ def test_load_cells_ansi_strip_happens_before_fence_is_computed(tmp_path):
     runs of 50 raw and one run of 100 stripped, so a pre-strip fence of 51 would be strictly shorter
     than the run it must delimit. A 2-backtick merge alone proves too little: it still fits under
     the minimum 3-backtick fence."""
-    d = tmp_path / "apply-summary.dev-eu.stacks-auth"
-    d.mkdir()
-    (d / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    d = _write_cell(tmp_path, "dev-eu", "stacks-auth", _cell(result="applied"))
     # The trailing "x" keeps the merged run's line from being a pure-backtick line, which
     # would masquerade as a third delimiter line to `_fence_delimiter_lines` -- the same
     # caveat as test_fence_escape_attempt_cannot_break_out_of_fence.
@@ -551,22 +542,15 @@ def test_resources_parses_colour_wrapped_apply_complete_line():
 
 
 def test_load_cells_reads_apply_text_only_when_present(tmp_path):
-    attempted = tmp_path / "apply-summary.dev-eu.stacks-app"
-    attempted.mkdir()
-    (attempted / "cell.json").write_text(json.dumps(_cell(result="applied")))
+    attempted = _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(result="applied"))
     (attempted / "apply.txt").write_text("output here")
-    blocked = tmp_path / "apply-summary.dev-us.stacks-db"
-    blocked.mkdir()
-    (blocked / "cell.json").write_text(
-        json.dumps(
-            _cell(
-                stack="db",
-                stack_path="stacks/db",
-                environment="dev-us",
-                result="blocked",
-                reason="x",
-            )
-        )
+    _write_cell(
+        tmp_path,
+        "dev-us",
+        "stacks-db",
+        _cell(
+            stack="db", stack_path="stacks/db", environment="dev-us", result="blocked", reason="x"
+        ),
     )
     cells = ac.load_cells(str(tmp_path))
     texts = {c["stack_path"]: t for c, t in cells}
@@ -1414,13 +1398,6 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     row = _row(environment="dev-eu", stack_path="stacks/app")
     jobs = [_job("post-merge / L0 / apply / stacks/app / dev-eu", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
-
-
-def _write_cell(cells_dir, env, slug, cell):
-    d = cells_dir / f"apply-summary.{env}.{slug}"
-    d.mkdir(parents=True)
-    (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
-    return d
 
 
 def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
