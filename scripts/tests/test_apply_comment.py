@@ -4,6 +4,7 @@ import pathlib
 import re
 
 import pytest
+import yaml
 from _loader import ENGINE as _ENGINE
 from _loader import load_script
 
@@ -1379,12 +1380,19 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     """Coupling: `_job_url` resolves a row's log link by matching the apply check name as a `/
     `-boundary suffix of the run's job names, which works only because every wave job's `name:` is
     byte-identical to that check name. Nothing else enforces it, and a rename downgrades every link
-    to the run URL -- the documented degradation, so no test fails on it."""
-    src = (_ENGINE / ".github" / "workflows" / "apply-env-level.yml").read_text(encoding="utf-8")
-    names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("name: apply / ")]
-    expected = "name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}"
+    to the run URL -- the documented degradation, so no test fails on it.
+
+    Mutation: change the `apply / ...` literal on wave0's `name: &wave-name`, or replace one wave's
+    `name: *wave-name` or `steps: *wave-steps` with a variant, or feed apply-cell's `stack:` from
+    another matrix key."""
+    jobs = yaml.safe_load(
+        (_ENGINE / ".github" / "workflows" / "apply-env-level.yml").read_text(encoding="utf-8")
+    )["jobs"]
+    expected = "apply / ${{ matrix.stack }} / ${{ matrix.environment }}"
     # Width from waves.MAX_WAVES, so a bump cannot leave this asserting the old count.
     max_waves = wv.MAX_WAVES
+    waves = [f"wave{i}" for i in range(max_waves)]
+    names = [jobs[w].get("name") for w in waves]
     assert names == [expected] * max_waves, (
         f"all {max_waves} wave job display names must stay byte-identical to the "
         "'apply / <stack path> / <env>' check-name grammar -- scripts/apply-comment's "
@@ -1393,12 +1401,12 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     # The two literals agree only if the wave job hands apply-cell the same matrix keys it
     # renders from.
     wired = [
-        ln.strip()
-        for ln in src.splitlines()
-        # Bare `env:` is the job-level env mapping, not the apply-cell input.
-        if ln.strip().startswith(("stack: ", "env: ")) and ln.strip() != "env:"
+        (step["with"]["stack"], step["with"]["env"])
+        for w in waves
+        for step in jobs[w]["steps"]
+        if str(step.get("uses", "")).endswith("/actions/apply-cell")
     ]
-    assert wired == ["stack: ${{ matrix.stack }}", "env: ${{ matrix.environment }}"] * max_waves, (
+    assert wired == [("${{ matrix.stack }}", "${{ matrix.environment }}")] * max_waves, (
         "every wave job must pass apply-cell the same matrix keys its display name "
         "renders (`stack: ${{ matrix.stack }}`, `env: ${{ matrix.environment }}`) -- "
         "apply-cell builds the check name from those two inputs, so a different "
