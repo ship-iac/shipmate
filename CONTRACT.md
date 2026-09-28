@@ -2321,14 +2321,21 @@ in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`, `targeted`
 and `all` jobs. Never `secrets: inherit`: it hands the engine the caller's whole
 secret set, and across an organization boundary it delivers nothing at all.
 
-Not an environment secret, and specifically not on `shipmate-engine`: a
-secret on one environment is released only to a job that *names* that
-environment, and a plan cell names its own plan environment instead. So a
-passphrase scoped to `shipmate-engine` resolves to empty at
-plan time and every later apply fails its plaintext-artifact check — the ref the
-plan run happens to be at is beside the point. Scoping it
-to a plan environment buys nothing either — those must have no branch policy at
-all (`docs/hardening.md` §6), so any branch's workflow can name one and read it.
+Not a variable and not an environment secret: a secret on one environment is
+released only to a job that *names* that environment, and a plan cell names its
+own plan environment. Every other placement fails:
+
+- **As a variable**, every cell refuses it by name (`scripts/env-inject`).
+- **As a secret on `shipmate-engine`**, no plan or apply cell binds that
+  environment, so the passphrase resolves to empty on both sides and plans
+  upload unencrypted with no message — the ref the plan run happens to be at
+  is beside the point.
+- **As a secret on `<env>-apply` alone**, the plan cell encrypts nothing and
+  every apply in that environment refuses its plaintext-artifact check.
+
+Scoping it to a plan environment buys nothing either — those must have no
+branch policy at all (`docs/hardening.md` §6), so any branch's workflow can
+name one and read it.
 Unlike the App private key, this secret must be readable wherever plans are
 produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
