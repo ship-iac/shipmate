@@ -73,8 +73,8 @@ nothing about the graph. Before that point the equivalent is
 `terramate experimental run-graph --label stack.dir` run locally.
 
 **Tags.** Environment membership is derived from `env/<name>` tags and nothing
-else. Terramate tags are otherwise free-form, so a repository that predates
-shipmate is likely using them for something unrelated.
+else; [Before you start](#before-you-start) covers re-tagging an existing
+repository.
 
 **A named AWS profile in generated HCL.** The apply path holds only the OIDC
 session, so a literal `profile` in a `provider` or `backend` block fails there
@@ -611,7 +611,8 @@ rules from Settings → Environments → `<name>` (or the API):
   unattended. On a private repository below Enterprise, GitHub refuses required
   reviewers and wait timers, so the apply gate is the ruleset's approving review
   and `[gate] approver_team`. Teams commonly gate production and leave dev
-  self-service; the maximally-hardened position gates every apply environment.
+  self-service; the maximally-hardened position gates every apply environment
+  where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
 - **Pair a reviewer-gated environment with `explicit = true` in
@@ -731,8 +732,8 @@ matches a check-run. The ruleset must also pin `integration_id` to the shipmate
 App's numeric id (`SHIPMATE_APP_ID`), so that a status of that name posted by any
 other identity does not satisfy the rule.
 
-[`branch-protection.md`](branch-protection.md) has the pasteable ruleset, the
-gate's state table, and the upgrade notes. Configure it from there.
+[`branch-protection.md`](branch-protection.md) has the pasteable ruleset and the
+gate's state table. Configure it from there.
 `scripts/onboard` creates a `shipmate-gate` ruleset carrying that one rule; the
 `pull_request`, `non_fast_forward` and `deletion` rules on that page stay a
 choice you make, so that a repository already carrying a `pull_request` rule
@@ -895,13 +896,13 @@ gated  = false
 Your workflow file needs no line for it, and neither does a repository setting.
 Comment-ops and both apply paths each resolve the flag themselves, from the file
 on your **default branch** — so an edit takes effect when it merges, and a pull
-request cannot exempt itself. Set it on no entry and *what applies* is
-unchanged: every environment keeps the ruleset's requirement.
+request cannot exempt itself. Set it on no entry and every environment keeps
+the ruleset's requirement.
 
 The second part is a pin. An apply is authorized by the engine
 `comment-ops.yml` the `comment-ops` job calls and enforced by the engine
 `apply.yml` and `apply-all.yml` the `targeted` and `all` jobs call, so those
-three pins must sit at the same release. An apply authorized under a newer pin
+three pins must sit at the same commit. An apply authorized under a newer pin
 than the engine that enforces it is enforced by nothing, so the `comment-ops`,
 `targeted` and `all` jobs keep one pin. One file carrying all seven pins is what
 makes that automatic: `dev/repin_consumer.py` moves them together.

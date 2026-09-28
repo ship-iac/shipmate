@@ -428,7 +428,7 @@ exempt itself from the review requirement or name the team that authorizes it.
 **The file must reach the default branch before the first plan run.** A pull
 request that only *adds* it is refused, because the branch its plan is compared
 against still has none. For a new consumer the file lands in the same commit as
-the workflow files, on the default branch.
+the workflow file, on the default branch.
 
 Every failure to read it refuses the run: unreachable `origin/<default>`, a
 failed `gh api` for the default-branch name, the file absent on the default
@@ -2118,8 +2118,7 @@ before the decrypt, the state restore and the apply — a plan of another tree i
 refused at the cheapest point. A record that disagrees with the checkout is
 refused, and so is an absent record: there is nothing to compare, so it is
 refused rather than tolerated. A mismatched engine pin is the usual cause of an
-absent record; the remedy is a re-plan. This
-is additive to the plan-run binding the apply path already carries: each cell's
+absent record; the remedy is to align the pins, then re-plan. This is additive to the plan-run binding the apply path already carries: each cell's
 plan run is read from an App-authored apply check on that same head, so no plan
 run from another head can be named. That binding bounds which plan run may be
 applied; this one binds each individual plan to the tree it was produced from.
@@ -2440,8 +2439,9 @@ TF_VAR fingerprint).
 **Consumer gitignore requirement.** A consuming repository must gitignore the
 per-run machine artifacts shipmate materializes in its working tree — the
 reviewed plan (`*.otplan`), the fingerprint (`fingerprint.txt`), the planned
-commit record (`planned-head.txt`), OpenTofu's working directory in each stack
-(`.terraform/`), and a local backend's state path (a non-local backend
+commit record (`planned-head.txt`), the rendered plan and cell summary
+(`plan.txt`, `plan.json`, `cell.json`), OpenTofu's working directory in each
+stack (`.terraform/`), and a local backend's state path (a non-local backend
 materializes none — see State backend, above). The reason is not a safeguard:
 shipmate writes into the consumer's own checkout, none of those belong in a
 commit, and a `terramate run` of the consumer's own that omits `--no-recursive`
