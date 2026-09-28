@@ -30,14 +30,18 @@ does with that wiring.
   ([`../CONTRACT.md`](../CONTRACT.md) §Consumption), not a repository variable.
 - **`gh` authenticated with admin on the repository.** Every tier creates
   environments, variables or rulesets.
+- **A GitHub plan that carries the controls you intend to use.** On a private
+  repository, environment required reviewers and wait timers need GitHub
+  Enterprise, and rulesets and environments need Pro, Team or Enterprise.
+  [`hardening.md`](hardening.md) §Plan prerequisites has the table.
 - **Remote state you control, or a local backend materialized in the working
   tree.** AWS S3 is what [`aws.md`](aws.md) covers.
 - **A `.gitignore` covering what shipmate writes into your working tree:**
-  `*.otplan`, `fingerprint.txt`, `planned-head.txt`, `.terraform/`, and a
-  local backend's state path. Left untracked, they show up as something
-  to commit, and a `terramate run` of your own that omits `--no-recursive`
-  refuses on them (`git-untracked`). [`../CONTRACT.md`](../CONTRACT.md)
-  §Consumer gitignore requirement is the rule.
+  `*.otplan`, `fingerprint.txt`, `planned-head.txt`, `plan.txt`, `plan.json`,
+  `cell.json`, `.terraform/`, and a local backend's state path. Left
+  untracked, they show up as something to commit, and a `terramate run` of
+  your own that omits `--no-recursive` refuses on them (`git-untracked`).
+  [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards states the rule.
 
 The four tiers are ordered and each depends on the one before. Tier 1 alone is
 not a working installation; read tier 2's first paragraphs before deciding to
@@ -166,10 +170,11 @@ what you are getting, and to configure a repository by hand instead.
 
 Every logical environment needs a GitHub Environment pair (`<env>-plan`,
 `<env>-apply`), plus the one fixed `shipmate-engine` environment that holds the
-App key ([`github-app.md`](github-app.md)) and the Slack webhook
-([`drift.md`](drift.md)). Neither half is ever named in workflow YAML: the
-logical env comes from Terramate stack tags at runtime, and detect adds the
-suffix when it stamps the cell's binding.
+App key ([`github-app.md`](github-app.md)) and the optional Slack webhook
+([`drift.md`](drift.md)); with no webhook set, no Slack message is sent.
+Neither half of a pair is ever named in workflow YAML: the logical env comes
+from Terramate stack tags at runtime, and detect adds the suffix when it stamps
+the cell's binding.
 
 This tier needs `<env>-plan` and `shipmate-engine`. `<env>-apply` is the apply
 tier's, but create it now anyway — unless that env shares one environment
@@ -251,9 +256,11 @@ creates all of them, including `shipmate-engine` and its branch policy:
   else.
 
   The same file carries `[gate]`, which names the team whose members may apply
-  and unlock by pull request comment and the environments that apply without an
-  approving review (§Required — apply). Put it above the first
-  `[environments.*]` header, with the other repository-wide settings:
+  and unlock by pull request comment. An environment applies without an
+  approving review through `gated = false` on its own `[environments.<name>]`
+  entry (§"Applying chosen environments without an approving review"). Put
+  `[gate]` above the first `[environments.*]` header, with the other
+  repository-wide settings:
 
   ```toml
   layout = "tf_vars"
@@ -283,7 +290,9 @@ creates all of them, including `shipmate-engine` and its branch policy:
   **The table has to be on the default branch before your first plan run.** The
   engine reads it from `origin/<default>`, so a pull request that only adds the
   table is refused by the branch it is compared against. Put it in the same
-  commit as the workflow file, on the default branch.
+  commit as the workflow file, on the default branch. That commit must change
+  no stack: its push to the default branch runs `deploy`, and a changed stack
+  there has no plan run to apply from, so that deploy fails.
 
 ### The workflow file
 
@@ -294,10 +303,10 @@ reusable workflow SHA-pinned. The jobs behind those calls — `facts`, `detect`,
 paths — live in the engine, so none of what they decide is wiring you can get
 wrong.
 
-The whole file goes in at tier 1, but only two of its jobs are this tier's: `plan`
-and `comment-ops`, which need `<env>-plan`, `shipmate-engine` and the App key and
-nothing else. The other five wait for the environments and secrets the apply tier
-creates.
+The whole file goes in at tier 1, but only three of its jobs are this tier's:
+`plan`, `comment-ops` and `drift`, which need `<env>-plan`, `shipmate-engine`
+and the App key and nothing else. The other four wait for the environments and
+secrets the apply tier creates.
 
 The plan triggers are `pull_request_target` for the automatic plan on every push
 to a pull request, and `workflow_dispatch` with `verb: plan` for the plan a
@@ -334,10 +343,11 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: apply` with no `environment` | `all` | `apply-all.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
-The engine's jobs run on `ubuntu-latest` unless a calling job passes a `runs_on:`
-input — the fence below omits it, as `repo-example-stacks-aws` does. Pass it
+Only the `plan` and `drift` jobs accept a `runs_on:` input; the engine's jobs
+behind every other call run on `ubuntu-latest`. The fence below omits it, as
+`repo-example-stacks-aws` does, so those two run on `ubuntu-latest` too. Pass it
 only for a different label your plan actually offers; one it does not leaves
-every job waiting for a runner that never arrives.
+every job of that call waiting for a runner that never arrives.
 
 ```yaml
 name: shipmate
@@ -598,15 +608,20 @@ rules from Settings → Environments → `<name>` (or the API):
   pauses for a named team, and that pause is the one gate an App installation
   token cannot forge, since a reviewer decision is a human action a minted
   token cannot take. Without them the tier is self-service and applies proceed
-  unattended. Teams commonly gate production and leave dev self-service; the
-  maximally-hardened position gates every apply environment.
+  unattended. On a private repository below Enterprise, GitHub refuses required
+  reviewers and wait timers, so the apply gate is the ruleset's approving review
+  and `[gate] approver_team`. Teams commonly gate production and leave dev
+  self-service; the maximally-hardened position gates every apply environment.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
 - **Pair a reviewer-gated environment with `explicit = true` in
   `.github/shipmate.toml`.**
   Set it on the bare env's entry (`[environments.prod]` — neither `prod-plan`
-  nor `prod-apply`). A bare `shipmate apply` then skips it, and it is only ever reached via the targeted
-  `shipmate apply prod`, which pauses for the environment reviewer.
+  nor `prod-apply`). A bare `shipmate apply` then skips it. While
+  `shipmate / gate` is a required check, it is only ever reached via the
+  targeted `shipmate apply prod`, which pauses for the environment reviewer;
+  without that check, a cell left pending at merge applies post-merge, because
+  the `deploy` job holds no environment back.
 
 ### The apply jobs
 
@@ -687,12 +702,14 @@ run with no job and no log.
 
 ### Consumers outside the engine's organization
 
-Nothing else changes. In particular the key placement does not: it stays a
-secret on your own `shipmate-engine` environment, with a deployment branch
-policy naming your default branch ([`github-app.md`](github-app.md) §5), and
-it never becomes a repository or organization secret. A called workflow's
-`environment:` resolves in the calling repository, so only the workflow *file*
-comes from the engine's organization — the credential never leaves yours.
+Register and install your own App in your own organization
+([`github-app.md`](github-app.md) steps 1–4). Nothing else changes. In
+particular the key placement does not: it stays a secret on your own
+`shipmate-engine` environment, with a deployment branch policy naming your
+default branch ([`github-app.md`](github-app.md) §5), and it never becomes a
+repository or organization secret. A called workflow's `environment:` resolves
+in the calling repository, so only the workflow *file* comes from the engine's
+organization — the credential never leaves yours.
 
 An environment's value also wins over whatever the caller passes, empty
 included. A calling job that binds no environment therefore passes
