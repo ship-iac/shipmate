@@ -552,7 +552,8 @@ def test_main_names_the_gated_envs_applied_with_no_review_required(
     not be named.
 
     Mutation: derive the set from `pending` instead of `runnable` -- prod-eu is named, red.
-    Mutation: compare `decision != "NONE"` -- both cases go red."""
+    Mutation: compare `decision != "NONE"` -- both cases go red.
+    Mutation: drop the `not in ungated` filter -- dev-us is named, the NONE case goes red."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
