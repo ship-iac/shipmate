@@ -46,23 +46,23 @@ jobs:
     needs: [snapshot]
     if: ${{ !failure() && !cancelled() && toJSON(fromJSON(inputs.waves_json).wave0) != '[]' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, actions: read, id-token: write }
+    permissions: &wave-permissions { contents: read, actions: read, id-token: write }
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave0 }}
-    environment: ${{ matrix.env_binding }}
-    concurrency:
+    environment: &wave-environment ${{ matrix.env_binding }}
+    concurrency: &wave-concurrency
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
-    steps:
+    name: &wave-name apply / ${{ matrix.stack }} / ${{ matrix.environment }}
+    steps: &wave-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
       - uses: $/actions/setup
       # The table chooses role and region; detect resolves a reference in it from a repository or
       # organization variable. A vars.* fallback would pick a role the table did not and stay green.
-      # Every wave job repeats this step unchanged (scripts/tests/test_aws_oidc_wiring_guard.py).
+      # wave1..wave7 alias this step list (scripts/tests/test_aws_oidc_wiring_guard.py).
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
@@ -84,247 +84,93 @@ jobs:
     needs: [wave0]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, actions: read, id-token: write }
+    permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave1 }}
-    environment: ${{ matrix.env_binding }}
-    concurrency:
-      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
-      cancel-in-progress: false
-    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: $/actions/setup
-      - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ matrix.role_arn != '' }}
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: ${{ matrix.role_arn }}
-          aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/apply-cell
-        with:
-          tf-vars: ${{ toJSON(matrix.tf_vars) }}
-          github-vars: ${{ toJSON(vars) }}
-          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          head-sha: ${{ inputs.head_sha }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    environment: *wave-environment
+    concurrency: *wave-concurrency
+    name: *wave-name
+    steps: *wave-steps
   wave2:
     needs: [wave0, wave1]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave2) != '[]' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, actions: read, id-token: write }
+    permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave2 }}
-    environment: ${{ matrix.env_binding }}
-    concurrency:
-      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
-      cancel-in-progress: false
-    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: $/actions/setup
-      - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ matrix.role_arn != '' }}
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: ${{ matrix.role_arn }}
-          aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/apply-cell
-        with:
-          tf-vars: ${{ toJSON(matrix.tf_vars) }}
-          github-vars: ${{ toJSON(vars) }}
-          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          head-sha: ${{ inputs.head_sha }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    environment: *wave-environment
+    concurrency: *wave-concurrency
+    name: *wave-name
+    steps: *wave-steps
   wave3:
     needs: [wave0, wave1, wave2]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave3) != '[]' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, actions: read, id-token: write }
+    permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave3 }}
-    environment: ${{ matrix.env_binding }}
-    concurrency:
-      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
-      cancel-in-progress: false
-    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: $/actions/setup
-      - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ matrix.role_arn != '' }}
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: ${{ matrix.role_arn }}
-          aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/apply-cell
-        with:
-          tf-vars: ${{ toJSON(matrix.tf_vars) }}
-          github-vars: ${{ toJSON(vars) }}
-          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          head-sha: ${{ inputs.head_sha }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    environment: *wave-environment
+    concurrency: *wave-concurrency
+    name: *wave-name
+    steps: *wave-steps
   wave4:
     needs: [wave0, wave1, wave2, wave3]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave4) != '[]' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, actions: read, id-token: write }
+    permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave4 }}
-    environment: ${{ matrix.env_binding }}
-    concurrency:
-      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
-      cancel-in-progress: false
-    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: $/actions/setup
-      - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ matrix.role_arn != '' }}
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: ${{ matrix.role_arn }}
-          aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/apply-cell
-        with:
-          tf-vars: ${{ toJSON(matrix.tf_vars) }}
-          github-vars: ${{ toJSON(vars) }}
-          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          head-sha: ${{ inputs.head_sha }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    environment: *wave-environment
+    concurrency: *wave-concurrency
+    name: *wave-name
+    steps: *wave-steps
   wave5:
     needs: [wave0, wave1, wave2, wave3, wave4]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave5) != '[]' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, actions: read, id-token: write }
+    permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave5 }}
-    environment: ${{ matrix.env_binding }}
-    concurrency:
-      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
-      cancel-in-progress: false
-    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: $/actions/setup
-      - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ matrix.role_arn != '' }}
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: ${{ matrix.role_arn }}
-          aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/apply-cell
-        with:
-          tf-vars: ${{ toJSON(matrix.tf_vars) }}
-          github-vars: ${{ toJSON(vars) }}
-          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          head-sha: ${{ inputs.head_sha }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    environment: *wave-environment
+    concurrency: *wave-concurrency
+    name: *wave-name
+    steps: *wave-steps
   wave6:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave6) != '[]' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, actions: read, id-token: write }
+    permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave6 }}
-    environment: ${{ matrix.env_binding }}
-    concurrency:
-      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
-      cancel-in-progress: false
-    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: $/actions/setup
-      - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ matrix.role_arn != '' }}
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: ${{ matrix.role_arn }}
-          aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/apply-cell
-        with:
-          tf-vars: ${{ toJSON(matrix.tf_vars) }}
-          github-vars: ${{ toJSON(vars) }}
-          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          head-sha: ${{ inputs.head_sha }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    environment: *wave-environment
+    concurrency: *wave-concurrency
+    name: *wave-name
+    steps: *wave-steps
   wave7:
     needs: [wave0, wave1, wave2, wave3, wave4, wave5, wave6]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave7) != '[]' }}
     runs-on: ubuntu-latest
-    permissions: { contents: read, actions: read, id-token: write }
+    permissions: *wave-permissions
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJSON(inputs.waves_json).wave7 }}
-    environment: ${{ matrix.env_binding }}
-    concurrency:
-      group: apply-${{ matrix.environment }}-${{ matrix.stack }}
-      cancel-in-progress: false
-    name: apply / ${{ matrix.stack }} / ${{ matrix.environment }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.head_sha }}" }
-      - uses: $/actions/setup
-      - name: Configure cloud credentials (AWS OIDC)
-        if: ${{ matrix.role_arn != '' }}
-        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
-        with:
-          role-to-assume: ${{ matrix.role_arn }}
-          aws-region: ${{ matrix.cred_region }}
-      - uses: $/actions/apply-cell
-        with:
-          tf-vars: ${{ toJSON(matrix.tf_vars) }}
-          github-vars: ${{ toJSON(vars) }}
-          consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          stack: ${{ matrix.stack }}
-          env: ${{ matrix.environment }}
-          head-sha: ${{ inputs.head_sha }}
-          plan-run-id: ${{ matrix.plan_run_id }}
-          plan-sha256: ${{ matrix.plan_sha256 }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+    environment: *wave-environment
+    concurrency: *wave-concurrency
+    name: *wave-name
+    steps: *wave-steps
 
   # Completes the checks the `snapshot` job captured, for every cell whose wave job succeeded in
   # this run. The only job in this workflow that holds the App key. Ordered after every wave, so

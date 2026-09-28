@@ -90,7 +90,7 @@ jobs:
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
-    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, id-token: write }
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
@@ -98,7 +98,7 @@ jobs:
     # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
     # `complete` job would hold no key, its applies would execute, and their apply checks would
     # strand pending forever.
-    secrets:
+    secrets: &envlevel-secrets
       # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
       # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
       # load-time error, unlike an undeclared action input, which is silently ignored.
@@ -111,42 +111,33 @@ jobs:
     needs: [guard, review, detect, envlevel0]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
-    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    permissions: *envlevel-permissions
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+    secrets: *envlevel-secrets
 
   envlevel2:
     name: L2
     needs: [guard, review, detect, envlevel0, envlevel1]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
-    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    permissions: *envlevel-permissions
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+    secrets: *envlevel-secrets
 
   envlevel3:
     name: L3
     needs: [guard, review, detect, envlevel0, envlevel1, envlevel2]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
-    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    permissions: *envlevel-permissions
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+    secrets: *envlevel-secrets
 
   summary:
     # `review` is in this list because `results:` is `join(needs.*.result, ',')`, which covers only
