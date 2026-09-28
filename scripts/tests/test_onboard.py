@@ -74,6 +74,7 @@ ENGINE_SECRETS = f"{ENGINE_PATH}/secrets?per_page=100"
 REPO_KEY_LIST = "gh secret list --json name"
 VARIABLE_LIST = "gh variable list --json name,value"
 RULES = "repos/o/r/rules/branches/main?per_page=100"
+REMOTE_SHIM = "repos/o/r/contents/.github/workflows/shipmate.yml?ref=main"
 CUSTOM_POLICY = {"protected_branches": False, "custom_branch_policies": True}
 
 
@@ -1012,7 +1013,9 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
 
     The engine environment exists with a null policy (the update path) and a
     repository-level copy of the key exists (the delete path); everything else is absent,
-    and the repository has no variable, no rule and no workflow file.
+    and the repository has no variable, no rule and no workflow file in the checkout. The
+    remote default branch holds one, or the ruleset POST would be deferred rather than
+    reached.
 
     Mutations, each proven: swap any one of the seven `write(...)` calls for a direct
     `_run(...)`, which appears in the call list below; and make `write_file` fall through to
@@ -1033,6 +1036,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
             "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": absent,
             VARIABLE_LIST: [],
             RULES: [],
+            REMOTE_SHIM: {"type": "file"},
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1055,6 +1059,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
         ["gh", "api", RULES],
+        ["gh", "api", REMOTE_SHIM],
     ]
     assert [verb for verb, _subject, _detail in onboard.REPORT] == [
         "would update",
@@ -1233,6 +1238,7 @@ FRESH_ROUTES = {
     "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": ABSENT,
     VARIABLE_LIST: [],
     RULES: [],
+    REMOTE_SHIM: ABSENT,
 }
 
 
@@ -1525,7 +1531,7 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
             "name=main",
         ],
         ["gh", "api", RULES],
-        ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"],
+        ["gh", "api", REMOTE_SHIM],
     ]
 
 
@@ -1706,13 +1712,17 @@ def test_missing_gate_rule_creates_the_ruleset(monkeypatch):
 
     The POST body is compared whole against a hand-written dict.
 
-    Mutation: drop `strict_required_status_checks_policy` from the body.
+    The workflow file is on the remote default branch here, so a pull request can
+    satisfy the gate and the ruleset is created.
+
+    Mutations: drop `strict_required_status_checks_policy` from the body; treat the
+    remote workflow file as always absent.
     """
-    fake = make_gh({RULES: []})
+    fake = make_gh({RULES: [], REMOTE_SHIM: {"type": "file"}})
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_ruleset(ctx(app_id="4326562"))
     post = ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"]
-    assert fake.calls == [["gh", "api", RULES], post]
+    assert fake.calls == [["gh", "api", RULES], ["gh", "api", REMOTE_SHIM], post]
     assert body_of(fake, post) == {
         "name": "shipmate-gate",
         "target": "branch",
@@ -1730,6 +1740,31 @@ def test_missing_gate_rule_creates_the_ruleset(monkeypatch):
             }
         ],
     }
+
+
+def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monkeypatch, tmp_path):
+    """`pull_request_target` runs the default branch's workflow file, so until that file
+    is merged no pull request can produce `shipmate / gate`, and a ruleset requiring it
+    blocks the pull request that adds the file. The checkout already holds the file here,
+    which is why the presence read must go to the remote default branch.
+
+    Mutation: treat the remote workflow file as always present.
+    """
+    shim = tmp_path / ".github" / "workflows" / "shipmate.yml"
+    shim.parent.mkdir(parents=True)
+    shim.write_text(onboard._render(ENGINE, "a" * 40, "v0.26.0"), encoding="utf-8", newline="\n")
+    fake, exit_ = run_main(monkeypatch, tmp_path, {}, [])
+    assert exit_.code == 0
+    assert [c for c in fake.calls if "repos/o/r/rulesets" in c] == []
+    assert [r for r in onboard.REPORT if r[1] == "gate ruleset"] == [
+        (
+            "deferred",
+            "gate ruleset",
+            "`.github/workflows/shipmate.yml` is not on main yet, so no pull request can "
+            "produce `shipmate / gate`. Merge the pull request that adds it, then run this "
+            "again to create the ruleset.",
+        )
+    ]
 
 
 def _rules(integration_id=1, strict=True):
@@ -2172,11 +2207,12 @@ _CHECKLIST_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-
 
 _CHECKLIST_TAIL = """  A CODEOWNERS entry covering /.github/workflows/.
 
-  Commit the workflow file and the table together and open the pull request; the
-  table is read from the default branch, so the first plan needs it merged.
-  `shipmate / gate` cannot be green on that one either: the workflows that produce
-  it are not on the default branch yet (CONTRACT.md §Post-plan topology). Merge it
-  with an administrative bypass.
+  Commit the workflow file and the table together, in a commit that changes no
+  stack, and open the pull request. The table is read from the default branch, so
+  the first plan needs it merged. Merge it: no ruleset requires `shipmate / gate`
+  yet, because the workflows that produce it are not on the default branch
+  (CONTRACT.md §Post-plan topology). Then run this script again to create the gate
+  ruleset.
 """
 
 SPLIT_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_REVIEWERS + _CHECKLIST_TAIL

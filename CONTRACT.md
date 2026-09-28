@@ -1501,8 +1501,9 @@ link falls back to the workflow-run page; `shipmate doctor` reports it.
 `pull_request_target` run uses the workflow file on the default branch. On the
 pull request that adds `shipmate.yml`, the default branch holds no file
 declaring the trigger, so that pull request produces no plan run and no
-`shipmate / gate`. Merge it
-with an administrative bypass and restore enforcement straight after; every pull
+`shipmate / gate`. `scripts/onboard` therefore creates the gate ruleset only
+once the file is on the remote default branch, so that pull request merges
+without one; re-running `onboard` after the merge creates it, and every pull
 request following it gates normally.
 
 For a repository migrating from another TACO, that same pull request is

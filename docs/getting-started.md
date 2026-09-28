@@ -133,7 +133,12 @@ It writes:
 - the `SHIPMATE_APP_ID` repository variable. It may instead be set once at the
   organization level and named in `--vars-at-org`, which skips writing it here
   ([`github-app.md`](github-app.md) §6);
-- a `shipmate-gate` ruleset requiring `shipmate / gate` under the App;
+- a `shipmate-gate` ruleset requiring `shipmate / gate` under the App, once
+  `.github/workflows/shipmate.yml` is on the default branch. Until then it reports
+  `deferred gate ruleset`: the first pull request, carrying that file, merges
+  normally because no ruleset requires the gate yet. Run the script again after
+  merging it to create the ruleset; until you do, `shipmate doctor` reports that
+  no active ruleset requires `shipmate / gate`;
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
 
@@ -292,7 +297,10 @@ creates all of them, including `shipmate-engine` and its branch policy:
   table is refused by the branch it is compared against. Put it in the same
   commit as the workflow file, on the default branch. That commit must change
   no stack: its push to the default branch runs `deploy`, and a changed stack
-  there has no plan run to apply from, so that deploy fails.
+  there has no plan run to apply from, so that deploy fails. The pull request
+  carrying it merges normally, because no ruleset requires `shipmate / gate`
+  yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
+  then `shipmate doctor` reports that no active ruleset requires the gate.
 
 ### The workflow file
 
