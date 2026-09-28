@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Changed
+
+- **A stack carrying two `workload/*` tags is refused at detect.**
+
 ## [0.41.0] — 2026-09-28
 
 Tags `7ff9345`.

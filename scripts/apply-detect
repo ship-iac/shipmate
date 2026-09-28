@@ -58,8 +58,8 @@ def cells_for_env(env, paths, tags_by_stack):
     carries no workload. A stack missing from the map carries "" and applies with
     the environment's generic role; the map itself is REQUIRED, so a caller that
     stops deriving it raises here instead of silently applying every cell with
-    the generic role."""
-    workloads = {p: bm.workload_of(tags_by_stack.get(p, [])) for p in paths}
+    the generic role. A stack carrying two `workload/*` tags refuses (`workload_of`)."""
+    workloads = {p: bm.workload_of(tags_by_stack.get(p, []), p) for p in paths}
     return [
         {
             "stack": p,

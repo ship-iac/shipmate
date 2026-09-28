@@ -897,6 +897,8 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 `workload/<name>` form. A stack may carry several `env/*` tags at once (for
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
+A stack carries at most one `workload/<name>` tag; a stack carrying two
+is refused at detect.
 
 Terramate refuses an uppercase letter in a tag, so an environment name is
 lowercase letters, digits, `-` and `_` — never uppercase. The `environments`

@@ -102,6 +102,52 @@ def test_nested_shipmate_stack_is_allowed():
     assert cells == [{"stack": "infra/shipmate", "environment": "dev-eu", "workload": ""}]
 
 
+_TWO_WORKLOADS_ERROR = (
+    "::error::stack 'stacks/dns' carries 2 workload tags (workload/net, workload/network), "
+    "and a stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` "
+    "and remove the rest."
+)
+
+
+def test_two_workload_tags_refuse_naming_the_stack_and_every_tag():
+    """Reddens on restoring the first-match `return` loop in `workload_of` (returns "net",
+    no SystemExit), and on any edit to the message: it is compared whole."""
+    with pytest.raises(SystemExit) as exc_info:
+        bm.workload_of(["env/dev-eu", "workload/net", "workload/network"], "stacks/dns")
+    assert exc_info.value.code == _TWO_WORKLOADS_ERROR
+
+
+def test_one_or_zero_workload_tags_keep_their_values():
+    """Reddens on `workload_of` returning "" unconditionally."""
+    assert bm.workload_of(["env/dev-eu", "workload/net"], "stacks/dns") == "net"
+    assert bm.workload_of(["env/dev-eu"], "stacks/dns") == ""
+
+
+def test_build_matrix_refuses_a_stack_with_two_workload_tags():
+    """Reddens on replacing the `workload_of` call in `build_matrix` with an inline first-match
+    over the tags, and on dropping the sort of the named tags (they arrive unsorted here)."""
+    with pytest.raises(SystemExit) as exc_info:
+        bm.build_matrix(
+            ["dev-eu"],
+            {"dev-eu": ["stacks/dns"]},
+            {"stacks/dns": ["workload/network", "env/dev-eu", "workload/net"]},
+        )
+    assert exc_info.value.code == _TWO_WORKLOADS_ERROR
+
+
+def test_apply_detect_cells_refuse_a_stack_with_two_workload_tags():
+    """Reddens on replacing the `workload_of` call in `apply-detect.cells_for_env` with an
+    inline first-match over the tags."""
+    ad = load_script("apply-detect")
+    with pytest.raises(SystemExit) as exc_info:
+        ad.cells_for_env(
+            "dev-eu",
+            ["stacks/dns"],
+            {"stacks/dns": ["env/dev-eu", "workload/net", "workload/network"]},
+        )
+    assert exc_info.value.code == _TWO_WORKLOADS_ERROR
+
+
 def test_list_stacks_changed_uses_changed_flag(monkeypatch):
     captured = {}
     monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or "stacks/a\n")

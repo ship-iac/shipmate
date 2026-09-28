@@ -39,8 +39,8 @@ def test_workset_forward_constructs_the_name_and_never_parses_it():
 def test_cells_take_the_workload_from_the_tags():
     """Never from the check name: the name carries no workload, and a cell that invented one
     from its path would assume the wrong environment role. A stack missing from the map carries
-    "", because the map comes from a separate terramate query and must never be able to raise
-    here."""
+    "", because the map comes from a separate terramate query and a missing entry must never be
+    able to raise here."""
     cells = ad.cells_for_env(
         "dev-eu",
         ["stacks/app", "stacks/dns"],
