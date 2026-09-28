@@ -546,7 +546,7 @@ def _footer_parts(
     form has no table.
 
     `review_not_required` names gated envs a null (`NONE`) decision authorized:
-    no branch rule requires an approving review, so `gated` enforced nothing. It
+    the pull request's review state required none, so `gated` enforced nothing. It
     is a different cause from `applied_ungated`, so it gets its own sentence,
     which states the authorization fact and never that nobody reviewed -- a
     code-owner review can still be required at count 0. `build_comment` narrows
@@ -582,8 +582,8 @@ def _footer_parts(
     if review_not_required:
         envs = ", ".join(f"`{sc._md_escape(e)}`" for e in review_not_required)
         lines.append(
-            f"No approving review was required to apply the gated environment(s) {envs}: no "
-            "branch rule on this repository requires one, so `gated` had nothing to enforce "
+            f"No approving review was required to apply the gated environment(s) {envs}: the "
+            "pull request's review state required none, so `gated` had nothing to enforce "
             "(docs/hardening.md #3–5)."
         )
     lines.append(_gate_sentence(gate))

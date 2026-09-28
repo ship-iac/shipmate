@@ -687,8 +687,8 @@ def test_comment_is_unchanged_when_held_and_ungated_are_empty():
 
 
 _NO_REVIEW_SENTENCE = (
-    "No approving review was required to apply the gated environment(s) `sbx`: no branch "
-    "rule on this repository requires one, so `gated` had nothing to enforce "
+    "No approving review was required to apply the gated environment(s) `sbx`: the pull "
+    "request's review state required none, so `gated` had nothing to enforce "
     "(docs/hardening.md #3–5)."
 )
 
@@ -727,6 +727,27 @@ def test_no_review_required_line_skips_an_env_whose_apply_never_ran():
         ["sbx"],
     )
     assert "No approving review was required" not in body
+
+
+@pytest.mark.parametrize("status", ["failed", "unrecorded"])
+def test_no_review_required_line_names_an_env_whose_apply_ran_without_applying(status):
+    """sbx's only row is `status`: apply ran there, so infrastructure may have changed.
+
+    Mutation: narrow the row filter in build_comment to `status == "applied"` -- red."""
+    body = ac.build_comment(
+        [_row(environment="sbx", status=status)],
+        [],
+        RUN_URL,
+        "pending",
+        [],
+        [],
+        "sbx",
+        "failure",
+        [],
+        [],
+        ["sbx"],
+    )
+    assert _NO_REVIEW_SENTENCE in body.split("\n\n")
 
 
 def test_main_reads_the_review_not_required_envs(monkeypatch, tmp_path):

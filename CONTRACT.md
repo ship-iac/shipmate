@@ -2046,7 +2046,7 @@ three review sentences (see §Comment-ops) are:
   it points at the run for what actually applied and reserves "applied" for
   the ✅ rows;
 - **no review required** — the gated environments a `NONE` decision
-  authorized: no branch rule on the repository requires an approving review, so
+  authorized: the pull request's review state required no approving review, so
   `gated` had nothing to enforce. It has its own cause, so it has its own detect
   output (`review_not_required_envs`, from both detects) rather than widening
   applied ungated. It renders in the targeted and the all-environments form, and
