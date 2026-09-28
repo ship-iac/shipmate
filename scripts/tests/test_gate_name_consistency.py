@@ -127,7 +127,8 @@ def test_gate_written_as_commit_status_not_check_run():
             assert "statuses/" in segment, (
                 f"{rel}: gate-writing step must POST to the commit statuses API: {segment!r}"
             )
-            for line in segment.splitlines():
+            # One logical shell line per entry, so a backslash-continued call is matched whole.
+            for line in segment.replace("\\\n", " ").splitlines():
                 assert not ("check-runs" in line and "gh api" in line), (
                     f"{rel}: gate POST still targets the check-runs API: {line.strip()}"
                 )

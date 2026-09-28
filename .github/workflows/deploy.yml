@@ -145,9 +145,8 @@ jobs:
             esac
           done
           # Commit status, not a check-run (see actions/summary for why).
-          desc="$title — deploy env-level applies completed"
           gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$concl" \
-            -f context="shipmate / gate" -f description="${desc:0:140}" \
+            -f context="shipmate / gate" -f description="$title — deploy env-level applies completed" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
       - name: Slack on failed deploy (outranks drift)
         if: ${{ always() && (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) }}

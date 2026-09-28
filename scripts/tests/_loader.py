@@ -157,10 +157,3 @@ def usable_bash():
         if probe.returncode == 0 and probe.stdout.strip() == "ok":
             return cand
     return None
-
-
-def gh_raw_fields(argv_file):
-    """The ``-f key=value`` pairs of one ``gh api`` call, from a stub that wrote its argv one
-    argument per line, as the dict of strings that call sends as its JSON body."""
-    args = pathlib.Path(argv_file).read_text(encoding="utf-8").splitlines()
-    return dict(args[i + 1].split("=", 1) for i, a in enumerate(args) if a == "-f")

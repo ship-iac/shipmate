@@ -15,7 +15,7 @@ import subprocess
 
 import pytest
 import yaml
-from _loader import WORKFLOWS, gh_raw_fields, usable_bash
+from _loader import WORKFLOWS, usable_bash
 
 _STEP = "Complete gate on the merged PR head SHA"
 _WRITE_MARKER = 'gh api "repos/$GITHUB_REPOSITORY/statuses/'
@@ -102,22 +102,30 @@ def test_verdict(results, expected):
     assert title == ("all env-levels applied" if expected == "success" else "deploy incomplete")
 
 
-#: The whole status each verdict posts, hand-written: a value read back from the step passes
-#: whatever the step says. The run link matches the GITHUB_* values `test_status_body` supplies.
-_RUN_URL = "https://example.invalid/acme/demo/actions/runs/999"
+_HEAD = "a" * 40
+
+
+def _status_argv(state, title):
+    return [
+        "api",
+        f"repos/acme/demo/statuses/{_HEAD}",
+        "-f",
+        f"state={state}",
+        "-f",
+        "context=shipmate / gate",
+        "-f",
+        f"description={title} — deploy env-level applies completed",
+        "-f",
+        "target_url=https://example.invalid/acme/demo/actions/runs/999",
+    ]
+
+
+#: The whole `gh` argv each verdict sends, hand-written: a value read back from the step passes
+#: whatever the step says. Pins the endpoint, the method (POST, implied by the fields) and every
+#: field. The values match the env `test_status_body` supplies.
 _POSTED = {
-    "success": {
-        "state": "success",
-        "context": "shipmate / gate",
-        "description": "all env-levels applied — deploy env-level applies completed",
-        "target_url": _RUN_URL,
-    },
-    "failure,success": {
-        "state": "failure",
-        "context": "shipmate / gate",
-        "description": "deploy incomplete — deploy env-level applies completed",
-        "target_url": _RUN_URL,
-    },
+    "success": _status_argv("success", "all env-levels applied"),
+    "failure,success": _status_argv("failure", "deploy incomplete"),
 }
 
 
@@ -125,7 +133,8 @@ _POSTED = {
 @pytest.mark.parametrize("results", sorted(_POSTED))
 def test_status_body(tmp_path, results):
     """The whole step runs with `gh` stubbed to record its argv. Mutations: drop the description
-    suffix; post `context="shipmate/gate"`; post `-F` for any field."""
+    suffix; post `context="shipmate/gate"`; post `-F` for any field; post to `$GITHUB_SHA`
+    instead of `$HEAD_SHA`; add `-X GET`."""
     wrote = tmp_path / "wrote"
     stub = 'gh() { printf \'%s\\n\' "$@" > "$WROTE" ; }\n'
     r = subprocess.run(
@@ -135,7 +144,9 @@ def test_status_body(tmp_path, results):
         cwd=tmp_path,
         env={
             "RESULTS": results,
-            "HEAD_SHA": "a" * 40,
+            "HEAD_SHA": _HEAD,
+            # A different SHA, so posting to the merge commit instead of the head reddens.
+            "GITHUB_SHA": "b" * 40,
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_SERVER_URL": "https://example.invalid",
             "GITHUB_RUN_ID": "999",
@@ -144,7 +155,7 @@ def test_status_body(tmp_path, results):
         },
     )
     assert r.returncode == 0, r.stderr
-    assert gh_raw_fields(wrote) == _POSTED[results]
+    assert wrote.read_text(encoding="utf-8").splitlines() == _POSTED[results]
 
 
 @bash_only
