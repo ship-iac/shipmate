@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.41.0] — 2026-09-28
 
+Tags `7ff9345`.
+
 ### Added
 
 - **A cell refuses `SHIPMATE_APP_PRIVATE_KEY` and `SHIPMATE_PLAN_PASSPHRASE` set as GitHub
