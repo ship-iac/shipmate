@@ -722,9 +722,10 @@ def _reconcile_ruleset(ctx):
         report(
             "deferred",
             subject,
-            f"`.github/workflows/shipmate.yml` is not on {ctx['default_branch']} yet, so no "
-            f"pull request can produce `{GATE}`. Merge the pull request that adds it, then "
-            "run this again to create the ruleset.",
+            f"`.github/workflows/shipmate.yml` is not on {ctx['default_branch']} yet, or this "
+            "token cannot read it: a private repository answers 404 for both. No pull request "
+            f"can produce `{GATE}` before the file is there. Merge the pull request that adds "
+            "it, then run this again to create the ruleset.",
         )
     elif chk is None:
         try:
@@ -909,8 +910,10 @@ def _checklist(ctx):
         if ctx["is_private"]:
             out += [
                 "  (docs/getting-started.md §Environment setup). On a private repository below",
-                "  Enterprise, GitHub refuses required reviewers, so the apply gate is the gate",
-                "  ruleset's approving review and `[gate] approver_team`.",
+                "  Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
+                "  approving-review `pull_request` rule on the default branch, which this script",
+                "  does not create (docs/branch-protection.md §Reproducible ruleset), and",
+                "  `[gate] approver_team`.",
             ]
         else:
             out.append("  (docs/getting-started.md §Environment setup).")
@@ -921,11 +924,14 @@ def _checklist(ctx):
         "",
         f"  {verb} the workflow file and the table together, in a commit that changes no",
         "  stack, and open the pull request. The table is read from the default branch, so",
-        "  the first plan needs it merged. Merge it: no ruleset requires `shipmate / gate`",
-        "  yet, because the workflows that produce it are not on the default branch",
-        "  (CONTRACT.md §Post-plan topology). Then run this script again to create the gate",
-        "  ruleset.",
+        "  the first plan needs it merged.",
     ]
+    if ("deferred", "gate ruleset") in {(verb, subject) for verb, subject, _d in REPORT}:
+        out += [
+            "  Merge it: no ruleset requires `shipmate / gate` yet, because the workflows that",
+            "  produce it are not on the default branch (CONTRACT.md §Post-plan topology).",
+            "  Then run this script again to create the gate ruleset.",
+        ]
     print("\n".join(out))
 
 

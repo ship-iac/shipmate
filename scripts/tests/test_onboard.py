@@ -1762,9 +1762,10 @@ def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monk
         (
             "deferred",
             "gate ruleset",
-            "`.github/workflows/shipmate.yml` is not on main yet, so no pull request can "
-            "produce `shipmate / gate`. Merge the pull request that adds it, then run this "
-            "again to create the ruleset.",
+            "`.github/workflows/shipmate.yml` is not on main yet, or this token cannot read "
+            "it: a private repository answers 404 for both. No pull request can produce "
+            "`shipmate / gate` before the file is there. Merge the pull request that adds "
+            "it, then run this again to create the ruleset.",
         )
     ]
 
@@ -2240,8 +2241,10 @@ _CHECKLIST_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-
 #: first private consumer is on Team, so the private block says so.
 _CHECKLIST_PRIVATE_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-eu-apply
   (docs/getting-started.md §Environment setup). On a private repository below
-  Enterprise, GitHub refuses required reviewers, so the apply gate is the gate
-  ruleset's approving review and `[gate] approver_team`.
+  Enterprise, GitHub refuses required reviewers, so the apply gate is then an
+  approving-review `pull_request` rule on the default branch, which this script
+  does not create (docs/branch-protection.md §Reproducible ruleset), and
+  `[gate] approver_team`.
 
 """
 
@@ -2249,10 +2252,15 @@ _CHECKLIST_TAIL = """  A CODEOWNERS entry covering /.github/workflows/.
 
   Commit the workflow file and the table together, in a commit that changes no
   stack, and open the pull request. The table is read from the default branch, so
-  the first plan needs it merged. Merge it: no ruleset requires `shipmate / gate`
-  yet, because the workflows that produce it are not on the default branch
-  (CONTRACT.md §Post-plan topology). Then run this script again to create the gate
-  ruleset.
+  the first plan needs it merged.
+"""
+
+#: Printed only by the run that deferred the gate ruleset: the re-run after the merge
+#: creates it, so asking that run to run again is false.
+_CHECKLIST_DEFERRED = """\
+  Merge it: no ruleset requires `shipmate / gate` yet, because the workflows that
+  produce it are not on the default branch (CONTRACT.md §Post-plan topology).
+  Then run this script again to create the gate ruleset.
 """
 
 SPLIT_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_REVIEWERS + _CHECKLIST_TAIL
@@ -2301,6 +2309,35 @@ def test_the_checklist_qualifies_the_reviewer_step_on_a_private_repository(capsy
     assert capsys.readouterr().out == (
         _CHECKLIST_HEAD + _CHECKLIST_PRIVATE_REVIEWERS + _CHECKLIST_TAIL
     )
+
+
+def test_the_checklist_asks_for_a_re_run_after_deferring_the_gate_ruleset(monkeypatch, capsys):
+    """The run before the merge defers the ruleset, and only this checklist line tells the
+    operator a second run is due; without it the gate is never required.
+
+    Mutation: drop the deferred-report condition, so the ask never prints.
+    """
+    fake = make_gh({RULES: [], REMOTE_SHIM: SystemExit("gh: Not Found (HTTP 404)")})
+    monkeypatch.setattr(onboard, "_run", fake)
+    c = ctx()
+    onboard._reconcile_ruleset(c)
+    assert capsys.readouterr().out.startswith("deferred gate ruleset: ")
+    onboard._checklist(c)
+    assert capsys.readouterr().out == SPLIT_CHECKLIST + _CHECKLIST_DEFERRED
+
+
+def test_the_checklist_asks_for_no_re_run_after_creating_the_gate_ruleset(monkeypatch, capsys):
+    """The re-run after the merge creates the ruleset, so asking it to run again is false.
+
+    Mutation: print the re-run ask unconditionally.
+    """
+    fake = make_gh({RULES: [], REMOTE_SHIM: {"name": "shipmate.yml"}})
+    monkeypatch.setattr(onboard, "_run", fake)
+    c = ctx()
+    onboard._reconcile_ruleset(c)
+    assert capsys.readouterr().out == "create gate ruleset: shipmate / gate\n"
+    onboard._checklist(c)
+    assert capsys.readouterr().out == SPLIT_CHECKLIST
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):
