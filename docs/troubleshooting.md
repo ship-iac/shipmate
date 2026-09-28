@@ -256,6 +256,7 @@ The verbs:
 | `ok` | already as shipmate needs it; nothing was written. |
 | `create` / `update` / `set` / `delete` | the write it just performed. |
 | `created` | the workflow file it just wrote to `.github/workflows/`. |
+| `deferred` | the gate ruleset is not created yet, because `.github/workflows/shipmate.yml` is not on the remote default branch, or the token cannot read it (a private repository answers 404 for both), and no pull request could produce `shipmate / gate`. Merge the pull request that adds the file, then run the script again. Not drift; it does not affect the exit code. |
 | `pin-only` | the file matches except for the engine pin. Not drift, and it does not affect the exit code — moving a pin is `dev/repin_consumer.py`'s job ([`../CONTRACT.md`](../CONTRACT.md) §Consumption). |
 | `would …` | `--dry-run`: the write that a real run would perform. |
 | `differs` | it found something it will not change on your behalf. Every one exits the run 2. |

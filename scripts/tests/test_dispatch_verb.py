@@ -359,10 +359,9 @@ _LAYOUT_SKEW = "has no .github/workflows/shipmate.yml"
 #: a pin bump does not write it, and `docs/releasing.md` is the maintainer's runbook.
 #: `_LAYOUT_SKEW` stays a substring for the two tests that assert this message is ABSENT.
 _LAYOUT_MESSAGE = (
-    "::error::This repository has no .github/workflows/shipmate.yml, or it predates the "
-    "single-file layout — it declares no workflow_dispatch trigger, or not the "
-    "verb/environment/ref/pr_number inputs every dispatch sends. Add or update that file "
-    "— docs/getting-started.md publishes it; re-pinning cannot create it."
+    "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no "
+    "workflow_dispatch trigger or not the inputs this verb's dispatch sends. "
+    "docs/getting-started.md publishes it; re-pinning cannot create it."
 )
 
 
@@ -372,7 +371,7 @@ _LAYOUT_MESSAGE = (
 def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_message(
     tmp_path, verb, stub
 ):
-    """All three shapes an absent or outdated `shipmate.yml` produces get the layout message,
+    """All three shapes an absent or incomplete `shipmate.yml` produces get the layout message,
     for every verb — every verb now aims at that one file. Measured: a workflow file that does
     not exist answers 404; one with no such trigger answers `Workflow does not have
     'workflow_dispatch' trigger (HTTP 422)`; one declaring fewer inputs than the body names

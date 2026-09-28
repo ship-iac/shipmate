@@ -41,6 +41,10 @@ unchanged: a ruleset `required_status_checks` entry matches a commit status by
 
 ## Reproducible ruleset (GitHub Pro / Team / Enterprise, or a public repo)
 
+Create it after the pull request adding `.github/workflows/shipmate.yml` merges:
+before then no pull request can produce `shipmate / gate`, so the ruleset blocks
+the first one.
+
 ```bash
 gh api -X POST repos/<owner>/<repo>/rulesets --input - <<'JSON'
 {

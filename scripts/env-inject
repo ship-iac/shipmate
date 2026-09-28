@@ -47,6 +47,18 @@ _NEVER_VARIABLES = {
         "repository. Delete the variable, rotate the webhook, and run gh secret set "
         f"{_WEBHOOK} --env shipmate-engine."
     ),
+    "SHIPMATE_APP_PRIVATE_KEY": (
+        "::error::SHIPMATE_APP_PRIVATE_KEY is set as a GitHub variable, and it must be a "
+        "secret on the shipmate-engine environment. Its value is readable by anyone who can "
+        "see the repository. Delete the variable, rotate the key, and run gh secret set "
+        "SHIPMATE_APP_PRIVATE_KEY --env shipmate-engine."
+    ),
+    "SHIPMATE_PLAN_PASSPHRASE": (
+        "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable, and it must be a "
+        "secret, not a variable. Its value is readable by anyone who can see the repository. "
+        "Delete the variable, choose a new passphrase, and set it as a secret, for example "
+        "with gh secret set SHIPMATE_PLAN_PASSPHRASE."
+    ),
 }
 
 #: What `$GITHUB_ENV` accepts as a name. `fullmatch` only: a prefix match leaves a

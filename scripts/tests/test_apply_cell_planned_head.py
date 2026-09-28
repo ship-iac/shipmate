@@ -11,9 +11,8 @@ plan is refused at the cheapest point rather than after mutating real infrastruc
 ordering guard here. The refusal must also be attributable in the cell summary, so a blocked
 apply names its cause instead of reporting a bare failure.
 
-An absent record is refused too, not tolerated: there is nothing to compare, and the likeliest
-cause -- an artifact predating the release that records provenance -- is stated as a likelihood,
-because a mismatched engine revision produces the same absence.
+An absent record is refused too, not tolerated: there is nothing to compare, and the cause is a
+plan produced by an engine revision that records none.
 """
 
 import ast
@@ -97,17 +96,16 @@ def _run_step(tmp_path, *, record=None, observed=_PLANNED):
 
 @bash_only
 def test_an_absent_record_aborts_and_says_to_re_plan(tmp_path):
-    # Whole message, written by hand: the two faults this pins against are a presumed cause
-    # asserted as fact, and a remedy that only exists pre-merge. A substring check on either half
+    # Whole message, written by hand: the two faults this pins against are a cause naming a past
+    # engine release, and a remedy that only exists pre-merge. A substring check on either half
     # leaves the other free to regress.
     r, _ = _run_step(tmp_path, record=None)
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     out = r.stdout + r.stderr
     assert out.strip() == (
         "::error::apply aborted for dev-eu/app: this reviewed plan records no planned "
-        "commit, so there is nothing to compare against this checkout — most likely "
-        "the plan predates the release that binds a plan to the tree it was produced from, "
-        "though a mismatched engine revision produces the same absence. Re-plan this stack "
+        "commit, so there is nothing to compare against this checkout — "
+        "a plan produced by an engine revision that records none. Re-plan this stack "
         "on its pull request and apply the fresh plan; if that pull request has already "
         "merged, a new pull request touching the stack plans and applies it afresh."
     )

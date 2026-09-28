@@ -43,6 +43,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import urllib.parse
 
 from _shipmate import REPO_RE, _load, scrub
 
@@ -63,6 +64,10 @@ _ENV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
 _APP_ID_RE = re.compile(r"[0-9]+")
+#: The default branch is rendered unquoted into a YAML flow list and a GitHub branch filter:
+#: a leading letter forecloses a number-like `1.0`, and the set forecloses `,` `{` `&` and
+#: the filter's `+` `!` `*` `?` `[`.
+_BRANCH_RE = re.compile(r"[A-Za-z][A-Za-z0-9._/-]*")
 
 
 def _run(args, secrets=(), stdin=None):
@@ -80,8 +85,7 @@ def _run(args, secrets=(), stdin=None):
     """
     # args is built here, shell=False. The values interpolated into it passed a
     # regex first: the team slug and the app id in main(), the repository slug in
-    # _repo_facts(), environment names in _derive_envs(). `default_branch` from
-    # _repo_facts() is unchecked -- GitHub's own value, echoed back into a body.
+    # _repo_facts() with the default branch, environment names in _derive_envs().
     p = subprocess.run(  # noqa: S603
         args,
         capture_output=True,
@@ -194,6 +198,12 @@ def _repo_facts():
         )
     if not REPO_RE.fullmatch(slug):
         raise SystemExit(f"unusable repository slug: {slug!r}")
+    if not _BRANCH_RE.fullmatch(branch):
+        raise SystemExit(
+            f"the default branch {branch!r} cannot be written unquoted into the workflow "
+            "file's `push: branches:` filter, so this script does not onboard it. Follow "
+            "docs/getting-started.md by hand and edit `branches:` to match the branch."
+        )
     return slug, branch, bool(facts.get("isPrivate"))
 
 
@@ -683,7 +693,8 @@ def _gate_entry(ctx):
     wrong, a repository with no ruleset crashes here instead of reaching the report
     `_reconcile_ruleset` writes for one that cannot have rulesets at all.
     """
-    rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{ctx['default_branch']}?per_page=100")
+    branch = urllib.parse.quote(ctx["default_branch"], safe="")
+    rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
     for rule in rules:
         if rule.get("type") != "required_status_checks":
             continue
@@ -703,17 +714,55 @@ def _post_failure(e):
     return None
 
 
+def _shim_on_default(repo, branch):
+    """True when `.github/workflows/shipmate.yml` is on the remote default branch.
+
+    A 404 reads as absent: the file is not there, or the token cannot see it. A 403 stops
+    the run, which is why `main` reads this before the first write.
+    """
+    ref = urllib.parse.quote(branch, safe="")
+    return (
+        _gh_json_or_none(f"repos/{repo}/contents/.github/workflows/shipmate.yml?ref={ref}")
+        is not None
+    )
+
+
 def _reconcile_ruleset(ctx):
     """Require `shipmate / gate`, pinned to the App, on the default branch.
 
     An entry under another `integration_id`, or without `strict`, is reported and left
     alone: editing a ruleset this script did not create is a policy change it must not
     make silently.
+
+    The ruleset is wanted only once the workflow file is on the remote default branch:
+    `pull_request_target` runs that branch's copy, so before it lands no pull request can
+    produce the gate, and the one adding the file could not merge. A missing ruleset is
+    deferred; one already required is reported.
     """
     subject = "gate ruleset"
     chk, params = _gate_entry(ctx)
     app_id = int(ctx["app_id"])
-    if chk is None:
+    branch = ctx["default_branch"]
+    if chk is None and not ctx["shim_on_default"]:
+        ctx["ruleset_deferred"] = True
+        report(
+            "deferred",
+            subject,
+            f"`.github/workflows/shipmate.yml` is not on {branch} yet, or this token cannot "
+            "read it and GitHub answered 404. No pull request can produce "
+            f"`{GATE}` before the file is there. Merge the pull request that adds it, then "
+            "run this again to create the ruleset.",
+        )
+    elif chk is not None and not ctx["shim_on_default"]:
+        report(
+            "differs",
+            subject,
+            f"`{GATE}` is already required, but `.github/workflows/shipmate.yml` is not on "
+            f"{branch} yet, or this token cannot read it and GitHub answered 404. The pull "
+            "request adding the file cannot get the gate: disable the gate rule until it "
+            "merges, or merge it through a bypass actor.",
+        )
+    elif chk is None:
         try:
             write(
                 "create",
@@ -778,12 +827,20 @@ def _fence(page_text, name):
     return bodies[0]
 
 
-def _render(engine, sha, version):
-    """The full text of one consumer workflow file, LF-delimited and newline-terminated."""
+def _render(engine, sha, version, default_branch):
+    """The full text of one consumer workflow file, LF-delimited and newline-terminated,
+    with its `push` trigger on `default_branch`."""
     text = _fence(
         (pathlib.Path(engine) / "docs" / "getting-started.md").read_text(encoding="utf-8"),
         "shipmate",
     )
+    trigger = "    branches: [main]\n"
+    if text.count(trigger) != 1:
+        raise SystemExit(
+            f"the documented shipmate fence holds {text.count(trigger)} `branches: [main]` "
+            "lines; expected exactly one, the push trigger this script retargets."
+        )
+    text = text.replace(trigger, f"    branches: [{default_branch}]\n")
     return _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
 
 
@@ -800,7 +857,7 @@ def _reconcile_shim(ctx):
     """
     filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
-    text = _render(ctx["engine"], ctx["sha"], ctx["version"])
+    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"])
     if not path.is_file():
         write_file(path, text, filename)
         return
@@ -884,19 +941,32 @@ def _checklist(ctx):
         out += [
             "",
             f"  Required reviewers and `Prevent self-review` on {', '.join(reviewed)}",
-            "  (docs/getting-started.md §Environment setup).",
         ]
-    verb = "Re-run without --dry-run, then commit" if _DRY else "Commit"
-    out += [
-        "",
-        "  A CODEOWNERS entry covering /.github/workflows/.",
-        "",
-        f"  {verb} the workflow file and the table together and open the pull request; the",
-        "  table is read from the default branch, so the first plan needs it merged.",
-        "  `shipmate / gate` cannot be green on that one either: the workflows that produce",
-        "  it are not on the default branch yet (CONTRACT.md §Post-plan topology). Merge it",
-        "  with an administrative bypass.",
-    ]
+        if ctx["is_private"]:
+            out += [
+                "  (docs/getting-started.md §Environment setup). On a private repository below",
+                "  Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
+                "  approving-review `pull_request` rule on the default branch, which this script",
+                "  does not create (docs/branch-protection.md §Reproducible ruleset), and",
+                "  `[gate] approver_team`.",
+            ]
+        else:
+            out.append("  (docs/getting-started.md §Environment setup).")
+    out += ["", "  A CODEOWNERS entry covering /.github/workflows/."]
+    if not ctx["shim_on_default"]:
+        verb = "Re-run without --dry-run, then commit" if _DRY else "Commit"
+        out += [
+            "",
+            f"  {verb} the workflow file and the table together, in a pull request that",
+            "  changes no stack. The table is read from the default branch, so the first",
+            "  plan needs it merged.",
+        ]
+    if ctx["ruleset_deferred"]:
+        out += [
+            "  Merge it: no ruleset requires `shipmate / gate` yet, because the workflows that",
+            "  produce it are not on the default branch (CONTRACT.md §Post-plan topology).",
+            "  Then run this script again to create the gate ruleset.",
+        ]
     print("\n".join(out))
 
 
@@ -986,6 +1056,9 @@ def main(argv=None):
         # tier message rather than "not shared". `orgs/<owner>` needs a permission no other
         # run needs, so only a private repository asserting the name pays the read.
         "org_plan": _org_plan(repo.split("/", 1)[0]) if at_org and is_private else "",
+        # Read before the first write: a token without Contents read answers 403 here.
+        "shim_on_default": _shim_on_default(repo, default_branch),
+        "ruleset_deferred": False,
     }
     _refuse_unreachable_org_variables(ctx)
     _refuse_org_assertion_mismatch(ctx)

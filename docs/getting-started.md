@@ -133,7 +133,12 @@ It writes:
 - the `SHIPMATE_APP_ID` repository variable. It may instead be set once at the
   organization level and named in `--vars-at-org`, which skips writing it here
   ([`github-app.md`](github-app.md) §6);
-- a `shipmate-gate` ruleset requiring `shipmate / gate` under the App;
+- a `shipmate-gate` ruleset requiring `shipmate / gate` under the App, once
+  `.github/workflows/shipmate.yml` is on the default branch. Until then it reports
+  `deferred gate ruleset`: the first pull request, carrying that file, merges
+  normally because no ruleset requires the gate yet. Run the script again after
+  merging it to create the ruleset; until you do, `shipmate doctor` reports that
+  no active ruleset requires `shipmate / gate`;
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
 
@@ -290,9 +295,12 @@ creates all of them, including `shipmate-engine` and its branch policy:
   **The table has to be on the default branch before your first plan run.** The
   engine reads it from `origin/<default>`, so a pull request that only adds the
   table is refused by the branch it is compared against. Put it in the same
-  commit as the workflow file, on the default branch. That commit must change
-  no stack: its push to the default branch runs `deploy`, and a changed stack
-  there has no plan run to apply from, so that deploy fails.
+  pull request as the workflow file. That pull request must change no stack:
+  its merge pushes to the default branch and runs `deploy`, and a changed stack
+  there has no plan run to apply from, so that deploy fails. The pull request
+  merges normally, because no ruleset requires `shipmate / gate`
+  yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
+  then `shipmate doctor` reports that no active ruleset requires the gate.
 
 ### The workflow file
 
@@ -508,6 +516,9 @@ jobs:
       ref: ${{ inputs.ref }}
 ```
 
+On a repository whose default branch is not `main`, change `branches: [main]`
+to that branch; `scripts/onboard` writes the file that way.
+
 **The `permissions:` block on each calling job is not optional.** A called
 workflow's permissions are capped at the `uses:` boundary, so each block above
 has to grant every scope the callee's own jobs request. Grant less and the run
@@ -554,11 +565,17 @@ page's S3 example owns its state, and the engine's state steps are skipped
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
 `SHIPMATE_PLAN_PASSPHRASE` is optional — unset, plan artifacts are stored
-unencrypted. If you set it, it must be a repository secret, not an
-environment one, and specifically not on `shipmate-engine`: a plan cell names its
-own plan environment, so a passphrase scoped elsewhere resolves to empty at plan
-time and every later apply fails its plaintext-artifact check
-([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption).
+unencrypted. If you set it, set it as a repository or organization secret, or
+as the same value on both `<env>-plan` and `<env>-apply`. An environment secret
+reaches only a job that binds that environment, and a plan cell binds its own
+plan environment, so these placements fail
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
+
+- As a variable, every cell refuses it by name.
+- As a secret on `shipmate-engine`, it reaches no cell: no plan or apply cell
+  binds that environment, so plans upload unencrypted with no message.
+- As a secret on `<env>-apply` alone, plans upload unencrypted and every apply
+  in that environment refuses its plaintext-artifact check.
 
 ## Required — apply
 
@@ -614,8 +631,10 @@ rules from Settings → Environments → `<name>` (or the API):
   token cannot forge, since a reviewer decision is a human action a minted
   token cannot take. Without them the tier is self-service and applies proceed
   unattended. On a private repository below Enterprise, GitHub refuses required
-  reviewers and wait timers, so the apply gate is the ruleset's approving review
-  and `[gate] approver_team`. Teams commonly gate production and leave dev
+  reviewers and wait timers, so the apply gate is then an approving-review
+  `pull_request` rule on the default branch, which `scripts/onboard` does not
+  create ([`branch-protection.md`](branch-protection.md) §Reproducible
+  ruleset), and `[gate] approver_team`. Teams commonly gate production and leave dev
   self-service; the maximally-hardened position gates every apply environment
   where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
@@ -725,8 +744,8 @@ cross-organization consumers.
 
 `SHIPMATE_PLAN_PASSPHRASE` is the exception, and it is not affected by the
 boundary. The wave jobs bind the env's apply environment, not `shipmate-engine`,
-so that secret has no environment to be read from and must travel down the call
-chain as a repository secret you pass by name.
+so `shipmate-engine` cannot supply that secret: it travels down the call chain as
+a repository or organization secret you pass by name.
 
 ## Required — enforce the gate
 
@@ -738,7 +757,9 @@ App's numeric id (`SHIPMATE_APP_ID`), so that a status of that name posted by an
 other identity does not satisfy the rule.
 
 [`branch-protection.md`](branch-protection.md) has the pasteable ruleset and the
-gate's state table. Configure it from there.
+gate's state table. Configure it from there, after the pull request adding
+`.github/workflows/shipmate.yml` merges: a ruleset created earlier blocks that
+pull request, which cannot produce the gate.
 `scripts/onboard` creates a `shipmate-gate` ruleset carrying that one rule; the
 `pull_request`, `non_fast_forward` and `deletion` rules on that page stay a
 choice you make, so that a repository already carrying a `pull_request` rule
@@ -791,8 +812,10 @@ the channel — the other five carry the same line without a comment.
 `SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
 value is readable by anyone who can see the repository and nothing in it reaches
 a cell; the run fails telling you to rotate what it held. A
-`SHIPMATE_SLACK_WEBHOOK` variable is refused too, with its own message: rotate the
-webhook and set it as a secret on `shipmate-engine`. The other direction cannot be
+`SHIPMATE_SLACK_WEBHOOK`, `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE`
+variable is refused too, each with its own message: rotate the webhook or the key
+and set it as a secret on `shipmate-engine`; choose a new passphrase and set it as
+a repository or organization secret. The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 
