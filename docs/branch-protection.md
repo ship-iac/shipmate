@@ -201,8 +201,3 @@ apply checks are outstanding, `failure` ("plan incomplete") when a plan cell
 fails, and `success` when nothing is left to apply. shipmate's responsibility —
 producing a correct, stable, single required status — holds regardless of plan.
 The ruleset above enforces it once the repo is public or on a paid plan.
-
-## Upgrading
-
-Re-pinning, Dependabot, and the past migrations that needed more than a pin
-bump: [`upgrading.md`](upgrading.md).

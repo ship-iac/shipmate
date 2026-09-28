@@ -949,8 +949,8 @@ warning:
   it would let an author publish no text, leave no bytes to hash, and switch the
   comparison off by omission.
 - An apply check carrying no digest is refused at detect, before any apply job
-  starts. Most often the plan predates the release that began recording one
-  ([`upgrading.md`](upgrading.md)); the remedy is a re-plan.
+  starts. Most often the plan predates the release that began recording one;
+  the remedy is a re-plan.
 - A digest that never reached the apply cell fails it before `tofu init`. A
   composite action's `required: true` is not enforced, so an unwired input
   arrives empty; accepting it would skip the comparison silently. The remedy is

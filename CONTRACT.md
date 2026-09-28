@@ -407,7 +407,7 @@ The file holds four top-level settings and no others: `schema_version`,
 `layout`, `environments`, `gate`. Any other
 top-level key refuses, naming the offending key and the four that are allowed. A key a *newer* engine
 implements is refused by an older one on that same check, which is why a
-repository moves its pin before it adds a key (`docs/upgrading.md`).
+repository moves its pin before it adds a key.
 
 Reading it needs Python 3.11, because `tomllib` arrived there. That is the floor
 §Runner prerequisites already states; nothing in the engine installs or pins a
@@ -1749,6 +1749,10 @@ trigger alone closes two paths a trigger check alone would not:
   the consumer's one pin names the whole tree that runs. The consumer surface is the seven
   reusable workflows; the composite actions are engine-internal.
   `dev/repin_consumer.py` is the hand-run tool that moves a consumer's pins together.
+- Releases are annotated tags, so `git/ref/tags/<tag>` returns the tag object's SHA, which a
+  workflow cannot check out. Resolve a tag with
+  `gh api repos/<owner>/shipmate/commits/<tag> --jq .sha`, or locally
+  `git rev-parse <tag>^{commit}`.
 - **Upgrade path.** shipmate publishes a GitHub Release per release SHA. A
   consumer with Dependabot's `github-actions` ecosystem enabled therefore
   receives a pull request bumping its shipmate pins to the new release's SHA —

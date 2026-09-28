@@ -132,10 +132,7 @@ the release commit, from `repo-example-stacks-aws`:
    **`repin_consumer.py` rewrites pins and nothing else.** When a release
    changes the consumer file's declared input contract, make those body edits on
    the scratch branch too — a new pin under an old body is the load-time
-   rejection described below, not a smoke result. `docs/upgrading.md`'s section
-   for the release names those edits; for this release it is replacing the six
-   files with the single `.github/workflows/shipmate.yml` that
-   `docs/getting-started.md` publishes.
+   rejection described below, not a smoke result.
 
    The same gap has a second form the tool cannot reach at all: a consumer's
    allowed-actions list is a repository setting, not a file. Under
@@ -146,8 +143,7 @@ the release commit, from `repo-example-stacks-aws`:
    `scripts/tests/test_third_party_actions_consumers_must_allow.py` reddens when
    the engine's third-party set changes, so you find out while committing rather
    than from a consumer. When it does: add the pattern to `docs/hardening.md`'s
-   list, and say so in `docs/upgrading.md`'s section for the release — it is a
-   setting the consumer has to change by hand before they re-pin.
+   list — it is a setting the consumer has to change by hand before they re-pin.
 
 2. Drive the consumer's workflow file directly at that ref — but **skip this
    step for a release that introduces that file.** `shipmate.yml` is not on any

@@ -277,7 +277,7 @@ The verbs:
 | `ok` | already as shipmate needs it; nothing was written. |
 | `create` / `update` / `set` / `delete` | the write it just performed. |
 | `created` | the workflow file it just wrote to `.github/workflows/`. |
-| `pin-only` | the file matches except for the engine pin. Not drift, and it does not affect the exit code — moving a pin is `dev/repin_consumer.py`'s job ([`upgrading.md`](upgrading.md)). |
+| `pin-only` | the file matches except for the engine pin. Not drift, and it does not affect the exit code — moving a pin is `dev/repin_consumer.py`'s job ([`../CONTRACT.md`](../CONTRACT.md) §Consumption). |
 | `would …` | `--dry-run`: the write that a real run would perform. |
 | `differs` | it found something it will not change on your behalf. Every one exits the run 2. |
 
@@ -567,7 +567,7 @@ the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `environments` and `gate` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does ([`upgrading.md`](upgrading.md)) |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `environments` and `gate` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does |
 | `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approver_team` alone. A misspelled one would leave the setting at its default while the repository believed it declared one. The review exemption is `gated = false` on the environment's own entry |
 | `environments.<env>.<key> must be a boolean` | `shared`, `explicit` and `gated` are TOML booleans: write `explicit = true`, unquoted. A quoted `"true"` or `"false"`, a number, or a variable reference would otherwise resolve to the default |
 | `schema_version is <value>; this engine implements version 1` | `schema_version` is optional and, written, must be the integer `1`. `schema_version = true` is refused by name rather than read as 1 |
@@ -789,7 +789,8 @@ tree: `gated = false` on `[environments.dev-eu2]` for `dev-eu` is accepted and
 names `dev-eu2` as an entry no stack tags
 ([`../CONTRACT.md`](../CONTRACT.md) §What the diagnostics can and cannot see).
 See
-[`upgrading.md`](upgrading.md) §"Opt-in: per-environment review gating".
+[`getting-started.md`](getting-started.md) §"Applying chosen environments without
+an approving review".
 
 **The run failed with an `environments.<env>.gated` or `environments.<name> is not an
 environment name` error.** The value or name is rejected loudly rather than left

@@ -27,7 +27,7 @@ does with that wiring.
 - **Nothing to set for the Terramate and OpenTofu versions.** They are in
   [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
   engine commit your workflow file pins. Moving to other versions is a pin bump
-  ([`upgrading.md`](upgrading.md)), not a repository variable.
+  ([`../CONTRACT.md`](../CONTRACT.md) §Consumption), not a repository variable.
 - **`gh` authenticated with admin on the repository.** Every tier creates
   environments, variables or rulesets.
 - **Remote state you control, or a local backend materialized in the working
@@ -42,6 +42,50 @@ does with that wiring.
 The four tiers are ordered and each depends on the one before. Tier 1 alone is
 not a working installation; read tier 2's first paragraphs before deciding to
 stop early.
+
+### Arriving from another TACO
+
+A repository that already works under another Terraform automation tool arrives
+with four things expressed somewhere shipmate does not read. None of them is a
+shipmate defect and none of them announces itself, so each is worth a deliberate
+pass before the first plan run.
+
+**Ordering.** Wave ordering comes only from the Terramate `after` DAG. If
+your ordering lives in the outgoing tool's configuration, it must be ported into
+`after`. Nothing will report the omission, because a missing edge is
+indistinguishable from a stack that is genuinely independent. Treat the outgoing
+tool's config as a *lower bound* on the real graph, not as the graph: one
+migration that audited the OpenTofu code instead of porting the config went from
+6 declared edges to 105, and from 2 wave levels to 6.
+
+Two detect jobs report the shape as a `::notice::` line — stack count, `after`
+edge count, wave levels, and how many stacks would apply concurrently. A reader
+who knows the repository can judge that last number immediately; nobody else
+can. Exactly two print it: the detect job of a dispatched `shipmate apply <env>`
+and the post-merge deploy's detect, so it arrives after the pull request
+that would have been the place to fix the graph. A plan run does not print
+it, and neither does a bare `shipmate apply` — seeing no such line there says
+nothing about the graph. Before that point the equivalent is
+`terramate experimental run-graph --label stack.dir` run locally.
+
+**Tags.** Environment membership is derived from `env/<name>` tags and nothing
+else. Terramate tags are otherwise free-form, so a repository that predates
+shipmate is likely using them for something unrelated.
+
+**A named AWS profile in generated HCL.** The apply path holds only the OIDC
+session, so a literal `profile` in a `provider` or `backend` block fails there
+while still planning fine locally. See [`aws.md`](aws.md).
+
+**`terramate.config.run.env` rewriting `TF_VAR_*`.** Terramate applies `run.env`
+after the ambient environment, so an assignment to a name the environment table
+resolves for a cell — `TF_VAR_env` and `TF_VAR_region` under the `tf_vars` layout,
+`TF_WORKSPACE` under `workspace`, any name in an environment's `tf_vars` — wins
+over whatever the cell was given, invisibly, because the fingerprint is computed
+outside `terramate run` and so agrees on both sides. Each cell reads those names
+back through `terramate run` before `tofu init` and refuses when one comes back
+changed or unset. A name the table does not resolve for the cell is yours to
+set. [`../CONTRACT.md`](../CONTRACT.md) §Env model has the rule and the
+`tm_try` form that keeps a local default.
 
 ## Required — plan
 
@@ -843,7 +887,9 @@ unchanged: every environment keeps the ruleset's requirement.
 The second part is a pin. An apply is authorized by the engine
 `comment-ops.yml` the `comment-ops` job calls and enforced by the engine
 `apply.yml` and `apply-all.yml` the `targeted` and `all` jobs call, so those
-three pins must sit at the same release (or the enforcing two later). One file
+three pins must sit at the same release (or the enforcing two later). An apply
+authorized under one pin and dispatched into an engine on another is enforced by
+nothing, so the `comment-ops`, `targeted` and `all` jobs keep one pin. One file
 carrying all seven pins is what makes that automatic: `dev/repin_consumer.py`
 moves them together, and there is no longer a second file to bump on its own.
 
@@ -860,7 +906,8 @@ applied with a review in hand. Ungating an environment is a commit to
 the default branch, under whatever your ruleset requires of one, so the pull
 request that benefits from the exemption cannot also grant it. That is all
 it claims. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)
-§Comment-ops; the trade-off against environment reviewers is in
+§Comment-ops. An environment's `required_reviewers` still gates the deployment:
+it is a separate control, and the trade-off against it is in
 [`hardening.md`](hardening.md) §3–5.
 
 ### Further hardening
