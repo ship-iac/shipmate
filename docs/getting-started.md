@@ -571,7 +571,7 @@ reaches only a job that binds that environment, and a plan cell binds its own
 plan environment, so these placements fail
 ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
-- As a variable, every plan cell refuses it by name.
+- As a variable, every cell refuses it by name.
 - As a secret on `shipmate-engine`, it reaches no cell: no plan or apply cell
   binds that environment, so plans upload unencrypted with no message.
 - As a secret on `<env>-apply` alone, plans upload unencrypted and every apply
@@ -815,7 +815,7 @@ a cell; the run fails telling you to rotate what it held. A
 `SHIPMATE_SLACK_WEBHOOK`, `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE`
 variable is refused too, each with its own message: rotate the webhook or the key
 and set it as a secret on `shipmate-engine`; choose a new passphrase and set it as
-a repository secret. The other direction cannot be
+a repository or organization secret. The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 

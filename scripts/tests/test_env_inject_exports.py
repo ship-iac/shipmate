@@ -329,9 +329,9 @@ def test_shipmate_vars_is_lifted_out_of_the_enumeration():
         (
             "SHIPMATE_PLAN_PASSPHRASE",
             "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable, and it must be a "
-            "repository secret. Its value is readable by anyone who can see the repository. "
-            "Delete the variable, choose a new passphrase, and run gh secret set "
-            "SHIPMATE_PLAN_PASSPHRASE.",
+            "secret, not a variable. Its value is readable by anyone who can see the repository. "
+            "Delete the variable, choose a new passphrase, and set it as a secret, for example "
+            "with gh secret set SHIPMATE_PLAN_PASSPHRASE.",
         ),
     ],
     ids=["secrets", "slack-webhook", "app-key", "plan-passphrase"],
