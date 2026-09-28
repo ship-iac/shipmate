@@ -318,9 +318,9 @@ Two things to know before relying on it:
   echo the ungated set.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
   environment is already ungated there, so `gated = false` on some narrows nothing. It
-  can only relax an existing requirement, never create one, and nothing
-  warns about the combination — a repository that sets both, and believes prod is
-  gated, gets no signal that it is not.
+  can only relax an existing requirement, never create one. `shipmate doctor`
+  warns about the combination, naming the environments still marked gated: each
+  of them applies without a review.
 
 `require_code_owner_review` is doing more work here than the approval count.
 A GitHub App cannot be listed in `CODEOWNERS`, so a code-owner review is one of

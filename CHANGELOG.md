@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## [Unreleased]
 
+### Added
+
+- **`shipmate doctor` warns at 0 required approvals, naming each gated environment.**
+
 ### Changed
 
 - **A stack carrying two `workload/*` tags is refused at detect.**

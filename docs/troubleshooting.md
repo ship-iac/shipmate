@@ -25,9 +25,10 @@ live probes.
   an entry actually owns — the rule is a no-op for unowned paths, and the probe
   reads ruleset booleans only, so it cannot see that.
   `required_approving_review_count: 0` *with* code-owner review on is the
-  supported sole-maintainer mode, reported as a note rather than a warning,
-  while count 0 with code-owner review off leaves no unforgeable merge-time
-  control at all and warns. The booleans are unioned across every
+  supported sole-maintainer mode, reported as a note only while no environment
+  is gated; otherwise a warning names the gated environments, which apply
+  without a review. Count 0 with code-owner review off leaves no unforgeable
+  merge-time control at all and warns. The booleans are unioned across every
   `pull_request` rule on the branch, since GitHub enforces the union across
   layered rulesets.
 - **A GitHub Environment (`<env>-plan` / `<env>-apply`, or a single shared
