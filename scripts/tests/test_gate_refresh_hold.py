@@ -10,39 +10,31 @@ read have no check at all.
 
 Invariant: the only exit from a hold is a fresh plan run.
 
-The tests execute the real, unmodified `Complete gate` step with `gh` and `python3` replaced by
-bash functions. Bash resolves a function before searching PATH, so this needs no fake
-executables. `python3` forwards to the real interpreter, so the greening runs also pin the whole
-body `scripts/gate-status-body` produces.
+The tests execute the real, unmodified `Complete gate` step with `gh` replaced by a bash
+function. Bash resolves a function before searching PATH, so this needs no fake executable. The
+greening runs also pin every `-f` field the write sends.
 """
 
-import json
 import os
-import pathlib
 import subprocess
-import sys
 
 import pytest
-from _loader import ACTIONS, action_steps, usable_bash
+from _loader import ACTIONS, action_steps, gh_raw_fields, usable_bash
 
 _BASH = usable_bash()
 
 HEAD_SHA = "a" * 40
 
 # Dispatches on the two `gh api` calls the step makes: the pre-write gate read
-# (`/commits/<sha>/status --jq ...`), and the write (`/statuses/<sha>`). `python3` resolves to
-# the real interpreter rather than a stub printing `{}`, so `scripts/gate-status-body` runs as
-# shipped: a body builder that died or printed nothing would leave `gh api --input gate.json`
-# reading an empty file, which these tests would otherwise never see.
-GH_STUB = f"""
-gh() {{
+# (`/commits/<sha>/status --jq ...`), and the write (`/statuses/<sha>`), whose argv it records.
+GH_STUB = """
+gh() {
   case "$*" in
     *"/status --jq"*) printf '%s' "$FAKE_GATE_STATE" ;;
-    *"/statuses/"*) cp gate.json "$WROTE" ;;
+    *"/statuses/"*) printf '%s\\n' "$@" > "$WROTE" ;;
     *) printf 'unexpected gh call: %s\\n' "$*" >&2 ; return 1 ;;
   esac
-}}
-python3() {{ '{pathlib.Path(sys.executable).as_posix()}' "$@" ; }}
+}
 """
 
 
@@ -73,14 +65,13 @@ def _run_step(tmp_path, gate_state):
     proc = subprocess.run(
         [_BASH, str(script)], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30
     )
-    posted = json.loads(wrote.read_text(encoding="utf-8")) if wrote.exists() else None
+    posted = gh_raw_fields(wrote) if wrote.exists() else None
     return proc, posted
 
 
-#: The whole body a greening run must POST, hand-written rather than read back from
-#: `scripts/gate-status-body`: a derived expectation passes whatever that file says, and this is
-#: the one place the context, the state and the run link are pinned together. Matches the
-#: GITHUB_* values `_run_step` supplies.
+#: The whole body a greening run must POST, hand-written rather than read back from the step: a
+#: derived expectation passes whatever that file says, and this is the one place the context, the
+#: state and the run link are pinned together. Matches the GITHUB_* values `_run_step` supplies.
 GREEN_BODY = {
     "state": "success",
     "context": "shipmate / gate",

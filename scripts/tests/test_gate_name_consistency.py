@@ -22,14 +22,11 @@ SKIP_DIRS = {
     "node_modules",
 }
 GATE = "shipmate / gate"
-# The literal lives in `scripts/gate-state` and `scripts/gate-status-body`, shared scripts that
-# can be unit- and mutation-tested, rather than an inline heredoc in the action or a workflow
-# `if:`. The composite actions only POST the body those scripts already built --
-# `actions/gate-refresh/action.yml` is listed alongside because it also names the gate in its
-# hold refusal, and that message must move with the context if the context is ever renamed.
+# `scripts/gate-state` builds the plan run's body, which `actions/summary` POSTs. The two
+# completion writers post their fields with `gh api -f`, and `actions/gate-refresh/action.yml`
+# also names the gate in its hold refusal, which must move with the context if it is renamed.
 WRITERS = [
     "scripts/gate-state",
-    "scripts/gate-status-body",
     "actions/gate-refresh/action.yml",
     ".github/workflows/deploy.yml",
 ]
@@ -47,12 +44,12 @@ def test_gate_literal_present_in_every_writer():
 
 
 def _gate_writing_run_blocks(text):
-    """Yield each `run:` block, as a single string, that writes the gate: it either references
-    the gate context literal and posts it (`--input`, from a `gh api ... --input` call), or --
-    `actions/summary`'s shape, which carries no context literal of its own -- POSTs the specific
-    body `scripts/gate-state` produced (`--input gate.json`). A step that merely names the gate
-    in a comment or echo does not count. The writer files each have exactly one such block, but
-    this scans generically rather than assume a fixed line layout."""
+    """Yield each `run:` block, as a single string, that writes the gate: it either posts the
+    gate context as a field (`-f context="shipmate / gate"`), or -- `actions/summary`'s shape,
+    which carries no context literal of its own -- POSTs the specific body `scripts/gate-state`
+    produced (`--input gate.json`). A step that merely names the gate in a comment or echo does
+    not count. The writer files each have exactly one such block, but this scans generically
+    rather than assume a fixed line layout."""
     blocks = []
     current = []
     in_run = False
@@ -76,7 +73,7 @@ def _gate_writing_run_blocks(text):
                 current.append(line)
     if current:
         blocks.append("\n".join(current))
-    return [b for b in blocks if (GATE in b and "--input" in b) or "--input gate.json" in b]
+    return [b for b in blocks if f'-f context="{GATE}"' in b or "--input gate.json" in b]
 
 
 def _writer_gate_segments(rel, text):
@@ -131,7 +128,7 @@ def test_gate_written_as_commit_status_not_check_run():
                 f"{rel}: gate-writing step must POST to the commit statuses API: {segment!r}"
             )
             for line in segment.splitlines():
-                assert not ("check-runs" in line and "--input" in line), (
+                assert not ("check-runs" in line and "gh api" in line), (
                     f"{rel}: gate POST still targets the check-runs API: {line.strip()}"
                 )
 
