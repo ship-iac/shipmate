@@ -24,7 +24,8 @@ Tags `30ba9e7`.
 - **The apply review job shows as `<caller> / review / decision`.** Both apply paths call one
   engine `apply-review.yml`.
 - **`scripts/onboard --vars-at-org` takes only `SHIPMATE_APP_ID`**; any other value, a comma
-  list included, is refused.
+  list included, is refused. The checklist drops the older-pin caveat for
+  `[gate] approver_team`.
 - **`apply-snapshot`'s empty-App-id refusal** uses `apply-gate`'s wording, which points at
   `docs/github-app.md`.
 
@@ -899,12 +900,12 @@ Tags `e576103`.
 
 ### Changed
 
-- **No `pull_request`-triggered job holds the App private key.** The summary runs in a
-  trusted `workflow_run` workflow, consumer `.github/workflows/summary.yml`, with the key on
-  the `shipmate-engine` environment. `comment-ops.yml`'s `ops` job and `drift.yml`'s new
+- **BREAKING: no `pull_request`-triggered job holds the App private key.** The summary runs
+  in a trusted `workflow_run` workflow, consumer `.github/workflows/summary.yml`, with the key
+  on the `shipmate-engine` environment. `comment-ops.yml`'s `ops` job and `drift.yml`'s new
   `issues` job declare `environment: shipmate-engine`.
 - **`actions/summary` inputs are reshaped** — `run-conclusion` and `artifact-count` replace
-  `plan-result` and `detect-result`, and `plan-run-url` is new.
+  `plan-result` and `detect-result`, and `plan-run-url` is new. Breaking for a direct caller.
 
 ### Added
 
