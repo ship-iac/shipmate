@@ -215,6 +215,12 @@ runs:
         PLAN_RESULT: ${{ inputs.plan-result }}
       run: |
         set -euo pipefail
+        # A draft autoplan planned nothing, so an existing comment still describes a head
+        # somebody planned; it is kept, and the draft run makes no comment API call.
+        if [ "$MODE" = "draft" ]; then
+          echo "the pull request was a draft when this run started and was not planned; the sticky plan comment was left as it is"
+          exit 0
+        fi
         marker='<!-- shipmate:summary -->'
         # The marker plus any Bot author, not a hardcoded login: the App's bot login derives
         # from the registered App name, which a consumer org may have had to slug differently
@@ -223,12 +229,6 @@ runs:
         # line, and a `contains` match also selects a comment that merely quotes it -- doctor's
         # report interpolates repository data such as workflow file names -- which this step
         # would then PATCH with the plan body.
-        # A draft autoplan planned nothing, so an existing comment still describes a head
-        # somebody planned; it is kept, and the draft run makes no comment API call.
-        if [ "$MODE" = "draft" ]; then
-          echo "the pull request was a draft when this run started and was not planned; the sticky plan comment was left as it is"
-          exit 0
-        fi
         if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
                --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
                > summary-comment-ids.txt; then
