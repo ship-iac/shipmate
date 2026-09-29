@@ -12,13 +12,13 @@ section below names the SHA the release tags.
 
 ### Added
 
-- **`shipmate doctor` warns at 0 required approvals, naming each gated environment.**
+- **`shipmate doctor` names each gated environment at 0 required approvals: a note while code-owner review is on, a warning while it is off.**
 - **The apply comment says when a gated environment applied with no approving review required.**
 
 ### Changed
 
 - **A stack carrying two `workload/*` tags is refused at detect.**
-- **A workload tag the environment does not list is refused at detect when its tier has no role to fall back to.**
+- **A workload tag the environment does not list is refused at detect, for the cells a run plans, applies or unlocks, when its tier has no role to fall back to.**
 
 ## [0.41.0] — 2026-09-28
 

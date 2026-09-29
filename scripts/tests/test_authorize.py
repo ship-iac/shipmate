@@ -535,3 +535,21 @@ def test_no_plan_run_id_output(tmp_path, monkeypatch):
     # whole command is not merely unused: a consumer wiring it would apply cells from a run that
     # never planned them.
     assert "plan_run_id" not in _main_output(tmp_path, monkeypatch)
+
+
+@pytest.mark.parametrize(
+    ("decision", "environment", "expected"),
+    [
+        ("NONE", "prod-eu", True),
+        ("NONE", "dev-eu", False),
+        ("NONE", "DEV-EU", False),
+        ("APPROVED", "prod-eu", False),
+        ("REVIEW_REQUIRED", "prod-eu", False),
+    ],
+)
+def test_review_not_required_decision_table(decision, environment, expected):
+    """dev-eu holds `gated = false`; prod-eu is gated.
+
+    Mutation: compare `review_decision != "NONE"` -- the three prod-eu rows flip.
+    Mutation: drop `.casefold()` -- the `DEV-EU` row is named."""
+    assert az._review_not_required(decision, environment, frozenset({"dev-eu"})) is expected

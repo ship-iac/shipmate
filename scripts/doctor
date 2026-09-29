@@ -100,6 +100,7 @@ _NO_REQUIRED_REVIEW = (
     "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
     "environments meant to apply unreviewed."
 )
+_ENV_NAME_CAP = 10
 # Same degrade posture as `_unverified`: unread is not misconfigured.
 _REVIEW_RULE_UNREADABLE = (
     "the `pull_request` rule on `{branch}` carried no parameters — review "
@@ -186,9 +187,11 @@ def _review_rule_warnings(ctx):
     Count 0 is a finding in its own right while any environment is gated: `gated`
     only relaxes a review the ruleset requires, so with no count required a gated
     environment is held only where a code-owner review is required for the changed
-    files. It is reported beside the
-    code-owner finding, and it is the sole-maintainer note only when no environment
-    is gated or the default branch's table cannot be read (`_no_review_findings`).
+    files. With code-owner review on it is a notice naming the gated environments,
+    since they are still held wherever owned files change; with it off it is a
+    warning beside the code-owner warning. It is the sole-maintainer note only when
+    no environment is gated or the default branch's table cannot be read
+    (`_no_review_findings`).
 
     Re-reads `rules/branches` rather than sharing `_gate_rule_warnings`'
     response, for `_existing_env_names`' per-probe-degrade reason.
@@ -225,6 +228,11 @@ def _no_review_findings(ctx, branch, code_owner):
 
     None are named when that table cannot be read or is invalid: which environments are
     exempt is then unknown, and naming all of them would warn about ones the file exempts.
+
+    A NOTICE while code-owner review is on: a warning forces a plan comment on every no-op
+    plan, which a sole maintainer cannot silence. A WARNING while it is off. The names are
+    not escaped here: `_finding_row` escapes the whole finding, and escaping twice doubles
+    the backslash it puts before a `|`.
     """
     table = _default_branch_table(ctx)
     gated = []
@@ -232,9 +240,17 @@ def _no_review_findings(ctx, branch, code_owner):
         listed = set(table.get("environments", {})) | set(ctx["envs"])
         gated = sorted(listed - bm.ec.ungated_envs(table))
     if gated:
-        shown = _one_line(", ".join(f"`{e}`" for e in gated), 400)
-        return [(WARNING, _NO_REQUIRED_REVIEW.format(branch=branch, envs=shown))]
+        level = NOTICE if code_owner else WARNING
+        return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=_code_spans(gated)))]
     return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))] if code_owner else []
+
+
+def _code_spans(names):
+    """`names` as comma-separated code spans: the first `_ENV_NAME_CAP`, then " and N more".
+    Bounded by count, never by characters, so no code span is ever cut."""
+    shown = ", ".join(f"`{n}`" for n in names[:_ENV_NAME_CAP])
+    extra = len(names) - _ENV_NAME_CAP
+    return shown + (f" and {extra} more" if extra > 0 else "")
 
 
 def _existing_env_names(ctx):
@@ -745,7 +761,7 @@ def _plan_env_secret_warnings(ctx):
         # Capped like the all-clear line's env list: the settings section is never truncated, so
         # one crowded environment would spend all of `sc.SIZE_BUDGET` and push the rest into the
         # omitted fallback. `count` reports the true total, so the cap hides only names.
-        shown = _one_line(", ".join(f"`{n}`" for n in sorted(names)), 400)
+        shown = _code_spans(sorted(names))
         count = f"at least {total}" if total > len(names) else str(len(names))
         out.append((NOTICE, _secret_finding(name, role, count, shown)))
         out += _app_key_findings(name, names, total, _env_noun(role))
@@ -2188,7 +2204,7 @@ def _all_clear_line(ctx):
             "environments were probed, since no declared environment set was available "
             "for this commit."
         )
-    named = _one_line(", ".join(f"`{_md_escape(e)}`" for e in envs), 400)
+    named = _code_spans([_md_escape(e) for e in envs])
     return (
         "- :white_check_mark: no problems found by the settings probes. The environment "
         "probes covered only the environments of the stacks changed in this pull request: "

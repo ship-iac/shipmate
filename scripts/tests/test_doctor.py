@@ -1871,6 +1871,19 @@ def test_all_clear_escapes_and_bounds_the_environment_names():
     assert len(line) < 600
 
 
+def test_all_clear_names_ten_environments_then_a_count():
+    """Bounded by name count, so no code span is cut.
+
+    Mutation: drop the slice in `_code_spans` -- all twelve are named. Mutation: restore the
+    `_one_line(..., 400)` cut in `_all_clear_line` -- the count suffix is missing."""
+    shown = ", ".join(f"`env-{i:02}`" for i in range(10)) + " and 2 more"
+    assert doctor._all_clear_line(_ctx(envs={f"env-{i:02}" for i in range(12)})) == (
+        "- :white_check_mark: no problems found by the settings probes. The environment "
+        "probes covered only the environments of the stacks changed in this pull request: "
+        f"{shown}."
+    )
+
+
 def test_findings_only_fallback_uses_the_same_all_clear_line():
     # Two renderers emit the all-clear; the scope statement must not live in
     # only one of them.
@@ -3425,10 +3438,10 @@ gated = false
 """
 
 
-def _no_required_review(envs):
+def _no_required_review(envs, level=doctor.NOTICE):
     """Hand-written: the count-0 finding naming `envs`, already rendered."""
     return (
-        doctor.WARNING,
+        level,
         f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews, so "
         f"these gated environments can apply without an approving review: {envs}. One is held "
         "only where a code-owner review is required for the changed files. `gated` can "
@@ -3447,23 +3460,26 @@ def _review_probe(monkeypatch, rules, table, envs=_ENVS):
 
 
 def test_review_rule_count_zero_names_only_the_gated_environments(monkeypatch):
-    """Count 0 with code-owner review on warns, naming the gated environments only.
+    """Count 0 with code-owner review on is a notice naming the gated environments only: they
+    are still held wherever owned files change.
 
-    Mutation: drop the `ungated_envs` subtraction -- `sandbox` is named too."""
+    Mutation: drop the `ungated_envs` subtraction -- `sandbox` is named too.
+    Mutation: emit the gated finding as WARNING unconditionally -- the level differs."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
     out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE)
     assert out == [_no_required_review("`dev-eu`")]
 
 
 def test_review_rule_count_zero_without_code_owner_review_reports_both(monkeypatch):
-    """Code-owner review off and count 0 are two findings, in that order.
+    """Code-owner review off and count 0 are two warnings, in that order.
 
-    Mutation: restore the early `return` on `not code_owner` -- the count finding is lost."""
+    Mutation: restore the early `return` on `not code_owner` -- the count finding is lost.
+    Mutation: emit the gated finding as NOTICE unconditionally -- the level differs."""
     rules = [_pull_request_rule(code_owner=False, count=0)]
     out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE)
     assert out == [
         (doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH)),
-        _no_required_review("`dev-eu`"),
+        _no_required_review("`dev-eu`", doctor.WARNING),
     ]
 
 
@@ -3510,6 +3526,36 @@ def test_review_rule_count_zero_names_a_declared_environment_the_table_lacks(mon
     rules = [_pull_request_rule(code_owner=True, count=0)]
     out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE, {"dev-eu", "prod-us"})
     assert out == [_no_required_review("`dev-eu`, `prod-us`")]
+
+
+def test_review_rule_count_zero_names_at_most_ten_environments(monkeypatch):
+    """Twelve gated environments: the first ten by name, then a count, so no code span is cut.
+
+    Mutation: show every name (drop the `[:_ENV_NAME_CAP]` slice) -- all twelve are named.
+    Mutation: drop the "and N more" suffix -- the count is missing."""
+    envs = {f"env-{i:02}" for i in range(12)}
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    out = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE, envs)
+    shown = ", ".join(f"`env-{i:02}`" for i in range(10)) + " and 2 more"
+    assert out == [_no_required_review(shown)]
+
+
+def test_review_rule_count_zero_escapes_an_environment_name_once(monkeypatch):
+    """The report row escapes the whole finding; a second escape of each name doubles the
+    backslash before a `|`.
+
+    Mutation: wrap each name in `_md_escape` inside `_no_review_findings` -- the backslash doubles.
+    Mutation: drop `_md_escape` from `_finding_row` -- the `|` and `<` render raw."""
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    [(level, text)] = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE, {"a|b<c"})
+    assert doctor._finding_row(level, text) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} the `pull_request` rule on `{_BRANCH}` requires "
+        "0 approving reviews, so these gated environments can apply without an approving "
+        "review: `a\\|b&lt;c`. One is held only where a code-owner review is required for the "
+        "changed files. `gated` can only relax a review requirement the ruleset sets "
+        "(docs/hardening.md #3–5); set `required_approving_review_count` to 1 or more, or set "
+        "`gated = false` on the environments meant to apply unreviewed."
+    )
 
 
 def test_review_rule_count_is_the_highest_across_layered_rulesets(monkeypatch):
@@ -3974,7 +4020,7 @@ def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypat
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     found = doctor._plan_env_secret_warnings(_ctx())
     assert [lvl for lvl, _ in found] == [doctor.NOTICE]
-    assert "…" in found[0][1], "a truncated name list must carry the ellipsis marker"
+    assert "and 50 more)" in found[0][1], "a capped name list must carry the count of the rest"
     assert len(found[0][1]) < 1000
     # The cap hides names, never the number of them.
     assert "60 secret(s)" in found[0][1]
@@ -4036,6 +4082,25 @@ def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
     found = doctor._plan_env_secret_warnings(_ctx())
     assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
     assert "at least 150" in found[0][1]
+
+
+def test_a_long_secret_listing_names_ten_secrets_then_a_count(monkeypatch):
+    """Bounded by name count, so no code span is cut; `count` still reports all twelve.
+
+    Mutation: pass every name to the finding (drop the `_code_spans` slice) -- all twelve are
+    named. Mutation: restore the `_one_line(..., 400)` cut -- the count suffix is missing."""
+    names = [f"SECRET_{i:02}" for i in range(12)]
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(*names),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    shown = ", ".join(f"`SECRET_{i:02}`" for i in range(10)) + " and 2 more"
+    assert doctor._plan_env_secret_warnings(_ctx())[0] == (
+        doctor.NOTICE,
+        doctor._secret_finding("dev-eu-plan", "plan", "12", shown),
+    )
 
 
 def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
