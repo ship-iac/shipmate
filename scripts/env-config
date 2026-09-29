@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+import types
 
 #: The file the engine reads its settings from, and the interpreter floor that reading it
 #: needs. The floor is CONTRACT.md section Runner prerequisites, which every runner already
@@ -402,11 +403,16 @@ def _check_provider(block, env, region):
 
 @contextlib.contextmanager
 def _gather(errors):
-    """Append the message of a `SystemExit` raised in the block to `errors`, and go on."""
+    """Append the message of a `SystemExit` raised in the block to `errors`, and go on.
+
+    Yields an object whose `ok` turns False when the block raised.
+    """
+    caught = types.SimpleNamespace(ok=True)
     try:
-        yield
+        yield caught
     except SystemExit as exc:
         errors.append(str(exc))
+        caught.ok = False
 
 
 def _check_vars(entry, env, errors):
@@ -417,9 +423,9 @@ def _check_vars(entry, env, errors):
     time -- forty identical failures in a forty-cell matrix instead of one at the top.
     """
     tf_vars = entry["tf_vars"]
-    with _gather(errors):
+    with _gather(errors) as shape:
         _mapping(tf_vars, f"environment {env}: tf_vars")
-    if not isinstance(tf_vars, dict):
+    if not shape.ok:
         return
     for name, value in sorted(tf_vars.items()):
         if not name.startswith("TF_VAR_") and name != "TF_WORKSPACE":
@@ -503,9 +509,9 @@ def ungated_envs(table):
 def _check_environment(entry, env, errors):
     """One entry's own shape, one message per check into `errors`. A non-mapping entry gets
     its one message and no other check. Nothing here reads context outside the file."""
-    with _gather(errors):
+    with _gather(errors) as shape:
         _mapping(entry, f"environment {env}")
-    if not isinstance(entry, dict):
+    if not shape.ok:
         return
     for key in sorted(entry):
         if key not in _ENV_KEYS:
@@ -520,10 +526,9 @@ def _check_environment(entry, env, errors):
         _check_vars(entry, env, errors)
     aws_ok = True
     if "aws" in entry:
-        before = len(errors)
-        with _gather(errors):
+        with _gather(errors) as aws:
             _check_provider(entry["aws"], env, entry.get("region"))
-        aws_ok = len(errors) == before
+        aws_ok = aws.ok
     _check_flags(entry, env, errors, aws_ok)
 
 
@@ -707,9 +712,9 @@ def _check_gate(gate, errors):
     Strict keys, as an environment entry is: a misspelled gate key leaves the setting at its
     default while the repository believes it declared one.
     """
-    with _gather(errors):
+    with _gather(errors) as shape:
         _mapping(gate, "gate")
-    if not isinstance(gate, dict):
+    if not shape.ok:
         return
     for key in sorted(gate):
         if key not in _GATE_KEYS:
@@ -756,14 +761,15 @@ def _check_entries(environments, errors):
             _check_env_name(env, f"environments.{env}", "an entry name")
     for env in sorted(environments):
         _check_environment(environments[env], env, errors)
-    before = len(errors)
     order = {}
+    lists_ok = True
     for env, entry in sorted(environments.items()):
         if isinstance(entry, dict) and "needs" in entry:
             order[env] = entry["needs"]
-            with _gather(errors):
+            with _gather(errors) as listed:
                 validate_env_name_list(entry["needs"], f"environments.{env}.needs")
-    if len(errors) == before:
+            lists_ok = lists_ok and listed.ok
+    if lists_ok:
         with _gather(errors):
             _check_cycle(order)
 
@@ -812,9 +818,9 @@ def validate_structure(table):
             f"::error::layout is {table['layout']!r}; it must be one of {', '.join(_LAYOUTS)}."
         )
     environments = table.get("environments", {})
-    with _gather(errors):
+    with _gather(errors) as shape:
         _mapping(environments, "environments")
-    if isinstance(environments, dict):
+    if shape.ok:
         _check_entries(environments, errors)
     _check_gate(table.get("gate", {}), errors)
     if errors:

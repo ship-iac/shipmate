@@ -9,8 +9,8 @@ from _shipmate import utf8_output
 
 
 def test_utf8_output_switches_both_streams_from_cp1252_to_utf8(monkeypatch):
-    """Mutations: drop the stdout reconfigure, or the stderr one; either stream then writes
-    `—` as cp1252's `\\x97`."""
+    """Mutations: drop `sys.stdout` from the loop's tuple, or `sys.stderr`; either stream then
+    writes `—` as cp1252's `\\x97`."""
     out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
     err = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
     monkeypatch.setattr(sys, "stdout", out)

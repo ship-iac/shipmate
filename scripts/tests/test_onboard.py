@@ -383,7 +383,7 @@ def test_a_branch_with_a_slash_is_accepted_and_quoted_in_every_api_path(monkeypa
     shim = "repos/o/r/contents/.github/workflows/shipmate.yml?ref=release%2F1.x"
     fake = make_gh({rules: [], shim: {"type": "file"}})
     monkeypatch.setattr(onboard, "_run", fake)
-    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None)
+    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None, 0)
     assert onboard._shim_on_default("o/r", "release/1.x") is True
     assert fake.calls == [["gh", "api", rules], ["gh", "api", shim]]
 
@@ -523,10 +523,12 @@ def test_main_calls_every_stage_in_order():
     `_refuse_org_assertion_mismatch(ctx)`, which leaves the `--vars-at-org` name filtered
     with nothing verifying the assertion behind it; move the `"shim_on_default"` read into
     `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run; move
-    the `"engine_secrets"` and `"repo_secrets"` reads below `_reconcile_env(ctx, ENGINE_ENV,
-    "apply")`, after the first write; delete `_refuse_missing_key(ctx)`, which lets a run
-    with no key create environments before `_reconcile_key` finds nothing to set. `_read_key`
-    sits in a conditional expression, whose call `_calls_in_order` still lists.
+    the `_engine_secrets` and `_repo_secrets` reads below `_reconcile_env(ctx, ENGINE_ENV,
+    "apply")`, after the first write; move them back into the `ctx` literal, ahead of the
+    organization refusals, where a token without Secrets read fails with a raw 403; delete
+    `_refuse_missing_key(ctx)`, which lets a run with no key create environments before
+    `_reconcile_key` finds nothing to set. `_read_key` sits in a conditional expression,
+    whose call `_calls_in_order` still lists.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
@@ -544,10 +546,10 @@ def test_main_calls_every_stage_in_order():
         "_resolve_shared(root, envs, repo, variables)",
         "_org_plan(repo.split('/', 1)[0])",
         "_shim_on_default(repo, default_branch)",
-        "_engine_secrets(repo)",
-        "_repo_secrets()",
         "_refuse_unreachable_org_variables(ctx)",
         "_refuse_org_assertion_mismatch(ctx)",
+        "_engine_secrets(repo)",
+        "_repo_secrets()",
         "_refuse_missing_key(ctx)",
         "_reconcile_env(ctx, ENGINE_ENV, 'apply')",
         "_reconcile_key(ctx)",
@@ -1607,9 +1609,9 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "api", REMOTE_SHIM],
+        ["gh", "api", "repos/o/r/actions/organization-variables", "--paginate", "--slurp"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
         ["gh", "secret", "list", "--json", "name"],
-        ["gh", "api", "repos/o/r/actions/organization-variables", "--paginate", "--slurp"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -2658,21 +2660,69 @@ def test_the_review_count_reads_past_the_gate_rule(monkeypatch):
         {"type": "pull_request", "parameters": {"required_approving_review_count": 1}},
     ]
     monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
-    c = ctx()
-    onboard._gate_entry(c)
-    assert c["review_count"] == 1
+    assert onboard._gate_entry(ctx()) == (
+        {"context": onboard.GATE},
+        {"required_status_checks": [{"context": onboard.GATE}]},
+        1,
+    )
 
 
-def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys, tmp_path):
-    """A shared env is bound by plan cells and the nightly drift run too, so a required
-    reviewer on it stalls them rather than gating an apply: the reviewer item is due only
-    for an `<env>-apply`.
+def test_the_ruleset_reconciler_stores_the_review_count(monkeypatch):
+    """`_checklist` judges the reviewer item on `ctx["review_count"]`, which only
+    `_reconcile_ruleset` sets.
 
-    Mutation: select the reviewer names on `role == "apply"` alone, which a bare shared
-    environment satisfies.
+    Mutation: unpack the count into `_` in `_reconcile_ruleset`.
     """
+    rules = [{"type": "pull_request", "parameters": {"required_approving_review_count": 2}}]
+    monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
+    c = ctx()
+    onboard._reconcile_ruleset(c)
+    assert c["review_count"] == 2
+
+
+def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(capsys, tmp_path):
+    """A shared env is bound by plan cells and the nightly drift run too, so a required
+    reviewer on it stalls them rather than gating an apply: no environment is asked for
+    reviewers, and the `pull_request` rule is the only apply gate left to judge.
+
+    Mutations, each proven: select the reviewer names on `role == "apply"` alone, which a
+    bare shared environment satisfies; drop the `elif gated` arm, omitting the item; compare
+    `review_count > 1` in `_review_rule_item`.
+    """
+    item = "approving review before apply"
     onboard._checklist(ctx(root=tmp_path, shared={"dev-eu"}))
-    assert "approving review before apply" not in checklist_items(capsys.readouterr().out)
+    assert checklist_items(capsys.readouterr().out)[item] == (
+        "todo",
+        [
+            "A shared environment has no `<env>-apply` to carry required reviewers, so its",
+            "apply gate is an approving-review `pull_request` rule on the default branch,",
+            "which this script does not create (docs/branch-protection.md §Reproducible",
+            "ruleset).",
+        ],
+    )
+    onboard._checklist(ctx(root=tmp_path, shared={"dev-eu"}, review_count=1))
+    assert checklist_items(capsys.readouterr().out)[item] == (
+        "ok",
+        ["`required_approving_review_count` is 1 on the default branch's `pull_request` rule."],
+    )
+
+
+def test_an_ungated_environment_is_not_asked_for_reviewers(capsys, tmp_path):
+    """`gated = false` exempts an environment from the review requirement, so asking for
+    reviewers on it contradicts the table.
+
+    Mutation: drop the `env not in ungated` filter from `_checklist`.
+    """
+    onboard._checklist(
+        ctx(
+            root=tmp_path,
+            envs=["dev-eu", "dev-us"],
+            table={"environments": {"dev-us": {"gated": False}}},
+            apply_envs={"dev-eu-apply": REVIEWED_APPLY, "dev-us-apply": {}},
+        )
+    )
+    items = checklist_items(capsys.readouterr().out)
+    assert items["approving review before apply"] == ("ok", [])
 
 
 def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys, tmp_path):

@@ -12,6 +12,7 @@ share, and the UTF-8 switch for their console output. It also reads the per-cell
 
 import glob
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -37,9 +38,13 @@ def scrub(text, secrets):
 
 
 def utf8_output():
-    """Write stdout and stderr as UTF-8: a cp1252 Windows console prints `—` and `§` as `?`."""
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    """Write stdout and stderr as UTF-8: a cp1252 Windows console prints `—` and `§` as `?`.
+
+    A stream that is not a `TextIOWrapper` is left alone, including `None` under `pythonw`.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
 
 
 def cell_summaries(cells_dir, keys, skew):

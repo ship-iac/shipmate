@@ -4219,8 +4219,9 @@ def test_a_refusal_is_the_finding_not_a_skipped_probe(monkeypatch):
 def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypatch):
     """Each line of the refusal loses its own `::error::`, so none nests in the finding.
 
-    Mutation: render `str(exc).removeprefix("::error::")` whole, as one line -- the second
-    and third messages keep their prefix and the `; ` separators are lost.
+    Mutations, each proven: render `str(exc).removeprefix("::error::")` whole, as one line
+    -- the second and third messages keep their prefix; join the lines with `"; "`, which
+    reads `gated.; environments`.
     """
     text = (
         'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n\n'
@@ -4233,12 +4234,37 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
             doctor.WARNING,
             "`.github/shipmate.toml` at the commit under examination is not valid: "
             "environment dev-eu: regoin is not a key this engine implements. An environment "
-            "holds region, tf_vars, aws, shared, needs, explicit, gated.; "
+            "holds region, tf_vars, aws, shared, needs, explicit, gated. "
             "environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
-            "gated = false, unquoted.; "
+            "gated = false, unquoted. "
             "gate.approver_team is 'Platform Team', which is not a GitHub team slug; use the "
             "bare slug from the team's URL (letters, digits, '-' and '_'), not a display name "
             "or an @org/team reference. Merging it refuses every operation that reads the "
+            "table. Execution still reads the default branch's copy, which this says nothing "
+            "about.",
+        )
+    ]
+
+
+def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatch):
+    """The finding lands in the PR comment and an annotation, so it is bounded however
+    many errors the file holds.
+
+    Mutation: join every line, dropping the `[:CONFIG_ERROR_LINES]` slice and the tail.
+    """
+    text = 'layout = "folder"\n' + "".join(f"k{n:02} = 1\n" for n in range(1, 13))
+    responses = _config_responses(text)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    unknown = (
+        "{} is not a setting this engine implements. .github/shipmate.toml holds "
+        "schema_version, layout, environments, gate."
+    )
+    shown = " ".join(unknown.format(f"k{n:02}") for n in range(1, 11))
+    assert doctor._config_warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "`.github/shipmate.toml` at the commit under examination is not valid: "
+            f"{shown} … and 2 more. Merging it refuses every operation that reads the "
             "table. Execution still reads the default branch's copy, which this says nothing "
             "about.",
         )

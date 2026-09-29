@@ -702,7 +702,8 @@ _PLAN_TIER = (
 
 
 def _gate_entry(ctx):
-    """(the `shipmate / gate` status-check entry, its rule parameters), or (None, None).
+    """(the `shipmate / gate` status-check entry, its rule parameters, the review count),
+    the first two None when no rule requires the gate.
 
     The effective rules across every ruleset, read the way `doctor`'s gate probe reads
     them -- including the assumption, inherited from it and not verified here, that this
@@ -710,12 +711,12 @@ def _gate_entry(ctx):
     wrong, a repository with no ruleset crashes here instead of reaching the report
     `_reconcile_ruleset` writes for one that cannot have rulesets at all.
 
-    Also sets `ctx["review_count"]`: the highest `required_approving_review_count` over
-    every `pull_request` rule in the same response, 0 when none.
+    The review count is the highest `required_approving_review_count` over every
+    `pull_request` rule in the same response, 0 when none.
     """
     branch = urllib.parse.quote(ctx["default_branch"], safe="")
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
-    ctx["review_count"] = max(
+    count = max(
         (
             (rule.get("parameters") or {}).get("required_approving_review_count") or 0
             for rule in rules
@@ -729,8 +730,8 @@ def _gate_entry(ctx):
         params = rule.get("parameters") or {}
         for chk in params.get("required_status_checks") or []:
             if chk.get("context") == GATE:
-                return chk, params
-    return None, None
+                return chk, params, count
+    return None, None, count
 
 
 def _post_failure(e):
@@ -768,7 +769,7 @@ def _reconcile_ruleset(ctx):
     deferred; one already required is reported.
     """
     subject = "gate ruleset"
-    chk, params = _gate_entry(ctx)
+    chk, params, ctx["review_count"] = _gate_entry(ctx)
     app_id = int(ctx["app_id"])
     branch = ctx["default_branch"]
     if chk is None and not ctx["shim_on_default"]:
@@ -1036,6 +1037,31 @@ def _review_item(ctx, names):
     )
 
 
+def _review_rule_item(ctx):
+    """The approving-review item when every gated environment is shared: the `pull_request`
+    rule is then the only apply gate the repository can have."""
+    item = "approving review before apply"
+    if ctx["review_count"] >= 1:
+        return (
+            "ok",
+            item,
+            [
+                f"`required_approving_review_count` is {ctx['review_count']} on the default "
+                "branch's `pull_request` rule."
+            ],
+        )
+    return (
+        "todo",
+        item,
+        [
+            "A shared environment has no `<env>-apply` to carry required reviewers, so its",
+            "apply gate is an approving-review `pull_request` rule on the default branch,",
+            "which this script does not create (docs/branch-protection.md §Reproducible",
+            "ruleset).",
+        ],
+    )
+
+
 def _codeowners_item(ctx):
     item = "CODEOWNERS entry covering /.github/workflows/"
     found = [p for p in _CODEOWNERS_PATHS if (pathlib.Path(ctx["root"]) / p).is_file()]
@@ -1084,10 +1110,12 @@ def _checklist(ctx):
     """
     # A reviewer on a shared env's bare environment stalls the plan cells and the drift
     # run, so it is asked for only where the apply path has an environment of its own.
+    ungated = ec.ungated_envs(ctx["table"] or {})
+    gated = [env for env in ctx["envs"] if env not in ctx["unresolved"] and env not in ungated]
     reviewed = [
         name
-        for env in ctx["envs"]
-        if env not in ctx["unresolved"] and env not in ctx["shared"]
+        for env in gated
+        if env not in ctx["shared"]
         for name, role in _env_names(env, ctx["shared"])
         if role == "apply"
     ]
@@ -1095,6 +1123,8 @@ def _checklist(ctx):
     items += [_approver_item(ctx), _app_item(ctx)]
     if reviewed:
         items.append(_review_item(ctx, reviewed))
+    elif gated:
+        items.append(_review_rule_item(ctx))
     items += [_codeowners_item(ctx), _adoption_item(ctx)]
     if ctx["ruleset_deferred"]:
         items.append(_RULESET_ITEM)
@@ -1192,15 +1222,16 @@ def main(argv=None):
         "org_plan": _org_plan(repo.split("/", 1)[0]) if at_org and is_private else "",
         # Read before the first write: a token without Contents read answers 403 here.
         "shim_on_default": _shim_on_default(repo, default_branch),
-        # Read before the first write, so `_refuse_missing_key` refuses while nothing exists.
-        "engine_secrets": _engine_secrets(repo),
-        "repo_secrets": _repo_secrets(),
         "ruleset_deferred": False,
         "apply_envs": {},
         "review_count": 0,
     }
     _refuse_unreachable_org_variables(ctx)
     _refuse_org_assertion_mismatch(ctx)
+    # Read before the first write, so `_refuse_missing_key` refuses while nothing exists, and
+    # after the organization refusals, which a token without Secrets read would otherwise miss.
+    ctx["engine_secrets"] = _engine_secrets(repo)
+    ctx["repo_secrets"] = _repo_secrets()
     _refuse_missing_key(ctx)
     print(f"{ctx['repo']} (default branch {ctx['default_branch']})")
     print(f"environments: {', '.join(ctx['envs'])}")
