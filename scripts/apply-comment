@@ -514,7 +514,7 @@ def _held_env(env, explicit):
     name = sc._md_escape(env)
     if not explicit:
         return f"`{name}`"
-    return f"`{name}` (explicit: once reviewed, comment `shipmate apply {name}`)"
+    return f"`{name}` (explicit: once the hold clears, comment `shipmate apply {name}`)"
 
 
 def _footer_parts(

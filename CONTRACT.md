@@ -2045,8 +2045,9 @@ three review sentences (see §Comment-ops) are:
   naming the environments and asking for an approving review, or for a
   requested-changes review to be resolved or dismissed. A held environment
   that is also explicit is listed once, here and not in the excluded sentence,
-  with its command: `` `prod` (explicit: once reviewed, comment `shipmate apply
-  prod`) ``, since a bare apply would not pick it up even once reviewed. A held
+  with its command: `` `prod` (explicit: once the hold clears, comment `shipmate
+  apply prod`) ``, since a bare apply would not pick it up even once the hold
+  clears. A held
   environment that is not explicit names no command. The sentence is deliberately
   cause-agnostic: three distinct decisions hold an environment
   (`REVIEW_REQUIRED` on a gated env, `CHANGES_REQUESTED`, or an unknown or

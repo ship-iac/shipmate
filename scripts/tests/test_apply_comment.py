@@ -655,7 +655,7 @@ def test_held_explicit_env_is_listed_once_under_the_hold_with_its_command():
     assert lines == [
         "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them.",
         "Held — the pull request's review state does not permit applying: `dev`, "
-        "`sbx` (explicit: once reviewed, comment `shipmate apply sbx`). "
+        "`sbx` (explicit: once the hold clears, comment `shipmate apply sbx`). "
         "Get an approving review, or resolve or dismiss a requested-changes "
         "review; the run log's apply-all-detect notice names the decision seen.",
     ]
@@ -666,7 +666,7 @@ def test_held_explicit_env_is_escaped_in_its_name_and_its_command():
     (line,) = ac._footer_parts("pending", RUN_URL, ["a<b"], [], "", ["a<b"])[:-2]
     esc = ac.sc._md_escape("a<b")
     assert esc == "a&lt;b"
-    assert f"`{esc}` (explicit: once reviewed, comment `shipmate apply {esc}`)" in line
+    assert f"`{esc}` (explicit: once the hold clears, comment `shipmate apply {esc}`)" in line
     assert "a<b" not in line
 
 
