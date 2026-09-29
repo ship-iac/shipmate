@@ -387,6 +387,8 @@ def _reconcile_env(ctx, name, role):
     """Create or repair one environment. `role` is "plan" or "apply"."""
     path = f"repos/{ctx['repo']}/environments/{name}"
     env = _gh_json_or_none(path)
+    if role == "apply":
+        ctx["apply_envs"][name] = env
     body = _APPLY_BODY if role == "apply" else _PLAN_BODY
     put = ["gh", "api", "-X", "PUT", path, "--input", "-"]
     if env is None:
@@ -707,9 +709,20 @@ def _gate_entry(ctx):
     endpoint answers `[]` rather than 404 when the branch carries no rule. If that is
     wrong, a repository with no ruleset crashes here instead of reaching the report
     `_reconcile_ruleset` writes for one that cannot have rulesets at all.
+
+    Also sets `ctx["review_count"]`: the highest `required_approving_review_count` over
+    every `pull_request` rule in the same response, 0 when none.
     """
     branch = urllib.parse.quote(ctx["default_branch"], safe="")
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
+    ctx["review_count"] = max(
+        (
+            (rule.get("parameters") or {}).get("required_approving_review_count") or 0
+            for rule in rules
+            if rule.get("type") == "pull_request"
+        ),
+        default=0,
+    )
     for rule in rules:
         if rule.get("type") != "required_status_checks":
             continue
@@ -888,102 +901,210 @@ def _reconcile_shim(ctx):
         report("differs", filename, "differs beyond its pin, not overwritten")
 
 
-def _checklist(ctx):
-    """Print the values and steps this script cannot supply, as commands to fill in.
+#: The table template a run with no `.github/shipmate.toml` prints. Every `<value>` is a
+#: placeholder to substitute, so no line carrying one runs as printed.
+_TABLE_TEMPLATE = [
+    "A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`",
+    "table for every environment that needs a region or a cloud role — under `layout",
+    '= "tf_vars"` every environment needs one, carrying a region, or the run refuses.',
+    "Tables are keyed by the logical environment name (`dev-eu`), never by its",
+    "`-plan` / `-apply` half. Top-level settings go above the first table header: a",
+    "scalar written below one lands inside that table instead.",
+    "",
+    "`shared = true` in a table binds that environment as one bare `<name>` on both",
+    "paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key",
+    "from this checkout's file, so re-run it after adding or dropping one.",
+    "",
+    "`[gate] approver_team` names the team whose members may apply and unlock by",
+    "pull request comment — `<team-slug>` here. Keep it above the first",
+    "`[environments.*]` header, where it reads with the other repository-wide",
+    "settings.",
+    "",
+    "  schema_version = 1",
+    '  layout = "tf_vars"',
+    "",
+    "  [gate]",
+    '  approver_team = "<team-slug>"',
+    "",
+    "  [environments.dev-eu]",
+    '  region         = "eu-west-1"',
+    '  aws.plan.role  = "arn:aws:iam::<account>:role/shipmate-plan"',
+    '  aws.apply.role = "arn:aws:iam::<account>:role/shipmate-apply"',
+    "",
+    "Give the plan and apply tiers separate roles. One `aws.role` covering both",
+    "hands any-branch plan cells the apply role's permissions (docs/hardening.md).",
+    "Each cell resolves its identity from that file on the default branch, and a",
+    "repository without one refuses (CONTRACT.md §Environment table).",
+]
 
-    The environment table is asked for by hand because its layout, roles and regions are
-    values this script cannot know. Every `<value>` is a placeholder to substitute, so no
-    line carrying one runs as printed.
+#: GitHub's own search order for the file.
+_CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+
+
+def _passphrase_item(ctx):
+    item = "SHIPMATE_PLAN_PASSPHRASE repository secret (optional)"
+    if "SHIPMATE_PLAN_PASSPHRASE" in ctx["repo_secrets"]:
+        return "ok", item, []
+    return (
+        "todo",
+        item,
+        [
+            "gh secret set SHIPMATE_PLAN_PASSPHRASE",
+            "An organization secret of that name is not visible to this read.",
+        ],
+    )
+
+
+def _webhook_item(ctx):
+    item = f"SHIPMATE_SLACK_WEBHOOK on {ENGINE_ENV} (optional)"
+    if "SHIPMATE_SLACK_WEBHOOK" in ctx["engine_secrets"]:
+        return "ok", item, []
+    return "todo", item, [f"gh secret set SHIPMATE_SLACK_WEBHOOK --env {ENGINE_ENV}"]
+
+
+def _table_item(ctx):
+    item = f"`{ec.CONFIG_PATH}`"
+    if ctx["table"] is None:
+        return "todo", item, _TABLE_TEMPLATE
+    try:
+        ec.validate(ctx["table"], ctx["envs"])
+    except SystemExit as e:
+        return "todo", item, [ln.removeprefix("::error::") for ln in str(e).splitlines()]
+    return "ok", item, []
+
+
+def _approver_item(ctx):
+    team = ec.gate_approver_team(ctx["table"] or {})
+    if team:
+        return "ok", f"`[gate] approver_team`: {team}", []
+    return (
+        "todo",
+        "`[gate] approver_team`",
+        [
+            f"Name, in `{ec.CONFIG_PATH}`, the team whose members may apply and unlock by",
+            "pull request comment.",
+        ],
+    )
+
+
+def _app_item(ctx):
+    return (
+        "cannot check",
+        f"{ctx['repo']} in the App installation's repository selection",
+        [
+            f"Reading `repos/{ctx['repo']}/installation` needs an App JWT, which this run",
+            "does not hold. Check it, or add the repository, at",
+            "https://github.com/organizations/<org>/settings/apps/shipmate/installations",
+            "— substitute your org and the App name you registered (docs/github-app.md §4).",
+            "The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.",
+        ],
+    )
+
+
+def _reviewed(env):
+    """True when `env` requires a named reviewer and prevents self-review."""
+    return env is not None and any(
+        r.get("type") == "required_reviewers"
+        and r.get("reviewers")
+        and r.get("prevent_self_review") is True
+        for r in env.get("protection_rules") or []
+    )
+
+
+def _review_item(ctx, names):
+    """`ok` when every environment in `names` is reviewed, or a `pull_request` rule on the
+    default branch requires an approving review. `apply_envs` holds `None` for an
+    environment a dry run would create, and that is not reviewed."""
+    item = "approving review before apply"
+    missing = [n for n in names if not _reviewed(ctx["apply_envs"].get(n))]
+    if not missing or ctx["review_count"] >= 1:
+        return "ok", item, []
+    first = f"Required reviewers and `Prevent self-review` on {', '.join(missing)}"
+    if not ctx["is_private"]:
+        return "todo", item, [first, "(docs/getting-started.md §Environment setup)."]
+    return (
+        "todo",
+        item,
+        [
+            first,
+            "(docs/getting-started.md §Environment setup). On a private repository below",
+            "Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
+            "approving-review `pull_request` rule on the default branch, which this script",
+            "does not create (docs/branch-protection.md §Reproducible ruleset), and",
+            "`[gate] approver_team`.",
+        ],
+    )
+
+
+def _codeowners_item(ctx):
+    item = "CODEOWNERS entry covering /.github/workflows/"
+    found = [p for p in _CODEOWNERS_PATHS if (pathlib.Path(ctx["root"]) / p).is_file()]
+    if not found:
+        return "todo", item, [f"Add one in `{_CODEOWNERS_PATHS[0]}`."]
+    return (
+        "cannot check",
+        item,
+        [f"`{found[0]}` exists. Which paths it covers is GitHub's matching, not this run's."],
+    )
+
+
+def _adoption_item(ctx):
+    item = "adoption pull request"
+    if ctx["shim_on_default"]:
+        return "ok", item, []
+    verb = "Re-run without --dry-run, then commit" if _DRY else "Commit"
+    return (
+        "todo",
+        item,
+        [
+            f"{verb} the workflow file and the table together,",
+            "in a pull request that changes no stack. The table is read from the default",
+            "branch, so the first plan needs it merged.",
+        ],
+    )
+
+
+_RULESET_ITEM = (
+    "todo",
+    "gate ruleset",
+    [
+        "Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because",
+        "the workflows that produce it are not on the default branch (CONTRACT.md",
+        "§Post-plan topology). Then run this script again to create the gate ruleset.",
+    ],
+)
+
+
+def _checklist(ctx):
+    """Print each value and step this script cannot supply, marked `ok`, `todo` or
+    `cannot check` from what this run read. Only a `todo` carries a command or template.
+
+    The verdicts never reach `_exit_code`: every item is the consumer's to do, so a first
+    run exits 0 over them.
     """
-    team = ec.gate_approver_team(ctx["table"] or {}) or "<team-slug>"
-    halves = [
-        (env, name, role)
-        for env in ctx["envs"]
-        if env not in ctx["unresolved"]
-        for name, role in _env_names(env, ctx["shared"])
-    ]
-    out = [
-        "",
-        "Still yours — these values are the consumer's, so this script cannot set them.",
-        "",
-        "Both optional:",
-        "",
-        "  gh secret set SHIPMATE_PLAN_PASSPHRASE",
-        "  gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine",
-        "",
-        "By hand:",
-        "",
-        "  A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`",
-        "  table for every environment that needs a region or a cloud role — under `layout",
-        '  = "tf_vars"` every environment needs one, carrying a region, or the run refuses.',
-        "  Tables are keyed by the logical environment name (`dev-eu`), never by its",
-        "  `-plan` / `-apply` half. Top-level settings go above the first table header: a",
-        "  scalar written below one lands inside that table instead.",
-        "",
-        "  `shared = true` in a table binds that environment as one bare `<name>` on both",
-        "  paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key",
-        "  from this checkout's file, so re-run it after adding or dropping one.",
-        "",
-        "  `[gate] approver_team` names the team whose members may apply and unlock by",
-        f"  pull request comment — `{team}` here. Keep it above the first",
-        "  `[environments.*]` header, where it reads with the other repository-wide",
-        "  settings.",
-        "",
-        "    schema_version = 1",
-        '    layout = "tf_vars"',
-        "",
-        "    [gate]",
-        f'    approver_team = "{team}"',
-        "",
-        "    [environments.dev-eu]",
-        '    region         = "eu-west-1"',
-        '    aws.plan.role  = "arn:aws:iam::<account>:role/shipmate-plan"',
-        '    aws.apply.role = "arn:aws:iam::<account>:role/shipmate-apply"',
-        "",
-        "  Give the plan and apply tiers separate roles. One `aws.role` covering both",
-        "  hands any-branch plan cells the apply role's permissions (docs/hardening.md).",
-        "  Each cell resolves its identity from that file on the default branch, and a",
-        "  repository without one refuses (CONTRACT.md §Environment table).",
-        "",
-        f"  Add {ctx['repo']} to the App installation's repository selection, at",
-        "  https://github.com/organizations/<org>/settings/apps/shipmate/installations",
-        "  — substitute your org and the App name you registered (docs/github-app.md §4).",
-        "  The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.",
-    ]
     # A reviewer on a shared env's bare environment stalls the plan cells and the drift
     # run, so it is asked for only where the apply path has an environment of its own.
-    reviewed = [name for env, name, role in halves if role == "apply" and env not in ctx["shared"]]
+    reviewed = [
+        name
+        for env in ctx["envs"]
+        if env not in ctx["unresolved"] and env not in ctx["shared"]
+        for name, role in _env_names(env, ctx["shared"])
+        if role == "apply"
+    ]
+    items = [_passphrase_item(ctx), _webhook_item(ctx), _table_item(ctx)]
+    items += [_approver_item(ctx), _app_item(ctx)]
     if reviewed:
-        out += [
-            "",
-            f"  Required reviewers and `Prevent self-review` on {', '.join(reviewed)}",
-        ]
-        if ctx["is_private"]:
-            out += [
-                "  (docs/getting-started.md §Environment setup). On a private repository below",
-                "  Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
-                "  approving-review `pull_request` rule on the default branch, which this script",
-                "  does not create (docs/branch-protection.md §Reproducible ruleset), and",
-                "  `[gate] approver_team`.",
-            ]
-        else:
-            out.append("  (docs/getting-started.md §Environment setup).")
-    out += ["", "  A CODEOWNERS entry covering /.github/workflows/."]
-    if not ctx["shim_on_default"]:
-        verb = "Re-run without --dry-run, then commit" if _DRY else "Commit"
-        out += [
-            "",
-            f"  {verb} the workflow file and the table together, in a pull request that",
-            "  changes no stack. The table is read from the default branch, so the first",
-            "  plan needs it merged.",
-        ]
+        items.append(_review_item(ctx, reviewed))
+    items += [_codeowners_item(ctx), _adoption_item(ctx)]
     if ctx["ruleset_deferred"]:
-        out += [
-            "  Merge it: no ruleset requires `shipmate / gate` yet, because the workflows that",
-            "  produce it are not on the default branch (CONTRACT.md §Post-plan topology).",
-            "  Then run this script again to create the gate ruleset.",
-        ]
-    print("\n".join(out))
+        items.append(_RULESET_ITEM)
+    out = ["", "Still yours, each item marked from what this run read:", ""]
+    for verdict, item, details in items:
+        out.append(f"{verdict:<12}  {item}")
+        out += [f"    {line}" if line else "" for line in details]
+        if details:
+            out.append("")
+    print("\n".join(out).rstrip("\n"))
 
 
 def _refuse_diverging_app_id(app_id, variables):
@@ -1075,6 +1196,8 @@ def main(argv=None):
         "engine_secrets": _engine_secrets(repo),
         "repo_secrets": _repo_secrets(),
         "ruleset_deferred": False,
+        "apply_envs": {},
+        "review_count": 0,
     }
     _refuse_unreachable_org_variables(ctx)
     _refuse_org_assertion_mismatch(ctx)

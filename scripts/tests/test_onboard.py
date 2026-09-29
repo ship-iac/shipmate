@@ -100,6 +100,8 @@ def ctx(**over):
         "repo_secrets": set(),
         "table": None,
         "ruleset_deferred": False,
+        "apply_envs": {},
+        "review_count": 0,
     }
     base.update(over)
     return base
@@ -1086,7 +1088,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx(shim_on_default=True))
     onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE))
-    onboard._checklist(ctx())
+    onboard._checklist(ctx(root=tmp_path))
     assert list(tmp_path.iterdir()) == []
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
@@ -2332,179 +2334,388 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
 
 
 #: Hand-written, not captured from the implementation: a constant pasted from the output
-#: passes whatever the output says. The two checklists differ in one item, so they are
-#: assembled from the same hand-written pieces rather than carrying two copies of the rest.
-_CHECKLIST_HEAD = """
-Still yours — these values are the consumer's, so this script cannot set them.
+#: passes whatever the output says. A fresh public repository under `--dry-run`: no table,
+#: no secret, every environment absent, no rule, no `CODEOWNERS`, no workflow file on the
+#: default branch, so the gate ruleset is deferred.
+FRESH_CHECKLIST = """
+Still yours, each item marked from what this run read:
 
-Both optional:
+todo          SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
+    gh secret set SHIPMATE_PLAN_PASSPHRASE
+    An organization secret of that name is not visible to this read.
 
-  gh secret set SHIPMATE_PLAN_PASSPHRASE
-  gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine
+todo          SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
+    gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine
 
-By hand:
+todo          `.github/shipmate.toml`
+    A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`
+    table for every environment that needs a region or a cloud role — under `layout
+    = "tf_vars"` every environment needs one, carrying a region, or the run refuses.
+    Tables are keyed by the logical environment name (`dev-eu`), never by its
+    `-plan` / `-apply` half. Top-level settings go above the first table header: a
+    scalar written below one lands inside that table instead.
 
-  A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`
-  table for every environment that needs a region or a cloud role — under `layout
-  = "tf_vars"` every environment needs one, carrying a region, or the run refuses.
-  Tables are keyed by the logical environment name (`dev-eu`), never by its
-  `-plan` / `-apply` half. Top-level settings go above the first table header: a
-  scalar written below one lands inside that table instead.
+    `shared = true` in a table binds that environment as one bare `<name>` on both
+    paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
+    from this checkout's file, so re-run it after adding or dropping one.
 
-  `shared = true` in a table binds that environment as one bare `<name>` on both
-  paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
-  from this checkout's file, so re-run it after adding or dropping one.
+    `[gate] approver_team` names the team whose members may apply and unlock by
+    pull request comment — `<team-slug>` here. Keep it above the first
+    `[environments.*]` header, where it reads with the other repository-wide
+    settings.
 
-  `[gate] approver_team` names the team whose members may apply and unlock by
-  pull request comment — `<team-slug>` here. Keep it above the first
-  `[environments.*]` header, where it reads with the other repository-wide
-  settings.
+      schema_version = 1
+      layout = "tf_vars"
 
-    schema_version = 1
-    layout = "tf_vars"
+      [gate]
+      approver_team = "<team-slug>"
 
-    [gate]
-    approver_team = "<team-slug>"
+      [environments.dev-eu]
+      region         = "eu-west-1"
+      aws.plan.role  = "arn:aws:iam::<account>:role/shipmate-plan"
+      aws.apply.role = "arn:aws:iam::<account>:role/shipmate-apply"
 
-    [environments.dev-eu]
-    region         = "eu-west-1"
-    aws.plan.role  = "arn:aws:iam::<account>:role/shipmate-plan"
-    aws.apply.role = "arn:aws:iam::<account>:role/shipmate-apply"
+    Give the plan and apply tiers separate roles. One `aws.role` covering both
+    hands any-branch plan cells the apply role's permissions (docs/hardening.md).
+    Each cell resolves its identity from that file on the default branch, and a
+    repository without one refuses (CONTRACT.md §Environment table).
 
-  Give the plan and apply tiers separate roles. One `aws.role` covering both
-  hands any-branch plan cells the apply role's permissions (docs/hardening.md).
-  Each cell resolves its identity from that file on the default branch, and a
-  repository without one refuses (CONTRACT.md §Environment table).
+todo          `[gate] approver_team`
+    Name, in `.github/shipmate.toml`, the team whose members may apply and unlock by
+    pull request comment.
 
-  Add o/r to the App installation's repository selection, at
-  https://github.com/organizations/<org>/settings/apps/shipmate/installations
-  — substitute your org and the App name you registered (docs/github-app.md §4).
-  The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+cannot check  o/r in the App installation's repository selection
+    Reading `repos/o/r/installation` needs an App JWT, which this run
+    does not hold. Check it, or add the repository, at
+    https://github.com/organizations/<org>/settings/apps/shipmate/installations
+    — substitute your org and the App name you registered (docs/github-app.md §4).
+    The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
+todo          approving review before apply
+    Required reviewers and `Prevent self-review` on dev-eu-apply
+    (docs/getting-started.md §Environment setup).
+
+todo          CODEOWNERS entry covering /.github/workflows/
+    Add one in `.github/CODEOWNERS`.
+
+todo          adoption pull request
+    Re-run without --dry-run, then commit the workflow file and the table together,
+    in a pull request that changes no stack. The table is read from the default
+    branch, so the first plan needs it merged.
+
+todo          gate ruleset
+    Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because
+    the workflows that produce it are not on the default branch (CONTRACT.md
+    §Post-plan topology). Then run this script again to create the gate ruleset.
 """
 
-_CHECKLIST_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-eu-apply
-  (docs/getting-started.md §Environment setup).
+#: Hand-written: a configured public repository. Every item this run can read is `ok`; the
+#: two it cannot read stay `cannot check`.
+CONFIGURED_CHECKLIST = """
+Still yours, each item marked from what this run read:
 
+ok            SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
+ok            SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
+ok            `.github/shipmate.toml`
+ok            `[gate] approver_team`: ops
+cannot check  o/r in the App installation's repository selection
+    Reading `repos/o/r/installation` needs an App JWT, which this run
+    does not hold. Check it, or add the repository, at
+    https://github.com/organizations/<org>/settings/apps/shipmate/installations
+    — substitute your org and the App name you registered (docs/github-app.md §4).
+    The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+
+ok            approving review before apply
+cannot check  CODEOWNERS entry covering /.github/workflows/
+    `.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's.
+
+ok            adoption pull request
 """
 
-#: GitHub refuses required reviewers on a private repository below Enterprise, and the
-#: first private consumer is on Team, so the private block says so.
-_CHECKLIST_PRIVATE_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-eu-apply
-  (docs/getting-started.md §Environment setup). On a private repository below
-  Enterprise, GitHub refuses required reviewers, so the apply gate is then an
-  approving-review `pull_request` rule on the default branch, which this script
-  does not create (docs/branch-protection.md §Reproducible ruleset), and
-  `[gate] approver_team`.
-
-"""
-
-_CHECKLIST_CODEOWNERS = """  A CODEOWNERS entry covering /.github/workflows/.
-"""
-
-#: Printed only while the workflow file is not on the remote default branch.
-_CHECKLIST_COMMIT = """
-  Commit the workflow file and the table together, in a pull request that
-  changes no stack. The table is read from the default branch, so the first
-  plan needs it merged.
-"""
-
-_CHECKLIST_TAIL = _CHECKLIST_CODEOWNERS + _CHECKLIST_COMMIT
-
-#: Printed only by the run that deferred the gate ruleset: the re-run after the merge
-#: creates it, so asking that run to run again is false.
-_CHECKLIST_DEFERRED = """\
-  Merge it: no ruleset requires `shipmate / gate` yet, because the workflows that
-  produce it are not on the default branch (CONTRACT.md §Post-plan topology).
-  Then run this script again to create the gate ruleset.
-"""
-
-SPLIT_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_REVIEWERS + _CHECKLIST_TAIL
+REVIEWERS_RULE = {
+    "type": "required_reviewers",
+    "prevent_self_review": True,
+    "reviewers": [{"type": "Team", "reviewer": {"slug": "ops"}}],
+}
+REVIEWED_APPLY = {"deployment_branch_policy": CUSTOM_POLICY, "protection_rules": [REVIEWERS_RULE]}
+MAIN_POLICY = {"total_count": 1, "branch_policies": [{"name": "main"}]}
 
 
-def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
-    """The printed block is the only place a consumer learns what remains to be done.
-    A step dropped from it is a repository that looks reconciled and cannot plan.
+def checklist_of(out):
+    """The checklist part of `main`'s stdout: everything from its heading on."""
+    return out[out.index("\nStill yours") :]
 
-    The block is compared whole against a hand-written constant, because a membership
-    check would pass a block that silently lost one item -- and cannot see a dropped `gh`
-    prefix or a line that lost its command.
 
-    Mutations, each proven: delete SHIPMATE_PLAN_PASSPHRASE from the block; delete the
-    environment-table item from the `By hand` list.
+def checklist_items(out):
+    """{item: (verdict, detail lines)} parsed from `_checklist`'s output."""
+    items = {}
+    for line in out.splitlines()[3:]:
+        if line and not line.startswith(" "):
+            current = line[14:]
+            items[current] = (line[:12].rstrip(), [])
+        elif line:
+            items[current][1].append(line[4:])
+    return items
+
+
+def test_the_checklist_of_a_fresh_repository_in_a_dry_run(monkeypatch, tmp_path, capsys):
+    """Every item a fresh repository still needs is `todo`, and the App installation, which
+    this run cannot read, is `cannot check`. The block is compared whole: a membership check
+    passes a block that silently lost one item, a command, or its verdict.
+
+    The environments are all absent, so `apply_envs` holds `None` for each: a dry run must
+    not read that as reviewed.
+
+    Mutation: delete the passphrase item from `_checklist`.
     """
-    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared=set()))
-    assert capsys.readouterr().out == SPLIT_CHECKLIST
+    _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
+    assert exit_.code == 0
+    assert checklist_of(capsys.readouterr().out) == FRESH_CHECKLIST
 
 
-#: The shared half of the same block. `_env_names` returns one bare `<env>` for a shared
-#: environment, and a reviewer on it stalls every plan cell, so no reviewer line is due.
-SHARED_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_TAIL
+def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, capsys):
+    """Driven through `main`, so the reviewer verdict rests on the `dev-eu-apply` read that
+    `_reconcile_env` recorded, not on a hand-filled `apply_envs`.
+
+    Mutation: drop the `ctx["apply_envs"][name] = env` record from `_reconcile_env`, so the
+    reviewer item turns `todo`.
+    """
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
+    (tmp_path / ".github" / "shipmate.toml").write_text(
+        'schema_version = 1\nlayout = "tf_vars"\n\n[gate]\napprover_team = "ops"\n\n'
+        '[environments.dev-eu]\nregion = "eu-west-1"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    routes = {
+        ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
+        ENGINE_POLICIES: MAIN_POLICY,
+        ENGINE_SECRETS: {"secrets": [{"name": KEY}, {"name": "SHIPMATE_SLACK_WEBHOOK"}]},
+        REPO_KEY_LIST: [{"name": "SHIPMATE_PLAN_PASSPHRASE"}],
+        "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
+        "repos/o/r/environments/dev-eu-apply": REVIEWED_APPLY,
+        "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": MAIN_POLICY,
+        VARIABLE_LIST: [{"name": "SHIPMATE_APP_ID", "value": "1"}],
+        REMOTE_SHIM: {"name": "shipmate.yml"},
+    }
+    _fake, exit_ = run_main(monkeypatch, tmp_path, routes, [])
+    assert exit_.code == 0
+    assert checklist_of(capsys.readouterr().out) == CONFIGURED_CHECKLIST
 
 
-def test_the_checklist_names_the_tables_approver_team(capsys):
-    """Mutation: print `<team-slug>` whatever the table declares."""
-    assert SPLIT_CHECKLIST.count("<team-slug>") == 2
-    onboard._checklist(ctx(table={"gate": {"approver_team": "platform"}}))
-    assert capsys.readouterr().out == SPLIT_CHECKLIST.replace("<team-slug>", "platform")
+def test_todo_items_leave_the_exit_code_at_0(monkeypatch, tmp_path, capsys):
+    """Exit 2 means a `differs` line and nothing else: every checklist item is the
+    consumer's to do, so a wrapper branching on 2 would fail every first run.
+
+    Mutation, proven: record each checklist verdict in `REPORT` and count `todo` in
+    `_exit_code`. Counting `todo` alone cannot redden: the checklist writes nothing to
+    `REPORT`, which is what keeps it out of the exit code.
+    """
+    _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
+    assert "\ntodo  " in capsys.readouterr().out
+    assert [v for v, _s, _d in onboard.REPORT if v == "differs"] == []
+    assert exit_.code == 0
 
 
-def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys):
+def test_the_passphrase_is_read_from_the_repository_secrets():
+    """Mutation: read `engine_secrets` for it."""
+    item = "SHIPMATE_PLAN_PASSPHRASE repository secret (optional)"
+    placed = ctx(repo_secrets={"SHIPMATE_PLAN_PASSPHRASE"})
+    assert onboard._passphrase_item(placed) == ("ok", item, [])
+    assert onboard._passphrase_item(ctx()) == (
+        "todo",
+        item,
+        [
+            "gh secret set SHIPMATE_PLAN_PASSPHRASE",
+            "An organization secret of that name is not visible to this read.",
+        ],
+    )
+
+
+def test_the_webhook_is_read_from_the_engine_environment_secrets():
+    """Mutation: read `repo_secrets` for it."""
+    placed = ctx(engine_secrets={"SHIPMATE_SLACK_WEBHOOK"})
+    assert onboard._webhook_item(placed) == (
+        "ok",
+        "SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)",
+        [],
+    )
+
+
+def test_a_table_failing_tf_vars_coverage_is_todo_naming_the_refusal():
+    """The checkout's table already passed `validate_structure` in `_resolve_shared`; only
+    `validate` sees an environment with no region, which every `tf_vars` cell refuses.
+
+    Mutation: call `ec.validate_structure` instead of `ec.validate`.
+    """
+    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nshared = false\n')
+    assert onboard._table_item(ctx(table=table)) == (
+        "todo",
+        "`.github/shipmate.toml`",
+        [
+            'layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the environment '
+            "table, and dev-eu has an entry with no region."
+        ],
+    )
+
+
+def test_the_approver_item_names_the_tables_team():
+    """Mutation: read `gate_approver_team` from `{}`."""
+    no_gate = ec.parse_table('layout = "none"\n')
+    assert onboard._approver_item(ctx(table=no_gate))[0] == "todo"
+    ops = ec.parse_table('layout = "none"\n\n[gate]\napprover_team = "ops"\n')
+    assert onboard._approver_item(ctx(table=ops)) == ("ok", "`[gate] approver_team`: ops", [])
+
+
+def test_a_private_repository_with_an_approving_review_rule_is_ok():
+    """A private repository below Enterprise cannot carry environment reviewers, so a
+    `pull_request` rule at one approval is its apply gate.
+
+    Mutation: compare `review_count > 1`.
+    """
+    item = "approving review before apply"
+    ruled = ctx(is_private=True, review_count=1)
+    assert onboard._review_item(ruled, ["dev-eu-apply"]) == ("ok", item, [])
+    assert onboard._review_item(ctx(is_private=True), ["dev-eu-apply"]) == (
+        "todo",
+        item,
+        [
+            "Required reviewers and `Prevent self-review` on dev-eu-apply",
+            "(docs/getting-started.md §Environment setup). On a private repository below",
+            "Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
+            "approving-review `pull_request` rule on the default branch, which this script",
+            "does not create (docs/branch-protection.md §Reproducible ruleset), and",
+            "`[gate] approver_team`.",
+        ],
+    )
+
+
+def test_an_environment_a_dry_run_would_create_is_not_reviewed():
+    """Mutation: read a `None` environment as reviewed."""
+    c = ctx(apply_envs={"dev-eu-apply": None})
+    assert onboard._review_item(c, ["dev-eu-apply"])[0] == "todo"
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {**REVIEWERS_RULE, "prevent_self_review": False},
+        {**REVIEWERS_RULE, "reviewers": []},
+    ],
+    ids=["self-review-allowed", "no-reviewer"],
+)
+def test_a_reviewer_rule_missing_a_condition_is_todo(rule):
+    """Mutations, each proven: drop the `prevent_self_review` condition from `_reviewed`;
+    drop the `reviewers` condition."""
+    c = ctx(apply_envs={"dev-eu-apply": {"protection_rules": [rule]}})
+    assert onboard._review_item(c, ["dev-eu-apply"])[0] == "todo"
+    reviewed = ctx(apply_envs={"dev-eu-apply": {"protection_rules": [REVIEWERS_RULE]}})
+    assert onboard._review_item(reviewed, ["dev-eu-apply"])[0] == "ok"
+
+
+def test_the_reviewer_verdict_ignores_the_engine_environment():
+    """`shipmate-engine` is recorded in `apply_envs` too, but no apply cell binds it.
+
+    Mutation: judge over every name in `apply_envs` instead of `names`.
+    """
+    c = ctx(apply_envs={"shipmate-engine": {}, "dev-eu-apply": REVIEWED_APPLY})
+    assert onboard._review_item(c, ["dev-eu-apply"])[0] == "ok"
+
+
+def test_the_review_count_reads_past_the_gate_rule(monkeypatch):
+    """`_gate_entry` returns at the gate's own `required_status_checks` rule, so a count
+    taken in that loop never sees a `pull_request` rule listed after it.
+
+    Mutation: take the count inside the loop, before its `return`.
+    """
+    rules = [
+        {
+            "type": "required_status_checks",
+            "parameters": {"required_status_checks": [{"context": onboard.GATE}]},
+        },
+        {"type": "pull_request", "parameters": {"required_approving_review_count": 1}},
+    ]
+    monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
+    c = ctx()
+    onboard._gate_entry(c)
+    assert c["review_count"] == 1
+
+
+def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys, tmp_path):
     """A shared env is bound by plan cells and the nightly drift run too, so a required
-    reviewer on it stalls them rather than gating an apply: the reviewer line is due only
-    for an `<env>-apply`. The split fixture above cannot reach this branch.
+    reviewer on it stalls them rather than gating an apply: the reviewer item is due only
+    for an `<env>-apply`.
 
-    Mutation: select the reviewer line on `role == "apply"` alone, which a bare shared
+    Mutation: select the reviewer names on `role == "apply"` alone, which a bare shared
     environment satisfies.
     """
-    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared={"dev-eu"}))
-    assert capsys.readouterr().out == SHARED_CHECKLIST
+    onboard._checklist(ctx(root=tmp_path, shared={"dev-eu"}))
+    assert "approving review before apply" not in checklist_items(capsys.readouterr().out)
 
 
-def test_the_checklist_qualifies_the_reviewer_step_on_a_private_repository(capsys):
-    """Printed unqualified, the reviewer step sends a Team-plan operator to a setting GitHub
-    refuses, with no word on what gates the apply instead. A public repository keeps the
-    unqualified step, which the split constant pins.
+def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys, tmp_path):
+    """`_reconcile_envs` touches neither half of an environment holding both a bare
+    `<env>` and an `<env>-apply`, because which the engine binds is undecided. Naming its
+    `<env>-apply` in the reviewer item points at one the run refused to reconcile.
 
-    Mutation: invert the `is_private` condition in `_checklist`.
+    Mutation: drop the `env not in ctx["unresolved"]` filter from `_checklist`.
     """
-    onboard._checklist(ctx(is_private=True))
-    assert capsys.readouterr().out == (
-        _CHECKLIST_HEAD + _CHECKLIST_PRIVATE_REVIEWERS + _CHECKLIST_TAIL
+    onboard._checklist(ctx(root=tmp_path, envs=["dev-eu", "dev-us"], unresolved={"dev-us"}))
+    items = checklist_items(capsys.readouterr().out)
+    assert items["approving review before apply"] == (
+        "todo",
+        [
+            "Required reviewers and `Prevent self-review` on dev-eu-apply",
+            "(docs/getting-started.md §Environment setup).",
+        ],
     )
 
 
-def test_the_checklist_asks_for_a_re_run_after_deferring_the_gate_ruleset(monkeypatch, capsys):
-    """The run before the merge defers the ruleset, and only this checklist line tells the
-    operator a second run is due; without it the gate is never required.
+def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
+    """GitHub reads `CODEOWNERS` from `.github/`, the root or `docs/`; which paths an entry
+    covers is not reimplemented here.
 
-    Mutation: drop the deferred-report condition, so the ask never prints.
+    Mutation: drop `docs/CODEOWNERS` from `_CODEOWNERS_PATHS`.
     """
-    fake = make_gh({RULES: []})
-    monkeypatch.setattr(onboard, "_run", fake)
-    c = ctx()
-    onboard._reconcile_ruleset(c)
-    assert capsys.readouterr().out.startswith("deferred gate ruleset: ")
-    onboard._checklist(c)
-    assert capsys.readouterr().out == SPLIT_CHECKLIST + _CHECKLIST_DEFERRED
-
-
-def test_the_checklist_asks_for_no_re_run_after_creating_the_gate_ruleset(monkeypatch, capsys):
-    """The re-run after the merge creates the ruleset, so asking it to run again is false,
-    and the workflow file it would ask to commit is already on the default branch.
-
-    Mutations: print the re-run ask unconditionally; print the commit paragraph
-    unconditionally.
-    """
-    fake = make_gh({RULES: []})
-    monkeypatch.setattr(onboard, "_run", fake)
-    c = ctx(shim_on_default=True)
-    onboard._reconcile_ruleset(c)
-    assert capsys.readouterr().out == "create gate ruleset: shipmate / gate\n"
-    onboard._checklist(c)
-    assert capsys.readouterr().out == (
-        _CHECKLIST_HEAD + _CHECKLIST_REVIEWERS + _CHECKLIST_CODEOWNERS
+    item = "CODEOWNERS entry covering /.github/workflows/"
+    assert onboard._codeowners_item(ctx(root=tmp_path)) == (
+        "todo",
+        item,
+        ["Add one in `.github/CODEOWNERS`."],
     )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
+    assert onboard._codeowners_item(ctx(root=tmp_path)) == (
+        "cannot check",
+        item,
+        ["`docs/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's."],
+    )
+
+
+def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(capsys, tmp_path):
+    """The table item prints the first `.github/shipmate.toml` a new consumer writes, and
+    it is not a ```toml fence, so `test_docs_toml_parses.py` cannot see it. `docs/hardening.md`
+    shipped an example declaring `[environments.prod]` twice through a full documentation
+    sweep and a green suite, so the class is live.
+
+    The example is read back out of the printed block rather than retyped: a copy here would
+    be a second selector, free to drift from the thing it claims to check.
+
+    Mutation: print a second `[environments.dev-eu]` header in the template, the duplicate
+    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`.
+    """
+    onboard._checklist(ctx(root=tmp_path))
+    lines = capsys.readouterr().out.splitlines()
+    snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("      ")))
+    # An extraction that finds nothing parses and validates cleanly, so it is green over an
+    # unchecked example.
+    assert snippet.startswith("schema_version = 1"), (
+        f"no TOML example found in the block: {snippet!r}"
+    )
+    # The placeholder is not a slug, so it is the one value a consumer substitutes.
+    assert snippet.count('approver_team = "<team-slug>"') == 1
+    ec.validate_structure(ec.parse_table(snippet.replace("<team-slug>", "ops")))
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):
@@ -2545,59 +2756,6 @@ def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkey
         ("ok", "dev-eu-apply", ""),
         ("ok", "dev-eu-apply branch policy", "main"),
     ]
-
-
-def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys):
-    """`_reconcile_envs` touches neither half of an environment holding both a bare
-    `<env>` and an `<env>-apply`, because which the engine binds is undecided. Naming
-    those halves in the checklist puts an `<env>-apply` the run refused to reconcile --
-    and may then delete -- on the `Required reviewers` line.
-
-    `dev-us` contributes nothing, so the expected block is the split constant unchanged.
-
-    Mutation: drop the `env not in ctx["unresolved"]` filter from `_checklist`.
-    """
-    onboard._checklist(ctx(envs=["dev-eu", "dev-us"], unresolved={"dev-us"}))
-    assert capsys.readouterr().out == SPLIT_CHECKLIST
-
-
-def test_the_checklist_does_not_tell_a_dry_run_to_commit_a_file_it_did_not_write(capsys):
-    """--dry-run writes no workflow file, so the closing step is a re-run, not a commit. The
-    expected block is the split constant with that one line substituted by hand.
-
-    Mutation: drop the `_DRY` branch from the closing line.
-    """
-    onboard._DRY = True
-    onboard._checklist(ctx())
-    assert capsys.readouterr().out == SPLIT_CHECKLIST.replace(
-        "  Commit the workflow file",
-        "  Re-run without --dry-run, then commit the workflow file",
-    )
-
-
-def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(capsys):
-    """The by-hand block prints the first `.github/shipmate.toml` a new consumer writes, and
-    it is not a ```toml fence, so `test_docs_toml_parses.py` cannot see it. `docs/hardening.md`
-    shipped an example declaring `[environments.prod]` twice through a full documentation
-    sweep and a green suite, so the class is live.
-
-    The example is read back out of the printed block rather than retyped: a copy here would
-    be a second selector, free to drift from the thing it claims to check.
-
-    Mutation: print a second `[environments.dev-eu]` header in `_checklist`, the duplicate
-    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`.
-    """
-    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared=set()))
-    lines = capsys.readouterr().out.splitlines()
-    snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("    ")))
-    # An extraction that finds nothing parses and validates cleanly, so it is green over an
-    # unchecked example.
-    assert snippet.startswith("schema_version = 1"), (
-        f"no TOML example found in the block: {snippet!r}"
-    )
-    # The placeholder is not a slug, so it is the one value a consumer substitutes.
-    assert snippet.count('approver_team = "<team-slug>"') == 1
-    ec.validate_structure(ec.parse_table(snippet.replace("<team-slug>", "ops")))
 
 
 def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch):

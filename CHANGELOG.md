@@ -24,6 +24,7 @@ section below names the SHA the release tags.
 - **An invalid `.github/shipmate.toml` is refused with every structural error it holds, one annotation each.**
 - **`scripts/onboard` takes no `--team`; the approver team is read from `[gate] approver_team` in the checkout's table.**
 - **`scripts/onboard --key` is needed only while `shipmate-engine` holds no App private key.**
+- **`scripts/onboard`'s closing checklist marks each item `ok`, `todo` or `cannot check` from what the run read.**
 
 ### Fixed
 

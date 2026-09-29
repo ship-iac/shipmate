@@ -145,9 +145,10 @@ It writes:
   pinned to the engine checkout's release.
 
 The approver team is read from `[gate] approver_team` in the checkout's
-`.github/shipmate.toml`, which this script does not write. The closing by-hand
-checklist prints the team it read there, or a `<team-slug>` placeholder when the
-file declares none.
+`.github/shipmate.toml`, which this script does not write. The closing
+checklist marks it `ok` naming the team it read there, or `todo` when the file
+declares none; with no file, the table template it prints carries a
+`<team-slug>` placeholder.
 
 It reads before it writes and creates or updates only what differs, so a second
 run over a configured repository changes nothing. What it will not touch — an
@@ -164,11 +165,16 @@ stops it too — the assertion is verified rather than trusted
 ([`github-app.md`](github-app.md) §6). So does a run without `--key` while
 `shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
-It then prints what it cannot know, because those values are yours: the cloud
-role and region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
-`SHIPMATE_SLACK_WEBHOOK`, adding the repository to the App installation, environment
-reviewers, a `CODEOWNERS` entry, and the pull request carrying the workflow
-file.
+It then prints a checklist of what it cannot set, because those values are
+yours: `SHIPMATE_PLAN_PASSPHRASE`, `SHIPMATE_SLACK_WEBHOOK`, the table with the
+cloud role, region and env identity your layout injects, `[gate] approver_team`,
+adding the repository to the App installation, an approving review before apply,
+a `CODEOWNERS` entry, and the pull request carrying the workflow file. It marks
+each item `ok`, `todo` or `cannot check` from what the run read, and only a
+`todo` prints its command or template. Two items are `cannot check`: the App
+installation, which only an App JWT can read, and, once a `CODEOWNERS` file
+exists, whether an entry in it covers `/.github/workflows/`, which is GitHub's
+matching.
 
 Branch, commit, push and pull request are yours: the script writes files and
 stops. The tier sections below are the spec it implements — read them to know

@@ -284,6 +284,16 @@ mandate. Each one names what to do.
 | `<file>.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `dev/repin_consumer.py` cannot move. Delete the file and run the script again. |
 | `<file>.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
 
+The closing checklist marks each item with one of three verdicts. None of them
+affects the exit code: every item is yours to do, so a first run exits 0 over
+its `todo` items.
+
+| Verdict | Meaning |
+| --- | --- |
+| `ok` | what the run read already satisfies the item. |
+| `todo` | the item is not done; the command or template to do it follows. |
+| `cannot check` | the run cannot read it: the App installation needs an App JWT, and whether a `CODEOWNERS` entry covers `/.github/workflows/` is GitHub's matching. Confirm it by hand. |
+
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.
 
