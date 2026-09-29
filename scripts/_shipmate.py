@@ -6,7 +6,8 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``bm._run`` cannot leak the patch into every other holder of ``build_matrix``.
 
 Also holds the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
-share. It also reads the per-cell ``cell.json`` summaries and builds this run's page link.
+share, and the UTF-8 switch for their console output. It also reads the per-cell
+``cell.json`` summaries and builds this run's page link.
 """
 
 import glob
@@ -15,6 +16,7 @@ import json
 import os
 import pathlib
 import re
+import sys
 from importlib.machinery import SourceFileLoader
 
 _D = pathlib.Path(__file__).resolve().parent
@@ -32,6 +34,12 @@ def scrub(text, secrets):
         if secret:
             text = text.replace(secret, REDACTED)
     return text
+
+
+def utf8_output():
+    """Write stdout and stderr as UTF-8: a cp1252 Windows console prints `—` and `§` as `?`."""
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 
 def cell_summaries(cells_dir, keys, skew):

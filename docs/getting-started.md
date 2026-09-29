@@ -113,9 +113,12 @@ repository, `terramate` on `PATH`, and an engine checkout sitting on a `vX.Y.Z`
 release tag:
 
 ```bash
-python3 <engine-checkout>/scripts/onboard \
+python <engine-checkout>/scripts/onboard \
   --app-id <app-id> --key shipmate-app.private-key.pem
 ```
+
+Use `python3` where the platform has no `python` (macOS, Debian and Ubuntu
+ship none by default).
 
 `--key` is needed until the App key is on `shipmate-engine`; a later run can
 leave it off.
