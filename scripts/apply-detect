@@ -278,21 +278,18 @@ def run_unlock(repo, env, head):
     half-finished stack may be sitting in the tree. Failing loud there would make
     unlock unavailable for every environment precisely when it is needed.
 
-    `env_membership` + `build_matrix([env], ...)` rather than `compute_cells`,
-    which is what the bare-apply detect does with the same whole-tree walk and
-    for the same reason: `build_matrix` refuses a set above the GHA matrix limit,
-    and over `all_stacks=True` that ceiling counts every stack × every
-    environment in the tree — so a repository large enough to exceed it could
-    never unlock ANY environment, however short the queue, and the refusal would
-    tell the operator to split a pull request that does not exist. Building only
-    the target env's cells bounds the check to what the matrix will actually
-    hold, and keeps the reserved-path and slug-collision guards `build_matrix`
-    also carries. Neither can affect an unlock — it consumes no plan artifact —
-    so each is a refusal inherited from the reuse, and the slug one can make a
-    repository with a latent colliding pair unable to unlock at all. Two more
-    refuse unlock for the whole of `env`: a stack in it carrying two
-    `workload/*` tags (`build_matrix`), and a cell in it whose workload tag its
-    tier does not list with no role to fall back to (`stamp_rows`).
+    `env_membership` + `build_matrix([env], {env: queued}, ...)` rather than
+    `compute_cells`, which is what the bare-apply detect does with the same whole-tree walk
+    and for the same reason: `build_matrix` refuses a set above the GHA matrix limit, and
+    over `all_stacks=True` that ceiling counts every stack × every environment in the tree
+    — so a repository large enough to exceed it could never unlock ANY environment,
+    however short the queue, and the refusal would tell the operator to split a pull
+    request that does not exist. The queue is narrowed before any cell is built, so every
+    refusal `build_matrix`, `stamp_rows` and `refuse_workload_gaps` carry sees only the
+    queued stacks: the matrix limit, the reserved-path and slug-collision guards, two
+    `workload/*` tags, and a workload tag its tier does not list with no role to fall back
+    to. None of them can affect a lock release, and a stack outside the queue is not
+    released, so none of them may make `env` unable to unlock.
 
     `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
     applies none — the run-time half of the decision `scripts/authorize` already
@@ -300,14 +297,16 @@ def run_unlock(repo, env, head):
     because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
     `fromJSON('')` is an error."""
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
-    cells = bm.build_matrix([env], stacks_by_env, tags_by_stack)
-    table = bm.env_config(cells, set(stacks_by_env))
-    cells = bm.stamp_rows(cells, table, "apply")
     names = pending_apply_names(repo, head)
-    pending = [c for c in cells if _check_name(c["stack"], c["environment"]) in names]
+    in_env = stacks_by_env.get(env, [])
+    queued = [s for s in in_env if _check_name(s, env) in names]
+    pending = bm.build_matrix([env], {env: queued}, tags_by_stack)
+    table = bm.env_config(pending, set(stacks_by_env))
+    pending = bm.stamp_rows(pending, table, "apply")
+    bm.refuse_workload_gaps(pending, table, "apply")
     print(
         f"::notice title=apply-detect::mode=unlock env={env} head={head} "
-        f"cells={len(cells)} pending={len(pending)}"
+        f"cells={len(in_env)} pending={len(pending)}"
     )
     if not pending:
         print(
@@ -369,6 +368,7 @@ def main():
     cells = bm.stamp_rows(cells, table, "apply")
 
     pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
+    bm.refuse_workload_gaps(pending, table, "apply")
 
     waves = wv.assign_waves(wv.stack_levels(deps), pending)
     print(dag_shape_notice(deps))

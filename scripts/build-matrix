@@ -148,19 +148,20 @@ def filter_cells(cells, tags_by_stack, query):
 
 
 def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
-    cells = []
-    for env in envs:
-        for stack in stacks_by_env.get(env, []):
-            workload = workload_of(tags_by_stack.get(stack, []), stack)
-            cells.append(
-                {
-                    "stack": stack,
-                    "environment": env,
-                    "workload": workload,
-                }
-            )
-    cells.sort(key=lambda c: (c["environment"], c["stack"]))
-    cells = filter_cells(cells, tags_by_stack, tags)
+    """The sorted cells of `envs`, narrowed by the `tags` filter. The workload is read after
+    the filter, so a stack the filter drops cannot refuse the run (`workload_of`)."""
+    cells = sorted(
+        (
+            {"stack": stack, "environment": env}
+            for env in envs
+            for stack in stacks_by_env.get(env, [])
+        ),
+        key=lambda c: (c["environment"], c["stack"]),
+    )
+    cells = [
+        {**c, "workload": workload_of(tags_by_stack.get(c["stack"], []), c["stack"])}
+        for c in filter_cells(cells, tags_by_stack, tags)
+    ]
     for reserved, message in RESERVED_STACK_PATHS.items():
         if any(c["stack"] == reserved for c in cells):
             raise SystemExit(message)
@@ -258,25 +259,7 @@ def stamp_rows(cells, table, tier):
     A row whose `env_binding` is not a non-empty string refuses before any caller writes a
     matrix: every cell job binds `environment:` from it, and GitHub binds no environment for
     an empty one, so the cell would run outside every environment control.
-
-    A cell whose `workload/<name>` tag the consulted tier does not list refuses when that
-    tier has no role to fall back to (`env-config`'s `unlisted_workload`): it would
-    otherwise run with no cloud credentials. The plan tier checks the apply tier too, so a
-    gap only the apply path would hit refuses before merge rather than failing the deploy.
     """
-    paths = (tier, "apply") if tier == "plan" else (tier,)
-    for cell, path in ((c, p) for c in cells for p in paths):
-        refused = ec.unlisted_workload(table, cell["environment"], path, cell["workload"])
-        if refused:
-            label, keys = refused
-            raise SystemExit(
-                f"::error::{cell['stack']} in {cell['environment']} carries "
-                f"workload/{cell['workload']}, which {label}.workloads does not list (it lists: "
-                f"{', '.join(keys)}), and {label} sets no role to fall back to. The cell would "
-                "run with no cloud credentials. Retag the stack, or add the workload to "
-                f"{ec.CONFIG_PATH} on the default branch, which is where this table is read "
-                "from: merge the workload entry there on its own pull request first."
-            )
     rows = [
         {**cell, **ec.resolve(table, cell["environment"], tier, cell["workload"])} for cell in cells
     ]
@@ -289,6 +272,32 @@ def stamp_rows(cells, table, tier):
                 "outside every environment control, so no matrix is written."
             )
     return rows
+
+
+def refuse_workload_gaps(rows, table, tier):
+    """`SystemExit` when a row's `workload/<name>` tag the consulted tier does not list, and
+    that tier has no role to fall back to (`env-config`'s `unlisted_workload`): the cell would
+    otherwise run with no cloud credentials. The plan tier checks the apply tier too, for the
+    stacks the plan path plans.
+
+    Each caller passes only the rows it will run. A completed, excluded or held cell is not
+    refused: a table-only change can make an applied cell look misconfigured, and refusing
+    over it would strand every pull request that planned it. `test_workload_gap_guard.py`
+    pins each call site.
+    """
+    paths = (tier, "apply") if tier == "plan" else (tier,)
+    for cell, path in ((c, p) for c in rows for p in paths):
+        refused = ec.unlisted_workload(table, cell["environment"], path, cell["workload"])
+        if refused:
+            label, keys = refused
+            raise SystemExit(
+                f"::error::{cell['stack']} in {cell['environment']} carries "
+                f"workload/{cell['workload']}, which {label}.workloads does not list (it lists: "
+                f"{', '.join(keys)}), and {label} sets no role to fall back to. The cell would "
+                "run with no cloud credentials. Retag the stack, or add the workload to "
+                f"{ec.CONFIG_PATH} on the default branch, which is where this table is read "
+                "from: merge the workload entry there on its own pull request first."
+            )
 
 
 def fork_pr_error(repository, head_repo, no_pull_request: bool):
@@ -470,6 +479,7 @@ def main():
     # report every unchanged environment as an unused table entry on every plan.
     table = env_config(cells, set(stacks_by_env) if all_stacks else None)
     cells = stamp_rows(cells, table, "plan")
+    refuse_workload_gaps(cells, table, "plan")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")

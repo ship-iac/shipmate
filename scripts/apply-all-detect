@@ -112,6 +112,7 @@ def main():
         ad.ag.plan_runs_by_name(lines, app_id),
         ad.ag.plan_hashes_by_name(lines, app_id),
     )
+    bm.refuse_workload_gaps(runnable, table, "apply")
     # From `runnable`, never from `pending & ungated`: an ungated env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_ungated = (

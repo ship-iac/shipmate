@@ -991,3 +991,40 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
             "env_binding": "dev-eu-apply",
         }
     ]
+
+
+def test_unlock_ignores_two_workload_tags_on_a_stack_outside_the_queue(monkeypatch, tmp_path):
+    """stacks/other is in dev-eu with two `workload/*` tags and no apply check, so it is not
+    released and must not refuse the unlock of stacks/app.
+
+    Mutation: build the cells from the whole of `stacks_by_env` in `run_unlock` -- the
+    two-workload-tag refusal fires."""
+    out = _unlock_env(monkeypatch, tmp_path)
+    _boom_on_plan_path(monkeypatch)
+    monkeypatch.setattr(
+        ad, "pending_apply_names", lambda repo, head: {"apply / stacks/app / dev-eu"}
+    )
+    monkeypatch.setattr(
+        ad.bm,
+        "env_membership",
+        lambda **kw: (
+            {"dev-eu": ["stacks/app", "stacks/other"]},
+            {
+                "stacks/app": ["env/dev-eu", "workload/app"],
+                "stacks/other": ["env/dev-eu", "workload/a", "workload/b"],
+            },
+        ),
+    )
+    ad.main()
+    assert json.loads(_parsed(out)["cells"]) == [
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload": "app",
+            "role_arn": "",
+            "cred_region": "",
+            "tf_vars": {},
+            "config_path": "apply",
+            "env_binding": "dev-eu-apply",
+        }
+    ]

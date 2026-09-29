@@ -561,9 +561,12 @@ of the cell's `workload/<name>` tag, exactly as written. `workloads`
 directly under a provider block is malformed shape, not a fourth tier: a
 workload role means nothing without the path it applies to. A cell whose
 `workload/<name>` tag the consulted tier's `workloads` does not list is refused
-at detect when that tier, after inheritance, sets no role to fall back to. An
-untagged cell and a tier that resolves a role are not refused; the plan detect
-checks the apply tier too, so an apply-tier gap refuses before merge.
+at detect when that tier, after inheritance, sets no role to fall back to. Only
+the cells a run plans or applies are checked: a completed, excluded or held cell
+is not refused, and neither is an untagged cell or a tier that resolves a role.
+The plan path checks both tiers for the stacks it plans. It plans only changed
+stacks, so what keeps an unchanged tagged stack from being stranded is removing
+a workload key after the branch that drops its tag (§Environment table).
 
 The environment's own `region` inheriting into `aws.region` is the schema's only
 cross-level default. Every other field resolves inside its own provider block.
@@ -655,7 +658,7 @@ Every condition below refuses at detect, before any cell starts.
 | The table declares no `layout` | it is the only source of a cell's environment identity, and a scalar written below a `[table]` header lands inside that table rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
 | `layout` is not `tf_vars`, `workspace` or `folder` | a typo would silently disable injection |
 | `layout = "tf_vars"` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
-| A cell's `workload/<name>` tag the consulted tier's `workloads` does not list, where that tier resolves no role to fall back to | the cell would run with no cloud credentials; the plan detect checks the apply tier too, so the gap refuses before merge |
+| A cell's `workload/<name>` tag the consulted tier's `workloads` does not list, where that tier resolves no role to fall back to | the cell would run with no cloud credentials. Checked only for the cells the run plans or applies; the plan path checks both tiers for the stacks it plans |
 | A tier resolves a role but no region | the credentials step requires one |
 | A tier sets an empty role | that resolves to a skipped credentials step, not to a credential |
 | A provider block resolves no role on any tier | dead config; apply-only is legal, all-empty is not |
@@ -907,7 +910,8 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
 A stack carries at most one `workload/<name>` tag; a stack carrying two
-is refused at detect.
+is refused at detect when a run builds its cell. A stack a drift `tags` filter
+or the unlock queue leaves out is not read.
 
 Terramate refuses an uppercase letter in a tag, so an environment name is
 lowercase letters, digits, `-` and `_` — never uppercase. The `environments`

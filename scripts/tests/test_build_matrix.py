@@ -1326,7 +1326,8 @@ def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
 def test_a_workload_tag_the_tier_does_not_list_refuses_when_it_has_no_fallback_role():
     """The tier holds only workload roles, so an unlisted tag would run with no credentials.
 
-    Mutation: remove the `unlisted_workload` call from `stamp_rows` -- no refusal is raised.
+    Mutation: remove the `unlisted_workload` call from `refuse_workload_gaps` -- no refusal is
+    raised.
     """
     table = {
         "layout": "folder",
@@ -1346,7 +1347,7 @@ def test_a_workload_tag_the_tier_does_not_list_refuses_when_it_has_no_fallback_r
     }
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
     with pytest.raises(SystemExit) as exc:
-        bm.stamp_rows(cells, table, "apply")
+        bm.refuse_workload_gaps(cells, table, "apply")
     assert str(exc.value) == (
         "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
         "list (it lists: app, net-edge), and aws.apply sets no role to fall back to. The cell "
@@ -1374,11 +1375,11 @@ _APPLY_GAP = {
 def test_the_plan_path_refuses_a_gap_only_the_apply_tier_has():
     """The apply-tier gap refuses at plan detect, before merge, not first at deploy.
 
-    Mutation: check only the requested tier in `stamp_rows` -- no refusal is raised.
+    Mutation: check only the requested tier in `refuse_workload_gaps` -- no refusal is raised.
     """
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
     with pytest.raises(SystemExit) as exc:
-        bm.stamp_rows(cells, _APPLY_GAP, "plan")
+        bm.refuse_workload_gaps(cells, _APPLY_GAP, "plan")
     assert str(exc.value) == (
         "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
         "list (it lists: net-edge), and aws.apply sets no role to fall back to. The cell would "
@@ -1405,6 +1406,21 @@ def test_the_apply_path_does_not_refuse_a_gap_only_the_plan_tier_has():
         },
     }
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
-    assert [row["role_arn"] for row in bm.stamp_rows(cells, table, "apply")] == [
-        "arn:aws:iam::9817:role/apply"
-    ]
+    assert bm.refuse_workload_gaps(cells, table, "apply") is None
+
+
+def test_a_tags_filter_drops_a_stack_before_its_workload_tags_are_read():
+    """stacks/dns is outside the `env/dev-eu` sweep, so its two workload tags must not refuse it.
+
+    Mutation: assign `workload` before `filter_cells` in `build_matrix` -- the two-workload-tag
+    refusal fires."""
+    cells = bm.build_matrix(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/app"], "prod-eu": ["stacks/dns"]},
+        {
+            "stacks/app": ["env/dev-eu"],
+            "stacks/dns": ["env/prod-eu", "workload/net", "workload/network"],
+        },
+        "env/dev-eu",
+    )
+    assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]

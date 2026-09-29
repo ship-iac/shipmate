@@ -167,11 +167,13 @@ Six things to know beyond the schema:
   exactly as written, so two workloads whose names differ only in punctuation
   resolve separately. A tag the consulted tier's `workloads` does not list is
   refused at detect when that tier, after inheritance, sets no role to fall back
-  to; an untagged cell and a tier that resolves a role are not refused. The plan
-  detect checks the apply tier too, so an apply-tier gap refuses before merge.
-  On a tier with no role to fall back to, a workload key follows the
-  environment order above: merge the key before the branch that tags the stack,
-  and remove it after the branch that drops the tag.
+  to. Only the cells a run plans or applies are checked; an untagged cell and a
+  tier that resolves a role are not refused. The plan path checks both tiers for
+  the stacks it plans, and it plans only changed stacks. On a tier with no role
+  to fall back to, a workload key follows the environment order above: merge the
+  key before the branch that tags the stack, and remove it after the branch that
+  drops the tag. That order is what keeps an unchanged tagged stack from being
+  stranded.
 
 ## Where the credentials step goes
 
