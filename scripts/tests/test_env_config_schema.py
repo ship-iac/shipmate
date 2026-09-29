@@ -710,7 +710,7 @@ def test_the_single_entry_point_validates_ordering(table, message):
     matches no environment and orders nothing. A pasted quote is its own case: TOML quotes
     the string itself, so a pasted `"dev-eu"` arrives with its quotes still on.
 
-    Mutations: delete the `validate_env_name_list` call from `validate_env_order` -- every
+    Mutations: delete the `validate_env_name_list` call from `_check_entries` -- every
     case validates; drop either entry from the suffix tuple in `_check_env_name` -- that
     suffix's case validates; or widen `_ENV_ENTRY` to `.+` -- the space, quote and
     uppercase cases validate.
@@ -756,8 +756,8 @@ def test_a_cycle_across_needs_refuses_structurally(order, cycle):
     for the direction the path is rendered in -- `graphlib` reports each node before its
     successor, so reversing the join silently mislabels every cycle longer than two.
 
-    Mutations: delete the `TopologicalSorter` block from `validate_env_order`, or the
-    `validate_env_order` call from `_check_entries` -- all three tables validate.
+    Mutations: delete the `TopologicalSorter` block from `_check_cycle`, or the
+    `_check_cycle` call from `_check_entries` -- all three tables validate.
     """
     table = {"layout": "folder", "environments": {e: {"needs": p} for e, p in order.items()}}
     with pytest.raises(SystemExit) as excinfo:
@@ -1065,4 +1065,125 @@ def test_a_lowercase_reference_refusal_spells_the_vars_key():
     assert str(excinfo.value) == (
         "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
         'variable "role"; GitHub variable names are uppercase. Write { vars = "ROLE" }.'
+    )
+
+
+# --- 12: every structural error in one refusal ------------------------------------------
+
+
+def _structural(table):
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(table)
+    return str(excinfo.value)
+
+
+def test_three_independent_errors_refuse_as_three_lines():
+    """A misspelled key, a quoted boolean in the same entry and a display name for the team
+    are three typos, and one refusal names all three rather than one per run.
+
+    Mutations: re-raise inside `_gather` -- only the team line is left, because the other
+    two are appended without it; or drop the `_check_gate` call from `validate_structure`
+    -- the team line is lost.
+    """
+    table = env_config.parse_table(
+        'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n\n'
+        '[gate]\napprover_team = "Platform Team"\n'
+    )
+    assert _structural(table) == (
+        "::error::environment dev-eu: regoin is not a key this engine implements. An "
+        "environment holds region, tf_vars, aws, shared, needs, explicit, gated.\n"
+        "::error::environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
+        "gated = false, unquoted.\n"
+        "::error::gate.approver_team is 'Platform Team', which is not a GitHub team slug; use "
+        "the bare slug from the team's URL (letters, digits, '-' and '_'), not a display name "
+        "or an @org/team reference."
+    )
+
+
+def test_the_lines_come_in_check_order():
+    """Top-level keys, then `layout`, then the entries: the order the checks run in.
+
+    Mutations: move the `layout` check after `_check_entries` -- the layout line moves last;
+    or `return` from `validate_structure` right after the `layout` check -- the entry line is
+    lost.
+    """
+    table = {"colour": 1, "lyout": "folder", "environments": {"dev": {"regoin": "eu-west-1"}}}
+    assert _structural(table) == (
+        "::error::colour is not a setting this engine implements. .github/shipmate.toml holds "
+        "schema_version, layout, environments, gate.\n"
+        "::error::lyout is not a setting this engine implements. .github/shipmate.toml holds "
+        "schema_version, layout, environments, gate.\n" + NO_LAYOUT + "\n"
+        "::error::environment dev: regoin is not a key this engine implements. An environment "
+        "holds region, tf_vars, aws, shared, needs, explicit, gated."
+    )
+
+
+def test_a_non_mapping_environments_is_one_message():
+    """Mutation: drop the `isinstance(environments, dict)` skip in `validate_structure` --
+    the entries loop indexes a string and raises a raw `TypeError`."""
+    assert _structural({"layout": "folder", "environments": "x"}) == (
+        "::error::environments must be a mapping, got str."
+    )
+
+
+@pytest.mark.parametrize(("value", "kind"), [("x", "str"), (7, "int")])
+def test_a_non_mapping_entry_skips_only_its_own_checks(value, kind):
+    """The entry beside it is still checked; the non-mapping one gets its one message.
+
+    Mutations: drop the `isinstance(entry, dict)` return in `_check_environment` -- both
+    cases raise a raw exception; or drop the `isinstance(entry, dict)` test on the `needs`
+    loop in `_check_entries` -- the `int` case raises a raw `TypeError`.
+    """
+    table = {"layout": "folder", "environments": {"dev": value, "prod": {"regoin": "eu"}}}
+    assert _structural(table) == (
+        f"::error::environment dev must be a mapping, got {kind}.\n"
+        "::error::environment prod: regoin is not a key this engine implements. An environment "
+        "holds region, tf_vars, aws, shared, needs, explicit, gated."
+    )
+
+
+def test_a_refused_aws_block_skips_the_shared_plan_rule():
+    """`"plan" in aws` on the string `"plan"` is a substring test that holds, so this value
+    is the one that makes the rule report a second, false message when it runs anyway.
+
+    Mutation: drop `aws_ok and` from the `aws.plan` rule in `_check_flags`.
+    """
+    table = {"layout": "folder", "environments": {"dev": {"aws": "plan", "shared": True}}}
+    assert _structural(table) == "::error::environment dev: aws must be a mapping, got str."
+
+
+def test_a_non_mapping_tf_vars_is_one_message():
+    """Mutation: drop the `isinstance(tf_vars, dict)` return in `_check_vars` -- `.items()`
+    on a string raises a raw `AttributeError`."""
+    table = {"layout": "folder", "environments": {"dev": {"tf_vars": "x"}}}
+    assert _structural(table) == "::error::environment dev: tf_vars must be a mapping, got str."
+
+
+def test_a_non_mapping_gate_is_one_message():
+    """Mutation: drop the `isinstance(gate, dict)` return in `_check_gate` -- each letter
+    of `"ops"` is then refused as a gate key."""
+    assert _structural({"layout": "folder", "gate": "ops"}) == (
+        "::error::gate must be a mapping, got str."
+    )
+
+
+def test_one_error_is_todays_message_byte_for_byte():
+    """Mutation: join the lines with `"\n".join(errors) + "\n"` -- a trailing newline."""
+    assert _structural({"layout": "drys"}) == (
+        "::error::layout is 'drys'; it must be one of tf_vars, workspace, folder."
+    )
+
+
+def test_validate_env_order_alone_still_refuses_at_its_first_error():
+    """`env-order` calls it outside the structural pass, where the first refusal is the
+    contract.
+
+    Mutation: wrap each `validate_env_name_list` call in `validate_env_order` in a gatherer
+    and raise the joined messages -- the second line appears.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_env_order({"a": "dev", "b": "prod"})
+    assert str(excinfo.value) == (
+        "::error::environments.a.needs must be a list of env-name strings, got str ('dev'); "
+        "did you mean ['dev']?"
     )

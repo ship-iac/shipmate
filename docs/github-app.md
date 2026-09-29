@@ -34,11 +34,14 @@ GitHub answers it with a redirect carrying a single-use `code`. One command
 does the whole leg:
 
 ```bash
-python3 scripts/register-app \
+python scripts/register-app \
   --name shipmate-<your-org> \
   --repo <your-org>/<your-repo> \
   --out shipmate-app.private-key.pem
 ```
+
+Use `python3` where the platform has no `python` (macOS, Debian and Ubuntu
+ship none by default).
 
 It builds the self-submitting form from `app/manifest.json`, opens it in your
 browser, and receives GitHub's redirect on a loopback listener it started
@@ -246,9 +249,8 @@ Then tell `scripts/onboard` the name is already set there, and it stops writing
 it per repository:
 
 ```bash
-python3 <engine-checkout>/scripts/onboard \
-  --team <approver-team-slug> --app-id <app-id> \
-  --key shipmate-app.private-key.pem \
+python <engine-checkout>/scripts/onboard \
+  --app-id <app-id> --key shipmate-app.private-key.pem \
   --vars-at-org SHIPMATE_APP_ID
 ```
 
@@ -518,13 +520,12 @@ behind the flag answers to nobody else.
 ```bash
 ENGINE=<path-to-engine-checkout>    # on a release tag
 CHECKOUTS="<path>/<repo> <path>/<repo>"
-TEAM=<approver-team-slug>          # may differ per repo; pass it per repo either way
 APP_ID=<app-id-from-step-1-output>
 KEY=$PWD/shipmate-app.private-key.pem
 
 for DIR in $CHECKOUTS; do
   echo "== $DIR"
-  ( cd "$DIR" && python3 "$ENGINE/scripts/onboard" --team "$TEAM" --app-id "$APP_ID" --key "$KEY" )
+  ( cd "$DIR" && python "$ENGINE/scripts/onboard" --app-id "$APP_ID" --key "$KEY" )
 done
 ```
 
@@ -539,10 +540,9 @@ exits 2 on a usage error, so a loop branching on 2 cannot tell a drifted
 repository from a mistyped flag. Add `--dry-run` for a first pass that reports
 what every repository would get and writes nothing.
 
-Each run ends with the checklist of what it cannot set: the cloud role and
-region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
-`SHIPMATE_SLACK_WEBHOOK`, environment reviewers, a `CODEOWNERS` entry, and the pull
-request carrying the workflow file.
+Each run ends with the checklist of what it cannot set, each item marked `ok`,
+`todo` or `cannot check` from what the run read.
+[`getting-started.md`](getting-started.md) §Quick path lists the items.
 
 Then confirm, per repository, that no repository-level
 `SHIPMATE_APP_PRIVATE_KEY` survived — `shipmate doctor` cannot check this for

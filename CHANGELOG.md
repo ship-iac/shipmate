@@ -21,11 +21,16 @@ section below names the SHA the release tags.
 - **A workload tag the environment does not list is refused at detect, for the cells a run plans, applies or unlocks, when its tier has no role to fall back to.**
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
 - **The bare-apply comment lists a held `explicit` environment once, with both reasons and the `shipmate apply <env>` command.**
+- **An invalid `.github/shipmate.toml` is refused with every structural error it holds, one annotation each.**
+- **`scripts/onboard` takes no `--team`; the approver team is read from `[gate] approver_team` in the checkout's table.**
+- **`scripts/onboard --key` is needed only while `shipmate-engine` holds no App private key.**
+- **`scripts/onboard`'s closing checklist marks each item `ok`, `todo` or `cannot check` from what the run read.**
 
 ### Fixed
 
 - **The Terramate download retries transient errors three times, and a failed install names the release URL and the status it answers.**
 - **`shipmate / gate`'s hold is read from every page of the head's status contexts, so a head carrying many no longer lets an apply green a held gate.**
+- **`scripts/onboard` and `scripts/register-app` write UTF-8 on a Windows console, and the docs run them with `python`.**
 
 ## [0.41.0] — 2026-09-28
 

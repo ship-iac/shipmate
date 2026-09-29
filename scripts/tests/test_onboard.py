@@ -83,7 +83,6 @@ def ctx(**over):
         "repo": "o/r",
         "default_branch": "main",
         "app_id": "1",
-        "team": "ops",
         "key": "-----BEGIN-----\npem\n",
         "envs": ["dev-eu"],
         "shared": set(),
@@ -97,7 +96,12 @@ def ctx(**over):
         "is_private": False,
         "org_plan": "",
         "shim_on_default": False,
+        "engine_secrets": set(),
+        "repo_secrets": set(),
+        "table": None,
         "ruleset_deferred": False,
+        "apply_envs": {},
+        "review_count": 0,
     }
     base.update(over)
     return base
@@ -379,7 +383,7 @@ def test_a_branch_with_a_slash_is_accepted_and_quoted_in_every_api_path(monkeypa
     shim = "repos/o/r/contents/.github/workflows/shipmate.yml?ref=release%2F1.x"
     fake = make_gh({rules: [], shim: {"type": "file"}})
     monkeypatch.setattr(onboard, "_run", fake)
-    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None)
+    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None, 0)
     assert onboard._shim_on_default("o/r", "release/1.x") is True
     assert fake.calls == [["gh", "api", rules], ["gh", "api", shim]]
 
@@ -446,19 +450,23 @@ def test_run_prints_nothing_of_its_own(capsys):
     assert captured.out == ""
 
 
-def test_main_refuses_a_bad_team_slug():
-    """Mutation: drop the `_TEAM_RE` check, so a value with a space reaches
-    `gh api` as two arguments."""
+def test_main_rejects_the_retired_team_flag(capsys):
+    """The approver team is read from `[gate] approver_team` in the checkout's table, so a
+    `--team` flag would be a value nothing reads. Mutation: add back
+    `ap.add_argument("--team", default="")`; `--key k` does not exist, so `_read_key` exits
+    too, and the assertion is on argparse's usage error.
+    """
     with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "bad team", "--app-id", "1", "--key", "k"])
-    assert "--team" in str(e.value)
+        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k"])
+    assert e.value.code == 2
+    assert "unrecognized arguments: --team ops" in capsys.readouterr().err
 
 
 def test_main_refuses_a_non_numeric_app_id():
     """Mutation: `_APP_ID_RE.fullmatch` to `args.app_id.isdigit()`, which accepts
     the superscript digit below."""
     with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "ops", "--app-id", "²", "--key", "k"])
+        onboard.main(["--app-id", "²", "--key", "k"])
     assert "--app-id" in str(e.value)
 
 
@@ -514,13 +522,18 @@ def test_main_calls_every_stage_in_order():
     onboarded with names that resolve to empty; delete
     `_refuse_org_assertion_mismatch(ctx)`, which leaves the `--vars-at-org` name filtered
     with nothing verifying the assertion behind it; move the `"shim_on_default"` read into
-    `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run.
+    `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run; move
+    the `_engine_secrets` and `_repo_secrets` reads below `_reconcile_env(ctx, ENGINE_ENV,
+    "apply")`, after the first write; move them back into the `ctx` literal, ahead of the
+    organization refusals, where a token without Secrets read fails with a raw 403; delete
+    `_refuse_missing_key(ctx)`, which lets a run with no key create environments before
+    `_reconcile_key` finds nothing to set. `_read_key` sits in a conditional expression,
+    whose call `_calls_in_order` still lists.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
     stages = [c for c in _calls_in_order(main) if c.startswith("_") or c.startswith("sys.exit")]
     assert stages == [
-        "_TEAM_RE.fullmatch(args.team)",
         "_APP_ID_RE.fullmatch(args.app_id)",
         "_at_org(args.vars_at_org)",
         "_read_key(args.key)",
@@ -535,6 +548,9 @@ def test_main_calls_every_stage_in_order():
         "_shim_on_default(repo, default_branch)",
         "_refuse_unreachable_org_variables(ctx)",
         "_refuse_org_assertion_mismatch(ctx)",
+        "_engine_secrets(repo)",
+        "_repo_secrets()",
+        "_refuse_missing_key(ctx)",
         "_reconcile_env(ctx, ENGINE_ENV, 'apply')",
         "_reconcile_key(ctx)",
         "_reconcile_envs(ctx)",
@@ -551,9 +567,9 @@ def test_main_calls_every_stage_in_order():
 _CONFORMING_ENGINE = {
     ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
     ENGINE_POLICIES: {"total_count": 1, "branch_policies": [{"name": "main"}]},
-    ENGINE_SECRETS: {"total_count": 1, "secrets": [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]},
-    REPO_KEY_LIST: [],
 }
+#: The secret-name set `main` reads when the App key is already on `shipmate-engine`.
+PLACED = {"SHIPMATE_APP_PRIVATE_KEY"}
 
 
 def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeypatch):
@@ -570,8 +586,6 @@ def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeyp
         {
             ENGINE_PATH: SystemExit("gh: Not Found (HTTP 404)"),
             ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
-            ENGINE_SECRETS: {"total_count": 0, "secrets": []},
-            REPO_KEY_LIST: [],
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
@@ -590,9 +604,7 @@ def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeyp
             "-f",
             "name=main",
         ],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
         ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--env", "shipmate-engine"],
-        ["gh", "secret", "list", "--json", "name"],
     ]
 
 
@@ -604,12 +616,7 @@ def test_the_key_reaches_gh_secret_set_on_stdin_and_as_a_secret(monkeypatch):
     Mutation: pass the PEM as `["--body", ctx["key"]]` instead of on stdin; or drop
     `secrets=(ctx["key"],)`.
     """
-    fake = make_gh(
-        {
-            ENGINE_SECRETS: {"total_count": 0, "secrets": []},
-            REPO_KEY_LIST: [],
-        }
-    )
+    fake = make_gh({})
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_key(ctx())
     sets = [
@@ -641,13 +648,11 @@ def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
         {
             ENGINE_PATH: {"deployment_branch_policy": None},
             ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
-            ENGINE_SECRETS: {"total_count": 1, "secrets": [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]},
-            REPO_KEY_LIST: [],
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
@@ -661,8 +666,6 @@ def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
             "-f",
             "name=main",
         ],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
     ]
     assert body_of(
         fake, ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"]
@@ -670,8 +673,9 @@ def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
 
 
 def test_conforming_engine_environment_writes_nothing(monkeypatch):
-    """A second run over a configured repository must change nothing: four reads, no
-    write, and every report line `ok` so the exit code stays 0.
+    """A second run over a configured repository must change nothing: two reads (the
+    secret names are read in `main`), no write, and every report line `ok` so the exit
+    code stays 0.
 
     Mutation: drop the `custom_branch_policies` test in `_reconcile_env`, so a
     conforming environment is PUT again.
@@ -679,12 +683,10 @@ def test_conforming_engine_environment_writes_nothing(monkeypatch):
     fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
     ]
     assert [verb for verb, _subject, _detail in onboard.REPORT] == ["ok", "ok", "ok", "ok"]
     assert onboard._exit_code() == 0
@@ -697,17 +699,13 @@ def test_repository_level_key_is_deleted(monkeypatch):
 
     Mutation: downgrade the deletion to `report("differs", ...)`.
     """
-    fake = make_gh(
-        dict(_CONFORMING_ENGINE, **{REPO_KEY_LIST: [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]})
-    )
+    fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(engine_secrets=PLACED, repo_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
         ["gh", "secret", "delete", "SHIPMATE_APP_PRIVATE_KEY"],
     ]
     assert [(verb, subject) for verb, subject, _detail in onboard.REPORT] == [
@@ -814,7 +812,7 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
     )
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -827,8 +825,6 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
             "-f",
             "name=main",
         ],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
     ]
     assert onboard.REPORT == [
         ("ok", "shipmate-engine", ""),
@@ -1078,8 +1074,6 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         {
             ENGINE_PATH: {"deployment_branch_policy": None},
             ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
-            ENGINE_SECRETS: absent,
-            REPO_KEY_LIST: [{"name": "SHIPMATE_APP_PRIVATE_KEY"}],
             "repos/o/r/environments/dev-eu": absent,
             "repos/o/r/environments/dev-eu-plan": absent,
             "repos/o/r/environments/dev-eu-apply": absent,
@@ -1091,18 +1085,16 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_DRY", True)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(repo_secrets=PLACED))
     onboard._reconcile_envs(ctx())
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx(shim_on_default=True))
     onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE))
-    onboard._checklist(ctx())
+    onboard._checklist(ctx(root=tmp_path))
     assert list(tmp_path.iterdir()) == []
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
         ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
@@ -1290,12 +1282,13 @@ FRESH_ROUTES = {
 }
 
 
-def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False):
+def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False, key=True):
     """Drive `main()` over `FRESH_ROUTES` plus `extra_routes`, returning (fake, SystemExit).
 
     Only the reads `main` does before its first reconciler are stubbed -- the git, terramate
     and `gh repo view` reads, each with its own test. Everything below them runs for real
     against the fake, which is what makes the order of the organization checks observable.
+    `key=False` passes no `--key`.
     """
     fake = make_gh({**FRESH_ROUTES, **extra_routes})
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1306,7 +1299,7 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False):
     pem = tmp_path / "key.pem"
     pem.write_text("-----BEGIN-----\npem\n", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit) as excinfo:
-        onboard.main(["--team", "ops", "--app-id", "1", "--key", str(pem), *argv])
+        onboard.main(["--app-id", "1", *(["--key", str(pem)] if key else []), *argv])
     return fake, excinfo.value
 
 
@@ -1327,6 +1320,59 @@ def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path)
     assert sorted(
         p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()
     ) == [".github/workflows/shipmate.yml", "key.pem"]
+
+
+KEY = "SHIPMATE_APP_PRIVATE_KEY"
+#: Hand-written: `main`'s reads up to the missing-key refusal, and nothing after them.
+READS_BEFORE_KEY_REFUSAL = [
+    ["gh", "variable", "list", "--json", "name,value"],
+    ["gh", "api", REMOTE_SHIM],
+    ["gh", "api", ENGINE_SECRETS],
+    ["gh", "secret", "list", "--json", "name"],
+]
+MISSING_KEY = (
+    "shipmate-engine holds no SHIPMATE_APP_PRIVATE_KEY, so this run has no key to place "
+    "there. Re-run with --key <path to the App's PEM private key>."
+)
+
+
+def test_a_run_without_key_reuses_the_placed_key(monkeypatch, tmp_path):
+    """A second run needs no PEM: `shipmate-engine` already holds the key, and no REST path
+    returns its value, so there is nothing to compare or rewrite.
+
+    Mutation: make `--key` `required=True` again, so argparse refuses the run with exit 2.
+    """
+    fake, exit_ = run_main(
+        monkeypatch,
+        tmp_path,
+        {**_CONFORMING_ENGINE, ENGINE_SECRETS: {"total_count": 1, "secrets": [{"name": KEY}]}},
+        [],
+        key=False,
+    )
+    assert exit_.code == 0
+    assert [c for c in fake.calls if c[:3] == ["gh", "secret", "set"]] == []
+    assert ("ok", f"shipmate-engine {KEY}", "") in onboard.REPORT
+
+
+def test_a_run_without_key_refuses_before_its_first_write(monkeypatch, tmp_path):
+    """No `--key` and no key on `shipmate-engine` (it does not exist, so its secret read
+    answers 404) leaves nothing to place: the run refuses before it creates anything. The
+    whole call list is compared, so any write ahead of the refusal reddens it.
+
+    Mutation: move `_refuse_missing_key(ctx)` below `_reconcile_env(ctx, ENGINE_ENV,
+    "apply")`, which creates `shipmate-engine` first.
+    """
+    fake, exc = run_main(monkeypatch, tmp_path, {}, [], key=False)
+    assert str(exc) == MISSING_KEY
+    assert fake.calls == READS_BEFORE_KEY_REFUSAL
+
+
+def test_a_dry_run_without_key_refuses_too(monkeypatch, tmp_path):
+    """A `would set` with no key to set is a false report. Mutation: return early from
+    `_refuse_missing_key` under `_DRY`."""
+    fake, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], key=False)
+    assert str(exc) == MISSING_KEY
+    assert fake.calls == READS_BEFORE_KEY_REFUSAL
 
 
 def _environment_puts(fake):
@@ -1406,7 +1452,7 @@ def test_a_repository_variable_resolves_a_reference(monkeypatch, tmp_path):
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh({ORG_VARS: NO_ORG_VARS}))
     write_referencing_table(tmp_path)
-    shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    _, shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
     assert shared == {"dev-eu"}
 
 
@@ -1416,7 +1462,7 @@ def test_an_organization_variable_resolves_a_reference(monkeypatch, tmp_path):
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh(org_region("eu-west-1")))
     write_referencing_table(tmp_path)
-    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == {"dev-eu"}
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {})[1] == {"dev-eu"}
 
 
 def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp_path):
@@ -1425,7 +1471,7 @@ def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh(org_region("")))
     write_referencing_table(tmp_path)
-    shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    _, shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
     assert shared == {"dev-eu"}
 
 
@@ -1448,6 +1494,17 @@ def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_p
     )
 
 
+def test_resolve_shared_returns_the_table_it_validated(tmp_path):
+    """`main` keeps the table for the checklist. Mutation: return `{}, set()` when there is
+    no file, which reads as a table declaring nothing."""
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == (None, set())
+    write_table(tmp_path, "shared = true\n")
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == (
+        {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1", "shared": True}}},
+        {"dev-eu"},
+    )
+
+
 def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
     """Mutation: call `_reaching_variables` whether or not the file holds a reference."""
 
@@ -1456,7 +1513,7 @@ def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
 
     monkeypatch.setattr(onboard, "_run", refuse)
     write_table(tmp_path, "shared = true\n")
-    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == {"dev-eu"}
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {})[1] == {"dev-eu"}
 
 
 def test_the_shared_flag_is_gone(monkeypatch, tmp_path, capsys):
@@ -1553,6 +1610,8 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "api", REMOTE_SHIM],
         ["gh", "api", "repos/o/r/actions/organization-variables", "--paginate", "--slurp"],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
+        ["gh", "secret", "list", "--json", "name"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -1565,9 +1624,7 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
             "-f",
             "name=main",
         ],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
         ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--env", "shipmate-engine"],
-        ["gh", "secret", "list", "--json", "name"],
         ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/dev-eu-plan", "--input", "-"],
@@ -1868,6 +1925,27 @@ def test_a_forbidden_workflow_file_read_stops_the_run_before_any_write(monkeypat
     ]
 
 
+def test_a_forbidden_engine_secret_read_stops_the_run_before_any_write(monkeypatch, tmp_path):
+    """A 403 on the `shipmate-engine` secret list is not absence. Read as "no key placed",
+    a run with `--key` would overwrite a working placement.
+
+    Mutation: replace the `_gh_json_or_none` call in `_engine_secrets` with a broad
+    `except SystemExit` returning no names.
+    """
+    fake, exit_ = run_main(
+        monkeypatch,
+        tmp_path,
+        {ENGINE_SECRETS: SystemExit("gh: Forbidden (HTTP 403)")},
+        [],
+    )
+    assert str(exit_) == "gh: Forbidden (HTTP 403)"
+    assert fake.calls == [
+        ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "api", REMOTE_SHIM],
+        ["gh", "api", ENGINE_SECRETS],
+    ]
+
+
 def _rules(integration_id=1, strict=True):
     """The effective branch rules of a repository whose gate is already required."""
     return [
@@ -2087,7 +2165,7 @@ def test_main_rejects_the_retired_state_suffix_flag(capsys):
     exist, so `_read_key` would exit too; the assertion is on argparse's usage error.
     """
     with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k", "--state-suffix", ""])
+        onboard.main(["--app-id", "1", "--key", "k", "--state-suffix", ""])
     assert e.value.code == 2
     assert "unrecognized arguments: --state-suffix" in capsys.readouterr().err
 
@@ -2279,172 +2357,466 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
 
 
 #: Hand-written, not captured from the implementation: a constant pasted from the output
-#: passes whatever the output says. The two checklists differ in one item, so they are
-#: assembled from the same hand-written pieces rather than carrying two copies of the rest.
-_CHECKLIST_HEAD = """
-Still yours — these values are the consumer's, so this script cannot set them.
+#: passes whatever the output says. A fresh public repository under `--dry-run`: no table,
+#: no secret, every environment absent, no rule, no `CODEOWNERS`, no workflow file on the
+#: default branch, so the gate ruleset is deferred.
+FRESH_CHECKLIST = """
+Still yours, each item marked from what this run read:
 
-Both optional:
+todo          SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
+    gh secret set SHIPMATE_PLAN_PASSPHRASE
+    An organization secret of that name is not visible to this read.
 
-  gh secret set SHIPMATE_PLAN_PASSPHRASE
-  gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine
+todo          SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
+    gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine
 
-By hand:
+todo          `.github/shipmate.toml`
+    A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`
+    table for every environment that needs a region or a cloud role — under `layout
+    = "tf_vars"` every environment needs one, carrying a region, or the run refuses.
+    Tables are keyed by the logical environment name (`dev-eu`), never by its
+    `-plan` / `-apply` half. Top-level settings go above the first table header: a
+    scalar written below one lands inside that table instead.
 
-  A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`
-  table for every environment that needs a region or a cloud role — under `layout
-  = "tf_vars"` every environment needs one, carrying a region, or the run refuses.
-  Tables are keyed by the logical environment name (`dev-eu`), never by its
-  `-plan` / `-apply` half. Top-level settings go above the first table header: a
-  scalar written below one lands inside that table instead.
+    `shared = true` in a table binds that environment as one bare `<name>` on both
+    paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
+    from this checkout's file, so re-run it after adding or dropping one.
 
-  `shared = true` in a table binds that environment as one bare `<name>` on both
-  paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
-  from this checkout's file, so re-run it after adding or dropping one.
+    `[gate] approver_team` names the team whose members may apply and unlock by
+    pull request comment — `<team-slug>` here. Keep it above the first
+    `[environments.*]` header, where it reads with the other repository-wide
+    settings.
 
-  `[gate] approver_team` names the team whose members may apply and unlock by
-  pull request comment — `ops` here. Keep it above the first
-  `[environments.*]` header, where it reads with the other repository-wide
-  settings.
+      schema_version = 1
+      layout = "tf_vars"
 
-    schema_version = 1
-    layout = "tf_vars"
+      [gate]
+      approver_team = "<team-slug>"
 
-    [gate]
-    approver_team = "ops"
+      [environments.dev-eu]
+      region         = "eu-west-1"
+      aws.plan.role  = "arn:aws:iam::<account>:role/shipmate-plan"
+      aws.apply.role = "arn:aws:iam::<account>:role/shipmate-apply"
 
-    [environments.dev-eu]
-    region         = "eu-west-1"
-    aws.plan.role  = "arn:aws:iam::<account>:role/shipmate-plan"
-    aws.apply.role = "arn:aws:iam::<account>:role/shipmate-apply"
+    Give the plan and apply tiers separate roles. One `aws.role` covering both
+    hands any-branch plan cells the apply role's permissions (docs/hardening.md).
+    Each cell resolves its identity from that file on the default branch, and a
+    repository without one refuses (CONTRACT.md §Environment table).
 
-  Give the plan and apply tiers separate roles. One `aws.role` covering both
-  hands any-branch plan cells the apply role's permissions (docs/hardening.md).
-  Each cell resolves its identity from that file on the default branch, and a
-  repository without one refuses (CONTRACT.md §Environment table).
+todo          `[gate] approver_team`
+    Name, in `.github/shipmate.toml`, the team whose members may apply and unlock by
+    pull request comment.
 
-  Add o/r to the App installation's repository selection, at
-  https://github.com/organizations/<org>/settings/apps/shipmate/installations
-  — substitute your org and the App name you registered (docs/github-app.md §4).
-  The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+cannot check  o/r in the App installation's repository selection
+    Reading `repos/o/r/installation` needs an App JWT, which this run
+    does not hold. Check it, or add the repository, at
+    https://github.com/organizations/<org>/settings/apps/shipmate/installations
+    — substitute your org and the App name you registered (docs/github-app.md §4).
+    The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
+todo          approving review before apply
+    Required reviewers and `Prevent self-review` on dev-eu-apply
+    (docs/getting-started.md §Environment setup).
+
+todo          CODEOWNERS entry covering /.github/workflows/
+    Add one in `.github/CODEOWNERS`.
+
+todo          adoption pull request
+    Re-run without --dry-run, then commit the workflow file and the table together,
+    in a pull request that changes no stack. The table is read from the default
+    branch, so the first plan needs it merged.
+
+todo          gate ruleset
+    Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because
+    the workflows that produce it are not on the default branch (CONTRACT.md
+    §Post-plan topology). Then run this script again to create the gate ruleset.
 """
 
-_CHECKLIST_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-eu-apply
-  (docs/getting-started.md §Environment setup).
+#: Hand-written: a configured public repository. Every item this run can read is `ok`; the
+#: two it cannot read stay `cannot check`.
+CONFIGURED_CHECKLIST = """
+Still yours, each item marked from what this run read:
 
+ok            SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
+ok            SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
+ok            `.github/shipmate.toml`
+ok            `[gate] approver_team`: ops
+cannot check  o/r in the App installation's repository selection
+    Reading `repos/o/r/installation` needs an App JWT, which this run
+    does not hold. Check it, or add the repository, at
+    https://github.com/organizations/<org>/settings/apps/shipmate/installations
+    — substitute your org and the App name you registered (docs/github-app.md §4).
+    The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+
+ok            approving review before apply
+cannot check  CODEOWNERS entry covering /.github/workflows/
+    `.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's.
+
+ok            adoption pull request
 """
 
-#: GitHub refuses required reviewers on a private repository below Enterprise, and the
-#: first private consumer is on Team, so the private block says so.
-_CHECKLIST_PRIVATE_REVIEWERS = """  Required reviewers and `Prevent self-review` on dev-eu-apply
-  (docs/getting-started.md §Environment setup). On a private repository below
-  Enterprise, GitHub refuses required reviewers, so the apply gate is then an
-  approving-review `pull_request` rule on the default branch, which this script
-  does not create (docs/branch-protection.md §Reproducible ruleset), and
-  `[gate] approver_team`.
-
-"""
-
-_CHECKLIST_CODEOWNERS = """  A CODEOWNERS entry covering /.github/workflows/.
-"""
-
-#: Printed only while the workflow file is not on the remote default branch.
-_CHECKLIST_COMMIT = """
-  Commit the workflow file and the table together, in a pull request that
-  changes no stack. The table is read from the default branch, so the first
-  plan needs it merged.
-"""
-
-_CHECKLIST_TAIL = _CHECKLIST_CODEOWNERS + _CHECKLIST_COMMIT
-
-#: Printed only by the run that deferred the gate ruleset: the re-run after the merge
-#: creates it, so asking that run to run again is false.
-_CHECKLIST_DEFERRED = """\
-  Merge it: no ruleset requires `shipmate / gate` yet, because the workflows that
-  produce it are not on the default branch (CONTRACT.md §Post-plan topology).
-  Then run this script again to create the gate ruleset.
-"""
-
-SPLIT_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_REVIEWERS + _CHECKLIST_TAIL
+REVIEWERS_RULE = {
+    "type": "required_reviewers",
+    "prevent_self_review": True,
+    "reviewers": [{"type": "Team", "reviewer": {"slug": "ops"}}],
+}
+REVIEWED_APPLY = {"deployment_branch_policy": CUSTOM_POLICY, "protection_rules": [REVIEWERS_RULE]}
+MAIN_POLICY = {"total_count": 1, "branch_policies": [{"name": "main"}]}
 
 
-def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
-    """The printed block is the only place a consumer learns what remains to be done.
-    A step dropped from it is a repository that looks reconciled and cannot plan.
+def checklist_of(out):
+    """The checklist part of `main`'s stdout: everything from its heading on."""
+    return out[out.index("\nStill yours") :]
 
-    The block is compared whole against a hand-written constant, because a membership
-    check would pass a block that silently lost one item -- and cannot see a dropped `gh`
-    prefix or a line that lost its command.
 
-    Mutations, each proven: delete SHIPMATE_PLAN_PASSPHRASE from the block; delete the
-    environment-table item from the `By hand` list.
+def checklist_items(out):
+    """{item: (verdict, detail lines)} parsed from `_checklist`'s output."""
+    items = {}
+    for line in out.splitlines()[3:]:
+        if line and not line.startswith(" "):
+            current = line[14:]
+            items[current] = (line[:12].rstrip(), [])
+        elif line:
+            items[current][1].append(line[4:])
+    return items
+
+
+def test_the_checklist_of_a_fresh_repository_in_a_dry_run(monkeypatch, tmp_path, capsys):
+    """Every item a fresh repository still needs is `todo`, and the App installation, which
+    this run cannot read, is `cannot check`. The block is compared whole: a membership check
+    passes a block that silently lost one item, a command, or its verdict.
+
+    The environments are all absent, so `apply_envs` holds `None` for each: a dry run must
+    not read that as reviewed.
+
+    Mutation: delete the passphrase item from `_checklist`.
     """
-    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared=set()))
-    assert capsys.readouterr().out == SPLIT_CHECKLIST
+    _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
+    assert exit_.code == 0
+    assert checklist_of(capsys.readouterr().out) == FRESH_CHECKLIST
 
 
-#: The shared half of the same block. `_env_names` returns one bare `<env>` for a shared
-#: environment, and a reviewer on it stalls every plan cell, so no reviewer line is due.
-SHARED_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_TAIL
+def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, capsys):
+    """Driven through `main`, so the reviewer verdict rests on the `dev-eu-apply` read that
+    `_reconcile_env` recorded, not on a hand-filled `apply_envs`.
 
-
-def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys):
-    """A shared env is bound by plan cells and the nightly drift run too, so a required
-    reviewer on it stalls them rather than gating an apply: the reviewer line is due only
-    for an `<env>-apply`. The split fixture above cannot reach this branch.
-
-    Mutation: select the reviewer line on `role == "apply"` alone, which a bare shared
-    environment satisfies.
+    Mutation: drop the `ctx["apply_envs"][name] = env` record from `_reconcile_env`, so the
+    reviewer item turns `todo`.
     """
-    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared={"dev-eu"}))
-    assert capsys.readouterr().out == SHARED_CHECKLIST
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
+    (tmp_path / ".github" / "shipmate.toml").write_text(
+        'schema_version = 1\nlayout = "tf_vars"\n\n[gate]\napprover_team = "ops"\n\n'
+        '[environments.dev-eu]\nregion = "eu-west-1"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    routes = {
+        ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
+        ENGINE_POLICIES: MAIN_POLICY,
+        ENGINE_SECRETS: {"secrets": [{"name": KEY}, {"name": "SHIPMATE_SLACK_WEBHOOK"}]},
+        REPO_KEY_LIST: [{"name": "SHIPMATE_PLAN_PASSPHRASE"}],
+        "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
+        "repos/o/r/environments/dev-eu-apply": REVIEWED_APPLY,
+        "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": MAIN_POLICY,
+        VARIABLE_LIST: [{"name": "SHIPMATE_APP_ID", "value": "1"}],
+        REMOTE_SHIM: {"name": "shipmate.yml"},
+    }
+    _fake, exit_ = run_main(monkeypatch, tmp_path, routes, [])
+    assert exit_.code == 0
+    assert checklist_of(capsys.readouterr().out) == CONFIGURED_CHECKLIST
 
 
-def test_the_checklist_qualifies_the_reviewer_step_on_a_private_repository(capsys):
-    """Printed unqualified, the reviewer step sends a Team-plan operator to a setting GitHub
-    refuses, with no word on what gates the apply instead. A public repository keeps the
-    unqualified step, which the split constant pins.
+def test_todo_items_leave_the_exit_code_at_0(monkeypatch, tmp_path, capsys):
+    """Exit 2 means a `differs` line and nothing else: every checklist item is the
+    consumer's to do, so a wrapper branching on 2 would fail every first run.
 
-    Mutation: invert the `is_private` condition in `_checklist`.
+    Mutation, proven: record each checklist verdict in `REPORT` and count `todo` in
+    `_exit_code`. Counting `todo` alone cannot redden: the checklist writes nothing to
+    `REPORT`, which is what keeps it out of the exit code.
     """
-    onboard._checklist(ctx(is_private=True))
-    assert capsys.readouterr().out == (
-        _CHECKLIST_HEAD + _CHECKLIST_PRIVATE_REVIEWERS + _CHECKLIST_TAIL
+    _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
+    assert "\ntodo  " in capsys.readouterr().out
+    assert [v for v, _s, _d in onboard.REPORT if v == "differs"] == []
+    assert exit_.code == 0
+
+
+def test_the_passphrase_is_read_from_the_repository_secrets():
+    """Mutation: read `engine_secrets` for it."""
+    item = "SHIPMATE_PLAN_PASSPHRASE repository secret (optional)"
+    placed = ctx(repo_secrets={"SHIPMATE_PLAN_PASSPHRASE"})
+    assert onboard._passphrase_item(placed) == ("ok", item, [])
+    assert onboard._passphrase_item(ctx()) == (
+        "todo",
+        item,
+        [
+            "gh secret set SHIPMATE_PLAN_PASSPHRASE",
+            "An organization secret of that name is not visible to this read.",
+        ],
     )
 
 
-def test_the_checklist_asks_for_a_re_run_after_deferring_the_gate_ruleset(monkeypatch, capsys):
-    """The run before the merge defers the ruleset, and only this checklist line tells the
-    operator a second run is due; without it the gate is never required.
+def test_the_webhook_is_read_from_the_engine_environment_secrets():
+    """Mutation: read `repo_secrets` for it."""
+    placed = ctx(engine_secrets={"SHIPMATE_SLACK_WEBHOOK"})
+    assert onboard._webhook_item(placed) == (
+        "ok",
+        "SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)",
+        [],
+    )
 
-    Mutation: drop the deferred-report condition, so the ask never prints.
+
+def test_a_table_failing_tf_vars_coverage_is_todo_naming_the_refusal():
+    """The checkout's table already passed `validate_structure` in `_resolve_shared`; only
+    `validate` sees an environment with no region, which every `tf_vars` cell refuses.
+
+    Mutation: call `ec.validate_structure` instead of `ec.validate`.
     """
-    fake = make_gh({RULES: []})
-    monkeypatch.setattr(onboard, "_run", fake)
+    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nshared = false\n')
+    assert onboard._table_item(ctx(table=table)) == (
+        "todo",
+        "`.github/shipmate.toml`",
+        [
+            'layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the environment '
+            "table, and dev-eu has an entry with no region."
+        ],
+    )
+
+
+def test_the_approver_item_names_the_tables_team():
+    """Mutation: read `gate_approver_team` from `{}`."""
+    no_gate = ec.parse_table('layout = "none"\n')
+    assert onboard._approver_item(ctx(table=no_gate))[0] == "todo"
+    ops = ec.parse_table('layout = "none"\n\n[gate]\napprover_team = "ops"\n')
+    assert onboard._approver_item(ctx(table=ops)) == ("ok", "`[gate] approver_team`: ops", [])
+
+
+def test_a_private_repository_with_an_approving_review_rule_is_ok():
+    """A private repository below Enterprise cannot carry environment reviewers, so a
+    `pull_request` rule at one approval is its apply gate.
+
+    Mutation: compare `review_count > 1`.
+    """
+    item = "approving review before apply"
+    ruled = ctx(is_private=True, review_count=1)
+    assert onboard._review_item(ruled, ["dev-eu-apply"]) == ("ok", item, [])
+    assert onboard._review_item(ctx(is_private=True), ["dev-eu-apply"]) == (
+        "todo",
+        item,
+        [
+            "Required reviewers and `Prevent self-review` on dev-eu-apply",
+            "(docs/getting-started.md §Environment setup). On a private repository below",
+            "Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
+            "approving-review `pull_request` rule on the default branch, which this script",
+            "does not create (docs/branch-protection.md §Reproducible ruleset), and",
+            "`[gate] approver_team`.",
+        ],
+    )
+
+
+def test_an_environment_a_dry_run_would_create_is_not_reviewed():
+    """Mutation: read a `None` environment as reviewed."""
+    c = ctx(apply_envs={"dev-eu-apply": None})
+    assert onboard._review_item(c, ["dev-eu-apply"])[0] == "todo"
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {**REVIEWERS_RULE, "prevent_self_review": False},
+        {**REVIEWERS_RULE, "reviewers": []},
+    ],
+    ids=["self-review-allowed", "no-reviewer"],
+)
+def test_a_reviewer_rule_missing_a_condition_is_todo(rule):
+    """Mutations, each proven: drop the `prevent_self_review` condition from `_reviewed`;
+    drop the `reviewers` condition."""
+    c = ctx(apply_envs={"dev-eu-apply": {"protection_rules": [rule]}})
+    assert onboard._review_item(c, ["dev-eu-apply"])[0] == "todo"
+    reviewed = ctx(apply_envs={"dev-eu-apply": {"protection_rules": [REVIEWERS_RULE]}})
+    assert onboard._review_item(reviewed, ["dev-eu-apply"])[0] == "ok"
+
+
+def test_the_reviewer_verdict_ignores_the_engine_environment():
+    """`shipmate-engine` is recorded in `apply_envs` too, but no apply cell binds it.
+
+    Mutation: judge over every name in `apply_envs` instead of `names`.
+    """
+    c = ctx(apply_envs={"shipmate-engine": {}, "dev-eu-apply": REVIEWED_APPLY})
+    assert onboard._review_item(c, ["dev-eu-apply"])[0] == "ok"
+
+
+def test_the_review_count_reads_past_the_gate_rule(monkeypatch):
+    """`_gate_entry` returns at the gate's own `required_status_checks` rule, so a count
+    taken in that loop never sees a `pull_request` rule listed after it.
+
+    Mutation: take the count inside the loop, before its `return`.
+    """
+    rules = [
+        {
+            "type": "required_status_checks",
+            "parameters": {"required_status_checks": [{"context": onboard.GATE}]},
+        },
+        {"type": "pull_request", "parameters": {"required_approving_review_count": 1}},
+    ]
+    monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
+    assert onboard._gate_entry(ctx()) == (
+        {"context": onboard.GATE},
+        {"required_status_checks": [{"context": onboard.GATE}]},
+        1,
+    )
+
+
+def test_the_ruleset_reconciler_stores_the_review_count(monkeypatch):
+    """`_checklist` judges the reviewer item on `ctx["review_count"]`, which only
+    `_reconcile_ruleset` sets.
+
+    Mutation: unpack the count into `_` in `_reconcile_ruleset`.
+    """
+    rules = [{"type": "pull_request", "parameters": {"required_approving_review_count": 2}}]
+    monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
     c = ctx()
     onboard._reconcile_ruleset(c)
-    assert capsys.readouterr().out.startswith("deferred gate ruleset: ")
-    onboard._checklist(c)
-    assert capsys.readouterr().out == SPLIT_CHECKLIST + _CHECKLIST_DEFERRED
+    assert c["review_count"] == 2
 
 
-def test_the_checklist_asks_for_no_re_run_after_creating_the_gate_ruleset(monkeypatch, capsys):
-    """The re-run after the merge creates the ruleset, so asking it to run again is false,
-    and the workflow file it would ask to commit is already on the default branch.
+def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(capsys, tmp_path):
+    """A shared env is bound by plan cells and the nightly drift run too, so a required
+    reviewer on it stalls them rather than gating an apply: no environment is asked for
+    reviewers, and the `pull_request` rule is the only apply gate left to judge.
 
-    Mutations: print the re-run ask unconditionally; print the commit paragraph
-    unconditionally.
+    Mutations, each proven: select the reviewer names on `role == "apply"` alone, which a
+    bare shared environment satisfies; drop the `if gated` arm, omitting the item; compare
+    `review_count > 1` in `_review_item`.
     """
-    fake = make_gh({RULES: []})
-    monkeypatch.setattr(onboard, "_run", fake)
-    c = ctx(shim_on_default=True)
-    onboard._reconcile_ruleset(c)
-    assert capsys.readouterr().out == "create gate ruleset: shipmate / gate\n"
-    onboard._checklist(c)
-    assert capsys.readouterr().out == (
-        _CHECKLIST_HEAD + _CHECKLIST_REVIEWERS + _CHECKLIST_CODEOWNERS
+    item = "approving review before apply"
+    onboard._checklist(ctx(root=tmp_path, shared={"dev-eu"}))
+    assert checklist_items(capsys.readouterr().out)[item] == (
+        "todo",
+        [
+            "Shared, so no `<env>-apply` carries required reviewers: dev-eu.",
+            "Their apply gate is an approving-review `pull_request` rule on the default",
+            "branch, which this script does not create (docs/branch-protection.md",
+            "§Reproducible ruleset).",
+        ],
     )
+    onboard._checklist(ctx(root=tmp_path, shared={"dev-eu"}, review_count=1))
+    assert checklist_items(capsys.readouterr().out)[item] == (
+        "ok",
+        ["`required_approving_review_count` is 1 on the default branch's `pull_request` rule."],
+    )
+
+
+def test_a_shared_environment_beside_a_reviewed_one_needs_the_review_rule(capsys, tmp_path):
+    """A shared env forfeits the environment reviewer gate, so a reviewed `prod-apply`
+    beside it does not gate its applies: only the `pull_request` rule does.
+
+    Mutation: drop `and not shared` from `_review_item`'s second `ok`.
+    """
+    item = "approving review before apply"
+    mixed = {
+        "root": tmp_path,
+        "envs": ["dev-eu", "prod"],
+        "shared": {"dev-eu"},
+        "apply_envs": {"prod-apply": REVIEWED_APPLY},
+    }
+    onboard._checklist(ctx(**mixed))
+    assert checklist_items(capsys.readouterr().out)[item] == (
+        "todo",
+        [
+            "Shared, so no `<env>-apply` carries required reviewers: dev-eu.",
+            "Their apply gate is an approving-review `pull_request` rule on the default",
+            "branch, which this script does not create (docs/branch-protection.md",
+            "§Reproducible ruleset).",
+        ],
+    )
+    onboard._checklist(ctx(**mixed, review_count=1))
+    assert checklist_items(capsys.readouterr().out)[item] == (
+        "ok",
+        ["`required_approving_review_count` is 1 on the default branch's `pull_request` rule."],
+    )
+
+
+def test_an_ungated_environment_is_not_asked_for_reviewers(capsys, tmp_path):
+    """`gated = false` exempts an environment from the review requirement, so asking for
+    reviewers on it contradicts the table.
+
+    Mutation: drop the `env not in ungated` filter from `_checklist`.
+    """
+    onboard._checklist(
+        ctx(
+            root=tmp_path,
+            envs=["dev-eu", "dev-us"],
+            table={"environments": {"dev-us": {"gated": False}}},
+            apply_envs={"dev-eu-apply": REVIEWED_APPLY, "dev-us-apply": {}},
+        )
+    )
+    items = checklist_items(capsys.readouterr().out)
+    assert items["approving review before apply"] == ("ok", [])
+
+
+def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys, tmp_path):
+    """`_reconcile_envs` touches neither half of an environment holding both a bare
+    `<env>` and an `<env>-apply`, because which the engine binds is undecided. Naming its
+    `<env>-apply` in the reviewer item points at one the run refused to reconcile.
+
+    Mutation: drop the `env not in ctx["unresolved"]` filter from `_checklist`.
+    """
+    onboard._checklist(ctx(root=tmp_path, envs=["dev-eu", "dev-us"], unresolved={"dev-us"}))
+    items = checklist_items(capsys.readouterr().out)
+    assert items["approving review before apply"] == (
+        "todo",
+        [
+            "Required reviewers and `Prevent self-review` on dev-eu-apply",
+            "(docs/getting-started.md §Environment setup).",
+        ],
+    )
+
+
+def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
+    """GitHub reads `CODEOWNERS` from `.github/`, the root or `docs/`; which paths an entry
+    covers is not reimplemented here.
+
+    Mutation: drop `docs/CODEOWNERS` from `_CODEOWNERS_PATHS`.
+    """
+    item = "CODEOWNERS entry covering /.github/workflows/"
+    assert onboard._codeowners_item(ctx(root=tmp_path)) == (
+        "todo",
+        item,
+        ["Add one in `.github/CODEOWNERS`."],
+    )
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
+    assert onboard._codeowners_item(ctx(root=tmp_path)) == (
+        "cannot check",
+        item,
+        ["`docs/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's."],
+    )
+
+
+def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(capsys, tmp_path):
+    """The table item prints the first `.github/shipmate.toml` a new consumer writes, and
+    it is not a ```toml fence, so `test_docs_toml_parses.py` cannot see it. `docs/hardening.md`
+    shipped an example declaring `[environments.prod]` twice through a full documentation
+    sweep and a green suite, so the class is live.
+
+    The example is read back out of the printed block rather than retyped: a copy here would
+    be a second selector, free to drift from the thing it claims to check.
+
+    Mutation: print a second `[environments.dev-eu]` header in the template, the duplicate
+    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`.
+    """
+    onboard._checklist(ctx(root=tmp_path))
+    lines = capsys.readouterr().out.splitlines()
+    snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("      ")))
+    # An extraction that finds nothing parses and validates cleanly, so it is green over an
+    # unchecked example.
+    assert snippet.startswith("schema_version = 1"), (
+        f"no TOML example found in the block: {snippet!r}"
+    )
+    # The placeholder is not a slug, so it is the one value a consumer substitutes.
+    assert snippet.count('approver_team = "<team-slug>"') == 1
+    ec.validate_structure(ec.parse_table(snippet.replace("<team-slug>", "ops")))
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):
@@ -2485,57 +2857,6 @@ def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkey
         ("ok", "dev-eu-apply", ""),
         ("ok", "dev-eu-apply branch policy", "main"),
     ]
-
-
-def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys):
-    """`_reconcile_envs` touches neither half of an environment holding both a bare
-    `<env>` and an `<env>-apply`, because which the engine binds is undecided. Naming
-    those halves in the checklist puts an `<env>-apply` the run refused to reconcile --
-    and may then delete -- on the `Required reviewers` line.
-
-    `dev-us` contributes nothing, so the expected block is the split constant unchanged.
-
-    Mutation: drop the `env not in ctx["unresolved"]` filter from `_checklist`.
-    """
-    onboard._checklist(ctx(envs=["dev-eu", "dev-us"], unresolved={"dev-us"}))
-    assert capsys.readouterr().out == SPLIT_CHECKLIST
-
-
-def test_the_checklist_does_not_tell_a_dry_run_to_commit_a_file_it_did_not_write(capsys):
-    """--dry-run writes no workflow file, so the closing step is a re-run, not a commit. The
-    expected block is the split constant with that one line substituted by hand.
-
-    Mutation: drop the `_DRY` branch from the closing line.
-    """
-    onboard._DRY = True
-    onboard._checklist(ctx())
-    assert capsys.readouterr().out == SPLIT_CHECKLIST.replace(
-        "  Commit the workflow file",
-        "  Re-run without --dry-run, then commit the workflow file",
-    )
-
-
-def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(capsys):
-    """The by-hand block prints the first `.github/shipmate.toml` a new consumer writes, and
-    it is not a ```toml fence, so `test_docs_toml_parses.py` cannot see it. `docs/hardening.md`
-    shipped an example declaring `[environments.prod]` twice through a full documentation
-    sweep and a green suite, so the class is live.
-
-    The example is read back out of the printed block rather than retyped: a copy here would
-    be a second selector, free to drift from the thing it claims to check.
-
-    Mutation: print a second `[environments.dev-eu]` header in `_checklist`, the duplicate
-    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`.
-    """
-    onboard._checklist(ctx(repo="o/r", envs=["dev-eu"], shared=set()))
-    lines = capsys.readouterr().out.splitlines()
-    snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("    ")))
-    # An extraction that finds nothing parses and validates cleanly, so it is green over an
-    # unchecked example.
-    assert snippet.startswith("schema_version = 1"), (
-        f"no TOML example found in the block: {snippet!r}"
-    )
-    ec.validate_structure(ec.parse_table(snippet))
 
 
 def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch):

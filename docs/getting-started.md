@@ -18,12 +18,17 @@ does with that wiring.
   something else entirely, and every stack ends up re-tagged. The work is
   additive, mechanical and reviewable, but it is repo-wide.
 
-  It does not have to land in one commit. `detect` only inspects the stacks a
-  run touches: an untagged stack fails the whole run as soon as it is in the
-  changed set, so re-tagging can follow the stacks you are changing anyway. The
-  failure lists every untagged stack it found for you to work down. The
-  nightly drift run is the repo-wide backstop — it inspects every stack, so it
-  fails until the last one is tagged.
+  Merge a retag pull request that tags every stack before the adoption pull
+  request. `scripts/onboard` derives the environments from the checkout's tags
+  and refuses while any stack in the repository is untagged, listing each one.
+  The retag cannot ride in the adoption pull request, because that one must
+  change no stack (§"The table has to be on the default branch before your
+  first plan run").
+
+  After adoption, a stack added later is tagged in the pull request that adds
+  it. `detect` refuses an untagged stack as soon as it is in a run's changed
+  set, and the nightly drift run inspects every stack, so it fails until that
+  stack is tagged.
 - **Nothing to set for the Terramate and OpenTofu versions.** They are in
   [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
   engine commit your workflow file pins. Moving to other versions is a pin bump
@@ -113,10 +118,15 @@ repository, `terramate` on `PATH`, and an engine checkout sitting on a `vX.Y.Z`
 release tag:
 
 ```bash
-python3 <engine-checkout>/scripts/onboard \
-  --team <approver-team-slug> --app-id <app-id> \
-  --key shipmate-app.private-key.pem
+python <engine-checkout>/scripts/onboard \
+  --app-id <app-id> --key shipmate-app.private-key.pem
 ```
+
+Use `python3` where the platform has no `python` (macOS, Debian and Ubuntu
+ship none by default).
+
+`--key` is needed until the App key is on `shipmate-engine`; a later run can
+leave it off.
 
 It writes:
 
@@ -142,10 +152,11 @@ It writes:
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
 
-`--team` writes nothing. The approver team is `gate.approver_team` in
-`.github/shipmate.toml`, which this script does not write, so the slug you pass
-is printed in the closing by-hand checklist instead, with the file it belongs
-in.
+The approver team is read from `[gate] approver_team` in the checkout's
+`.github/shipmate.toml`, which this script does not write. The closing
+checklist marks it `ok` naming the team it read there, or `todo` when the file
+declares none; with no file, the table template it prints carries a
+`<team-slug>` placeholder.
 
 It reads before it writes and creates or updates only what differs, so a second
 run over a configured repository changes nothing. What it will not touch — an
@@ -159,13 +170,19 @@ ruleset to an App and a ruleset pinned to one the workflows do not use blocks th
 default branch. A name passed to `--vars-at-org` that does not reach this
 repository as an organization variable, or reaches it holding another value,
 stops it too — the assertion is verified rather than trusted
-([`github-app.md`](github-app.md) §6). `--dry-run` reports every change and performs no write.
+([`github-app.md`](github-app.md) §6). So does a run without `--key` while
+`shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
-It then prints what it cannot know, because those values are yours: the cloud
-role and region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
-`SHIPMATE_SLACK_WEBHOOK`, adding the repository to the App installation, environment
-reviewers, a `CODEOWNERS` entry, and the pull request carrying the workflow
-file.
+It then prints a checklist of what it cannot set, because those values are
+yours: `SHIPMATE_PLAN_PASSPHRASE`, `SHIPMATE_SLACK_WEBHOOK`, the table with the
+cloud role, region and env identity your layout injects, `[gate] approver_team`,
+adding the repository to the App installation, an approving review before apply,
+a `CODEOWNERS` entry, and the pull request carrying the workflow file. It marks
+each item `ok`, `todo` or `cannot check` from what the run read, and only a
+`todo` prints what to do. Two items are `cannot check`: the App
+installation, which only an App JWT can read, and, once a `CODEOWNERS` file
+exists, whether an entry in it covers `/.github/workflows/`, which is GitHub's
+matching.
 
 Branch, commit, push and pull request are yours: the script writes files and
 stops. The tier sections below are the spec it implements — read them to know
@@ -259,6 +276,21 @@ creates all of them, including `shipmate-engine` and its branch policy:
   inside that table instead, which TOML accepts and the engine then refuses.
   A repository that needs no cloud role at all declares `layout` and nothing
   else.
+
+  A stack's `workload/<name>` tag selects `aws.<tier>.workloads.<name>`, keyed
+  by the name exactly as written ([`aws.md`](aws.md) §"The environment table"
+  has the example). A tier that lists workloads falls back to its own role for
+  a tag it does not list, and refuses the cell at detect when it has no role to
+  fall back to. An untagged stack, and any stack on a tier that lists no
+  workloads, runs as the tier's role, or with no credentials when the tier sets
+  none. On a tier with no role of its own, merge a new workload key before the
+  branch that tags the stack. The OIDC subject names only the environment
+  (`environment:<env>-apply`, or the bare `<env>` when shared), never the
+  workload, so every workload role whose trust policy accepts that subject is
+  reachable from every apply cell of that environment, and for a shared
+  environment from every plan cell too. Choose how finely to
+  split environments before writing those trust policies
+  ([`hardening.md`](hardening.md) §7–9).
 
   The same file carries `[gate]`, which names the team whose members may apply
   and unlock by pull request comment. An environment applies without an
@@ -767,7 +799,10 @@ pull request, which cannot produce the gate.
 `scripts/onboard` creates a `shipmate-gate` ruleset carrying that one rule; the
 `pull_request`, `non_fast_forward` and `deletion` rules on that page stay a
 choice you make, so that a repository already carrying a `pull_request` rule
-does not end up with a conflicting second one.
+does not end up with a conflicting second one. To add them, follow
+[`branch-protection.md`](branch-protection.md) §Reproducible ruleset, and leave
+the `pull_request` rule out of the body when another ruleset already carries
+one.
 
 ## Optional
 

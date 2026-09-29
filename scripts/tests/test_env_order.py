@@ -55,7 +55,7 @@ def test_cycle_raises():
     The refusal is matched on its message, not on `SystemExit` alone: `env_levels` also
     exits on a malformed order shape, and that is a different property.
 
-    Mutation: delete the `TopologicalSorter` block from `validate_env_order` -- `wv.levels`
+    Mutation: delete the `TopologicalSorter` block from `_check_cycle` -- `wv.levels`
     then raises `CycleError`, which is a `ValueError` and not a `SystemExit`.
     """
     with pytest.raises(SystemExit, match="needs is cyclic: a -> b -> a"):

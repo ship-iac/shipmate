@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Register the shipmate GitHub App and store its credentials, in one command.
 
-    python3 scripts/register-app --name shipmate-<org> --repo <org>/<repo> \
+    python scripts/register-app --name shipmate-<org> --repo <org>/<repo> \
         --out shipmate-app.private-key.pem
 
 One-time dev/ops setup; docs/github-app.md §1-§2 is the runbook. Registration
@@ -35,7 +35,7 @@ import threading
 import urllib.parse
 import webbrowser
 
-from _shipmate import REPO_RE, scrub
+from _shipmate import REPO_RE, scrub, utf8_output
 
 #: `code` is interpolated into the `app-manifests/<code>/conversions` API path and arrives over
 #: a loopback socket; a '/' or '..' in it retargets that request at another endpoint.
@@ -220,4 +220,5 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
+    utf8_output()
     main()

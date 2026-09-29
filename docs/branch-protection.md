@@ -45,8 +45,23 @@ Create it after the pull request adding `.github/workflows/shipmate.yml` merges:
 before then no pull request can produce `shipmate / gate`, so the ruleset blocks
 the first one.
 
+Whether a `shipmate-gate` ruleset exists decides the command. A
+`scripts/onboard` run may have created one carrying the gate rule alone, and a
+`POST` under a name already taken answers HTTP 422. Read its id first; it is
+empty when no such ruleset exists:
+
 ```bash
-gh api -X POST repos/<owner>/<repo>/rulesets --input - <<'JSON'
+id=$(gh api repos/<owner>/<repo>/rulesets \
+  --jq '.[] | select(.name == "shipmate-gate") | .id')
+```
+
+Write the body outside the checkout. An untracked file left there shows up as
+something to commit and trips `git-untracked`
+([`getting-started.md`](getting-started.md) §Before you start):
+
+```bash
+ruleset="${TMPDIR:-/tmp}/ruleset.json"
+cat > "$ruleset" <<'JSON'
 {
   "name": "shipmate-gate",
   "target": "branch",
@@ -71,6 +86,30 @@ gh api -X POST repos/<owner>/<repo>/rulesets --input - <<'JSON'
   ]
 }
 JSON
+```
+
+When `$id` is non-empty, replace that ruleset by its id. The `PUT` replaces the
+ruleset with the body, so carry any bypass actors it already holds into the
+body as its `bypass_actors` array first. Read them with:
+
+```bash
+gh api "repos/<owner>/<repo>/rulesets/$id" --jq .bypass_actors
+```
+
+Then send the body:
+
+```bash
+gh api -X PUT "repos/<owner>/<repo>/rulesets/$id" --input "$ruleset"
+```
+
+`scripts/onboard` checks only the `shipmate / gate` entry, so its next run
+reports the widened ruleset `ok` while that entry keeps the App's
+`integration_id` and `strict_required_status_checks_policy: true`.
+
+When `$id` is empty, create the ruleset:
+
+```bash
+gh api -X POST repos/<owner>/<repo>/rulesets --input "$ruleset"
 ```
 
 `strict_required_status_checks_policy: true` is the "require branches up to date"
