@@ -2043,9 +2043,11 @@ three review sentences (see §Comment-ops) are:
 
 - **held** — "the pull request's review state does not permit applying",
   naming the environments and asking for an approving review, or for a
-  requested-changes review to be resolved or dismissed, and naming no
-  command, because a held environment may also be an explicit one that a bare
-  apply would not pick up even once reviewed. The sentence is deliberately
+  requested-changes review to be resolved or dismissed. A held environment
+  that is also explicit is listed once, here and not in the excluded sentence,
+  with its command: `` `prod` (explicit: once reviewed, comment `shipmate apply
+  prod`) ``, since a bare apply would not pick it up even once reviewed. A held
+  environment that is not explicit names no command. The sentence is deliberately
   cause-agnostic: three distinct decisions hold an environment
   (`REVIEW_REQUIRED` on a gated env, `CHANGES_REQUESTED`, or an unknown or
   absent decision), and only the run's own apply-all-detect notice carries

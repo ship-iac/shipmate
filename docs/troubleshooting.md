@@ -810,11 +810,11 @@ file broken this way also refuses every plan run, which is the louder signal of
 the two.
 
 **A held environment is also an explicit environment.** When both causes apply
-it is reported as held, not as excluded, because the review is the thing to get
-first. Getting it does not release the environment into a bare
+it is listed once, under the held sentence, because the review is the thing to
+get first. Getting it does not release the environment into a bare
 `shipmate apply`, though: its entry still holds `explicit = true`, so it still
-needs a targeted `shipmate apply <env>`. That is why the held sentence names no
-command.
+needs a targeted `shipmate apply <env>`. The held sentence names that command
+beside it: `` `prod` (explicit: once reviewed, comment `shipmate apply prod`) ``.
 
 **An ungated environment that is also explicit is not held.** It is reported as
 excluded, with the usual "run `shipmate apply <env>`" — and that targeted apply

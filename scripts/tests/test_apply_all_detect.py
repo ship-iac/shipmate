@@ -496,6 +496,24 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
     assert json.loads(parsed["skipped_envs"]) == ["dev-us"]
 
 
+def test_main_reports_a_held_explicit_env_as_excluded_too(tmp_path, monkeypatch):
+    """prod-eu is explicit and held, so it is in both outputs and the comment can name its
+    targeted command under the hold; dev-eu is held and not explicit, so it is held only.
+
+    Mutation: subtract `held` from `excluded` -- prod-eu leaves `excluded_envs`, red.
+    Mutation: take `excluded` from `partition_envs(..., explicit + held, ...)` -- dev-eu
+    enters `excluded_envs`, red."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "prod-eu"],
+        explicit=["prod-eu"],
+        decision="REVIEW_REQUIRED",
+    )
+    assert json.loads(parsed["excluded_envs"]) == ["prod-eu"]
+    assert json.loads(parsed["review_held_envs"]) == ["dev-eu", "prod-eu"]
+
+
 def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
     """The hold and the applied-ungated report both resolve from `gated = false` on the
     default branch's entry, which is the only source: an environment without it is held.

@@ -510,6 +510,13 @@ def _gate_sentence(gate):
     )
 
 
+def _held_env(env, explicit):
+    name = sc._md_escape(env)
+    if not explicit:
+        return f"`{name}`"
+    return f"`{name}` (explicit: once reviewed, comment `shipmate apply {name}`)"
+
+
 def _footer_parts(
     gate,
     run_url,
@@ -525,9 +532,10 @@ def _footer_parts(
     in both forms, the no-review-required sentence; then the gate sentence and the run
     link. Env names are author-controlled, so `_md_escape`d.
 
-    The held sentence names no command: a held env can also be an explicit env
-    (the held cause wins, so it is not in `excluded`), and a bare `shipmate
-    apply` would not pick it up once reviewed. It is also cause-agnostic --
+    `excluded` can overlap `held`. A held env that is also in `excluded` is
+    listed once, under the hold, with its `shipmate apply <env>` command: once
+    reviewed, a bare `shipmate apply` still leaves it pending. A held env that
+    is not explicit names no command. The held sentence is also cause-agnostic --
     three decisions hold (REVIEW_REQUIRED on a gated env, CHANGES_REQUESTED,
     and an unknown or absent decision) and only the run's own detect notice
     carries which one, since the decision never reaches this renderer.
@@ -554,9 +562,10 @@ def _footer_parts(
     may have changed; the short form has no rows and never receives it."""
     lines = []
     if not env_name:
-        if excluded:
-            envs = ", ".join(f"`{sc._md_escape(e)}`" for e in excluded)
-            cmds = ", ".join(f"`shipmate apply {sc._md_escape(e)}`" for e in excluded)
+        explicit_only = [e for e in excluded if e not in held]
+        if explicit_only:
+            envs = ", ".join(f"`{sc._md_escape(e)}`" for e in explicit_only)
+            cmds = ", ".join(f"`shipmate apply {sc._md_escape(e)}`" for e in explicit_only)
             lines.append(
                 f"Explicit environment(s) left pending: {envs} — run {cmds} to apply them."
             )
@@ -566,7 +575,7 @@ def _footer_parts(
             # naming "explicit" here misattributes every hold-induced skip.
             lines.append(f"Skipped (ordered after an environment not applying this run): {envs}.")
         if held:
-            envs = ", ".join(f"`{sc._md_escape(e)}`" for e in held)
+            envs = ", ".join(_held_env(e, e in excluded) for e in held)
             lines.append(
                 f"Held — the pull request's review state does not permit applying: {envs}. "
                 "Get an approving review, or resolve or dismiss a requested-changes "

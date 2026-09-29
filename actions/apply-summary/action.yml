@@ -29,7 +29,7 @@ inputs:
     required: false
     default: ""
   excluded-envs:
-    description: JSON array of explicit environments left pending (all-environments form only). Empty = [].
+    description: "JSON array of explicit environments left pending, including held ones; the comment lists a held one under the hold (all-environments form only). Empty = []."
     required: false
     default: ""
   skipped-envs:

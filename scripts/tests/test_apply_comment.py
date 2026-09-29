@@ -636,13 +636,38 @@ _UNGATED_SENTENCE = (
 )
 
 
-def test_held_line_names_review_and_never_a_targeted_apply_command():
-    # A held env can also be an explicit env, where the review alone does not release it,
-    # so this sentence must not name a command at all. `shipmate apply prod` would
-    # additionally be a command that refuses.
+def test_held_line_names_no_command_for_a_held_env_that_is_not_explicit():
+    """Getting the review releases it into a bare apply, and `shipmate apply prod` would
+    refuse while it is held.
+
+    Mutation: annotate every held env, not only those in `excluded` -- red."""
     (line,) = ac._footer_parts("pending", RUN_URL, [], [], "", ["prod"], [])[:-2]
     assert line == _HELD_SENTENCE
-    assert "shipmate apply prod" not in line
+
+
+def test_held_explicit_env_is_listed_once_under_the_hold_with_its_command():
+    """`excluded` carries every pending explicit env, held ones included. A held explicit env
+    is named once, under the hold, with the targeted command a bare apply never replaces.
+
+    Mutation: list all of `excluded` in the explicit sentence -- `sbx` appears there, red.
+    Mutation: drop the annotation in `_held_env` -- red."""
+    lines = ac._footer_parts("pending", RUN_URL, ["prod", "sbx"], [], "", ["dev", "sbx"])[:-2]
+    assert lines == [
+        "Explicit environment(s) left pending: `prod` — run `shipmate apply prod` to apply them.",
+        "Held — the pull request's review state does not permit applying: `dev`, "
+        "`sbx` (explicit: once reviewed, comment `shipmate apply sbx`). "
+        "Get an approving review, or resolve or dismiss a requested-changes "
+        "review; the run log's apply-all-detect notice names the decision seen.",
+    ]
+
+
+def test_held_explicit_env_is_escaped_in_its_name_and_its_command():
+    """Mutation: interpolate the raw env name into the command in `_held_env` -- red."""
+    (line,) = ac._footer_parts("pending", RUN_URL, ["a<b"], [], "", ["a<b"])[:-2]
+    esc = ac.sc._md_escape("a<b")
+    assert esc == "a&lt;b"
+    assert f"`{esc}` (explicit: once reviewed, comment `shipmate apply {esc}`)" in line
+    assert "a<b" not in line
 
 
 def test_applied_ungated_line_states_no_review_and_names_the_setting():
