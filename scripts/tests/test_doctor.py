@@ -3425,10 +3425,10 @@ gated = false
 """
 
 
-def _no_required_review(envs):
+def _no_required_review(envs, level=doctor.NOTICE):
     """Hand-written: the count-0 finding naming `envs`, already rendered."""
     return (
-        doctor.WARNING,
+        level,
         f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews, so "
         f"these gated environments can apply without an approving review: {envs}. One is held "
         "only where a code-owner review is required for the changed files. `gated` can "
@@ -3447,23 +3447,26 @@ def _review_probe(monkeypatch, rules, table, envs=_ENVS):
 
 
 def test_review_rule_count_zero_names_only_the_gated_environments(monkeypatch):
-    """Count 0 with code-owner review on warns, naming the gated environments only.
+    """Count 0 with code-owner review on is a notice naming the gated environments only: they
+    are still held wherever owned files change.
 
-    Mutation: drop the `ungated_envs` subtraction -- `sandbox` is named too."""
+    Mutation: drop the `ungated_envs` subtraction -- `sandbox` is named too.
+    Mutation: emit the gated finding as WARNING unconditionally -- the level differs."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
     out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE)
     assert out == [_no_required_review("`dev-eu`")]
 
 
 def test_review_rule_count_zero_without_code_owner_review_reports_both(monkeypatch):
-    """Code-owner review off and count 0 are two findings, in that order.
+    """Code-owner review off and count 0 are two warnings, in that order.
 
-    Mutation: restore the early `return` on `not code_owner` -- the count finding is lost."""
+    Mutation: restore the early `return` on `not code_owner` -- the count finding is lost.
+    Mutation: emit the gated finding as NOTICE unconditionally -- the level differs."""
     rules = [_pull_request_rule(code_owner=False, count=0)]
     out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE)
     assert out == [
         (doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH)),
-        _no_required_review("`dev-eu`"),
+        _no_required_review("`dev-eu`", doctor.WARNING),
     ]
 
 
@@ -3510,6 +3513,36 @@ def test_review_rule_count_zero_names_a_declared_environment_the_table_lacks(mon
     rules = [_pull_request_rule(code_owner=True, count=0)]
     out = _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE, {"dev-eu", "prod-us"})
     assert out == [_no_required_review("`dev-eu`, `prod-us`")]
+
+
+def test_review_rule_count_zero_names_at_most_ten_environments(monkeypatch):
+    """Twelve gated environments: the first ten by name, then a count, so no code span is cut.
+
+    Mutation: show every name (drop the `[:_ENV_NAME_CAP]` slice) -- all twelve are named.
+    Mutation: drop the "and N more" suffix -- the count is missing."""
+    envs = {f"env-{i:02}" for i in range(12)}
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    out = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE, envs)
+    shown = ", ".join(f"`env-{i:02}`" for i in range(10)) + " and 2 more"
+    assert out == [_no_required_review(shown)]
+
+
+def test_review_rule_count_zero_escapes_an_environment_name_once(monkeypatch):
+    """The report row escapes the whole finding; a second escape of each name doubles the
+    backslash before a `|`.
+
+    Mutation: wrap each name in `_md_escape` inside `_no_review_findings` -- the backslash doubles.
+    Mutation: drop `_md_escape` from `_finding_row` -- the `|` and `<` render raw."""
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    [(level, text)] = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE, {"a|b<c"})
+    assert doctor._finding_row(level, text) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} the `pull_request` rule on `{_BRANCH}` requires "
+        "0 approving reviews, so these gated environments can apply without an approving "
+        "review: `a\\|b&lt;c`. One is held only where a code-owner review is required for the "
+        "changed files. `gated` can only relax a review requirement the ruleset sets "
+        "(docs/hardening.md #3–5); set `required_approving_review_count` to 1 or more, or set "
+        "`gated = false` on the environments meant to apply unreviewed."
+    )
 
 
 def test_review_rule_count_is_the_highest_across_layered_rulesets(monkeypatch):

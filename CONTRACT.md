@@ -1339,9 +1339,11 @@ no branch rule requires an approving review, the decision is `NONE` (unless a
 requested-changes review stands, which still refuses), and both paths apply a
 gated environment without one. The apply result comment names
 each gated environment that applied that way (§Apply result comment), and
-`shipmate doctor` warns about the combination when it can read the default
-branch's table. With the table unreadable, doctor reports only the
-sole-maintainer note, or only the code-owner warning when that review is off.
+`shipmate doctor` names the gated environments when it can read the default
+branch's table: in a note while code-owner review is on, since they are still
+held wherever owned files change, and in a warning beside the code-owner
+warning while that review is off. With the table unreadable, doctor reports only
+the sole-maintainer note, or only the code-owner warning when that review is off.
 
 What bounds the exemption is the default branch, not an admin boundary. Anyone who
 can open a pull request can propose `gated = false`; what they cannot do is have it take
@@ -1352,7 +1354,7 @@ benefits from it. This is the inverse of the reasoning that held while the
 exemption was a repository variable, where the point was that it could *not* be a commit:
 a variable edit is governed by GitHub's permission settings and reviewed by
 nobody. `shipmate doctor` validates the file it is in and reports a malformed
-entry, but does not list the `gated = false` entries; its count-0 warning names
+entry, but does not list the `gated = false` entries; its count-0 finding names
 their complement, the gated environments. `gated` accepts no variable
 reference (§Variable references), so the decision stays a merged commit.
 

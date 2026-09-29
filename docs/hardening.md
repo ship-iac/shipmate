@@ -279,7 +279,8 @@ of the App private key cannot satisfy is left either. `shipmate doctor` warns
 whenever code-owner review is off, whatever the count is. Count `0` with
 `require_code_owner_review` on is a different setting: the code-owner review
 still gates the merge wherever a `CODEOWNERS` entry covers the changed files,
-which is why doctor reports that combination as a note rather than a warning.
+which is why doctor reports that combination as a note rather than a warning,
+naming any gated environments in it.
 Either way, a `CHANGES_REQUESTED` review still blocks an apply until it is
 resolved or dismissed (`authorize` passes only on `NONE` or `APPROVED`; see
 `docs/branch-protection.md` §"Review policy").
@@ -315,15 +316,16 @@ Two things to know before relying on it:
   one, and a reviewer reads it as code. Anyone who can push a branch can still
   *propose* the entry, so this bounds when it takes effect, not who may ask.
   `shipmate doctor` validates the file and reports a malformed entry, but does not
-  list the `gated = false` entries; its count-0 warning below names their
+  list the `gated = false` entries; its count-0 finding below names their
   complement, the gated environments.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
   environment is already ungated there, so `gated = false` on some narrows nothing. It
   can only relax an existing requirement, never create one. When it can read the
-  default branch's table, `shipmate doctor` warns about the combination, naming
-  the environments still marked gated: each of them can apply without an
-  approving review, and is held only where a code-owner review is required for
-  the changed files. With the table unreadable it names none, and reports only
+  default branch's table, `shipmate doctor` names the environments still marked
+  gated: each of them can apply without an approving review, and is held only
+  where a code-owner review is required for the changed files. It is a note
+  while code-owner review is on, and a warning beside the code-owner warning
+  while that review is off. With the table unreadable it names none, and reports only
   the sole-maintainer note, or only the code-owner warning when that review is
   off. The apply result comment also names each
   gated environment a run applied while `reviewDecision` was `NONE`, stating that

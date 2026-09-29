@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Added
 
-- **`shipmate doctor` warns at 0 required approvals, naming each gated environment.**
+- **`shipmate doctor` names each gated environment at 0 required approvals: a note while code-owner review is on, a warning while it is off.**
 - **The apply comment says when a gated environment applied with no approving review required.**
 
 ### Changed

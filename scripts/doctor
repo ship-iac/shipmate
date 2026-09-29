@@ -100,6 +100,7 @@ _NO_REQUIRED_REVIEW = (
     "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
     "environments meant to apply unreviewed."
 )
+_ENV_NAME_CAP = 10
 # Same degrade posture as `_unverified`: unread is not misconfigured.
 _REVIEW_RULE_UNREADABLE = (
     "the `pull_request` rule on `{branch}` carried no parameters — review "
@@ -186,9 +187,11 @@ def _review_rule_warnings(ctx):
     Count 0 is a finding in its own right while any environment is gated: `gated`
     only relaxes a review the ruleset requires, so with no count required a gated
     environment is held only where a code-owner review is required for the changed
-    files. It is reported beside the
-    code-owner finding, and it is the sole-maintainer note only when no environment
-    is gated or the default branch's table cannot be read (`_no_review_findings`).
+    files. With code-owner review on it is a notice naming the gated environments,
+    since they are still held wherever owned files change; with it off it is a
+    warning beside the code-owner warning. It is the sole-maintainer note only when
+    no environment is gated or the default branch's table cannot be read
+    (`_no_review_findings`).
 
     Re-reads `rules/branches` rather than sharing `_gate_rule_warnings`'
     response, for `_existing_env_names`' per-probe-degrade reason.
@@ -225,6 +228,12 @@ def _no_review_findings(ctx, branch, code_owner):
 
     None are named when that table cannot be read or is invalid: which environments are
     exempt is then unknown, and naming all of them would warn about ones the file exempts.
+
+    A NOTICE while code-owner review is on: a warning forces a plan comment on every no-op
+    plan, which a sole maintainer cannot silence. A WARNING while it is off. At most
+    `_ENV_NAME_CAP` names are shown, then a count, so no code span is ever cut. The names
+    are not escaped here: `_finding_row` escapes the whole finding, and escaping twice
+    doubles the backslash it puts before a `|`.
     """
     table = _default_branch_table(ctx)
     gated = []
@@ -232,8 +241,11 @@ def _no_review_findings(ctx, branch, code_owner):
         listed = set(table.get("environments", {})) | set(ctx["envs"])
         gated = sorted(listed - bm.ec.ungated_envs(table))
     if gated:
-        shown = _one_line(", ".join(f"`{e}`" for e in gated), 400)
-        return [(WARNING, _NO_REQUIRED_REVIEW.format(branch=branch, envs=shown))]
+        shown = ", ".join(f"`{e}`" for e in gated[:_ENV_NAME_CAP])
+        if len(gated) > _ENV_NAME_CAP:
+            shown += f" and {len(gated) - _ENV_NAME_CAP} more"
+        level = NOTICE if code_owner else WARNING
+        return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=shown))]
     return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))] if code_owner else []
 
 
