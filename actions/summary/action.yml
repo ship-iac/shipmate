@@ -22,7 +22,8 @@ inputs:
       run's own per-cell checks are attached to the ref it was dispatched on, not to the pull
       request head, so they are mirrored onto the head here. Empty or "false" mirrors nothing —
       under a pull-request event those checks are already on the head, and a second copy would
-      put two producers behind one check name.
+      put two producers behind one check name. gate-state also reads it, with is-draft, to tell
+      an autoplan of a draft from a requested plan.
     required: false
     default: ""
   is-draft:

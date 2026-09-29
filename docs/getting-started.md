@@ -328,6 +328,10 @@ at all. The engine's `facts` job resolves the pull request once, from the event
 payload on a pull-request event and from the API by the dispatched `pr_number`
 otherwise, and every job below it plans the head SHA that job reports.
 
+A draft pull request's autoplan plans nothing, and `shipmate / gate` goes
+pending with the draft reason. Mark the pull request ready, or comment
+`shipmate plan`, which plans a draft; applies still refuse a draft.
+
 **`name: shipmate` on a calling job is a contract literal, not decoration.**
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 that name is what makes the plan cells `shipmate / <stack> / <env>` and lets the
