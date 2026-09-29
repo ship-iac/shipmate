@@ -1,6 +1,6 @@
 """The plan workflow -> summary action -> gate-state handshake.
 
-Three files have to agree on five names. Nothing at runtime notices when they stop agreeing, and
+Three files have to agree on seven names. Nothing at runtime notices when they stop agreeing, and
 the failure is a gate decided from defaults.
 """
 
@@ -17,6 +17,8 @@ EXPECTED_GATE_ENV = {
     "SHIPMATE_PLANNED_CELLS": "${{ inputs.planned-cells }}",
     "SHIPMATE_CELL_COUNT": "${{ steps.build.outputs.count }}",
     "SHIPMATE_PENDING": "${{ steps.build.outputs.pending }}",
+    "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
+    "SHIPMATE_ON_DEMAND": "${{ inputs.on-demand }}",
 }
 
 

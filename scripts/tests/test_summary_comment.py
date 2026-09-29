@@ -536,16 +536,22 @@ def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
     run PATCHing the older one -- a permanently stale plan comment below the live one. That
     `|| true` only existed to dodge EPIPE from `head` under `pipefail`, so the pipe goes rather
     than the error check, and a listing failure skips the post for the next run to recover. The
-    gate status is written by a separate later step, so skipping here must not fail this one."""
+    gate status is written by a separate later step, so skipping here must not fail this one.
+
+    The positions are those of the listing-failure `exit 0`, not of the step's first one, which
+    is the draft exit above the listing. Mutation: move the listing-failure `exit 0` below the
+    PATCH."""
     block = _upsert_step()
     assert "|| true" not in block
     assert "| head -n1" not in block  # No pipe, so no EPIPE to swallow.
     assert "if ! gh api" in block
-    degrade = block.split("if ! gh api", 1)[1].split("fi", 1)[0]
+    listing = block.index("if ! gh api") + len("if ! gh api")
+    degrade = block[listing:].split("fi", 1)[0]
     assert "::warning::" in degrade
     assert "exit 0" in degrade
-    assert block.index("exit 0") < block.index("-X PATCH")
-    assert block.index("exit 0") < block.index('issues/$PR/comments" -F body=@comment.md')
+    listing_exit = listing + degrade.index("exit 0")
+    assert listing_exit < block.index("-X PATCH")
+    assert listing_exit < block.index('issues/$PR/comments" -F body=@comment.md')
 
 
 def _guard_bodies():

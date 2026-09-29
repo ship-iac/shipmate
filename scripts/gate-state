@@ -11,6 +11,12 @@ did not produce the evidence the gate would be greening over, and incomplete
 evidence must never green the gate: `deploy-detect`'s work queue IS the pending
 apply checks, so a green gate over missing cells merges reviewed stacks that are
 then never applied.
+
+One case runs before both numbers: an autoplan of a draft pull request skips
+`detect`, so there is no count to compare. `decide` writes that run `pending`
+with a description naming the recovery, and comment mode `draft`, which leaves
+the sticky comment as it is. An on-demand plan never takes that branch: a
+skipped `detect` there is a failure like any other non-success.
 """
 
 import json
@@ -20,6 +26,12 @@ import sys
 _HOLD = "hold"
 _POST = "post"
 _NOTHING = "nothing-changed"
+_DRAFT = "draft"
+
+DRAFT_DESCRIPTION = (
+    "the pull request was a draft when this run started, so nothing was planned — "
+    "comment `shipmate plan`, or mark it ready"
+)
 
 
 def _as_int(value):
@@ -73,7 +85,16 @@ def _evidence_gap(*, cell_count, planned):
     return None
 
 
-def decide(*, detect_result, plan_result, planned_cells, cell_count, pending):
+def decide(
+    *,
+    detect_result,
+    plan_result,
+    planned_cells,
+    cell_count,
+    pending,
+    is_draft=False,
+    on_demand=False,
+):
     """Return (state, description, comment_mode).
 
     state is None when nothing should be written at all.
@@ -83,7 +104,14 @@ def decide(*, detect_result, plan_result, planned_cells, cell_count, pending):
     skipped job. Treating that as "write nothing" would leave every docs-only
     pull request with no gate at all, so `skipped` is accepted and then measured
     against the same evidence checks as a successful plan.
+
+    A draft autoplan (`is_draft` and not `on_demand`) with `detect` skipped is
+    `pending`, never `success`: nothing was planned, so there is nothing to green.
+    It returns before `planned_cells` is read, because a skipped `detect` reports
+    no count.
     """
+    if detect_result == "skipped" and is_draft and not on_demand:
+        return "pending", DRAFT_DESCRIPTION, _DRAFT
     if detect_result != "success":
         return (
             "failure",
@@ -131,6 +159,8 @@ def main():
         # before any gate is written -- blocking the merge. Fail-closed, not a hold's guarantee.
         cell_count=int(os.environ.get("SHIPMATE_CELL_COUNT", "0")),
         pending=os.environ.get("SHIPMATE_PENDING", "false") == "true",
+        is_draft=os.environ.get("SHIPMATE_IS_DRAFT", "false") == "true",
+        on_demand=os.environ.get("SHIPMATE_ON_DEMAND", "false") == "true",
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"state={state or ''}\n")
