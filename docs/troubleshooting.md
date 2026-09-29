@@ -684,6 +684,19 @@ Two locks this verb does not reach:
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
 
+### `Terramate install failed`
+
+The `Install Terramate` step failed, and the annotation reads "Terramate
+<version> did not install; the step log above names the cause. <url> answers
+HTTP <code> now; re-run the failed job."
+
+The download retries transient errors three times before the step fails. The
+status is a fresh probe of the release
+URL after the failure, not the one that failed; `000` means the URL was
+unreachable. The install also fails at unpacking, at its version check, and on
+a 404, and the `Install Terramate` step log names which. Re-run the failed job
+to recover from a transient cause.
+
 ### `shipmate / gate` never goes green
 
 Five distinct causes, in the order worth checking.

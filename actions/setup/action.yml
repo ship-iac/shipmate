@@ -35,10 +35,46 @@ runs:
       with:
         tofu_version: ${{ steps.versions.outputs.tofu }}
         tofu_wrapper: false
+    - name: Retry transient download errors
+      shell: bash
+      run: |
+        set -euo pipefail
+        # terramate-action runs one curl with no retry option; curl reads this file through
+        # CURL_HOME. curl reads only the first config it finds, hence the copy of the runner's own.
+        mkdir -p "$RUNNER_TEMP/shipmate-curl"
+        rc="$RUNNER_TEMP/shipmate-curl/.curlrc"
+        : > "$rc"
+        if [ -f "$HOME/.curlrc" ]; then
+          printf '%s\n' "$(cat "$HOME/.curlrc")" >> "$rc"
+        fi
+        echo 'retry = 3' >> "$rc"
+        echo 'retry-all-errors' >> "$rc"
     - name: Install Terramate
+      id: terramate
       uses: terramate-io/terramate-action@1cc78a548efefaab7762f4d06f51aa6de06ce201 # v3.3.0
+      env:
+        CURL_HOME: ${{ runner.temp }}/shipmate-curl
       with:
         version: ${{ steps.versions.outputs.terramate }}
+    - name: Report a failed Terramate install
+      if: ${{ failure() && steps.terramate.outcome == 'failure' }}
+      shell: bash
+      env:
+        SHIPMATE_TERRAMATE_VERSION: ${{ steps.versions.outputs.terramate }}
+      run: |
+        set -uo pipefail
+        v="$SHIPMATE_TERRAMATE_VERSION"
+        system="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        case "$(uname -m)" in
+          x86_64|x64) arch=x86_64 ;;
+          aarch64|arm64) arch=arm64 ;;
+          *) arch="$(uname -m)" ;;
+        esac
+        url="https://github.com/terramate-io/terramate/releases/download/v${v}/terramate_${v}_${system}_${arch}.tar.gz"
+        code="$(curl -sS -o /dev/null -I -L --max-time 30 -w '%{http_code}' "$url")" || true
+        code="${code:-000}"
+        echo "::error title=Terramate install failed::Terramate ${v} did not install; the step log above names the cause. ${url} answers HTTP ${code} now; re-run the failed job."
+        exit 1
     - name: Provider plugin cache
       shell: bash
       run: |

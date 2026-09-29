@@ -22,6 +22,10 @@ section below names the SHA the release tags.
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
 - **The bare-apply comment lists a held `explicit` environment once, with both reasons and the `shipmate apply <env>` command.**
 
+### Fixed
+
+- **The Terramate download retries transient errors three times, and a failed install names the release URL and the status it answers.**
+
 ## [0.41.0] — 2026-09-28
 
 Tags `7ff9345`.

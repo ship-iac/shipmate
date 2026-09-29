@@ -24,7 +24,9 @@ _ACTION = "setup"
 _EXPECTED_STEPS = [
     "Resolve versions",
     "Install OpenTofu",
+    "Retry transient download errors",
     "Install Terramate",
+    "Report a failed Terramate install",
     "Provider plugin cache",
     "Restore plugin cache",
 ]
