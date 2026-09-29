@@ -13,6 +13,7 @@ import os
 import stat
 import subprocess
 import threading
+from typing import Any, cast
 
 import pytest
 from _loader import bash_only, run_step, step_by, usable_bash
@@ -63,19 +64,24 @@ _OK_BODY = b"terramate tarball"
 _ERROR_BODY = b"internal error"
 
 
+class _CountingServer(http.server.ThreadingHTTPServer):
+    requests: int = 0
+
+
 class _Flaky(http.server.BaseHTTPRequestHandler):
     """Answers 500, 500, then 200, counting requests on the server."""
 
     def do_GET(self):
-        self.server.requests += 1
-        ok = self.server.requests >= 3
+        server = cast(_CountingServer, self.server)
+        server.requests += 1
+        ok = server.requests >= 3
         code, body = (200, _OK_BODY) if ok else (500, _ERROR_BODY)
         self.send_response(code)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *args):
+    def log_message(self, format: str, *args: Any) -> None:
         pass
 
 
@@ -94,8 +100,7 @@ def test_curl_retries_through_the_install_steps_curl_home(tmp_path):
     curl_home = step_by(_ACTION, name=_INSTALL)["env"]["CURL_HOME"].replace(
         "${{ runner.temp }}", runner_temp.as_posix()
     )
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Flaky)
-    server.requests = 0
+    server = _CountingServer(("127.0.0.1", 0), _Flaky)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
