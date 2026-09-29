@@ -18,12 +18,17 @@ does with that wiring.
   something else entirely, and every stack ends up re-tagged. The work is
   additive, mechanical and reviewable, but it is repo-wide.
 
-  It does not have to land in one commit. `detect` only inspects the stacks a
-  run touches: an untagged stack fails the whole run as soon as it is in the
-  changed set, so re-tagging can follow the stacks you are changing anyway. The
-  failure lists every untagged stack it found for you to work down. The
-  nightly drift run is the repo-wide backstop — it inspects every stack, so it
-  fails until the last one is tagged.
+  Merge a retag pull request that tags every stack before the adoption pull
+  request. `scripts/onboard` derives the environments from the checkout's tags
+  and refuses while any stack in the repository is untagged, listing each one.
+  The retag cannot ride in the adoption pull request, because that one must
+  change no stack (§"The table has to be on the default branch before your
+  first plan run").
+
+  After adoption, a stack added later is tagged in the pull request that adds
+  it. `detect` refuses an untagged stack as soon as it is in a run's changed
+  set, and the nightly drift run inspects every stack, so it fails until that
+  stack is tagged.
 - **Nothing to set for the Terramate and OpenTofu versions.** They are in
   [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
   engine commit your workflow file pins. Moving to other versions is a pin bump
@@ -271,6 +276,20 @@ creates all of them, including `shipmate-engine` and its branch policy:
   inside that table instead, which TOML accepts and the engine then refuses.
   A repository that needs no cloud role at all declares `layout` and nothing
   else.
+
+  A stack's `workload/<name>` tag selects `aws.<tier>.workloads.<name>`, keyed
+  by the name exactly as written ([`aws.md`](aws.md) §"The environment table"
+  has the example). A tier that lists workloads falls back to its own role for
+  a tag it does not list, and refuses the cell at detect when it has no role to
+  fall back to. An untagged stack, and any stack on a tier that lists no
+  workloads, runs as the tier's role, or with no credentials when the tier sets
+  none. On a tier with no role of its own, merge a new workload key before the
+  branch that tags the stack. The OIDC subject names only the environment
+  (`environment:<env>-apply`, or the bare `<env>` when shared), never the
+  workload, so every workload role whose trust policy accepts `<env>-apply` is
+  reachable from every apply cell of that environment. Choose how finely to
+  split environments before writing those trust policies
+  ([`hardening.md`](hardening.md) §7–9).
 
   The same file carries `[gate]`, which names the team whose members may apply
   and unlock by pull request comment. An environment applies without an
@@ -779,7 +798,8 @@ pull request, which cannot produce the gate.
 `scripts/onboard` creates a `shipmate-gate` ruleset carrying that one rule; the
 `pull_request`, `non_fast_forward` and `deletion` rules on that page stay a
 choice you make, so that a repository already carrying a `pull_request` rule
-does not end up with a conflicting second one.
+does not end up with a conflicting second one. Add them to that ruleset as
+[`branch-protection.md`](branch-protection.md) §Reproducible ruleset shows.
 
 ## Optional
 

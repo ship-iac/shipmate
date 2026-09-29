@@ -45,8 +45,12 @@ Create it after the pull request adding `.github/workflows/shipmate.yml` merges:
 before then no pull request can produce `shipmate / gate`, so the ruleset blocks
 the first one.
 
+Which command sends the ruleset depends on whether `scripts/onboard` ran. It
+creates a `shipmate-gate` ruleset carrying the gate rule alone, and a `POST`
+under a name already taken answers HTTP 422. Write the body first:
+
 ```bash
-gh api -X POST repos/<owner>/<repo>/rulesets --input - <<'JSON'
+cat > ruleset.json <<'JSON'
 {
   "name": "shipmate-gate",
   "target": "branch",
@@ -71,6 +75,24 @@ gh api -X POST repos/<owner>/<repo>/rulesets --input - <<'JSON'
   ]
 }
 JSON
+```
+
+After `scripts/onboard` created `shipmate-gate`, replace that ruleset by its id:
+
+```bash
+id=$(gh api repos/<owner>/<repo>/rulesets \
+  --jq '.[] | select(.name == "shipmate-gate") | .id')
+gh api -X PUT "repos/<owner>/<repo>/rulesets/$id" --input ruleset.json
+```
+
+`scripts/onboard` checks only the `shipmate / gate` entry, so its next run
+reports the widened ruleset `ok` while that entry keeps the App's
+`integration_id` and `strict_required_status_checks_policy: true`.
+
+Without `scripts/onboard`, create it:
+
+```bash
+gh api -X POST repos/<owner>/<repo>/rulesets --input ruleset.json
 ```
 
 `strict_required_status_checks_policy: true` is the "require branches up to date"
