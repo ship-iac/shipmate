@@ -8,6 +8,7 @@ request is refused before it plans.
 """
 
 import base64
+import contextlib
 import graphlib
 import json
 import os
@@ -399,43 +400,58 @@ def _check_provider(block, env, region):
             )
 
 
-def _check_vars(entry, env):
-    """`TF_VAR_*` and `TF_WORKSPACE` only, and strings only.
+@contextlib.contextmanager
+def _gather(errors):
+    """Append the message of a `SystemExit` raised in the block to `errors`, and go on."""
+    try:
+        yield
+    except SystemExit as exc:
+        errors.append(str(exc))
+
+
+def _check_vars(entry, env, errors):
+    """`TF_VAR_*` and `TF_WORKSPACE` only, and strings only, one message per name. A
+    non-mapping `tf_vars` gets its one message and no per-name check.
 
     A non-string value would otherwise pass here and refuse once per cell at injection
     time -- forty identical failures in a forty-cell matrix instead of one at the top.
     """
-    for name, value in sorted(_mapping(entry["tf_vars"], f"environment {env}: tf_vars").items()):
+    tf_vars = entry["tf_vars"]
+    with _gather(errors):
+        _mapping(tf_vars, f"environment {env}: tf_vars")
+    if not isinstance(tf_vars, dict):
+        return
+    for name, value in sorted(tf_vars.items()):
         if not name.startswith("TF_VAR_") and name != "TF_WORKSPACE":
-            raise SystemExit(
+            errors.append(
                 f"::error::environment {env}: tf_vars may name only TF_VAR_* and "
                 f"TF_WORKSPACE, and {name} is neither."
             )
-        if not isinstance(value, str):
-            raise SystemExit(
+        elif not isinstance(value, str):
+            errors.append(
                 f"::error::environment {env}: tf_vars.{name} must be a string, got "
                 f"{type(value).__name__}. A non-string value would otherwise refuse once "
                 "per cell at injection time."
             )
 
 
-def _check_flags(entry, env):
+def _check_flags(entry, env, errors, aws_ok):
     """`shared`, `explicit` and `gated` are TOML booleans, and a shared entry declares no
-    `aws.plan`.
+    `aws.plan`, one message per check.
 
     A quoted `"true"` reads as set to a person and resolves as unset; for `explicit` that
     puts the environment on a bare `shipmate apply`. A reference resolves to a string, so
-    it refuses here too. Runs after `_check_provider`, which is what has proven the `aws`
-    block a mapping.
+    it refuses here too. The `aws.plan` rule runs only when `aws_ok`, `_check_provider`
+    having proven the `aws` block a mapping.
     """
     for key in ("shared", "explicit", "gated"):
         if key in entry and not isinstance(entry[key], bool):
-            raise SystemExit(
+            errors.append(
                 f"::error::environments.{env}.{key} must be a boolean, got "
                 f"{type(entry[key]).__name__}. Write {key} = true or {key} = false, unquoted."
             )
-    if entry.get("shared") is True and "plan" in entry.get("aws", {}):
-        raise SystemExit(
+    if aws_ok and entry.get("shared") is True and "plan" in entry.get("aws", {}):
+        errors.append(
             f"::error::environment {env} is shared between the plan and apply paths, so "
             "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
             "paths. Remove aws.plan, or set shared = false."
@@ -484,22 +500,31 @@ def ungated_envs(table):
     )
 
 
-def _check_environment(entry, env):
-    """One entry's own shape. Nothing here reads context outside the file."""
-    entry = _mapping(entry, f"environment {env}")
+def _check_environment(entry, env, errors):
+    """One entry's own shape, one message per check into `errors`. A non-mapping entry gets
+    its one message and no other check. Nothing here reads context outside the file."""
+    with _gather(errors):
+        _mapping(entry, f"environment {env}")
+    if not isinstance(entry, dict):
+        return
     for key in sorted(entry):
         if key not in _ENV_KEYS:
-            raise SystemExit(
+            errors.append(
                 f"::error::environment {env}: {key} is not a key this engine implements. "
                 f"An environment holds {', '.join(_ENV_KEYS)}."
             )
     if "region" in entry:
-        _string(entry["region"], f"environment {env}: region")
+        with _gather(errors):
+            _string(entry["region"], f"environment {env}: region")
     if "tf_vars" in entry:
-        _check_vars(entry, env)
+        _check_vars(entry, env, errors)
+    aws_ok = True
     if "aws" in entry:
-        _check_provider(entry["aws"], env, entry.get("region"))
-    _check_flags(entry, env)
+        before = len(errors)
+        with _gather(errors):
+            _check_provider(entry["aws"], env, entry.get("region"))
+        aws_ok = len(errors) == before
+    _check_flags(entry, env, errors, aws_ok)
 
 
 def _check_dry_coverage(environments, matrix_envs):
@@ -586,7 +611,16 @@ def validate_env_order(order):
         )
     for env, preds in order.items():
         validate_env_name_list(preds, f"environments.{env}.needs")
-    # After the shape checks, or the sorter consumes a string predecessor character by character.
+    _check_cycle(order)
+    return order
+
+
+def _check_cycle(order):
+    """`SystemExit` when `order`, already a mapping of env-name lists, is cyclic.
+
+    Only after the list checks, or the sorter consumes a string predecessor character by
+    character.
+    """
     try:
         graphlib.TopologicalSorter(order).prepare()
     except graphlib.CycleError as exc:
@@ -596,7 +630,6 @@ def validate_env_order(order):
             "before the next, so the ordering has no first environment and no apply path "
             f"can sort it. Break the chain in {CONFIG_PATH}."
         ) from exc
-    return order
 
 
 def validate_env_name_list(envs, key):
@@ -667,22 +700,26 @@ def validate_team_slug(team, key):
     return team
 
 
-def validate_gate(gate):
-    """One `[gate]` table's shape, or `SystemExit`.
+def _check_gate(gate, errors):
+    """One `[gate]` table's shape, one message per check into `errors`. A non-mapping
+    `[gate]` gets its one message and no per-key or `approver_team` check.
 
     Strict keys, as an environment entry is: a misspelled gate key leaves the setting at its
     default while the repository believes it declared one.
     """
-    gate = _mapping(gate, "gate")
+    with _gather(errors):
+        _mapping(gate, "gate")
+    if not isinstance(gate, dict):
+        return
     for key in sorted(gate):
         if key not in _GATE_KEYS:
-            raise SystemExit(
+            errors.append(
                 f"::error::gate.{key} is not a key this engine implements. "
                 f"The gate table holds {', '.join(_GATE_KEYS)}."
             )
     if "approver_team" in gate:
-        validate_team_slug(gate["approver_team"], "gate.approver_team")
-    return gate
+        with _gather(errors):
+            validate_team_slug(gate["approver_team"], "gate.approver_team")
 
 
 def gate_approver_team(table):
@@ -710,17 +747,37 @@ def _check_version(table):
         )
 
 
-def _check_entries(environments):
-    """Every entry name, then every entry, then the order their `needs` declare."""
+def _check_entries(environments, errors):
+    """Every entry name, then every entry, then each `needs` list, then the order they
+    declare -- the cycle check only when every list passed. A non-mapping entry's `needs`
+    is not read."""
     for env in sorted(environments):
-        _check_env_name(env, f"environments.{env}", "an entry name")
+        with _gather(errors):
+            _check_env_name(env, f"environments.{env}", "an entry name")
     for env in sorted(environments):
-        _check_environment(environments[env], env)
-    validate_env_order(env_order({"environments": environments}))
+        _check_environment(environments[env], env, errors)
+    before = len(errors)
+    order = {}
+    for env, entry in sorted(environments.items()):
+        if isinstance(entry, dict) and "needs" in entry:
+            order[env] = entry["needs"]
+            with _gather(errors):
+                validate_env_name_list(entry["needs"], f"environments.{env}.needs")
+    if len(errors) == before:
+        with _gather(errors):
+            _check_cycle(order)
 
 
 def validate_structure(table):
-    """Everything the file can be judged on by itself, or `SystemExit`.
+    """Everything the file can be judged on by itself, or one `SystemExit` naming every
+    error: its message is one `::error::` line per refused check, in check order.
+
+    Every independent check runs. A check whose input an earlier check refused is skipped: a
+    non-mapping `environments` skips every entry, a non-mapping entry its own checks and its
+    `needs`, a non-mapping `tf_vars` its per-name checks, a refused `aws` block the
+    shared-with-`aws.plan` rule, a refused `needs` list the cycle check, and a non-mapping
+    `[gate]` its per-key and `approver_team` checks. A tier-resolving `aws` check stops at its
+    first refusal.
 
     Every top-level field, so a "valid configuration" verdict cannot hide an ordering
     or flag error until an apply reads it. `doctor` and `gate-config` validate with
@@ -730,29 +787,38 @@ def validate_structure(table):
     `layout` is required: it is the only source of a cell's environment identity, so a
     table without one leaves every cell with nothing to run as.
     """
+    errors = []
     for key in sorted(table):
         if key not in _TOP_KEYS:
-            raise SystemExit(
+            errors.append(
                 f"::error::{key} is not a setting this engine implements. "
                 f"{CONFIG_PATH} holds {', '.join(_TOP_KEYS)}."
             )
     if "schema_version" in table:
-        _check_version(table)
+        with _gather(errors):
+            _check_version(table)
+    # Key presence, not a truthy value: an empty layout is a declared layout holding a value
+    # no layout may hold, and must say so rather than read as undeclared.
     if "layout" not in table:
-        raise SystemExit(
+        errors.append(
             f"::error::{CONFIG_PATH} declares no layout, so no cell can resolve its "
             'environment identity. Declare layout = "tf_vars", "workspace" or "folder" on the '
             "default branch, which is where this table is read from. A scalar written below "
             "a [table] header lands inside that table rather than at the top level, so "
             "layout must come before the first header."
         )
-    # Key presence, not a truthy value: an empty layout is a declared layout holding a value
-    # no layout may hold, and must say so rather than read as undeclared.
-    layout = table["layout"]
-    if layout not in _LAYOUTS:
-        raise SystemExit(f"::error::layout is {layout!r}; it must be one of {', '.join(_LAYOUTS)}.")
-    _check_entries(_mapping(table.get("environments", {}), "environments"))
-    validate_gate(table.get("gate", {}))
+    elif table["layout"] not in _LAYOUTS:
+        errors.append(
+            f"::error::layout is {table['layout']!r}; it must be one of {', '.join(_LAYOUTS)}."
+        )
+    environments = table.get("environments", {})
+    with _gather(errors):
+        _mapping(environments, "environments")
+    if isinstance(environments, dict):
+        _check_entries(environments, errors)
+    _check_gate(table.get("gate", {}), errors)
+    if errors:
+        raise SystemExit("\n".join(errors))
     return table
 
 

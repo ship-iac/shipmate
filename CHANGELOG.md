@@ -21,6 +21,7 @@ section below names the SHA the release tags.
 - **A workload tag the environment does not list is refused at detect, for the cells a run plans, applies or unlocks, when its tier has no role to fall back to.**
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
 - **The bare-apply comment lists a held `explicit` environment once, with both reasons and the `shipmate apply <env>` command.**
+- **An invalid `.github/shipmate.toml` is refused with every structural error it holds, one annotation each.**
 
 ### Fixed
 
