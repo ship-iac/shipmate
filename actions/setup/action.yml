@@ -43,6 +43,8 @@ runs:
         # CURL_HOME. curl reads only the first config it finds, hence the copy of the runner's own.
         mkdir -p "$RUNNER_TEMP/shipmate-curl"
         rc="$RUNNER_TEMP/shipmate-curl/.curlrc"
+        # The copy can carry `proxy-user` or `user` credentials, so the file is owner-only.
+        umask 077
         : > "$rc"
         if [ -f "$HOME/.curlrc" ]; then
           printf '%s\n' "$(cat "$HOME/.curlrc")" >> "$rc"
