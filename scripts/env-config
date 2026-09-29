@@ -787,6 +787,13 @@ def _derived(layout, env, entry):
     return {}
 
 
+def _consulted(table, env, path):
+    """`(shared, tier)`: whether `env` is shared, and the tier a cell on `path` consults --
+    `apply` on both paths when shared. `resolve` and `unlisted_workload` must agree on it."""
+    shared = env in shared_envs(table)
+    return shared, "apply" if shared else path
+
+
 def resolve(table, env, path, workload):
     """What one cell runs with: `role_arn`, `cred_region`, `tf_vars`, `config_path`,
     `env_binding`.
@@ -806,9 +813,8 @@ def resolve(table, env, path, workload):
     """
     environments = _mapping(table.get("environments", {}), "environments")
     entry = _mapping(environments.get(env, {}), f"environment {env}")
-    names = {role: name for name, role in env_names(env, shared_envs(table))}
-    shared = "shared" in names
-    config_path = "apply" if shared else path
+    shared, config_path = _consulted(table, env, path)
+    names = {role: name for name, role in env_names(env, {env} if shared else set())}
     fields = {}
     if "aws" in entry:
         resolved = dict(tiers(entry["aws"], env, entry.get("region")))
@@ -838,8 +844,7 @@ def unlisted_workload(table, env, path, workload):
     entry = _mapping(environments.get(env, {}), f"environment {env}")
     if not workload or "aws" not in entry:
         return None
-    shared = env in shared_envs(table)
-    label = f"aws.{'apply' if shared else path}"
+    label = f"aws.{_consulted(table, env, path)[1]}"
     resolved = dict(tiers(entry["aws"], env, entry.get("region")))
     prefix = f"{label}.workloads."
     keys = sorted(name[len(prefix) :] for name in resolved if name.startswith(prefix))
