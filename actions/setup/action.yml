@@ -40,15 +40,19 @@ runs:
       run: |
         set -euo pipefail
         # terramate-action runs one curl with no retry option; curl reads this file through
-        # CURL_HOME. curl reads only the first config it finds, hence the copy of the runner's own.
+        # CURL_HOME, which hides every other config. curl reads only the first it finds, so copy
+        # that one, in curl's own lookup order.
         mkdir -p "$RUNNER_TEMP/shipmate-curl"
         rc="$RUNNER_TEMP/shipmate-curl/.curlrc"
         # The copy can carry `proxy-user` or `user` credentials, so the file is owner-only.
         umask 077
         : > "$rc"
-        if [ -f "$HOME/.curlrc" ]; then
-          printf '%s\n' "$(cat "$HOME/.curlrc")" >> "$rc"
-        fi
+        for f in ${CURL_HOME:+"$CURL_HOME/.curlrc"} ${XDG_CONFIG_HOME:+"$XDG_CONFIG_HOME/curlrc"} "$HOME/.curlrc"; do
+          if [ -f "$f" ] && [ -r "$f" ] && ! [ "$f" -ef "$rc" ]; then
+            printf '%s\n' "$(cat "$f")" >> "$rc"
+            break
+          fi
+        done
         echo 'retry = 3' >> "$rc"
         echo 'retry-all-errors' >> "$rc"
     - name: Install Terramate

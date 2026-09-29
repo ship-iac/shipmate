@@ -42,22 +42,42 @@ def _require_curl():
         pytest.skip("no curl on this host's bash PATH")
 
 
-def _write_curlrc(tmp_path, home_curlrc=None):
-    """Run the real retry step with `RUNNER_TEMP` and `HOME` under `tmp_path`; return
-    `RUNNER_TEMP`."""
+_SOURCES = {
+    "curl_home": ("curl-home", ".curlrc"),
+    "xdg": ("xdg", "curlrc"),
+    "home": ("home", ".curlrc"),
+}
+
+
+def _write_curlrc(tmp_path, curlrcs=None, curl_home=None):
+    """Run the real retry step with `RUNNER_TEMP`, `HOME`, `XDG_CONFIG_HOME` and a pre-existing
+    `CURL_HOME` under `tmp_path`, each holding the `.curlrc` or `curlrc` that `curlrcs` gives by
+    `_SOURCES` key; return `RUNNER_TEMP`. `curl_home` overrides the job's `CURL_HOME`."""
     runner_temp = tmp_path / "runner-temp"
-    home = tmp_path / "home"
     runner_temp.mkdir()
-    home.mkdir()
-    if home_curlrc is not None:
-        (home / ".curlrc").write_text(home_curlrc, encoding="utf-8", newline="\n")
+    dirs = {key: tmp_path / sub for key, (sub, _) in _SOURCES.items()}
+    for d in dirs.values():
+        d.mkdir()
+    for key, text in (curlrcs or {}).items():
+        (dirs[key] / _SOURCES[key][1]).write_text(text, encoding="utf-8", newline="\n")
+    env = {k: v for k, v in os.environ.items() if k not in ("CURL_HOME", "XDG_CONFIG_HOME")}
     r = run_step(
         tmp_path,
         step_by(_ACTION, name=_RETRY)["run"],
-        {**os.environ, "RUNNER_TEMP": str(runner_temp), "HOME": str(home)},
+        {
+            **env,
+            "RUNNER_TEMP": str(runner_temp),
+            "HOME": str(dirs["home"]),
+            "XDG_CONFIG_HOME": str(dirs["xdg"]),
+            "CURL_HOME": str(curl_home or dirs["curl_home"]),
+        },
     )
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     return runner_temp
+
+
+def _generated(runner_temp):
+    return (runner_temp / "shipmate-curl" / ".curlrc").read_text(encoding="utf-8")
 
 
 _OK_BODY = b"terramate tarball"
@@ -124,13 +144,47 @@ def test_curl_retries_through_the_install_steps_curl_home(tmp_path):
 
 
 @bash_only
-def test_the_generated_file_keeps_the_runners_own_curlrc_first(tmp_path):
-    """curl reads only the first config it finds, so a runner's own `proxy` or `cacert` must
-    survive in the generated file. Mutation: drop the copy of `$HOME/.curlrc`.
+@pytest.mark.parametrize(
+    ("curlrcs", "expected"),
+    [
+        ({"curl_home": "user-agent = curl-home\n"}, "user-agent = curl-home\n"),
+        ({"xdg": "user-agent = xdg\n"}, "user-agent = xdg\n"),
+        ({"home": "user-agent = home\n"}, "user-agent = home\n"),
+        (
+            {"curl_home": "user-agent = curl-home\n", "xdg": "user-agent = xdg\n"},
+            "user-agent = curl-home\n",
+        ),
+        (
+            {"xdg": "user-agent = xdg\n", "home": "user-agent = home\n"},
+            "user-agent = xdg\n",
+        ),
+        (
+            {"curl_home": "user-agent = curl-home\n", "home": "user-agent = home\n"},
+            "user-agent = curl-home\n",
+        ),
+        ({}, ""),
+    ],
+)
+def test_the_generated_file_keeps_the_config_curl_would_have_read(tmp_path, curlrcs, expected):
+    """The install step's `CURL_HOME` hides every config curl would otherwise read, and curl
+    reads only the first it finds, so a runner's own `proxy` or `cacert` must survive: the first
+    of `$CURL_HOME/.curlrc`, `$XDG_CONFIG_HOME/curlrc`, `$HOME/.curlrc` is copied, alone.
+
+    Mutations: drop the `CURL_HOME` source; drop the `XDG_CONFIG_HOME` source; swap the
+    `CURL_HOME` and `XDG_CONFIG_HOME` sources; drop the `break`.
     """
-    runner_temp = _write_curlrc(tmp_path, home_curlrc="user-agent = shipmate-probe\n")
-    got = (runner_temp / "shipmate-curl" / ".curlrc").read_text(encoding="utf-8")
-    assert got == "user-agent = shipmate-probe\nretry = 3\nretry-all-errors\n"
+    runner_temp = _write_curlrc(tmp_path, curlrcs)
+    assert _generated(runner_temp) == expected + "retry = 3\nretry-all-errors\n"
+
+
+@bash_only
+def test_a_curl_home_that_is_the_generated_directory_is_not_copied_into_itself(tmp_path):
+    """A job whose `CURL_HOME` already names the generated directory must not read the file the
+    step truncates; the next source is copied instead. Mutation: drop the `-ef` test.
+    """
+    generated_dir = tmp_path / "runner-temp" / "shipmate-curl"
+    runner_temp = _write_curlrc(tmp_path, {"home": "user-agent = home\n"}, curl_home=generated_dir)
+    assert _generated(runner_temp) == "user-agent = home\nretry = 3\nretry-all-errors\n"
 
 
 @bash_only
@@ -139,7 +193,7 @@ def test_the_generated_file_is_private(tmp_path):
     """The copied `$HOME/.curlrc` can hold `proxy-user` credentials. Mutation: delete the
     `umask 077` line.
     """
-    runner_temp = _write_curlrc(tmp_path, home_curlrc="proxy-user = u:p\n")
+    runner_temp = _write_curlrc(tmp_path, {"home": "proxy-user = u:p\n"})
     mode = (runner_temp / "shipmate-curl" / ".curlrc").stat().st_mode
     assert stat.S_IMODE(mode) & 0o077 == 0
 
