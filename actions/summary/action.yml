@@ -311,7 +311,7 @@ runs:
         # a hold and greens `pending`, so a re-run draft run over a held head would open that
         # hold (scripts/tests/test_summary_draft_gate.py). The read is gate-refresh's own.
         if [ "$MODE" = "draft" ]; then
-          if ! held=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status" \
+          if ! held=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status?per_page=100" \
             --jq '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty'); then
             echo "::warning::could not read the gate status of $HEAD_SHA; the draft gate status was not written"
             exit 0

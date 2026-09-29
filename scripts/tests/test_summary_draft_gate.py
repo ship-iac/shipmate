@@ -14,6 +14,7 @@ Both steps run for real: `Create/refresh gate` with `gh` replaced by a bash func
 """
 
 import os
+import re
 
 import pytest
 from _loader import bash_only, run_step, step_by
@@ -21,7 +22,7 @@ from _loader import bash_only, run_step, step_by
 HEAD_SHA = "a" * 40
 READ_ARGV = [
     "api",
-    f"repos/acme/demo/commits/{HEAD_SHA}/status",
+    f"repos/acme/demo/commits/{HEAD_SHA}/status?per_page=100",
     "--jq",
     '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty',
 ]
@@ -33,7 +34,7 @@ GH_STUB = """
 gh() {
   printf '%s\\n' "$@" -- >> "$CALLS"
   case "$*" in
-    *"/status --jq"*)
+    *"/status?per_page=100 --jq"*)
       [ -z "${FAKE_READ_FAILS:-}" ] || return 1
       printf '%s' "$FAKE_GATE_STATE" ;;
     *"/statuses/"*) ;;
@@ -108,6 +109,26 @@ def test_a_post_run_writes_without_reading(tmp_path):
     proc, calls = _run_gate(tmp_path, "post", "failure")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [WRITE_ARGV]
+
+
+_GATE_READ = re.compile(
+    r"""gh api "repos/\$GITHUB_REPOSITORY/commits/\$HEAD_SHA/status[^"]*" \\\n\s*--jq '[^']*'"""
+)
+
+
+def _gate_read(action, step):
+    reads = _GATE_READ.findall(step_by(action, name=step)["run"])
+    assert len(reads) == 1, f"{action} / {step}: {reads!r}"
+    return re.sub(r"\\\n\s*", "", reads[0])
+
+
+def test_the_draft_read_is_gate_refreshs_own():
+    """Both sites decide "is this head held"; if they read differently, one greens or overwrites
+    a hold the other would have seen. Mutation: change one site's `per_page`.
+    """
+    assert _gate_read("summary", "Create/refresh gate") == _gate_read(
+        "gate-refresh", "Complete gate"
+    )
 
 
 def _run_upsert(tmp_path, mode):

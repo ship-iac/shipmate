@@ -25,6 +25,7 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **The Terramate download retries transient errors three times, and a failed install names the release URL and the status it answers.**
+- **`shipmate / gate`'s hold is read past the first 30 status contexts, so a head carrying more no longer lets an apply green a held gate.**
 
 ## [0.41.0] — 2026-09-28
 
