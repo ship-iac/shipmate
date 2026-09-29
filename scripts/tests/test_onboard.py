@@ -2686,21 +2686,51 @@ def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(capsys, tmp
     reviewers, and the `pull_request` rule is the only apply gate left to judge.
 
     Mutations, each proven: select the reviewer names on `role == "apply"` alone, which a
-    bare shared environment satisfies; drop the `elif gated` arm, omitting the item; compare
-    `review_count > 1` in `_review_rule_item`.
+    bare shared environment satisfies; drop the `if gated` arm, omitting the item; compare
+    `review_count > 1` in `_review_item`.
     """
     item = "approving review before apply"
     onboard._checklist(ctx(root=tmp_path, shared={"dev-eu"}))
     assert checklist_items(capsys.readouterr().out)[item] == (
         "todo",
         [
-            "A shared environment has no `<env>-apply` to carry required reviewers, so its",
-            "apply gate is an approving-review `pull_request` rule on the default branch,",
-            "which this script does not create (docs/branch-protection.md §Reproducible",
-            "ruleset).",
+            "Shared, so no `<env>-apply` carries required reviewers: dev-eu.",
+            "Their apply gate is an approving-review `pull_request` rule on the default",
+            "branch, which this script does not create (docs/branch-protection.md",
+            "§Reproducible ruleset).",
         ],
     )
     onboard._checklist(ctx(root=tmp_path, shared={"dev-eu"}, review_count=1))
+    assert checklist_items(capsys.readouterr().out)[item] == (
+        "ok",
+        ["`required_approving_review_count` is 1 on the default branch's `pull_request` rule."],
+    )
+
+
+def test_a_shared_environment_beside_a_reviewed_one_needs_the_review_rule(capsys, tmp_path):
+    """A shared env forfeits the environment reviewer gate, so a reviewed `prod-apply`
+    beside it does not gate its applies: only the `pull_request` rule does.
+
+    Mutation: drop `and not shared` from `_review_item`'s second `ok`.
+    """
+    item = "approving review before apply"
+    mixed = {
+        "root": tmp_path,
+        "envs": ["dev-eu", "prod"],
+        "shared": {"dev-eu"},
+        "apply_envs": {"prod-apply": REVIEWED_APPLY},
+    }
+    onboard._checklist(ctx(**mixed))
+    assert checklist_items(capsys.readouterr().out)[item] == (
+        "todo",
+        [
+            "Shared, so no `<env>-apply` carries required reviewers: dev-eu.",
+            "Their apply gate is an approving-review `pull_request` rule on the default",
+            "branch, which this script does not create (docs/branch-protection.md",
+            "§Reproducible ruleset).",
+        ],
+    )
+    onboard._checklist(ctx(**mixed, review_count=1))
     assert checklist_items(capsys.readouterr().out)[item] == (
         "ok",
         ["`required_approving_review_count` is 1 on the default branch's `pull_request` rule."],

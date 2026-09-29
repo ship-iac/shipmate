@@ -1012,54 +1012,43 @@ def _reviewed(env):
     )
 
 
-def _review_item(ctx, names):
-    """`ok` when every environment in `names` is reviewed, or a `pull_request` rule on the
-    default branch requires an approving review. `apply_envs` holds `None` for an
-    environment a dry run would create, and that is not reviewed."""
-    item = "approving review before apply"
-    missing = [n for n in names if not _reviewed(ctx["apply_envs"].get(n))]
-    if not missing or ctx["review_count"] >= 1:
-        return "ok", item, []
-    first = f"Required reviewers and `Prevent self-review` on {', '.join(missing)}"
-    if not ctx["is_private"]:
-        return "todo", item, [first, "(docs/getting-started.md §Environment setup)."]
-    return (
-        "todo",
-        item,
-        [
-            first,
-            "(docs/getting-started.md §Environment setup). On a private repository below",
-            "Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
-            "approving-review `pull_request` rule on the default branch, which this script",
-            "does not create (docs/branch-protection.md §Reproducible ruleset), and",
-            "`[gate] approver_team`.",
-        ],
-    )
-
-
-def _review_rule_item(ctx):
-    """The approving-review item when every gated environment is shared: the `pull_request`
-    rule is then the only apply gate the repository can have."""
+def _review_item(ctx, names, shared=()):
+    """`ok` when a `pull_request` rule on the default branch requires an approving review,
+    or when every environment in `names` is reviewed and `shared`, the gated shared
+    environments, is empty: a shared environment has no `<env>-apply` to carry reviewers,
+    so that rule is its only apply gate. `apply_envs` holds `None` for an environment a dry
+    run would create, and that is not reviewed."""
     item = "approving review before apply"
     if ctx["review_count"] >= 1:
-        return (
-            "ok",
-            item,
-            [
-                f"`required_approving_review_count` is {ctx['review_count']} on the default "
-                "branch's `pull_request` rule."
-            ],
+        rule = (
+            f"`required_approving_review_count` is {ctx['review_count']} on the default "
+            "branch's `pull_request` rule."
         )
-    return (
-        "todo",
-        item,
-        [
-            "A shared environment has no `<env>-apply` to carry required reviewers, so its",
-            "apply gate is an approving-review `pull_request` rule on the default branch,",
-            "which this script does not create (docs/branch-protection.md §Reproducible",
-            "ruleset).",
-        ],
-    )
+        return "ok", item, [rule] if shared else []
+    missing = [n for n in names if not _reviewed(ctx["apply_envs"].get(n))]
+    if not missing and not shared:
+        return "ok", item, []
+    lines = []
+    if missing:
+        lines.append(f"Required reviewers and `Prevent self-review` on {', '.join(missing)}")
+        if not ctx["is_private"]:
+            lines.append("(docs/getting-started.md §Environment setup).")
+        else:
+            lines += [
+                "(docs/getting-started.md §Environment setup). On a private repository below",
+                "Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
+                "approving-review `pull_request` rule on the default branch, which this script",
+                "does not create (docs/branch-protection.md §Reproducible ruleset), and",
+                "`[gate] approver_team`.",
+            ]
+    if shared:
+        lines += [
+            f"Shared, so no `<env>-apply` carries required reviewers: {', '.join(shared)}.",
+            "Their apply gate is an approving-review `pull_request` rule on the default",
+            "branch, which this script does not create (docs/branch-protection.md",
+            "§Reproducible ruleset).",
+        ]
+    return "todo", item, lines
 
 
 def _codeowners_item(ctx):
@@ -1121,10 +1110,8 @@ def _checklist(ctx):
     ]
     items = [_passphrase_item(ctx), _webhook_item(ctx), _table_item(ctx)]
     items += [_approver_item(ctx), _app_item(ctx)]
-    if reviewed:
-        items.append(_review_item(ctx, reviewed))
-    elif gated:
-        items.append(_review_rule_item(ctx))
+    if gated:
+        items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))
     items += [_codeowners_item(ctx), _adoption_item(ctx)]
     if ctx["ruleset_deferred"]:
         items.append(_RULESET_ITEM)
