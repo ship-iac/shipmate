@@ -247,8 +247,7 @@ it per repository:
 
 ```bash
 python3 <engine-checkout>/scripts/onboard \
-  --team <approver-team-slug> --app-id <app-id> \
-  --key shipmate-app.private-key.pem \
+  --app-id <app-id> --key shipmate-app.private-key.pem \
   --vars-at-org SHIPMATE_APP_ID
 ```
 
@@ -518,13 +517,12 @@ behind the flag answers to nobody else.
 ```bash
 ENGINE=<path-to-engine-checkout>    # on a release tag
 CHECKOUTS="<path>/<repo> <path>/<repo>"
-TEAM=<approver-team-slug>          # may differ per repo; pass it per repo either way
 APP_ID=<app-id-from-step-1-output>
 KEY=$PWD/shipmate-app.private-key.pem
 
 for DIR in $CHECKOUTS; do
   echo "== $DIR"
-  ( cd "$DIR" && python3 "$ENGINE/scripts/onboard" --team "$TEAM" --app-id "$APP_ID" --key "$KEY" )
+  ( cd "$DIR" && python3 "$ENGINE/scripts/onboard" --app-id "$APP_ID" --key "$KEY" )
 done
 ```
 

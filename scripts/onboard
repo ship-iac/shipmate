@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Reconcile one consumer repository to shipmate's per-repository setup.
 
-    python3 <engine>/scripts/onboard --team <team-slug> --app-id <id> \
-        --key shipmate-app.private-key.pem \
+    python3 <engine>/scripts/onboard --app-id <id> \
+        [--key shipmate-app.private-key.pem] \
         [--vars-at-org SHIPMATE_APP_ID] [--dry-run]
 
 Hand-run from inside the consumer checkout, with `gh` authenticated against that
@@ -12,13 +12,11 @@ repository changes nothing.
 
 Flags:
 
-  --team          GitHub team slug whose members may apply and unlock. Not
-                  written anywhere: it belongs in `.github/shipmate.toml`,
-                  which this script does not write, so it is printed in the
-                  closing checklist instead.
   --app-id        the shipmate App's numeric id.
   --key           path to the App's PEM private key (its text, not the path,
-                  is what gets stored).
+                  is what gets stored). Needed only while `shipmate-engine`
+                  holds no SHIPMATE_APP_PRIVATE_KEY; without it such a run
+                  refuses before its first write.
   --vars-at-org   SHIPMATE_APP_ID, the one name it accepts, when that variable
                   is already set at organization level, so no repository copy
                   is written. The name is verified against the organization
@@ -33,7 +31,8 @@ must distinguish the two by output, or validate its own arguments first.
 Environments are derived from the repository's own Terramate env/* tags, never
 passed in: the set of environments is a property of the stacks. Those bound as
 one bare `<env>` instead of the `<env>-plan` / `<env>-apply` pair are the entries
-holding `shared = true` in the checkout's `.github/shipmate.toml`.
+holding `shared = true` in the checkout's `.github/shipmate.toml`. The approver
+team is that file's `[gate] approver_team`, which this script does not write.
 """
 
 import argparse
@@ -58,10 +57,6 @@ _DRY = False
 
 #: Environment names are interpolated into API paths and `gh --env` arguments.
 _ENV_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-#: A team slug is interpolated into an action input and an API path: starting
-#: alphanumeric forecloses a leading '-' reading to a CLI as a flag, and the
-#: character set forecloses '/' and '..'.
-_TEAM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
 _APP_ID_RE = re.compile(r"[0-9]+")
 #: The default branch is rendered unquoted into a YAML flow list and a GitHub branch filter:
@@ -84,7 +79,7 @@ def _run(args, secrets=(), stdin=None):
     prints, so a caller that discards the exception discards the noise too.
     """
     # args is built here, shell=False. The values interpolated into it passed a
-    # regex first: the team slug and the app id in main(), the repository slug in
+    # regex first: the app id in main(), the repository slug in
     # _repo_facts() with the default branch, environment names in _derive_envs().
     p = subprocess.run(  # noqa: S603
         args,
@@ -246,9 +241,10 @@ def _at_org(raw):
 
 
 def _resolve_shared(root, envs, repo, variables):
-    """The environments the checkout's `.github/shipmate.toml` marks `shared = true`.
+    """(table, shared): the checkout's validated `.github/shipmate.toml` and the
+    environments it marks `shared = true`.
 
-    No file means no shared environments. A file holding a `{ vars = "NAME" }` reference
+    No file gives `(None, set())`. A file holding a `{ vars = "NAME" }` reference
     resolves it from the repository `variables` over the organization variables reaching
     `repo`, GitHub's precedence; a file without one makes no API call. The table is
     structurally validated first, because `shared_envs` trusts its shape, and this runs
@@ -257,7 +253,7 @@ def _resolve_shared(root, envs, repo, variables):
     """
     path = root / ec.CONFIG_PATH
     if not path.is_file():
-        return set()
+        return None, set()
     text = path.read_text(encoding="utf-8")
     table = ec.load_toml(text)
     refs = ec.references(table)
@@ -277,7 +273,7 @@ def _resolve_shared(root, envs, repo, variables):
                 f"[environments.{name}] in {ec.CONFIG_PATH} holds `shared = true`, but no "
                 f"stack declares {name!r}. Its environments are: {', '.join(envs)}."
             )
-    return shared
+    return table, shared
 
 
 def _variables():
@@ -407,6 +403,28 @@ def _reconcile_env(ctx, name, role):
         _ensure_policy(ctx, name)
 
 
+def _engine_secrets(repo):
+    """The secret names on `shipmate-engine`; none when the environment does not exist."""
+    data = _gh_json_or_none(f"repos/{repo}/environments/{ENGINE_ENV}/secrets?per_page=100")
+    return {s.get("name") for s in (data or {}).get("secrets", [])}
+
+
+def _repo_secrets():
+    return {s.get("name") for s in json.loads(_run(["gh", "secret", "list", "--json", "name"]))}
+
+
+def _refuse_missing_key(ctx):
+    """Refuse a run with no `--key` while `shipmate-engine` holds no App private key.
+
+    Under `--dry-run` too: a `would set` with no key to set is a false report.
+    """
+    if ctx["key"] is None and _APP_KEY_NAME not in ctx["engine_secrets"]:
+        raise SystemExit(
+            f"{ENGINE_ENV} holds no {_APP_KEY_NAME}, so this run has no key to place there. "
+            "Re-run with --key <path to the App's PEM private key>."
+        )
+
+
 def _reconcile_key(ctx):
     """Place the App key on `shipmate-engine`, and remove any repository-level copy.
 
@@ -414,10 +432,8 @@ def _reconcile_key(ctx):
     value, so overwriting could only destroy a working placement. Rotation is
     docs/github-app.md.
     """
-    repo = ctx["repo"]
-    data = _gh_json_or_none(f"repos/{repo}/environments/{ENGINE_ENV}/secrets?per_page=100")
     subject = f"{ENGINE_ENV} {_APP_KEY_NAME}"
-    if _APP_KEY_NAME in {s.get("name") for s in (data or {}).get("secrets", [])}:
+    if _APP_KEY_NAME in ctx["engine_secrets"]:
         report("ok", subject)
     else:
         write(
@@ -427,8 +443,7 @@ def _reconcile_key(ctx):
             stdin=ctx["key"],
             secrets=(ctx["key"],),
         )
-    listed = json.loads(_run(["gh", "secret", "list", "--json", "name"]))
-    if _APP_KEY_NAME not in {s.get("name") for s in listed}:
+    if _APP_KEY_NAME not in ctx["repo_secrets"]:
         report("ok", f"no repository-level {_APP_KEY_NAME}")
         return
     write(
@@ -880,6 +895,7 @@ def _checklist(ctx):
     values this script cannot know. Every `<value>` is a placeholder to substitute, so no
     line carrying one runs as printed.
     """
+    team = ec.gate_approver_team(ctx["table"] or {}) or "<team-slug>"
     halves = [
         (env, name, role)
         for env in ctx["envs"]
@@ -909,7 +925,7 @@ def _checklist(ctx):
         "  from this checkout's file, so re-run it after adding or dropping one.",
         "",
         "  `[gate] approver_team` names the team whose members may apply and unlock by",
-        f"  pull request comment — `{ctx['team']}` here. Keep it above the first",
+        f"  pull request comment — `{team}` here. Keep it above the first",
         "  `[environments.*]` header, where it reads with the other repository-wide",
         "  settings.",
         "",
@@ -917,7 +933,7 @@ def _checklist(ctx):
         '    layout = "tf_vars"',
         "",
         "    [gate]",
-        f'    approver_team = "{ctx["team"]}"',
+        f'    approver_team = "{team}"',
         "",
         "    [environments.dev-eu]",
         '    region         = "eu-west-1"',
@@ -1003,14 +1019,12 @@ def _exit_code():
 def main(argv=None):
     global _DRY
     ap = argparse.ArgumentParser(description="Reconcile a consumer repository to shipmate.")
-    ap.add_argument(
-        "--team",
-        required=True,
-        help="team slug whose members may apply and unlock; not written anywhere, "
-        "printed in the closing checklist for `.github/shipmate.toml`",
-    )
     ap.add_argument("--app-id", required=True, help="the shipmate App's numeric id")
-    ap.add_argument("--key", required=True, help="path to the App's PEM private key")
+    ap.add_argument(
+        "--key",
+        default=None,
+        help="path to the App's PEM private key; needed only while shipmate-engine holds none",
+    )
     ap.add_argument(
         "--vars-at-org",
         default="",
@@ -1019,8 +1033,6 @@ def main(argv=None):
     )
     ap.add_argument("--dry-run", action="store_true", help="report changes, write nothing")
     args = ap.parse_args(argv)
-    if not _TEAM_RE.fullmatch(args.team):
-        raise SystemExit(f"--team must be a GitHub team slug: {args.team!r}")
     if not _APP_ID_RE.fullmatch(args.app_id):
         raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
     at_org = _at_org(args.vars_at_org)
@@ -1028,7 +1040,7 @@ def main(argv=None):
 
     # The local reads first: a bad key path or an unreadable engine pin must fail in under
     # a second, before the first API call creates anything.
-    key = _read_key(args.key)
+    key = _read_key(args.key) if args.key is not None else None
     engine = pathlib.Path(__file__).resolve().parents[1]
     sha, version = _engine_pin(engine)
     root = _repo_root()
@@ -1036,14 +1048,15 @@ def main(argv=None):
     envs = _derive_envs()
     variables = _variables()
     _refuse_diverging_app_id(args.app_id, variables)
+    table, shared = _resolve_shared(root, envs, repo, variables)
     ctx = {
         "repo": repo,
         "default_branch": default_branch,
         "app_id": args.app_id,
-        "team": args.team,
         "key": key,
         "envs": envs,
-        "shared": _resolve_shared(root, envs, repo, variables),
+        "table": table,
+        "shared": shared,
         "unresolved": set(),
         "root": root,
         "engine": engine,
@@ -1058,10 +1071,14 @@ def main(argv=None):
         "org_plan": _org_plan(repo.split("/", 1)[0]) if at_org and is_private else "",
         # Read before the first write: a token without Contents read answers 403 here.
         "shim_on_default": _shim_on_default(repo, default_branch),
+        # Read before the first write, so `_refuse_missing_key` refuses while nothing exists.
+        "engine_secrets": _engine_secrets(repo),
+        "repo_secrets": _repo_secrets(),
         "ruleset_deferred": False,
     }
     _refuse_unreachable_org_variables(ctx)
     _refuse_org_assertion_mismatch(ctx)
+    _refuse_missing_key(ctx)
     print(f"{ctx['repo']} (default branch {ctx['default_branch']})")
     print(f"environments: {', '.join(ctx['envs'])}")
     print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")

@@ -83,7 +83,6 @@ def ctx(**over):
         "repo": "o/r",
         "default_branch": "main",
         "app_id": "1",
-        "team": "ops",
         "key": "-----BEGIN-----\npem\n",
         "envs": ["dev-eu"],
         "shared": set(),
@@ -97,6 +96,9 @@ def ctx(**over):
         "is_private": False,
         "org_plan": "",
         "shim_on_default": False,
+        "engine_secrets": set(),
+        "repo_secrets": set(),
+        "table": None,
         "ruleset_deferred": False,
     }
     base.update(over)
@@ -446,19 +448,23 @@ def test_run_prints_nothing_of_its_own(capsys):
     assert captured.out == ""
 
 
-def test_main_refuses_a_bad_team_slug():
-    """Mutation: drop the `_TEAM_RE` check, so a value with a space reaches
-    `gh api` as two arguments."""
+def test_main_rejects_the_retired_team_flag(capsys):
+    """The approver team is read from `[gate] approver_team` in the checkout's table, so a
+    `--team` flag would be a value nothing reads. Mutation: add back
+    `ap.add_argument("--team", default="")`; `--key k` does not exist, so `_read_key` exits
+    too, and the assertion is on argparse's usage error.
+    """
     with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "bad team", "--app-id", "1", "--key", "k"])
-    assert "--team" in str(e.value)
+        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k"])
+    assert e.value.code == 2
+    assert "unrecognized arguments: --team ops" in capsys.readouterr().err
 
 
 def test_main_refuses_a_non_numeric_app_id():
     """Mutation: `_APP_ID_RE.fullmatch` to `args.app_id.isdigit()`, which accepts
     the superscript digit below."""
     with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "ops", "--app-id", "²", "--key", "k"])
+        onboard.main(["--app-id", "²", "--key", "k"])
     assert "--app-id" in str(e.value)
 
 
@@ -514,13 +520,16 @@ def test_main_calls_every_stage_in_order():
     onboarded with names that resolve to empty; delete
     `_refuse_org_assertion_mismatch(ctx)`, which leaves the `--vars-at-org` name filtered
     with nothing verifying the assertion behind it; move the `"shim_on_default"` read into
-    `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run.
+    `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run; move
+    the `"engine_secrets"` and `"repo_secrets"` reads below `_reconcile_env(ctx, ENGINE_ENV,
+    "apply")`, after the first write; delete `_refuse_missing_key(ctx)`, which lets a run
+    with no key create environments before `_reconcile_key` has nothing to set. `_read_key`
+    sits in a conditional expression, whose call `_calls_in_order` still lists.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
     main = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
     stages = [c for c in _calls_in_order(main) if c.startswith("_") or c.startswith("sys.exit")]
     assert stages == [
-        "_TEAM_RE.fullmatch(args.team)",
         "_APP_ID_RE.fullmatch(args.app_id)",
         "_at_org(args.vars_at_org)",
         "_read_key(args.key)",
@@ -533,8 +542,11 @@ def test_main_calls_every_stage_in_order():
         "_resolve_shared(root, envs, repo, variables)",
         "_org_plan(repo.split('/', 1)[0])",
         "_shim_on_default(repo, default_branch)",
+        "_engine_secrets(repo)",
+        "_repo_secrets()",
         "_refuse_unreachable_org_variables(ctx)",
         "_refuse_org_assertion_mismatch(ctx)",
+        "_refuse_missing_key(ctx)",
         "_reconcile_env(ctx, ENGINE_ENV, 'apply')",
         "_reconcile_key(ctx)",
         "_reconcile_envs(ctx)",
@@ -551,9 +563,9 @@ def test_main_calls_every_stage_in_order():
 _CONFORMING_ENGINE = {
     ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
     ENGINE_POLICIES: {"total_count": 1, "branch_policies": [{"name": "main"}]},
-    ENGINE_SECRETS: {"total_count": 1, "secrets": [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]},
-    REPO_KEY_LIST: [],
 }
+#: The secret-name set `main` reads when the App key is already on `shipmate-engine`.
+PLACED = {"SHIPMATE_APP_PRIVATE_KEY"}
 
 
 def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeypatch):
@@ -570,8 +582,6 @@ def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeyp
         {
             ENGINE_PATH: SystemExit("gh: Not Found (HTTP 404)"),
             ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
-            ENGINE_SECRETS: {"total_count": 0, "secrets": []},
-            REPO_KEY_LIST: [],
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
@@ -590,9 +600,7 @@ def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeyp
             "-f",
             "name=main",
         ],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
         ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--env", "shipmate-engine"],
-        ["gh", "secret", "list", "--json", "name"],
     ]
 
 
@@ -604,12 +612,7 @@ def test_the_key_reaches_gh_secret_set_on_stdin_and_as_a_secret(monkeypatch):
     Mutation: pass the PEM as `["--body", ctx["key"]]` instead of on stdin; or drop
     `secrets=(ctx["key"],)`.
     """
-    fake = make_gh(
-        {
-            ENGINE_SECRETS: {"total_count": 0, "secrets": []},
-            REPO_KEY_LIST: [],
-        }
-    )
+    fake = make_gh({})
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_key(ctx())
     sets = [
@@ -641,13 +644,11 @@ def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
         {
             ENGINE_PATH: {"deployment_branch_policy": None},
             ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
-            ENGINE_SECRETS: {"total_count": 1, "secrets": [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]},
-            REPO_KEY_LIST: [],
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
@@ -661,8 +662,6 @@ def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
             "-f",
             "name=main",
         ],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
     ]
     assert body_of(
         fake, ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"]
@@ -670,8 +669,9 @@ def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
 
 
 def test_conforming_engine_environment_writes_nothing(monkeypatch):
-    """A second run over a configured repository must change nothing: four reads, no
-    write, and every report line `ok` so the exit code stays 0.
+    """A second run over a configured repository must change nothing: two reads (the
+    secret names are read in `main`), no write, and every report line `ok` so the exit
+    code stays 0.
 
     Mutation: drop the `custom_branch_policies` test in `_reconcile_env`, so a
     conforming environment is PUT again.
@@ -679,12 +679,10 @@ def test_conforming_engine_environment_writes_nothing(monkeypatch):
     fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
     ]
     assert [verb for verb, _subject, _detail in onboard.REPORT] == ["ok", "ok", "ok", "ok"]
     assert onboard._exit_code() == 0
@@ -697,17 +695,13 @@ def test_repository_level_key_is_deleted(monkeypatch):
 
     Mutation: downgrade the deletion to `report("differs", ...)`.
     """
-    fake = make_gh(
-        dict(_CONFORMING_ENGINE, **{REPO_KEY_LIST: [{"name": "SHIPMATE_APP_PRIVATE_KEY"}]})
-    )
+    fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(engine_secrets=PLACED, repo_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
         ["gh", "secret", "delete", "SHIPMATE_APP_PRIVATE_KEY"],
     ]
     assert [(verb, subject) for verb, subject, _detail in onboard.REPORT] == [
@@ -814,7 +808,7 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
     )
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
@@ -827,8 +821,6 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
             "-f",
             "name=main",
         ],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
     ]
     assert onboard.REPORT == [
         ("ok", "shipmate-engine", ""),
@@ -1078,8 +1070,6 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         {
             ENGINE_PATH: {"deployment_branch_policy": None},
             ENGINE_POLICIES: {"total_count": 0, "branch_policies": []},
-            ENGINE_SECRETS: absent,
-            REPO_KEY_LIST: [{"name": "SHIPMATE_APP_PRIVATE_KEY"}],
             "repos/o/r/environments/dev-eu": absent,
             "repos/o/r/environments/dev-eu-plan": absent,
             "repos/o/r/environments/dev-eu-apply": absent,
@@ -1091,7 +1081,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_DRY", True)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
-    onboard._reconcile_key(ctx())
+    onboard._reconcile_key(ctx(repo_secrets=PLACED))
     onboard._reconcile_envs(ctx())
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx(shim_on_default=True))
@@ -1101,8 +1091,6 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
         ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
@@ -1290,12 +1278,13 @@ FRESH_ROUTES = {
 }
 
 
-def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False):
+def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False, key=True):
     """Drive `main()` over `FRESH_ROUTES` plus `extra_routes`, returning (fake, SystemExit).
 
     Only the reads `main` does before its first reconciler are stubbed -- the git, terramate
     and `gh repo view` reads, each with its own test. Everything below them runs for real
     against the fake, which is what makes the order of the organization checks observable.
+    `key=False` passes no `--key`.
     """
     fake = make_gh({**FRESH_ROUTES, **extra_routes})
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1306,7 +1295,7 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False):
     pem = tmp_path / "key.pem"
     pem.write_text("-----BEGIN-----\npem\n", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit) as excinfo:
-        onboard.main(["--team", "ops", "--app-id", "1", "--key", str(pem), *argv])
+        onboard.main(["--app-id", "1", *(["--key", str(pem)] if key else []), *argv])
     return fake, excinfo.value
 
 
@@ -1327,6 +1316,59 @@ def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path)
     assert sorted(
         p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()
     ) == [".github/workflows/shipmate.yml", "key.pem"]
+
+
+KEY = "SHIPMATE_APP_PRIVATE_KEY"
+#: Hand-written: `main`'s reads up to the missing-key refusal, and nothing after them.
+READS_BEFORE_KEY_REFUSAL = [
+    ["gh", "variable", "list", "--json", "name,value"],
+    ["gh", "api", REMOTE_SHIM],
+    ["gh", "api", ENGINE_SECRETS],
+    ["gh", "secret", "list", "--json", "name"],
+]
+MISSING_KEY = (
+    "shipmate-engine holds no SHIPMATE_APP_PRIVATE_KEY, so this run has no key to place "
+    "there. Re-run with --key <path to the App's PEM private key>."
+)
+
+
+def test_a_run_without_key_reuses_the_placed_key(monkeypatch, tmp_path):
+    """A second run needs no PEM: `shipmate-engine` already holds the key, and no REST path
+    returns its value, so there is nothing to compare or rewrite.
+
+    Mutation: make `--key` `required=True` again, so argparse refuses the run with exit 2.
+    """
+    fake, exit_ = run_main(
+        monkeypatch,
+        tmp_path,
+        {**_CONFORMING_ENGINE, ENGINE_SECRETS: {"total_count": 1, "secrets": [{"name": KEY}]}},
+        [],
+        key=False,
+    )
+    assert exit_.code == 0
+    assert [c for c in fake.calls if c[:3] == ["gh", "secret", "set"]] == []
+    assert ("ok", f"shipmate-engine {KEY}", "") in onboard.REPORT
+
+
+def test_a_run_without_key_refuses_before_its_first_write(monkeypatch, tmp_path):
+    """No `--key` and no key on `shipmate-engine` (it does not exist, so its secret read
+    answers 404) leaves nothing to place: the run refuses before it creates anything. The
+    whole call list is compared, so any write ahead of the refusal reddens it.
+
+    Mutation: move `_refuse_missing_key(ctx)` below `_reconcile_env(ctx, ENGINE_ENV,
+    "apply")`, which creates `shipmate-engine` first.
+    """
+    fake, exc = run_main(monkeypatch, tmp_path, {}, [], key=False)
+    assert str(exc) == MISSING_KEY
+    assert fake.calls == READS_BEFORE_KEY_REFUSAL
+
+
+def test_a_dry_run_without_key_refuses_too(monkeypatch, tmp_path):
+    """A `would set` with no key to set is a false report. Mutation: return early from
+    `_refuse_missing_key` under `_DRY`."""
+    fake, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], key=False)
+    assert str(exc) == MISSING_KEY
+    assert fake.calls == READS_BEFORE_KEY_REFUSAL
 
 
 def _environment_puts(fake):
@@ -1406,7 +1448,7 @@ def test_a_repository_variable_resolves_a_reference(monkeypatch, tmp_path):
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh({ORG_VARS: NO_ORG_VARS}))
     write_referencing_table(tmp_path)
-    shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    _, shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
     assert shared == {"dev-eu"}
 
 
@@ -1416,7 +1458,7 @@ def test_an_organization_variable_resolves_a_reference(monkeypatch, tmp_path):
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh(org_region("eu-west-1")))
     write_referencing_table(tmp_path)
-    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == {"dev-eu"}
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {})[1] == {"dev-eu"}
 
 
 def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp_path):
@@ -1425,7 +1467,7 @@ def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh(org_region("")))
     write_referencing_table(tmp_path)
-    shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    _, shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
     assert shared == {"dev-eu"}
 
 
@@ -1448,6 +1490,17 @@ def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_p
     )
 
 
+def test_resolve_shared_returns_the_table_it_validated(tmp_path):
+    """`main` keeps the table for the checklist. Mutation: return `{}, set()` when there is
+    no file, which reads as a table declaring nothing."""
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == (None, set())
+    write_table(tmp_path, "shared = true\n")
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == (
+        {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1", "shared": True}}},
+        {"dev-eu"},
+    )
+
+
 def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
     """Mutation: call `_reaching_variables` whether or not the file holds a reference."""
 
@@ -1456,7 +1509,7 @@ def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
 
     monkeypatch.setattr(onboard, "_run", refuse)
     write_table(tmp_path, "shared = true\n")
-    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == {"dev-eu"}
+    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {})[1] == {"dev-eu"}
 
 
 def test_the_shared_flag_is_gone(monkeypatch, tmp_path, capsys):
@@ -1552,6 +1605,8 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "api", REMOTE_SHIM],
+        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
+        ["gh", "secret", "list", "--json", "name"],
         ["gh", "api", "repos/o/r/actions/organization-variables", "--paginate", "--slurp"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
@@ -1565,9 +1620,7 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
             "-f",
             "name=main",
         ],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
         ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--env", "shipmate-engine"],
-        ["gh", "secret", "list", "--json", "name"],
         ["gh", "api", "repos/o/r/environments/dev-eu"],
         ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
         ["gh", "api", "-X", "PUT", "repos/o/r/environments/dev-eu-plan", "--input", "-"],
@@ -2087,7 +2140,7 @@ def test_main_rejects_the_retired_state_suffix_flag(capsys):
     exist, so `_read_key` would exit too; the assertion is on argparse's usage error.
     """
     with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k", "--state-suffix", ""])
+        onboard.main(["--app-id", "1", "--key", "k", "--state-suffix", ""])
     assert e.value.code == 2
     assert "unrecognized arguments: --state-suffix" in capsys.readouterr().err
 
@@ -2303,7 +2356,7 @@ By hand:
   from this checkout's file, so re-run it after adding or dropping one.
 
   `[gate] approver_team` names the team whose members may apply and unlock by
-  pull request comment — `ops` here. Keep it above the first
+  pull request comment — `<team-slug>` here. Keep it above the first
   `[environments.*]` header, where it reads with the other repository-wide
   settings.
 
@@ -2311,7 +2364,7 @@ By hand:
     layout = "tf_vars"
 
     [gate]
-    approver_team = "ops"
+    approver_team = "<team-slug>"
 
     [environments.dev-eu]
     region         = "eu-west-1"
@@ -2387,6 +2440,13 @@ def test_the_checklist_names_every_value_the_script_cannot_set(capsys):
 #: The shared half of the same block. `_env_names` returns one bare `<env>` for a shared
 #: environment, and a reviewer on it stalls every plan cell, so no reviewer line is due.
 SHARED_CHECKLIST = _CHECKLIST_HEAD + _CHECKLIST_TAIL
+
+
+def test_the_checklist_names_the_tables_approver_team(capsys):
+    """Mutation: print `<team-slug>` whatever the table declares."""
+    assert SPLIT_CHECKLIST.count("<team-slug>") == 2
+    onboard._checklist(ctx(table={"gate": {"approver_team": "platform"}}))
+    assert capsys.readouterr().out == SPLIT_CHECKLIST.replace("<team-slug>", "platform")
 
 
 def test_the_checklist_asks_for_no_reviewer_on_a_shared_environment(capsys):
@@ -2535,7 +2595,9 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     assert snippet.startswith("schema_version = 1"), (
         f"no TOML example found in the block: {snippet!r}"
     )
-    ec.validate_structure(ec.parse_table(snippet))
+    # The placeholder is not a slug, so it is the one value a consumer substitutes.
+    assert snippet.count('approver_team = "<team-slug>"') == 1
+    ec.validate_structure(ec.parse_table(snippet.replace("<team-slug>", "ops")))
 
 
 def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch):

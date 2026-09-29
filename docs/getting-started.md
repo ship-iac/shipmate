@@ -114,9 +114,11 @@ release tag:
 
 ```bash
 python3 <engine-checkout>/scripts/onboard \
-  --team <approver-team-slug> --app-id <app-id> \
-  --key shipmate-app.private-key.pem
+  --app-id <app-id> --key shipmate-app.private-key.pem
 ```
+
+`--key` is needed until the App key is on `shipmate-engine`; a later run can
+leave it off.
 
 It writes:
 
@@ -142,10 +144,10 @@ It writes:
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
 
-`--team` writes nothing. The approver team is `gate.approver_team` in
-`.github/shipmate.toml`, which this script does not write, so the slug you pass
-is printed in the closing by-hand checklist instead, with the file it belongs
-in.
+The approver team is read from `[gate] approver_team` in the checkout's
+`.github/shipmate.toml`, which this script does not write. The closing by-hand
+checklist prints the team it read there, or a `<team-slug>` placeholder when the
+file declares none.
 
 It reads before it writes and creates or updates only what differs, so a second
 run over a configured repository changes nothing. What it will not touch — an
@@ -159,7 +161,8 @@ ruleset to an App and a ruleset pinned to one the workflows do not use blocks th
 default branch. A name passed to `--vars-at-org` that does not reach this
 repository as an organization variable, or reaches it holding another value,
 stops it too — the assertion is verified rather than trusted
-([`github-app.md`](github-app.md) §6). `--dry-run` reports every change and performs no write.
+([`github-app.md`](github-app.md) §6). So does a run without `--key` while
+`shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
 It then prints what it cannot know, because those values are yours: the cloud
 role and region, the env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,

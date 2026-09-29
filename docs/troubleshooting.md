@@ -287,14 +287,16 @@ mandate. Each one names what to do.
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.
 
-The one that needs no flag is the `SHIPMATE_APP_ID` repository variable
+Two need no flag. The first is the `SHIPMATE_APP_ID` repository variable
 differing from `--app-id`. `--app-id` does not only set that variable: it pins
 the gate ruleset's `integration_id` and selects whose private key is stored on
 `shipmate-engine`. Reconciling the two separately would require a
 `shipmate / gate` status the workflows — which mint their token from the
 variable — can never post, and the default branch would stay blocked until an
 admin deleted the ruleset. Re-run with the variable's value, or change the
-variable first.
+variable first. The second is a run without `--key` while `shipmate-engine`
+holds no `SHIPMATE_APP_PRIVATE_KEY`, or does not exist yet: there is no key to
+place. Re-run with `--key <path to the App's PEM private key>`.
 
 The others come with `--vars-at-org`, which accepts `SHIPMATE_APP_ID` and no
 other name: an asserted name that no organization variable reaching

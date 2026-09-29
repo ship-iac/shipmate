@@ -22,6 +22,8 @@ section below names the SHA the release tags.
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
 - **The bare-apply comment lists a held `explicit` environment once, with both reasons and the `shipmate apply <env>` command.**
 - **An invalid `.github/shipmate.toml` is refused with every structural error it holds, one annotation each.**
+- **`scripts/onboard` takes no `--team`; the approver team is read from `[gate] approver_team` in the checkout's table.**
+- **`scripts/onboard --key` is needed only while `shipmate-engine` holds no App private key.**
 
 ### Fixed
 
