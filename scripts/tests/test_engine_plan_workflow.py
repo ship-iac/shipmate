@@ -194,8 +194,9 @@ _GATED_IF = {
 
 def test_the_detect_and_plan_jobs_carry_exactly_these_gates():
     """Mutations, each reddening only its own case: drop `detect`'s `on-demand` clause, and a
-    `shipmate plan` on a draft skips `detect` and `plan` while `summary` still runs on its own
-    on-demand clause, writing a gate over cells nobody planned; turn either `||` into `&&`;
+    `shipmate plan` on a draft skips `detect` and `plan`, so the plan a person asked for never
+    runs and gate-state writes a `failure` gate (a skipped detect under an on-demand run is not
+    the draft branch); turn either `||` into `&&`;
     invert `plan`'s `empty` comparison, and a pull request with changed stacks plans no cell
     while the gate greens over it.
 

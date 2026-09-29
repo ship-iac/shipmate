@@ -1677,25 +1677,30 @@ post-merge apply reads each cell's plan run from that cell's own apply check, so
 a rename strands nothing that was planned before it. It does stop the dispatch
 itself, for apply exactly as for plan.
 
-Both trust decisions live on the `summary` job's `if:`, in engine-owned,
-SHA-pinned YAML, and so do the facts they read:
+The trust decision lives on the `summary` job's `if:`, in engine-owned,
+SHA-pinned YAML, and so do the facts it reads:
 
 ```
 !cancelled() &&
 needs.facts.outputs.head-repo != '' &&
-needs.facts.outputs.head-repo == github.repository &&
-(needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true')
+needs.facts.outputs.head-repo == github.repository
 ```
 
-The parentheses are load-bearing: `&&` binds tighter than `||`, so without them
-`on-demand` alone would satisfy the whole guard, fork included. The fork clause
-yields to nothing; the draft clause yields to `on-demand`, because skipping a
-draft is autoplan's economy rather than a trust decision, and a commented
-`shipmate plan` on a draft is a collaborator asking for exactly that plan. An
-empty `head-repo` — the shape a failed `facts` job produces — is a refusal
-rather than a pass, which is why `facts` is its own job and not `detect`'s first
-step: `detect` can fail on a fmt check or stale codegen, and `summary` must
-still be told which head to gate.
+The fork clause yields to nothing: no trigger, `on-demand` included, rescues a
+fork's run. An empty `head-repo` — the shape a failed `facts` job produces — is
+a refusal rather than a pass, which is why `facts` is its own job and not
+`detect`'s first step: `detect` can fail on a fmt check or stale codegen, and
+`summary` must still be told which head to gate.
+
+The job has no draft clause, because skipping a draft is autoplan's economy
+rather than a trust decision. A draft's autoplan skips `detect` and `plan` and
+still reaches `summary`, which writes `shipmate / gate` pending with the
+description "the pull request was a draft when this run started, so nothing
+was planned — comment `shipmate plan`, or mark it ready". Nothing greens that
+status: `gate-refresh` greens only over completed apply checks, and a draft run
+creates none. The draft status is written only on a head that carries no
+`shipmate / gate` status yet: an existing one is kept, and a failed read of it
+writes nothing. The sticky comment is left as it is.
 
 **A consumer states none of these facts and can weaken none of them.**
 Producing them and comparing them are the same file, so a consumer has no site
@@ -1707,9 +1712,9 @@ secrets and permissions; the engine decides everything else.
 `summary` deliberately does not require `detect` or `plan` to have succeeded: a
 failed detect or plan must still produce a red gate with an explanation, because
 no gate at all is a pull request nobody can diagnose. `detect` and `plan` keep
-their own condition — not a draft, *or* named on demand — which is a cost
-control (it stops a draft burning runners), not a security property, and is why
-a requested plan runs on a draft at all.
+the draft skip as their own condition — not a draft, *or* named on demand —
+which is a cost control (it stops a draft burning runners), not a security
+property, and is why a requested plan runs on a draft at all.
 
 Binding `summary` to the `shipmate-engine` environment rather than trusting the
 trigger alone closes two paths a trigger check alone would not:
@@ -2038,9 +2043,12 @@ three review sentences (see §Comment-ops) are:
 
 - **held** — "the pull request's review state does not permit applying",
   naming the environments and asking for an approving review, or for a
-  requested-changes review to be resolved or dismissed, and naming no
-  command, because a held environment may also be an explicit one that a bare
-  apply would not pick up even once reviewed. The sentence is deliberately
+  requested-changes review to be resolved or dismissed. A held environment
+  that is also explicit is listed once, here and not in the excluded sentence,
+  with its command: `` `prod` (explicit: once the hold clears, comment `shipmate
+  apply prod`) ``, since a bare apply would not pick it up even once the hold
+  clears. A held
+  environment that is not explicit names no command. The sentence is deliberately
   cause-agnostic: three distinct decisions hold an environment
   (`REVIEW_REQUIRED` on a gated env, `CHANGES_REQUESTED`, or an unknown or
   absent decision), and only the run's own apply-all-detect notice carries

@@ -22,11 +22,13 @@ from _loader import ACTIONS, bash_only, run_step, step_by
 HEAD_SHA = "a" * 40
 
 # Dispatches on the two `gh api` calls the step makes: the pre-write gate read
-# (`/commits/<sha>/status --jq ...`), and the write (`/statuses/<sha>`), whose argv it records.
+# (`api --paginate .../commits/<sha>/status?per_page=100 --jq ...`; any other read fails the
+# step), and the write (`/statuses/<sha>`), whose argv it records.
 GH_STUB = """
 gh() {
   case "$*" in
-    *"/status --jq"*) printf '%s' "$FAKE_GATE_STATE" ;;
+    "api --paginate repos/acme/demo/commits/$HEAD_SHA/status?per_page=100 --jq "*)
+      printf '%s' "$FAKE_GATE_STATE" ;;
     *"/statuses/"*) printf '%s\\n' "$@" > "$WROTE" ;;
     *) printf 'unexpected gh call: %s\\n' "$*" >&2 ; return 1 ;;
   esac

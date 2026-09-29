@@ -197,11 +197,12 @@ produced them. See
   `shipmate / gate` commit status, which stays non-green while any apply is
   pending or any plan cell failed.
 
-  That job declines outright — before its first step — on a fork pull request
-  and on a draft nobody asked to plan, reading both facts from `facts` in the
-  same file. An empty head repository, the shape a failed `facts` job produces,
-  is a refusal rather than a pass. Nothing a consumer writes reaches that
-  decision.
+  That job declines outright — before its first step — on a fork pull request,
+  reading the head repository from `facts` in the same file. An empty head
+  repository, the shape a failed `facts` job produces, is a refusal rather than
+  a pass. Nothing a consumer writes reaches that decision. On a draft nobody
+  asked to plan, the job runs and writes `shipmate / gate` pending with the
+  draft reason, unless the head already carries a gate status.
 
   On an `on-demand` run it also mirrors this run's own completed
   `shipmate / ` per-cell plan checks onto the head commit: a dispatched run's job

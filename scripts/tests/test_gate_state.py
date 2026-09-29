@@ -31,6 +31,49 @@ def test_all_applied_greens_the_gate():
     assert mode == "post"
 
 
+_DETECT_SKIPPED_DESCRIPTION = (
+    "change detection did not succeed (skipped) — fix the shipmate / detect job before merging"
+)
+
+
+def test_a_draft_autoplan_writes_a_pending_gate_that_names_the_draft():
+    """Mutation: delete the draft branch in `decide` -> the skipped detect falls to `failure`."""
+    got = d(detect_result="skipped", planned_cells="", cell_count=0, pending=False, is_draft=True)
+    assert got == ("pending", gate_state.DRAFT_DESCRIPTION, "draft")
+
+
+def test_an_on_demand_plan_of_a_draft_with_detect_skipped_is_a_failure():
+    """A person asked for this plan, so a skipped detect is a failure, not a draft.
+
+    Mutation: drop `not on_demand` from the draft branch -> `pending`.
+    """
+    got = d(
+        detect_result="skipped",
+        planned_cells="",
+        cell_count=0,
+        pending=False,
+        is_draft=True,
+        on_demand=True,
+    )
+    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "hold")
+
+
+def test_a_draft_whose_detect_ran_is_judged_on_its_evidence():
+    """Mutation: drop `detect_result == "skipped"` from the draft branch -> the draft reason."""
+    got = d(is_draft=True)
+    assert got == (
+        "pending",
+        "one or more stacks are waiting to be applied — merge is blocked until applies complete",
+        "post",
+    )
+
+
+def test_a_non_draft_with_detect_skipped_is_a_failure():
+    """Mutation: drop `is_draft` from the draft branch -> `pending`."""
+    got = d(detect_result="skipped", planned_cells="", cell_count=0, pending=False)
+    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "hold")
+
+
 def test_detect_failure_is_a_red_gate_not_a_silent_skip():
     # detect is the change detection. Without it there is no claim to make, and writing nothing
     # would leave the pull request with no gate to explain it.
@@ -112,6 +155,7 @@ def test_more_cells_than_planned_holds():
         {"planned_cells": "unknown"},
         {"plan_result": "skipped", "planned_cells": "3"},
         {"planned_cells": "3", "cell_count": 0},
+        {"detect_result": "skipped", "is_draft": True},
     ],
 )
 def test_every_description_fits_the_statuses_api(kw):
@@ -160,3 +204,33 @@ def test_gate_links_to_this_run(tmp_path, monkeypatch, capsys):
     # plan artifacts the gate points at.
     body = _main_body(tmp_path, monkeypatch, capsys)
     assert body["target_url"] == "https://example.invalid/acme/demo/actions/runs/999"
+
+
+def _main_draft(tmp_path, monkeypatch, capsys, on_demand):
+    body = _main_body(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        SHIPMATE_DETECT_RESULT="skipped",
+        SHIPMATE_PLAN_RESULT="skipped",
+        SHIPMATE_PLANNED_CELLS="",
+        SHIPMATE_CELL_COUNT="0",
+        SHIPMATE_PENDING="false",
+        SHIPMATE_IS_DRAFT="true",
+        SHIPMATE_ON_DEMAND=on_demand,
+    )
+    return body, (tmp_path / "out").read_text(encoding="utf-8")
+
+
+def test_main_reads_the_draft_flag(tmp_path, monkeypatch, capsys):
+    """Mutation: misspell `SHIPMATE_IS_DRAFT` in `main()` -> `state=failure`."""
+    body, out = _main_draft(tmp_path, monkeypatch, capsys, "false")
+    assert out == "state=pending\ncomment_mode=draft\n"
+    assert body["description"] == gate_state.DRAFT_DESCRIPTION
+
+
+def test_main_reads_the_on_demand_flag(tmp_path, monkeypatch, capsys):
+    """Mutation: misspell `SHIPMATE_ON_DEMAND` in `main()` -> `state=pending`."""
+    body, out = _main_draft(tmp_path, monkeypatch, capsys, "true")
+    assert out == "state=failure\ncomment_mode=hold\n"
+    assert body["description"] == _DETECT_SKIPPED_DESCRIPTION

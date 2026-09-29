@@ -19,6 +19,13 @@ section below names the SHA the release tags.
 
 - **A stack carrying two `workload/*` tags is refused at detect.**
 - **A workload tag the environment does not list is refused at detect, for the cells a run plans, applies or unlocks, when its tier has no role to fall back to.**
+- **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
+- **The bare-apply comment lists a held `explicit` environment once, with both reasons and the `shipmate apply <env>` command.**
+
+### Fixed
+
+- **The Terramate download retries transient errors three times, and a failed install names the release URL and the status it answers.**
+- **`shipmate / gate`'s hold is read from every page of the head's status contexts, so a head carrying many no longer lets an apply green a held gate.**
 
 ## [0.41.0] — 2026-09-28
 

@@ -13,7 +13,8 @@ Three exclusions distinguish the bare form from deploy:
 - envs whose entry holds `explicit = true` (typically prod) are removed
   before env-levels are built; their apply checks stay pending, so
   `shipmate / gate` keeps gating the merge until a targeted
-  `shipmate apply <env>` completes them;
+  `shipmate apply <env>` completes them. `excluded_envs` names every one with
+  pending work, including those also held for review;
 - envs ordered (transitively) after an env not applying this run — held or
   excluded as explicit — are skipped with a notice — their ordering
   precondition cannot be met this run, exactly like a failed predecessor
@@ -99,10 +100,11 @@ def main():
     ungated = bm.ec.ungated_envs(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     held = review_held(pending_envs, ungated, decision)
-    excluded, skipped = partition_envs(pending_envs, bm.ec.explicit_envs(table) + held, order)
-    # An explicit env is "run `shipmate apply <env>`", a held one is "get a
-    # review" -- two causes, two outputs, or the comment names the wrong fix.
-    excluded = sorted(set(excluded) - set(held))
+    explicit = bm.ec.explicit_envs(table)
+    _, skipped = partition_envs(pending_envs, explicit + held, order)
+    # Every pending explicit env, held or not: the comment names a held one's
+    # explicit command under the hold. A held env that is not explicit stays out.
+    excluded = sorted(pending_envs & set(explicit))
     dropped = set(excluded) | set(skipped) | set(held)
     # The plan runs attach to `runnable`, not `pending`: an excluded or held env's checks
     # stay pending by design for a later targeted apply, and that apply refuses on its own

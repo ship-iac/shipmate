@@ -464,20 +464,19 @@ actual work here:
   without the pin would satisfy the required check outright.
 - The `summary` job's `if:` is load-bearing rather than belt-and-braces. It
   refuses when the head repository the `facts` job resolved differs from
-  `github.repository`, and when that job reports a draft nobody explicitly asked
-  to plan. The three values fall on two sides of the guard's parentheses: the
-  head repository is outside them, so an empty value — what a failed `facts` job
-  yields — refuses unconditionally and no trigger rescues it; the draft flag and
-  the on-demand flag are the two sides of one disjunct, so a missing draft flag
-  refuses every autoplan run and is rescued by a requested plan exactly as an
-  explicit draft is. All three are produced one job earlier in the same
-  engine-owned file, so nothing a consumer writes can weaken them. Under
-  `pull_request_target` a fork's pull request *does* reach the base ref, so
-  nothing else would stop that job; and the environment admits a draft's run,
-  whose plan jobs an autoplan skips, so without the second clause it would write
-  a gate over a plan that never ran (a *requested* plan of a draft does run, and
-  `on-demand` is how the caller says so). Being on the job, a refusal creates no
-  deployment at all.
+  `github.repository`, and an empty value — what a failed `facts` job yields —
+  refuses too; no trigger rescues either. The head repository is produced one
+  job earlier in the same engine-owned file, so nothing a consumer writes can
+  weaken it. Under `pull_request_target` a fork's pull request *does* reach the
+  base ref, so nothing else would stop that job. Being on the job, a refusal
+  creates no deployment at all.
+- A draft is not refused there. A draft's autoplan skips its plan jobs, enters
+  `shipmate-engine` and creates a deployment like any other plan run, and
+  `gate-state` writes `shipmate / gate` pending with the draft reason. The run
+  creates no apply check, so `gate-refresh` has nothing to green that status
+  over, and the draft status is written only on a head that carries no gate
+  status yet, so a draft run never replaces an earlier gate. A *requested*
+  plan of a draft does run, and `on-demand` is how the caller says so.
 
 What none of this defends against is a change to the trusted workflow files
 themselves — the consumer's `shipmate.yml`, and the engine's `plan.yml`,

@@ -684,19 +684,47 @@ Two locks this verb does not reach:
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
 
+### `Terramate install failed`
+
+The `Install Terramate` step failed, and the annotation reads "Terramate
+<version> did not install; the step log above names the cause. <url> answers
+HTTP <code> now; re-run the failed job."
+
+The download retries transient errors three times before the step fails. The
+status is a fresh probe of the release
+URL after the failure, not the one that failed; `000` means the URL was
+unreachable. The install also fails at unpacking, at its version check, and on
+a 404, and the `Install Terramate` step log names which. Re-run the failed job
+to recover from a transient cause.
+
 ### `shipmate / gate` never goes green
 
-Four distinct causes, in the order worth checking.
+Five distinct causes, in the order worth checking.
 
 **No gate status was written at all, as opposed to a red or held one.** The
-engine's `summary` job is skipped on a fork pull request, and on a draft nobody
-asked to plan — either way there is no gate, no plan comment, and nothing on the
-run page saying why. The pull request cannot merge, which is the intended
-direction. Both facts come from the `facts` job in the same engine file, so a
-skipped `summary` is not a wiring mistake: check the pull request's head
-repository and its draft state, and re-issue `shipmate plan` if you want a draft
-planned. A pull request whose head is in a fork is refused earlier still, at
-`detect` ("A fork's pull request is refused", below).
+engine's `summary` job is skipped on a fork pull request — there is no gate, no
+plan comment, and nothing on the run page saying why. The pull request cannot
+merge, which is the intended direction. The head repository comes from the
+`facts` job in the same engine file, so a skipped `summary` is not a wiring
+mistake: check the pull request's head repository. A pull request whose head is
+in a fork is refused earlier still, at `detect` ("A fork's pull request is
+refused", below).
+
+**The gate is pending with the draft reason.** The description reads "the pull
+request was a draft when this run started, so nothing was planned — comment
+`shipmate plan`, or mark it ready". Autoplan skips a draft's plan jobs, so the
+gate has nothing to green over. Recover either way:
+
+- Mark the pull request ready for review; its autoplan plans the head.
+- Comment `shipmate plan`, which plans a draft. Applies still refuse a draft.
+
+A head that already carried a `shipmate / gate` status when the draft run
+reached it keeps that status; the draft status is written only on a head with
+none. A draft marked ready within seconds of a push can keep the draft status:
+the ready run shares the `plan-<pr>` concurrency group with the draft run, and
+if the ready run is the one cancelled, no plan follows. Which of the two runs
+the group cancels in that race is not verified. Comment `shipmate plan` to
+recover.
 
 **A pending apply check nothing will complete.** `gate-refresh` greens the gate
 only when every shipmate-App-authored check on that commit whose name begins
@@ -795,11 +823,11 @@ file broken this way also refuses every plan run, which is the louder signal of
 the two.
 
 **A held environment is also an explicit environment.** When both causes apply
-it is reported as held, not as excluded, because the review is the thing to get
-first. Getting it does not release the environment into a bare
+it is listed once, under the held sentence, because the hold is the thing to
+clear first. Clearing it does not release the environment into a bare
 `shipmate apply`, though: its entry still holds `explicit = true`, so it still
-needs a targeted `shipmate apply <env>`. That is why the held sentence names no
-command.
+needs a targeted `shipmate apply <env>`. The held sentence names that command
+beside it: `` `prod` (explicit: once the hold clears, comment `shipmate apply prod`) ``.
 
 **An ungated environment that is also explicit is not held.** It is reported as
 excluded, with the usual "run `shipmate apply <env>`" — and that targeted apply

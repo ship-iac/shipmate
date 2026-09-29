@@ -104,17 +104,16 @@ jobs:
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   # The only job here that holds the App key. It checks out nothing, so it runs no consumer
-  # repository content, which is what makes `pull_request_target` safe for this file. All three
-  # trust decisions are on its own `if:`, reading the one producer above.
+  # repository content, which is what makes `pull_request_target` safe for this file. Its trust
+  # decision is on its own `if:`, reading the one producer above.
   summary:
     needs: [facts, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
-    # content. The draft clause does yield -- skipping a draft is economy, not trust. The
-    # parentheses are load-bearing: `&&` binds tighter than `||`, so `on-demand` alone would pass.
+    # content. A draft is not skipped here: `detect` skips it, and gate-state writes the gate
+    # pending with the reason, so the pull request says why nothing was planned.
     if: >-
       ${{ !cancelled() && needs.facts.outputs.head-repo != '' &&
-      needs.facts.outputs.head-repo == github.repository &&
-      (needs.facts.outputs.is-draft == 'false' || needs.facts.outputs.on-demand == 'true') }}
+      needs.facts.outputs.head-repo == github.repository }}
     runs-on: ${{ inputs.runs_on }}
     # The guard is on the job, not on a step: a skipped job creates no deployment and never enters
     # the environment, whereas a first-step check would already hold the App key in scope.
@@ -145,6 +144,7 @@ jobs:
           plan-result: ${{ needs.plan.result }}
           planned-cells: ${{ needs.detect.outputs.count }}
           on-demand: ${{ needs.facts.outputs.on-demand }}
+          is-draft: ${{ needs.facts.outputs.is-draft }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           github-vars: ${{ toJSON(vars) }}
