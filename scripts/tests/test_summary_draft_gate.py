@@ -22,6 +22,7 @@ from _loader import bash_only, run_step, step_by
 HEAD_SHA = "a" * 40
 READ_ARGV = [
     "api",
+    "--paginate",
     f"repos/acme/demo/commits/{HEAD_SHA}/status?per_page=100",
     "--jq",
     '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty',
@@ -34,7 +35,7 @@ GH_STUB = """
 gh() {
   printf '%s\\n' "$@" -- >> "$CALLS"
   case "$*" in
-    *"/status?per_page=100 --jq"*)
+    "api --paginate repos/acme/demo/commits/$HEAD_SHA/status?per_page=100 --jq "*)
       [ -z "${FAKE_READ_FAILS:-}" ] || return 1
       printf '%s' "$FAKE_GATE_STATE" ;;
     *"/statuses/"*) ;;
@@ -112,7 +113,8 @@ def test_a_post_run_writes_without_reading(tmp_path):
 
 
 _GATE_READ = re.compile(
-    r"""gh api "repos/\$GITHUB_REPOSITORY/commits/\$HEAD_SHA/status[^"]*" \\\n\s*--jq '[^']*'"""
+    r"""gh api [^"\n]*"repos/\$GITHUB_REPOSITORY/commits/\$HEAD_SHA/status[^"]*" """
+    r"""\\\n\s*--jq '[^']*'"""
 )
 
 

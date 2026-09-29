@@ -61,7 +61,7 @@ runs:
         # never consults the gate (scripts/authorize reads reviewDecision), so the cells that WERE
         # parsed can apply and reach verdict=complete while the stacks whose summaries were never
         # read still have no apply check at all.
-        held=$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status?per_page=100" \
+        held=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status?per_page=100" \
           --jq '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty')
         # Matched on the STATE alone, not on the description: gate-state writes `failure` for
         # exactly its hold cases (non-success plan run, unreadable artifact list, cell/artifact
