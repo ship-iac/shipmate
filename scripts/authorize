@@ -36,6 +36,13 @@ def parse_ungated_envs(raw):
     return frozenset(e.casefold() for e in (raw or "").split(",") if e)
 
 
+def _review_not_required(review_decision, environment, ungated_envs):
+    """Whether a gated `environment` is authorized only because no branch rule requires a
+    review: a `NONE` decision, and no `gated = false` entry for it. The apply comment names
+    each such environment."""
+    return review_decision == "NONE" and environment.casefold() not in ungated_envs
+
+
 def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     """Reject reason for the ruleset-delegated review check, or None to pass.
 

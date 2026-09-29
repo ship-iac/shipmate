@@ -670,8 +670,9 @@ def test_main_names_a_gated_env_applied_with_no_review_required(
     an ungated env's `gated = false` entry already declares it applies unreviewed, and an
     approval needs no disclosure.
 
-    Mutation: compare `decision != "NONE"` -- the NONE/gated and APPROVED cases swap and go red.
-    Mutation: drop the ungated check -- the NONE/ungated case names dev-eu and goes red."""
+    Mutation: compare `review_decision != "NONE"` in `authorize._review_not_required` -- the
+    NONE/gated and APPROVED cases swap and go red.
+    Mutation: drop its ungated check -- the NONE/ungated case names dev-eu and goes red."""
     out = _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()

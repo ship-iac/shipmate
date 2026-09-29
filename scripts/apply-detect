@@ -339,9 +339,8 @@ def main():
     bm.ec.validate_structure(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     refuse_unreviewed(env, table, decision)
-    # A null decision authorizes a gated env only because no branch rule requires a review.
     no_review_required = (
-        [env] if decision == "NONE" and env.casefold() not in bm.ec.ungated_envs(table) else []
+        [env] if az._review_not_required(decision, env, bm.ec.ungated_envs(table)) else []
     )
 
     deps = run_graph_deps()

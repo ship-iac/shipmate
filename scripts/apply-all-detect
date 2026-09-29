@@ -120,12 +120,13 @@ def main():
         if ungated and decision == "REVIEW_REQUIRED"
         else []
     )
-    # From `runnable` for the same reason; a null decision authorizes a gated env only
-    # because no branch rule requires a review.
-    no_review_required = (
-        sorted({c["environment"] for c in runnable if c["environment"].casefold() not in ungated})
-        if decision == "NONE"
-        else []
+    # From `runnable` for the same reason.
+    no_review_required = sorted(
+        {
+            c["environment"]
+            for c in runnable
+            if ad.az._review_not_required(decision, c["environment"], ungated)
+        }
     )
 
     deps = ad.run_graph_deps()
