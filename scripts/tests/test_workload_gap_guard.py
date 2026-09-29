@@ -71,8 +71,8 @@ def _done(stack, env="dev-eu"):
 def test_the_plan_matrix_refuses_over_the_stamped_cells(monkeypatch, tmp_path):
     """Call site 1: `build-matrix` main(), plan tier. Every stamped cell is planned.
 
-    Mutations: call the refusal before `stamp_rows` (the rows lack the resolved fields); pass
-    `"apply"` (the plan path's apply-tier check is keyed on `"plan"`)."""
+    Mutations: drop the call -- nothing is recorded; pass `"apply"` -- the plan path's
+    apply-tier check is keyed on `"plan"`, so the tier differs."""
     calls = _spy(monkeypatch, tbm.bm)
     tbm._run_main(monkeypatch, tmp_path, trs._PLAN_ENV, head_sha="cafe1234", table=trs._TABLE)
     assert calls == [
@@ -83,7 +83,7 @@ def test_the_plan_matrix_refuses_over_the_stamped_cells(monkeypatch, tmp_path):
 def test_the_drift_matrix_refuses_over_the_stamped_cells(monkeypatch, tmp_path):
     """Call site 2: the same line, reached with `all-stacks: true`.
 
-    Mutations: as above."""
+    Mutations: drop the call; pass `"apply"`."""
     calls = _spy(monkeypatch, tbm.bm)
     tbm._run_main(monkeypatch, tmp_path, trs._DRIFT_ENV, table=trs._TABLE)
     assert calls == [

@@ -1390,7 +1390,11 @@ def test_the_plan_path_refuses_a_gap_only_the_apply_tier_has():
 
 
 def test_the_apply_path_does_not_refuse_a_gap_only_the_plan_tier_has():
-    """Mutation: check both tiers on the apply path too -- the plan-tier gap refuses."""
+    """The apply cell does not refuse, and still resolves the apply tier's own role.
+
+    Mutation: check both tiers on the apply path too -- the plan-tier gap refuses.
+    Mutation: drop the tier fallback in `env-config`'s `resolve` (`else {}`) -- the role is
+    empty."""
     table = {
         "layout": "folder",
         "environments": {
@@ -1407,6 +1411,18 @@ def test_the_apply_path_does_not_refuse_a_gap_only_the_plan_tier_has():
     }
     cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
     assert bm.refuse_workload_gaps(cells, table, "apply") is None
+    assert bm.stamp_rows(cells, table, "apply") == [
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload": "net",
+            "role_arn": "arn:aws:iam::9817:role/apply",
+            "cred_region": "eu-west-1",
+            "tf_vars": {},
+            "config_path": "apply",
+            "env_binding": "dev-eu-apply",
+        }
+    ]
 
 
 def test_a_tags_filter_drops_a_stack_before_its_workload_tags_are_read():

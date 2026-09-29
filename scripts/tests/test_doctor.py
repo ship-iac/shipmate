@@ -1871,6 +1871,19 @@ def test_all_clear_escapes_and_bounds_the_environment_names():
     assert len(line) < 600
 
 
+def test_all_clear_names_ten_environments_then_a_count():
+    """Bounded by name count, so no code span is cut.
+
+    Mutation: drop the slice in `_code_spans` -- all twelve are named. Mutation: restore the
+    `_one_line(..., 400)` cut in `_all_clear_line` -- the count suffix is missing."""
+    shown = ", ".join(f"`env-{i:02}`" for i in range(10)) + " and 2 more"
+    assert doctor._all_clear_line(_ctx(envs={f"env-{i:02}" for i in range(12)})) == (
+        "- :white_check_mark: no problems found by the settings probes. The environment "
+        "probes covered only the environments of the stacks changed in this pull request: "
+        f"{shown}."
+    )
+
+
 def test_findings_only_fallback_uses_the_same_all_clear_line():
     # Two renderers emit the all-clear; the scope statement must not live in
     # only one of them.
@@ -4007,7 +4020,7 @@ def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypat
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     found = doctor._plan_env_secret_warnings(_ctx())
     assert [lvl for lvl, _ in found] == [doctor.NOTICE]
-    assert "…" in found[0][1], "a truncated name list must carry the ellipsis marker"
+    assert "and 50 more)" in found[0][1], "a capped name list must carry the count of the rest"
     assert len(found[0][1]) < 1000
     # The cap hides names, never the number of them.
     assert "60 secret(s)" in found[0][1]
@@ -4069,6 +4082,25 @@ def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
     found = doctor._plan_env_secret_warnings(_ctx())
     assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.WARNING]
     assert "at least 150" in found[0][1]
+
+
+def test_a_long_secret_listing_names_ten_secrets_then_a_count(monkeypatch):
+    """Bounded by name count, so no code span is cut; `count` still reports all twelve.
+
+    Mutation: pass every name to the finding (drop the `_code_spans` slice) -- all twelve are
+    named. Mutation: restore the `_one_line(..., 400)` cut -- the count suffix is missing."""
+    names = [f"SECRET_{i:02}" for i in range(12)]
+    responses = {
+        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
+        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
+        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(*names),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    shown = ", ".join(f"`SECRET_{i:02}`" for i in range(10)) + " and 2 more"
+    assert doctor._plan_env_secret_warnings(_ctx())[0] == (
+        doctor.NOTICE,
+        doctor._secret_finding("dev-eu-plan", "plan", "12", shown),
+    )
 
 
 def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):

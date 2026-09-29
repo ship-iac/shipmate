@@ -230,10 +230,9 @@ def _no_review_findings(ctx, branch, code_owner):
     exempt is then unknown, and naming all of them would warn about ones the file exempts.
 
     A NOTICE while code-owner review is on: a warning forces a plan comment on every no-op
-    plan, which a sole maintainer cannot silence. A WARNING while it is off. At most
-    `_ENV_NAME_CAP` names are shown, then a count, so no code span is ever cut. The names
-    are not escaped here: `_finding_row` escapes the whole finding, and escaping twice
-    doubles the backslash it puts before a `|`.
+    plan, which a sole maintainer cannot silence. A WARNING while it is off. The names are
+    not escaped here: `_finding_row` escapes the whole finding, and escaping twice doubles
+    the backslash it puts before a `|`.
     """
     table = _default_branch_table(ctx)
     gated = []
@@ -241,12 +240,17 @@ def _no_review_findings(ctx, branch, code_owner):
         listed = set(table.get("environments", {})) | set(ctx["envs"])
         gated = sorted(listed - bm.ec.ungated_envs(table))
     if gated:
-        shown = ", ".join(f"`{e}`" for e in gated[:_ENV_NAME_CAP])
-        if len(gated) > _ENV_NAME_CAP:
-            shown += f" and {len(gated) - _ENV_NAME_CAP} more"
         level = NOTICE if code_owner else WARNING
-        return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=shown))]
+        return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=_code_spans(gated)))]
     return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))] if code_owner else []
+
+
+def _code_spans(names):
+    """`names` as comma-separated code spans: the first `_ENV_NAME_CAP`, then " and N more".
+    Bounded by count, never by characters, so no code span is ever cut."""
+    shown = ", ".join(f"`{n}`" for n in names[:_ENV_NAME_CAP])
+    extra = len(names) - _ENV_NAME_CAP
+    return shown + (f" and {extra} more" if extra > 0 else "")
 
 
 def _existing_env_names(ctx):
@@ -757,7 +761,7 @@ def _plan_env_secret_warnings(ctx):
         # Capped like the all-clear line's env list: the settings section is never truncated, so
         # one crowded environment would spend all of `sc.SIZE_BUDGET` and push the rest into the
         # omitted fallback. `count` reports the true total, so the cap hides only names.
-        shown = _one_line(", ".join(f"`{n}`" for n in sorted(names)), 400)
+        shown = _code_spans(sorted(names))
         count = f"at least {total}" if total > len(names) else str(len(names))
         out.append((NOTICE, _secret_finding(name, role, count, shown)))
         out += _app_key_findings(name, names, total, _env_noun(role))
@@ -2200,7 +2204,7 @@ def _all_clear_line(ctx):
             "environments were probed, since no declared environment set was available "
             "for this commit."
         )
-    named = _one_line(", ".join(f"`{_md_escape(e)}`" for e in envs), 400)
+    named = _code_spans([_md_escape(e) for e in envs])
     return (
         "- :white_check_mark: no problems found by the settings probes. The environment "
         "probes covered only the environments of the stacks changed in this pull request: "

@@ -167,8 +167,8 @@ Six things to know beyond the schema:
   exactly as written, so two workloads whose names differ only in punctuation
   resolve separately. A tag the consulted tier's `workloads` does not list is
   refused at detect when that tier, after inheritance, sets no role to fall back
-  to. Only the cells a run plans or applies are checked; an untagged cell and a
-  tier that resolves a role are not refused. The plan path checks both tiers for
+  to. Only the cells a run plans, applies or unlocks are checked; an untagged
+  cell and a tier that resolves a role are not refused. The plan path checks both tiers for
   the stacks it plans, and it plans only changed stacks. On a tier with no role
   to fall back to, a workload key follows the environment order above: merge the
   key before the branch that tags the stack, and remove it after the branch that
