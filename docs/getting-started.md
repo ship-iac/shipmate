@@ -179,7 +179,7 @@ cloud role, region and env identity your layout injects, `[gate] approver_team`,
 adding the repository to the App installation, an approving review before apply,
 a `CODEOWNERS` entry, and the pull request carrying the workflow file. It marks
 each item `ok`, `todo` or `cannot check` from what the run read, and only a
-`todo` prints its command or template. Two items are `cannot check`: the App
+`todo` prints what to do. Two items are `cannot check`: the App
 installation, which only an App JWT can read, and, once a `CODEOWNERS` file
 exists, whether an entry in it covers `/.github/workflows/`, which is GitHub's
 matching.
@@ -286,8 +286,9 @@ creates all of them, including `shipmate-engine` and its branch policy:
   none. On a tier with no role of its own, merge a new workload key before the
   branch that tags the stack. The OIDC subject names only the environment
   (`environment:<env>-apply`, or the bare `<env>` when shared), never the
-  workload, so every workload role whose trust policy accepts `<env>-apply` is
-  reachable from every apply cell of that environment. Choose how finely to
+  workload, so every workload role whose trust policy accepts that subject is
+  reachable from every apply cell of that environment, and for a shared
+  environment from every plan cell too. Choose how finely to
   split environments before writing those trust policies
   ([`hardening.md`](hardening.md) §7–9).
 
@@ -798,8 +799,10 @@ pull request, which cannot produce the gate.
 `scripts/onboard` creates a `shipmate-gate` ruleset carrying that one rule; the
 `pull_request`, `non_fast_forward` and `deletion` rules on that page stay a
 choice you make, so that a repository already carrying a `pull_request` rule
-does not end up with a conflicting second one. Add them to that ruleset as
-[`branch-protection.md`](branch-protection.md) §Reproducible ruleset shows.
+does not end up with a conflicting second one. To add them, follow
+[`branch-protection.md`](branch-protection.md) §Reproducible ruleset, and leave
+the `pull_request` rule out of the body when another ruleset already carries
+one.
 
 ## Optional
 

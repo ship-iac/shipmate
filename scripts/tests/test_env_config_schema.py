@@ -1081,8 +1081,9 @@ def test_three_independent_errors_refuse_as_three_lines():
     """A misspelled key, a quoted boolean in the same entry and a display name for the team
     are three typos, and one refusal names all three rather than one per run.
 
-    Mutations: re-raise inside `_gather` -- only the first line is left; or drop the
-    `_check_gate` call from `validate_structure` -- the team line is lost.
+    Mutations: re-raise inside `_gather` -- only the team line is left, because the other
+    two are appended without it; or drop the `_check_gate` call from `validate_structure`
+    -- the team line is lost.
     """
     table = env_config.parse_table(
         'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n\n'

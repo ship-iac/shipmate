@@ -291,13 +291,13 @@ its `todo` items.
 | Verdict | Meaning |
 | --- | --- |
 | `ok` | what the run read already satisfies the item. |
-| `todo` | the item is not done; the command or template to do it follows. |
+| `todo` | the item is not done; what to do follows. |
 | `cannot check` | the run cannot read it: the App installation needs an App JWT, and whether a `CODEOWNERS` entry covers `/.github/workflows/` is GitHub's matching. Confirm it by hand. |
 
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.
 
-Two need no flag. The first is the `SHIPMATE_APP_ID` repository variable
+Two come without `--vars-at-org`. The first is the `SHIPMATE_APP_ID` repository variable
 differing from `--app-id`. `--app-id` does not only set that variable: it pins
 the gate ruleset's `integration_id` and selects whose private key is stored on
 `shipmate-engine`. Reconciling the two separately would require a
@@ -575,9 +575,15 @@ scalar into whatever table header precedes it, so the line is well-formed and
 lands in the wrong place. Which message you get depends on *which* setting moved
 and *which* header it landed under.
 
-A misplaced `layout` always reports as `declares no layout`, whatever header it
-fell under — the missing-`layout` check runs before anything looks inside
-`environments`, and its message names the placement rule.
+A misplaced `layout` reports `declares no layout`, whose message names the
+placement rule, plus a second line naming the table the key fell under. The
+second line is the diagnosis:
+
+| Where it landed | The second line |
+| --- | --- |
+| after `[gate]` | `gate.layout is not a key this engine implements. The gate table holds approver_team.` |
+| after `[environments.dev-eu]` | `environment dev-eu: layout is not a key this engine implements. An environment holds region, tf_vars, aws, shared, needs, explicit, gated.` |
+| after `[environments.dev-eu.aws.plan]` | `environment dev-eu: aws.plan.layout is not a field the aws provider defines. It defines region, role.` |
 
 A misplaced `schema_version` reports differently in each position:
 

@@ -541,10 +541,8 @@ repository from a mistyped flag. Add `--dry-run` for a first pass that reports
 what every repository would get and writes nothing.
 
 Each run ends with the checklist of what it cannot set, each item marked `ok`,
-`todo` or `cannot check` from what the run read: the cloud role and region, the
-env identity your layout injects, `SHIPMATE_PLAN_PASSPHRASE`,
-`SHIPMATE_SLACK_WEBHOOK`, the App installation, environment reviewers, a
-`CODEOWNERS` entry, and the pull request carrying the workflow file.
+`todo` or `cannot check` from what the run read.
+[`getting-started.md`](getting-started.md) §Quick path lists the items.
 
 Then confirm, per repository, that no repository-level
 `SHIPMATE_APP_PRIVATE_KEY` survived — `shipmate doctor` cannot check this for

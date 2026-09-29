@@ -525,7 +525,7 @@ def test_main_calls_every_stage_in_order():
     `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run; move
     the `"engine_secrets"` and `"repo_secrets"` reads below `_reconcile_env(ctx, ENGINE_ENV,
     "apply")`, after the first write; delete `_refuse_missing_key(ctx)`, which lets a run
-    with no key create environments before `_reconcile_key` has nothing to set. `_read_key`
+    with no key create environments before `_reconcile_key` finds nothing to set. `_read_key`
     sits in a conditional expression, whose call `_calls_in_order` still lists.
     """
     tree = ast.parse((ENGINE / "scripts" / "onboard").read_text(encoding="utf-8"))
@@ -1920,6 +1920,27 @@ def test_a_forbidden_workflow_file_read_stops_the_run_before_any_write(monkeypat
     assert fake.calls == [
         ["gh", "variable", "list", "--json", "name,value"],
         ["gh", "api", REMOTE_SHIM],
+    ]
+
+
+def test_a_forbidden_engine_secret_read_stops_the_run_before_any_write(monkeypatch, tmp_path):
+    """A 403 on the `shipmate-engine` secret list is not absence. Read as "no key placed",
+    a run with `--key` would overwrite a working placement.
+
+    Mutation: replace the `_gh_json_or_none` call in `_engine_secrets` with a broad
+    `except SystemExit` returning no names.
+    """
+    fake, exit_ = run_main(
+        monkeypatch,
+        tmp_path,
+        {ENGINE_SECRETS: SystemExit("gh: Forbidden (HTTP 403)")},
+        [],
+    )
+    assert str(exit_) == "gh: Forbidden (HTTP 403)"
+    assert fake.calls == [
+        ["gh", "variable", "list", "--json", "name,value"],
+        ["gh", "api", REMOTE_SHIM],
+        ["gh", "api", ENGINE_SECRETS],
     ]
 
 
