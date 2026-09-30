@@ -2529,12 +2529,13 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   are not in the key: stacks whose locks name the same providers at the same
   versions share one entry, and each still verifies the packages against its
   own lock. A lock with no `provider` block restores nothing.
-- Only `drift-cell` saves it: drift runs default-branch code, while plan and
-  apply cells run pull-request HCL. It saves after a restore that missed, and
-  only when `init` left a file in the cache. A repository that never runs drift
-  never fills the cache.
+- `drift-cell` and `apply-cell` save it; `plan-cell` never does. An apply cell
+  already holds the environment's apply role, so its save reaches nothing a
+  pull request's applied HCL could not. Each saves after a restore that missed,
+  and only when `init` left a file in the cache; `apply-cell` saves only after
+  a successful apply, and a failed save does not fail the cell.
 - An entry is keyed on its path, which lives under `RUNNER_TEMP`: a cell on a
-  runner image whose `RUNNER_TEMP` differs from the drift runner's misses and
+  runner image whose `RUNNER_TEMP` differs from the saving runner's misses and
   downloads.
 - The lock verifies every cached package at every reader. A cached package that
   does not match fails `init` with `does not match the content of the downloaded

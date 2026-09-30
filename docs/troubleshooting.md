@@ -729,7 +729,7 @@ provider cache").
    `tofu-providers-`.
 2. Delete the entry: `gh cache delete <key> --repo <owner>/<repo>`.
 3. Re-run the failed jobs. The cells download their providers, and the next
-   drift run saves a fresh entry.
+   drift or apply cell saves a fresh entry.
 
 ### `shipmate / gate` never goes green
 

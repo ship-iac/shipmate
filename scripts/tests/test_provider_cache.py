@@ -1,23 +1,27 @@
-"""The provider plugin cache is restored per stack from a committed lock file and saved only by
-drift.
+"""The provider plugin cache is restored per stack from a committed lock file and saved by drift
+and apply cells.
 
 Every cell that runs `tofu init` on a plan or apply path restores the entry keyed on the provider
 addresses and versions in its own stack's `.terraform.lock.hcl` (`scripts/provider-cache-key`),
 exact match: a `restore-keys` prefix would hand one stack another stack's partial provider set.
-Only `drift-cell` saves, because it alone runs default-branch code; plan and apply cells run
-pull-request HCL. The save runs only after a restore that missed and an `init` that left at least
-one file in the cache, and it reuses the restore step's key, computed before `init -reconfigure`
-can rewrite the committed lock: a key computed after it could name a lock no restore reads.
+`drift-cell` and `apply-cell` save; plan cells never do. An apply cell already holds the
+environment's apply role, so its save adds no reach a plan cell lacks. The save runs only after a
+restore that missed and an `init` that left at least one file in the cache, and it reuses the
+restore step's key, computed before `init -reconfigure` can rewrite the committed lock: a key
+computed after it could name a lock no restore reads. In `apply-cell` both steps follow
+`Save state` with no status function in their `if:`, so a failed apply saves nothing, and carry
+`continue-on-error: true`, so a failed save cannot fail an applied cell.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
 save added to another cell, a dropped guard or a widened key. Each value is compared whole
 against a hand-written constant.
 
-Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `if:`; the save's
-key rebuilt from the key step's digest; `-type f` dropped from the check's `find`;
-`restore-keys` added to one cell's restore; `STACK` dropped from one cell's key step `env:`;
-`actions/cache/save` of the cache directory added to another action; the combined
-`actions/cache` action used anywhere.
+Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `if:`; the
+`cache-hit` clause dropped from `apply-cell`'s check; `always() &&` prefixed to `apply-cell`'s
+check `if:`; the save's key rebuilt from the key step's digest; `continue-on-error` dropped from
+`apply-cell`'s save; `-type f` dropped from the check's `find`; `restore-keys` added to one
+cell's restore; `STACK` dropped from one cell's key step `env:`; `actions/cache/save` of the
+cache directory added to another action; the combined `actions/cache` action used anywhere.
 """
 
 import os
@@ -83,13 +87,23 @@ def test_each_cell_restores_the_cache_keyed_on_its_own_lock_file(cell):
     assert _without_ref(step) == _RESTORE
 
 
-def test_drift_checks_the_cache_only_after_a_restore_that_missed():
-    step = step_by("drift-cell", name="Check the provider cache")
-    assert {k: v for k, v in step.items() if k != "run"} == _CHECK
+_SAVERS = ["apply-cell", "drift-cell"]
 
 
-def test_drift_saves_only_a_populated_cache_under_the_restore_key():
-    assert _without_ref(step_by("drift-cell", name="Save provider cache")) == _SAVE
+def _expected(cell, step):
+    return {**step, "continue-on-error": True} if cell == "apply-cell" else step
+
+
+@pytest.mark.parametrize("cell", _SAVERS)
+def test_savers_check_the_cache_only_after_a_restore_that_missed(cell):
+    step = step_by(cell, name="Check the provider cache")
+    assert {k: v for k, v in step.items() if k != "run"} == _expected(cell, _CHECK)
+    assert step["run"] == step_by("drift-cell", name="Check the provider cache")["run"]
+
+
+@pytest.mark.parametrize("cell", _SAVERS)
+def test_savers_save_only_a_populated_cache_under_the_restore_key(cell):
+    assert _without_ref(step_by(cell, name="Save provider cache")) == _expected(cell, _SAVE)
 
 
 def _uses_steps(node):
@@ -111,10 +125,10 @@ def _engine_tree():
     return docs
 
 
-def test_only_drift_saves_the_provider_cache():
-    """Every `actions/cache/save` in the engine, by file and path, is drift's provider save and the
-    state save. Mutation: a save step with `path: ${{ runner.temp }}/.tofu-plugin-cache` added to
-    `plan-cell`."""
+def test_only_drift_and_apply_save_the_provider_cache():
+    """Every `actions/cache/save` in the engine, by file and path, is apply's and drift's provider
+    saves and the state save. Mutation: a save step with
+    `path: ${{ runner.temp }}/.tofu-plugin-cache` added to `plan-cell`."""
     saves = sorted(
         (name, (step.get("with") or {}).get("path"))
         for name, doc in _engine_tree().items()
@@ -122,6 +136,7 @@ def test_only_drift_saves_the_provider_cache():
         if step["uses"].split("@")[0] == "actions/cache/save"
     )
     assert saves == [
+        ("apply-cell", "${{ env.TF_PLUGIN_CACHE_DIR }}"),
         ("drift-cell", "${{ env.TF_PLUGIN_CACHE_DIR }}"),
         ("state", "${{ inputs.path }}"),
     ]

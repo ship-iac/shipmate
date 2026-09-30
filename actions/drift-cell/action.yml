@@ -73,8 +73,8 @@ runs:
 
     - name: Save provider cache
       if: ${{ steps.provider-cache-files.outputs.populated == 'true' }}
-      # Only this cell saves: it alone runs default-branch code. The key is the restore step's,
-      # computed before `init -reconfigure` can rewrite the committed lock, as every reader's is.
+      # The key is the restore step's, computed before `init -reconfigure` can rewrite the
+      # committed lock, as every reader's is.
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ env.TF_PLUGIN_CACHE_DIR }}

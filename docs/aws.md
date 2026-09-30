@@ -240,8 +240,8 @@ The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
 `drift`; their cells download only `hashicorp/random`. An AWS repository's
 cells pull `hashicorp/aws`. The provider cache serves a stack once its
 `.terraform.lock.hcl` is committed ([`../CONTRACT.md`](../CONTRACT.md)
-§Terramate safeguards, "Lock files and the provider cache") and a drift run on
-the default branch has saved the entry; only drift saves. Without a committed
+§Terramate safeguards, "Lock files and the provider cache") and a drift or
+apply cell has saved the entry; plan cells never save. Without a committed
 lock, as in `repo-example-stacks-aws`, every `init -reconfigure` downloads the
 provider again; weigh the slim image against that download before passing it
 to `plan` or `drift`.

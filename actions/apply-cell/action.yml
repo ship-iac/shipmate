@@ -269,6 +269,27 @@ runs:
         mode: save
         path: ${{ steps.locate-state.outputs.path }}
 
+    - name: Check the provider cache
+      id: provider-cache-files
+      # No status function in this `if:` or the save's: the implied success() skips both after a
+      # failed apply. continue-on-error, as on `Compose cell summary`, keeps a cache failure from
+      # stranding an applied cell's check pending.
+      if: ${{ steps.provider-cache.outcome == 'success' && steps.provider-cache.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      shell: bash
+      run: |
+        if [ -n "$(find "$TF_PLUGIN_CACHE_DIR" -type f -print -quit)" ]; then
+          echo "populated=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Save provider cache
+      if: ${{ steps.provider-cache-files.outputs.populated == 'true' }}
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: ${{ steps.provider-cache.outputs.cache-primary-key }}
+
     - name: Compose cell summary
       # Runs even when a fail-safe or the apply itself failed or was cancelled: the
       # aggregator needs a result for every attempted-or-blocked cell. Built from env vars
