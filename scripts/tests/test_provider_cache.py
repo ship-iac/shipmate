@@ -1,22 +1,23 @@
 """The provider plugin cache is restored per stack from a committed lock file and saved only by
 drift.
 
-Every cell that runs `tofu init` on a plan or apply path restores the entry keyed on its own
-stack's `.terraform.lock.hcl`, exact match: a `restore-keys` prefix would hand one stack another
-stack's partial provider set. Only `drift-cell` saves, because it alone runs default-branch code;
-plan and apply cells run pull-request HCL. The save runs only after a restore that missed and an
-`init` that left at least one file in the cache, and it reuses the restore step's key, hashed
-before `init -reconfigure` can rewrite the committed lock (adding hashes, for example): a key
-hashed after it would name a lock no restore hashes.
+Every cell that runs `tofu init` on a plan or apply path restores the entry keyed on the provider
+addresses and versions in its own stack's `.terraform.lock.hcl` (`scripts/provider-cache-key`),
+exact match: a `restore-keys` prefix would hand one stack another stack's partial provider set.
+Only `drift-cell` saves, because it alone runs default-branch code; plan and apply cells run
+pull-request HCL. The save runs only after a restore that missed and an `init` that left at least
+one file in the cache, and it reuses the restore step's key, computed before `init -reconfigure`
+can rewrite the committed lock: a key computed after it could name a lock no restore reads.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
 save added to another cell, a dropped guard or a widened key. Each value is compared whole
 against a hand-written constant.
 
 Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `if:`; the save's
-key replaced by a second `hashFiles(...)`; `-type f` dropped from the check's `find`;
-`restore-keys` added to one cell's restore; `actions/cache/save` of the cache directory added to
-another action; the combined `actions/cache` action used anywhere.
+key rebuilt from the key step's digest; `-type f` dropped from the check's `find`;
+`restore-keys` added to one cell's restore; `STACK` dropped from one cell's key step `env:`;
+`actions/cache/save` of the cache directory added to another action; the combined
+`actions/cache` action used anywhere.
 """
 
 import os
@@ -24,25 +25,27 @@ import os
 import pytest
 from _loader import ACTIONS, WORKFLOWS, action_yaml, bash_only, run_step, step_by, workflow_yaml
 
-_LOCK_HASH = "hashFiles(format('{0}/.terraform.lock.hcl', inputs.stack))"
+_KEY_STEP = {
+    "name": "Provider cache key",
+    "id": "provider-cache-key",
+    "shell": "bash",
+    "env": {"STACK": "${{ inputs.stack }}"},
+    "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/provider-cache-key"',
+}
 
 _RESTORE = {
     "name": "Restore provider cache",
-    "if": "${{ " + _LOCK_HASH + " != '' }}",
+    "id": "provider-cache",
+    "if": "${{ steps.provider-cache-key.outputs.digest != '' }}",
     "uses": "actions/cache/restore",
     "with": {
         "path": "${{ env.TF_PLUGIN_CACHE_DIR }}",
-        "key": "tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ " + _LOCK_HASH + " }}",
+        "key": "tofu-providers-${{ runner.os }}-${{ runner.arch }}-"
+        "${{ steps.provider-cache-key.outputs.digest }}",
     },
 }
 
-#: `drift-cell`'s restore alone carries an id, because its save reads the outputs. An id on the
-#: `apply-cell` restore would red `test_apply_cell_failsafe_wiring_guard.py`.
-_EXPECTED_RESTORE = {
-    "plan-cell": _RESTORE,
-    "apply-cell": _RESTORE,
-    "drift-cell": {**_RESTORE, "id": "provider-cache"},
-}
+_CELLS = ["apply-cell", "drift-cell", "plan-cell"]
 
 _CHECK = {
     "name": "Check the provider cache",
@@ -69,10 +72,15 @@ def _without_ref(step):
     return {**step, "uses": step["uses"].split("@")[0]}
 
 
-@pytest.mark.parametrize("cell", sorted(_EXPECTED_RESTORE))
+@pytest.mark.parametrize("cell", _CELLS)
+def test_each_cell_computes_the_key_from_its_own_lock_file(cell):
+    assert step_by(cell, name="Provider cache key") == _KEY_STEP
+
+
+@pytest.mark.parametrize("cell", _CELLS)
 def test_each_cell_restores_the_cache_keyed_on_its_own_lock_file(cell):
     step = step_by(cell, name="Restore provider cache")
-    assert _without_ref(step) == _EXPECTED_RESTORE[cell]
+    assert _without_ref(step) == _RESTORE
 
 
 def test_drift_checks_the_cache_only_after_a_restore_that_missed():

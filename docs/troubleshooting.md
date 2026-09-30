@@ -719,8 +719,9 @@ to recover from a transient cause.
 
 `tofu init` refused a provider package restored from the provider cache: its
 content does not match the hash in the stack's `.terraform.lock.hcl`. The
-cache entry is corrupt or was altered. Every cell whose lock file matches that
-entry fails the same way until the lock file changes or the entry is deleted
+cache entry is corrupt or was altered. Every cell whose lock file names the
+same provider versions fails the same way until those versions change or the
+entry is deleted
 ([`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Lock files and the
 provider cache").
 

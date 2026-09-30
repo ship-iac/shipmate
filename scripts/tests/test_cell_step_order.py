@@ -18,6 +18,7 @@ _EXPECTED = {
         "Record the planned commit",
         "Inject identity variables",
         "Stack slug",
+        "Provider cache key",
         "Restore provider cache",
         "Initialize the stack",
         "Locate state",
@@ -34,6 +35,7 @@ _EXPECTED = {
     "drift-cell": [
         "Inject identity variables",
         "Stack slug",
+        "Provider cache key",
         "Restore provider cache",
         "Initialize the stack",
         "Check the provider cache",
@@ -52,6 +54,7 @@ _EXPECTED = {
         "Decrypt reviewed plan artifact (fail-safe on config/plaintext mismatch)",
         "Verify fingerprint matches the reviewed plan",
         "Check the reviewed plan text's digest reached this action",
+        "Provider cache key",
         "Restore provider cache",
         "Initialize the stack",
         "Locate state",

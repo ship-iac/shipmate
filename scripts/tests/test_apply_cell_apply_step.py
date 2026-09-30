@@ -54,9 +54,11 @@ def test_the_apply_half_is_split_across_its_four_attributable_steps():
     # bodies in that constant's order, so a swap made in both places would leave every runtime
     # assertion in this file green and this the only test able to catch it. Locating and
     # restoring state sit between init and the render, and the harness leaves them out: neither
-    # touches the stored plan.
-    assert tuple(ids[start : start + 6]) == (
+    # touches the stored plan; nor do the provider cache key and restore before init.
+    assert tuple(ids[start : start + 8]) == (
         "digest-input",
+        "provider-cache-key",
+        "provider-cache",
         "init",
         "locate-state",
         "restore-state",

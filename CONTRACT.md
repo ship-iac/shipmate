@@ -2523,9 +2523,12 @@ gitignore it and show the no-cache path.
 The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
 
 - `plan-cell`, `drift-cell` and `apply-cell` restore it before `init`, keyed on
-  the runner OS, the runner architecture and the hash of the stack's own
-  committed `.terraform.lock.hcl`, exact match. Stacks with identical lock files
-  share one entry.
+  the runner OS, the runner architecture and a SHA-256 digest of the provider
+  addresses and versions in the stack's own committed `.terraform.lock.hcl`,
+  exact match (`scripts/provider-cache-key`). Constraint strings and hash lines
+  are not in the key: stacks whose locks name the same providers at the same
+  versions share one entry, and each still verifies the packages against its
+  own lock. A lock with no `provider` block restores nothing.
 - Only `drift-cell` saves it: drift runs default-branch code, while plan and
   apply cells run pull-request HCL. It saves after a restore that missed, and
   only when `init` left a file in the cache. A repository that never runs drift

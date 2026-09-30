@@ -68,12 +68,20 @@ runs:
         [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
         echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
+    - name: Provider cache key
+      id: provider-cache-key
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/provider-cache-key"
+
     - name: Restore provider cache
-      if: ${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.stack)) != '' }}
+      id: provider-cache
+      if: ${{ steps.provider-cache-key.outputs.digest != '' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-        key: tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.stack)) }}
+        key: tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ steps.provider-cache-key.outputs.digest }}
 
     - name: Initialize the stack
       shell: bash
