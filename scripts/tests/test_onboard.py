@@ -1652,7 +1652,7 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
         ],
         ["gh", "api", RULES],
         ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"],
-        ["git", "-C", str(tmp_path), "ls-files", "-z", "--", "stacks/app/.terraform.lock.hcl"],
+        ["git", "ls-files", "-z", "--", ":(top)*.terraform.lock.hcl"],
     ]
 
 
@@ -2434,8 +2434,9 @@ todo          CODEOWNERS entry covering /.github/workflows/
 
 todo          Provider lock files
     1 of 1 stack(s) have no git-tracked `.terraform.lock.hcl`,
-    so the provider cache serves none of them. Run `tofu providers lock` in each and
-    commit the file:
+    so the provider cache serves none of them. Remove any `.gitignore` entry for the
+    file first, since git refuses to add an ignored path, then run `tofu providers lock`
+    in each and commit the file:
       stacks/app
 
 todo          adoption pull request
@@ -2539,9 +2540,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
         "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": MAIN_POLICY,
         VARIABLE_LIST: [{"name": "SHIPMATE_APP_ID", "value": "1"}],
         REMOTE_SHIM: {"name": "shipmate.yml"},
-        f"git -C {tmp_path} ls-files -z -- stacks/app/.terraform.lock.hcl": (
-            "stacks/app/.terraform.lock.hcl\0"
-        ),
+        "git ls-files -z -- :(top)*.terraform.lock.hcl": "stacks/app/.terraform.lock.hcl\0",
     }
     _fake, exit_ = run_main(monkeypatch, tmp_path, routes, [])
     assert exit_.code == 0
@@ -2818,13 +2817,13 @@ def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
 LOCK_ITEM = "Provider lock files"
 
 
-def lock_run(root, tracked):
-    """A fake `_run` answering `git -C <root> ls-files -z -- <paths>` as git does: the
-    requested paths that are in `tracked`, each NUL-terminated."""
+def lock_run(tracked):
+    """A fake `_run` answering `git ls-files -z -- ':(top)*.terraform.lock.hcl'` as git does:
+    every path in `tracked`, relative to the working directory, each NUL-terminated."""
 
     def _run(args, secrets=(), stdin=None):
-        assert args[:6] == ["git", "-C", str(root), "ls-files", "-z", "--"], args
-        return "".join(f"{path}\0" for path in args[6:] if path in tracked)
+        assert args == ["git", "ls-files", "-z", "--", ":(top)*.terraform.lock.hcl"], args
+        return "".join(f"{path}\0" for path in sorted(tracked))
 
     return _run
 
@@ -2834,26 +2833,28 @@ def test_the_lock_item_is_ok_when_every_stack_tracks_its_lock(monkeypatch, tmp_p
     monkeypatch.chdir(tmp_path)
     stacks = ["a", "b", "c"]
     tracked = {f"{s}/.terraform.lock.hcl" for s in stacks}
-    monkeypatch.setattr(onboard, "_run", lock_run(tmp_path, tracked))
+    monkeypatch.setattr(onboard, "_run", lock_run(tracked))
     assert onboard._lock_files_item(ctx(root=tmp_path, stacks=stacks)) == ("ok", LOCK_ITEM, [])
 
 
 def test_the_lock_item_names_each_stack_without_a_tracked_lock(monkeypatch, tmp_path):
     """Mutation: replace the tracked-file check with `is_file()` on the lock path, which
-    reads `c`'s lock on disk as committed although git does not track it.
+    reads `c`'s lock on disk as committed although git does not track it. Or drop the item's
+    `sorted`, which names `c` before `a`.
     """
     monkeypatch.chdir(tmp_path)
     for s in ("a", "b", "c"):
         (tmp_path / s).mkdir()
         (tmp_path / s / ".terraform.lock.hcl").write_text("", encoding="utf-8")
-    monkeypatch.setattr(onboard, "_run", lock_run(tmp_path, {"b/.terraform.lock.hcl"}))
+    monkeypatch.setattr(onboard, "_run", lock_run({"b/.terraform.lock.hcl"}))
     assert onboard._lock_files_item(ctx(root=tmp_path, stacks=["c", "b", "a"])) == (
         "todo",
         LOCK_ITEM,
         [
             "2 of 3 stack(s) have no git-tracked `.terraform.lock.hcl`,",
-            "so the provider cache serves none of them. Run `tofu providers lock` in each and",
-            "commit the file:",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+            "in each and commit the file:",
             "  a",
             "  c",
         ],
@@ -2863,15 +2864,16 @@ def test_the_lock_item_names_each_stack_without_a_tracked_lock(monkeypatch, tmp_
 def test_the_lock_item_names_ten_stacks_and_counts_the_rest(monkeypatch, tmp_path):
     """Mutation: drop the ten-path cap, which names all twelve."""
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(onboard, "_run", lock_run(tmp_path, set()))
+    monkeypatch.setattr(onboard, "_run", lock_run(set()))
     stacks = [f"s{i:02}" for i in range(12)]
     assert onboard._lock_files_item(ctx(root=tmp_path, stacks=stacks)) == (
         "todo",
         LOCK_ITEM,
         [
             "12 of 12 stack(s) have no git-tracked `.terraform.lock.hcl`,",
-            "so the provider cache serves none of them. Run `tofu providers lock` in each and",
-            "commit the file:",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+            "in each and commit the file:",
             "  s00",
             "  s01",
             "  s02",
@@ -2888,18 +2890,26 @@ def test_the_lock_item_names_ten_stacks_and_counts_the_rest(monkeypatch, tmp_pat
 
 
 def test_the_lock_item_resolves_stacks_against_the_working_directory(monkeypatch, tmp_path):
-    """`terramate list` prints stacks relative to the directory it ran in; the item names
-    them relative to the checkout root.
+    """`terramate list` and `git ls-files` both print paths relative to the directory they
+    ran in, so a stack above it matches its lock as `../infra` and is named as printed.
 
-    Mutation: resolve each stack against `root` instead of `pathlib.Path.cwd()`.
+    Mutation: resolve each stack to a root-relative path with `os.path.relpath(cwd / s,
+    root)`, which reads `infra`'s tracked lock as missing and names `stacks/app`.
     """
     (tmp_path / "stacks").mkdir()
     monkeypatch.chdir(tmp_path / "stacks")
-    monkeypatch.setattr(onboard, "_run", lock_run(tmp_path, set()))
-    _verdict, _item, details = onboard._lock_files_item(
-        ctx(root=tmp_path, stacks=["app", "../infra"])
+    monkeypatch.setattr(onboard, "_run", lock_run({"../infra/.terraform.lock.hcl"}))
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=["app", "../infra"])) == (
+        "todo",
+        LOCK_ITEM,
+        [
+            "1 of 2 stack(s) have no git-tracked `.terraform.lock.hcl`,",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+            "in each and commit the file:",
+            "  app",
+        ],
     )
-    assert details[3:] == ["  infra", "  stacks/app"]
 
 
 def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, capsys):
@@ -2920,8 +2930,9 @@ def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, caps
         "todo",
         [
             "2 of 2 stack(s) have no git-tracked `.terraform.lock.hcl`,",
-            "so the provider cache serves none of them. Run `tofu providers lock` in each and",
-            "commit the file:",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+            "in each and commit the file:",
             "  a",
             "  b",
         ],

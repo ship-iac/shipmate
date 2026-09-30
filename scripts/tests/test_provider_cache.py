@@ -5,14 +5,14 @@ Every cell that runs `tofu init` on a plan or apply path restores the entry keye
 addresses and versions in its own stack's `.terraform.lock.hcl` (`scripts/provider-cache-key`),
 exact match: a `restore-keys` prefix would hand one stack another stack's partial provider set.
 `drift-cell` and `apply-cell` save; plan cells never do. An apply cell already holds the
-environment's apply role, so its save adds no reach a plan cell lacks. The save runs only after a
-restore that missed and an `init` that left at least one file in the cache, and it reuses the
-restore step's key, computed before `init -reconfigure` can rewrite the committed lock: a key
-computed after it could name a lock no restore reads. In `apply-cell` both steps follow
+environment's apply role, so its save reaches nothing that cell's applied HCL could not. The save
+runs only after a restore that missed and an `init` that left at least one file in the cache, and
+it reuses the restore step's key, computed before `init -reconfigure` can rewrite the committed
+lock: a key computed after it could name a lock no restore reads. In `apply-cell` both steps follow
 `Save state` with no status function in their `if:`, so a failed apply saves nothing, and carry
-`continue-on-error: true`, so a failed save cannot fail an applied cell. When `init` fails after
-a restore that hit, each cell names the restored entry in one `::error::`, so a corrupt entry can
-be deleted by key.
+`continue-on-error: true`, so a failed save cannot fail an applied cell. When `init` fails after a
+restore that hit, each cell names the restored entry in one `::error::`, so a corrupt entry can be
+deleted by key.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
 save added to another cell, a dropped guard or a widened key. Each value is compared whole
@@ -221,11 +221,13 @@ def test_each_cells_init_step_carries_the_id_the_annotation_reads(cell):
 @pytest.mark.parametrize("cell", _CELLS)
 def test_the_annotation_names_the_key_and_the_delete_command(tmp_path, cell):
     body = step_by(cell, name="Name the restored provider cache entry")["run"]
-    r = run_step(tmp_path, body, {**os.environ, "KEY": "tofu-providers-Linux-X64-abc123"})
+    """Mutation: drop `--repo $GITHUB_REPOSITORY` from the delete command."""
+    key = "tofu-providers-Linux-X64-abc123"
+    r = run_step(tmp_path, body, {**os.environ, "KEY": key, "GITHUB_REPOSITORY": "o/r"})
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
         "::error::OpenTofu's init failed after restoring provider cache entry "
         "tofu-providers-Linux-X64-abc123. If the log above says a cached package does not "
         "match the content of the downloaded package, delete the entry with gh cache delete "
-        "tofu-providers-Linux-X64-abc123 and re-run.\n"
+        "tofu-providers-Linux-X64-abc123 --repo o/r and re-run.\n"
     )

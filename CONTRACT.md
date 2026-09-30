@@ -2529,7 +2529,8 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   are not in the key: stacks whose locks name the same providers at the same
   versions share one entry, and each still verifies the packages against its
   own lock. A lock with no `provider` block restores nothing.
-- `drift-cell` and `apply-cell` save it; `plan-cell` never does. An apply cell
+- `drift-cell` and `apply-cell` save it; `plan-cell` never does, because a plan
+  cell runs unreviewed pull-request HCL without the apply role. An apply cell
   already holds the environment's apply role, so its save reaches nothing a
   pull request's applied HCL could not. Each saves after a restore that missed,
   and only when `init` left a file in the cache; `apply-cell` saves only after

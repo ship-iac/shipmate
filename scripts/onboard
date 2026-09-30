@@ -37,7 +37,6 @@ team is that file's `[gate] approver_team`, which this script does not write.
 
 import argparse
 import json
-import os
 import pathlib
 import re
 import subprocess
@@ -1066,27 +1065,25 @@ def _codeowners_item(ctx):
 def _lock_files_item(ctx):
     """`ok` when every stack has a git-tracked `.terraform.lock.hcl`, the only lock the
     provider cache keys on. Tracked, not present on disk: any local `tofu init` writes the
-    file, gitignored or not. `ctx["stacks"]` are relative to the working directory, as
-    `terramate list` printed them; the paths named here are relative to the checkout root.
+    file, gitignored or not. `ctx["stacks"]` and the paths named here are relative to the
+    working directory, as `terramate list` printed them; `git ls-files` prints the same form.
+    One fixed pathspec keeps the argv under Windows' command-line limit at any stack count.
     """
     item = "Provider lock files"
-    root = pathlib.Path(ctx["root"])
-    stacks = sorted(
-        pathlib.Path(os.path.relpath(pathlib.Path.cwd() / s, root)).as_posix()
-        for s in ctx["stacks"]
-    )
-    locks = {s: (pathlib.PurePosixPath(s) / ".terraform.lock.hcl").as_posix() for s in stacks}
+    stacks = sorted(ctx["stacks"])
     tracked = set()
-    if locks:
-        out = _run(["git", "-C", str(root), "ls-files", "-z", "--", *locks.values()])
+    if stacks:
+        out = _run(["git", "ls-files", "-z", "--", ":(top)*.terraform.lock.hcl"])
         tracked = set(out.split("\0"))
-    missing = [s for s in stacks if locks[s] not in tracked]
+    lock = ".terraform.lock.hcl"
+    missing = [s for s in stacks if (pathlib.PurePosixPath(s) / lock).as_posix() not in tracked]
     if not missing:
         return "ok", item, []
     lines = [
         f"{len(missing)} of {len(stacks)} stack(s) have no git-tracked `.terraform.lock.hcl`,",
-        "so the provider cache serves none of them. Run `tofu providers lock` in each and",
-        "commit the file:",
+        "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+        "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+        "in each and commit the file:",
     ]
     lines += [f"  {s}" for s in missing[:10]]
     if len(missing) > 10:
@@ -1225,7 +1222,7 @@ def main(argv=None):
         "app_id": args.app_id,
         "key": key,
         "envs": envs,
-        "stacks": sorted(tags_by_stack),
+        "stacks": list(tags_by_stack),
         "table": table,
         "shared": shared,
         "unresolved": set(),

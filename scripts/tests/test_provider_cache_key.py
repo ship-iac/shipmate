@@ -2,7 +2,8 @@
 else, and prints an empty digest rather than failing when there is nothing to digest.
 
 Mutations that red this module: `sorted(pairs)` replaced by `pairs`; the constraints line
-captured into the digest input; `except OSError` narrowed to `except FileNotFoundError`.
+captured into the digest input; `except OSError` narrowed to `except FileNotFoundError`;
+`errors="replace"` dropped from the lock read.
 """
 
 import os
@@ -49,6 +50,8 @@ def _run(tmp_path, lock=None, *, lock_is_dir=False):
     stack.mkdir()
     if lock_is_dir:
         (stack / ".terraform.lock.hcl").mkdir()
+    elif isinstance(lock, bytes):
+        (stack / ".terraform.lock.hcl").write_bytes(lock)
     elif lock is not None:
         (stack / ".terraform.lock.hcl").write_text(lock, encoding="utf-8")
     out = tmp_path / "github_output"
@@ -101,3 +104,10 @@ def test_a_changed_version_changes_the_digest(tmp_path):
 )
 def test_nothing_to_digest_is_an_empty_digest_and_exit_zero(tmp_path, lock, lock_is_dir):
     assert _run(tmp_path, lock, lock_is_dir=lock_is_dir) == "digest=\n"
+
+
+def test_a_non_utf8_byte_still_digests_the_provider(tmp_path):
+    """Mutation: drop `errors="replace"`, which raises on the 0xff byte and exits non-zero."""
+    lock = _RANDOM.replace('"~> 3.0"', '"~> 3.0 \xff"').encode("latin-1")
+    assert b"\xff" in lock
+    assert _run(tmp_path, lock) == f"digest={_RANDOM_ONLY}\n"

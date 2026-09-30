@@ -96,7 +96,7 @@ runs:
       env:
         KEY: ${{ steps.provider-cache.outputs.cache-primary-key }}
       run: |
-        echo "::error::OpenTofu's init failed after restoring provider cache entry $KEY. If the log above says a cached package does not match the content of the downloaded package, delete the entry with gh cache delete $KEY and re-run."
+        echo "::error::OpenTofu's init failed after restoring provider cache entry $KEY. If the log above says a cached package does not match the content of the downloaded package, delete the entry with gh cache delete $KEY --repo $GITHUB_REPOSITORY and re-run."
 
     - name: Locate state
       id: locate-state
