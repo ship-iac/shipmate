@@ -268,10 +268,13 @@ creates all of them, including `shipmate-engine` and its branch policy:
   ```toml
   layout = "tf_vars"
 
+  [identities.dev]
+  aws.plan  = "arn:aws:iam::9817:role/shipmate-plan"
+  aws.apply = "arn:aws:iam::9817:role/shipmate-apply"
+
   [environments.dev-eu]
-  region         = "eu-west-1"
-  aws.plan.role  = "arn:aws:iam::9817:role/shipmate-plan"
-  aws.apply.role = "arn:aws:iam::9817:role/shipmate-apply"
+  region   = "eu-west-1"
+  identity = "dev"
   ```
 
   Dotted keys are the canonical spelling: one `[environments.<name>]` header per

@@ -20,11 +20,22 @@ CANONICAL = """\
 schema_version = 1                 # optional
 layout         = "tf_vars"         # "tf_vars" | "workspace" | "folder", required
 
+[identities.dev]
+aws.account = "981781037707"
+aws.plan    = "shipmate-plan"      # a role name, under aws.account
+aws.apply   = "shipmate-apply"
+
+[identities.prod]
+aws.plan = "arn:aws:iam::981781037707:role/prod-plan"
+
+[identities.prod.aws.apply]        # a map gives each workload its own role
+app      = "arn:aws:iam::981781037707:role/prod-apply"
+net-edge = "arn:aws:iam::981781037707:role/net-edge"
+
 [environments.dev-eu]
 region         = "eu-west-1"
 gated          = false             # optional: a targeted apply needs no approving review
-aws.plan.role  = "arn:aws:iam::981781037707:role/shipmate-plan"
-aws.apply.role = "arn:aws:iam::981781037707:role/shipmate-apply"
+identity       = "dev"
 
 [environments.dev-us]
 region = "us-east-1"
@@ -33,10 +44,8 @@ needs  = ["dev-eu"]                # optional: envs that must fully apply first
 [environments.prod]
 region         = "eu-west-1"
 explicit       = true              # optional: a bare `shipmate apply` skips it
-aws.plan.role  = "arn:aws:iam::981781037707:role/prod-plan"
-aws.apply.role = "arn:aws:iam::981781037707:role/prod-apply"
-# A workload inherits its tier's fields and overrides one:
-aws.apply.workloads.net-edge.role = "arn:aws:iam::981781037707:role/net-edge"
+identity       = "prod"
+workloads      = ["app", "net-edge"]  # the workload tags prod admits
 tf_vars.TF_VAR_tier = "core"       # optional, merged over the derived TF_VAR_*
 """
 
@@ -51,11 +60,11 @@ schema_version = 1            # intended as a top-level setting
 
 
 def test_the_canonical_file_validates():
-    """Every top-level key but `gate`, dotted provider keys, a workload tier, an ordering and
-    both entry flags.
+    """Every top-level key but `gate`, a string and a map role field, a workload list, an
+    ordering and both entry flags.
 
-    Mutation: remove any of the three names from the allowed top-level set, or `"needs"`,
-    `"explicit"` or `"gated"` from the allowed entry keys.
+    Mutation: remove any of the four names from the allowed top-level set, or `"identity"`,
+    `"workloads"`, `"needs"`, `"explicit"` or `"gated"` from the allowed entry keys.
     """
     table = ec.parse_table(CANONICAL)
     assert ec.validate(table, ("dev-eu", "prod")) is table
@@ -78,7 +87,8 @@ def test_the_misplaced_control_refuses():
         ec.validate(table, ())
     assert str(exc.value) == (
         "::error::environment prod: schema_version is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared, needs, explicit, gated."
+        "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, "
+        "gated."
     )
 
 
@@ -163,11 +173,11 @@ def test_the_canonical_file_resolves_each_cell(env, path, workload, expected):
     """A file the real parser read, through the real validator, into whole cells compared
     against hand-written constants -- never against values derived from the file.
 
-    Mutations, each reddening one row: stop the workload tier overriding its path (row 0
-    resolves the plain apply role); resolve the plan tier for an apply cell, or the reverse
-    (rows 1 and 2 swap roles); drop the environment's own `tf_vars` from the merge (`TF_VAR_tier`
-    disappears); stop inheriting the environment's region into the provider block (every
-    `cred_region` empties).
+    Mutations, each reddening one row: look the role map up by a fixed key (rows 0 and 1
+    resolve one role); resolve the plan field for an apply cell, or the reverse (rows 1 and 2
+    swap roles); drop the environment's own `tf_vars` from the merge (`TF_VAR_tier`
+    disappears); stop taking `cred_region` from the environment's region (every `cred_region`
+    empties).
     """
     table = ec.validate(ec.parse_table(CANONICAL), ("dev-eu", "prod"))
     assert ec.resolve(table, env, path, workload) == expected

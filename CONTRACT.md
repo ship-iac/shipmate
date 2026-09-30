@@ -448,20 +448,26 @@ environment is a parse error (§TOML placement).
 schema_version = 1
 layout = "tf_vars"                # tf_vars | workspace | folder
 
+[identities.dev]
+aws.account = "111111111111"      # a role name below becomes arn:aws:iam::<account>:role/<name>
+aws.plan    = "shipmate-plan-{workload}"
+aws.apply   = "shipmate-apply-{workload}"
+
+[identities.prod]
+aws.apply = "arn:aws:iam::4402:role/shipmate-apply"  # a full ARN is used as written
+
 [environments.dev-eu]
-region              = "eu-west-1" # the layout's TF_VAR_region, cloud-neutral
-aws.region          = "eu-west-1" # the credentials step's region; omitted, it inherits the above
-aws.plan.role       = "arn:aws:iam::9817:role/shipmate-plan"
-aws.apply.role      = "arn:aws:iam::9817:role/shipmate-apply"
-aws.apply.workloads.net-edge.role = "arn:aws:iam::9817:role/net-edge"
+region              = "eu-west-1" # the layout's TF_VAR_region and the credentials step's region
+identity            = "dev"
+workloads           = ["core", "net-edge"]  # the workload tags this environment admits
 gated               = false       # applies without an approving review
 
 [environments.prod]
 region              = "eu-west-1"
+identity            = "prod"
 needs               = ["dev-eu"]  # dev-eu fully applies first
 explicit            = true        # a bare `shipmate apply` skips it
 tf_vars.TF_VAR_account = "4402"   # merged over the layout's TF_VAR_*
-aws.apply.role      = "arn:aws:iam::4402:role/shipmate-apply"
 
 [environments.sbx]
 region              = "eu-west-1"
@@ -598,10 +604,13 @@ layout = "tf_vars"
 [gate]
 approver_team = { vars = "APPROVERS" }
 
+[identities.prod]
+aws.apply = { vars = "PROD_APPLY_ROLE" }
+
 [environments.prod]
 needs                  = [{ vars = "FIRST_ENV" }]
 region                 = { vars = "PROD_REGION" }
-aws.apply.role         = { vars = "PROD_APPLY_ROLE" }
+identity               = "prod"
 tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
 ```
 

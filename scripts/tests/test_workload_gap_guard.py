@@ -1,4 +1,4 @@
-"""The unlisted-workload refusal (`build-matrix`'s `refuse_workload_gaps`) sees only the cells a
+"""The workload-list refusal (`build-matrix`'s `refuse_workload_gaps`) sees only the cells a
 path will run: a completed, excluded or held cell is not refused, because a table-only change can
 make an applied cell look misconfigured and refusing over it strands the pull request that
 planned it.
@@ -10,8 +10,8 @@ with a recording double in place of the refusal on that script's own `build-matr
 hand-written constant. Each fixture holds a cell the path does not run, so passing the
 unfiltered set records a different value.
 
-The behavioural tests run the real refusal on each apply path: a pending cell with an unlisted
-tag refuses, and the same cell completed or excluded does not.
+The behavioural tests run the real refusal on each apply path: a pending cell tagged outside its
+environment's list refuses, and the same cell completed or excluded does not.
 """
 
 import json
@@ -26,20 +26,22 @@ from _detect_fixtures import PLAN_SHA, _apply_check, check_run
 
 _ROLE = "arn:aws:iam::1:role/net"
 
-#: The apply tier lists only `net` and resolves no role of its own, so a `workload/app` cell
-#: would run with no cloud credentials.
-_GAP_ENTRY = {"region": "eu-west-1", "aws": {"apply": {"workloads": {"net": {"role": _ROLE}}}}}
-_GAP = {"layout": "folder", "environments": {"dev-eu": _GAP_ENTRY}}
+#: `dev-eu` admits only `net`, so a `workload/app` cell is outside its list.
+_GAP = {
+    "layout": "folder",
+    "identities": {"dev": {"aws": {"apply": _ROLE}}},
+    "environments": {"dev-eu": {"region": "eu-west-1", "identity": "dev", "workloads": ["net"]}},
+}
 
 _GAP_ERROR = (
-    "::error::stacks/app in dev-eu carries workload/app, which aws.apply.workloads does not "
-    "list (it lists: net), and aws.apply sets no role to fall back to. The cell would run with "
-    "no cloud credentials. Retag the stack, or add the workload to .github/shipmate.toml on the "
-    "default branch, which is where this table is read from: merge the workload entry there on "
-    "its own pull request first."
+    "::error::1 cell(s) carry a workload tag their environment's workloads list does not name: "
+    "stacks/app in dev-eu (workload/app; dev-eu lists net). A listed workload is the only one "
+    "the default branch grants a role to. Retag the stack, or add the workload to "
+    "environments.<env>.workloads in .github/shipmate.toml on the default branch, which is "
+    "where this table is read from: merge it there on its own pull request first."
 )
 
-#: The apply-tier fields `trs._TABLE` resolves for a dev-eu cell.
+#: The apply-path fields `trs._TABLE` resolves for a dev-eu cell.
 _APPLY = {
     "role_arn": "arn:aws:iam::1:role/apply",
     "cred_region": "eu-west-1",
@@ -57,10 +59,9 @@ _PLAN = {
 
 
 def _spy(monkeypatch, bm):
+    """A double with the real two-argument signature, recording each call's arguments."""
     calls = []
-    monkeypatch.setattr(
-        bm, "refuse_workload_gaps", lambda rows, table, tier: calls.append((rows, tier))
-    )
+    monkeypatch.setattr(bm, "refuse_workload_gaps", lambda rows, table: calls.append((rows, table)))
     return calls
 
 
@@ -69,25 +70,25 @@ def _done(stack, env="dev-eu"):
 
 
 def test_the_plan_matrix_refuses_over_the_stamped_cells(monkeypatch, tmp_path):
-    """Call site 1: `build-matrix` main(), plan tier. Every stamped cell is planned.
+    """Call site 1: `build-matrix` main(). Every stamped cell is planned.
 
-    Mutations: drop the call -- nothing is recorded; pass `"apply"` -- the plan path's
-    apply-tier check is keyed on `"plan"`, so the tier differs."""
+    Mutations: drop the call -- nothing is recorded; move the call above `stamp_rows` --
+    the recorded row loses its resolved fields."""
     calls = _spy(monkeypatch, tbm.bm)
     tbm._run_main(monkeypatch, tmp_path, trs._PLAN_ENV, head_sha="cafe1234", table=trs._TABLE)
     assert calls == [
-        ([{"stack": "stacks/app", "environment": "dev-eu", "workload": "", **_PLAN}], "plan")
+        ([{"stack": "stacks/app", "environment": "dev-eu", "workload": "", **_PLAN}], trs._TABLE)
     ]
 
 
 def test_the_drift_matrix_refuses_over_the_stamped_cells(monkeypatch, tmp_path):
     """Call site 2: the same line, reached with `all-stacks: true`.
 
-    Mutations: drop the call; pass `"apply"`."""
+    Mutations: as above."""
     calls = _spy(monkeypatch, tbm.bm)
     tbm._run_main(monkeypatch, tmp_path, trs._DRIFT_ENV, table=trs._TABLE)
     assert calls == [
-        ([{"stack": "stacks/app", "environment": "dev-eu", "workload": "", **_PLAN}], "plan")
+        ([{"stack": "stacks/app", "environment": "dev-eu", "workload": "", **_PLAN}], trs._TABLE)
     ]
 
 
@@ -115,7 +116,7 @@ def test_the_deploy_refuses_over_the_pending_cells_only(monkeypatch, tmp_path):
                     "plan_sha256": PLAN_SHA,
                 }
             ],
-            "apply",
+            trs._TABLE,
         )
     ]
 
@@ -144,7 +145,7 @@ def test_the_targeted_apply_refuses_over_the_pending_cells_only(monkeypatch, tmp
                     "plan_sha256": PLAN_SHA,
                 }
             ],
-            "apply",
+            trs._TABLE,
         )
     ]
 
@@ -165,7 +166,10 @@ def test_the_unlock_refuses_over_the_queue_only(monkeypatch, tmp_path):
     )
     tad.ad.main()
     assert calls == [
-        ([{"stack": "stacks/app", "environment": "dev-eu", "workload": "app", **_APPLY}], "apply")
+        (
+            [{"stack": "stacks/app", "environment": "dev-eu", "workload": "app", **_APPLY}],
+            trs._TABLE,
+        )
     ]
 
 
@@ -195,15 +199,28 @@ def test_the_bare_apply_refuses_over_the_runnable_cells_only(monkeypatch, tmp_pa
                     "plan_sha256": PLAN_SHA,
                 }
             ],
-            "apply",
+            # `_run_main` folds `explicit` into the table it stubs.
+            {
+                "layout": "folder",
+                "identities": {
+                    "dev": {
+                        "aws": {
+                            "plan": "arn:aws:iam::1:role/plan",
+                            "apply": "arn:aws:iam::1:role/apply",
+                        }
+                    }
+                },
+                "environments": {
+                    "dev-eu": {"region": "eu-west-1", "identity": "dev"},
+                    "prod-eu": {"explicit": True},
+                },
+            },
         )
     ]
 
 
 @pytest.mark.parametrize("pending", [True, False], ids=["pending", "completed"])
-def test_the_deploy_refuses_an_unlisted_workload_only_on_a_pending_cell(
-    monkeypatch, tmp_path, pending
-):
+def test_the_deploy_refuses_an_outside_tag_only_on_a_pending_cell(monkeypatch, tmp_path, pending):
     """Mutation: pass `cells` instead of `pending` -- the completed case refuses."""
     check = _apply_check("stacks/app") if pending else _done("stacks/app")
 
@@ -225,7 +242,7 @@ def test_the_deploy_refuses_an_unlisted_workload_only_on_a_pending_cell(
 
 
 @pytest.mark.parametrize("pending", [True, False], ids=["pending", "completed"])
-def test_the_targeted_apply_refuses_an_unlisted_workload_only_on_a_pending_cell(
+def test_the_targeted_apply_refuses_an_outside_tag_only_on_a_pending_cell(
     monkeypatch, tmp_path, pending
 ):
     """Mutation: pass `cells` instead of `pending` -- the completed case refuses."""
@@ -242,9 +259,7 @@ def test_the_targeted_apply_refuses_an_unlisted_workload_only_on_a_pending_cell(
 
 
 @pytest.mark.parametrize("pending", [True, False], ids=["pending", "completed"])
-def test_the_unlock_refuses_an_unlisted_workload_only_on_a_queued_cell(
-    monkeypatch, tmp_path, pending
-):
+def test_the_unlock_refuses_an_outside_tag_only_on_a_queued_cell(monkeypatch, tmp_path, pending):
     """Mutation: build the cells from the whole of `stacks_by_env` -- the completed case
     refuses."""
     out = tad._unlock_env(monkeypatch, tmp_path, table=_GAP)
@@ -265,7 +280,7 @@ def test_the_unlock_refuses_an_unlisted_workload_only_on_a_queued_cell(
 
 
 @pytest.mark.parametrize("explicit", [False, True], ids=["runnable", "excluded"])
-def test_the_bare_apply_refuses_an_unlisted_workload_only_on_a_runnable_cell(
+def test_the_bare_apply_refuses_an_outside_tag_only_on_a_runnable_cell(
     monkeypatch, tmp_path, explicit
 ):
     """dev-eu carries the gap; dev-us applies either way.

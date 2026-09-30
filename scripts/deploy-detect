@@ -77,7 +77,7 @@ def main():
         ad.ag.plan_runs_by_name(lines, app_id),
         ad.ag.plan_hashes_by_name(lines, app_id),
     )
-    bm.refuse_workload_gaps(pending, table, "apply")
+    bm.refuse_workload_gaps(pending, table)
     deps = ad.run_graph_deps()
     order = bm.ec.env_order(table)
     levels = eo.env_levels(order, {c["environment"] for c in pending})

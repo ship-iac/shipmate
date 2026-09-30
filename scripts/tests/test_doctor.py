@@ -4162,7 +4162,8 @@ _MISPLACED_FINDING = (
     doctor.WARNING,
     "`.github/shipmate.toml` at the commit under examination is not valid: "
     "environment prod: schema_version is not a key this engine implements. An environment "
-    "holds region, tf_vars, aws, shared, needs, explicit, gated. Merging it refuses every "
+    "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. Merging it "
+    "refuses every "
     "operation that reads the table. Execution still reads the default branch's copy, which "
     "this says nothing about.",
 )
@@ -4234,7 +4235,7 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
             doctor.WARNING,
             "`.github/shipmate.toml` at the commit under examination is not valid: "
             "environment dev-eu: regoin is not a key this engine implements. An environment "
-            "holds region, tf_vars, aws, shared, needs, explicit, gated. "
+            "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. "
             "environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
             "gated = false, unquoted. "
             "gate.approver_team is 'Platform Team', which is not a GitHub team slug; use the "
@@ -4257,7 +4258,7 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     unknown = (
         "{} is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, environments, gate."
+        "schema_version, layout, identities, environments, gate."
     )
     shown = " ".join(unknown.format(f"k{n:02}") for n in range(1, 11))
     assert doctor._config_warnings(_ctx()) == [
@@ -4397,10 +4398,13 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
 #: Two references, one of them a list item, hand-written.
 _REFERENCED = """layout = "folder"
 
+[identities.dev]
+aws.plan  = { vars = "DEV_PLAN_ROLE" }
+aws.apply = "arn:aws:iam::981781037707:role/shipmate-apply"
+
 [environments.dev]
-region         = "eu-west-1"
-aws.plan.role  = { vars = "DEV_PLAN_ROLE" }
-aws.apply.role = "arn:aws:iam::981781037707:role/shipmate-apply"
+region   = "eu-west-1"
+identity = "dev"
 
 [environments.prod]
 explicit = true
@@ -4430,8 +4434,8 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         (
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination takes these values from "
-            "GitHub variables instead of holding them: `environments.dev.aws.plan.role` from "
-            "variable `DEV_PLAN_ROLE`; `environments.prod.needs[0]` from variable `FIRST_ENV`. "
+            "GitHub variables instead of holding them: `environments.prod.needs[0]` from "
+            "variable `FIRST_ENV`; `identities.dev.aws.plan` from variable `DEV_PLAN_ROLE`. "
             "Every run "
             "resolves them again from repository and organization variables, never from a "
             "cell's Environment; in comment-ops and the plan summary a `shipmate-engine` "
@@ -4468,7 +4472,7 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
         (
             doctor.WARNING,
             "`.github/shipmate.toml` at the commit under examination is not valid: "
-            ".github/shipmate.toml environments.dev.aws.plan.role references GitHub variable "
+            ".github/shipmate.toml identities.dev.aws.plan references GitHub variable "
             "DEV_PLAN_ROLE, which is not set. A reference reads repository and organization "
             "variables; the variables of a cell's <env>-plan, <env>-apply or shared <env> "
             "Environment are never read. "

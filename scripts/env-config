@@ -281,18 +281,24 @@ def read_table_at_default_branch(run=None):
     return parse_table(text)
 
 
-#: The layouts a repository may declare, and the environment-level keys an entry may
-#: hold. `aws` is the only provider implemented; a second one costs a field list here
-#: and one conditional step in each cell action.
+#: The layouts a repository may declare, and the environment-level keys an entry may hold.
 _LAYOUTS = ("tf_vars", "workspace", "folder")
-_AWS_FIELDS = ("region", "role")
-_ENV_KEYS = ("region", "tf_vars", "aws", "shared", "needs", "explicit", "gated")
+_ENV_KEYS = ("region", "tf_vars", "identity", "workloads", "shared", "needs", "explicit", "gated")
 
-#: Reserved at every level: a tier selector, never a provider field.
-_STRUCTURAL = ("plan", "apply", "workloads")
+#: An identity's fields, all under `aws`. Each is a string or a map keyed by workload.
+_ID_FIELDS = ("account", "plan", "apply")
+_ROLE_FIELDS = ("plan", "apply")
+
+#: The only placeholder a role may carry, filled with `str.replace` from a listed workload.
+_PLACEHOLDER = "{workload}"
+_ACCOUNT_ID = re.compile(r"[0-9]{12}")
+
+#: `vars` because a one-key `{ vars = "…" }` is a reference; `role` because the retired
+#: `aws.plan.role = "…"` parses as a map keyed `role`.
+_RESERVED_WORKLOADS = ("vars", "role")
 
 #: Everything the file may declare at its top level.
-_TOP_KEYS = ("schema_version", "layout", "environments", "gate")
+_TOP_KEYS = ("schema_version", "layout", "identities", "environments", "gate")
 
 #: Everything a `[gate]` table may declare.
 _GATE_KEYS = ("approver_team",)
@@ -320,85 +326,6 @@ def _string(value, where):
     if not isinstance(value, str):
         raise SystemExit(f"::error::{where} must be a string, got {type(value).__name__}.")
     return value
-
-
-def _fields(level, env, where, allowed_structural):
-    """The provider fields of one level, refusing anything the schema does not give it."""
-    fields = {}
-    for key, value in level.items():
-        if key in _STRUCTURAL:
-            if key not in allowed_structural:
-                raise SystemExit(
-                    f"::error::environment {env}: {where}.{key} is a reserved key in a "
-                    "position the schema does not give it. plan and apply sit inside a "
-                    "provider block; workloads sits only under plan or apply."
-                )
-            continue
-        if key == "tf_vars":
-            raise SystemExit(
-                f"::error::environment {env}: {where}.tf_vars is not a field the aws provider "
-                "defines. tf_vars sits at environment level: a per-tier one would let plan "
-                "and apply inject different values, and every apply would then fail as "
-                "stale."
-            )
-        if key not in _AWS_FIELDS:
-            raise SystemExit(
-                f"::error::environment {env}: {where}.{key} is not a field the aws "
-                f"provider defines. It defines {', '.join(_AWS_FIELDS)}."
-            )
-        fields[key] = _string(value, f"environment {env}: {where}.{key}")
-    return fields
-
-
-def tiers(block, env, region):
-    """Every tier of one provider block, as `(label, resolved fields)`.
-
-    Block level, then the path, then the workload, each overriding the last field by
-    field -- the merge order resolution repeats. The environment's own `region` inherits
-    into the block, which is the schema's only cross-level default.
-    """
-    base = {"region": region} if region else {}
-    base.update(_fields(_mapping(block, f"environment {env}: aws"), env, "aws", ("plan", "apply")))
-    for path in ("plan", "apply"):
-        where = f"aws.{path}"
-        level = _mapping(block.get(path, {}), f"environment {env}: {where}")
-        merged = {**base, **_fields(level, env, where, ("workloads",))}
-        yield where, merged
-        workloads = _mapping(level.get("workloads", {}), f"environment {env}: {where}.workloads")
-        for name, workload in sorted(workloads.items()):
-            inner = f"{where}.workloads.{name}"
-            level_fields = _fields(
-                _mapping(workload, f"environment {env}: {inner}"), env, inner, ()
-            )
-            yield inner, {**merged, **level_fields}
-
-
-def _check_provider(block, env, region):
-    """Refuse a block that authenticates nothing, or a tier that authenticates
-    incompletely.
-
-    A tier resolving no credential is legal: apply-only cloud access is a supported
-    shape, and its plan path resolves an empty credential and skips the step.
-    """
-    resolved = list(tiers(block, env, region))
-    if not any("role" in fields for _, fields in resolved):
-        raise SystemExit(
-            f"::error::environment {env}: the aws block resolves no role on any tier. "
-            "Give aws, aws.plan, aws.apply or a workload a role, or remove the block."
-        )
-    for label, fields in resolved:
-        if fields.get("role") == "":
-            raise SystemExit(
-                f"::error::environment {env}: {label} sets an empty role, which resolves to "
-                "a skipped credentials step rather than to a credential. Give it a role, or "
-                "remove the key."
-            )
-        if "role" in fields and "region" not in fields:
-            raise SystemExit(
-                f"::error::environment {env}: {label} resolves a role but no region, and "
-                "the aws credentials step requires one. Set aws.region, or the "
-                "environment's own region."
-            )
 
 
 @contextlib.contextmanager
@@ -441,14 +368,12 @@ def _check_vars(entry, env, errors):
             )
 
 
-def _check_flags(entry, env, errors, aws_ok):
-    """`shared`, `explicit` and `gated` are TOML booleans, and a shared entry declares no
-    `aws.plan`, one message per check.
+def _check_flags(entry, env, errors):
+    """`shared`, `explicit` and `gated` are TOML booleans, one message per flag.
 
     A quoted `"true"` reads as set to a person and resolves as unset; for `explicit` that
     puts the environment on a bare `shipmate apply`. A reference resolves to a string, so
-    it refuses here too. The `aws.plan` rule runs only when `aws_ok`, `_check_provider`
-    having proven the `aws` block a mapping.
+    it refuses here too.
     """
     for key in ("shared", "explicit", "gated"):
         if key in entry and not isinstance(entry[key], bool):
@@ -456,12 +381,6 @@ def _check_flags(entry, env, errors, aws_ok):
                 f"::error::environments.{env}.{key} must be a boolean, got "
                 f"{type(entry[key]).__name__}. Write {key} = true or {key} = false, unquoted."
             )
-    if aws_ok and entry.get("shared") is True and "plan" in entry.get("aws", {}):
-        errors.append(
-            f"::error::environment {env} is shared between the plan and apply paths, so "
-            "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
-            "paths. Remove aws.plan, or set shared = false."
-        )
 
 
 def shared_envs(table):
@@ -506,15 +425,25 @@ def ungated_envs(table):
     )
 
 
-def _check_environment(entry, env, errors):
+def _check_environment(entry, env, errors, identities):
     """One entry's own shape, one message per check into `errors`. A non-mapping entry gets
-    its one message and no other check. Nothing here reads context outside the file."""
+    its one message and no other check. Nothing here reads context outside the file.
+
+    `identities` is `(declared, valid)` from `_check_identities`, or `None` when the file's
+    `identities` is not a mapping, which skips every check of how the entry names one.
+    """
     with _gather(errors) as shape:
         _mapping(entry, f"environment {env}")
     if not shape.ok:
         return
     for key in sorted(entry):
-        if key not in _ENV_KEYS:
+        if key == "aws":
+            errors.append(
+                f"::error::environment {env}: aws is retired. Credentials live in "
+                "[identities.<name>] (aws.account, aws.plan, aws.apply), and the environment "
+                'names one with identity = "<name>".'
+            )
+        elif key not in _ENV_KEYS:
             errors.append(
                 f"::error::environment {env}: {key} is not a key this engine implements. "
                 f"An environment holds {', '.join(_ENV_KEYS)}."
@@ -524,12 +453,270 @@ def _check_environment(entry, env, errors):
             _string(entry["region"], f"environment {env}: region")
     if "tf_vars" in entry:
         _check_vars(entry, env, errors)
-    aws_ok = True
-    if "aws" in entry:
-        with _gather(errors) as aws:
-            _check_provider(entry["aws"], env, entry.get("region"))
-        aws_ok = aws.ok
-    _check_flags(entry, env, errors, aws_ok)
+    _check_flags(entry, env, errors)
+    if identities is not None:
+        _check_identity_use(entry, env, errors, *identities)
+
+
+def _not_a_workload(where):
+    return SystemExit(
+        f"::error::{where} is not a workload name: lowercase letters, digits, '-' and '_', "
+        "starting with a letter or digit, and not vars or role."
+    )
+
+
+def _is_workload(name):
+    """The environment-name charset, because a workload name is a Terramate tag too."""
+    return bool(_ENV_ENTRY.fullmatch(name)) and name not in _RESERVED_WORKLOADS
+
+
+def _check_value(name, where, field, value):
+    """One string at an identity's field position: non-empty, an account id where the field
+    is `account`, and no brace but the placeholder in a role."""
+    if value == "":
+        raise SystemExit(
+            f"::error::identities.{name}.{where} is empty. Give it a value, or remove the key."
+        )
+    if field == "account":
+        if not _ACCOUNT_ID.fullmatch(value):
+            raise SystemExit(
+                f"::error::identities.{name}.{where} is not a 12-digit AWS account id in a "
+                "quoted string. A TOML integer drops a leading 0."
+            )
+    elif "{" in value.replace(_PLACEHOLDER, "") or "}" in value.replace(_PLACEHOLDER, ""):
+        raise SystemExit(
+            f"::error::identities.{name}.{where} holds a brace outside {_PLACEHOLDER}, the "
+            "only placeholder."
+        )
+
+
+def _check_map_value(name, field, key, value):
+    """One `key = value` of a field written as a map keyed by workload."""
+    where = f"identities.{name}.aws.{field}.{key}"
+    if key == "role":
+        raise SystemExit(
+            f"::error::{where}: role is not a workload name. The retired "
+            f'aws.{field}.role = "…" is written aws.{field} = "…".'
+        )
+    if not _is_workload(key):
+        raise _not_a_workload(where)
+    if not isinstance(value, str):
+        retired = (
+            f" The retired aws.{field}.workloads.<name>.role is written "
+            f'aws.{field} = {{ <name> = "…" }}.'
+            if key == "workloads"
+            else ""
+        )
+        raise SystemExit(f"::error::{where} must be a string, got {type(value).__name__}.{retired}")
+    _check_value(name, f"aws.{field}.{key}", field, value)
+
+
+def _check_field(name, field, value, errors):
+    """One identity field, a string or a map keyed by workload; each map entry is checked
+    on its own."""
+    if isinstance(value, str):
+        with _gather(errors):
+            _check_value(name, f"aws.{field}", field, value)
+    elif isinstance(value, dict):
+        for key in sorted(value):
+            with _gather(errors):
+                _check_map_value(name, field, key, value[key])
+    else:
+        errors.append(
+            f"::error::identities.{name}.aws.{field} must be a string or a map keyed by "
+            f"workload, got {type(value).__name__}."
+        )
+
+
+def _aws_key_error(name, key):
+    where = f"::error::identities.{name}.aws.{key}"
+    if key == "role":
+        return (
+            f"{where} is retired: one role on both paths hands any-branch plan cells the "
+            "apply role's permissions. Write aws.plan and aws.apply."
+        )
+    if key == "region":
+        return f"{where} is retired: the credentials step uses the environment's region."
+    return (
+        f"{where} is not a field this engine implements. An identity holds aws.account, "
+        "aws.plan and aws.apply."
+    )
+
+
+def _check_identity(identity, name, errors):
+    """One identity's own shape, one message per check into `errors`. A non-mapping
+    identity, or a non-mapping `aws`, gets its one message and no other check."""
+    with _gather(errors) as shape:
+        _mapping(identity, f"identities.{name}")
+    if not shape.ok:
+        return
+    for key in sorted(identity):
+        if key != "aws":
+            errors.append(
+                f"::error::identities.{name}.{key} is not a key this engine implements. An "
+                "identity holds aws.account, aws.plan and aws.apply."
+            )
+    aws = identity.get("aws", {})
+    with _gather(errors) as shape:
+        _mapping(aws, f"identities.{name}.aws")
+    if not shape.ok:
+        return
+    errors.extend(_aws_key_error(name, key) for key in sorted(aws) if key not in _ID_FIELDS)
+    if not any(field in aws for field in _ROLE_FIELDS):
+        errors.append(
+            f"::error::identities.{name} sets neither aws.plan nor aws.apply, so it grants no "
+            "credential. Set one, or remove the identity."
+        )
+    for field in _ID_FIELDS:
+        if field in aws:
+            _check_field(name, field, aws[field], errors)
+
+
+def _check_identities(identities, errors):
+    """Every identity, by name. Returns the names that passed, the only ones an
+    environment's role checks read."""
+    valid = set()
+    for name in sorted(identities):
+        before = len(errors)
+        _check_identity(identities[name], name, errors)
+        if len(errors) == before:
+            valid.add(name)
+    return valid
+
+
+def _varies(aws):
+    """Whether a validated identity's roles depend on the cell's workload."""
+    return any(isinstance(value, dict) or _PLACEHOLDER in value for value in aws.values())
+
+
+def _check_workloads(entry, env, errors):
+    """`workloads`, which only an entry naming an identity may hold. True when the list is
+    absent or sound, so the role checks can read it."""
+    if "workloads" not in entry:
+        return True
+    if "identity" not in entry:
+        errors.append(
+            f"::error::environment {env}: workloads admits workloads to an identity, and the "
+            "environment names none. Name an identity, or remove workloads; without one a "
+            "workload tag is inert."
+        )
+        return False
+    listed = entry["workloads"]
+    if (
+        not isinstance(listed, list)
+        or not listed
+        or not all(isinstance(w, str) for w in listed)
+        or len(set(listed)) != len(listed)
+    ):
+        errors.append(
+            f"::error::environments.{env}.workloads must be a non-empty list of distinct "
+            "workload-name strings."
+        )
+        return False
+    bad = [w for w in listed if not _is_workload(w)]
+    errors.extend(str(_not_a_workload(f"environments.{env}.workloads entry {w!r}")) for w in bad)
+    return not bad
+
+
+def _check_identity_use(entry, env, errors, declared, valid):
+    """How one entry names an identity, and the roles that identity resolves for it."""
+    listed_ok = _check_workloads(entry, env, errors)
+    if "identity" not in entry:
+        return
+    name = entry["identity"]
+    if not isinstance(name, str) or name not in declared:
+        errors.append(
+            f"::error::environment {env}: identity names no [identities.<name>] table; the "
+            f"file declares {', '.join(sorted(declared)) or 'none'}."
+        )
+        return
+    region = entry.get("region")
+    if not isinstance(region, str) or not region:
+        errors.append(
+            f"::error::environment {env} names identity {name} but sets no region, and the "
+            "credentials step requires one. Set region."
+        )
+    if name in valid:
+        _check_named_identity(entry, env, name, declared[name]["aws"], errors, listed_ok)
+
+
+def _check_named_identity(entry, env, name, aws, errors, listed_ok):
+    """The rules that join an entry to the valid identity it names."""
+    varies = _varies(aws)
+    if varies and "workloads" not in entry:
+        errors.append(
+            f"::error::environment {env} names identity {name}, whose roles vary by workload, "
+            'and lists no workloads. List the workloads it admits: workloads = ["…"].'
+        )
+    shared = entry.get("shared") is True
+    if shared and "plan" in aws:
+        errors.append(
+            f"::error::environment {env} is shared between the plan and apply paths, so "
+            f"identity {name}'s aws.plan cannot apply to it: a shared environment uses "
+            "aws.apply on both paths. Name an identity without aws.plan, or set shared = false."
+        )
+    if varies and not listed_ok:
+        return
+    # A non-varying identity resolves one role per path for every cell, list or no list.
+    paths = ("apply",) if shared else _ROLE_FIELDS
+    for workload in entry.get("workloads", []) if varies else [None]:
+        with _gather(errors):
+            _check_account_rule(env, name, aws, paths, workload)
+
+
+def _listed_roles(env, name, aws, paths, workload):
+    """`{path: role}` for one workload, `None` standing for every cell; a listed workload
+    missing from a role map refuses."""
+    roles = {}
+    for path in paths:
+        value = aws.get(path)
+        if isinstance(value, dict):
+            if workload not in value:
+                raise _missing_entry(env, name, path, workload)
+            value = value[workload]
+        if value is not None:
+            roles[path] = value.replace(_PLACEHOLDER, workload or "")
+    return roles
+
+
+def _missing_entry(env, name, field, workload):
+    return SystemExit(
+        f"::error::environment {env} lists workload {workload}, and identities.{name}.aws."
+        f"{field} has no {workload} entry. Add it, or remove {workload} from workloads."
+    )
+
+
+def _check_account_rule(env, name, aws, paths, workload):
+    """One workload's roles, over the paths the entry consults: all names or all ARNs, a name
+    beside an account and an ARN beside none. Refuses at the first break."""
+    roles = _listed_roles(env, name, aws, paths, workload)
+    cell = "every cell" if workload is None else f"workload {workload}"
+    arns = {role.startswith("arn:") for role in roles.values()}
+    if len(arns) > 1:
+        raise SystemExit(
+            f"::error::environment {env}: identities.{name} gives {cell} a role name on one "
+            "path and a full ARN on the other. Write both as ARNs."
+        )
+    if not roles:
+        return
+    path = next(iter(roles))
+    account = aws.get("account")
+    has_account = isinstance(account, str) or (isinstance(account, dict) and workload in account)
+    if arns == {True} and has_account:
+        raise SystemExit(
+            f"::error::environment {env}: identities.{name}.aws.{path} is a full ARN for "
+            f"{cell}, and identities.{name}.aws.account also gives "
+            f"{'every cell' if workload is None else workload} an account. An ARN carries its "
+            "own; remove the account, or write the role as a name."
+        )
+    if arns == {False} and not has_account:
+        if isinstance(account, dict):
+            raise _missing_entry(env, name, "account", workload)
+        raise SystemExit(
+            f"::error::environment {env}: identities.{name}.aws.{path} is a role name for "
+            f"{cell}, and no account is set for it. Set identities.{name}.aws.account, or "
+            "write the role as a full ARN."
+        )
 
 
 def _check_dry_coverage(environments, matrix_envs):
@@ -752,15 +939,15 @@ def _check_version(table):
         )
 
 
-def _check_entries(environments, errors):
+def _check_entries(environments, errors, identities):
     """Every entry name, then every entry, then each `needs` list, then the order they
     declare -- the cycle check only when every list passed. A non-mapping entry's `needs`
-    is not read."""
+    is not read. `identities` is as `_check_environment` takes it."""
     for env in sorted(environments):
         with _gather(errors):
             _check_env_name(env, f"environments.{env}", "an entry name")
     for env in sorted(environments):
-        _check_environment(environments[env], env, errors)
+        _check_environment(environments[env], env, errors, identities)
     order = {}
     lists_ok = True
     for env, entry in sorted(environments.items()):
@@ -779,11 +966,14 @@ def validate_structure(table):
     error: its message is one `::error::` line per refused check, in check order.
 
     Every independent check runs. A check whose input an earlier check refused is skipped: a
+    non-mapping `identities` skips every identity check and every entry's `identity` and
+    `workloads` checks, a refused identity the role checks of each entry naming it, a
     non-mapping `environments` skips every entry, a non-mapping entry its own checks and its
-    `needs`, a non-mapping `tf_vars` its per-name checks, a refused `aws` block the
-    shared-with-`aws.plan` rule, a refused `needs` list the cycle check, and a non-mapping
-    `[gate]` its per-key and `approver_team` checks. A tier-resolving `aws` check stops at its
-    first refusal.
+    `needs`, a non-mapping `tf_vars` its per-name checks, a refused `needs` list the cycle
+    check, and a non-mapping `[gate]` its per-key and `approver_team` checks. The role checks
+    of one workload stop at its first refusal.
+
+    Identities are checked before entries, each once, whatever the number of entries naming it.
 
     Every top-level field, so a "valid configuration" verdict cannot hide an ordering
     or flag error until an apply reads it. `doctor` and `gate-config` validate with
@@ -793,13 +983,12 @@ def validate_structure(table):
     `layout` is required: it is the only source of a cell's environment identity, so a
     table without one leaves every cell with nothing to run as.
     """
-    errors = []
-    for key in sorted(table):
-        if key not in _TOP_KEYS:
-            errors.append(
-                f"::error::{key} is not a setting this engine implements. "
-                f"{CONFIG_PATH} holds {', '.join(_TOP_KEYS)}."
-            )
+    errors = [
+        f"::error::{key} is not a setting this engine implements. "
+        f"{CONFIG_PATH} holds {', '.join(_TOP_KEYS)}."
+        for key in sorted(table)
+        if key not in _TOP_KEYS
+    ]
     if "schema_version" in table:
         with _gather(errors):
             _check_version(table)
@@ -817,11 +1006,15 @@ def validate_structure(table):
         errors.append(
             f"::error::layout is {table['layout']!r}; it must be one of {', '.join(_LAYOUTS)}."
         )
+    identities = table.get("identities", {})
+    with _gather(errors) as shape:
+        _mapping(identities, "identities")
+    identities = (identities, _check_identities(identities, errors)) if shape.ok else None
     environments = table.get("environments", {})
     with _gather(errors) as shape:
         _mapping(environments, "environments")
     if shape.ok:
-        _check_entries(environments, errors)
+        _check_entries(environments, errors, identities)
     _check_gate(table.get("gate", {}), errors)
     if errors:
         raise SystemExit("\n".join(errors))
@@ -860,66 +1053,100 @@ def _derived(layout, env, entry):
 
 
 def _consulted(table, env, path):
-    """`(shared, tier)`: whether `env` is shared, and the tier a cell on `path` consults --
-    `apply` on both paths when shared. `resolve` and `unlisted_workload` must agree on it."""
+    """`(shared, path)`: whether `env` is shared, and the path whose role a cell on `path`
+    takes -- `apply` on both paths when shared. `resolve` and `resolved_roles` must agree."""
     shared = env in shared_envs(table)
     return shared, "apply" if shared else path
+
+
+def _pick(value, workload):
+    """A field's value for one workload: the string itself, or the map's entry, or ""."""
+    if isinstance(value, dict):
+        return value.get(workload, "")
+    return value or ""
+
+
+def _role(identity, entry, path, workload):
+    """The role ARN a cell of `workload` assumes on `path`, the path already switched for a
+    shared environment, or "".
+
+    A varying identity gives a workload off the entry's list, or an untagged cell, no role:
+    `{workload}` is never filled from a tag the default branch did not list. A name becomes
+    `arn:aws:iam::<account>:role/<name>`; a value starting `arn:` is used as written.
+    """
+    aws = identity["aws"]
+    if _varies(aws) and workload not in entry.get("workloads", ()):
+        return ""
+    role = _pick(aws.get(path), workload).replace(_PLACEHOLDER, workload)
+    if not role or role.startswith("arn:"):
+        return role
+    account = _pick(aws.get("account"), workload)
+    return f"arn:aws:iam::{account}:role/{role}" if account else ""
+
+
+def outside_workloads(table, env, workload):
+    """The entry's `workloads`, sorted, when `workload` is a tag that list does not name;
+    else `None`.
+
+    Only an entry naming an identity and writing the list refuses a tag. An untagged cell, an
+    entry naming no identity (its tag is inert) and an entry without a list are never outside.
+    """
+    entry = table.get("environments", {}).get(env, {})
+    listed = entry.get("workloads")
+    if not workload or "identity" not in entry or listed is None or workload in listed:
+        return None
+    return sorted(listed)
 
 
 def resolve(table, env, path, workload):
     """What one cell runs with: `role_arn`, `cred_region`, `tf_vars`, `config_path`,
     `env_binding`.
 
-    `path` is the calling detect's tier, never inferred; a shared environment resolves
-    `aws.apply` on both paths, and `config_path` reports the tier actually consulted
-    rather than the one requested. `env_binding` is the GitHub Environment the cell's job
-    binds, taken from `env_names`: the bare `env` when shared, `<env>-<path>` otherwise.
-    A `path` other than `plan` or `apply` raises KeyError. The table chooses; a
-    reference in it was resolved from a repository or organization variable by
-    `parse_table`. An environment with no entry resolves an empty role and the caller skips
-    the credentials step.
+    `path` is the calling detect's path, never inferred; a shared environment resolves
+    `aws.apply` on both paths, and `config_path` reports the path actually consulted rather
+    than the one requested. `env_binding` is the GitHub Environment the cell's job binds,
+    taken from `env_names`: the bare `env` when shared, `<env>-<path>` otherwise. A `path`
+    other than `plan` or `apply` raises KeyError. A reference in the table was resolved from
+    a repository or organization variable by `parse_table`.
 
-    The workload tier is keyed by the raw `workload` tag value, never by a normalized
-    form of it: `net-edge` and `net_edge` are two workloads. The environment's own `tf_vars`
-    merges last, over the derivation.
+    The role comes from the identity the entry names. An empty `role_arn` means the caller
+    skips the credentials step: no entry, no identity, no role for the path, a tag outside
+    the entry's `workloads`, or a varying identity and a tag it does not list. It never raises
+    on a validated table, including for a completed cell the table no longer lists. The
+    workload is matched as written: `net-edge` and `net_edge` are two workloads. The
+    environment's own `tf_vars` merges last, over the derivation.
     """
     environments = _mapping(table.get("environments", {}), "environments")
     entry = _mapping(environments.get(env, {}), f"environment {env}")
     shared, config_path = _consulted(table, env, path)
     names = {role: name for name, role in env_names(env, {env} if shared else set())}
-    fields = {}
-    if "aws" in entry:
-        resolved = dict(tiers(entry["aws"], env, entry.get("region")))
-        label = f"aws.{config_path}"
-        inner = f"{label}.workloads.{workload}"
-        fields = resolved[inner] if inner in resolved else resolved.get(label, {})
+    role = ""
+    if "identity" in entry and outside_workloads(table, env, workload) is None:
+        role = _role(table["identities"][entry["identity"]], entry, config_path, workload)
     return {
-        "role_arn": fields.get("role", ""),
-        "cred_region": fields.get("region", ""),
+        "role_arn": role,
+        "cred_region": entry.get("region", "") if "identity" in entry else "",
         "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("tf_vars", {})},
         "config_path": config_path,
         "env_binding": names["shared" if shared else path],
     }
 
 
-def unlisted_workload(table, env, path, workload):
-    """`(label, keys)` when the cell must be refused, else None.
+def resolved_roles(table):
+    """`(env, path, workload, role_arn)` for every environment naming an identity, by env,
+    then `plan` before `apply`, then the entry's `workloads` in written order.
 
-    Refused when `workload` is non-empty, is not a key of the consulted tier's
-    `workloads`, that tier lists at least one workload, and the tier resolves no role
-    after inheritance: the cell would run with no cloud credentials. `label` is the tier
-    `resolve` consults (`aws.apply` on both paths for a shared environment) and `keys`
-    its sorted workload names. An untagged cell, a tier that resolves a role, an
-    entry without an `aws` block and an environment without an entry are never refused.
+    A non-varying identity gives one row per path with workload "", standing for every cell.
+    A row whose `role_arn` is "" is a path the identity grants no credential on. Reads only a
+    validated table.
     """
-    environments = _mapping(table.get("environments", {}), "environments")
-    entry = _mapping(environments.get(env, {}), f"environment {env}")
-    if not workload or "aws" not in entry:
-        return None
-    label = f"aws.{_consulted(table, env, path)[1]}"
-    resolved = dict(tiers(entry["aws"], env, entry.get("region")))
-    prefix = f"{label}.workloads."
-    keys = sorted(name[len(prefix) :] for name in resolved if name.startswith(prefix))
-    if not keys or workload in keys or "role" in resolved[label]:
-        return None
-    return label, keys
+    rows = []
+    for env, entry in sorted(table.get("environments", {}).items()):
+        if "identity" not in entry:
+            continue
+        identity = table["identities"][entry["identity"]]
+        workloads = entry.get("workloads", []) if _varies(identity["aws"]) else [""]
+        for path in _ROLE_FIELDS:
+            consulted = _consulted(table, env, path)[1]
+            rows.extend((env, path, w, _role(identity, entry, consulted, w)) for w in workloads)
+    return rows

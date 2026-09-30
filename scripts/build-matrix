@@ -274,30 +274,32 @@ def stamp_rows(cells, table, tier):
     return rows
 
 
-def refuse_workload_gaps(rows, table, tier):
-    """`SystemExit` when a row's `workload/<name>` tag the consulted tier does not list, and
-    that tier has no role to fall back to (`env-config`'s `unlisted_workload`): the cell would
-    otherwise run with no cloud credentials. The plan tier checks the apply tier too, for the
-    stacks the plan path plans.
+def refuse_workload_gaps(rows, table):
+    """`SystemExit` naming every row whose `workload/<name>` tag its environment's `workloads`
+    list does not name (`env-config`'s `outside_workloads`), in row order. Membership is per
+    environment, so the plan and apply paths refuse the same rows.
 
     Each caller passes only the rows it will run. A completed, excluded or held cell is not
     refused: a table-only change can make an applied cell look misconfigured, and refusing
     over it would strand every pull request that planned it. `test_workload_gap_guard.py`
     pins each call site.
     """
-    paths = (tier, "apply") if tier == "plan" else (tier,)
-    for cell, path in ((c, p) for c in rows for p in paths):
-        refused = ec.unlisted_workload(table, cell["environment"], path, cell["workload"])
-        if refused:
-            label, keys = refused
-            raise SystemExit(
-                f"::error::{cell['stack']} in {cell['environment']} carries "
-                f"workload/{cell['workload']}, which {label}.workloads does not list (it lists: "
-                f"{', '.join(keys)}), and {label} sets no role to fall back to. The cell would "
-                "run with no cloud credentials. Retag the stack, or add the workload to "
-                f"{ec.CONFIG_PATH} on the default branch, which is where this table is read "
-                "from: merge the workload entry there on its own pull request first."
+    items = []
+    for row in rows:
+        env, workload = row["environment"], row["workload"]
+        listed = ec.outside_workloads(table, env, workload)
+        if listed is not None:
+            items.append(
+                f"{row['stack']} in {env} (workload/{workload}; {env} lists {', '.join(listed)})"
             )
+    if items:
+        raise SystemExit(
+            f"::error::{len(items)} cell(s) carry a workload tag their environment's workloads "
+            f"list does not name: {'; '.join(items)}. A listed workload is the only one the "
+            "default branch grants a role to. Retag the stack, or add the workload to "
+            f"environments.<env>.workloads in {ec.CONFIG_PATH} on the default branch, which is "
+            "where this table is read from: merge it there on its own pull request first."
+        )
 
 
 def fork_pr_error(repository, head_repo, no_pull_request: bool):
@@ -479,7 +481,7 @@ def main():
     # report every unchanged environment as an unused table entry on every plan.
     table = env_config(cells, set(stacks_by_env) if all_stacks else None)
     cells = stamp_rows(cells, table, "plan")
-    refuse_workload_gaps(cells, table, "plan")
+    refuse_workload_gaps(cells, table)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")

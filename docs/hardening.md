@@ -551,10 +551,13 @@ no split of its own.
   ```toml
   layout = "tf_vars"
 
+  [identities.prod]
+  aws.plan  = "arn:aws:iam::9817:role/prod-plan"
+  aws.apply = "arn:aws:iam::9817:role/prod-apply"
+
   [environments.prod]
-  region         = "eu-west-1"
-  aws.plan.role  = "arn:aws:iam::9817:role/prod-plan"
-  aws.apply.role = "arn:aws:iam::9817:role/prod-apply"
+  region   = "eu-west-1"
+  identity = "prod"
   ```
 
   No — the plan tier inherits the apply role:
@@ -562,9 +565,13 @@ no split of its own.
   ```toml
   layout = "tf_vars"
 
+  [identities.prod]
+  aws.plan  = "arn:aws:iam::9817:role/prod-apply"
+  aws.apply = "arn:aws:iam::9817:role/prod-apply"
+
   [environments.prod]
   region   = "eu-west-1"
-  aws.role = "arn:aws:iam::9817:role/prod-apply"
+  identity = "prod"
   ```
 
   Nothing refuses the shorthand: a block-level role is a legitimate shape for an

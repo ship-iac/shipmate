@@ -287,8 +287,8 @@ def run_unlock(repo, env, head):
     request that does not exist. The queue is narrowed before any cell is built, so every
     refusal `build_matrix`, `stamp_rows` and `refuse_workload_gaps` carry sees only the
     queued stacks: the matrix limit, the reserved-path and slug-collision guards, two
-    `workload/*` tags, and a workload tag its tier does not list with no role to fall back
-    to. None of them can affect a lock release, and a stack outside the queue is not
+    `workload/*` tags, and a workload tag its environment's `workloads` list does not name.
+    None of them can affect a lock release, and a stack outside the queue is not
     released, so none of them may make `env` unable to unlock.
 
     `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
@@ -303,7 +303,7 @@ def run_unlock(repo, env, head):
     pending = bm.build_matrix([env], {env: queued}, tags_by_stack)
     table = bm.env_config(pending, set(stacks_by_env))
     pending = bm.stamp_rows(pending, table, "apply")
-    bm.refuse_workload_gaps(pending, table, "apply")
+    bm.refuse_workload_gaps(pending, table)
     print(
         f"::notice title=apply-detect::mode=unlock env={env} head={head} "
         f"cells={len(in_env)} pending={len(pending)}"
@@ -367,7 +367,7 @@ def main():
     cells = bm.stamp_rows(cells, table, "apply")
 
     pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
-    bm.refuse_workload_gaps(pending, table, "apply")
+    bm.refuse_workload_gaps(pending, table)
 
     waves = wv.assign_waves(wv.stack_levels(deps), pending)
     print(dag_shape_notice(deps))

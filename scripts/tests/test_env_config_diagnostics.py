@@ -36,8 +36,8 @@ UNUSED_TWO = (
 TABLE = {
     "layout": "folder",
     "environments": {
-        "dev-eu": {"aws": {"region": "eu-west-1", "apply": {"role": "arn:aws:iam::1:role/a"}}},
-        "dev-us": {"aws": {"region": "us-east-1", "apply": {"role": "arn:aws:iam::1:role/b"}}},
+        "dev-eu": {"region": "eu-west-1"},
+        "dev-us": {"region": "us-east-1"},
     },
 }
 

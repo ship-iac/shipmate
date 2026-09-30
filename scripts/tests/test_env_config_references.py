@@ -20,18 +20,19 @@ layout = "tf_vars"
 [gate]
 approver_team = { vars = "APPROVERS" }
 
+[identities.prod]
+aws.plan = { vars = "PROD_PLAN_ROLE" }
+aws.apply = { app = "arn:aws:iam::1:role/apply", net-edge = { vars = "NET_EDGE_ROLE" } }
+
 [environments.prod]
 region = "eu-west-1"
 needs = [{ vars = "FIRST_ENV" }, "stage"]
-aws.plan.role = "arn:aws:iam::1:role/plan"
-aws.apply.role = { vars = "PROD_APPLY_ROLE" }
-aws.apply.workloads.net-edge.role = { vars = "NET_EDGE_ROLE" }
 """
 
 _VARIABLES = {
     "FIRST_ENV": "dev",
     "APPROVERS": "platform",
-    "PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply",
+    "PROD_PLAN_ROLE": "arn:aws:iam::1:role/plan",
     "NET_EDGE_ROLE": "arn:aws:iam::1:role/net-edge",
     "UNUSED": "never-read",
 }
@@ -39,28 +40,27 @@ _VARIABLES = {
 _RESOLVED = {
     "layout": "tf_vars",
     "gate": {"approver_team": "platform"},
-    "environments": {
+    "identities": {
         "prod": {
-            "region": "eu-west-1",
-            "needs": ["dev", "stage"],
             "aws": {
-                "plan": {"role": "arn:aws:iam::1:role/plan"},
+                "plan": "arn:aws:iam::1:role/plan",
                 "apply": {
-                    "role": "arn:aws:iam::1:role/apply",
-                    "workloads": {"net-edge": {"role": "arn:aws:iam::1:role/net-edge"}},
+                    "app": "arn:aws:iam::1:role/apply",
+                    "net-edge": "arn:aws:iam::1:role/net-edge",
                 },
-            },
+            }
         }
     },
+    "environments": {"prod": {"region": "eu-west-1", "needs": ["dev", "stage"]}},
 }
 
-_ROLE_REF = '[environments.prod]\naws.apply.role = { vars = "PROD_APPLY_ROLE" }\n'
+_ROLE_REF = '[identities.prod]\naws.apply = { vars = "PROD_APPLY_ROLE" }\n'
 
 
 def test_every_reference_is_replaced_by_its_value():
-    """Covers an environment tier, a list item, a workload tier and `gate.approver_team`.
+    """Covers an identity field, a list item, a workload map value and `gate.approver_team`.
     Reddens on returning the raw table, on recursing into dicts only (the `needs` item stays
-    a mapping), and on stopping at depth 3 (the workload and apply roles stay mappings)."""
+    a mapping), and on stopping at depth 4 (the workload map value stays a mapping)."""
     assert ec.parse_table(_TABLE, _VARIABLES) == _RESOLVED
 
 
@@ -101,17 +101,15 @@ def test_a_resolved_needs_value_is_name_checked(value, message):
 
 
 def test_a_mapping_that_merely_contains_vars_is_data():
-    """An environment and a workload named `vars` are ordinary data. Reddens on detecting a
-    reference as "a dict containing `vars`"."""
+    """An environment named `vars`, and a two-key map holding `vars`, are ordinary data.
+    Reddens on detecting a reference as "a dict containing `vars`"."""
     text = (
         '[environments.vars]\nregion = "eu-west-1"\n'
-        '[environments.prod.aws.apply.workloads.vars]\nrole = "r"\n'
+        '[identities.prod]\naws.apply = { vars = "r", core = "s" }\n'
     )
     assert ec.parse_table(text, {}) == {
-        "environments": {
-            "vars": {"region": "eu-west-1"},
-            "prod": {"aws": {"apply": {"workloads": {"vars": {"role": "r"}}}}},
-        }
+        "environments": {"vars": {"region": "eu-west-1"}},
+        "identities": {"prod": {"aws": {"apply": {"vars": "r", "core": "s"}}}},
     }
 
 
@@ -130,7 +128,7 @@ def _refusal(text, variables):
 
 
 _UNSET_REFUSAL = (
-    "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+    "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
     "variable PROD_APPLY_ROLE, which is not set. A reference reads repository and "
     "organization variables; the variables of a cell's <env>-plan, <env>-apply or shared "
     "<env> Environment are never read."
@@ -145,16 +143,16 @@ def test_an_unset_variable_refuses_naming_the_path_and_name():
 def test_an_empty_variable_refuses():
     """Reddens on dropping the empty check."""
     assert _refusal(_ROLE_REF, {"PROD_APPLY_ROLE": ""}) == (
-        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
         "variable PROD_APPLY_ROLE, which is set to an empty value."
     )
 
 
 def test_a_lowercase_name_refuses_and_names_the_uppercase_spelling():
     """Reddens on uppercasing the name before the lookup, which resolves it silently."""
-    text = '[environments.prod]\naws.apply.role = { vars = "prod_apply_role" }\n'
+    text = '[identities.prod]\naws.apply = { vars = "prod_apply_role" }\n'
     assert _refusal(text, {"PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply"}) == (
-        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
         'variable "prod_apply_role"; GitHub variable names are uppercase. Write '
         '{ vars = "PROD_APPLY_ROLE" }.'
     )
@@ -175,9 +173,9 @@ def test_a_name_outside_the_charset_refuses_naming_the_rule(toml_name, name, ren
     TOML `\\n` in it cannot split the `::error::` line. Reddens on dropping the charset check:
     `""`, `A-B` and `1ROLE` then resolve to the value set for them and `a-b` refuses as
     lowercase, suggesting `A-B`. Reddens on rendering the name raw instead of with `!r`."""
-    text = f'[environments.prod]\naws.apply.role = {{ vars = "{toml_name}" }}\n'
+    text = f'[identities.prod]\naws.apply = {{ vars = "{toml_name}" }}\n'
     assert _refusal(text, {name: "v", name.upper(): "v"}) == (
-        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
         f"variable {rendered}, which is not a GitHub variable name ([A-Z_][A-Z0-9_]*)."
     )
 
@@ -193,7 +191,7 @@ def test_no_reference_never_reads_the_environment(monkeypatch):
 
 
 _NO_VARIABLES_REFUSAL = (
-    "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+    "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
     "variable PROD_APPLY_ROLE, but this step received no GitHub variables: the engine did not "
     "pass github-vars to this step, or the repository reaches no variables at all."
 )
@@ -233,17 +231,15 @@ def test_references_lists_every_reference_sorted_by_path():
     """Reddens on dropping list recursion (the `environments.prod.needs[0]` row
     disappears)."""
     assert ec.references(tomllib.loads(_TABLE)) == [
-        ("environments.prod.aws.apply.role", "PROD_APPLY_ROLE"),
-        ("environments.prod.aws.apply.workloads.net-edge.role", "NET_EDGE_ROLE"),
         ("environments.prod.needs[0]", "FIRST_ENV"),
         ("gate.approver_team", "APPROVERS"),
+        ("identities.prod.aws.apply.net-edge", "NET_EDGE_ROLE"),
+        ("identities.prod.aws.plan", "PROD_PLAN_ROLE"),
     ]
 
 
 _ENUMERATION = '{"PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply"}'
-_ROLE_RESOLVED = {
-    "environments": {"prod": {"aws": {"apply": {"role": "arn:aws:iam::1:role/apply"}}}}
-}
+_ROLE_RESOLVED = {"identities": {"prod": {"aws": {"apply": "arn:aws:iam::1:role/apply"}}}}
 
 
 def test_read_table_resolves_references(monkeypatch):

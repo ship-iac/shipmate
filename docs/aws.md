@@ -132,11 +132,14 @@ this is what it looks like for the AWS sample:
 ```toml
 layout = "tf_vars"
 
+[identities.dev]
+aws.plan  = "arn:aws:iam::9817:role/shipmate-plan"
+aws.apply = { app = "arn:aws:iam::9817:role/shipmate-apply", net-edge = "arn:aws:iam::9817:role/net-edge" }
+
 [environments.dev-eu]
-region         = "eu-west-1"
-aws.plan.role  = "arn:aws:iam::9817:role/shipmate-plan"
-aws.apply.role = "arn:aws:iam::9817:role/shipmate-apply"
-aws.apply.workloads.net-edge.role = "arn:aws:iam::9817:role/net-edge"
+region    = "eu-west-1"
+identity  = "dev"
+workloads = ["app", "net-edge"]
 ```
 
 Six things to know beyond the schema:
