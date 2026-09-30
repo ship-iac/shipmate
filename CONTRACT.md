@@ -392,13 +392,14 @@ never used.
 A repository declares its environments, their regions and the credentials they
 name in `.github/shipmate.toml`, read with `tomllib` from the standard library.
 The file is required, and so is `layout`: it is the only source of a cell's
-environment identity (the layout's variables), so a repository without one has nothing for its cells to run as. The
-two absences refuse at the same site, `scripts/env-config` (§Refusals) — a file
-absent from the default branch, and a file that parses but declares no `layout`.
+environment identity (the layout's variables), so a repository without one has
+nothing for its cells to run as. The two absences refuse at the same site,
+`scripts/env-config` (§Refusals) — a file absent from the default branch, and a
+file that parses but declares no `layout`.
 
 The file holds five top-level settings and no others: `schema_version`,
-`layout`, `identities`, `environments`, `gate`. Any other
-top-level key refuses, naming the offending key and the five that are allowed. A key a *newer* engine
+`layout`, `identities`, `environments`, `gate`. Any other top-level key refuses,
+naming the offending key and the five that are allowed. A key a *newer* engine
 implements is refused by an older one on that same check, which is why a
 repository moves its pin before it adds a key.
 
@@ -697,9 +698,10 @@ tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
 ### Refusals
 
 Every condition below refuses at detect, before any cell starts, and one
-refusal names every structural error the file holds. All but the `tf_vars` coverage row and
-the workload-tag row are judged on the file alone, so `shipmate doctor` reports
-them on the pull request that introduces them.
+refusal names every structural error the file holds. `shipmate doctor` reports
+every structural row, the ones judged on the file alone, on the pull request that
+introduces it. The absent-file, interpreter, `tf_vars` coverage, workload-tag and
+variable rows depend on the run as well as the file, so they are not structural.
 
 | Condition | Why |
 |---|---|
@@ -753,9 +755,9 @@ an empty role, and the cell's credentials step is skipped explicitly. A
 shared-mode environment resolves `aws.apply` on both paths. Each row carries
 what its detect resolved: `role_arn`, `cred_region` (the entry's `region` when it
 names an identity, else empty), `tf_vars`, `config_path` — the path actually
-consulted, which is diagnostic and read by nothing — and `env_binding`, the GitHub Environment the cell's job binds: the
-bare `<env>` when shared, `<env>-plan` or `<env>-apply` for the calling path
-otherwise.
+consulted, which is diagnostic and read by nothing — and `env_binding`, the
+GitHub Environment the cell's job binds: the bare `<env>` when shared,
+`<env>-plan` or `<env>-apply` for the calling path otherwise.
 
 **`shipmate doctor` lists the role each environment resolves**, one notice per
 environment naming an identity: `` `<env>` resolves these roles at the commit

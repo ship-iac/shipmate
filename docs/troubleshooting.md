@@ -548,9 +548,9 @@ an environment deleted between the pre-flight and the wave that binds it.
 
 ### `.github/shipmate.toml` is rejected, or its settings do not take effect
 
-Every failure below refuses at `detect`, before any cell starts, and every one
-of them is reported against the **default branch's** copy of the file — that is
-the only copy execution reads.
+Every row below but the `workloads lists` warning refuses at `detect`, before
+any cell starts, and every one of them is reported against the **default
+branch's** copy of the file — that is the only copy execution reads.
 
 | What `detect` says | What it means |
 | --- | --- |

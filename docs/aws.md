@@ -172,7 +172,9 @@ Beyond the schema:
   that scan the whole tree warn about a listed workload no stack tags.
 - **Several environments may name one identity.** One edit to
   `[identities.dev]` then retargets all of them; `shipmate doctor`'s roles lines
-  on the pull request list what each environment resolves.
+  on the pull request list what each environment resolves. A referenced role
+  there shows the value comment-ops resolves: a `shipmate-engine` Environment
+  variable of the same name wins in comment-ops, and never in a cell.
 - **A shared environment resolves `aws.apply` on both paths**, because it is one
   environment with one role. A shared environment naming an identity that sets
   `aws.plan` is refused rather than silently ignored.
