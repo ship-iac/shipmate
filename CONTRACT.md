@@ -2512,13 +2512,15 @@ shipmate writes into the consumer's own checkout, none of those belong in a
 commit, and a `terramate run` of the consumer's own that omits `--no-recursive`
 refuses on them (`git-untracked` *does* fire there).
 
-`.terraform.lock.hcl` is the consumer's call, not shipmate's: committing it is
-OpenTofu's own recommendation for pinning provider versions and hashes, and a
-cell tolerates it either way — `init -reconfigure` may rewrite it, but that is a
-tracked-file change and `git-uncommitted` never runs on a cell.
+**Lock files and the provider cache.** `.terraform.lock.hcl` is not in that
+list: commit it. It is OpenTofu's own recommendation for pinning provider
+versions and hashes, and the provider cache serves only stacks that commit it.
+A cell runs without one. `init -reconfigure` may rewrite a committed lock; that
+is a tracked-file change and `git-uncommitted` never runs on a cell.
+`repo-example-folders`, `repo-example-workspaces` and `repo-example-stacks-aws`
+gitignore it and show the no-cache path.
 
-The lock file also decides the provider cache (`TF_PLUGIN_CACHE_DIR`, set by
-`actions/setup`):
+The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
 
 - `plan-cell`, `drift-cell` and `apply-cell` restore it before `init`, keyed on
   the runner OS, the runner architecture and the hash of the stack's own
@@ -2526,16 +2528,37 @@ The lock file also decides the provider cache (`TF_PLUGIN_CACHE_DIR`, set by
   share one entry.
 - Only `drift-cell` saves it: drift runs default-branch code, while plan and
   apply cells run pull-request HCL. It saves after a restore that missed, and
-  only when `init` left a file in the cache.
-- A stack without a committed lock file restores and saves nothing: OpenTofu
-  ignores the cache for a provider no lock file names, and downloads it again.
-- A repository that never runs drift never fills the cache.
+  only when `init` left a file in the cache. A repository that never runs drift
+  never fills the cache.
 - An entry is keyed on its path, which lives under `RUNNER_TEMP`: a cell on a
   runner image whose `RUNNER_TEMP` differs from the drift runner's misses and
   downloads.
 - The lock verifies every cached package at every reader. A cached package that
   does not match fails `init` with `does not match the content of the downloaded
   package` ([`docs/troubleshooting.md`](docs/troubleshooting.md)).
+
+A lock serves the cache only when, for each provider, it names the address
+OpenTofu resolves the stack's `source` to (`registry.opentofu.org/hashicorp/aws`
+for `hashicorp/aws`) and carries the `h1:` hash for the runner's platform
+(`linux_amd64`, or `linux_arm64` on an ARM runner). A `tofu init` or
+`tofu providers lock` that reads the OpenTofu registry records every
+platform's `h1:`. Otherwise OpenTofu restores the entry and downloads the
+provider anyway: a lock written by Terraform (`registry.terraform.io`), one
+holding only `zh:` hashes, and one holding only another platform's `h1:`, as a
+`tofu init` through a provider mirror on a developer machine writes it.
+
+Why the cache depends on a committed lock:
+
+- OpenTofu reuses a cached provider only after checking it against the lock's
+  `h1:` hash for the runner's platform. With no such hash it downloads again,
+  whatever `required_providers` pins.
+- The checking lock must come from Git, where it is reviewed. A lock taken from
+  the cache, or `TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE`, makes the cache
+  check itself: a planted entry then installs a tampered provider
+  unauthenticated.
+- The engine cannot write the lock in the cell: `tofu providers lock` downloads
+  each provider to hash it and leaves the cache empty, so `init` would download
+  a second time.
 
 ## Env apply order
 

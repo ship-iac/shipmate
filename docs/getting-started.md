@@ -47,6 +47,11 @@ does with that wiring.
   untracked, they show up as something to commit, and a `terramate run` of
   your own that omits `--no-recursive` refuses on them (`git-untracked`).
   [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards states the rule.
+- **Each stack's `.terraform.lock.hcl` committed.** It pins provider versions,
+  and without it every cell downloads its providers. Write it with `tofu init`
+  against the OpenTofu registry; a lock from Terraform, or from a provider
+  mirror on another platform, does not serve the cache. [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards,
+  "Lock files and the provider cache", has the conditions and the reasoning.
 
 The four tiers are ordered and each depends on the one before. Tier 1 alone is
 not a working installation; read tier 2's first paragraphs before deciding to

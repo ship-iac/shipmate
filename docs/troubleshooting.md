@@ -721,8 +721,8 @@ to recover from a transient cause.
 content does not match the hash in the stack's `.terraform.lock.hcl`. The
 cache entry is corrupt or was altered. Every cell whose lock file matches that
 entry fails the same way until the lock file changes or the entry is deleted
-([`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Consumer gitignore
-requirement").
+([`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Lock files and the
+provider cache").
 
 1. Read the key from the cell's `Restore provider cache` step log. It starts
    `tofu-providers-`.
