@@ -226,12 +226,14 @@ prefix.
 The documented fences in [`getting-started.md`](getting-started.md) and
 [`drift.md`](drift.md) pass no `runs_on:`, so every job runs on the
 `ubuntu-latest` default. Only the `plan` and `drift` jobs accept `runs_on:`.
-The three credential-free samples pass `runs_on: ubuntu-slim` to both, which
-suits them: their cells download no provider. An AWS repository does — every
-cell pulls `hashicorp/aws` — and if `.terraform.lock.hcl` is gitignored, as it
-is in `repo-example-stacks-aws`, every `init -reconfigure` re-resolves it from
-scratch. On a cloud repository weigh the slim image against that download
-before passing it to `plan` or `drift`.
+The three credential-free samples pass `runs_on: ubuntu-slim` to both; their
+cells download only `hashicorp/random`. An AWS repository's cells pull
+`hashicorp/aws`. Commit each stack's `.terraform.lock.hcl` to have the provider
+cache serve it ([`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards,
+"Consumer gitignore requirement"). With the lock gitignored, as it is in
+`repo-example-stacks-aws`, every `init -reconfigure` downloads the provider
+again. On a cloud repository weigh the slim image against that download before
+passing it to `plan` or `drift`.
 
 ## The sample's workload
 

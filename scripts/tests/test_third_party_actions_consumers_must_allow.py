@@ -20,7 +20,6 @@ from _loader import ACTIONS, WORKFLOWS, action_yaml, workflow_yaml
 #: What `docs/hardening.md` and every consumer repository's allowed-actions list name. Changing
 #: this constant alone does not make a new action work; the failure message says what does.
 THIRD_PARTY = {
-    "actions/cache",
     "actions/cache/restore",
     "actions/cache/save",
     "actions/checkout",

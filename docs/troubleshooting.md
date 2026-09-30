@@ -715,6 +715,21 @@ unreachable. The install also fails at unpacking, at its version check, and on
 a 404, and the `Install Terramate` step log names which. Re-run the failed job
 to recover from a transient cause.
 
+### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
+
+`tofu init` refused a provider package restored from the provider cache: its
+content does not match the hash in the stack's `.terraform.lock.hcl`. The
+cache entry is corrupt or was altered. Every cell whose lock file matches that
+entry fails the same way until the lock file changes or the entry is deleted
+([`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Consumer gitignore
+requirement").
+
+1. Read the key from the cell's `Restore provider cache` step log. It starts
+   `tofu-providers-`.
+2. Delete the entry: `gh cache delete <key> --repo <owner>/<repo>`.
+3. Re-run the failed jobs. The cells download their providers, and the next
+   drift run saves a fresh entry.
+
 ### `shipmate / gate` never goes green
 
 Five distinct causes, in the order worth checking.

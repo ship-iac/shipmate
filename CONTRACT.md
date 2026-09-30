@@ -2509,10 +2509,27 @@ refuses on them (`git-untracked` *does* fire there).
 `.terraform.lock.hcl` is the consumer's call, not shipmate's: committing it is
 OpenTofu's own recommendation for pinning provider versions and hashes, and a
 cell tolerates it either way — `init -reconfigure` may rewrite it, but that is a
-tracked-file change and `git-uncommitted` never runs on a cell. Committing it
-also makes `actions/setup`'s provider cache key
-(`hashFiles('**/.terraform.lock.hcl')`) vary with the actual provider set instead
-of hashing nothing.
+tracked-file change and `git-uncommitted` never runs on a cell.
+
+The lock file also decides the provider cache (`TF_PLUGIN_CACHE_DIR`, set by
+`actions/setup`):
+
+- `plan-cell`, `drift-cell` and `apply-cell` restore it before `init`, keyed on
+  the runner OS, the runner architecture and the hash of the stack's own
+  committed `.terraform.lock.hcl`, exact match. Stacks with identical lock files
+  share one entry.
+- Only `drift-cell` saves it: drift runs default-branch code, while plan and
+  apply cells run pull-request HCL. It saves after a restore that missed, and
+  only when `init` left a file in the cache.
+- A stack without a committed lock file restores and saves nothing: OpenTofu
+  ignores the cache for a provider no lock file names, and downloads it again.
+- A repository that never runs drift never fills the cache.
+- An entry is keyed on its path, which lives under `RUNNER_TEMP`: a cell on a
+  runner image whose `RUNNER_TEMP` differs from the drift runner's misses and
+  downloads.
+- The lock verifies every cached package at every reader. A cached package that
+  does not match fails `init` with `does not match the content of the downloaded
+  package` ([`docs/troubleshooting.md`](docs/troubleshooting.md)).
 
 ## Env apply order
 

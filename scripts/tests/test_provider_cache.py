@@ -1,0 +1,162 @@
+"""The provider plugin cache is restored per stack from a committed lock file and saved only by
+drift.
+
+Every cell that runs `tofu init` on a plan or apply path restores the entry keyed on its own
+stack's `.terraform.lock.hcl`, exact match: a `restore-keys` prefix would hand one stack another
+stack's partial provider set. Only `drift-cell` saves, because it alone runs default-branch code;
+plan and apply cells run pull-request HCL. The save runs only after a restore that missed and an
+`init` that left at least one file in the cache, and it reuses the restore step's key, computed
+before `init` writes a lock the stack may gitignore.
+
+Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
+save added to another cell, a dropped guard or a widened key. Each value is compared whole
+against a hand-written constant.
+
+Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `if:`; the save's
+key replaced by a second `hashFiles(...)`; `-type f` dropped from the check's `find`;
+`restore-keys` added to one cell's restore; `actions/cache/save` of the cache directory added to
+another action; the combined `actions/cache` action used anywhere.
+"""
+
+import os
+
+import pytest
+from _loader import ACTIONS, WORKFLOWS, action_yaml, bash_only, run_step, step_by, workflow_yaml
+
+_LOCK_HASH = "hashFiles(format('{0}/.terraform.lock.hcl', inputs.stack))"
+
+_RESTORE = {
+    "name": "Restore provider cache",
+    "if": "${{ " + _LOCK_HASH + " != '' }}",
+    "uses": "actions/cache/restore",
+    "with": {
+        "path": "${{ env.TF_PLUGIN_CACHE_DIR }}",
+        "key": "tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ " + _LOCK_HASH + " }}",
+    },
+}
+
+#: `drift-cell`'s restore alone carries an id, because its save reads the outputs. An id on the
+#: `apply-cell` restore would red `test_apply_cell_failsafe_wiring_guard.py`.
+_EXPECTED_RESTORE = {
+    "plan-cell": _RESTORE,
+    "apply-cell": _RESTORE,
+    "drift-cell": {**_RESTORE, "id": "provider-cache"},
+}
+
+_CHECK = {
+    "name": "Check the provider cache",
+    "id": "provider-cache-files",
+    "if": "${{ steps.provider-cache.outcome == 'success' && "
+    "steps.provider-cache.outputs.cache-hit != 'true' }}",
+    "shell": "bash",
+}
+
+_SAVE = {
+    "name": "Save provider cache",
+    "if": "${{ steps.provider-cache-files.outputs.populated == 'true' }}",
+    "uses": "actions/cache/save",
+    "with": {
+        "path": "${{ env.TF_PLUGIN_CACHE_DIR }}",
+        "key": "${{ steps.provider-cache.outputs.cache-primary-key }}",
+    },
+}
+
+
+def _without_ref(step):
+    """``step`` with its ``uses:`` cut to the action path: the ref is a pin bumped on its own
+    schedule."""
+    return {**step, "uses": step["uses"].split("@")[0]}
+
+
+@pytest.mark.parametrize("cell", sorted(_EXPECTED_RESTORE))
+def test_each_cell_restores_the_cache_keyed_on_its_own_lock_file(cell):
+    step = step_by(cell, name="Restore provider cache")
+    assert _without_ref(step) == _EXPECTED_RESTORE[cell]
+
+
+def test_drift_checks_the_cache_only_after_a_restore_that_missed():
+    step = step_by("drift-cell", name="Check the provider cache")
+    assert {k: v for k, v in step.items() if k != "run"} == _CHECK
+
+
+def test_drift_saves_only_a_populated_cache_under_the_restore_key():
+    assert _without_ref(step_by("drift-cell", name="Save provider cache")) == _SAVE
+
+
+def _uses_steps(node):
+    """Every mapping carrying a `uses:` anywhere in a parsed YAML document."""
+    if isinstance(node, dict):
+        if isinstance(node.get("uses"), str):
+            yield node
+        for value in node.values():
+            yield from _uses_steps(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _uses_steps(item)
+
+
+def _engine_tree():
+    docs = {p.parent.name: action_yaml(p) for p in sorted(ACTIONS.glob("*/action.yml"))}
+    docs |= {p.name: workflow_yaml(p) for p in sorted(WORKFLOWS.glob("*.yml"))}
+    assert len(docs) > 20, f"expected the whole engine tree, found {len(docs)} files"
+    return docs
+
+
+def test_only_drift_saves_the_provider_cache():
+    savers = {
+        name
+        for name, doc in _engine_tree().items()
+        for step in _uses_steps(doc)
+        if step["uses"].split("@")[0] == "actions/cache/save"
+        and "TF_PLUGIN_CACHE_DIR" in str((step.get("with") or {}).get("path"))
+    }
+    assert savers == {"drift-cell"}
+
+
+def test_nothing_uses_the_combined_restore_and_save_action():
+    # `actions/cache` saves in its post step on every job it restores in, detect jobs included.
+    users = {
+        name
+        for name, doc in _engine_tree().items()
+        for step in _uses_steps(doc)
+        if step["uses"].split("@")[0] == "actions/cache"
+    }
+    assert users == set()
+
+
+def _run_check(tmp_path, populate):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    populate(cache)
+    out = tmp_path / "github_output"
+    out.write_text("", encoding="utf-8")
+    env = {
+        **os.environ,
+        "TF_PLUGIN_CACHE_DIR": cache.as_posix(),
+        "GITHUB_OUTPUT": out.as_posix(),
+    }
+    body = step_by("drift-cell", name="Check the provider cache")["run"]
+    r = run_step(tmp_path, body, env)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    return out.read_text(encoding="utf-8")
+
+
+def _nested_file(cache):
+    leaf = cache / "registry.opentofu.org" / "hashicorp" / "null" / "3.2.4" / "linux_amd64"
+    leaf.mkdir(parents=True)
+    (leaf / "terraform-provider-null").write_bytes(b"\x7fELF")
+
+
+@bash_only
+@pytest.mark.parametrize(
+    "populate",
+    [lambda cache: None, lambda cache: (cache / "registry.opentofu.org").mkdir()],
+    ids=["empty", "empty-subdirectory"],
+)
+def test_an_empty_cache_is_not_reported_populated(tmp_path, populate):
+    assert _run_check(tmp_path, populate) == ""
+
+
+@bash_only
+def test_a_cache_holding_a_nested_file_is_reported_populated(tmp_path):
+    assert _run_check(tmp_path, _nested_file) == "populated=true\n"

@@ -28,7 +28,6 @@ _EXPECTED_STEPS = [
     "Install Terramate",
     "Report a failed Terramate install",
     "Provider plugin cache",
-    "Restore plugin cache",
 ]
 
 #: Each installer's whole `with:` block. `uses:` is deliberately absent -- it is a pin, bumped on
