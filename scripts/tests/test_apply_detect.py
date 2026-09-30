@@ -1,7 +1,14 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, PLAN_SHA, _apply_check, _record, completed_names
+from _detect_fixtures import (
+    APP_ID,
+    PLAN_SHA,
+    _apply_check,
+    _record,
+    completed_names,
+    spy_env_config,
+)
 from _detect_fixtures import check_run as _check
 from _loader import load_script
 
@@ -896,6 +903,26 @@ def test_unlock_does_not_refuse_an_unreviewed_pr(monkeypatch, tmp_path):
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
     ad.main()
     assert len(json.loads(_parsed(out)["cells"])) == 3
+
+
+def test_unlock_passes_the_whole_tree_workload_map(monkeypatch, tmp_path):
+    """Mutation: pass `set(stacks_by_env)` at `run_unlock`'s `env_config` call -- the spy
+    records the environment set."""
+    _unlock_env(monkeypatch, tmp_path)
+    _boom_on_plan_path(monkeypatch)
+    _stub_unlock_tree(
+        monkeypatch,
+        [*_DEV_EU_CELLS, {"stack": "stacks/web", "environment": "dev-us", "workload": "web"}],
+    )
+    seen = spy_env_config(monkeypatch, ad.bm)
+    ad.main()
+    assert seen == [
+        {
+            "dev-eu": frozenset({"app", "net"}),
+            "prod-eu": frozenset({"app"}),
+            "dev-us": frozenset({"web"}),
+        }
+    ]
 
 
 def test_unlock_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_path):

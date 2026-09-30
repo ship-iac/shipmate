@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from _detect_fixtures import spy_env_config
 from _loader import action_yaml, load_script
 
 bm = load_script("build-matrix")
@@ -319,10 +320,14 @@ def _run_main(
     plan_workflow=True,
     head_sha=None,
     table=None,
+    stacks=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
     never having run. Pass `called` to keep that record readable when main() raises.
+
+    `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
+    the double, and leaves `called` and `cells` unused.
 
     `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
     run past the head-checkout refusal looks like; without it the run states no head and is
@@ -360,15 +365,15 @@ def _run_main(
         # The whole row `build_matrix` emits, `workload` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.
         rows = [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
-        # The real `compute_cells` returns the env->stacks map beside the rows, and `main`
-        # forwards it as `all_envs` only under `all_stacks`. A double returning rows alone
-        # would unpack into two names and fail somewhere unrelated.
-        by_env = {}
-        for s_, e_ in cells:
-            by_env.setdefault(e_, []).append(s_)
-        return by_env, rows
+        # The real `compute_cells` returns the env->workloads map beside the rows, and `main`
+        # forwards it as `tagged` only under `all_stacks`. The rows tag no workload.
+        return {e: frozenset() for _, e in cells}, rows
 
-    monkeypatch.setattr(bm, "compute_cells", fake_compute)
+    if stacks is None:
+        monkeypatch.setattr(bm, "compute_cells", fake_compute)
+    else:
+        monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
+        monkeypatch.setattr(bm, "_tags", lambda s: stacks[s])
     monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     bm.main()
     parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
@@ -1217,7 +1222,7 @@ def test_a_plan_run_says_nothing_about_an_environment_outside_the_changed_set(
     """`all_stacks=False` scans the CHANGED stacks only, so `dev-us` having no stack in that
     set says nothing about whether any stack tags it.
 
-    Mutation: pass `set(stacks_by_env)` unconditionally at the call site. Every plan run then
+    Mutation: pass `tagged` unconditionally at the call site. Every plan run then
     warns about every environment with no changed stack. The drift sibling below is what keeps
     this test from passing with the diagnostic deleted."""
     _run_main(
@@ -1250,6 +1255,71 @@ def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, ca
         table=_TWO_ENV_TABLE,
     )
     assert _UNUSED_DEV_US in capsys.readouterr().out.splitlines()
+
+
+_DRIFT_ENV = {
+    "GITHUB_EVENT_NAME": "schedule",
+    "GITHUB_REPOSITORY": "acme/iac",
+    "SHIPMATE_ALL_STACKS": "true",
+    "SHIPMATE_NO_PULL_REQUEST": "true",
+}
+#: `stacks/net` alone tags `workload/net`, and `stacks/web` alone sits in dev-us.
+_WORKLOAD_TREE = {
+    "stacks/app": ["env/dev-eu", "workload/app"],
+    "stacks/net": ["env/dev-eu", "workload/net"],
+    "stacks/web": ["env/dev-us"],
+}
+_LISTING_TABLE = {
+    "layout": "folder",
+    "identities": {"dev": {"aws": {"apply": "arn:aws:iam::111111111111:role/apply"}}},
+    "environments": {
+        "dev-eu": {"region": "eu-west-1", "identity": "dev", "workloads": ["app", "net"]},
+        "dev-us": {"region": "us-east-1"},
+    },
+}
+
+
+def test_drift_passes_the_whole_tree_workload_map(monkeypatch, tmp_path):
+    """Mutations: pass `set(tagged)` at `main`'s drift call -- the real `env_config` raises
+    `AttributeError: 'set' object has no attribute 'get'`; or build `tagged` from the cells in
+    `compute_cells` -- dev-us records `frozenset({''})`."""
+    seen = spy_env_config(monkeypatch, bm)
+    _run_main(monkeypatch, tmp_path, _DRIFT_ENV, table=_LISTING_TABLE, stacks=_WORKLOAD_TREE)
+    assert seen == [{"dev-eu": frozenset({"app", "net"}), "dev-us": frozenset()}]
+
+
+def test_a_plan_passes_no_workload_map(monkeypatch, tmp_path):
+    """Mutation: pass `tagged` unconditionally at `main`'s `env_config` call -- the spy records
+    the workload map."""
+    seen = spy_env_config(monkeypatch, bm)
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_HEAD_REPO": "acme/iac",
+        },
+        head_sha="a" * 40,
+        table=_LISTING_TABLE,
+        stacks=_WORKLOAD_TREE,
+    )
+    assert seen == [None]
+
+
+def test_a_tag_filter_does_not_hide_a_workload_from_drift(monkeypatch, tmp_path, capsys):
+    """The filter drops `stacks/net`, the only stack tagging `workload/net`, from the cells; the
+    tag still exists, so drift must not report `net` as untagged every night.
+
+    Mutation: derive `tagged` from the cells in `compute_cells` -- the warning names `net`."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "workload/app"},
+        table=_LISTING_TABLE,
+        stacks=_WORKLOAD_TREE,
+    )
+    assert capsys.readouterr().out.splitlines() == ["1 cell(s): dev-eu/stacks/app"]
 
 
 def test_a_supplied_table_is_validated_exactly_as_a_read_one_is(monkeypatch):

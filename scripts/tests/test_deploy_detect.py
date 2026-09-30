@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, _apply_check, stub_read_table
+from _detect_fixtures import APP_ID, _apply_check, spy_env_config, stub_read_table
 from _detect_fixtures import check_run as _check
 from _loader import load_script
 
@@ -153,12 +153,15 @@ def _run_main(
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: HEAD)
-    # `compute_cells` returns (env->stacks map, rows); a double returning rows alone
+    # `compute_cells` returns (env->workloads map, rows); a double returning rows alone
     # unpacks into two names and fails somewhere unrelated.
     monkeypatch.setattr(
         dd.bm,
         "compute_cells",
-        lambda all_stacks, base: ({c["environment"]: [c["stack"]] for c in cells}, cells),
+        lambda all_stacks=False, base="", require_env_tag=True, tags="": (
+            {c["environment"]: frozenset({c["workload"]} - {""}) for c in cells},
+            cells,
+        ),
     )
     # deploy-detect and the apply-detect it loads hold separate build-matrix instances, and
     # the check-run listing is fetched through apply-detect's. Both are stubbed so a `gh api`
@@ -379,3 +382,13 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
         reads=reads,
     )
     assert len(reads) == 1
+
+
+def test_deploy_passes_no_workload_map(tmp_path, monkeypatch):
+    """The merge's changed stacks are no whole-tree scan. Mutation: keep `compute_cells`'
+    workload map and pass it to `env_config` -- the spy records `{"dev-eu": frozenset()}`."""
+    seen = spy_env_config(monkeypatch, dd.bm)
+    _run_main(
+        tmp_path, monkeypatch, cells=[_cell("stacks/app")], checks=[_apply_check("stacks/app")]
+    )
+    assert seen == [None]

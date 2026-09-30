@@ -225,26 +225,45 @@ def env_membership(all_stacks=False, base="", require_env_tag=True):
     return stacks_by_env, tags_by_stack
 
 
+def tagged_workloads(stacks_by_env, tags_by_stack):
+    """`{env: frozenset of the names its stacks' workload/<name> tags carry}`, every env of
+    `stacks_by_env` included.
+
+    Read from the tags, not the cells: a `tags` filter narrows the cells, and a workload on a
+    filtered-out stack is still tagged. Not through `workload_of` either: its two-tag refusal
+    is scoped to the cells a run runs."""
+    return {
+        env: frozenset(
+            t[len("workload/") :]
+            for s in stacks
+            for t in tags_by_stack.get(s, [])
+            if t.startswith("workload/")
+        )
+        for env, stacks in stacks_by_env.items()
+    }
+
+
 def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
-    """({env: [stacks...]}, cells). The map is returned as well as consumed because a
-    caller that scanned the whole tree feeds it to `env_config` as `all_envs`, and
-    re-scanning would be a second source that can disagree with this one."""
+    """(`tagged_workloads` of the scan, cells). The map is returned beside the cells because a
+    caller that scanned the whole tree feeds it to `env_config` as `tagged`, and re-scanning
+    would be a second source that can disagree with this one."""
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base, require_env_tag)
-    return stacks_by_env, build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
+    cells = build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
+    return tagged_workloads(stacks_by_env, tags_by_stack), cells
 
 
-def env_config(cells, all_envs=None, table=None):
+def env_config(cells, tagged=None, table=None):
     """The validated table for `cells`. One read per detect, not per row.
 
-    `all_envs` is the whole-tree environment scan, which only the unused-entry warning
-    reads; the caller passes it only where it actually scanned the whole tree, and `None`
-    otherwise. `table` is a mapping the caller already read from the default branch, for a
-    path needing a field of it before its cells exist; passing it here is what keeps that
-    path on one read.
+    `tagged` is the whole-tree `tagged_workloads` scan, which only the unused-entry and
+    untagged-workload warnings read; the caller passes it only where it actually scanned the
+    whole tree, and `None` otherwise. `table` is a mapping the caller already read from the
+    default branch, for a path needing a field of it before its cells exist; passing it here
+    is what keeps that path on one read.
     """
     envs = {c["environment"] for c in cells}
     table = ec.read_table() if table is None else table
-    return ec.validate(table, envs, all_envs=all_envs)
+    return ec.validate(table, envs, tagged=tagged)
 
 
 def stamp_rows(cells, table, tier):
@@ -475,11 +494,11 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
-    stacks_by_env, cells = compute_cells(all_stacks, base, tags=tags)
+    tagged, cells = compute_cells(all_stacks, base, tags=tags)
     # One call serves plan and drift, and only drift scans the whole tree. Under
     # `all_stacks=False` the map covers the CHANGED stacks alone, so passing it would
     # report every unchanged environment as an unused table entry on every plan.
-    table = env_config(cells, set(stacks_by_env) if all_stacks else None)
+    table = env_config(cells, tagged if all_stacks else None)
     cells = stamp_rows(cells, table, "plan")
     refuse_workload_gaps(cells, table)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:

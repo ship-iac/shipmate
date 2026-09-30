@@ -8,6 +8,7 @@ from _detect_fixtures import (
     _apply_check,
     _record,
     check_run,
+    spy_env_config,
     stub_read_table,
 )
 from _loader import load_script
@@ -313,6 +314,21 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "plan_sha256": PLAN_SHA,
         }
     ]
+
+
+def test_main_passes_the_whole_tree_workload_map(tmp_path, monkeypatch):
+    """Mutation: pass `set(stacks_by_env)` at `main`'s `env_config` call -- the spy records
+    the environment set."""
+    seen = spy_env_config(monkeypatch, aad.bm)
+    _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu"],
+        decision="APPROVED",
+        tree={"dev-eu": ["stacks/app"], "dev-us": ["stacks/web"]},
+        tags={"stacks/app": ["env/dev-eu", "workload/net-edge"], "stacks/web": ["env/dev-us"]},
+    )
+    assert seen == [{"dev-eu": frozenset({"net-edge"}), "dev-us": frozenset()}]
 
 
 def test_main_reads_the_head_listing_and_makes_no_artifact_lookup(tmp_path, monkeypatch):

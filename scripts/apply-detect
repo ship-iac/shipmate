@@ -301,7 +301,7 @@ def run_unlock(repo, env, head):
     in_env = stacks_by_env.get(env, [])
     queued = [s for s in in_env if _check_name(s, env) in names]
     pending = bm.build_matrix([env], {env: queued}, tags_by_stack)
-    table = bm.env_config(pending, set(stacks_by_env))
+    table = bm.env_config(pending, bm.tagged_workloads(stacks_by_env, tags_by_stack))
     pending = bm.stamp_rows(pending, table, "apply")
     bm.refuse_workload_gaps(pending, table)
     print(

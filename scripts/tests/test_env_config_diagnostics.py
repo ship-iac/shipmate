@@ -1,10 +1,10 @@
-"""The one `env-config` diagnostic that reports rather than refuses.
+"""The `env-config` diagnostics that report rather than refuse.
 
-Everything else this script does refuses. This one does not, and that asymmetry is the
-subject: an unused table entry warns because the table is read from the default branch
-while the environment list comes from the feature branch, so adding or removing an
-environment is a two-pull-request sequence and refusing the unused entry alongside the
-missing one would deadlock both directions.
+Everything else this script does refuses. These do not, and that asymmetry is the
+subject: an unused table entry, or a listed workload no stack tags, warns because the table
+is read from the default branch while the tags come from the feature branch, so adding or
+removing an environment or a workload is a two-pull-request sequence, and refusing the
+unused name alongside the missing one would deadlock both directions.
 
 Reddens on: turning the warning into a refusal, deleting the print, firing it where no
 whole-tree scan exists, and gating the missing-entry refusal on that scan.
@@ -42,8 +42,13 @@ TABLE = {
 }
 
 
-def _validate(table, matrix_envs=(), all_envs=None):
-    return env_config.validate(table, matrix_envs, all_envs=all_envs)
+def _scan(*envs, **workloads):
+    """A whole-tree scan: each env in `envs` tagged by no workload, then `workloads`' envs."""
+    return {**dict.fromkeys(envs, frozenset()), **{e: frozenset(w) for e, w in workloads.items()}}
+
+
+def _validate(table, matrix_envs=(), tagged=None):
+    return env_config.validate(table, matrix_envs, tagged=tagged)
 
 
 # --- 1: an unused entry warns, and never refuses --------------------------------------
@@ -53,7 +58,7 @@ def test_an_unused_entry_warns_and_returns_the_table(capsys):
     """Mutation: raise `SystemExit` instead of printing. Refusing here deadlocks both adding
     an environment (stacks on the branch, entry not yet on the default branch) and removing
     one."""
-    assert _validate(TABLE, matrix_envs=("dev-eu",), all_envs={"dev-eu"}) == TABLE
+    assert _validate(TABLE, matrix_envs=("dev-eu",), tagged=_scan("dev-eu")) == TABLE
     assert capsys.readouterr().out.splitlines() == [UNUSED_DEV_US]
 
 
@@ -61,13 +66,13 @@ def test_every_unused_entry_is_named(capsys):
     """Mutation: name only the first. One entry per line, or a per-name assertion, would
     both pass that."""
     table = {**TABLE, "environments": {**TABLE["environments"], "prod-eu": {}}}
-    _validate(table, matrix_envs=("dev-eu",), all_envs={"dev-eu"})
+    _validate(table, matrix_envs=("dev-eu",), tagged=_scan("dev-eu"))
     assert capsys.readouterr().out.splitlines() == [UNUSED_TWO]
 
 
 def test_a_fully_used_table_says_nothing(capsys):
-    """Mutation: print the warning whenever `all_envs` is passed, empty list or not."""
-    _validate(TABLE, matrix_envs=("dev-eu",), all_envs={"dev-eu", "dev-us"})
+    """Mutation: print the warning whenever `tagged` is passed, empty list or not."""
+    _validate(TABLE, matrix_envs=("dev-eu",), tagged=_scan("dev-eu", "dev-us"))
     assert capsys.readouterr().out == ""
 
 
@@ -77,7 +82,7 @@ def test_an_entry_matching_only_in_case_is_unused(capsys):
 
     Mutation: lower both sides. The entry is then reported as used while `resolve` still
     misses it."""
-    _validate(TABLE, matrix_envs=("dev-eu",), all_envs={"dev-eu", "DEV-US"})
+    _validate(TABLE, matrix_envs=("dev-eu",), tagged=_scan("dev-eu", "DEV-US"))
     assert capsys.readouterr().out.splitlines() == [UNUSED_DEV_US]
 
 
@@ -89,7 +94,7 @@ def test_a_misspelled_flagged_entry_warns_as_unused(capsys):
     Mutation: drop the unused-entry print from `_report_unused`.
     """
     table = {"layout": "folder", "environments": {"prd": {"explicit": True, "gated": False}}}
-    _validate(table, all_envs={"prod"})
+    _validate(table, tagged=_scan("prod"))
     assert capsys.readouterr().out.splitlines() == [
         "::warning::the environment table declares prd, which no stack tags. Remove the "
         "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
@@ -102,12 +107,12 @@ def test_a_misspelled_flagged_entry_warns_as_unused(capsys):
 
 
 def test_no_whole_tree_scan_means_no_unused_diagnostic(capsys):
-    """`all_envs=None` is every path that scans a changed set or a workset rather than the
+    """`tagged=None` is every path that scans a changed set or a workset rather than the
     tree, and an environment absent from those is no evidence of anything.
 
-    Mutation: evaluate the diagnostic against `matrix_envs` when `all_envs` is None. The
+    Mutation: evaluate the diagnostic against `matrix_envs` when `tagged` is None. The
     sibling above is what keeps this one from passing with the print deleted."""
-    assert _validate(TABLE, matrix_envs=("dev-eu",), all_envs=None) == TABLE
+    assert _validate(TABLE, matrix_envs=("dev-eu",), tagged=None) == TABLE
     assert capsys.readouterr().out == ""
 
 
@@ -118,11 +123,11 @@ def test_a_tagged_environment_missing_from_the_table_refuses_without_a_scan(caps
     """The missing-entry refusal needs only the environments already in the matrix, so it
     fires on a targeted apply too.
 
-    Mutation: gate `_check_dry_coverage` on `all_envs is not None`. Every path without a
+    Mutation: gate `_check_dry_coverage` on `tagged is not None`. Every path without a
     whole-tree scan then stops refusing."""
     table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}}
     with pytest.raises(SystemExit) as excinfo:
-        _validate(table, matrix_envs=("dev-eu", "prod-us"), all_envs=None)
+        _validate(table, matrix_envs=("dev-eu", "prod-us"), tagged=None)
     assert str(excinfo.value) == (
         '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
         "environment table, and prod-us has no entry in it."
@@ -134,7 +139,7 @@ def test_the_refusal_precedes_the_unused_warning(capsys):
     continue. Mutation: run the diagnostic before the coverage check."""
     table = {"layout": "tf_vars", "environments": {"dev-us": {"region": "us-east-1"}}}
     with pytest.raises(SystemExit):
-        _validate(table, matrix_envs=("dev-eu",), all_envs={"dev-eu"})
+        _validate(table, matrix_envs=("dev-eu",), tagged=_scan("dev-eu"))
     assert capsys.readouterr().out == ""
 
 
@@ -160,7 +165,7 @@ def test_a_needs_predecessor_naming_no_environment_warns(capsys):
     or drop `needs` from the reference-key mapping -- nothing prints."""
     table = {"layout": "folder", "environments": {"prod": {"needs": ["ghost"]}}}
     assert env_config.validate_structure(table) is table
-    assert _validate(table, all_envs={"prod"}) == table
+    assert _validate(table, tagged=_scan("prod")) == table
     assert capsys.readouterr().out.splitlines() == [UNUSED_NEEDS]
 
 
@@ -173,7 +178,7 @@ def test_reference_keys_naming_real_environments_say_nothing(capsys):
         "layout": "folder",
         "environments": {"prod": {"needs": ["dev"], "explicit": True, "gated": False}},
     }
-    _validate(table, all_envs={"prod", "dev"})
+    _validate(table, tagged=_scan("prod", "dev"))
     assert capsys.readouterr().out == ""
 
 
@@ -181,7 +186,48 @@ def test_a_reference_key_warns_only_under_a_whole_tree_scan(capsys):
     """Same rule as the table's own entries: a changed set or a workset is no evidence that
     an environment does not exist.
 
-    Mutation: report reference keys regardless of `all_envs`."""
+    Mutation: report reference keys regardless of `tagged`."""
     table = {"layout": "folder", "environments": {"prod": {"needs": ["ghost"]}}}
-    _validate(table, all_envs=None)
+    _validate(table, tagged=None)
+    assert capsys.readouterr().out == ""
+
+
+# --- 5: a listed workload no stack tags warns ---------------------------------------------
+
+
+#: One identity, one entry listing `core` and `net`. Hand-written, whole.
+_LISTING = {
+    "layout": "folder",
+    "identities": {"dev": {"aws": {"apply": "arn:aws:iam::111111111111:role/apply"}}},
+    "environments": {
+        "dev-eu": {"region": "eu-west-1", "identity": "dev", "workloads": ["core", "net"]}
+    },
+}
+UNTAGGED_NET = (
+    "::warning::environments.dev-eu.workloads lists net, which no stack in dev-eu tags. "
+    "Remove it after the pull request that drops the last tag merges. This is a warning "
+    "rather than a refusal because the table is read from the default branch and the tags "
+    "from this branch, so an environment arrives and leaves over two pull requests."
+)
+
+
+def test_a_listed_workload_no_stack_tags_warns(capsys):
+    """Mutation: hand `_report_unused` the matrix environments, each tagged by nothing,
+    instead of `tagged` -- the warning names `core, net`."""
+    table = _validate(_LISTING, matrix_envs=("dev-eu",), tagged=_scan(**{"dev-eu": {"core"}}))
+    assert table == _LISTING
+    assert capsys.readouterr().out.splitlines() == [UNTAGGED_NET]
+
+
+def test_every_listed_workload_tagged_says_nothing(capsys):
+    """Mutation: the same substitution as above -- `core, net` is then reported."""
+    _validate(_LISTING, matrix_envs=("dev-eu",), tagged=_scan(**{"dev-eu": {"core", "net"}}))
+    assert capsys.readouterr().out == ""
+
+
+def test_a_listed_workload_warns_only_under_a_whole_tree_scan(capsys):
+    """A plan scans only changed stacks, so a listed workload on an unchanged one is untagged
+    there. Mutation: call `_report_unused(table, tagged or {})` when `tagged` is None -- the
+    unused-entry warning for dev-eu and a warning naming `core, net` print."""
+    _validate(_LISTING, matrix_envs=("dev-eu",), tagged=None)
     assert capsys.readouterr().out == ""

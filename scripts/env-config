@@ -749,8 +749,9 @@ _TWO_PULL_REQUESTS = (
 )
 
 
-def _report_unused(table, all_envs):
-    """Name the entries no stack tags. A warning, deliberately, and never a refusal.
+def _report_unused(table, tagged):
+    """Name the entries no stack tags, and each entry's listed workloads no stack in it tags.
+    A warning, deliberately, and never a refusal.
 
     The table is read from the default branch and the tags from the feature branch, so
     adding or removing an environment takes two pull requests; refusing an unused entry
@@ -763,20 +764,37 @@ def _report_unused(table, all_envs):
     names no env name could take; a plain typo passes it and lands here. Only predecessors are
     checked: the env holding `needs` is an entry, like one holding `explicit` or `gated`, and
     the unused-entry warning covers it.
+
+    `tagged` maps each environment the whole-tree scan found to the workload names its
+    stacks tag.
     """
-    tagged = set(all_envs)
-    unused = sorted(set(table.get("environments", {})) - tagged)
+    envs = set(tagged)
+    unused = sorted(set(table.get("environments", {})) - envs)
     if unused:
         print(
             f"::warning::the environment table declares {', '.join(unused)}, which no stack "
             "tags. Remove the entry, or tag the stacks that belong to it. " + _TWO_PULL_REQUESTS
         )
-    stale = sorted({p for preds in env_order(table).values() for p in preds} - tagged)
+    stale = sorted({p for preds in env_order(table).values() for p in preds} - envs)
     if stale:
         print(
             f"::warning::needs names {', '.join(stale)}, which no stack tags, so it orders "
             "nothing. Remove the entry, or tag the stacks that belong to it. " + _TWO_PULL_REQUESTS
         )
+    _report_untagged_workloads(table, tagged)
+
+
+def _report_untagged_workloads(table, tagged):
+    """Name each entry's listed workloads no stack in that environment tags. A workload is
+    listed before the branch tagging it merges and dropped after the branch untagging it."""
+    for env, entry in sorted(table.get("environments", {}).items()):
+        untagged = sorted(set(entry.get("workloads", ())).difference(tagged.get(env, ())))
+        if untagged:
+            print(
+                f"::warning::environments.{env}.workloads lists {', '.join(untagged)}, which "
+                f"no stack in {env} tags. Remove it after the pull request that drops the "
+                "last tag merges. " + _TWO_PULL_REQUESTS
+            )
 
 
 def env_order(table):
@@ -1021,20 +1039,21 @@ def validate_structure(table):
     return table
 
 
-def validate(table, matrix_envs, all_envs=None):
+def validate(table, matrix_envs, tagged=None):
     """The table, or `SystemExit`. Structure first, then the rules needing run context.
 
-    `matrix_envs` is the environment set this operation resolved, and `all_envs` the
-    whole-tree environment scan where one exists -- only the unused-entry warning reads it,
-    and it is `None` on the paths that scan only a changed set or a workset, where an
-    environment absent from that set is not evidence of anything.
+    `matrix_envs` is the environment set this operation resolved, and `tagged` the whole-tree
+    scan where one exists, `{env: workload names its stacks tag}` -- only the unused-entry and
+    untagged-workload warnings read it, and it is `None` on the paths that scan only a changed
+    set or a workset, where an environment or workload absent from that set is not evidence
+    of anything.
     """
     validate_structure(table)
     environments = table.get("environments", {})
     if table["layout"] == "tf_vars":
         _check_dry_coverage(environments, matrix_envs)
-    if all_envs is not None:
-        _report_unused(table, all_envs)
+    if tagged is not None:
+        _report_unused(table, tagged)
     return table
 
 
