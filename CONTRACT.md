@@ -389,16 +389,16 @@ never used.
 
 ## Environment table
 
-A repository declares its environments' identity, credentials and regions in
-`.github/shipmate.toml`, read with `tomllib` from the standard library. The file
-is required, and so is `layout`: it is the only source of a cell's environment
-identity, so a repository without one has nothing for its cells to run as. The
+A repository declares its environments, their regions and the credentials they
+name in `.github/shipmate.toml`, read with `tomllib` from the standard library.
+The file is required, and so is `layout`: it is the only source of a cell's
+environment identity (the layout's variables), so a repository without one has nothing for its cells to run as. The
 two absences refuse at the same site, `scripts/env-config` (§Refusals) — a file
 absent from the default branch, and a file that parses but declares no `layout`.
 
-The file holds four top-level settings and no others: `schema_version`,
-`layout`, `environments`, `gate`. Any other
-top-level key refuses, naming the offending key and the four that are allowed. A key a *newer* engine
+The file holds five top-level settings and no others: `schema_version`,
+`layout`, `identities`, `environments`, `gate`. Any other
+top-level key refuses, naming the offending key and the five that are allowed. A key a *newer* engine
 implements is refused by an older one on that same check, which is why a
 repository moves its pin before it adds a key.
 
@@ -409,8 +409,8 @@ refuses with the required version, the version found and the contract clause.
 
 **The engine reads the file from the repository's default branch, never from the
 branch under test.** `scripts/env-config` runs `git show
-origin/<default-branch>:.github/shipmate.toml` and resolves each cell's identity
-and credential from what that returns. A pull request cannot change which role
+origin/<default-branch>:.github/shipmate.toml` and resolves each cell's
+environment identity and credential from what that returns. A pull request cannot change which role
 its own plan assumes, which region it authenticates against, or which workspace
 it plans; changing any of those takes a merge to the default branch. `origin` is
 the base repository on every path — no checkout passes `repository:` — and a fork
@@ -421,7 +421,7 @@ same branch and the same refusal wording, so a consumer never gets two accounts
 of one problem depending on which job read it.
 
 **`needs`, `explicit`, `gated` and `[gate]` come from the default branch too.**
-They are read from the same parsed mapping as the identity table, and a branch
+They are read from the same parsed mapping as the environment table, and a branch
 therefore cannot reorder its own apply waves, drop its own production exclusion,
 exempt itself from the review requirement or name the team that authorizes it.
 
@@ -439,10 +439,10 @@ read failure as absence would hand the decision back to branch content.
 
 ### Keys
 
-Dotted keys are canonical: one `[table]` header per environment, with the tiers
-written as `aws.plan.role` inside it. A separate `[environments.dev-eu.aws.plan]`
-header parses to exactly the same mapping, but mixing the two notations for one
-environment is a parse error (§TOML placement).
+Dotted keys are canonical: one `[table]` header per identity and per
+environment, with the credential fields written as `aws.plan` inside it. A
+separate `[identities.dev.aws]` header parses to exactly the same mapping, but
+mixing the two notations for one identity is a parse error (§TOML placement).
 
 ```toml
 schema_version = 1
@@ -474,9 +474,10 @@ region              = "eu-west-1"
 shared              = true        # one bare `sbx` Environment on both paths
 ```
 
-An environment entry holds `region`, `tf_vars`, `aws`, `shared`, `needs`,
-`explicit` and `gated`, and nothing else. `aws` is the only provider implemented;
-any other provider key is refused by name. `shared = true` binds the environment
+An environment entry holds `region`, `tf_vars`, `identity`, `workloads`,
+`shared`, `needs`, `explicit` and `gated`, and nothing else. An `aws` key in an
+entry is refused, naming `[identities.<name>]` as its replacement. `shared = true`
+binds the environment
 as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pair
 (§Env model, shared mode). `explicit = true` keeps the environment out of a bare
 `shipmate apply`, and `gated = false` exempts it from the review requirement
@@ -486,13 +487,70 @@ as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pa
 TOML bare keys admit letters, digits, `_` and `-`, so an ordinary environment
 name needs no quoting. Quote anything outside that set.
 
+**An identity names credentials once.** `[identities.<name>]` holds three
+fields, each optional, all under `aws`:
+
+| Field | Holds |
+| --- | --- |
+| `aws.account` | the 12-digit account id, as a quoted string |
+| `aws.plan` | the plan path's role |
+| `aws.apply` | the apply path's role |
+
+- **A field is a string or a map keyed by workload**
+  (`{ core = "111111111111", network = "222222222222" }`). A workload name, as a
+  map key or a `workloads` element, follows the environment-name charset, and
+  `vars` and `role` are reserved: `{ vars = "…" }` is a variable reference, and
+  the retired `aws.plan.role = "…"` parses as a map keyed `role`.
+- **A role is a role name or a full ARN.** A name (`shipmate-plan`, or under an
+  IAM path `ci/shipmate-plan`) becomes `arn:aws:iam::<account>:role/<name>`. A
+  value starting `arn:` is used as written, which covers a third account,
+  `aws-cn` and `aws-us-gov`.
+- **The account rule is per workload, over both paths.** A workload whose role is
+  a name on either path needs an account; one whose role is an ARN must have
+  none. A name on one path and an ARN on the other refuses: write both as ARNs.
+  An account map may hold keys no environment lists, because another environment
+  naming the identity may list them.
+- **`{workload}` is the only placeholder.** A role may carry it, and it is filled
+  from the cell's `workload/<name>` tag exactly as written, and only when the
+  environment's `workloads` lists that name. Any other brace in a role refuses,
+  so a role under an IAM path holding a brace cannot be written.
+- **No `aws.plan` means the plan path has no cloud access**, which is legal as
+  apply-only access. An identity setting neither `aws.plan` nor `aws.apply`
+  refuses.
+
+**An environment names one identity** with `identity = "<name>"`, and the
+credentials step then authenticates against the environment's `region`, which
+such an entry must set. An identity varies by workload when any field is a map
+or a role carries `{workload}`. `workloads` lists the workload tags the
+environment admits, and it is the one membership rule:
+
+| The environment's identity | `workloads` | A cell tagged outside the list | An untagged cell |
+| --- | --- | --- | --- |
+| varies by workload | required | refused at detect | no credential |
+| does not vary | optional | refused at detect when a list is written | the identity's credential |
+| none | refused | runs credential-free; the tag is inert | no credential |
+
+Every workload the list names must resolve on each path the environment
+consults: a listed workload missing from a role map refuses, and so does one
+missing from an account map when its role is a name. A shared environment
+consults `aws.apply` on both paths, so naming an identity that sets `aws.plan`
+from one refuses.
+
+In the fence above, `dev-eu` is the first row, `prod` the second and `sbx` the
+third.
+
 **The file is data.** TOML has no expression language: no functions, no way to
-derive one entry from another. The one indirection is a value that names a
-GitHub variable (§Variable references), and it replaces a value; it computes
-nothing. A repository with many environments repeats itself, deliberately — for
-a file that decides which cloud role a job assumes, explicit repetition is the
-safer artifact. There is no `[defaults]` table and no merge rule between
-environments; the only cross-level default is the one named below.
+derive one entry from another. The file has two indirections, a variable
+reference (§Variable references) and one placeholder, `{workload}`; each fills a
+value from a closed source (a named variable; the environment's `workloads`),
+and neither derives one entry from another. A repository with many environments
+repeats `identity`, `workloads`, `region` and its flags on each entry,
+deliberately — an audit of one environment reads one entry. There is no
+`[defaults]` table and no merge rule between environments: an environment holds
+no credential field, the identity it names arrives whole, and an identity reaches
+only the environments that name it. The cost is that one edit to an identity
+retargets every environment naming it; `shipmate doctor`'s roles lines list what
+each environment resolves (§Resolution).
 
 ### The gate table
 
@@ -539,48 +597,27 @@ closed.
 
 - **A top-level setting must come above the first `[table]` header.** A scalar
   written below one lands inside *that* header's table: `layout` written after
-  `[environments.dev-eu.aws.plan]` becomes
-  `environments.dev-eu.aws.plan.layout`. One mistake therefore refuses in
+  `[identities.dev]` becomes `identities.dev.layout`. One mistake therefore
+  refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
   refusal, which checks before anything reads `environments`; a misplaced
   `schema_version` refuses as an unimplemented environment
-  key, an unknown provider field or an unknown `[gate]` key, depending on the
-  header it fell under.
+  key, identity key or identity field, or an unknown `[gate]` key, depending on
+  the header it fell under.
   `docs/troubleshooting.md` has the message for each position.
-- **Declaring one table twice is a parse error.** A dotted `aws.plan.role` under
-  `[environments.dev-eu]` plus a later `[environments.dev-eu.aws.plan]` header
-  refuses with *"Cannot declare ('environments', 'dev-eu', 'aws', 'plan')
-  twice"*. Pick one notation per environment. Duplicate keys refuse the same
-  way.
+- **Declaring one table twice is a parse error.** A dotted `aws.plan` under
+  `[identities.dev]` plus a later `[identities.dev.aws]` header refuses with
+  *"Cannot declare ('identities', 'dev', 'aws') twice"*. Pick one notation per
+  identity. Duplicate keys refuse the same way.
 
 A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and both read
 mechanisms — the cell paths' `git show`, and the contents-API read that
 `shipmate doctor` and comment-ops' gate resolve share — deliver those bytes and
 reach the same verdict rather than one of them stripping it.
 
-**Three tiers, one resolution rule.** `plan`, `apply` and `workloads` are
-structural keys reserved at every level; everything else inside a provider block
-is a provider field. A field may sit at provider-block level, under `plan` or
-`apply`, or under `plan.workloads[<name>]` / `apply.workloads[<name>]`, and each
-tier overrides the last field by field. The workload tier is keyed by the `<name>`
-of the cell's `workload/<name>` tag, exactly as written. `workloads`
-directly under a provider block is malformed shape, not a fourth tier: a
-workload role means nothing without the path it applies to. A cell whose
-`workload/<name>` tag the consulted tier's `workloads` does not list is refused
-at detect when that tier, after inheritance, sets no role to fall back to. Only
-the cells a run plans, applies or unlocks are checked: a completed, excluded or
-held cell is not refused, and neither is an untagged cell or a tier that
-resolves a role.
-The plan path checks both tiers for the stacks it plans. It plans only changed
-stacks, so what keeps an unchanged tagged stack from being stranded is removing
-a workload key after the branch that drops its tag (§Environment table).
-
-The environment's own `region` inheriting into `aws.region` is the schema's only
-cross-level default. Every other field resolves inside its own provider block.
-
-**A provider block is optional.** With none, no credentials step runs — which is
-how the three credential-free sample repositories work. A file holding only
-`layout = "workspace"` is a complete, warning-free table.
+**An identity is optional.** An environment naming none runs no credentials
+step — which is how the three credential-free sample repositories work. A file
+holding only `layout = "workspace"` is a complete, warning-free table.
 
 **What each layout derives**, before the environment's own `tf_vars` merges over it:
 
@@ -616,8 +653,9 @@ tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
 
 - **Shape.** Exactly `{ vars = "NAME" }`: a mapping with one key, `vars`,
   holding a string, named after GitHub's `vars` context. It is valid at every
-  string position, list items and `[gate]` included. Any other mapping is
-  ordinary data for the checks in §Refusals.
+  string position, list items, an identity map's values and `[gate]` included,
+  and it replaces the whole string before `{workload}` is filled. Any other
+  mapping is ordinary data for the checks in §Refusals.
 - **Resolution.** Every reader of the file replaces each reference with the
   variable's value before it validates anything: every detect, comment-ops'
   gate resolution, `shipmate doctor` and `scripts/onboard`. The checks then run
@@ -658,7 +696,10 @@ tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
 
 ### Refusals
 
-Every condition below refuses at detect, before any cell starts.
+Every condition below refuses at detect, before any cell starts, and one
+refusal names every structural error the file holds. All but the `tf_vars` coverage row and
+the workload-tag row are judged on the file alone, so `shipmate doctor` reports
+them on the pull request that introduces them.
 
 | Condition | Why |
 |---|---|
@@ -668,18 +709,31 @@ Every condition below refuses at detect, before any cell starts.
 | The table declares no `layout` | it is the only source of a cell's environment identity, and a scalar written below a `[table]` header lands inside that table rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
 | `layout` is not `tf_vars`, `workspace` or `folder` | a typo would silently disable injection |
 | `layout = "tf_vars"` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
-| A cell's `workload/<name>` tag the consulted tier's `workloads` does not list, where that tier resolves no role to fall back to | the cell would run with no cloud credentials. Checked only for the cells the run plans, applies or unlocks; the plan path checks both tiers for the stacks it plans |
-| A tier resolves a role but no region | the credentials step requires one |
-| A tier sets an empty role | that resolves to a skipped credentials step, not to a credential |
-| A provider block resolves no role on any tier | dead config; apply-only is legal, all-empty is not |
-| A field the provider does not define, or `tf_vars` inside a provider block | a per-tier `tf_vars` would let plan and apply inject different values, and every apply would then fail as stale |
+| A cell's `workload/<name>` tag its environment's `workloads` does not list | a listed workload is the only one the default branch grants a role to. One refusal names every such cell. Checked only for the cells the run plans, applies or unlocks: a completed, excluded or held cell is not refused, and neither is an untagged cell, a tag in an environment naming no identity, or one in an environment writing no list |
 | An environment name outside the env-name charset, or carrying a `-plan`/`-apply` suffix | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing |
-| An environment key other than `region`, `tf_vars`, `aws`, `shared`, `needs`, `explicit`, `gated` | catches an unimplemented provider and a misspelled key alike, and a top-level setting written below an entry's header |
+| An environment key other than `region`, `tf_vars`, `identity`, `workloads`, `shared`, `needs`, `explicit`, `gated` | catches a misspelled key and a top-level setting written below an entry's header |
+| An environment entry holding `aws` | credentials live in `[identities.<name>]`; the refusal names the replacement |
+| `identity` that is not a string, or names no `[identities.<name>]` table | the refusal lists the identities the file declares |
+| An environment naming an identity with no non-empty string `region` | the credentials step authenticates against the environment's region and requires one |
+| `workloads` on an environment naming no identity | without an identity a workload tag is inert, so the list would admit nothing |
+| `workloads` that is not a non-empty list of distinct strings | membership is read from this list alone, so a shape it cannot mean is refused rather than guessed at |
+| An environment naming an identity whose roles vary by workload, with no `workloads` | a varying identity grants a role only to a listed workload, so the environment must say which |
+| A listed workload missing from the identity's `aws.plan` or `aws.apply` map, or, when its role is a name, from its `aws.account` map | the cell would resolve no role for a workload the environment admits |
+| For one workload, a role name on one path and a full ARN on the other | the account rule is per workload over both paths; write both as ARNs |
+| For one workload, a role name and no account | a name becomes `arn:aws:iam::<account>:role/<name>` and has no account to go in it |
+| For one workload, a full ARN and an account | an ARN carries its own account, so the file would hold two for one role |
 | `shared`, `explicit` or `gated` that is not a TOML boolean | a quoted value would otherwise resolve to the default: `shared = "true"` binds the split pair the repository believes it gave up, `explicit = "true"` puts the environment on a bare `shipmate apply`, and `gated = "false"` leaves it gated. A reference resolves to a string and refuses the same way |
-| A shared environment declaring `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths |
+| A shared environment naming an identity that sets `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths; the file would read as a read-only plan role while every plan cell assumes the apply role |
 | `tf_vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
-| Malformed shape, or a structural key in a position the grammar does not give it | a string where a mapping is required, and the reverse |
-| A top-level key other than `schema_version`, `layout`, `environments`, `gate` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
+| Malformed shape | a string where a mapping is required, and the reverse |
+| An identity key other than `aws`, or an `aws` field other than `account`, `plan`, `apply` | `aws.role` refuses by name, because one role on both paths hands any-branch plan cells the apply role's permissions; `aws.region` refuses by name, because the credentials step uses the environment's region |
+| An identity setting neither `aws.plan` nor `aws.apply` | it grants no credential; apply-only is legal, all-empty is not |
+| An identity field that is neither a string nor a map keyed by workload, or a map value that is not a string | the refusal names the retired `aws.<path>.workloads.<name>.role` spelling where the map holds `workloads` |
+| A workload name, as a map key or a `workloads` element, outside the env-name charset, or `vars` or `role` | a workload name is a Terramate tag; `{ vars = "…" }` is a variable reference, and `role` names the retired `aws.<path>.role` spelling |
+| An empty string in an identity field | that resolves to a skipped credentials step, not to a credential |
+| `aws.account` that is not a 12-digit string | a TOML integer drops a leading `0` |
+| A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
+| A top-level key other than `schema_version`, `layout`, `identities`, `environments`, `gate` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 | A `[gate]` key other than `approver_team` | a misspelled gate key leaves the setting at its default while the repository believes it declared one |
@@ -691,14 +745,26 @@ Every condition below refuses at detect, before any cell starts.
 ### Resolution
 
 The table chooses on every path; a reference in it is resolved from a repository
-or organization variable (§Variable references). An environment absent from the
-table resolves an empty role, and the cell's credentials step is skipped
-explicitly. A shared-mode environment resolves `aws.apply` on both paths. Each
-row carries what its detect resolved: `role_arn`, `cred_region`, `tf_vars`,
-`config_path` — the tier actually consulted, which is diagnostic and read by
-nothing — and `env_binding`, the GitHub Environment the cell's job binds: the
+or organization variable (§Variable references). The role comes from the
+identity the environment names. An environment absent from the table or naming
+no identity, a path the identity sets no role for, a tag outside the entry's
+`workloads`, and an untagged cell whose identity varies by workload each resolve
+an empty role, and the cell's credentials step is skipped explicitly. A
+shared-mode environment resolves `aws.apply` on both paths. Each row carries
+what its detect resolved: `role_arn`, `cred_region` (the entry's `region` when it
+names an identity, else empty), `tf_vars`, `config_path` — the path actually
+consulted, which is diagnostic and read by nothing — and `env_binding`, the GitHub Environment the cell's job binds: the
 bare `<env>` when shared, `<env>-plan` or `<env>-apply` for the calling path
 otherwise.
+
+**`shipmate doctor` lists the role each environment resolves**, one notice per
+environment naming an identity: ``roles `<env>` resolves at the commit under
+examination: …``, one item per path and listed workload, `every cell` for an
+identity that does not vary, and `no role` for a path the identity grants
+nothing on. It reads the branch's table, so it is the audit read for an identity
+edit before it merges. A referenced role shows the value comment-ops resolves: a
+`shipmate-engine` Environment variable of the same name wins there, and never in
+a cell (§Variable references).
 
 ### Adding and removing an environment
 
@@ -722,18 +788,20 @@ under `folder` or `workspace` nothing refuses it — the cell's credentials step
 resolves no role, skips, and the cell fails at `tofu init`. The sequence applies to
 any environment that needs an entry: every environment under the `tf_vars`
 layout, and under
-`workspace` or `folder` any environment declaring a provider block. An
+`workspace` or `folder` any environment naming an identity. An
 environment needing no entry at all lands in one pull request.
 
-The same order applies to a `workloads` key on a tier with no role to fall back
-to: merge the key before the branch that adds its `workload/<name>` tag, and
-remove it after the branch that drops the tag.
+The same order applies to a `workloads` entry: merge the workload into the list
+before the branch that adds its `workload/<name>` tag, and remove it after the
+branch that drops the last tag. A tag outside the list refuses at detect, and a
+listed workload no stack tags warns, so this order passes through a warning and
+never a refusal.
 
 **An unused entry warns rather than refusing, and that is what makes the
 sequence available.** Refusing both the missing entry and the unused one leaves
 no order in which the two pull requests can land — every add and every remove
 deadlocks. The refusal stays on the side that would otherwise run a cell with no
-identity at all.
+environment identity at all.
 
 An entry name holding an uppercase letter refuses (§Refusals), so no entry can
 differ from a tag only in case. Entry keys are matched exactly against the
@@ -742,9 +810,10 @@ no stack tags is unused and warns.
 
 ### What the diagnostics can and cannot see
 
-The unused-entry warning needs the whole-tree tag map, and it never triggers a
-scan of its own — evaluating the whole tree on a targeted apply would let one
-unrelated stack's unresolvable expression block an approved plan. So it fires
+The unused-entry warning, and its sibling naming a listed workload that no stack
+in its environment tags, need the whole-tree tag map, and they never trigger a
+scan of their own — evaluating the whole tree on a targeted apply would let one
+unrelated stack's unresolvable expression block an approved plan. So they fire
 only where a whole-tree scan already happened: the nightly drift run, `unlock`,
 and a bare `shipmate apply`. The plan, deploy and targeted-apply paths see a
 changed set or a workset and stay silent.
@@ -828,15 +897,15 @@ artifact, so it can never be blocked on one.
 ## AWS OIDC (optional)
 
 The engine is cloud-agnostic by default and ships no credential of its own. A
-consumer opts in per environment, in that environment's `aws` block on the
-default branch, resolved through the three tiers (§Environment table). The table
+consumer opts in per environment, by naming an `[identities.<name>]` table from
+that environment's entry on the default branch (§Environment table). The table
 chooses on every path: a reference in it is resolved from a repository or
 organization variable (§Variable references), and no variable the table does
 not reference can widen what it resolved. The trust policy on each role is the
 enforcing control (`docs/hardening.md` §7–9): the table decides which role a
 cell names, not who may assume it.
 
-With no role resolving — no provider block, or no entry for the environment —
+With no role resolving — no identity named, or no entry for the environment —
 the credentials step is skipped and the job holds no cloud credential at all,
 which is how the sample repos run credential-free. Every cell-running job on
 every path is wired the same way: the wave jobs of `apply-env-level.yml`,
@@ -844,7 +913,7 @@ every path is wired the same way: the wave jobs of `apply-env-level.yml`,
 job each request `id-token: write` and run
 `aws-actions/configure-aws-credentials`, gated on a role resolving non-empty,
 before the cell step. The step reads the row, which the detect resolved from the
-`apply` tier on the first two and the `plan` tier on the other two. The
+identity's `aws.apply` on the first two and its `aws.plan` on the other two. The
 `snapshot` and `complete` jobs deliberately get no token.
 
 On the apply path the engine passes through whatever role the environment
@@ -852,20 +921,24 @@ resolves, and nothing more: which role that is — and whether two environments'
 roles live in different AWS accounts — is the consumer's configuration, not
 something the engine resolves further or validates.
 
-**An environment resolves the role its own entry names, and nothing else.** The
-table has no level above the entry, so no role can be set once and picked up by
-every environment at a stroke, and an environment with no entry resolves none.
-The only bound on what a resolved role may do is its own trust-policy claim
-condition (`docs/hardening.md` §7–9).
+**An environment resolves the roles of the identity its entry names, and nothing
+else.** An identity is a role named once and picked up by every environment that
+names it, so one edit to `[identities.<name>]` retargets all of them. The reach
+is bounded and visible: only the entries carrying `identity = "<name>"`, and
+`shipmate doctor`'s roles lines list every role each one resolves
+(§Resolution). An environment with no entry, or naming no identity, resolves
+none. The only bound on what a resolved role may do is its own trust-policy
+claim condition (`docs/hardening.md` §7–9).
 
-**The plan and drift paths run that same step, workload tier included.** An
-`aws.plan` tier is what a consumer sets for plan-time and drift-time cloud
-access, with a `plan.workloads[<name>]` tier for the per-workload role. The
+**The plan and drift paths run that same step, per-workload roles included.** An
+identity's `aws.plan` is what a consumer sets for plan-time and drift-time cloud
+access, written as a map keyed by workload or with `{workload}` for a
+per-workload role. The
 engine runs the step on every cell path, so no consumer workflow file decides
 whether a cell gets credentials; the environment table alone decides the role.
 
 **A plan cell executes branch-authored Terramate/OpenTofu** — a provider or an
-`external` data source runs at plan time — so whatever the `aws.plan` tier
+`external` data source runs at plan time — so whatever the identity's `aws.plan`
 names is assumed while running code from the branch under review. What
 *authorizes* it is the role's trust policy, and nothing in the engine bounds it
 further: a policy conditioned on
@@ -877,8 +950,8 @@ apply credentials to a plan of any branch someone with push access can push
 `docs/hardening.md` §7–9 is the threat model.
 
 It follows that the plan/apply role split is the consumer's to configure and to
-enforce in the roles' trust policies: an `aws.plan` and an `aws.apply` tier, and
-a trust-policy claim condition on each role. The engine verifies nothing about
+enforce in the roles' trust policies: an identity's `aws.plan` and `aws.apply`,
+and a trust-policy claim condition on each role. The engine verifies nothing about
 either role, including whether the two differ. See `docs/hardening.md` §7–9 for
 the threat model this bounds.
 

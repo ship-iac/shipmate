@@ -245,14 +245,15 @@ creates all of them, including `shipmate-engine` and its branch policy:
   whose pull request targets a branch it does not name (plan jobs run at the
   pull request's *base* ref) ([`hardening.md`](hardening.md) #8;
   `shipmate doctor` warns on either). Plan-time cloud credentials are not
-  configured here: a plan cell's role is the environment's `aws.plan` tier in
-  the table ([`aws.md`](aws.md) §"The environment table"), and nothing but
-  that entry, a literal or a variable reference in it, can supply one. A plan
+  configured here: a plan cell's role is the `aws.plan` of the identity the
+  environment names in the table ([`aws.md`](aws.md) §"The environment
+  table"), and nothing but that table, a literal or a variable reference in it,
+  can supply one. A plan
   environment can have no protection at all, so anyone who can push a branch
   can reach whatever role a plan cell resolves; what refuses it is that role's
   own trust-policy claim condition ([`hardening.md`](hardening.md) §7–9).
-- **The identity your layout injects comes from the environment table**,
-  `.github/shipmate.toml` on your repository's default branch
+- **The environment identity your layout injects comes from the environment
+  table**, `.github/shipmate.toml` on your repository's default branch
   ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). It is required: a
   repository without one has nothing for its cells to run as, and every run
   refuses. `layout` is the discriminator — `tf_vars` derives `TF_VAR_env` and
@@ -277,25 +278,29 @@ creates all of them, including `shipmate-engine` and its branch policy:
   identity = "dev"
   ```
 
-  Dotted keys are the canonical spelling: one `[environments.<name>]` header per
-  environment, tiers written as `aws.plan.role` inside it. Give the plan and
-  apply paths separate roles — one block-level `aws.role` covers both, and the
-  plan path is reachable from any branch ([`hardening.md`](hardening.md) §7–9).
+  Credentials live in `[identities.<name>]`, and an environment names one with
+  `identity`. Dotted keys are the canonical spelling: one header per identity
+  and per environment, the fields written as `aws.plan` inside it. Give the plan
+  and apply paths separate roles — the plan path is reachable from any branch
+  ([`hardening.md`](hardening.md) §7–9).
   Top-level settings go above the first header: a scalar written below one lands
   inside that table instead, which TOML accepts and the engine then refuses.
   A repository that needs no cloud role at all declares `layout` and nothing
   else.
 
-  A stack's `workload/<name>` tag selects `aws.<tier>.workloads.<name>`, keyed
-  by the name exactly as written ([`aws.md`](aws.md) §"The environment table"
-  has the example). A tier that lists workloads falls back to its own role for
-  a tag it does not list, and refuses the cell at detect when it has no role to
-  fall back to. An untagged stack, and any stack on a tier that lists no
-  workloads, runs as the tier's role, or with no credentials when the tier sets
-  none. On a tier with no role of its own, merge a new workload key before the
-  branch that tags the stack. The OIDC subject names only the environment
-  (`environment:<env>-apply`, or the bare `<env>` when shared), never the
-  workload, so every workload role whose trust policy accepts that subject is
+  A role can vary by workload: an identity field written as a map keyed by
+  workload, or a role carrying `{workload}`, gives each stack the role of its
+  `workload/<name>` tag, matched exactly as written ([`aws.md`](aws.md) §"The
+  environment table" has the example). An environment naming such an identity
+  lists the workloads it admits in `workloads`; a tag outside the list is
+  refused at detect, and an untagged stack runs with no credentials. An
+  identity that does not vary gives every stack its role, and a `workloads`
+  list there only refuses tags outside it. An environment naming no identity
+  runs every stack credential-free, and its workload tags are inert. Merge a new
+  workload into `workloads` before the branch that tags the stack, and remove
+  one after the branch that drops the last tag. The OIDC subject names only the
+  environment (`environment:<env>-apply`, or the bare `<env>` when shared),
+  never the workload, so every workload role whose trust policy accepts that subject is
   reachable from every apply cell of that environment, and for a shared
   environment from every plan cell too. Choose how finely to
   split environments before writing those trust policies
@@ -321,7 +326,7 @@ creates all of them, including `shipmate-engine` and its branch policy:
   **A value can come from a GitHub variable.** Write `{ vars = "NAME" }` in
   place of any string, list items included, and every run reads that
   repository or organization variable instead:
-  `aws.apply.role = { vars = "PROD_APPLY_ROLE" }`. Changing the variable changes
+  `aws.apply = { vars = "PROD_APPLY_ROLE" }`. Changing the variable changes
   the value with no pull request. Define the name as a repository or
   organization variable; no cell's Environment is read. Never define it on
   `shipmate-engine`: comment-ops and the plan summary bind that Environment, so
@@ -597,10 +602,11 @@ default a new input drifts back to, and it reopens this exactly.
 callee runs one — that is every job but `comment-ops`, whose callee asks for no
 such scope, and it applies to consumers with no cloud credentials at all. The
 engine runs `aws-actions/configure-aws-credentials` in the `plan` job, gated on
-a role resolving non-empty. That role is the environment's `aws.plan` tier in
-the table, read from the default branch, and nothing but that entry, a literal
-or a variable reference in it, can supply one. The step is skipped, and the
-consumer runs with no cloud credentials, wherever that entry resolves no role;
+a role resolving non-empty. That role is the `aws.plan` of the identity the
+environment names in the table, read from the default branch, and nothing but
+that table, a literal or a variable reference in it, can supply one. The step is
+skipped, and the consumer runs with no cloud credentials, wherever the cell
+resolves no role;
 where it resolves one, the role's own trust-policy claim condition is the bound
 ([`hardening.md`](hardening.md) §7–9). The grant is required either way,
 because the job requests it whether or not the step fires.

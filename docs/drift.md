@@ -73,10 +73,10 @@ all; no consumer file can set it, and no plan run carries it.
 
 The engine runs `aws-actions/configure-aws-credentials` inside the `drift` job,
 in the same position as on the plan path, gated on a role resolving non-empty.
-That role is the environment's `aws.plan` tier in the table, or
-`aws.plan.workloads[<name>]` for a cell carrying that `workload/<name>` tag. An
-environment with no entry, or an entry whose block resolves nothing on the plan
-tier, resolves no role and the step is skipped. A drift cell runs only
+That role is the `aws.plan` of the identity the environment names in the table,
+per workload where that field varies by workload. An environment with no entry,
+or naming no identity, or whose identity sets no `aws.plan`, resolves no role and
+the step is skipped. A drift cell runs only
 default-branch code, so what an over-scoped role costs here is write access
 where a read-only one belongs; the role's trust-policy claim condition is what
 refuses it. See
@@ -87,8 +87,9 @@ refuses it. See
 the three paths that scan the whole tree, so it is where the engine warns that
 the environment table declares an environment no stack tags — a leftover entry,
 or a typo in a key. It reports a `needs` predecessor matching no tag the same
-way: it is inert, and the warning names what it therefore fails to do. A pull
-request introducing that typo says nothing about it:
+way: it is inert, and the warning names what it therefore fails to do. It also
+names a workload an environment's `workloads` lists and no stack in that
+environment tags. A pull request introducing that typo says nothing about it:
 the plan path sees only the changed set
 ([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
 

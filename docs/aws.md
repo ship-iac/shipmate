@@ -69,12 +69,15 @@ once it reaches the apply path.
 
 ## GitHub OIDC
 
-Each environment gets its own IAM role, assumed through GitHub's OIDC provider
+Roles are named per identity, not per environment: an `[identities.<name>]`
+table names a plan and an apply role, and every environment whose entry carries
+`identity = "<name>"` assumes them, through GitHub's OIDC provider
 (`token.actions.githubusercontent.com`) — no long-lived access key anywhere. The
 role's trust policy conditions the `sub` claim on the environment claim
 (`environment:<env>-apply` for an apply role, `environment:<env>-plan` for a
 read-only plan role), which is the only control that decides which environments
-can actually assume it. [`hardening.md`](hardening.md) §7–9 explains why that,
+can actually assume it. A role that several environments assume must admit
+each one's subject. [`hardening.md`](hardening.md) §7–9 explains why that,
 and not where the role is named, is the enforcing bound.
 
 Because the claim is inside the condition, renaming an environment breaks its
@@ -123,9 +126,10 @@ repository renamed or recreated under an old name cannot inherit the trust.
 ## The environment table
 
 A cell resolves its role from the environment table — `.github/shipmate.toml` —
-and from nothing else. Each environment's table carries its region and the `aws`
-fields naming the roles. The engine reads the file from the repository's default
-branch, so a pull request cannot choose which role its own plan assumes.
+and from nothing else. An `[identities.<name>]` table names the roles once, and
+each environment's entry names an identity and carries its region. The engine
+reads the file from the repository's default branch, so a pull request cannot
+choose which role its own plan assumes.
 [`../CONTRACT.md`](../CONTRACT.md) §Environment table is the schema of record;
 this is what it looks like for the AWS sample:
 
@@ -142,23 +146,36 @@ identity  = "dev"
 workloads = ["app", "net-edge"]
 ```
 
-Six things to know beyond the schema:
+Beyond the schema:
 
-- **Name the two tiers separately, always.** A single block-level `aws.role`
-  covers the plan path as well as the apply path, and the plan path is reachable
-  from any branch — see [`hardening.md`](hardening.md) §7–9, which has the whole
-  argument. It saves no lines either.
-
-- **`aws.region` inherits the environment's own `region`.** Set it separately
-  only where the credentials step must authenticate against a region the IaC
-  does not use. A tier that resolves a role and no region is refused at detect,
-  not at the credentials step.
-- **`plan` and `apply` are the two tiers a cell path selects between**, and
-  `workloads` under either carries the per-workload role. A field set at
-  provider-block level applies to both paths unless a tier overrides it.
+- **Give the two paths different roles, always.** The plan path is reachable
+  from any branch, so an apply role in `aws.plan` hands it write access — see
+  [`hardening.md`](hardening.md) §7–9, which has the whole argument. The one-role
+  shorthand `aws.role` is refused.
+- **A role is a role name or a full ARN.** A name needs `aws.account` and becomes
+  `arn:aws:iam::<account>:role/<name>`; an ARN, as above, is used as written and
+  must have no account beside it.
+- **The credentials step authenticates against the environment's `region`.** An
+  environment naming an identity without a region is refused.
+- **`aws.apply` above varies by workload**, so `dev-eu` must list the workloads
+  it admits. A stack tagged `workload/app` assumes the first role on the apply
+  path, one tagged `workload/net-edge` the second, and both assume the one plan
+  role. The tag is matched exactly as written, so two workloads whose names
+  differ only in punctuation are two workloads. `{workload}` in a role string is
+  the other way to vary: `shipmate-apply-{workload}` names one role per listed
+  workload.
+- **A tag outside `workloads` is refused at detect**, naming every such cell,
+  for the cells a run plans, applies or unlocks. An untagged stack in `dev-eu`
+  runs with no credential, because its identity varies. Add a workload to the
+  list on its own pull request before the branch that tags a stack with it, and
+  remove it after the branch that drops the last tag; in between, the paths
+  that scan the whole tree warn about a listed workload no stack tags.
+- **Several environments may name one identity.** One edit to
+  `[identities.dev]` then retargets all of them; `shipmate doctor`'s roles lines
+  on the pull request list what each environment resolves.
 - **A shared environment resolves `aws.apply` on both paths**, because it is one
-  environment with one role. Declaring `aws.plan` for an environment holding
-  `shared = true` is refused rather than silently ignored.
+  environment with one role. A shared environment naming an identity that sets
+  `aws.plan` is refused rather than silently ignored.
 - **Adding or removing an environment takes two pull requests**, configuration
   first when adding and last when removing, because the table is read from the
   default branch while the stacks' tags come from the branch under test.
@@ -166,17 +183,6 @@ Six things to know beyond the schema:
   The same rule governs the first table of all: it has to be on the default
   branch before the first plan run, so it lands in the commit that adds the
   workflow file rather than in a pull request of its own.
-- **A workload tier is keyed by the `<name>` of the `workload/<name>` tag**,
-  exactly as written, so two workloads whose names differ only in punctuation
-  resolve separately. A tag the consulted tier's `workloads` does not list is
-  refused at detect when that tier, after inheritance, sets no role to fall back
-  to. Only the cells a run plans, applies or unlocks are checked; an untagged
-  cell and a tier that resolves a role are not refused. The plan path checks both tiers for
-  the stacks it plans, and it plans only changed stacks. On a tier with no role
-  to fall back to, a workload key follows the environment order above: merge the
-  key before the branch that tags the stack, and remove it after the branch that
-  drops the tag. That order is what keeps an unchanged tagged stack from being
-  stranded.
 
 ## Where the credentials step goes
 
@@ -191,24 +197,24 @@ side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
 `id-token: write` on itself (see
 [`getting-started.md`](getting-started.md) §Required — plan).
 
-The plan-side role is the `aws.plan` tier. In shared mode — a logical env
+The plan-side role is the identity's `aws.plan`. In shared mode — a logical env
 holding `shared = true` binds one bare `<env>` on both paths — there
 is one role for both and the wave jobs use it, so it must be the apply role: plan-time
 branch code and the drift run then have write access, and the read-only plan
 role is unreachable for that env ([`hardening.md`](hardening.md) §7–9). Such an
-environment resolves `aws.apply` on both paths, and an `aws.plan` tier on it is
-refused rather than ignored.
+environment resolves `aws.apply` on both paths, and naming an identity that sets
+`aws.plan` from it is refused rather than ignored.
 
 **The plan and drift steps resolve a workload role too**, like the wave jobs:
-`aws.plan.workloads[<name>]` overrides the `aws.plan` role for cells carrying
-that tag.
+an `aws.plan` map or a `{workload}` in it gives each listed workload its own
+plan role.
 
-**A step is skipped** wherever the environment's entry resolves no
-role on the tier that cell's path consulted — an environment with no entry, an
-entry with no `aws` block, or an apply-only block on the plan path. There is no
-level above the entry to fall back to, so an environment that names no role is
-credential-free on its own. A tagged cell on a tier that lists workloads but
-not its tag, and resolves no role, is not skipped: detect refuses it.
+**A step is skipped** wherever the cell resolves no role on its path — an
+environment with no entry, an entry naming no identity, an identity setting
+only `aws.apply` on the plan path, or an untagged cell whose identity varies by
+workload. An environment naming no identity is credential-free on its own. A
+cell tagged outside its environment's `workloads` is not skipped: detect refuses
+it.
 
 ## A green plan does not size either policy
 
