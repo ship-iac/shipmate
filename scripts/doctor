@@ -1680,6 +1680,10 @@ CONFIG_PATH = bm.ec.CONFIG_PATH
 #: The refusal lines one invalid-file finding shows. The finding lands in the PR comment and
 #: in an annotation, so it stays bounded however many errors the file holds.
 CONFIG_ERROR_LINES = 10
+#: The characters all roles notices may take together. 256 listed workloads with long role
+#: names reach 70,000, past GitHub's 65,536-character comment limit, and the report's
+#: fallback for that drops this section and every harvested annotation.
+ROLE_LINES_BUDGET = 8000
 
 # NOTICE: a branch need not carry the file at all, so an unreadable one is not a
 # misconfiguration. Never an all-clear, and never a read of another revision in its place.
@@ -1713,19 +1717,47 @@ CONFIG_REFERENCES = (
 )
 
 
+def _roles_notice(env, rows, budget):
+    """One environment's roles notice, its items cut to fit `budget` and counted when it
+    alone exceeds it."""
+    head = f"`{env}` resolves these roles at the commit under examination: "
+    text = head + "; ".join(rows) + "."
+    if len(text) <= budget:
+        return text
+    shown = len(rows)
+    while len(head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more.") > budget:
+        shown -= 1
+    return head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more."
+
+
 def _config_roles(table):
     """One notice per environment naming an identity: the role each path and listed workload
-    resolves, `every cell` for an identity that does not vary, `no role` for a path it grants
-    nothing on. Unabridged, because the table bounds the count.
+    resolves, `no role` for a path it grants nothing on. An identity that does not vary shows
+    `every cell`, or `untagged and listed cells` when the entry writes `workloads`, because a
+    tag outside the list resolves no role.
+
+    Bounded by ROLE_LINES_BUDGET: the notices that fit, then one counting the environments
+    left out.
     """
     items = {}
     for env, path, workload, role in bm.ec.resolved_roles(table):
         shown = f"`{role}`" if role else "no role"
-        items.setdefault(env, []).append(f"{path} {workload or 'every cell'}: {shown}")
-    return [
-        (NOTICE, f"roles `{env}` resolves at the commit under examination: {'; '.join(rows)}.")
-        for env, rows in items.items()
-    ]
+        written = "workloads" in table["environments"][env]
+        cells = workload or ("untagged and listed cells" if written else "every cell")
+        items.setdefault(env, []).append(f"{path} {cells}: {shown}")
+    notices, left = [], ROLE_LINES_BUDGET
+    for done, (env, rows) in enumerate(items.items()):
+        text = _roles_notice(env, rows, ROLE_LINES_BUDGET)
+        if len(text) > left:
+            notices.append(
+                f"roles for {len(items) - done} more environment(s) not shown, to keep this "
+                "report under GitHub's comment limit; `CONTRACT.md` §Resolution lists how each "
+                "cell resolves."
+            )
+            break
+        notices.append(text)
+        left -= len(text)
+    return [(NOTICE, text) for text in notices]
 
 
 def _config_defaults(table):

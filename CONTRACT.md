@@ -758,11 +758,15 @@ bare `<env>` when shared, `<env>-plan` or `<env>-apply` for the calling path
 otherwise.
 
 **`shipmate doctor` lists the role each environment resolves**, one notice per
-environment naming an identity: ``roles `<env>` resolves at the commit under
-examination: …``, one item per path and listed workload, `every cell` for an
-identity that does not vary, and `no role` for a path the identity grants
-nothing on. It reads the branch's table, so it is the audit read for an identity
-edit before it merges. A referenced role shows the value comment-ops resolves: a
+environment naming an identity: `` `<env>` resolves these roles at the commit
+under examination: … ``, one item per path and listed workload, and `no role` for
+a path the identity grants nothing on. An identity that does not vary shows
+`every cell`, or `untagged and listed cells` when the entry writes `workloads`,
+because a tag outside the list resolves no role. The notices share an 8,000-character
+budget, so the report stays under GitHub's comment limit: an environment over it
+alone has its items cut and counted, and one final notice counts the
+environments left out. It reads the branch's table, so it is the audit read for
+an identity edit before it merges. A referenced role shows the value comment-ops resolves: a
 `shipmate-engine` Environment variable of the same name wins there, and never in
 a cell (§Variable references).
 

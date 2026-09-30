@@ -4380,13 +4380,13 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "roles `dev-eu` resolves at the commit under examination: plan every cell: "
+            "`dev-eu` resolves these roles at the commit under examination: plan every cell: "
             "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
             "`arn:aws:iam::981781037707:role/shipmate-apply`.",
         ),
         (
             doctor.NOTICE,
-            "roles `prod` resolves at the commit under examination: plan app: "
+            "`prod` resolves these roles at the commit under examination: plan app: "
             "`arn:aws:iam::981781037707:role/prod-plan`; plan net-edge: "
             "`arn:aws:iam::981781037707:role/prod-plan`; apply app: "
             "`arn:aws:iam::981781037707:role/prod-apply`; apply net-edge: "
@@ -4461,7 +4461,7 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "roles `dev` resolves at the commit under examination: plan every cell: "
+            "`dev` resolves these roles at the commit under examination: plan every cell: "
             "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
             "`arn:aws:iam::981781037707:role/shipmate-apply`.",
         ),
@@ -4484,7 +4484,8 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
 
 
 #: A varying identity with two workloads listed out of alphabetical order, an apply-only
-#: identity named by a shared and by an unshared environment, and an entry naming none.
+#: identity named by a shared and by two unshared environments, one of them writing
+#: `workloads`, and an entry naming none.
 _ROLES_TABLE = """layout = "folder"
 
 [identities.app]
@@ -4511,6 +4512,11 @@ region = "eu-west-1"
 [environments.stage]
 region   = "eu-west-1"
 identity = "ops"
+
+[environments.tools]
+region    = "eu-west-1"
+identity  = "ops"
+workloads = ["ci"]
 """
 
 
@@ -4523,7 +4529,8 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
     Mutations: drop the roles notices from `config_status` (three lines vanish); consult the
     requested path rather than `apply` for a shared environment in `resolved_roles` (the
     `ops` plan row reads `no role`); skip rows whose `role_arn` is empty (the `stage` plan
-    row vanishes).
+    row vanishes); print `every cell` whatever the entry writes (the `tools` rows, whose list
+    leaves a tag outside it with no role, read `every cell`).
     """
     responses = {_CONFIG_READ: _wf_file(_ROLES_TABLE)}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4531,7 +4538,7 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
         (doctor.NOTICE, doctor.CONFIG_VALID),
         (
             doctor.NOTICE,
-            "roles `dev` resolves at the commit under examination: plan network: "
+            "`dev` resolves these roles at the commit under examination: plan network: "
             "`arn:aws:iam::111111111111:role/network-plan`; plan core: "
             "`arn:aws:iam::111111111111:role/core-plan`; apply network: "
             "`arn:aws:iam::111111111111:role/net-apply`; apply core: "
@@ -4539,14 +4546,20 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
         ),
         (
             doctor.NOTICE,
-            "roles `ops` resolves at the commit under examination: plan every cell: "
+            "`ops` resolves these roles at the commit under examination: plan every cell: "
             "`arn:aws:iam::333333333333:role/ops-apply`; apply every cell: "
             "`arn:aws:iam::333333333333:role/ops-apply`.",
         ),
         (
             doctor.NOTICE,
-            "roles `stage` resolves at the commit under examination: plan every cell: no "
+            "`stage` resolves these roles at the commit under examination: plan every cell: no "
             "role; apply every cell: `arn:aws:iam::333333333333:role/ops-apply`.",
+        ),
+        (
+            doctor.NOTICE,
+            "`tools` resolves these roles at the commit under examination: plan untagged and "
+            "listed cells: no role; apply untagged and listed cells: "
+            "`arn:aws:iam::333333333333:role/ops-apply`.",
         ),
         (
             doctor.NOTICE,
@@ -4562,6 +4575,64 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
             doctor.NOTICE,
             "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
+        ),
+    ]
+
+
+#: 62 characters, the role-name length that reproduces the oversized report.
+_LONG_ROLE = "shipmate-" + "r" * 53
+
+
+def _wide_roles_table(*envs):
+    """`envs` each naming one identity whose apply role varies over 256 listed workloads."""
+    workloads = [f"w{i:03}" for i in range(256)]
+    return {
+        "layout": "folder",
+        "identities": {
+            "wide": {
+                "aws": {
+                    "account": "111111111111",
+                    "plan": _LONG_ROLE,
+                    "apply": {w: _LONG_ROLE for w in workloads},
+                }
+            }
+        },
+        "environments": {
+            env: {"region": "eu-west-1", "identity": "wide", "workloads": workloads} for env in envs
+        },
+    }
+
+
+def test_the_roles_section_stays_within_its_budget_and_keeps_the_harvest():
+    """A report whose roles notices ran past GitHub's comment limit fell back to the
+    findings-only body, dropping the environment-table section and every harvested
+    annotation. The first environment's items are cut and counted, the second is counted,
+    and a harvested warning still renders.
+
+    Mutations: remove the budget (every notice unabridged) -- the body falls back, and the
+    harvested `stale codegen` warning and the section heading both vanish; or never cut an
+    environment's items -- the first notice alone is over budget, so both environments are
+    only counted.
+    """
+    table = doctor.bm.ec.validate_structure(_wide_roles_table("dev", "prod"))
+    roles = doctor._config_roles(table)
+    body = doctor.render_report([], [_ann(title="stale codegen")], _ctx(), roles)
+    assert (doctor.CONFIG_HEADING in body, "stale codegen" in body) == (True, True)
+    arn = f"`arn:aws:iam::111111111111:role/{_LONG_ROLE}`"
+    items = [f"plan w{i:03}: {arn}" for i in range(256)] + [
+        f"apply w{i:03}: {arn}" for i in range(256)
+    ]
+    assert roles == [
+        (
+            doctor.NOTICE,
+            "`dev` resolves these roles at the commit under examination: "
+            + "; ".join(items[:73])
+            + " … and 439 more.",
+        ),
+        (
+            doctor.NOTICE,
+            "roles for 1 more environment(s) not shown, to keep this report under GitHub's "
+            "comment limit; `CONTRACT.md` §Resolution lists how each cell resolves.",
         ),
     ]
 
