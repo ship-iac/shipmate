@@ -37,6 +37,7 @@ team is that file's `[gate] approver_team`, which this script does not write.
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -157,8 +158,7 @@ def _env_membership():
     return _load("build-matrix").env_membership(all_stacks=True)
 
 
-def _derive_envs():
-    stacks_by_env, _ = _env_membership()
+def _derive_envs(stacks_by_env):
     if not stacks_by_env:
         raise SystemExit(
             "::error::this repository declares no environment: no stack carries an env/* tag, "
@@ -1063,6 +1063,37 @@ def _codeowners_item(ctx):
     )
 
 
+def _lock_files_item(ctx):
+    """`ok` when every stack has a git-tracked `.terraform.lock.hcl`, the only lock the
+    provider cache keys on. Tracked, not present on disk: any local `tofu init` writes the
+    file, gitignored or not. `ctx["stacks"]` are relative to the working directory, as
+    `terramate list` printed them; the paths named here are relative to the checkout root.
+    """
+    item = "Provider lock files"
+    root = pathlib.Path(ctx["root"])
+    stacks = sorted(
+        pathlib.Path(os.path.relpath(pathlib.Path.cwd() / s, root)).as_posix()
+        for s in ctx["stacks"]
+    )
+    locks = {s: (pathlib.PurePosixPath(s) / ".terraform.lock.hcl").as_posix() for s in stacks}
+    tracked = set()
+    if locks:
+        out = _run(["git", "-C", str(root), "ls-files", "-z", "--", *locks.values()])
+        tracked = set(out.split("\0"))
+    missing = [s for s in stacks if locks[s] not in tracked]
+    if not missing:
+        return "ok", item, []
+    lines = [
+        f"{len(missing)} of {len(stacks)} stack(s) have no git-tracked `.terraform.lock.hcl`,",
+        "so the provider cache serves none of them. Run `tofu providers lock` in each and",
+        "commit the file:",
+    ]
+    lines += [f"  {s}" for s in missing[:10]]
+    if len(missing) > 10:
+        lines.append(f"  and {len(missing) - 10} more")
+    return "todo", item, lines
+
+
 def _adoption_item(ctx):
     item = "adoption pull request"
     if ctx["shim_on_default"]:
@@ -1112,7 +1143,7 @@ def _checklist(ctx):
     items += [_approver_item(ctx), _app_item(ctx)]
     if gated:
         items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))
-    items += [_codeowners_item(ctx), _adoption_item(ctx)]
+    items += [_codeowners_item(ctx), _lock_files_item(ctx), _adoption_item(ctx)]
     if ctx["ruleset_deferred"]:
         items.append(_RULESET_ITEM)
     out = ["", "Still yours, each item marked from what this run read:", ""]
@@ -1183,7 +1214,8 @@ def main(argv=None):
     sha, version = _engine_pin(engine)
     root = _repo_root()
     repo, default_branch, is_private = _repo_facts()
-    envs = _derive_envs()
+    stacks_by_env, tags_by_stack = _env_membership()
+    envs = _derive_envs(stacks_by_env)
     variables = _variables()
     _refuse_diverging_app_id(args.app_id, variables)
     table, shared = _resolve_shared(root, envs, repo, variables)
@@ -1193,6 +1225,7 @@ def main(argv=None):
         "app_id": args.app_id,
         "key": key,
         "envs": envs,
+        "stacks": sorted(tags_by_stack),
         "table": table,
         "shared": shared,
         "unresolved": set(),
