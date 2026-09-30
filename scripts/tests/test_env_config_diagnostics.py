@@ -246,6 +246,7 @@ def test_every_listed_workload_tagged_says_nothing(capsys):
 def test_a_listed_workload_warns_only_under_a_whole_tree_scan(capsys):
     """A plan scans only changed stacks, so a listed workload on an unchanged one is untagged
     there. Mutation: call `_report_unused(table, tagged or {})` when `tagged` is None -- the
-    unused-entry warning for dev-eu and a warning naming `core, net` print."""
+    unused-entry warning for dev-eu prints, alone, since an environment no stack tags gets no
+    listed-workload line."""
     _validate(_LISTING, matrix_envs=("dev-eu",), tagged=None)
     assert capsys.readouterr().out == ""
