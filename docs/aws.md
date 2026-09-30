@@ -240,11 +240,11 @@ The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
 `drift`; their cells download only `hashicorp/random`. An AWS repository's
 cells pull `hashicorp/aws`. The provider cache serves a stack once its
 `.terraform.lock.hcl` is committed ([`../CONTRACT.md`](../CONTRACT.md)
-§Terramate safeguards, "Consumer gitignore requirement") and a drift run on the
-default branch has saved the entry; only drift saves. With the lock gitignored,
-as it is in `repo-example-stacks-aws`, every `init -reconfigure` downloads the
-provider again. On a cloud repository weigh the slim image against that
-download before passing it to `plan` or `drift`.
+§Terramate safeguards, "Lock files and the provider cache") and a drift run on
+the default branch has saved the entry; only drift saves. Without a committed
+lock, as in `repo-example-stacks-aws`, every `init -reconfigure` downloads the
+provider again; weigh the slim image against that download before passing it
+to `plan` or `drift`.
 
 ## The sample's workload
 
