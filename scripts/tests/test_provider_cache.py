@@ -10,7 +10,9 @@ restore that missed and an `init` that left at least one file in the cache, and 
 restore step's key, computed before `init -reconfigure` can rewrite the committed lock: a key
 computed after it could name a lock no restore reads. In `apply-cell` both steps follow
 `Save state` with no status function in their `if:`, so a failed apply saves nothing, and carry
-`continue-on-error: true`, so a failed save cannot fail an applied cell.
+`continue-on-error: true`, so a failed save cannot fail an applied cell. When `init` fails after
+a restore that hit, each cell names the restored entry in one `::error::`, so a corrupt entry can
+be deleted by key.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
 save added to another cell, a dropped guard or a widened key. Each value is compared whole
@@ -21,7 +23,9 @@ Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `
 check `if:`; the save's key rebuilt from the key step's digest; `continue-on-error` dropped from
 `apply-cell`'s save; `-type f` dropped from the check's `find`; `restore-keys` added to one
 cell's restore; `STACK` dropped from one cell's key step `env:`; `actions/cache/save` of the
-cache directory added to another action; the combined `actions/cache` action used anywhere.
+cache directory added to another action; the combined `actions/cache` action used anywhere;
+`steps.init.outcome == 'failure'` or the `cache-hit` clause dropped from one cell's annotation
+`if:`.
 """
 
 import os
@@ -189,3 +193,39 @@ def test_an_empty_cache_is_not_reported_populated(tmp_path, populate):
 @bash_only
 def test_a_cache_holding_a_nested_file_is_reported_populated(tmp_path):
     assert _run_check(tmp_path, _nested_file) == "populated=true\n"
+
+
+_ANNOTATE_IF = (
+    "${{ failure() && steps.init.outcome == 'failure' && "
+    "steps.provider-cache.outputs.cache-hit == 'true' }}"
+)
+
+
+@pytest.mark.parametrize("cell", _CELLS)
+def test_each_cell_names_the_entry_only_when_init_fails_after_a_hit(cell):
+    step = step_by(cell, name="Name the restored provider cache entry")
+    assert {k: v for k, v in step.items() if k != "run"} == {
+        "name": "Name the restored provider cache entry",
+        "if": _ANNOTATE_IF,
+        "shell": "bash",
+        "env": {"KEY": "${{ steps.provider-cache.outputs.cache-primary-key }}"},
+    }
+
+
+@pytest.mark.parametrize("cell", _CELLS)
+def test_each_cells_init_step_carries_the_id_the_annotation_reads(cell):
+    assert step_by(cell, name="Initialize the stack")["id"] == "init"
+
+
+@bash_only
+@pytest.mark.parametrize("cell", _CELLS)
+def test_the_annotation_names_the_key_and_the_delete_command(tmp_path, cell):
+    body = step_by(cell, name="Name the restored provider cache entry")["run"]
+    r = run_step(tmp_path, body, {**os.environ, "KEY": "tofu-providers-Linux-X64-abc123"})
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == (
+        "::error::OpenTofu's init failed after restoring provider cache entry "
+        "tofu-providers-Linux-X64-abc123. If the log above says a cached package does not "
+        "match the content of the downloaded package, delete the entry with gh cache delete "
+        "tofu-providers-Linux-X64-abc123 and re-run.\n"
+    )

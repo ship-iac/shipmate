@@ -14,6 +14,7 @@ section below names the SHA the release tags.
 
 - **`shipmate doctor` names each gated environment at 0 required approvals: a note while code-owner review is on, a warning while it is off.**
 - **The apply comment says when a gated environment applied with no approving review required.**
+- **A cell whose `tofu init` fails after restoring a provider cache entry names that entry's key in an error annotation.**
 
 ### Changed
 
