@@ -293,9 +293,9 @@ _ROLE_FIELDS = ("plan", "apply")
 _PLACEHOLDER = "{workload}"
 _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 
-#: `vars` because a one-key `{ vars = "…" }` is a reference; `role` because the retired
-#: `aws.plan.role = "…"` parses as a map keyed `role`.
-_RESERVED_WORKLOADS = ("vars", "role")
+#: `vars` because a one-key `{ vars = "…" }` is a reference; `role` and `region` because the
+#: retired `aws.plan.role = "…"` and `aws.plan.region = "…"` parse as maps keyed by them.
+_RESERVED_WORKLOADS = ("vars", "role", "region")
 
 #: Everything the file may declare at its top level.
 _TOP_KEYS = ("schema_version", "layout", "identities", "environments", "gate")
@@ -461,7 +461,7 @@ def _check_environment(entry, env, errors, identities):
 def _not_a_workload(where):
     return SystemExit(
         f"::error::{where} is not a workload name: lowercase letters, digits, '-' and '_', "
-        "starting with a letter or digit, and not vars or role."
+        "starting with a letter or digit, and not vars, role or region."
     )
 
 
@@ -470,19 +470,33 @@ def _is_workload(name):
     return bool(_ENV_ENTRY.fullmatch(name)) and name not in _RESERVED_WORKLOADS
 
 
+def _empty(name, where):
+    return SystemExit(
+        f"::error::identities.{name}.{where} is empty. Give it a value, or remove the key."
+    )
+
+
+def _not_an_account(name, where):
+    return SystemExit(
+        f"::error::identities.{name}.{where} is not a 12-digit AWS account id in a quoted "
+        "string. A TOML integer drops a leading 0."
+    )
+
+
+def _is_integer(value):
+    """A TOML integer, which an account id must not be; a TOML boolean is a Python `int` too
+    and keeps the type refusal."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _check_value(name, where, field, value):
     """One string at an identity's field position: non-empty, an account id where the field
     is `account`, and no brace but the placeholder in a role."""
     if value == "":
-        raise SystemExit(
-            f"::error::identities.{name}.{where} is empty. Give it a value, or remove the key."
-        )
+        raise _empty(name, where)
     if field == "account":
         if not _ACCOUNT_ID.fullmatch(value):
-            raise SystemExit(
-                f"::error::identities.{name}.{where} is not a 12-digit AWS account id in a "
-                "quoted string. A TOML integer drops a leading 0."
-            )
+            raise _not_an_account(name, where)
     elif "{" in value.replace(_PLACEHOLDER, "") or "}" in value.replace(_PLACEHOLDER, ""):
         raise SystemExit(
             f"::error::identities.{name}.{where} holds a brace outside {_PLACEHOLDER}, the "
@@ -491,20 +505,29 @@ def _check_value(name, where, field, value):
 
 
 def _check_map_value(name, field, key, value):
-    """One `key = value` of a field written as a map keyed by workload."""
+    """One `key = value` of a field written as a map keyed by workload. The retired spellings
+    were per path, so under `account` a `role` or `region` key is only not a workload name."""
     where = f"identities.{name}.aws.{field}.{key}"
-    if key == "role":
+    retired_path = field != "account"
+    if key == "role" and retired_path:
         raise SystemExit(
             f"::error::{where}: role is not a workload name. The retired "
             f'aws.{field}.role = "…" is written aws.{field} = "…".'
         )
+    if key == "region" and retired_path:
+        raise SystemExit(
+            f"::error::{where}: region is not a workload name. The retired "
+            f"aws.{field}.region is gone: the credentials step uses the environment's region."
+        )
     if not _is_workload(key):
         raise _not_a_workload(where)
+    if field == "account" and _is_integer(value):
+        raise _not_an_account(name, f"aws.{field}.{key}")
     if not isinstance(value, str):
         retired = (
             f" The retired aws.{field}.workloads.<name>.role is written "
             f'aws.{field} = {{ <name> = "…" }}.'
-            if key == "workloads"
+            if key == "workloads" and retired_path
             else ""
         )
         raise SystemExit(f"::error::{where} must be a string, got {type(value).__name__}.{retired}")
@@ -517,6 +540,10 @@ def _check_field(name, field, value, errors):
     if isinstance(value, str):
         with _gather(errors):
             _check_value(name, f"aws.{field}", field, value)
+    elif field == "account" and _is_integer(value):
+        errors.append(str(_not_an_account(name, f"aws.{field}")))
+    elif value == {}:
+        errors.append(str(_empty(name, f"aws.{field}")))
     elif isinstance(value, dict):
         for key in sorted(value):
             with _gather(errors):
@@ -786,14 +813,20 @@ def _report_unused(table, tagged):
 
 def _report_untagged_workloads(table, tagged):
     """Name each entry's listed workloads no stack in that environment tags. A workload is
-    listed before the branch tagging it merges and dropped after the branch untagging it."""
+    listed before the branch tagging it merges and dropped after the branch untagging it. An
+    environment no stack tags is skipped: the unused-entry warning already names it."""
     for env, entry in sorted(table.get("environments", {}).items()):
-        untagged = sorted(set(entry.get("workloads", ())).difference(tagged.get(env, ())))
+        if env not in tagged:
+            continue
+        untagged = sorted(set(entry.get("workloads", ())).difference(tagged[env]))
         if untagged:
             print(
                 f"::warning::environments.{env}.workloads lists {', '.join(untagged)}, which "
-                f"no stack in {env} tags. Remove it after the pull request that drops the "
-                "last tag merges. " + _TWO_PULL_REQUESTS
+                f"no stack in {env} tags. Tag a stack with each, or remove it from the list "
+                "once the pull request that drops its last tag has merged. This is a warning "
+                "rather than a refusal because the table is read from the default branch and "
+                "the tags from this branch, so a workload arrives and leaves over two pull "
+                "requests."
             )
 
 

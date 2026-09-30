@@ -205,9 +205,16 @@ _LISTING = {
 }
 UNTAGGED_NET = (
     "::warning::environments.dev-eu.workloads lists net, which no stack in dev-eu tags. "
-    "Remove it after the pull request that drops the last tag merges. This is a warning "
-    "rather than a refusal because the table is read from the default branch and the tags "
-    "from this branch, so an environment arrives and leaves over two pull requests."
+    "Tag a stack with each, or remove it from the list once the pull request that drops its "
+    "last tag has merged. This is a warning rather than a refusal because the table is read "
+    "from the default branch and the tags from this branch, so a workload arrives and leaves "
+    "over two pull requests."
+)
+UNUSED_DEV_EU = (
+    "::warning::the environment table declares dev-eu, which no stack tags. Remove the "
+    "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
+    "because the table is read from the default branch and the tags from this branch, so "
+    "an environment arrives and leaves over two pull requests."
 )
 
 
@@ -217,6 +224,17 @@ def test_a_listed_workload_no_stack_tags_warns(capsys):
     table = _validate(_LISTING, matrix_envs=("dev-eu",), tagged=_scan(**{"dev-eu": {"core"}}))
     assert table == _LISTING
     assert capsys.readouterr().out.splitlines() == [UNTAGGED_NET]
+
+
+def test_a_listed_workload_in_an_untagged_environment_warns_once(capsys):
+    """An environment no stack tags gets the unused-entry warning alone, not a second line
+    naming each of its listed workloads.
+
+    Mutation: drop the skip for an environment absent from `tagged` -- a second line naming
+    `core, net` prints.
+    """
+    _validate(_LISTING, tagged=_scan("prod"))
+    assert capsys.readouterr().out.splitlines() == [UNUSED_DEV_EU]
 
 
 def test_every_listed_workload_tagged_says_nothing(capsys):

@@ -729,8 +729,8 @@ them on the pull request that introduces them.
 | An identity key other than `aws`, or an `aws` field other than `account`, `plan`, `apply` | `aws.role` refuses by name, because one role on both paths hands any-branch plan cells the apply role's permissions; `aws.region` refuses by name, because the credentials step uses the environment's region |
 | An identity setting neither `aws.plan` nor `aws.apply` | it grants no credential; apply-only is legal, all-empty is not |
 | An identity field that is neither a string nor a map keyed by workload, or a map value that is not a string | the refusal names the retired `aws.<path>.workloads.<name>.role` spelling where the map holds `workloads` |
-| A workload name, as a map key or a `workloads` element, outside the env-name charset, or `vars` or `role` | a workload name is a Terramate tag; `{ vars = "…" }` is a variable reference, and `role` names the retired `aws.<path>.role` spelling |
-| An empty string in an identity field | that resolves to a skipped credentials step, not to a credential |
+| A workload name, as a map key or a `workloads` element, outside the env-name charset, or `vars`, `role` or `region` | a workload name is a Terramate tag; `{ vars = "…" }` is a variable reference, and `role` and `region` name the retired `aws.<path>.role` and `aws.<path>.region` spellings, which a `plan` or `apply` map key refuses by name |
+| An empty string or an empty map in an identity field | that resolves to a skipped credentials step, not to a credential |
 | `aws.account` that is not a 12-digit string | a TOML integer drops a leading `0` |
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
 | A top-level key other than `schema_version`, `layout`, `identities`, `environments`, `gate` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |

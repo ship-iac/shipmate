@@ -190,16 +190,52 @@ def test_an_identity_granting_no_credential_refuses(aws):
 
 @pytest.mark.parametrize(
     ("field", "value", "found"),
-    [("plan", 3, "int"), ("apply", ["a"], "list"), ("account", 111111111111, "int")],
+    [("plan", 3, "int"), ("apply", ["a"], "list"), ("account", True, "bool")],
 )
 def test_a_field_that_is_neither_string_nor_map_refuses(field, value, found):
-    """An integer account is refused here, by type, before its digits are read.
+    """A boolean account keeps the type refusal although Python counts it an `int`.
 
-    Mutation: drop the type refusal in the field check -- every case validates or raises raw.
+    Mutations: drop the type refusal in the field check -- every case validates or raises raw;
+    or route every `int` account to the account-id refusal -- the `bool` case gets it.
     """
     assert _refusal(_identity({"apply": _ARN, field: value})) == (
         f"::error::identities.dev.aws.{field} must be a string or a map keyed by workload, "
         f"got {found}."
+    )
+
+
+@pytest.mark.parametrize(
+    ("account", "where"),
+    [(111111111111, "aws.account"), ({"core": 111111111111}, "aws.account.core")],
+    ids=["field", "map-value"],
+)
+def test_an_integer_account_gets_the_account_id_refusal(account, where):
+    """The account-id refusal's second sentence is written for this case.
+
+    Mutation: route an integer account to the type refusals again -- the field case reads
+    "must be a string or a map keyed by workload, got int." and the map-value case "must be
+    a string, got int."
+    """
+    assert _refusal(_identity({"apply": _ARN, "account": account})) == (
+        f"::error::identities.dev.{where} is not a 12-digit AWS account id in a quoted string. "
+        "A TOML integer drops a leading 0."
+    )
+
+
+@pytest.mark.parametrize(
+    "aws",
+    [{"apply": {}}, {"apply": _ARN, "plan": {}}, {"apply": _ARN, "account": {}}],
+    ids=["apply", "plan", "account"],
+)
+def test_an_empty_map_at_a_field_refuses(aws):
+    """An identity whose only role field is an empty map gets this line alone, not the
+    grants-no-credential one beside it.
+
+    Mutation: accept the empty map -- all three cases validate.
+    """
+    field = next(f for f, v in aws.items() if v == {})
+    assert _refusal(_identity(aws)) == (
+        f"::error::identities.dev.aws.{field} is empty. Give it a value, or remove the key."
     )
 
 
@@ -233,9 +269,44 @@ def test_the_retired_role_key_names_the_string_spelling():
     )
 
 
+def test_the_retired_region_key_names_the_environment_region():
+    """`aws.plan.region = "…"` parses as a map with key `region`.
+
+    Mutation: drop the `region` map-key case -- the line becomes the charset refusal.
+    """
+    assert _refusal(_identity({"apply": _ARN, "plan": {"region": "eu-west-1"}})) == (
+        "::error::identities.dev.aws.plan.region: region is not a workload name. The retired "
+        "aws.plan.region is gone: the credentials step uses the environment's region."
+    )
+
+
+@pytest.mark.parametrize("key", ["role", "region"])
+def test_under_account_a_retired_key_is_only_not_a_workload_name(key):
+    """`aws.account.role` and `aws.account.region` never existed, so no retired spelling is
+    named.
+
+    Mutations: drop the `account` exemption -- each line names the retired
+    `aws.account.<key>` spelling instead; or drop `region` from the reserved names -- the
+    `region` case validates.
+    """
+    assert _refusal(_identity({"apply": _ARN, "account": {key: _ACCOUNT}})) == (
+        f"::error::identities.dev.aws.account.{key} is not a workload name: lowercase letters, "
+        "digits, '-' and '_', starting with a letter or digit, and not vars, role or region."
+    )
+
+
+def test_under_account_a_workloads_map_names_no_retired_spelling():
+    """Mutation: drop the `account` exemption -- the line gains the retired
+    `aws.account.workloads.<name>.role` sentence."""
+    table = _identity({"apply": _ARN, "account": {"workloads": {"net": _ACCOUNT}}})
+    assert _refusal(table) == (
+        "::error::identities.dev.aws.account.workloads must be a string, got dict."
+    )
+
+
 _WORKLOAD_RULE = (
     "is not a workload name: lowercase letters, digits, '-' and '_', starting with a letter or "
-    "digit, and not vars or role."
+    "digit, and not vars, role or region."
 )
 _NOT_WORKLOADS = ["vars", "Core", "a b", "-x"]
 
@@ -250,7 +321,7 @@ def test_a_map_key_that_is_not_a_workload_name_refuses(name):
     assert _refusal(table) == f"::error::identities.dev.aws.apply.{name} {_WORKLOAD_RULE}"
 
 
-@pytest.mark.parametrize("name", [*_NOT_WORKLOADS, "role"])
+@pytest.mark.parametrize("name", [*_NOT_WORKLOADS, "role", "region"])
 def test_a_list_element_that_is_not_a_workload_name_refuses(name):
     """Mutation: drop the charset check on `workloads` elements -- every case validates."""
     table = _named({"apply": _ARN}, workloads=[name])
@@ -268,7 +339,8 @@ def test_vars_as_a_list_element_refuses():
     table = _named({"apply": _ARN}, workloads=["core", "vars"])
     assert _refusal(table) == (
         "::error::environments.dev-eu.workloads entry 'vars' is not a workload name: lowercase "
-        "letters, digits, '-' and '_', starting with a letter or digit, and not vars or role."
+        "letters, digits, '-' and '_', starting with a letter or digit, and not vars, role or "
+        "region."
     )
 
 
