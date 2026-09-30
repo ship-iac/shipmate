@@ -28,6 +28,7 @@ section below names the SHA the release tags.
 - **The provider cache serves only stacks with a committed `.terraform.lock.hcl`, restored per stack, and only drift runs save it.**
 - **Plan cells render the text and JSON plans concurrently.**
 - **The control jobs that run no `tofu` run on `ubuntu-slim`.**
+- **Comments by bots or without `shipmate` start no comment-ops job.**
 
 ### Fixed
 

@@ -31,12 +31,19 @@ def test_the_workflow_declares_no_inputs_and_one_secret():
     assert call["secrets"] == {"SHIPMATE_APP_PRIVATE_KEY": {"required": False}}
 
 
-def test_only_pull_request_comments_are_handled():
-    """issue_comment fires on issues too. Mutation: delete the `if:`, and every issue comment in
+def test_only_human_pull_request_comments_naming_shipmate_are_handled():
+    """issue_comment fires on issues too. Without the pull-request clause every issue comment in
     the repository spins a job binding `shipmate-engine`. Issues and pull requests share one
     number sequence, so the `pulls/<n>` read 404s and the command refuses -- cost and
-    pending-deployment noise, not an escalation."""
-    assert _job()["if"] == "${{ github.event.issue.pull_request }}"
+    pending-deployment noise, not an escalation. The bot and `contains` clauses skip the
+    runner for comments the step guard and the parser would ignore anyway. Mutations: drop the
+    bot clause; drop the `contains` clause; `contains` -> `startsWith`, which misses a command
+    that follows other lines."""
+    assert _job()["if"] == (
+        "${{ github.event.issue.pull_request"
+        " && !endsWith(github.event.comment.user.login, '[bot]')"
+        " && contains(github.event.comment.body, 'shipmate') }}"
+    )
 
 
 def test_the_dispatch_step_runs_only_when_the_guard_authorized():

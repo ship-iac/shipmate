@@ -948,7 +948,9 @@ comment line must match one regex, and the parsed values are never
 interpolated into a shell. A comment authored by a bot account (any login
 ending `[bot]`) is ignored outright before parsing — a loop guard, since
 shipmate's own comments (help output, apply results, the doctor report) can
-themselves contain text that matches the command grammar.
+themselves contain text that matches the command grammar. The engine's `ops`
+job starts only for a pull-request comment whose author is not a bot and whose
+body contains `shipmate` in any case; every other comment starts no runner.
 
 | verb | status | args | authorization |
 |---|---|---|---|
