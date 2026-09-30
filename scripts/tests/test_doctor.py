@@ -4370,12 +4370,27 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
             "every check a file can be judged on by itself: its top-level keys, `schema_version`, "
-            "`layout`, the environment entries and the "
+            "`layout`, the identities, the environment entries and the "
             "`[gate]` table. Not checked here, for want of a plan matrix and a whole-tree "
-            "environment scan: `tf_vars`-layout coverage of the planned environments and entries "
-            "that no stack tags \u2014 `detect` checks each of those on the runs where it "
+            "environment scan: `tf_vars`-layout coverage of the planned environments, entries "
+            "that no stack tags, workload tags outside an environment's `workloads` and listed "
+            "workloads no stack tags \u2014 `detect` checks each of those on the runs where it "
             "applies. "
             "Execution reads the default branch's copy of this file, never this branch's.",
+        ),
+        (
+            doctor.NOTICE,
+            "roles `dev-eu` resolves at the commit under examination: plan every cell: "
+            "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
+            "`arn:aws:iam::981781037707:role/shipmate-apply`.",
+        ),
+        (
+            doctor.NOTICE,
+            "roles `prod` resolves at the commit under examination: plan app: "
+            "`arn:aws:iam::981781037707:role/prod-plan`; plan net-edge: "
+            "`arn:aws:iam::981781037707:role/prod-plan`; apply app: "
+            "`arn:aws:iam::981781037707:role/prod-apply`; apply net-edge: "
+            "`arn:aws:iam::981781037707:role/net-edge`.",
         ),
         (
             doctor.NOTICE,
@@ -4418,6 +4433,9 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
     plan run and displace the settings-probe all-clear. The `needs` line shows the resolved
     predecessor, and the explicit line reads the entry's flag.
 
+    The roles line reads the plan role from the variable, where `CONFIG_REFERENCES` says a
+    run reads it.
+
     Mutations: omit the references notice from `config_status`; stop `_replace` recursing
     into lists -- the `needs` line renders the mapping; or read the old top-level list in
     `_config_defaults` -- the explicit line reports none.
@@ -4443,6 +4461,12 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         ),
         (
             doctor.NOTICE,
+            "roles `dev` resolves at the commit under examination: plan every cell: "
+            "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
+            "`arn:aws:iam::981781037707:role/shipmate-apply`.",
+        ),
+        (
+            doctor.NOTICE,
             "`needs` orders prod after dev — a bare `shipmate apply` applies "
             "one env-level fully before it starts the next.",
         ),
@@ -4454,6 +4478,89 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         (
             doctor.NOTICE,
             "`gate.approver_team`: absent — nobody may `shipmate apply` or "
+            "`shipmate unlock` by comment.",
+        ),
+    ]
+
+
+#: A varying identity with two workloads listed out of alphabetical order, an apply-only
+#: identity named by a shared and by an unshared environment, and an entry naming none.
+_ROLES_TABLE = """layout = "folder"
+
+[identities.app]
+aws.account = "111111111111"
+aws.plan    = "{workload}-plan"
+aws.apply   = { core = "core-apply", network = "net-apply" }
+
+[identities.ops]
+aws.apply = "arn:aws:iam::333333333333:role/ops-apply"
+
+[environments.dev]
+region    = "eu-west-1"
+identity  = "app"
+workloads = ["network", "core"]
+
+[environments.ops]
+region   = "eu-west-1"
+identity = "ops"
+shared   = true
+
+[environments.plain]
+region = "eu-west-1"
+
+[environments.stage]
+region   = "eu-west-1"
+identity = "ops"
+"""
+
+
+def test_each_environment_prints_the_role_every_path_and_workload_resolves(monkeypatch):
+    """One notice per environment naming an identity, between the verdict and the defaults:
+    `{workload}` filled and names expanded under the account, the list's written order, a
+    shared environment's plan row showing the apply role it runs with, and an apply-only
+    identity's plan row as `no role`. An entry naming no identity gets no line.
+
+    Mutations: drop the roles notices from `config_status` (three lines vanish); consult the
+    requested path rather than `apply` for a shared environment in `resolved_roles` (the
+    `ops` plan row reads `no role`); skip rows whose `role_arn` is empty (the `stage` plan
+    row vanishes).
+    """
+    responses = {_CONFIG_READ: _wf_file(_ROLES_TABLE)}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor.config_status(_ctx()) == [
+        (doctor.NOTICE, doctor.CONFIG_VALID),
+        (
+            doctor.NOTICE,
+            "roles `dev` resolves at the commit under examination: plan network: "
+            "`arn:aws:iam::111111111111:role/network-plan`; plan core: "
+            "`arn:aws:iam::111111111111:role/core-plan`; apply network: "
+            "`arn:aws:iam::111111111111:role/net-apply`; apply core: "
+            "`arn:aws:iam::111111111111:role/core-apply`.",
+        ),
+        (
+            doctor.NOTICE,
+            "roles `ops` resolves at the commit under examination: plan every cell: "
+            "`arn:aws:iam::333333333333:role/ops-apply`; apply every cell: "
+            "`arn:aws:iam::333333333333:role/ops-apply`.",
+        ),
+        (
+            doctor.NOTICE,
+            "roles `stage` resolves at the commit under examination: plan every cell: no "
+            "role; apply every cell: `arn:aws:iam::333333333333:role/ops-apply`.",
+        ),
+        (
+            doctor.NOTICE,
+            "`needs`: declared by no environment \u2014 every environment sits at one level, "
+            "and a bare `shipmate apply` applies them all together.",
+        ),
+        (
+            doctor.NOTICE,
+            "`explicit`: set on no environment \u2014 every environment applies on a bare "
+            "`shipmate apply`, production included.",
+        ),
+        (
+            doctor.NOTICE,
+            "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
             "`shipmate unlock` by comment.",
         ),
     ]

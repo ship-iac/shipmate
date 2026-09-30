@@ -2405,17 +2405,18 @@ todo          `.github/shipmate.toml`
       approver_team = "<team-slug>"
 
       [identities.dev]
-      aws.plan  = "arn:aws:iam::<account>:role/shipmate-plan"
-      aws.apply = "arn:aws:iam::<account>:role/shipmate-apply"
+      aws.account = "<account>"
+      aws.plan    = "shipmate-plan"
+      aws.apply   = "shipmate-apply"
 
       [environments.dev-eu]
       region   = "eu-west-1"
       identity = "dev"
 
-    Give the plan and apply tiers separate roles. One `aws.role` covering both
-    hands any-branch plan cells the apply role's permissions (docs/hardening.md).
-    Each cell resolves its identity from that file on the default branch, and a
-    repository without one refuses (CONTRACT.md §Environment table).
+    Give the plan and apply paths separate roles: the plan role is reachable from any
+    branch (docs/hardening.md). Each cell reads its environment and credentials from
+    that file on the default branch, and a repository without one refuses (CONTRACT.md
+    §Environment table).
 
 todo          `[gate] approver_team`
     Name, in `.github/shipmate.toml`, the team whose members may apply and unlock by
@@ -2951,8 +2952,10 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     The example is read back out of the printed block rather than retyped: a copy here would
     be a second selector, free to drift from the thing it claims to check.
 
-    Mutation: print a second `[environments.dev-eu]` header in the template, the duplicate
-    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`.
+    Mutations: print a second `[environments.dev-eu]` header in the template, the duplicate
+    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`; or write the
+    retired `aws.plan.role = "shipmate-plan"` -- `validate_structure` refuses `role` as a
+    workload name.
     """
     onboard._checklist(ctx(root=tmp_path))
     lines = capsys.readouterr().out.splitlines()
@@ -2964,7 +2967,9 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     )
     # The placeholder is not a slug, so it is the one value a consumer substitutes.
     assert snippet.count('approver_team = "<team-slug>"') == 1
-    ec.validate_structure(ec.parse_table(snippet.replace("<team-slug>", "ops")))
+    assert snippet.count('aws.account = "<account>"') == 1
+    filled = snippet.replace("<account>", "111111111111").replace("<team-slug>", "deployers")
+    ec.validate_structure(ec.parse_table(filled))
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):
