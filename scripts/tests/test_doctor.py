@@ -39,7 +39,6 @@ def _ctx(**over):
         "app_id": _APP_ID,
         "default_branch": _BRANCH,
         "envs": set(_ENVS),
-        "report_mode": True,
         "app_permissions_checked": False,
         "app_permission_error": "",
         "head_sha": _HEAD,
@@ -1412,33 +1411,6 @@ def test_ctx_from_env_reads_the_engine_repo_and_the_harvest_flags(monkeypatch, t
     assert ctx["harvest_pending"] is False
 
 
-def test_ctx_from_env_marks_only_report_mode_as_the_route_that_can_probe_a_team(
-    monkeypatch, tmp_path
-):
-    """The producer end of the team probe's route gate. `actions/summary` mints its App token
-    without `members: read`, so the lookup fails there for every repository alike and a probe
-    running on the plan path would report every declared team as unresolvable. The guard on
-    the consumer side cannot see this: it is handed `report_mode` already decided.
-
-    All three modes are driven, and against the mode strings `MODES` declares rather than a
-    single positive case -- `annotate` is the one that must be false, and it is the one a
-    wrong comparison would select.
-
-    Mutation: compare against "annotate" in `ctx_from_env`, or against any truthy constant.
-    """
-    monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
-    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
-    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", _BRANCH)
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
-    modes = {}
-    for mode in doctor.MODES:
-        monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", mode)
-        modes[mode] = doctor.ctx_from_env()["report_mode"]
-    assert modes == {"annotate": False, "report": True, "check-ids": False}
-    monkeypatch.delenv("SHIPMATE_DOCTOR_MODE")
-    assert doctor.ctx_from_env()["report_mode"] is False
-
-
 def test_unreadable_release_degrades_to_note(monkeypatch):
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
@@ -1607,114 +1579,6 @@ def test_an_empty_public_token_leaves_gh_token_alone(monkeypatch):
     monkeypatch.setenv("SHIPMATE_PUBLIC_TOKEN", "")
     assert doctor._latest_release_sha("acme/engine") == ("v1.4.0", _SHA)
     assert seen == ["app-token", "app-token"]
-
-
-#: The canonical file with a `[gate]` table, placed above the first entry the way
-#: `onboard`'s checklist prints it. Built from that file rather than retyped, so the fixture
-#: cannot drift from it; an insertion that found no anchor leaves the
-#: key undeclared, which every assertion below reads as a lookup of the wrong team.
-_GATE_TABLE = CANONICAL.replace(
-    "[environments.dev-eu]", '[gate]\napprover_team = "platform"\n\n[environments.dev-eu]', 1
-)
-
-
-def _team_probe(monkeypatch, table=CANONICAL, found=None, report_mode=True):
-    """(findings, the team lookups the probe made) over one configuration file.
-
-    The recorded paths are the point. `_team_warnings` returns `[]` both when the team
-    resolves and when nothing was ever checked, so an empty finding list on its own cannot
-    tell a working probe from one that silently stopped running.
-    """
-    looked_up = []
-
-    def gh(path):
-        if path == _CONFIG_READ:
-            return _wf_file(table)
-        looked_up.append(path)
-        if isinstance(found, BaseException):
-            raise found
-        return {"slug": "ops"} if found is None else found
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
-    return doctor._team_warnings(_ctx(report_mode=report_mode)), looked_up
-
-
-#: The remedy, whole and hand-written: it is the only line telling an operator where the
-#: team that governs is declared, and naming the retired variable sends them to a value no
-#: apply reads.
-def _unresolved(team):
-    return (
-        doctor.WARNING,
-        f"approver team `{team}` does not resolve in org `o` — every `shipmate apply` "
-        'will be rejected as "not a team member". Check `[gate] approver_team` in '
-        "`.github/shipmate.toml` and that the App has members:read.",
-    )
-
-
-def test_team_probe_skipped_when_the_file_declares_no_team(monkeypatch):
-    """No `[gate]` table means nothing declares a team, so there is nothing to look up and
-    no finding to make.
-
-    Mutation: probe unconditionally -- the lookup path is recorded as `orgs/o/teams/`.
-    """
-    assert _team_probe(monkeypatch) == ([], [])
-
-
-def test_the_team_probe_reads_the_file(monkeypatch):
-    """The file is what comment-ops authorizes against, and it is now the only source. The
-    lookup is compared whole, not merely counted: an empty finding list cannot tell a
-    working probe from one that silently stopped running.
-
-    Mutation: resolve the team from anything but the table -- the lookup then asks for a
-    different team, or records none at all.
-    """
-    out, looked_up = _team_probe(monkeypatch, table=_GATE_TABLE)
-    assert looked_up == ["orgs/o/teams/platform"]
-    assert out == []
-
-
-def test_the_team_probe_prints_nothing_into_the_report(monkeypatch, capsys):
-    """`report` mode is run as `python3 scripts/doctor > doctor.md`, so this module's stdout
-    IS the sticky comment's body, and a workflow command written there is pasted into the
-    pull request comment.
-
-    Mutation: `print()` anything from `_governing_team`.
-    """
-    out, looked_up = _team_probe(monkeypatch, table=_GATE_TABLE)
-    assert looked_up == ["orgs/o/teams/platform"]
-    assert out == []
-    assert capsys.readouterr().out == ""
-
-
-def test_the_team_probe_does_not_run_on_the_plan_path(monkeypatch):
-    """`actions/summary` mints its App token without `members: read`, so the lookup fails
-    there for every repository alike. A probe that ran would report every declared team as
-    unresolvable on every plan run -- a warning about a correctly configured repository.
-
-    Mutation: drop the `report_mode` guard.
-    """
-    assert _team_probe(monkeypatch, table=_GATE_TABLE, report_mode=False) == ([], [])
-
-
-def test_unresolvable_team_warned(monkeypatch):
-    """A typo'd slug in the file 404s in the membership lookup, which refuses every
-    commenter under a message naming the team as though it had resolved. The remedy names
-    the file key, the only place the team is declared.
-
-    Mutation: swallow the lookup failure -- a typo'd team then reports healthy.
-    """
-    bad = _GATE_TABLE.replace('approver_team = "platform"', 'approver_team = "platfrom"')
-    out, looked_up = _team_probe(monkeypatch, table=bad, found=SystemExit("404 Not Found"))
-    assert looked_up == ["orgs/o/teams/platfrom"]
-    assert out == [_unresolved("platfrom")]
-
-
-def test_team_response_without_slug_warned(monkeypatch):
-    """A 200 response that isn't actually the team resource (e.g. the team-slug
-    input carrying a path segment that happens to hit some other list endpoint)
-    must not be mistaken for a resolved team."""
-    out, _looked_up = _team_probe(monkeypatch, table=_GATE_TABLE, found={"id": 1})
-    assert out == [_unresolved("platform")]
 
 
 def test_one_line_flattens_and_pins_the_truncation_boundary():
@@ -3319,7 +3183,6 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
         doctor._dispatch_wiring_warnings,
         doctor._routing_warnings,
         doctor._config_warnings,
-        doctor._team_warnings,
         doctor._app_permission_warnings,
     )
     assert expected == doctor.PROBES
@@ -3599,20 +3462,20 @@ def test_probe_count_is_stated_correctly_in_the_docs():
 
     - `scripts/doctor`'s module docstring: (1) "the <n> live probes" and (2) the
       `Probes:` bullet list below it (one bullet per probe);
-    - `CONTRACT.md`: (3) "<n> live settings probes" and (4) "<n-2> of the <n>";
-    - `docs/troubleshooting.md`: (5) "combining <n>", (6) "<n-2> of the <n> probes"
+    - `CONTRACT.md`: (3) "<n> live settings probes" and (4) "<n-1> of the <n>";
+    - `docs/troubleshooting.md`: (5) "combining <n>", (6) "<n-1> of the <n> probes"
       and (7) the reader-facing probe list itself, one `- **` bullet per probe.
 
     The number words come from the count, so this keeps biting when a further probe lands.
-    `<n-2>` is the plan-path subset: the approver-team and App-permission probes cannot
-    report from `annotate` mode.
+    `<n-1>` is the plan-path subset: the App-permission probe cannot report from `annotate`
+    mode, because only the comment path attempts the full-permission mint it reports on.
 
     Mutations, one per claim: change `len(PROBES)`; delete a bullet from the `Probes:`
     docstring list; edit either count phrase in `CONTRACT.md` or in
     `docs/troubleshooting.md`; delete a `- **` bullet from that page's probe list.
     """
     total = len(doctor.PROBES)
-    word, plan_word = _count_word(total), _count_word(total - 2)
+    word, plan_word = _count_word(total), _count_word(total - 1)
 
     src = (SCRIPTS / "doctor").read_text(encoding="utf-8")
     assert f"the {word} live probes" in src, f"scripts/doctor no longer says '{word} live probes'"
@@ -4225,8 +4088,8 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
     reads `gated.; environments`.
     """
     text = (
-        'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n\n'
-        '[gate]\napprover_team = "Platform Team"\n'
+        'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n'
+        'needs = ["dev-eu"]\n'
     )
     responses = _config_responses(text)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4238,11 +4101,11 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
             "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. "
             "environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
             "gated = false, unquoted. "
-            "gate.approver_team is 'Platform Team', which is not a GitHub team slug; use the "
-            "bare slug from the team's URL (letters, digits, '-' and '_'), not a display name "
-            "or an @org/team reference. Merging it refuses every operation that reads the "
-            "table. Execution still reads the default branch's copy, which this says nothing "
-            "about.",
+            "needs is cyclic: dev-eu -> dev-eu — each of those must fully apply before the "
+            "next, so the ordering has no first environment and no apply path can sort it. "
+            "Break the chain in .github/shipmate.toml. Merging it refuses every operation that "
+            "reads the table. Execution still reads the default branch's copy, which this says "
+            "nothing about.",
         )
     ]
 
@@ -4258,7 +4121,7 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     unknown = (
         "{} is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, identities, environments, gate."
+        "schema_version, layout, identities, environments."
     )
     shown = " ".join(unknown.format(f"k{n:02}") for n in range(1, 11))
     assert doctor._config_warnings(_ctx()) == [
@@ -4370,9 +4233,9 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
             "every check a file can be judged on by itself: its top-level keys, `schema_version`, "
-            "`layout`, the identities, the environment entries and the "
-            "`[gate]` table. Not checked here, for want of a plan matrix and a whole-tree "
-            "environment scan: `tf_vars`-layout coverage of the planned environments, entries "
+            "`layout`, the identities and the environment entries. Not checked here, for want "
+            "of a plan matrix and a whole-tree environment scan: `tf_vars`-layout coverage of "
+            "the planned environments, entries "
             "that no stack tags, workload tags outside an environment's `workloads` and listed "
             "workloads no stack tags \u2014 `detect` checks each of those on the runs where it "
             "applies. "
@@ -4401,11 +4264,6 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             doctor.NOTICE,
             "`explicit = true` on prod \u2014 a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
-        ),
-        (
-            doctor.NOTICE,
-            "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
-            "`shipmate unlock` by comment.",
         ),
     ]
 
@@ -4474,11 +4332,6 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
             doctor.NOTICE,
             "`explicit = true` on prod — a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
-        ),
-        (
-            doctor.NOTICE,
-            "`gate.approver_team`: absent — nobody may `shipmate apply` or "
-            "`shipmate unlock` by comment.",
         ),
     ]
 
@@ -4570,11 +4423,6 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
             doctor.NOTICE,
             "`explicit`: set on no environment \u2014 every environment applies on a bare "
             "`shipmate apply`, production included.",
-        ),
-        (
-            doctor.NOTICE,
-            "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
-            "`shipmate unlock` by comment.",
         ),
     ]
 
@@ -4720,10 +4568,9 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
 
 
 def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
-    """A table omitting `needs`, `explicit` and `[gate]` is valid and takes the
-    empty default for each: a bare `shipmate apply` applies every environment -- including
-    the one a consumer meant to exclude -- and no commenter may apply at all. Nothing
-    refuses and no validator can, so the report says it.
+    """A table omitting `needs` and `explicit` is valid and takes the empty default for
+    each: a bare `shipmate apply` applies every environment -- including the one a consumer
+    meant to exclude. Nothing refuses and no validator can, so the report says it.
 
     Mutation: drop `_config_defaults` from `config_status`.
     """
@@ -4740,28 +4587,7 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
             "`explicit`: set on no environment \u2014 every environment applies on a bare "
             "`shipmate apply`, production included.",
         ),
-        (
-            doctor.NOTICE,
-            "`gate.approver_team`: absent \u2014 nobody may `shipmate apply` or "
-            "`shipmate unlock` by comment.",
-        ),
     ]
-
-
-def test_the_declared_approver_team_is_reported(monkeypatch):
-    """The team the file declares reaches the report by name. `_team_warnings` says nothing
-    about a team that resolves, so without this line a reader cannot tell a repository
-    whose gate is wired from one whose `[gate]` table never merged.
-
-    Mutation: echo a constant, or read the team from anywhere but the parsed table.
-    """
-    responses = {_CONFIG_READ: _wf_file(_GATE_TABLE)}
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor.config_status(_ctx())[-1] == (
-        doctor.NOTICE,
-        "`gate.approver_team` is `platform` \u2014 its members may `shipmate apply` and "
-        "`shipmate unlock` by comment.",
-    )
 
 
 def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):

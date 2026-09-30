@@ -48,7 +48,8 @@ def test_an_environment_aws_block_names_its_replacement():
     )
 
 
-#: `repo-example-stacks-aws/.github/shipmate.toml` as shipped for v0.41.0, verbatim.
+#: An excerpt of `repo-example-stacks-aws/.github/shipmate.toml` as shipped for v0.41.0,
+#: omitting its `gate` table: its `schema_version`, `layout` and environment entries, verbatim.
 _STACKS_AWS_V0_41_0 = """\
 schema_version = 1
 
@@ -56,11 +57,6 @@ schema_version = 1
 # and `TF_VAR_region` from its `region`. Under `tf_vars` every environment in the matrix
 # needs an entry with a non-empty region, or the run refuses at detect.
 layout = "tf_vars"
-
-# Who may drive shipmate by pull-request comment. Every repository declares its own
-# team: the engine reads this file and no repository variable.
-[gate]
-approver_team = "deployers"
 
 # The environment's own `region` inherits into the provider block, so the credentials
 # step gets the same region the stack does. `plan` and `apply` are separate roles: the
@@ -98,8 +94,9 @@ _STACKS_AWS_VARIABLES = {
 
 
 def test_the_v0_41_0_sample_table_refuses_once_per_environment():
-    """The last released sample table, fed through the real parser, refuses all at once, and
-    each line names `identity` as the replacement.
+    """An excerpt of the last released sample table, as shipped for v0.41.0 but omitting its
+    `gate` table, fed through the real parser, refuses all at once, and each line names
+    `identity` as the replacement.
 
     Mutation: drop the `aws` case from the entry key loop -- each line becomes the generic
     unknown-key text.

@@ -93,15 +93,15 @@ def test_every_job_binds_the_engine_environment():
 def test_the_authz_step_passes_this_whole_with_block():
     """Hand-written. This is the deciding step, so every input here is a security input.
     `comment-user` twice over: it is the `[bot]` loop guard's only subject, and it is the login
-    whose team membership authorizes an apply.
+    whose repository permission authorizes an apply.
 
     Mutations: delete `comment-user`, and the loop guard sees an empty login, never matches
     `*[bot]`, and shipmate's own help output re-triggers the command grammar; rewire it to a
-    constant privileged login, and every commenter's `shipmate apply` passes the membership
-    check; add an `approvers-team` or `ungated-envs` back, and the gate settings acquire a
-    second source that a repository variable can set without a pull request. `github-vars` is
-    not that: it resolves only the `{ vars = "NAME" }` references the file itself names, so the
-    file still chooses; delete it, and a file holding a reference refuses every apply and unlock.
+    constant privileged login, and every commenter's `shipmate apply` passes the permission
+    check; add an `ungated-envs` back, and the gate settings acquire a second source that a
+    repository variable can set without a pull request. `github-vars` is not that: it resolves
+    only the `{ vars = "NAME" }` references the file itself names, so the file still chooses;
+    delete it, and a file holding a reference refuses every apply and unlock.
     """
     assert _step("actions/comment-ops")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",

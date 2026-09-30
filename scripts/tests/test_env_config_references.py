@@ -17,9 +17,6 @@ ec = load_script("env-config")
 _TABLE = """\
 layout = "tf_vars"
 
-[gate]
-approver_team = { vars = "APPROVERS" }
-
 [identities.prod]
 aws.plan = { vars = "PROD_PLAN_ROLE" }
 aws.apply = { app = "arn:aws:iam::1:role/apply", net-edge = { vars = "NET_EDGE_ROLE" } }
@@ -31,7 +28,6 @@ needs = [{ vars = "FIRST_ENV" }, "stage"]
 
 _VARIABLES = {
     "FIRST_ENV": "dev",
-    "APPROVERS": "platform",
     "PROD_PLAN_ROLE": "arn:aws:iam::1:role/plan",
     "NET_EDGE_ROLE": "arn:aws:iam::1:role/net-edge",
     "UNUSED": "never-read",
@@ -39,7 +35,6 @@ _VARIABLES = {
 
 _RESOLVED = {
     "layout": "tf_vars",
-    "gate": {"approver_team": "platform"},
     "identities": {
         "prod": {
             "aws": {
@@ -58,7 +53,7 @@ _ROLE_REF = '[identities.prod]\naws.apply = { vars = "PROD_APPLY_ROLE" }\n'
 
 
 def test_every_reference_is_replaced_by_its_value():
-    """Covers an identity field, a list item, a workload map value and `gate.approver_team`.
+    """Covers an identity field, a list item and a workload map value.
     Reddens on returning the raw table, on recursing into dicts only (the `needs` item stays
     a mapping), and on stopping at depth 4 (the workload map value stays a mapping)."""
     assert ec.parse_table(_TABLE, _VARIABLES) == _RESOLVED
@@ -232,7 +227,6 @@ def test_references_lists_every_reference_sorted_by_path():
     disappears)."""
     assert ec.references(tomllib.loads(_TABLE)) == [
         ("environments.prod.needs[0]", "FIRST_ENV"),
-        ("gate.approver_team", "APPROVERS"),
         ("identities.prod.aws.apply.net-edge", "NET_EDGE_ROLE"),
         ("identities.prod.aws.plan", "PROD_PLAN_ROLE"),
     ]

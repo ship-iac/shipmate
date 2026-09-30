@@ -177,9 +177,8 @@ Grant repository write only to people you would let apply to production
 unreviewed, because that is what it amounts to. This is the only control that
 closes the branch-authored-workflow path outright; everything else narrows it.
 
-Review the list whenever the approver team changes — write access and
-`gate.approver_team` membership are separate grants, and the first one is
-the stronger of the two.
+Write access is also the grant that applies and unlocks by comment, so review
+the list as you would the apply role.
 
 ## 2. Restrict pushes that touch executable paths
 
@@ -294,7 +293,7 @@ the other:
   and from nothing else.** It is a flag on the environment's entry in
   `.github/shipmate.toml` on the default branch. The
   ruleset still requires the review before the merge, `CHANGES_REQUESTED`
-  still refuses, and the approver-team, not-a-draft, mergeable and exact-plan
+  still refuses, and the write-access, not-a-draft, mergeable and exact-plan
   requirements are untouched (CONTRACT.md §Comment-ops). Environments without
   it are held out of a bare `shipmate apply` and refused on a targeted
   one, their apply checks left pending, so the gate keeps blocking the merge
@@ -451,9 +450,7 @@ enforcement.
 
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
-`gate.approver_team` accepts `{ vars = "NAME" }` like any other string, and a
-variable edit then changes who may apply by comment, on the next run and with no
-pull request. `explicit` and `gated` are booleans and refuse a reference, so
+`explicit` and `gated` are booleans and refuse a reference, so
 which environments a bare apply skips and which apply unreviewed stay merged
 commits. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes

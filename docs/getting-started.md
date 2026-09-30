@@ -157,12 +157,6 @@ It writes:
 - `.github/workflows/shipmate.yml`, rendered from the fence on this page and
   pinned to the engine checkout's release.
 
-The approver team is read from `[gate] approver_team` in the checkout's
-`.github/shipmate.toml`, which this script does not write. The closing
-checklist marks it `ok` naming the team it read there, or `todo` when the file
-declares none; with no file, the table template it prints carries a
-`<team-slug>` placeholder.
-
 It reads before it writes and creates or updates only what differs, so a second
 run over a configured repository changes nothing. What it will not touch — an
 environment carrying a protection it did not set, a ruleset it did not create —
@@ -180,7 +174,7 @@ stops it too — the assertion is verified rather than trusted
 
 It then prints a checklist of what it cannot set, because those values are
 yours: `SHIPMATE_PLAN_PASSPHRASE`, `SHIPMATE_SLACK_WEBHOOK`, the table with the
-cloud role, region and env identity your layout injects, `[gate] approver_team`,
+cloud role, region and env identity your layout injects,
 adding the repository to the App installation, an approving review before apply,
 a `CODEOWNERS` entry, a git-tracked `.terraform.lock.hcl` in each stack, and
 the pull request carrying the workflow file. It marks
@@ -306,22 +300,9 @@ creates all of them, including `shipmate-engine` and its branch policy:
   split environments before writing those trust policies
   ([`hardening.md`](hardening.md) §7–9).
 
-  The same file carries `[gate]`, which names the team whose members may apply
-  and unlock by pull request comment. An environment applies without an
-  approving review through `gated = false` on its own `[environments.<name>]`
-  entry (§"Applying chosen environments without an approving review"). Put
-  `[gate]` above the first `[environments.*]` header, with the other
-  repository-wide settings:
-
-  ```toml
-  layout = "tf_vars"
-
-  [gate]
-  approver_team = "platform-approvers"
-
-  [environments.dev-eu]
-  region = "eu-west-1"
-  ```
+  An environment applies without an approving review through `gated = false`
+  on its own `[environments.<name>]` entry (§"Applying chosen environments
+  without an approving review").
 
   **A value can come from a GitHub variable.** Write `{ vars = "NAME" }` in
   place of any string, list items included, and every run reads that
@@ -638,12 +619,11 @@ jobs, and a lock release through `unlock`), and the environment protection that
 also governs the idempotent post-merge apply the tier-1 `deploy` job runs on
 push to the default branch.
 
-`shipmate apply` runs only for a member of the team named by
-`gate.approver_team` in `.github/shipmate.toml` on your default branch
-(§Environments for this tier), on a pull request that is mergeable and
-satisfies the branch ruleset's review policy, and only against a plan for the
-pull request's current head, and only on a pull request that is not a
-draft — the five apply requirements in
+`shipmate apply` runs only for a commenter with write or admin permission on the
+repository, on a pull request that is mergeable and satisfies the branch
+ruleset's review policy, and only against a plan for the pull request's current
+head, and only on a pull request that is not a draft — the five apply
+requirements in
 [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops
 ([`concepts.md`](concepts.md) §Comment-ops for the shape). A refused comment
 names which requirement failed.
@@ -687,9 +667,9 @@ rules from Settings → Environments → `<name>` (or the API):
   reviewers and wait timers, so the apply gate is then an approving-review
   `pull_request` rule on the default branch, which `scripts/onboard` does not
   create ([`branch-protection.md`](branch-protection.md) §Reproducible
-  ruleset), and `[gate] approver_team`. Teams commonly gate production and leave dev
-  self-service; the maximally-hardened position gates every apply environment
-  where the plan allows it.
+  ruleset), and the set of people with write access. Teams commonly gate
+  production and leave dev self-service; the maximally-hardened position gates
+  every apply environment where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
 - **Pair a reviewer-gated environment with `explicit = true` in

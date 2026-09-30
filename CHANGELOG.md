@@ -27,13 +27,14 @@ section below names the SHA the release tags.
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
 - **The bare-apply comment lists a held `explicit` environment once, with both reasons and the `shipmate apply <env>` command.**
 - **An invalid `.github/shipmate.toml` is refused with every structural error it holds, one annotation each.**
-- **`scripts/onboard` takes no `--team`; the approver team is read from `[gate] approver_team` in the checkout's table.**
+- **`scripts/onboard` takes no `--team`.**
 - **`scripts/onboard --key` is needed only while `shipmate-engine` holds no App private key.**
 - **`scripts/onboard`'s closing checklist marks each item `ok`, `todo` or `cannot check` from what the run read.**
 - **The provider cache serves only stacks with a committed `.terraform.lock.hcl`, keyed on the lock's provider addresses and versions, and drift and apply cells save it; plan cells never do.**
 - **Plan cells render the text and JSON plans concurrently.**
 - **The control jobs that run no `tofu` run on `ubuntu-slim`.**
 - **Comments by bots or without `shipmate` start no comment-ops job.**
+- **`shipmate apply` and `shipmate unlock` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed.**
 
 ### Fixed
 

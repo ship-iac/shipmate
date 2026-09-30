@@ -184,11 +184,6 @@ the `shipmate-app.private-key.pem` step 1 wrote. Keep that file until every
 consumer repo has it. `scripts/onboard` does all of this, and additionally
 deletes any repository-level copy of the key.
 
-The approver team is not set here. It is `gate.approver_team` in
-`.github/shipmate.toml` on the consumer's default branch, committed with the rest
-of that repository's configuration ([`../CONTRACT.md`](../CONTRACT.md) §The gate
-table). Every repository declares its own.
-
 ```bash
 REPO=<owner>/<repo>
 APP_ID=<app-id-from-step-1-output>
@@ -227,11 +222,7 @@ organization level instead.** `vars` resolve organization → repository →
 environment, so a consumer repo holding no copy of its own reads the organization
 value and nothing else in the pipeline changes. Set it per repository wherever the
 App differs — one App per trust domain means one id per trust domain
-([`hardening.md`](hardening.md) §13–14).
-
-It is the only name that shares this way. `gate.approver_team` is per repository
-by construction: every repository declares its own team, and one that declares
-none authorizes nobody by comment.
+([`hardening.md`](hardening.md) §13–14). It is the only name that shares this way.
 
 `gh variable set --org` defaults to `--visibility private`, which reaches
 private repositories only — an organization-wide default leaves every public
@@ -338,9 +329,9 @@ every consumer repo, not once for the org.
 ## Reference: what the App can and can't do
 
 - Permissions: `actions: write`, `pull_requests: write`, `contents: read`,
-  `members: read`, `checks: write`, `statuses: write`, `issues: write`,
-  `environments: read` (doctor's plan-environment secret listing — names only;
-  no GitHub API returns a secret's value, and this permission cannot write one).
+  `checks: write`, `statuses: write`, `issues: write`, `environments: read`
+  (doctor's plan-environment secret listing — names only; no GitHub API returns
+  a secret's value, and this permission cannot write one).
   Minted in its own non-fatal step, so an installation that has not accepted
   the request leaves the `shipmate / gate` status and the apply checks
   untouched; it costs two warnings in the `shipmate doctor` report — that probe

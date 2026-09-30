@@ -48,10 +48,10 @@ mirrors that run's own completed `shipmate / ` checks onto the pull request head
 as App-authored copies linking back to the originals. The prefix leaves out the
 file's sibling jobs, which complete as `skipped` in the same suite.
 
-Authorizing an apply requires team membership, a non-draft, mergeable PR that
-satisfies the branch ruleset's review policy, and a reviewed plan for the PR's
-current head. Authorizing an unlock requires team membership plus the
-`<env>-apply` environment its job binds.
+Authorizing an apply requires a commenter with write or admin permission on the
+repository, a non-draft, mergeable PR that satisfies the branch ruleset's review
+policy, and a reviewed plan for the PR's current head. Authorizing an unlock
+requires that permission plus the `<env>-apply` environment its job binds.
 
 Comment-ops keeps the entire interaction surface inside the pull request
 that is already the unit of review, with an auditable history of who asked
@@ -83,20 +83,20 @@ not a repository-wide audit.
 
 `help` and `doctor` are read-only. `plan` changes no infrastructure, but is open
 to the same commenters `doctor` is. `apply` and `unlock` are authorized. `apply`
-carries the full check: approver-team membership, a non-draft, mergeable and
-reviewed PR, and a reviewed plan for the current head (see Comment-ops above).
-`unlock` carries a narrower one — approver-team membership and the
-`<env>-apply` environment, but no draft check, no review and no plan —
+carries the full check: write or admin permission on the repository, a
+non-draft, mergeable and reviewed PR, and a reviewed plan for the current head
+(see Comment-ops above). `unlock` carries a narrower one — that permission and
+the `<env>-apply` environment, but no draft check, no review and no plan —
 because it releases a lock rather than changing infrastructure.
 
 `help` answers any commenter. `doctor` does not: it names the guardrails this
 repository is missing — that `shipmate / gate` is not required on the default
-branch, that an apply environment has no approval rule, which approver team is
-configured and whether it resolves. So the engine runs it only for a commenter
-GitHub classifies as `OWNER`, `MEMBER` or `COLLABORATOR`: organization members
-and repository collaborators. Anyone else gets a one-line refusal. No App token
-is minted and no probe runs. Adopting the gate takes only a re-pin of the engine
-SHA — no new input, no new workflow permission.
+branch, and that an apply environment has no approval rule. So the engine runs
+it only for a commenter GitHub classifies as `OWNER`, `MEMBER` or
+`COLLABORATOR`: organization members and repository collaborators. Anyone else
+gets a one-line refusal. No App token is minted and no probe runs. Adopting the
+gate takes only a re-pin of the engine SHA — no new input, no new workflow
+permission.
 
 Three limits:
 

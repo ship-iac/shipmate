@@ -452,18 +452,6 @@ def test_run_prints_nothing_of_its_own(capsys):
     assert captured.out == ""
 
 
-def test_main_rejects_the_retired_team_flag(capsys):
-    """The approver team is read from `[gate] approver_team` in the checkout's table, so a
-    `--team` flag would be a value nothing reads. Mutation: add back
-    `ap.add_argument("--team", default="")`; `--key k` does not exist, so `_read_key` exits
-    too, and the assertion is on argparse's usage error.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k"])
-    assert e.value.code == 2
-    assert "unrecognized arguments: --team ops" in capsys.readouterr().err
-
-
 def test_main_refuses_a_non_numeric_app_id():
     """Mutation: `_APP_ID_RE.fullmatch` to `args.app_id.isdigit()`, which accepts
     the superscript digit below."""
@@ -1119,15 +1107,14 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
 
 
 def test_absent_variables_are_set_from_the_flags_and_no_tool_version_is_written(monkeypatch):
-    """A repository with no variables gets exactly the one the workflows still read. Neither
-    the approver team -- it is declared in `.github/shipmate.toml`, which this script does
-    not write -- nor the tool versions are among them: `actions/setup` takes both from the
-    release's own VERSIONS file, so a repository copy would only be a second source of truth.
+    """A repository with no variables gets exactly the one the workflows still read. The
+    tool versions are not among them: `actions/setup` takes both from the release's own
+    VERSIONS file, so a repository copy would only be a second source of truth.
 
     The whole recorded call list is compared against a hand-written constant: an assertion
     that TERRAMATE_VERSION is absent is satisfied by a run that wrote nothing at all.
 
-    Mutation: add a second `write("set", ...)` for SHIPMATE_APPROVERS_TEAM to
+    Mutation: add a second `write("set", ...)` for TERRAMATE_VERSION to
     `_reconcile_variables`.
     """
     fake = make_gh({VARIABLE_LIST: []})
@@ -1171,11 +1158,6 @@ def test_at_org_uppercases_the_name_it_accepts():
             id="unrecognised",
         ),
         pytest.param(
-            "SHIPMATE_APPROVERS_TEAM",
-            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'SHIPMATE_APPROVERS_TEAM'.",
-            id="approvers-team",
-        ),
-        pytest.param(
             "TERRAMATE_VERSION",
             "--vars-at-org accepts SHIPMATE_APP_ID only, not 'TERRAMATE_VERSION'.",
             id="version-pin",
@@ -1192,11 +1174,9 @@ def test_at_org_refuses_a_name_it_does_not_accept(raw, message):
     written and the run still reports success. The whole message is compared, because it is
     the only thing that tells the operator which name was wrong.
 
-    `approvers-team` is the name a consumer is most likely to type, because earlier releases
-    accepted it; the team is declared in `.github/shipmate.toml` now. `version-pin` is a
-    variable nothing writes or reads any more: the release's own VERSIONS file decides it.
-    `trailing-comma` is the old list form; the quoted value is what tells it apart from the
-    accepted name.
+    `version-pin` is a variable nothing writes or reads any more: the release's own VERSIONS
+    file decides it. `trailing-comma` is the old list form; the quoted value is what tells it
+    apart from the accepted name.
 
     Mutations: skip the comparison, so every non-empty value returns True (reddens every
     row); accept the row's name beside SHIPMATE_APP_ID (reddens that row alone); print the
@@ -1780,7 +1760,7 @@ def test_the_organization_read_is_paginated_and_slurped(monkeypatch):
     `pages[0]` alone, which reds the second-page fixture while the absent one stays green.
     """
     two_pages = [
-        {"variables": [{"name": "SHIPMATE_APPROVERS_TEAM", "value": "ops"}], "total_count": 1},
+        {"variables": [{"name": "OTHER_VARIABLE", "value": "ops"}], "total_count": 1},
         {"variables": [{"name": "SHIPMATE_APP_ID", "value": "1"}], "total_count": 1},
     ]
     fake = make_gh({ORG_VARS: two_pages})
@@ -2393,16 +2373,8 @@ todo          `.github/shipmate.toml`
     paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
     from this checkout's file, so re-run it after adding or dropping one.
 
-    `[gate] approver_team` names the team whose members may apply and unlock by
-    pull request comment — `<team-slug>` here. Keep it above the first
-    `[environments.*]` header, where it reads with the other repository-wide
-    settings.
-
       schema_version = 1
       layout = "tf_vars"
-
-      [gate]
-      approver_team = "<team-slug>"
 
       [identities.dev]
       aws.account = "<account>"
@@ -2417,10 +2389,6 @@ todo          `.github/shipmate.toml`
     branch (docs/hardening.md). Each cell reads its environment and credentials from
     that file on the default branch, and a repository without one refuses (CONTRACT.md
     §Environment table).
-
-todo          `[gate] approver_team`
-    Name, in `.github/shipmate.toml`, the team whose members may apply and unlock by
-    pull request comment.
 
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
@@ -2462,7 +2430,6 @@ Still yours, each item marked from what this run read:
 ok            SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
 ok            SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
 ok            `.github/shipmate.toml`
-ok            `[gate] approver_team`: ops
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
     does not hold. Check it, or add the repository, at
@@ -2529,8 +2496,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
     (tmp_path / ".github" / "shipmate.toml").write_text(
-        'schema_version = 1\nlayout = "tf_vars"\n\n[gate]\napprover_team = "ops"\n\n'
-        '[environments.dev-eu]\nregion = "eu-west-1"\n',
+        'schema_version = 1\nlayout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n',
         encoding="utf-8",
         newline="\n",
     )
@@ -2607,14 +2573,6 @@ def test_a_table_failing_tf_vars_coverage_is_todo_naming_the_refusal():
     )
 
 
-def test_the_approver_item_names_the_tables_team():
-    """Mutation: read `gate_approver_team` from `{}`."""
-    no_gate = ec.parse_table('layout = "none"\n')
-    assert onboard._approver_item(ctx(table=no_gate))[0] == "todo"
-    ops = ec.parse_table('layout = "none"\n\n[gate]\napprover_team = "ops"\n')
-    assert onboard._approver_item(ctx(table=ops)) == ("ok", "`[gate] approver_team`: ops", [])
-
-
 def test_a_private_repository_with_an_approving_review_rule_is_ok():
     """A private repository below Enterprise cannot carry environment reviewers, so a
     `pull_request` rule at one approval is its apply gate.
@@ -2632,8 +2590,7 @@ def test_a_private_repository_with_an_approving_review_rule_is_ok():
             "(docs/getting-started.md §Environment setup). On a private repository below",
             "Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
             "approving-review `pull_request` rule on the default branch, which this script",
-            "does not create (docs/branch-protection.md §Reproducible ruleset), and",
-            "`[gate] approver_team`.",
+            "does not create (docs/branch-protection.md §Reproducible ruleset).",
         ],
     )
 
@@ -2965,10 +2922,8 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     assert snippet.startswith("schema_version = 1"), (
         f"no TOML example found in the block: {snippet!r}"
     )
-    # The placeholder is not a slug, so it is the one value a consumer substitutes.
-    assert snippet.count('approver_team = "<team-slug>"') == 1
     assert snippet.count('aws.account = "<account>"') == 1
-    filled = snippet.replace("<account>", "111111111111").replace("<team-slug>", "deployers")
+    filled = snippet.replace("<account>", "111111111111")
     ec.validate_structure(ec.parse_table(filled))
 
 

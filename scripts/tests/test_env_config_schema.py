@@ -291,7 +291,6 @@ def test_a_whole_table_is_returned_unchanged():
     """
     table = {
         "layout": "tf_vars",
-        "gate": {"approver_team": "deployers"},
         "identities": {
             "dev": {
                 "aws": {
@@ -313,7 +312,6 @@ def test_a_whole_table_is_returned_unchanged():
     }
     assert env_config.validate(table, ("dev-eu",)) == {
         "layout": "tf_vars",
-        "gate": {"approver_team": "deployers"},
         "identities": {
             "dev": {
                 "aws": {
@@ -360,22 +358,21 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments, gate."
+        ".github/shipmate.toml holds schema_version, layout, identities, environments."
     )
 
 
 def test_every_allowed_top_level_key_is_accepted():
-    """The other half of the strict-key rule: the five names are the whole allowed set, so a
-    table using all five must validate. Compared against a hand-written table, never against
+    """The other half of the strict-key rule: the four names are the whole allowed set, so a
+    table using all four must validate. Compared against a hand-written table, never against
     the module's own constant.
 
-    Mutation: remove a name from the allowed set -- one of these five then refuses.
+    Mutation: remove a name from the allowed set -- one of these four then refuses.
     """
     table = {
         "layout": "folder",
         "identities": {},
         "environments": {},
-        "gate": {"approver_team": "deployers"},
         "schema_version": 1,
     }
     assert env_config.validate(table, ()) == table
@@ -388,7 +385,7 @@ def test_the_old_explicit_envs_list_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "explicit_envs": ["prod"]}) == (
         "::error::explicit_envs is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments, gate."
+        ".github/shipmate.toml holds schema_version, layout, identities, environments."
     )
 
 
@@ -550,7 +547,7 @@ def test_the_old_env_order_table_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "env_order": {"prod": ["dev"]}}) == (
         "::error::env_order is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments, gate."
+        ".github/shipmate.toml holds schema_version, layout, identities, environments."
     )
 
 
@@ -589,7 +586,7 @@ def test_an_entry_name_no_environment_can_take_refuses(name, message):
     )
 
 
-# --- 11: schema_version and the gate table ------------------------------------------------
+# --- 11: schema_version -----------------------------------------------------------------
 
 
 def test_a_declared_schema_version_1_is_accepted():
@@ -636,89 +633,18 @@ def test_the_old_version_key_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "version": 1}) == (
         "::error::version is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments, gate."
+        ".github/shipmate.toml holds schema_version, layout, identities, environments."
     )
 
 
-def test_a_gate_table_holding_its_key_is_accepted():
-    """Mutation: remove `"gate"` from `_TOP_KEYS` -- the table a repository declares ahead of
-    the release that reads it is refused as an unknown setting."""
-    table = {"layout": "folder", "gate": {"approver_team": "deployers"}}
-    assert env_config.validate(table, ()) == table
-
-
-def test_an_absent_gate_table_is_accepted():
-    """Mutation: `table.get("gate", {})` -> `table["gate"]` -- every file that declares no
-    gate then raises instead of validating."""
-    table = {"layout": "folder", "environments": {}}
-    assert env_config.validate(table, ()) == table
-
-
-def test_an_unknown_key_in_the_gate_table_refuses_by_name():
-    """A misspelled gate key is silently inert: the setting keeps its default and the
-    repository believes it declared one. The old `approvers_team` is one such key: no alias.
-
-    Mutation: widen `_GATE_KEYS` to accept any key, or keep `"approvers_team"` in it.
-    """
-    assert _refusal({"layout": "folder", "gate": {"approvers_team": "deployers"}}) == (
-        "::error::gate.approvers_team is not a key this engine implements. "
-        "The gate table holds approver_team."
+def test_a_leftover_gate_table_refuses_as_an_unknown_setting():
+    """Mutation: keep `"gate"` in `_TOP_KEYS` -- the file then validates."""
+    with pytest.raises(SystemExit) as exc:
+        env_config.validate_structure({"schema_version": 1, "layout": "tf_vars", "gate": {}})
+    assert str(exc.value) == (
+        "::error::gate is not a setting this engine implements. "
+        ".github/shipmate.toml holds schema_version, layout, identities, environments."
     )
-
-
-def test_the_old_ungated_envs_list_refuses_as_an_unknown_gate_key():
-    """No alias: the exemption now sits on each entry as `gated = false`.
-
-    Mutation: keep `"ungated_envs"` in `_GATE_KEYS` -- the file then validates.
-    """
-    assert _refusal({"layout": "folder", "gate": {"ungated_envs": ["dev"]}}) == (
-        "::error::gate.ungated_envs is not a key this engine implements. "
-        "The gate table holds approver_team."
-    )
-
-
-def test_the_declared_approver_team_is_what_the_accessor_returns():
-    """Mutation: read `approvers_team` in `gate_approver_team` -- it then returns ""."""
-    table = env_config.validate_structure({"layout": "folder", "gate": {"approver_team": "ops"}})
-    assert env_config.gate_approver_team(table) == "ops"
-
-
-def test_a_non_string_approver_team_refuses():
-    """Mutation: drop the `_string` call inside `validate_team_slug` -- a non-string team slug
-    validates here and fails once per membership query instead."""
-    assert _refusal({"layout": "folder", "gate": {"approver_team": 1}}) == (
-        "::error::gate.approver_team must be a string, got int."
-    )
-
-
-_NOT_A_TEAM_SLUG = (
-    "is {team!r}, which is not a GitHub team slug; use the bare slug from the team's URL "
-    "(letters, digits, '-' and '_'), not a display name or an @org/team reference."
-)
-
-
-@pytest.mark.parametrize("team", ["Platform Team", "@ship-iac/platform", "platform ", '"platform"'])
-def test_an_approver_team_that_is_not_a_slug_refuses(team):
-    """A charset rule, as environment names have one. A display name, an `@org/team`
-    reference or a padded slug 404s in the membership lookup, so every commenter is refused
-    under a message naming the team as though it had resolved -- the same failure a missing
-    team produces, with no diagnostic distinguishing them.
-
-    Mutation: drop the `_TEAM_SLUG.fullmatch` check, or widen the pattern to `.*`.
-    """
-    assert _refusal({"layout": "folder", "gate": {"approver_team": team}}) == (
-        f"::error::gate.approver_team {_NOT_A_TEAM_SLUG.format(team=team)}"
-    )
-
-
-def test_a_declared_empty_approver_team_still_validates():
-    """An empty team is legal and authorizes nobody, so the charset rule must not refuse it.
-
-    Mutation: drop the `if team and` guard -- a repository deliberately closing the comment
-    path is then refused at every read of its file, including `doctor`'s.
-    """
-    table = {"layout": "folder", "gate": {"approver_team": ""}}
-    assert env_config.validate_structure(table) == table
 
 
 # --- 12: the tf_vars layout, the entry's tf_vars table, the vars reference -------------
@@ -825,25 +751,25 @@ def _structural(table):
 
 
 def test_three_independent_errors_refuse_as_three_lines():
-    """A misspelled key, a quoted boolean in the same entry and a display name for the team
+    """A misspelled key, a quoted boolean and a self-referencing `needs` in the same entry
     are three typos, and one refusal names all three rather than one per run.
 
-    Mutations: re-raise inside `_gather` -- only the team line is left, because the other
-    two are appended without it; or drop the `_check_gate` call from `validate_structure`
-    -- the team line is lost.
+    Mutations: re-raise inside `_gather` -- only the cycle line is left, because the other
+    two are appended without it; or drop the `_check_cycle` call from `_check_entries` --
+    the cycle line is lost.
     """
     table = env_config.parse_table(
-        'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n\n'
-        '[gate]\napprover_team = "Platform Team"\n'
+        'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n'
+        'needs = ["dev-eu"]\n'
     )
     assert _structural(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. An "
         "environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.\n"
         "::error::environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
         "gated = false, unquoted.\n"
-        "::error::gate.approver_team is 'Platform Team', which is not a GitHub team slug; use "
-        "the bare slug from the team's URL (letters, digits, '-' and '_'), not a display name "
-        "or an @org/team reference."
+        "::error::needs is cyclic: dev-eu -> dev-eu — each of those must fully apply before "
+        "the next, so the ordering has no first environment and no apply path can sort it. "
+        "Break the chain in .github/shipmate.toml."
     )
 
 
@@ -857,9 +783,9 @@ def test_the_lines_come_in_check_order():
     table = {"colour": 1, "lyout": "folder", "environments": {"dev": {"regoin": "eu-west-1"}}}
     assert _structural(table) == (
         "::error::colour is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, identities, environments, gate.\n"
+        "schema_version, layout, identities, environments.\n"
         "::error::lyout is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, identities, environments, gate.\n" + NO_LAYOUT + "\n"
+        "schema_version, layout, identities, environments.\n" + NO_LAYOUT + "\n"
         "::error::environment dev: regoin is not a key this engine implements. An environment "
         "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )
@@ -894,14 +820,6 @@ def test_a_non_mapping_tf_vars_is_one_message():
     on a string raises a raw `AttributeError`."""
     table = {"layout": "folder", "environments": {"dev": {"tf_vars": "x"}}}
     assert _structural(table) == "::error::environment dev: tf_vars must be a mapping, got str."
-
-
-def test_a_non_mapping_gate_is_one_message():
-    """Mutation: drop the `isinstance(gate, dict)` return in `_check_gate` -- each letter
-    of `"ops"` is then refused as a gate key."""
-    assert _structural({"layout": "folder", "gate": "ops"}) == (
-        "::error::gate must be a mapping, got str."
-    )
 
 
 def test_one_error_is_todays_message_byte_for_byte():

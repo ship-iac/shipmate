@@ -31,8 +31,7 @@ must distinguish the two by output, or validate its own arguments first.
 Environments are derived from the repository's own Terramate env/* tags, never
 passed in: the set of environments is a property of the stacks. Those bound as
 one bare `<env>` instead of the `<env>-plan` / `<env>-apply` pair are the entries
-holding `shared = true` in the checkout's `.github/shipmate.toml`. The approver
-team is that file's `[gate] approver_team`, which this script does not write.
+holding `shared = true` in the checkout's `.github/shipmate.toml`.
 """
 
 import argparse
@@ -915,16 +914,8 @@ _TABLE_TEMPLATE = [
     "paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key",
     "from this checkout's file, so re-run it after adding or dropping one.",
     "",
-    "`[gate] approver_team` names the team whose members may apply and unlock by",
-    "pull request comment — `<team-slug>` here. Keep it above the first",
-    "`[environments.*]` header, where it reads with the other repository-wide",
-    "settings.",
-    "",
     "  schema_version = 1",
     '  layout = "tf_vars"',
-    "",
-    "  [gate]",
-    '  approver_team = "<team-slug>"',
     "",
     "  [identities.dev]",
     '  aws.account = "<account>"',
@@ -977,20 +968,6 @@ def _table_item(ctx):
     return "ok", item, []
 
 
-def _approver_item(ctx):
-    team = ec.gate_approver_team(ctx["table"] or {})
-    if team:
-        return "ok", f"`[gate] approver_team`: {team}", []
-    return (
-        "todo",
-        "`[gate] approver_team`",
-        [
-            f"Name, in `{ec.CONFIG_PATH}`, the team whose members may apply and unlock by",
-            "pull request comment.",
-        ],
-    )
-
-
 def _app_item(ctx):
     return (
         "cannot check",
@@ -1041,8 +1018,7 @@ def _review_item(ctx, names, shared=()):
                 "(docs/getting-started.md §Environment setup). On a private repository below",
                 "Enterprise, GitHub refuses required reviewers, so the apply gate is then an",
                 "approving-review `pull_request` rule on the default branch, which this script",
-                "does not create (docs/branch-protection.md §Reproducible ruleset), and",
-                "`[gate] approver_team`.",
+                "does not create (docs/branch-protection.md §Reproducible ruleset).",
             ]
     if shared:
         lines += [
@@ -1141,7 +1117,7 @@ def _checklist(ctx):
         if role == "apply"
     ]
     items = [_passphrase_item(ctx), _webhook_item(ctx), _table_item(ctx)]
-    items += [_approver_item(ctx), _app_item(ctx)]
+    items.append(_app_item(ctx))
     if gated:
         items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))
     items += [_codeowners_item(ctx), _lock_files_item(ctx), _adoption_item(ctx)]

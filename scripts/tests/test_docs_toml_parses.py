@@ -43,7 +43,7 @@ _FENCE = re.compile(r"^(?P<indent>[ \t]*)```toml[ \t]*$\n(?P<body>.*?)^\1```", r
 # counts here and does not pair in _FENCE.
 _OPENER = re.compile(r"^[ \t]*```toml\b", re.M)
 
-#: An environment name, a team slug and a non-empty region all at once.
+#: An environment name and a non-empty region at once.
 _PLACEHOLDER = "dev"
 
 #: A role a consumer's variable would hold: a full ARN, which needs no `aws.account`.

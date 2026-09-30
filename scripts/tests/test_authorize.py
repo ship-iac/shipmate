@@ -25,17 +25,33 @@ DRAFT_REASON = (
     "not authorized: this pull request is a draft. A draft can be planned but not "
     "applied — mark it ready for review, then comment the apply again."
 )
-#: The membership refusal for `_decide`'s default team, hand-written for the
-#: same reason.
-MEMBER_REASON = (
-    "not authorized: the commenter is not a member of the required approver team `deployers`."
-)
+
+
+def _a1(verb, permission):
+    return (
+        f"not authorized: `shipmate {verb}` needs write access to this repository, and the "
+        f"commenter's permission is `{permission}`."
+    )
+
+
+def _a2(verb):
+    return (
+        "not authorized: could not read the commenter's permission on this repository, so "
+        f"`shipmate {verb}` was not run. This run's log has the API response; comment again."
+    )
+
+
+def _a3(verb, permission):
+    return (
+        f"not authorized: `shipmate {verb}` needs write access to this repository, and GitHub "
+        f"reported the commenter's permission as `{permission}`, which this engine does not "
+        "admit."
+    )
 
 
 def _decide(**kw):
     base = dict(
-        is_member=True,
-        approvers_team="deployers",
+        permission="write",
         review_decision="NONE",
         pr=PR_OK,
         plan_runs=RUNS_OK,
@@ -49,9 +65,38 @@ def test_all_conditions_met_authorizes():
     assert ok and reason == ""
 
 
-def test_non_member_rejected_first():
-    ok, reason = _decide(is_member=False)
-    assert not ok and "team `deployers`" in reason and "not a member" in reason
+#: (permission, verb) -> the whole verdict. Apply rows that pass the permission check reach
+#: `_decide`'s otherwise authorizable pull request, so they authorize too.
+_PERMISSION_TABLE = [
+    (p, verb, expected)
+    for verb in ("apply", "unlock")
+    for p, expected in (
+        ("admin", (True, "")),
+        ("write", (True, "")),
+        ("read", (False, _a1(verb, "read"))),
+        ("none", (False, _a1(verb, "none"))),
+        ("", (False, _a2(verb))),
+        ("WRITE", (False, _a2(verb))),
+        ("wr ite", (False, _a2(verb))),
+        ("write\n", (False, _a2(verb))),
+        ("maintain", (False, _a3(verb, "maintain"))),
+        ("triage", (False, _a3(verb, "triage"))),
+        ("null", (False, _a3(verb, "null"))),
+    )
+]
+
+
+@pytest.mark.parametrize(("permission", "verb", "expected"), _PERMISSION_TABLE)
+def test_permission_decision_table(permission, verb, expected):
+    """`read` is every account on a public repository and `none` any other non-collaborator, so
+    both refuse. An unreadable value refuses without being quoted; an unexpected readable one
+    (the docs say `maintain` and `triage` fold into `write` and `read`, unprobed) refuses too.
+
+    Mutations: admit `read` (the read rows authorize); drop the `admin` branch (the admin rows
+    land on A3); admit any non-empty value (every refusal but `""` authorizes); drop the
+    charset check (`WRITE` is quoted in A3); `re.match(r"^[a-z]+$", ...)` in place of
+    `fullmatch` (`"write\\n"` reaches A3)."""
+    assert _decide(permission=permission, verb=verb) == expected
 
 
 def test_unmergeable_rejected():
@@ -127,8 +172,7 @@ def test_main_reads_review_decision_env(tmp_path, monkeypatch):
     out = tmp_path / "out.txt"
     out.touch()
     for key, value in {
-        "IS_MEMBER": "true",
-        "APPROVERS_TEAM": "deployers",
+        "PERMISSION": "write",
         "PR_JSON": str(pr_json),
         "PLAN_RUN_JSON": str(run_json),
         "GITHUB_OUTPUT": str(out),
@@ -271,8 +315,8 @@ def test_exemption_does_not_reach_the_other_checks():
     # An exempting decision must not authorize anything the other predicates refuse: the
     # exemption sits inside the review check, not around it.
     exempt = dict(review_decision="REVIEW_REQUIRED", environment="dev-eu", ungated_envs=UNGATED_DEV)
-    ok, reason = _decide(is_member=False, **exempt)
-    assert not ok and "not a member" in reason
+    ok, reason = _decide(permission="read", **exempt)
+    assert (ok, reason) == (False, _a1("apply", "read"))
     ok, reason = _decide(
         pr={"mergeable": False, "mergeable_state": "dirty", "head": {"sha": "abc123"}}, **exempt
     )
@@ -292,8 +336,7 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     out = tmp_path / "out.txt"
     out.touch()
     for key, value in {
-        "IS_MEMBER": "true",
-        "APPROVERS_TEAM": "deployers",
+        "PERMISSION": "write",
         "PR_JSON": str(pr_json),
         "PLAN_RUN_JSON": str(run_json),
         "GITHUB_OUTPUT": str(out),
@@ -321,8 +364,7 @@ def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_runs=RUNS_OK, **env):
     out = tmp_path / "out.txt"
     out.touch()
     base = {
-        "IS_MEMBER": "true",
-        "APPROVERS_TEAM": "deployers",
+        "PERMISSION": "write",
         "PR_JSON": str(pr_json),
         "PLAN_RUN_JSON": str(run_json),
         "GITHUB_OUTPUT": str(out),
@@ -405,11 +447,11 @@ def test_apply_on_a_non_draft_is_unaffected():
     assert (ok, reason) == (True, "")
 
 
-def test_draft_refusal_runs_after_the_membership_check():
-    # A non-member on a draft is told about membership: the reason a commenter can act on
-    # first, and the fail-fast order every check here relies on.
-    ok, reason = _decide(is_member=False, pr={**PR_OK, "draft": True})
-    assert (ok, reason) == (False, MEMBER_REASON)
+def test_draft_refusal_runs_after_the_permission_check():
+    # A read-only commenter on a draft is told about the permission: the reason a commenter can
+    # act on first, and the fail-fast order every check here relies on.
+    ok, reason = _decide(permission="read", pr={**PR_OK, "draft": True})
+    assert (ok, reason) == (False, _a1("apply", "read"))
 
 
 def test_draft_refusal_runs_before_the_mergeable_check():
@@ -423,8 +465,7 @@ def test_draft_refusal_runs_before_the_mergeable_check():
 
 def test_unlock_on_a_draft_is_still_authorized():
     ok, reason = az.decide(
-        is_member=True,
-        approvers_team="infra",
+        permission="write",
         review_decision="",
         pr={"mergeable": None, "draft": True, "head": {"sha": "a" * 40}},
         plan_runs={},
@@ -434,10 +475,9 @@ def test_unlock_on_a_draft_is_still_authorized():
     assert (ok, reason) == (True, "")
 
 
-def test_unlock_needs_only_team_membership():
+def test_unlock_needs_only_write_access():
     ok, reason = az.decide(
-        is_member=True,
-        approvers_team="infra",
+        permission="write",
         review_decision="",  # There is no decision at all.
         pr={"mergeable": None, "head": {"sha": "a" * 40}},  # The pull request is merged.
         plan_runs={},  # There is no reviewed plan.
@@ -447,24 +487,22 @@ def test_unlock_needs_only_team_membership():
     assert (ok, reason) == (True, "")
 
 
-def test_unlock_still_refuses_a_non_member():
+def test_unlock_still_refuses_a_read_only_commenter():
     ok, reason = az.decide(
-        is_member=False,
-        approvers_team="infra",
+        permission="read",
         review_decision="APPROVED",
         pr={"mergeable": True, "head": {"sha": "a" * 40}},
         plan_runs=RUNS_OK,
         environment="dev-eu",
         verb="unlock",
     )
-    assert not ok and "not a member" in reason
+    assert (ok, reason) == (False, _a1("unlock", "read"))
 
 
 def test_apply_is_unchanged_by_the_verb_default():
     # The apply path must not become laxer: same inputs as the unlock case above.
     ok, reason = az.decide(
-        is_member=True,
-        approvers_team="infra",
+        permission="write",
         review_decision="",
         pr={"mergeable": None, "head": {"sha": "a" * 40}},
         plan_runs={},
@@ -475,7 +513,7 @@ def test_apply_is_unchanged_by_the_verb_default():
 
 def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_path, monkeypatch):
     """unlock with review_decision="REVIEW_REQUIRED", the named env in ungated_envs and
-    membership=true authorizes, without the exemption. The exemption is an audit record of an
+    write permission authorizes, without the exemption. The exemption is an audit record of an
     apply without review, and unlock applies nothing, so it must not produce that audit
     line."""
     pr_json = tmp_path / "pr.json"
@@ -485,8 +523,7 @@ def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_pat
     out = tmp_path / "out.txt"
     out.touch()
     for key, value in {
-        "IS_MEMBER": "true",
-        "APPROVERS_TEAM": "infra",
+        "PERMISSION": "write",
         "PR_JSON": str(pr_json),
         "PLAN_RUN_JSON": str(run_json),
         "GITHUB_OUTPUT": str(out),
@@ -504,7 +541,7 @@ def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_pat
 
 def test_apply_with_ungated_exemption_still_produces_audit_line(tmp_path, monkeypatch):
     # apply, not unlock, with review_decision="REVIEW_REQUIRED", the named env in ungated_envs
-    # and membership=true authorizes and records the exemption. Scoping the exemption to the
+    # and write permission authorizes and records the exemption. Scoping the exemption to the
     # verb must not disable it for apply.
     pr_json = tmp_path / "pr.json"
     pr_json.write_text(json.dumps(PR_OK), encoding="utf-8")
@@ -513,8 +550,7 @@ def test_apply_with_ungated_exemption_still_produces_audit_line(tmp_path, monkey
     out = tmp_path / "out.txt"
     out.touch()
     for key, value in {
-        "IS_MEMBER": "true",
-        "APPROVERS_TEAM": "infra",
+        "PERMISSION": "write",
         "PR_JSON": str(pr_json),
         "PLAN_RUN_JSON": str(run_json),
         "GITHUB_OUTPUT": str(out),

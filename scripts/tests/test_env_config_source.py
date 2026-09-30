@@ -377,30 +377,3 @@ def test_both_readers_return_the_same_table_for_the_same_bytes(monkeypatch):
     git = types.SimpleNamespace(returncode=0, stdout=_SHARED_TEXT, stderr="")
     assert ec.read_table(run=_fake_run(git=git)) == _SHARED_TABLE
     assert ec.read_table_at_default_branch(run=_contents_run(_SHARED_TEXT)) == _SHARED_TABLE
-
-
-def _gate(**keys):
-    """A validated-shaped table carrying one `[gate]` table. `_SHARED_TABLE` itself is the
-    no-gate case, so the two differ only in the key under test."""
-    return {**_SHARED_TABLE, "gate": keys}
-
-
-def _warnings(capsys):
-    """Only this module's own annotations, so a line of ordinary output cannot be counted
-    as a warning and an emitted one cannot hide in it."""
-    return [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("::warning::")]
-
-
-def test_a_declared_approver_team_resolves(capsys):
-    """Reddens on returning anything but the declared slug, and on any output."""
-    assert ec.gate_approver_team(_gate(approver_team="platform")) == "platform"
-    assert _warnings(capsys) == []
-
-
-def test_a_declared_empty_approver_team_authorizes_nobody(capsys):
-    """An empty slug is a declared empty team, which 404s to `is_member=false` downstream.
-    An absent key resolves the same way. Reddens on any reading that yields a non-empty
-    team for either, which authorizes comments against a team the file does not name."""
-    assert ec.gate_approver_team(_gate(approver_team="")) == ""
-    assert ec.gate_approver_team(_SHARED_TABLE) == ""
-    assert _warnings(capsys) == []

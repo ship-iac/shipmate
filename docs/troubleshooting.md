@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining fourteen
+shipmate:doctor -->`, upserted in place like the plan comment) combining thirteen
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -107,18 +107,16 @@ live probes.
   never runs completes green with nothing done, and a job whose `if:` is too
   wide runs on an event it was never meant to see. The fence in
   [`getting-started.md`](getting-started.md) has every expression.
-- **Whether the configured approver team resolves in the org.**
 - **Whether `.github/shipmate.toml` at the commit under examination is valid.**
   Read through the API at that commit, never from the default branch and never
   substituted by it, so a malformed or misplaced setting is reported on the pull
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
-  on by itself run here — the top-level keys, `schema_version`, `layout`, the
-  environment entries and `[gate]`; `tf_vars`-layout
-  coverage and unused entries need a plan matrix or a whole-tree environment
-  scan, and the verdict names them as unchecked. A valid
-  file also gets its `needs` and
-  `explicit` values read back, absent ones included: `explicit` set on no entry
+  on by itself run here — the top-level keys, `schema_version`, `layout` and the
+  environment entries; `tf_vars`-layout coverage and unused entries need a plan
+  matrix or a whole-tree environment scan, and the verdict names them as
+  unchecked. A valid file also gets its `needs` and `explicit` values read back,
+  absent ones included: `explicit` set on no entry
   is legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Each variable reference is resolved
   and listed as `<key> from variable <NAME>`; an unset one is the invalid-file
@@ -133,13 +131,11 @@ annotations GitHub already recorded on this commit's workflow runs — shipmate'
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only twelve of the fourteen probes can produce a finding from the plan path's
-own `annotate`-mode run (`actions/summary`). The approver-team probe runs only
-in `report` mode, because the plan path's App token is minted without
-`members: read` and could not look a team up, and
-the App-permission-drift probe only has something to report when a
-full-manifest permission-set mint was actually attempted, which only
-`shipmate doctor` does. Both are effectively comment-path-only. `doctor`
+Only twelve of the thirteen probes can produce a finding from the plan path's
+own `annotate`-mode run (`actions/summary`). The App-permission-drift probe
+only has something to report when a full-manifest permission-set mint was
+actually attempted, which only `shipmate doctor` does. It is effectively
+comment-path-only. `doctor`
 degrades to a "could not verify" warning naming each probe that was skipped on
 an API error, and always exits 0, so a probe failure never fails the plan run.
 One such failure is the App token lacking read access to `rules/branches` or
@@ -187,8 +183,8 @@ deprecation warning from a pinned action reads the same as a shipmate warning.
 That is intended — a known-noise denylist would eventually swallow a real
 warning — so treat an unfamiliar line as upstream's until you have checked.
 
-`shipmate doctor` never blocks the gate, and it needs no team membership,
-review or reviewed plan, unlike `shipmate apply` — but because it reports this
+`shipmate doctor` never blocks the gate, and it needs no write access, review
+or reviewed plan, unlike `shipmate apply` — but because it reports this
 repository's own settings, the engine limits it to organization members and
 repository collaborators (§Who can ask for the report, and who can see it).
 
@@ -196,9 +192,8 @@ repository collaborators (§Who can ask for the report, and who can see it).
 
 The report is an inventory of what is *not* configured: that no ruleset
 requires `shipmate / gate` on the default branch, that `<env>-apply` has no
-approval rule so pre-merge applies to it are unreviewed, which approver
-team is configured and whether it resolves, and whether the App installation is
-missing permissions the manifest declares.
+approval rule so pre-merge applies to it are unreviewed, and whether the App
+installation is missing permissions the manifest declares.
 
 **What the engine enforces.** `shipmate doctor` runs only for a commenter
 GitHub classifies as `OWNER`, `MEMBER` or `COLLABORATOR` in
@@ -558,8 +553,7 @@ branch's** copy of the file — that is the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `identities`, `environments` and `gate` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does |
-| `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approver_team` alone. A misspelled one would leave the setting at its default while the repository believed it declared one. The review exemption is `gated = false` on the environment's own entry |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `identities` and `environments` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does |
 | `environments.<env>.<key> must be a boolean` | `shared`, `explicit` and `gated` are TOML booleans: write `explicit = true`, unquoted. A quoted `"true"` or `"false"`, a number, or a variable reference would otherwise resolve to the default |
 | `environment <env>: aws is retired` | credentials moved out of the environment entry. Write them as `[identities.<name>]` with `aws.account`, `aws.plan` and `aws.apply`, and name it from the entry with `identity = "<name>"`. Inside an identity, `aws.role`, `aws.region` and a `plan` or `apply` map key `role` or `region` (the retired `aws.<path>.role` and `aws.<path>.region`) refuse too, each naming its replacement |
 | `environment <env>: identity names no [identities.<name>] table` | the entry names an identity the file does not declare; the message lists the ones it does. A misspelled name lands here |
@@ -587,7 +581,6 @@ second line is the diagnosis:
 
 | Where it landed | The second line |
 | --- | --- |
-| after `[gate]` | `gate.layout is not a key this engine implements. The gate table holds approver_team.` |
 | after `[environments.dev-eu]` | `environment dev-eu: layout is not a key this engine implements. An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.` |
 | after `[identities.dev]` | `identities.dev.layout is not a key this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
 | after `[identities.dev.aws]` | `identities.dev.aws.layout is not a field this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
@@ -596,7 +589,6 @@ A misplaced `schema_version` reports differently in each position:
 
 | Where it landed | What `detect` says |
 | --- | --- |
-| after `[gate]` | `gate.schema_version is not a key this engine implements. The gate table holds approver_team.` |
 | after `[environments.dev-eu]` | `environment dev-eu: schema_version is not a key this engine implements. An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.` |
 | after `[identities.dev]` | `identities.dev.schema_version is not a key this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
 | after `[identities.dev.aws]` | `identities.dev.aws.schema_version is not a field this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
@@ -614,14 +606,12 @@ A leading byte-order mark is `Invalid statement (at line 1, column 1)`. Save the
 file as UTF-8 without a BOM; nothing strips it, deliberately, so that
 `shipmate doctor` and the run reach the same verdict on the same bytes.
 
-**Three settings refuse nothing when they are absent.** `needs`,
-`explicit` and `gate.approver_team` are optional and take tolerant
-defaults — no ordering, no exclusions, and no one authorized. A file that sets
-`explicit` on no entry is structurally valid, and a bare `shipmate apply` then applies
-every environment, production included; one that omits `approver_team` refuses
-every `shipmate apply` and `shipmate unlock` as though the commenter were an
-outsider. Nothing warns. `shipmate doctor` echoes all three on every report for
-exactly this reason; read them before merging.
+**Two settings refuse nothing when they are absent.** `needs` and `explicit`
+are optional and take tolerant defaults — no ordering and no exclusions. A file
+that sets `explicit` on no entry is structurally valid, and a bare
+`shipmate apply` then applies every environment, production included. Nothing
+warns. `shipmate doctor` echoes both on every report for exactly this reason;
+read them before merging.
 
 **Editing them on a branch does not change what that branch applies.** `needs`
 and `explicit` are read from the default branch with the rest of the file.
@@ -685,8 +675,9 @@ carrying no such file gets no run at all — the dispatch is refused with a 404,
 the comment-handling run carries an error saying so, and the pull request gets a
 comment saying the dispatch failed and linking that run. A file GitHub does
 dispatch but whose jobs do not select `unlock` produces a run in which every job
-skips (§A dispatched verb produced a run in which every job was skipped). It authorizes on approver-team
-membership and the `<env>-apply` environment, not on a review — so a lock
+skips (§A dispatched verb produced a run in which every job was skipped). It
+authorizes on the commenter's write or admin permission on the repository and
+the `<env>-apply` environment, not on a review — so a lock
 stranded after the pull request merged is still releasable
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops has the contract). Every cell
 in that environment with a pending `apply / <stack> / <env>` check is probed;
