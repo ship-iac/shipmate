@@ -1188,7 +1188,8 @@ def resolved_roles(table):
     """`(env, path, workload, role_arn)` for every environment naming an identity, by env,
     then `plan` before `apply`, then the entry's `workloads` in written order.
 
-    A non-varying identity gives one row per path with workload "", standing for every cell.
+    A non-varying identity gives one row per path with workload "", standing for every cell,
+    or for untagged and listed cells when the entry writes `workloads`.
     A row whose `role_arn` is "" is a path the identity grants no credential on. Reads only a
     validated table.
     """

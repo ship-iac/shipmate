@@ -4637,6 +4637,64 @@ def test_the_roles_section_stays_within_its_budget_and_keeps_the_harvest():
     ]
 
 
+class _SliceBudget(list):
+    """A row list that refuses a 64th slice, so a trim loop that never ends fails fast."""
+
+    slices = 0
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            self.slices += 1
+            assert self.slices < 64, "the trim loop did not stop"
+        return super().__getitem__(key)
+
+
+def test_a_heading_over_the_budget_shows_no_items_and_stops():
+    """A lowercase environment name of 8,000 characters is valid, and its heading alone is
+    over the budget: trimming went on past zero rows, the count growing, and hung the report.
+    Zero rows shown gives the heading and the count, over budget, for `_config_roles` to
+    count as not shown.
+
+    Mutation: drop the `shown and` guard -- the 64th slice fails the assertion inside
+    `_SliceBudget` instead of hanging (observed).
+    """
+    env = "e" * 8000
+    rows = _SliceBudget(["plan every cell: no role", "apply every cell: no role"])
+    assert doctor._roles_notice(env, rows, doctor.ROLE_LINES_BUDGET) == (
+        f"`{env}` resolves these roles at the commit under examination:  … and 2 more."
+    )
+
+
+def test_a_later_environment_over_the_budget_is_cut_against_what_is_left():
+    """Only the first environment could be cut: a later one over the budget on its own was
+    counted not shown although budget remained.
+
+    Mutation: cut every environment against the full budget -- `dev` is cut to fit 8,000,
+    runs past what `aa` left, and is only counted (observed).
+    """
+    table = _wide_roles_table("dev")
+    table["identities"]["narrow"] = {"aws": {"account": "222222222222", "plan": "aa-plan"}}
+    table["environments"]["aa"] = {"region": "eu-west-1", "identity": "narrow"}
+    roles = doctor._config_roles(doctor.bm.ec.validate_structure(table))
+    arn = f"`arn:aws:iam::111111111111:role/{_LONG_ROLE}`"
+    items = [f"plan w{i:03}: {arn}" for i in range(256)] + [
+        f"apply w{i:03}: {arn}" for i in range(256)
+    ]
+    assert roles == [
+        (
+            doctor.NOTICE,
+            "`aa` resolves these roles at the commit under examination: plan every cell: "
+            "`arn:aws:iam::222222222222:role/aa-plan`; apply every cell: no role.",
+        ),
+        (
+            doctor.NOTICE,
+            "`dev` resolves these roles at the commit under examination: "
+            + "; ".join(items[:72])
+            + " … and 440 more.",
+        ),
+    ]
+
+
 def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
     """A pull request adding a misspelled reference plans green, because plans read the
     default branch's file; `shipmate doctor` is where the refusal shows before the merge.

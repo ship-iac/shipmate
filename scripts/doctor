@@ -1725,7 +1725,9 @@ def _roles_notice(env, rows, budget):
     if len(text) <= budget:
         return text
     shown = len(rows)
-    while len(head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more.") > budget:
+    while (
+        shown and len(head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more.") > budget
+    ):
         shown -= 1
     return head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more."
 
@@ -1747,7 +1749,7 @@ def _config_roles(table):
         items.setdefault(env, []).append(f"{path} {cells}: {shown}")
     notices, left = [], ROLE_LINES_BUDGET
     for done, (env, rows) in enumerate(items.items()):
-        text = _roles_notice(env, rows, ROLE_LINES_BUDGET)
+        text = _roles_notice(env, rows, left)
         if len(text) > left:
             notices.append(
                 f"roles for {len(items) - done} more environment(s) not shown, to keep this "
