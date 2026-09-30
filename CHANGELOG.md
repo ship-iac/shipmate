@@ -14,6 +14,8 @@ section below names the SHA the release tags.
 
 - **`shipmate doctor` names each gated environment at 0 required approvals: a note while code-owner review is on, a warning while it is off.**
 - **The apply comment says when a gated environment applied with no approving review required.**
+- **A cell whose `tofu init` fails after restoring a provider cache entry names that entry's key in an error annotation.**
+- **`scripts/onboard`'s closing checklist names the stacks without a git-tracked `.terraform.lock.hcl`.**
 
 ### Changed
 
@@ -25,7 +27,7 @@ section below names the SHA the release tags.
 - **`scripts/onboard` takes no `--team`; the approver team is read from `[gate] approver_team` in the checkout's table.**
 - **`scripts/onboard --key` is needed only while `shipmate-engine` holds no App private key.**
 - **`scripts/onboard`'s closing checklist marks each item `ok`, `todo` or `cannot check` from what the run read.**
-- **The provider cache serves only stacks with a committed `.terraform.lock.hcl`, restored per stack, and only drift runs save it.**
+- **The provider cache serves only stacks with a committed `.terraform.lock.hcl`, keyed on the lock's provider addresses and versions, and drift and apply cells save it; plan cells never do.**
 - **Plan cells render the text and JSON plans concurrently.**
 - **The control jobs that run no `tofu` run on `ubuntu-slim`.**
 - **Comments by bots or without `shipmate` start no comment-ops job.**

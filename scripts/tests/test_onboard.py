@@ -26,7 +26,8 @@ def make_gh(routes):
 
     A read is `gh api <path>` with no `-X`, keyed by the path, or `gh secret list ...` /
     `gh variable list ...`, keyed by its whole command line; anything else is a write and
-    is only recorded. An
+    is only recorded. A `git` call is keyed by its whole command line and answered raw, ""
+    when unrouted: to `git ls-files` that is "nothing tracked", the `todo` direction. An
     unrouted read raises `AssertionError`, deliberately NOT `SystemExit`:
     `_gh_json_or_none` reads a `SystemExit` naming HTTP 404 as "absent", so a routing
     mistake phrased that way would be swallowed into the absent branch and the test
@@ -52,6 +53,8 @@ def make_gh(routes):
             key = args[2]
         elif args[:3] in (["gh", "secret", "list"], ["gh", "variable", "list"]):
             key = " ".join(args)
+        elif args[0] == "git":
+            return routes.get(" ".join(args), "")
         else:
             return ""
         if key not in routes:
@@ -85,6 +88,7 @@ def ctx(**over):
         "app_id": "1",
         "key": "-----BEGIN-----\npem\n",
         "envs": ["dev-eu"],
+        "stacks": [],
         "shared": set(),
         "unresolved": set(),
         "root": None,
@@ -168,15 +172,14 @@ def test_empty_key_file_is_refused(tmp_path):
     assert "empty" in str(e.value)
 
 
-def test_zero_environments_is_refused(monkeypatch):
+def test_zero_environments_is_refused():
     """A repository whose stacks carry no env tag has nothing to bind; creating
     zero environments and reporting success is the fail-open form.
 
     Mutation: return an empty list instead of raising.
     """
-    monkeypatch.setattr(onboard, "_env_membership", lambda: ({}, {}))
     with pytest.raises(SystemExit) as e:
-        onboard._derive_envs()
+        onboard._derive_envs({})
     assert "no environment" in str(e.value)
 
 
@@ -219,14 +222,13 @@ def test_shared_name_outside_the_derived_environments_is_refused(tmp_path):
     )
 
 
-def test_derived_environment_failing_the_regex_is_refused(monkeypatch):
+def test_derived_environment_failing_the_regex_is_refused():
     """An env/* tag becomes an API path segment and a `gh --env` argument.
 
     Mutation: drop the `_ENV_RE` loop, so `../admin` is returned as an environment.
     """
-    monkeypatch.setattr(onboard, "_env_membership", lambda: ({"../admin": ["s"]}, {}))
     with pytest.raises(SystemExit) as e:
-        onboard._derive_envs()
+        onboard._derive_envs({"../admin": ["s"]})
     assert "../admin" in str(e.value)
 
 
@@ -540,7 +542,8 @@ def test_main_calls_every_stage_in_order():
         "_engine_pin(engine)",
         "_repo_root()",
         "_repo_facts()",
-        "_derive_envs()",
+        "_env_membership()",
+        "_derive_envs(stacks_by_env)",
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
         "_resolve_shared(root, envs, repo, variables)",
@@ -1282,20 +1285,27 @@ FRESH_ROUTES = {
 }
 
 
-def run_main(monkeypatch, tmp_path, extra_routes, argv, is_private=False, key=True):
+#: One stack, `stacks/app`, tagged for `dev-eu`: what `_env_membership` returns in `run_main`.
+ONE_STACK = ({"dev-eu": ["stacks/app"]}, {"stacks/app": ["env/dev-eu"]})
+
+
+def run_main(
+    monkeypatch, tmp_path, extra_routes, argv, is_private=False, key=True, membership=ONE_STACK
+):
     """Drive `main()` over `FRESH_ROUTES` plus `extra_routes`, returning (fake, SystemExit).
 
     Only the reads `main` does before its first reconciler are stubbed -- the git, terramate
     and `gh repo view` reads, each with its own test. Everything below them runs for real
     against the fake, which is what makes the order of the organization checks observable.
-    `key=False` passes no `--key`.
+    `key=False` passes no `--key`. The run starts in `tmp_path`, the checkout root.
     """
     fake = make_gh({**FRESH_ROUTES, **extra_routes})
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_engine_pin", lambda engine: ("a" * 40, "v0.26.0"))
     monkeypatch.setattr(onboard, "_repo_root", lambda: tmp_path)
     monkeypatch.setattr(onboard, "_repo_facts", lambda: ("o/r", "main", is_private))
-    monkeypatch.setattr(onboard, "_derive_envs", lambda: ["dev-eu"])
+    monkeypatch.setattr(onboard, "_env_membership", lambda: membership)
+    monkeypatch.chdir(tmp_path)
     pem = tmp_path / "key.pem"
     pem.write_text("-----BEGIN-----\npem\n", encoding="utf-8", newline="\n")
     with pytest.raises(SystemExit) as excinfo:
@@ -1642,6 +1652,7 @@ def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tm
         ],
         ["gh", "api", RULES],
         ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"],
+        ["git", "ls-files", "-z", "--", ":(top)*.terraform.lock.hcl"],
     ]
 
 
@@ -2421,6 +2432,13 @@ todo          approving review before apply
 todo          CODEOWNERS entry covering /.github/workflows/
     Add one in `.github/CODEOWNERS`.
 
+todo          Provider lock files
+    1 of 1 stack(s) have no git-tracked `.terraform.lock.hcl`,
+    so the provider cache serves none of them. Remove any `.gitignore` entry for the
+    file first, since git refuses to add an ignored path, then run `tofu providers lock`
+    in each and commit the file:
+      stacks/app
+
 todo          adoption pull request
     Re-run without --dry-run, then commit the workflow file and the table together,
     in a pull request that changes no stack. The table is read from the default
@@ -2452,6 +2470,7 @@ ok            approving review before apply
 cannot check  CODEOWNERS entry covering /.github/workflows/
     `.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's.
 
+ok            Provider lock files
 ok            adoption pull request
 """
 
@@ -2521,6 +2540,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
         "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": MAIN_POLICY,
         VARIABLE_LIST: [{"name": "SHIPMATE_APP_ID", "value": "1"}],
         REMOTE_SHIM: {"name": "shipmate.yml"},
+        "git ls-files -z -- :(top)*.terraform.lock.hcl": "stacks/app/.terraform.lock.hcl\0",
     }
     _fake, exit_ = run_main(monkeypatch, tmp_path, routes, [])
     assert exit_.code == 0
@@ -2791,6 +2811,131 @@ def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
         "cannot check",
         item,
         ["`docs/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's."],
+    )
+
+
+LOCK_ITEM = "Provider lock files"
+
+
+def lock_run(tracked):
+    """A fake `_run` answering `git ls-files -z -- ':(top)*.terraform.lock.hcl'` as git does:
+    every path in `tracked`, relative to the working directory, each NUL-terminated."""
+
+    def _run(args, secrets=(), stdin=None):
+        assert args == ["git", "ls-files", "-z", "--", ":(top)*.terraform.lock.hcl"], args
+        return "".join(f"{path}\0" for path in sorted(tracked))
+
+    return _run
+
+
+def test_the_lock_item_is_ok_when_every_stack_tracks_its_lock(monkeypatch, tmp_path):
+    """Mutation: split the `git ls-files -z` output on a newline, which matches no path."""
+    monkeypatch.chdir(tmp_path)
+    stacks = ["a", "b", "c"]
+    tracked = {f"{s}/.terraform.lock.hcl" for s in stacks}
+    monkeypatch.setattr(onboard, "_run", lock_run(tracked))
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=stacks)) == ("ok", LOCK_ITEM, [])
+
+
+def test_the_lock_item_names_each_stack_without_a_tracked_lock(monkeypatch, tmp_path):
+    """Mutation: replace the tracked-file check with `is_file()` on the lock path, which
+    reads `c`'s lock on disk as committed although git does not track it. Or drop the item's
+    `sorted`, which names `c` before `a`.
+    """
+    monkeypatch.chdir(tmp_path)
+    for s in ("a", "b", "c"):
+        (tmp_path / s).mkdir()
+        (tmp_path / s / ".terraform.lock.hcl").write_text("", encoding="utf-8")
+    monkeypatch.setattr(onboard, "_run", lock_run({"b/.terraform.lock.hcl"}))
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=["c", "b", "a"])) == (
+        "todo",
+        LOCK_ITEM,
+        [
+            "2 of 3 stack(s) have no git-tracked `.terraform.lock.hcl`,",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+            "in each and commit the file:",
+            "  a",
+            "  c",
+        ],
+    )
+
+
+def test_the_lock_item_names_ten_stacks_and_counts_the_rest(monkeypatch, tmp_path):
+    """Mutation: drop the ten-path cap, which names all twelve."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(onboard, "_run", lock_run(set()))
+    stacks = [f"s{i:02}" for i in range(12)]
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=stacks)) == (
+        "todo",
+        LOCK_ITEM,
+        [
+            "12 of 12 stack(s) have no git-tracked `.terraform.lock.hcl`,",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+            "in each and commit the file:",
+            "  s00",
+            "  s01",
+            "  s02",
+            "  s03",
+            "  s04",
+            "  s05",
+            "  s06",
+            "  s07",
+            "  s08",
+            "  s09",
+            "  and 2 more",
+        ],
+    )
+
+
+def test_the_lock_item_resolves_stacks_against_the_working_directory(monkeypatch, tmp_path):
+    """`terramate list` and `git ls-files` both print paths relative to the directory they
+    ran in, so a stack above it matches its lock as `../infra` and is named as printed.
+
+    Mutation: resolve each stack to a root-relative path with `os.path.relpath(cwd / s,
+    root)`, which reads `infra`'s tracked lock as missing and names `stacks/app`.
+    """
+    (tmp_path / "stacks").mkdir()
+    monkeypatch.chdir(tmp_path / "stacks")
+    monkeypatch.setattr(onboard, "_run", lock_run({"../infra/.terraform.lock.hcl"}))
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=["app", "../infra"])) == (
+        "todo",
+        LOCK_ITEM,
+        [
+            "1 of 2 stack(s) have no git-tracked `.terraform.lock.hcl`,",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+            "in each and commit the file:",
+            "  app",
+        ],
+    )
+
+
+def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, capsys):
+    """The item reads the stacks from `_env_membership`'s stack map, where each appears once.
+
+    Mutation: build `ctx["stacks"]` from the `stacks_by_env` values, which lists `a` twice.
+    """
+    membership = ({"dev-eu": ["a", "b"], "dev-us": ["a"]}, {"a": [], "b": []})
+    dev_us = {
+        "repos/o/r/environments/dev-us": ABSENT,
+        "repos/o/r/environments/dev-us-plan": ABSENT,
+        "repos/o/r/environments/dev-us-apply": ABSENT,
+        "repos/o/r/environments/dev-us-apply/deployment-branch-policies": ABSENT,
+    }
+    run_main(monkeypatch, tmp_path, dev_us, ["--dry-run"], membership=membership)
+    items = checklist_items(checklist_of(capsys.readouterr().out))
+    assert items[LOCK_ITEM] == (
+        "todo",
+        [
+            "2 of 2 stack(s) have no git-tracked `.terraform.lock.hcl`,",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
+            "in each and commit the file:",
+            "  a",
+            "  b",
+        ],
     )
 
 

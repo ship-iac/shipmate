@@ -719,16 +719,18 @@ to recover from a transient cause.
 
 `tofu init` refused a provider package restored from the provider cache: its
 content does not match the hash in the stack's `.terraform.lock.hcl`. The
-cache entry is corrupt or was altered. Every cell whose lock file matches that
-entry fails the same way until the lock file changes or the entry is deleted
+cache entry is corrupt or was altered. Every cell whose lock file names the
+same provider versions fails the same way until those versions change or the
+entry is deleted
 ([`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Lock files and the
 provider cache").
 
-1. Read the key from the cell's `Restore provider cache` step log. It starts
-   `tofu-providers-`.
+1. Read the key from the cell's error annotation, `OpenTofu's init failed
+   after restoring provider cache entry <key>`, or from its `Restore provider
+   cache` step log. It starts `tofu-providers-`.
 2. Delete the entry: `gh cache delete <key> --repo <owner>/<repo>`.
 3. Re-run the failed jobs. The cells download their providers, and the next
-   drift run saves a fresh entry.
+   drift or apply cell saves a fresh entry.
 
 ### `shipmate / gate` never goes green
 

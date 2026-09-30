@@ -149,12 +149,20 @@ runs:
           exit 1
         }
 
+    - name: Provider cache key
+      id: provider-cache-key
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/provider-cache-key"
+
     - name: Restore provider cache
-      if: ${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.stack)) != '' }}
+      id: provider-cache
+      if: ${{ steps.provider-cache-key.outputs.digest != '' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-        key: tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.stack)) }}
+        key: tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ steps.provider-cache-key.outputs.digest }}
 
     - name: Initialize the stack
       id: init
@@ -164,6 +172,14 @@ runs:
       # Its own step: init output is setup noise and stays out of the apply step's teed pipeline,
       # apply.txt being reviewer-facing comment data.
       run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+
+    - name: Name the restored provider cache entry
+      if: ${{ failure() && steps.init.outcome == 'failure' && steps.provider-cache.outputs.cache-hit == 'true' }}
+      shell: bash
+      env:
+        KEY: ${{ steps.provider-cache.outputs.cache-primary-key }}
+      run: |
+        echo "::error::OpenTofu's init failed after restoring provider cache entry $KEY. If the log above says a cached package does not match the content of the downloaded package, delete the entry with gh cache delete $KEY --repo $GITHUB_REPOSITORY and re-run."
 
     - name: Locate state
       id: locate-state
@@ -260,6 +276,27 @@ runs:
         env: ${{ inputs.env }}
         mode: save
         path: ${{ steps.locate-state.outputs.path }}
+
+    - name: Check the provider cache
+      id: provider-cache-files
+      # No status function in this `if:` or the save's: the implied success() skips both after a
+      # failed apply. continue-on-error, as on `Compose cell summary`, keeps a cache failure from
+      # stranding an applied cell's check pending.
+      if: ${{ steps.provider-cache.outcome == 'success' && steps.provider-cache.outputs.cache-hit != 'true' }}
+      continue-on-error: true
+      shell: bash
+      run: |
+        if [ -n "$(find "$TF_PLUGIN_CACHE_DIR" -type f -print -quit)" ]; then
+          echo "populated=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Save provider cache
+      if: ${{ steps.provider-cache-files.outputs.populated == 'true' }}
+      continue-on-error: true
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: ${{ steps.provider-cache.outputs.cache-primary-key }}
 
     - name: Compose cell summary
       # Runs even when a fail-safe or the apply itself failed or was cancelled: the

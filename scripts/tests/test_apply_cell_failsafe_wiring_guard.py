@@ -17,11 +17,15 @@ from _loader import SCRIPTS, action_steps, step_by
 
 #: Ids in the guarded range that are deliberately not fail-safes wired into the Compose step's
 #: decision, such as a step added only to expose an output with no bearing on whether the apply
-#: can proceed. Empty today: every id'd step between the stack slug and the apply is a fail-safe.
-#: Adding an id here must be a conscious, reviewed choice, spelled out with a reason, because an
-#: unlisted id'd step in range fails the guard instead of being silently skipped, and silent
-#: skipping is how a real fail-safe could ship unwired.
-NOT_A_FAILSAFE: set[str] = set()
+#: can proceed. Adding an id here must be a conscious, reviewed choice, spelled out with a reason,
+#: because an unlisted id'd step in range fails the guard instead of being silently skipped, and
+#: silent skipping is how a real fail-safe could ship unwired.
+NOT_A_FAILSAFE: set[str] = {
+    # The provider cache key and restore cannot halt the apply: `scripts/provider-cache-key`
+    # never exits non-zero, and a restore miss or cache service error is a warning.
+    "provider-cache-key",
+    "provider-cache",
+}
 
 
 def _steps():

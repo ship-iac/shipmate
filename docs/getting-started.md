@@ -182,7 +182,8 @@ It then prints a checklist of what it cannot set, because those values are
 yours: `SHIPMATE_PLAN_PASSPHRASE`, `SHIPMATE_SLACK_WEBHOOK`, the table with the
 cloud role, region and env identity your layout injects, `[gate] approver_team`,
 adding the repository to the App installation, an approving review before apply,
-a `CODEOWNERS` entry, and the pull request carrying the workflow file. It marks
+a `CODEOWNERS` entry, a git-tracked `.terraform.lock.hcl` in each stack, and
+the pull request carrying the workflow file. It marks
 each item `ok`, `todo` or `cannot check` from what the run read, and only a
 `todo` prints what to do. Two items are `cannot check`: the App
 installation, which only an App JWT can read, and, once a `CODEOWNERS` file
