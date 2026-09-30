@@ -2512,10 +2512,26 @@ shipmate writes into the consumer's own checkout, none of those belong in a
 commit, and a `terramate run` of the consumer's own that omits `--no-recursive`
 refuses on them (`git-untracked` *does* fire there).
 
-`.terraform.lock.hcl` is the consumer's call, not shipmate's: committing it is
-OpenTofu's own recommendation for pinning provider versions and hashes, and a
-cell tolerates it either way — `init -reconfigure` may rewrite it, but that is a
-tracked-file change and `git-uncommitted` never runs on a cell.
+Commit each stack's `.terraform.lock.hcl`. A cell runs without one, but the
+provider cache below serves only stacks with one. `init -reconfigure` may rewrite
+it; that is a tracked-file change and `git-uncommitted` never runs on a cell.
+
+Why the cache needs a committed lock file:
+
+- OpenTofu reuses a cached provider only after checking it against a checksum in
+  the lock file. Without one it downloads again, whatever `required_providers`
+  pins.
+- The lock must come from Git, where it is reviewed. A lock taken from the cache,
+  or `TF_PLUGIN_CACHE_MAY_BREAK_DEPENDENCY_LOCK_FILE`, makes the cache check
+  itself: a planted entry then installs a tampered provider unauthenticated.
+- The engine cannot generate a lock in the cell cheaply: `tofu providers lock`
+  downloads each provider to hash it.
+
+A lock serves the cache only if it names `registry.opentofu.org` providers and
+carries the `h1:` hash for `linux_amd64`. `tofu init` or
+`tofu providers lock -platform=linux_amd64` writes both. A lock written by
+Terraform (`registry.terraform.io`), or one holding only `zh:` hashes or another
+platform's `h1:`, restores the entry and downloads the provider anyway.
 
 The lock file also decides the provider cache (`TF_PLUGIN_CACHE_DIR`, set by
 `actions/setup`):
