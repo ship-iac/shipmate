@@ -330,8 +330,7 @@ def test_a_brace_outside_the_placeholder_refuses(aws, where):
     ids=["unknown", "none-declared", "not-a-string"],
 )
 def test_an_identity_that_names_nothing_refuses(identities, identity, names):
-    """Mutation: drop the unknown-identity check -- the first two cases validate and the
-    third raises raw."""
+    """Mutation: drop the unknown-identity check -- all three cases validate."""
     table = {
         "layout": "folder",
         "identities": identities,
@@ -387,7 +386,8 @@ def test_a_workloads_value_that_is_not_a_list_of_distinct_names_refuses(workload
 )
 def test_a_varying_identity_needs_a_workloads_list(aws):
     """Mutations: drop the check -- every case validates; test only for `{workload}` when
-    deciding whether an identity varies -- the two map cases validate."""
+    deciding whether an identity varies -- the two map cases refuse with a role-map line for
+    workload `None` instead."""
     assert _refusal(_named(aws)) == (
         "::error::environment dev-eu names identity dev, whose roles vary by workload, and "
         'lists no workloads. List the workloads it admits: workloads = ["…"].'
@@ -414,7 +414,7 @@ def test_a_shared_environment_naming_an_apply_only_identity_validates():
 
 
 def test_a_listed_workload_missing_from_a_role_map_refuses():
-    """Mutation: drop the map-key check -- `net` validates and resolves no role."""
+    """Mutation: drop the map-key check -- the lookup of `net` raises a raw `KeyError`."""
     table = _named({"apply": {"core": _ARN}}, workloads=["core", "net"])
     assert _refusal(table) == (
         "::error::environment dev-eu lists workload net, and identities.dev.aws.apply has no net "
@@ -440,8 +440,8 @@ def test_a_listed_workload_missing_from_the_account_map_refuses():
     ids=["every-cell", "listed"],
 )
 def test_a_role_name_on_one_path_and_an_arn_on_the_other_refuses(aws, workloads, cell):
-    """Mutation: drop the mixed-kind check -- the every-cell case refuses as an ARN beside an
-    account instead, the listed case as a name with no account."""
+    """Mutation: drop the mixed-kind check -- both cases validate; in the every-cell case
+    `resolve` then hands the plan path a name-derived ARN beside the apply path's full ARN."""
     entry = {} if workloads is None else {"workloads": workloads}
     assert _refusal(_named(aws, **entry)) == (
         f"::error::environment dev-eu: identities.dev gives {cell} a role name on one path and "
