@@ -2541,11 +2541,11 @@ A lock serves the cache only when, for each provider, it names the address
 OpenTofu resolves the stack's `source` to (`registry.opentofu.org/hashicorp/aws`
 for `hashicorp/aws`) and carries the `h1:` hash for the runner's platform
 (`linux_amd64`, or `linux_arm64` on an ARM runner). A `tofu init` or
-`tofu providers lock` that installs from the OpenTofu registry records every
+`tofu providers lock` that reads the OpenTofu registry records every
 platform's `h1:`. Otherwise OpenTofu restores the entry and downloads the
 provider anyway: a lock written by Terraform (`registry.terraform.io`), one
 holding only `zh:` hashes, and one holding only another platform's `h1:`, as a
-`tofu init` through a provider mirror writes it.
+`tofu init` through a provider mirror on a developer machine writes it.
 
 Why the cache depends on a committed lock:
 
