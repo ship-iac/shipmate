@@ -98,7 +98,7 @@ _SHOW_JSON = ["tofu", "-chdir=$STACK", "show", "-json", "stack.otplan"]
 #: wrapper, which `_EXPECTED` does not claim. Rendering a stored plan needs no wrapper: it reads a
 #: file and touches neither state nor the stack graph.
 _EXPECTED_BARE = {
-    "plan-cell": [[*_SHOW_TEXT, ">", "plan.txt"], [*_SHOW_JSON, ">", "plan.json"]],
+    "plan-cell": [[*_SHOW_TEXT, ">", "plan.txt", "&"], [*_SHOW_JSON, ">", "plan.json", "&"]],
     "drift-cell": [[*_SHOW_JSON, ">", "plan.json"]],
     "apply-cell": [[*_SHOW_TEXT, ">", "$rendered"]],
     "unlock-cell": [],
