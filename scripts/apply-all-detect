@@ -90,7 +90,7 @@ def main():
     app_id = os.environ["SHIPMATE_APP_ID"]
     lines = ad._check_run_lines(repo, head)
     cells = cells_from_checks(ad.apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)
-    table = bm.env_config(cells, set(stacks_by_env))
+    table = bm.env_config(cells, bm.tagged_workloads(stacks_by_env, tags_by_stack))
     cells = bm.stamp_rows(cells, table, "apply")
 
     pending = ad.filter_pending(cells, ad.ag.app_done_names(lines, app_id))
@@ -114,7 +114,7 @@ def main():
         ad.ag.plan_runs_by_name(lines, app_id),
         ad.ag.plan_hashes_by_name(lines, app_id),
     )
-    bm.refuse_workload_gaps(runnable, table, "apply")
+    bm.refuse_workload_gaps(runnable, table)
     # From `runnable`, never from `pending & ungated`: an ungated env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
     applied_ungated = (

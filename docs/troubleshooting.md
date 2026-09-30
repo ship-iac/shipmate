@@ -548,9 +548,9 @@ an environment deleted between the pre-flight and the wave that binds it.
 
 ### `.github/shipmate.toml` is rejected, or its settings do not take effect
 
-Every failure below refuses at `detect`, before any cell starts, and every one
-of them is reported against the **default branch's** copy of the file — that is
-the only copy execution reads.
+Every row below but the `workloads lists` warning refuses at `detect`, before
+any cell starts, and every one of them is reported against the **default
+branch's** copy of the file — that is the only copy execution reads.
 
 | What `detect` says | What it means |
 | --- | --- |
@@ -558,9 +558,15 @@ the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `environments` and `gate` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `identities`, `environments` and `gate` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does |
 | `gate.<key> is not a key this engine implements` | the `[gate]` table holds `approver_team` alone. A misspelled one would leave the setting at its default while the repository believed it declared one. The review exemption is `gated = false` on the environment's own entry |
 | `environments.<env>.<key> must be a boolean` | `shared`, `explicit` and `gated` are TOML booleans: write `explicit = true`, unquoted. A quoted `"true"` or `"false"`, a number, or a variable reference would otherwise resolve to the default |
+| `environment <env>: aws is retired` | credentials moved out of the environment entry. Write them as `[identities.<name>]` with `aws.account`, `aws.plan` and `aws.apply`, and name it from the entry with `identity = "<name>"`. Inside an identity, `aws.role`, `aws.region` and a `plan` or `apply` map key `role` or `region` (the retired `aws.<path>.role` and `aws.<path>.region`) refuse too, each naming its replacement |
+| `environment <env>: identity names no [identities.<name>] table` | the entry names an identity the file does not declare; the message lists the ones it does. A misspelled name lands here |
+| `environment <env> names identity <name>, whose roles vary by workload, and lists no workloads` | the identity's roles depend on the workload tag, so the entry must list the workloads it admits: `workloads = ["…"]` |
+| `environment <env> lists workload <w>, and identities.<name>.aws.<field> has no <w> entry` | a listed workload has no role (or, for a role name, no account) in that map. Add the entry, or remove the workload from the list |
+| `<n> cell(s) carry a workload tag their environment's workloads list does not name` | each named stack's `workload/<name>` tag is outside its environment's `workloads`. Retag the stack, or add the workload to the list on the default branch in a pull request of its own first; the plan reads the default branch's table, so the same pull request cannot fix it |
+| `environments.<env>.workloads lists <w>, which no stack in <env> tags` | a warning, on the paths that scan the whole tree. The workload was listed ahead of the branch that tags it, or its last tag was dropped: tag a stack with it, or remove it from the list once the branch dropping its last tag has merged. An environment no stack tags at all gets the unused-entry warning instead |
 | `schema_version is <value>; this engine implements version 1` | `schema_version` is optional and, written, must be the integer `1`. `schema_version = true` is refused by name rather than read as 1 |
 | `environments.<name> is not an environment name` or `environments.<name> carries the environment suffix` | an `[environments.<name>]` header whose name no stack tag can carry: Terramate refuses an uppercase letter in a tag, and the name is the bare logical env name, never `<env>-plan` or `<env>-apply`. Rename the entry to the name in the stacks' `env/<name>` tags |
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
@@ -582,25 +588,26 @@ second line is the diagnosis:
 | Where it landed | The second line |
 | --- | --- |
 | after `[gate]` | `gate.layout is not a key this engine implements. The gate table holds approver_team.` |
-| after `[environments.dev-eu]` | `environment dev-eu: layout is not a key this engine implements. An environment holds region, tf_vars, aws, shared, needs, explicit, gated.` |
-| after `[environments.dev-eu.aws.plan]` | `environment dev-eu: aws.plan.layout is not a field the aws provider defines. It defines region, role.` |
+| after `[environments.dev-eu]` | `environment dev-eu: layout is not a key this engine implements. An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.` |
+| after `[identities.dev]` | `identities.dev.layout is not a key this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
+| after `[identities.dev.aws]` | `identities.dev.aws.layout is not a field this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
 
 A misplaced `schema_version` reports differently in each position:
 
 | Where it landed | What `detect` says |
 | --- | --- |
 | after `[gate]` | `gate.schema_version is not a key this engine implements. The gate table holds approver_team.` |
-| after `[environments.dev-eu]` | `environment dev-eu: schema_version is not a key this engine implements. An environment holds region, tf_vars, aws, shared, needs, explicit, gated.` |
-| after `[environments.dev-eu.aws.plan]` | `environment dev-eu: aws.plan.schema_version is not a field the aws provider defines. It defines region, role.` |
+| after `[environments.dev-eu]` | `environment dev-eu: schema_version is not a key this engine implements. An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.` |
+| after `[identities.dev]` | `identities.dev.schema_version is not a key this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
+| after `[identities.dev.aws]` | `identities.dev.aws.schema_version is not a field this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
 
 The fix in every case is the same: put the top-level settings above the first
 `[table]` header.
 
-**Trap 2: two notations for one environment.** A dotted `aws.plan.role` under
-`[environments.dev-eu]` and a later `[environments.dev-eu.aws.plan]` header both
-declare the same table, and `tomllib` refuses with `Cannot declare
-('environments', 'dev-eu', 'aws', 'plan') twice`. Pick one notation per
-environment; dotted keys are canonical. A repeated key refuses the same way,
+**Trap 2: two notations for one identity.** A dotted `aws.plan` under
+`[identities.dev]` and a later `[identities.dev.aws]` header both declare the
+same table, and `tomllib` refuses with `Cannot declare ('identities', 'dev',
+'aws') twice`. Pick one notation per identity; dotted keys are canonical. A repeated key refuses the same way,
 with `Cannot overwrite a value`.
 
 A leading byte-order mark is `Invalid statement (at line 1, column 1)`. Save the
@@ -624,22 +631,24 @@ that is what makes it take effect.
 ### A cell fails with no AWS credential
 
 The credentials step is skipped and the cell fails at `tofu init` with no role
-assumed, on a `folder` or `workspace` layout. Under the `tf_vars` layout this does not happen:
-`detect` refuses first, because that layout needs an entry with a region for
-every environment in the matrix.
+assumed. Under the `tf_vars` layout an environment with no entry does not get
+this far: `detect` refuses first, because that layout needs an entry with a
+region for every environment in the matrix.
 
-Three causes, in the order they are worth checking:
+Four causes, in the order they are worth checking:
 
-1. **The environment has no `[environments.<name>]` table**, or one with no
-   `aws` fields. There is no level above the entry to inherit a role from, so the
-   cell resolves none.
-2. **The block is apply-only and this is a plan cell.** `aws.apply.role` alone
-   resolves nothing on the plan path — a supported shape, and the reason a plan
-   cell can skip credentials while the apply cell of the same environment does
-   not.
-3. **A misplaced line put the fields somewhere else.** A scalar written below a
-   `[table]` header lands inside that header's table, so an `aws.plan.role`
-   written after the *next* environment's header belongs to that environment
+1. **The environment has no `[environments.<name>]` table**, or one naming no
+   `identity`. The cell resolves no role.
+2. **The identity is apply-only and this is a plan cell.** An identity setting
+   `aws.apply` alone resolves nothing on the plan path — a supported shape, and
+   the reason a plan cell can skip credentials while the apply cell of the same
+   environment does not.
+3. **The stack is untagged and the identity varies by workload.** An untagged
+   cell gets no role from a map or a `{workload}` role; tag it with a workload
+   the environment's `workloads` lists.
+4. **A misplaced line put the fields somewhere else.** A scalar written below a
+   `[table]` header lands inside that header's table, so an `identity` written
+   after the *next* environment's header belongs to that environment
    instead. Read the file top to bottom and check which header each line sits
    under; §`.github/shipmate.toml` is rejected, or its settings do not take
    effect has the rest of that hazard.

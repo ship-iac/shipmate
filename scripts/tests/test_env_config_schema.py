@@ -107,92 +107,7 @@ def test_a_non_tf_vars_layout_needs_no_entry():
     assert env_config.validate(table, ("dev-eu",)) == table
 
 
-# --- 3: a tier that resolves a credential resolves every required field ---------------
-
-
-def test_a_credential_tier_missing_a_required_field_refuses():
-    """Mutation: drop the required-field check -- the credentials step fails mid-run."""
-    table = {
-        "layout": "folder",
-        "environments": {"dev-eu": {"aws": {"apply": {"role": "arn:aws:iam::9817:role/a"}}}},
-    }
-    assert _refusal(table) == (
-        "::error::environment dev-eu: aws.apply resolves a role but no region, and "
-        "the aws credentials step requires one. Set aws.region, or the environment's "
-        "own region."
-    )
-
-
-def test_a_workload_tier_missing_a_required_field_refuses():
-    """A tier walker that stops at plan/apply passes the plain case and misses this one.
-
-    Mutation: yield only the plan and apply tiers, not the workload tiers.
-    """
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "aws": {"apply": {"workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/n"}}}}
-            }
-        },
-    }
-    assert _refusal(table) == (
-        "::error::environment dev-eu: aws.apply.workloads.net-edge resolves a role but "
-        "no region, and the aws credentials step requires one. Set aws.region, or the "
-        "environment's own region."
-    )
-
-
-def test_the_environment_region_satisfies_the_required_field():
-    """The one cross-level default in the schema.
-
-    Mutation: stop inheriting the environment's region into the provider block.
-    """
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "region": "eu-west-1",
-                "aws": {"apply": {"role": "arn:aws:iam::9817:role/a"}},
-            }
-        },
-    }
-    assert env_config.validate(table, ()) == table
-
-
-# --- 4: a field the provider does not define ------------------------------------------
-
-
-def test_a_field_the_provider_does_not_define_refuses():
-    """Mutation: drop the field allowlist -- aws.plan.client_id would reach a run."""
-    table = {
-        "layout": "folder",
-        "environments": {"dev-eu": {"aws": {"plan": {"client_id": "x"}}}},
-    }
-    assert _refusal(table) == (
-        "::error::environment dev-eu: aws.plan.client_id is not a field the aws "
-        "provider defines. It defines region, role."
-    )
-
-
-def test_tf_vars_inside_a_provider_block_refuses():
-    """`tf_vars` sits at environment level; a per-tier one fails every apply as stale.
-
-    Mutation: drop the `tf_vars` case from the field check (it then refuses as an unknown
-    field, with a message that does not say where `tf_vars` belongs).
-    """
-    table = {
-        "layout": "folder",
-        "environments": {"dev-eu": {"aws": {"plan": {"tf_vars": {"TF_VAR_x": "y"}}}}},
-    }
-    assert _refusal(table) == (
-        "::error::environment dev-eu: aws.plan.tf_vars is not a field the aws provider "
-        "defines. tf_vars sits at environment level: a per-tier one would let plan and "
-        "apply inject different values, and every apply would then fail as stale."
-    )
-
-
-# --- 5: an unimplemented provider key -------------------------------------------------
+# --- 5: an unimplemented environment key ----------------------------------------------
 
 
 def test_an_unimplemented_provider_key_refuses():
@@ -203,7 +118,7 @@ def test_an_unimplemented_provider_key_refuses():
     }
     assert _refusal(table) == (
         "::error::environment dev-eu: azure is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared, needs, explicit, gated."
+        "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )
 
 
@@ -215,86 +130,11 @@ def test_a_misspelled_environment_key_refuses():
     table = {"layout": "folder", "environments": {"dev-eu": {"regoin": "eu-west-1"}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared, needs, explicit, gated."
+        "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )
 
 
-# --- 6: a provider block resolving no credential on any tier ---------------------------
-
-
-def test_a_provider_block_resolving_no_credential_refuses():
-    """A block that authenticates nothing is dead config, and skipping it silently is
-    the fail-open reading.
-
-    Mutation: drop the any-tier check.
-    """
-    table = {
-        "layout": "folder",
-        "environments": {"dev-eu": {"aws": {"region": "eu-west-1"}}},
-    }
-    assert _refusal(table) == (
-        "::error::environment dev-eu: the aws block resolves no role on any tier. "
-        "Give aws, aws.plan, aws.apply or a workload a role, or remove the block."
-    )
-
-
-def test_a_tier_setting_an_empty_role_refuses():
-    """An empty role is not a credential: it resolves to a silently skipped credentials
-    step, which is the dead configuration refusal 6 exists to stop, reached with an empty
-    string instead of a missing key.
-
-    Mutation: delete this check -- the plan tier then runs uncredentialed with no refusal
-    anywhere. Widening refusal 6 to truth instead does not cover it: the apply tier
-    satisfies `any` on its own.
-    """
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "aws": {
-                    "region": "eu-west-1",
-                    "apply": {"role": "arn:aws:iam::9817:role/apply"},
-                    "plan": {"role": ""},
-                }
-            }
-        },
-    }
-    assert _refusal(table) == (
-        "::error::environment dev-eu: aws.plan sets an empty role, which resolves to a "
-        "skipped credentials step rather than to a credential. Give it a role, or remove "
-        "the key."
-    )
-
-
-def test_an_apply_only_tier_passes():
-    """Apply-only cloud access: the plan path resolves an empty credential and skips the
-    step.
-
-    Mutation: refuse when any tier lacks a role -- this reds while the refusal-6 fixture
-    stays green, which is what separates the two.
-    """
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "region": "eu-west-1",
-                "aws": {"apply": {"role": "arn:aws:iam::9817:role/a"}},
-            }
-        },
-    }
-    assert env_config.validate(table, ()) == table
-
-
-# --- 7: the shared key ----------------------------------------------------------------
-
-_PLAN_AND_APPLY = {
-    "region": "eu-west-1",
-    "aws": {
-        "plan": {"role": "arn:aws:iam::9817:role/p"},
-        "apply": {"role": "arn:aws:iam::9817:role/a"},
-    },
-}
-
+# --- 7: the flags -----------------------------------------------------------------------
 
 _FLAGS = ("shared", "explicit", "gated")
 
@@ -346,47 +186,6 @@ def test_a_referenced_flag_refuses_as_the_string_it_resolves_to():
         "::error::environments.prod.explicit must be a boolean, got str. Write "
         "explicit = true or explicit = false, unquoted."
     )
-
-
-def test_a_shared_environment_declaring_plan_refuses_without_run_context():
-    """The contradiction is structural, so `validate_structure` alone refuses it: `shipmate
-    doctor` validates a branch with nothing else.
-
-    Mutation: move the check out of `_check_environment` into `validate` -- this table then
-    passes `validate_structure`.
-    """
-    table = {"layout": "folder", "environments": {"dev-eu": {**_PLAN_AND_APPLY, "shared": True}}}
-    with pytest.raises(SystemExit) as excinfo:
-        env_config.validate_structure(table)
-    assert str(excinfo.value) == (
-        "::error::environment dev-eu is shared between the plan and apply paths, so "
-        "aws.plan cannot apply to it: a shared environment resolves aws.apply on both "
-        "paths. Remove aws.plan, or set shared = false."
-    )
-
-
-def test_an_unshared_environment_may_declare_plan():
-    """`shared = false` is the second remedy the refusal above names, so it must validate.
-
-    Mutation: refuse `aws.plan` whenever the key is present, whatever its value.
-    """
-    table = {"layout": "folder", "environments": {"dev-eu": {**_PLAN_AND_APPLY, "shared": False}}}
-    assert env_config.validate_structure(table) is table
-
-
-def test_a_shared_environment_declaring_only_apply_validates():
-    """Mutation: refuse any `aws` block in a shared environment."""
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "region": "eu-west-1",
-                "shared": True,
-                "aws": {"apply": {"role": "arn:aws:iam::9817:role/a"}},
-            }
-        },
-    }
-    assert env_config.validate_structure(table) is table
 
 
 # --- 8: tf_vars names and values ----------------------------------------------------------
@@ -451,32 +250,6 @@ _MALFORMED = [
         {"layout": "folder", "environments": {"dev-eu": {"tf_vars": "TF_VAR_x"}}},
         "::error::environment dev-eu: tf_vars must be a mapping, got str.",
     ),
-    (
-        {"layout": "folder", "environments": {"dev-eu": {"aws": "arn:aws:iam::9817:role/a"}}},
-        "::error::environment dev-eu: aws must be a mapping, got str.",
-    ),
-    (
-        {"layout": "folder", "environments": {"dev-eu": {"aws": {"plan": "arn"}}}},
-        "::error::environment dev-eu: aws.plan must be a mapping, got str.",
-    ),
-    (
-        {"layout": "folder", "environments": {"dev-eu": {"aws": {"role": {"arn": "a"}}}}},
-        "::error::environment dev-eu: aws.role must be a string, got dict.",
-    ),
-    (
-        {
-            "layout": "folder",
-            "environments": {"dev-eu": {"aws": {"apply": {"workloads": "net-edge"}}}},
-        },
-        "::error::environment dev-eu: aws.apply.workloads must be a mapping, got str.",
-    ),
-    (
-        {
-            "layout": "folder",
-            "environments": {"dev-eu": {"aws": {"apply": {"workloads": {"net-edge": "arn"}}}}},
-        },
-        "::error::environment dev-eu: aws.apply.workloads.net-edge must be a mapping, got str.",
-    ),
 ]
 
 
@@ -486,45 +259,6 @@ def test_a_malformed_shape_refuses(table, message):
 
     Mutation: accept the value and carry on (skip the entry rather than raise) -- a crash
     is not the property, refusal is.
-    """
-    assert _refusal(table) == message
-
-
-_MISPLACED = [
-    (
-        {"layout": "folder", "environments": {"dev-eu": {"aws": {"workloads": {"n": {}}}}}},
-        "::error::environment dev-eu: aws.workloads is a reserved key in a position the "
-        "schema does not give it. plan and apply sit inside a provider block; workloads "
-        "sits only under plan or apply.",
-    ),
-    (
-        {
-            "layout": "folder",
-            "environments": {
-                "dev-eu": {"aws": {"apply": {"workloads": {"net-edge": {"plan": {}}}}}}
-            },
-        },
-        "::error::environment dev-eu: aws.apply.workloads.net-edge.plan is a reserved key "
-        "in a position the schema does not give it. plan and apply sit inside a provider "
-        "block; workloads sits only under plan or apply.",
-    ),
-    (
-        {
-            "layout": "folder",
-            "environments": {"dev-eu": {"aws": {"apply": {"workloads": {"n": {"workloads": {}}}}}}},
-        },
-        "::error::environment dev-eu: aws.apply.workloads.n.workloads is a reserved key in "
-        "a position the schema does not give it. plan and apply sit inside a provider "
-        "block; workloads sits only under plan or apply.",
-    ),
-]
-
-
-@pytest.mark.parametrize(("table", "message"), _MISPLACED, ids=range(len(_MISPLACED)))
-def test_a_structural_key_in_a_forbidden_position_refuses(table, message):
-    """A workload role is meaningless without the path it applies to.
-
-    Mutation: skip a structural key wherever it appears instead of refusing the position.
     """
     assert _refusal(table) == message
 
@@ -558,38 +292,44 @@ def test_a_whole_table_is_returned_unchanged():
     table = {
         "layout": "tf_vars",
         "gate": {"approver_team": "deployers"},
+        "identities": {
+            "dev": {
+                "aws": {
+                    "account": "981700000000",
+                    "plan": "shipmate-plan",
+                    "apply": {"app": "shipmate-apply", "net-edge": "net-edge"},
+                }
+            }
+        },
         "environments": {
             "dev-eu": {
                 "region": "eu-west-1",
                 "needs": ["prod-us"],
                 "tf_vars": {"TF_VAR_team": "core"},
-                "aws": {
-                    "region": "eu-central-1",
-                    "plan": {"role": "arn:aws:iam::9817:role/p"},
-                    "apply": {
-                        "role": "arn:aws:iam::9817:role/a",
-                        "workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/n"}},
-                    },
-                },
+                "identity": "dev",
+                "workloads": ["net-edge", "app"],
             }
         },
     }
     assert env_config.validate(table, ("dev-eu",)) == {
         "layout": "tf_vars",
         "gate": {"approver_team": "deployers"},
+        "identities": {
+            "dev": {
+                "aws": {
+                    "account": "981700000000",
+                    "plan": "shipmate-plan",
+                    "apply": {"app": "shipmate-apply", "net-edge": "net-edge"},
+                }
+            }
+        },
         "environments": {
             "dev-eu": {
                 "region": "eu-west-1",
                 "needs": ["prod-us"],
                 "tf_vars": {"TF_VAR_team": "core"},
-                "aws": {
-                    "region": "eu-central-1",
-                    "plan": {"role": "arn:aws:iam::9817:role/p"},
-                    "apply": {
-                        "role": "arn:aws:iam::9817:role/a",
-                        "workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/n"}},
-                    },
-                },
+                "identity": "dev",
+                "workloads": ["net-edge", "app"],
             }
         },
     }
@@ -620,19 +360,20 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate."
+        ".github/shipmate.toml holds schema_version, layout, identities, environments, gate."
     )
 
 
 def test_every_allowed_top_level_key_is_accepted():
-    """The other half of the strict-key rule: the four names are the whole allowed set, so a
-    table using all four must validate. Compared against a hand-written table, never against
+    """The other half of the strict-key rule: the five names are the whole allowed set, so a
+    table using all five must validate. Compared against a hand-written table, never against
     the module's own constant.
 
-    Mutation: remove a name from the allowed set -- one of these four then refuses.
+    Mutation: remove a name from the allowed set -- one of these five then refuses.
     """
     table = {
         "layout": "folder",
+        "identities": {},
         "environments": {},
         "gate": {"approver_team": "deployers"},
         "schema_version": 1,
@@ -647,7 +388,7 @@ def test_the_old_explicit_envs_list_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "explicit_envs": ["prod"]}) == (
         "::error::explicit_envs is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate."
+        ".github/shipmate.toml holds schema_version, layout, identities, environments, gate."
     )
 
 
@@ -809,7 +550,7 @@ def test_the_old_env_order_table_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "env_order": {"prod": ["dev"]}}) == (
         "::error::env_order is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate."
+        ".github/shipmate.toml holds schema_version, layout, identities, environments, gate."
     )
 
 
@@ -895,7 +636,7 @@ def test_the_old_version_key_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "version": 1}) == (
         "::error::version is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, environments, gate."
+        ".github/shipmate.toml holds schema_version, layout, identities, environments, gate."
     )
 
 
@@ -1011,7 +752,7 @@ def test_the_old_entry_vars_table_refuses_as_an_unknown_key():
     table = {"layout": "folder", "environments": {"dev-eu": {"vars": {"TF_VAR_x": "y"}}}}
     assert _refusal(table) == (
         "::error::environment dev-eu: vars is not a key this engine implements. "
-        "An environment holds region, tf_vars, aws, shared, needs, explicit, gated."
+        "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )
 
 
@@ -1031,31 +772,37 @@ def test_the_entry_tf_vars_table_reaches_the_row():
     }
 
 
-_ROLE_TEXT = 'layout = "folder"\n\n[environments.prod]\nregion = "eu-west-1"\naws.apply.role = {}\n'
+_ROLE_TEXT = (
+    'layout = "folder"\n\n[identities.prod]\naws.apply = {}\n\n'
+    '[environments.prod]\nregion = "eu-west-1"\nidentity = "prod"\n'
+)
 
 
 def test_a_vars_reference_resolves():
     """Mutation: `_is_reference` reads `var` -- the mapping then reaches validation."""
-    table = env_config.parse_table(_ROLE_TEXT.format('{ vars = "ROLE" }'), {"ROLE": "r"})
+    table = env_config.parse_table(
+        _ROLE_TEXT.format('{ vars = "ROLE" }'), {"ROLE": "arn:aws:iam::9817:role/r"}
+    )
     assert table == {
         "layout": "folder",
-        "environments": {"prod": {"region": "eu-west-1", "aws": {"apply": {"role": "r"}}}},
+        "identities": {"prod": {"aws": {"apply": "arn:aws:iam::9817:role/r"}}},
+        "environments": {"prod": {"region": "eu-west-1", "identity": "prod"}},
     }
     assert env_config.validate_structure(table) == table
 
 
 def test_the_old_var_reference_is_ordinary_data():
-    """`{ var = "X" }` is a mapping again, so a string position refuses it.
+    """`{ var = "X" }` is a mapping again, so a string position refuses it. `region`, because
+    a role field is a string or a map, and there the mapping is a one-workload map.
 
     Mutation: `_is_reference` accepts `var` as well as `vars` -- the value then resolves from
     the variable set here and the table validates.
     """
-    table = env_config.parse_table(_ROLE_TEXT.format('{ var = "ROLE" }'), {"ROLE": "r"})
+    text = 'layout = "folder"\n\n[environments.prod]\nregion = { var = "REGION" }\n'
+    table = env_config.parse_table(text, {"REGION": "eu-west-1"})
     with pytest.raises(SystemExit) as excinfo:
         env_config.validate_structure(table)
-    assert str(excinfo.value) == (
-        "::error::environment prod: aws.apply.role must be a string, got dict."
-    )
+    assert str(excinfo.value) == "::error::environment prod: region must be a string, got dict."
 
 
 def test_a_lowercase_reference_refusal_spells_the_vars_key():
@@ -1063,7 +810,7 @@ def test_a_lowercase_reference_refusal_spells_the_vars_key():
     with pytest.raises(SystemExit) as excinfo:
         env_config.parse_table(_ROLE_TEXT.format('{ vars = "role" }'), {})
     assert str(excinfo.value) == (
-        "::error::.github/shipmate.toml environments.prod.aws.apply.role references GitHub "
+        "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
         'variable "role"; GitHub variable names are uppercase. Write { vars = "ROLE" }.'
     )
 
@@ -1091,7 +838,7 @@ def test_three_independent_errors_refuse_as_three_lines():
     )
     assert _structural(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. An "
-        "environment holds region, tf_vars, aws, shared, needs, explicit, gated.\n"
+        "environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.\n"
         "::error::environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
         "gated = false, unquoted.\n"
         "::error::gate.approver_team is 'Platform Team', which is not a GitHub team slug; use "
@@ -1110,11 +857,11 @@ def test_the_lines_come_in_check_order():
     table = {"colour": 1, "lyout": "folder", "environments": {"dev": {"regoin": "eu-west-1"}}}
     assert _structural(table) == (
         "::error::colour is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, environments, gate.\n"
+        "schema_version, layout, identities, environments, gate.\n"
         "::error::lyout is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, environments, gate.\n" + NO_LAYOUT + "\n"
+        "schema_version, layout, identities, environments, gate.\n" + NO_LAYOUT + "\n"
         "::error::environment dev: regoin is not a key this engine implements. An environment "
-        "holds region, tf_vars, aws, shared, needs, explicit, gated."
+        "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )
 
 
@@ -1138,18 +885,8 @@ def test_a_non_mapping_entry_skips_only_its_own_checks(value, kind):
     assert _structural(table) == (
         f"::error::environment dev must be a mapping, got {kind}.\n"
         "::error::environment prod: regoin is not a key this engine implements. An environment "
-        "holds region, tf_vars, aws, shared, needs, explicit, gated."
+        "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )
-
-
-def test_a_refused_aws_block_skips_the_shared_plan_rule():
-    """`"plan" in aws` on the string `"plan"` is a substring test that holds, so this value
-    is the one that makes the rule report a second, false message when it runs anyway.
-
-    Mutation: drop `aws_ok and` from the `aws.plan` rule in `_check_flags`.
-    """
-    table = {"layout": "folder", "environments": {"dev": {"aws": "plan", "shared": True}}}
-    assert _structural(table) == "::error::environment dev: aws must be a mapping, got str."
 
 
 def test_a_non_mapping_tf_vars_is_one_message():

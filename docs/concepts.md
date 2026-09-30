@@ -275,15 +275,15 @@ backend's state is cached at the path `tofu init` records; a remote backend (for
 example S3) owns its state, and the engine's state restore/save steps are
 skipped.
 
-Credentials are opt-in per environment, from that environment's `aws` tier in
-the environment table. The table has no level above the entry, so an environment
-that names no role resolves none: the credentials step skips and no cloud
+Credentials are opt-in per environment: an entry in the environment table names
+an `[identities.<name>]` table holding the roles. An environment that names no
+identity resolves no role: the credentials step skips and no cloud
 credential enters the job, which is how the sample repos run credential-free. Every job that runs a cell requests `id-token: write`, and GitHub
 caps a called workflow's permissions at each `uses:` boundary. So every job of
 `shipmate.yml` but `comment-ops` must grant `id-token: write` —
 including consumers using no cloud credentials at all. The plan and drift cells
-run the same credentials step as the apply waves, resolving the `aws.plan` tier,
-so whatever role that tier names is assumed while running branch-authored code —
+run the same credentials step as the apply waves, resolving the identity's
+`aws.plan`, so whatever role it names is assumed while running branch-authored code —
 bounded by that role's trust policy and nothing in the engine.
 See [`CONTRACT.md`](../CONTRACT.md) §State backend and §AWS OIDC for the
 semantics, and [`hardening.md`](hardening.md) §7–9 for the exposure.

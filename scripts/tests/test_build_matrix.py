@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from _detect_fixtures import spy_env_config
 from _loader import action_yaml, load_script
 
 bm = load_script("build-matrix")
@@ -319,10 +320,14 @@ def _run_main(
     plan_workflow=True,
     head_sha=None,
     table=None,
+    stacks=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
     never having run. Pass `called` to keep that record readable when main() raises.
+
+    `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
+    the double, and leaves `called` and `cells` unused.
 
     `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
     run past the head-checkout refusal looks like; without it the run states no head and is
@@ -360,15 +365,15 @@ def _run_main(
         # The whole row `build_matrix` emits, `workload` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.
         rows = [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
-        # The real `compute_cells` returns the env->stacks map beside the rows, and `main`
-        # forwards it as `all_envs` only under `all_stacks`. A double returning rows alone
-        # would unpack into two names and fail somewhere unrelated.
-        by_env = {}
-        for s_, e_ in cells:
-            by_env.setdefault(e_, []).append(s_)
-        return by_env, rows
+        # The real `compute_cells` returns the env->workloads map beside the rows, and `main`
+        # forwards it as `tagged` only under `all_stacks`. The rows tag no workload.
+        return {e: frozenset() for _, e in cells}, rows
 
-    monkeypatch.setattr(bm, "compute_cells", fake_compute)
+    if stacks is None:
+        monkeypatch.setattr(bm, "compute_cells", fake_compute)
+    else:
+        monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
+        monkeypatch.setattr(bm, "_tags", lambda s: stacks[s])
     monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
     bm.main()
     parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
@@ -1199,8 +1204,8 @@ def test_the_plan_workflow_path_is_the_one_consumer_file():
 _TWO_ENV_TABLE = {
     "layout": "folder",
     "environments": {
-        "dev-eu": {"aws": {"region": "eu-west-1", "apply": {"role": "arn:aws:iam::1:role/a"}}},
-        "dev-us": {"aws": {"region": "us-east-1", "apply": {"role": "arn:aws:iam::1:role/b"}}},
+        "dev-eu": {"region": "eu-west-1"},
+        "dev-us": {"region": "us-east-1"},
     },
 }
 _UNUSED_DEV_US = (
@@ -1217,7 +1222,7 @@ def test_a_plan_run_says_nothing_about_an_environment_outside_the_changed_set(
     """`all_stacks=False` scans the CHANGED stacks only, so `dev-us` having no stack in that
     set says nothing about whether any stack tags it.
 
-    Mutation: pass `set(stacks_by_env)` unconditionally at the call site. Every plan run then
+    Mutation: pass `tagged` unconditionally at the call site. Every plan run then
     warns about every environment with no changed stack. The drift sibling below is what keeps
     this test from passing with the diagnostic deleted."""
     _run_main(
@@ -1250,6 +1255,71 @@ def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, ca
         table=_TWO_ENV_TABLE,
     )
     assert _UNUSED_DEV_US in capsys.readouterr().out.splitlines()
+
+
+_DRIFT_ENV = {
+    "GITHUB_EVENT_NAME": "schedule",
+    "GITHUB_REPOSITORY": "acme/iac",
+    "SHIPMATE_ALL_STACKS": "true",
+    "SHIPMATE_NO_PULL_REQUEST": "true",
+}
+#: `stacks/net` alone tags `workload/net`, and `stacks/web` alone sits in dev-us.
+_WORKLOAD_TREE = {
+    "stacks/app": ["env/dev-eu", "workload/app"],
+    "stacks/net": ["env/dev-eu", "workload/net"],
+    "stacks/web": ["env/dev-us"],
+}
+_LISTING_TABLE = {
+    "layout": "folder",
+    "identities": {"dev": {"aws": {"apply": "arn:aws:iam::111111111111:role/apply"}}},
+    "environments": {
+        "dev-eu": {"region": "eu-west-1", "identity": "dev", "workloads": ["app", "net"]},
+        "dev-us": {"region": "us-east-1"},
+    },
+}
+
+
+def test_drift_passes_the_whole_tree_workload_map(monkeypatch, tmp_path):
+    """Mutations: pass `set(tagged)` at `main`'s drift call -- the real `env_config` raises
+    `AttributeError: 'set' object has no attribute 'get'`; or build `tagged` from the cells in
+    `compute_cells` -- dev-us records `frozenset({''})`."""
+    seen = spy_env_config(monkeypatch, bm)
+    _run_main(monkeypatch, tmp_path, _DRIFT_ENV, table=_LISTING_TABLE, stacks=_WORKLOAD_TREE)
+    assert seen == [{"dev-eu": frozenset({"app", "net"}), "dev-us": frozenset()}]
+
+
+def test_a_plan_passes_no_workload_map(monkeypatch, tmp_path):
+    """Mutation: pass `tagged` unconditionally at `main`'s `env_config` call -- the spy records
+    the workload map."""
+    seen = spy_env_config(monkeypatch, bm)
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_HEAD_REPO": "acme/iac",
+        },
+        head_sha="a" * 40,
+        table=_LISTING_TABLE,
+        stacks=_WORKLOAD_TREE,
+    )
+    assert seen == [None]
+
+
+def test_a_tag_filter_does_not_hide_a_workload_from_drift(monkeypatch, tmp_path, capsys):
+    """The filter drops `stacks/net`, the only stack tagging `workload/net`, from the cells; the
+    tag still exists, so drift must not report `net` as untagged every night.
+
+    Mutation: derive `tagged` from the cells in `compute_cells` -- the warning names `net`."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "workload/app"},
+        table=_LISTING_TABLE,
+        stacks=_WORKLOAD_TREE,
+    )
+    assert capsys.readouterr().out.splitlines() == ["1 cell(s): dev-eu/stacks/app"]
 
 
 def test_a_supplied_table_is_validated_exactly_as_a_read_one_is(monkeypatch):
@@ -1323,100 +1393,51 @@ def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == ""
 
 
-def test_a_workload_tag_the_tier_does_not_list_refuses_when_it_has_no_fallback_role():
-    """The tier holds only workload roles, so an unlisted tag would run with no credentials.
-
-    Mutation: remove the `unlisted_workload` call from `refuse_workload_gaps` -- no refusal is
-    raised.
-    """
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "region": "eu-west-1",
-                "aws": {
-                    "apply": {
-                        "workloads": {
-                            "net-edge": {"role": "arn:aws:iam::9817:role/net-edge"},
-                            "app": {"role": "arn:aws:iam::9817:role/app"},
-                        }
-                    }
-                },
-            }
-        },
-    }
-    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
-    with pytest.raises(SystemExit) as exc:
-        bm.refuse_workload_gaps(cells, table, "apply")
-    assert str(exc.value) == (
-        "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
-        "list (it lists: app, net-edge), and aws.apply sets no role to fall back to. The cell "
-        "would run with no cloud credentials. Retag the stack, or add the workload to "
-        ".github/shipmate.toml on the default branch, which is where this table is read "
-        "from: merge the workload entry there on its own pull request first."
-    )
-
-
-#: A plan tier with a role of its own and an apply tier holding only workload roles.
-_APPLY_GAP = {
+#: `dev-eu` lists `core` and `net`; `prod` names no identity, so a tag there is inert.
+_LISTED = {
     "layout": "folder",
+    "identities": {"dev": {"aws": {"account": "111111111111", "apply": "deploy-{workload}"}}},
     "environments": {
-        "dev-eu": {
-            "region": "eu-west-1",
-            "aws": {
-                "plan": {"role": "arn:aws:iam::9817:role/plan"},
-                "apply": {"workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/net-edge"}}},
-            },
-        }
+        "dev-eu": {"region": "eu-west-1", "identity": "dev", "workloads": ["net", "core"]},
+        "prod": {"region": "eu-west-1"},
     },
 }
 
 
-def test_the_plan_path_refuses_a_gap_only_the_apply_tier_has():
-    """The apply-tier gap refuses at plan detect, before merge, not first at deploy.
-
-    Mutation: check only the requested tier in `refuse_workload_gaps` -- no refusal is raised.
-    """
-    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
+def test_every_cell_tagged_outside_its_list_is_named_in_one_refusal():
+    """Mutation: raise inside the loop -- only stacks/app is named."""
+    cells = [
+        {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
+        {"stack": "stacks/net", "environment": "dev-eu", "workload": "net"},
+        {"stack": "stacks/free", "environment": "prod", "workload": "app"},
+        {"stack": "stacks/db", "environment": "dev-eu", "workload": "db"},
+        {"stack": "stacks/bare", "environment": "dev-eu", "workload": ""},
+    ]
     with pytest.raises(SystemExit) as exc:
-        bm.refuse_workload_gaps(cells, _APPLY_GAP, "plan")
+        bm.refuse_workload_gaps(cells, _LISTED)
     assert str(exc.value) == (
-        "::error::stacks/app in dev-eu carries workload/net, which aws.apply.workloads does not "
-        "list (it lists: net-edge), and aws.apply sets no role to fall back to. The cell would "
-        "run with no cloud credentials. Retag the stack, or add the workload to "
-        ".github/shipmate.toml on the default branch, which is where this table is read "
-        "from: merge the workload entry there on its own pull request first."
+        "::error::2 cell(s) carry a workload tag their environment's workloads list does not "
+        "name: stacks/app in dev-eu (workload/app; dev-eu lists core, net); stacks/db in dev-eu "
+        "(workload/db; dev-eu lists core, net). A listed workload is the only one the default "
+        "branch grants a role to. Retag the stack, or add the workload to "
+        "environments.<env>.workloads in .github/shipmate.toml on the default branch, which is "
+        "where this table is read from: merge it there on its own pull request first."
     )
 
 
-def test_the_apply_path_does_not_refuse_a_gap_only_the_plan_tier_has():
-    """The apply cell does not refuse, and still resolves the apply tier's own role.
+def test_a_cell_the_table_no_longer_lists_stamps_with_no_role():
+    """`stamp_rows` resolves every cell, completed ones included, before the caller filters
+    and refuses; a table-only change that drops a workload must strand no applied cell.
 
-    Mutation: check both tiers on the apply path too -- the plan-tier gap refuses.
-    Mutation: drop the tier fallback in `env-config`'s `resolve` (`else {}`) -- the role is
-    empty."""
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "region": "eu-west-1",
-                "aws": {
-                    "plan": {
-                        "workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/net-edge"}}
-                    },
-                    "apply": {"role": "arn:aws:iam::9817:role/apply"},
-                },
-            }
-        },
-    }
-    cells = [{"stack": "stacks/app", "environment": "dev-eu", "workload": "net"}]
-    assert bm.refuse_workload_gaps(cells, table, "apply") is None
-    assert bm.stamp_rows(cells, table, "apply") == [
+    Mutation: make `resolve` raise for a tag outside the list -- this raises.
+    """
+    cells = [{"stack": "stacks/db", "environment": "dev-eu", "workload": "db"}]
+    assert bm.stamp_rows(cells, _LISTED, "apply") == [
         {
-            "stack": "stacks/app",
+            "stack": "stacks/db",
             "environment": "dev-eu",
-            "workload": "net",
-            "role_arn": "arn:aws:iam::9817:role/apply",
+            "workload": "db",
+            "role_arn": "",
             "cred_region": "eu-west-1",
             "tf_vars": {},
             "config_path": "apply",

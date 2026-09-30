@@ -16,11 +16,14 @@ section below names the SHA the release tags.
 - **The apply comment says when a gated environment applied with no approving review required.**
 - **A cell whose `tofu init` fails after restoring a provider cache entry names that entry's key in an error annotation.**
 - **`scripts/onboard`'s closing checklist names the stacks without a git-tracked `.terraform.lock.hcl`.**
+- **`shipmate doctor` lists the role each environment resolves, per path and workload.**
+- **A listed workload that no stack tags is warned about on the paths that scan the whole tree.**
 
 ### Changed
 
+- **Credentials live in `[identities.<name>]`; an environment names one with `identity` and lists the workloads it admits with `workloads`. The environment `aws` block, its per-tier and per-workload overrides and `aws.region` are retired, and each refuses naming its replacement.**
 - **A stack carrying two `workload/*` tags is refused at detect.**
-- **A workload tag the environment does not list is refused at detect, for the cells a run plans, applies or unlocks, when its tier has no role to fall back to.**
+- **A workload tag outside the environment's `workloads` list is refused at detect, naming every such cell.**
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
 - **The bare-apply comment lists a held `explicit` environment once, with both reasons and the `shipmate apply <env>` command.**
 - **An invalid `.github/shipmate.toml` is refused with every structural error it holds, one annotation each.**

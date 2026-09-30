@@ -96,3 +96,18 @@ def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), re
 
     for config in configs:
         monkeypatch.setattr(config, "read_table", read_table)
+
+
+def spy_env_config(monkeypatch, build_matrix):
+    """Record the `tagged` each `build_matrix.env_config` call receives, then run the real one.
+
+    The double keeps the real signature, so a caller passing an argument the real function
+    does not take still fails."""
+    seen, real = [], build_matrix.env_config
+
+    def spy(cells, tagged=None, table=None):
+        seen.append(tagged)
+        return real(cells, tagged, table=table)
+
+    monkeypatch.setattr(build_matrix, "env_config", spy)
+    return seen

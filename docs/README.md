@@ -10,7 +10,7 @@ In reading order.
 | Page | What it is |
 | --- | --- |
 | [`getting-started.md`](getting-started.md) | Wire shipmate into one repository, in four ordered tiers. Start here. |
-| [`aws.md`](aws.md) | S3 backend, GitHub OIDC roles, the environment table's `aws` block. |
+| [`aws.md`](aws.md) | S3 backend, GitHub OIDC roles, the environment table's identities. |
 | [`github-app.md`](github-app.md) | Register and install the App; the `shipmate-engine` environment. |
 | [`branch-protection.md`](branch-protection.md) | Require `shipmate / gate`; the reproducible ruleset. |
 | [`drift.md`](drift.md) | Optional nightly drift detection, and what it costs. |

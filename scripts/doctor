@@ -1680,6 +1680,10 @@ CONFIG_PATH = bm.ec.CONFIG_PATH
 #: The refusal lines one invalid-file finding shows. The finding lands in the PR comment and
 #: in an annotation, so it stays bounded however many errors the file holds.
 CONFIG_ERROR_LINES = 10
+#: The characters all roles notices may take together. 256 listed workloads with long role
+#: names reach 70,000, past GitHub's 65,536-character comment limit, and the report's
+#: fallback for that drops this section and every harvested annotation.
+ROLE_LINES_BUDGET = 8000
 
 # NOTICE: a branch need not carry the file at all, so an unreadable one is not a
 # misconfiguration. Never an all-clear, and never a read of another revision in its place.
@@ -1698,9 +1702,10 @@ CONFIG_NO_COMMIT = (
 CONFIG_VALID = (
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
     "file can be judged on by itself: its top-level keys, `schema_version`, `layout`, the "
-    "environment entries and the `[gate]` table. Not checked "
+    "identities, the environment entries and the `[gate]` table. Not checked "
     "here, for want of a plan matrix and a whole-tree environment scan: `tf_vars`-layout "
-    "coverage of the planned environments and entries that no stack tags — `detect` checks "
+    "coverage of the planned environments, entries that no stack tags, workload tags outside "
+    "an environment's `workloads` and listed workloads no stack tags — `detect` checks "
     "each of those on the runs where it applies. Execution reads the default branch's copy of this "
     "file, never this branch's."
 )
@@ -1710,6 +1715,51 @@ CONFIG_REFERENCES = (
     "repository and organization variables, never from a cell's Environment; in comment-ops "
     "and the plan summary a `shipmate-engine` Environment variable of the same name wins."
 )
+
+
+def _roles_notice(env, rows, budget):
+    """One environment's roles notice, its items cut to fit `budget` and counted when it
+    alone exceeds it."""
+    head = f"`{env}` resolves these roles at the commit under examination: "
+    text = head + "; ".join(rows) + "."
+    if len(text) <= budget:
+        return text
+    shown = len(rows)
+    while (
+        shown and len(head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more.") > budget
+    ):
+        shown -= 1
+    return head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more."
+
+
+def _config_roles(table):
+    """One notice per environment naming an identity: the role each path and listed workload
+    resolves, `no role` for a path it grants nothing on. An identity that does not vary shows
+    `every cell`, or `untagged and listed cells` when the entry writes `workloads`, because a
+    tag outside the list resolves no role.
+
+    Bounded by ROLE_LINES_BUDGET: the notices that fit, then one counting the environments
+    left out.
+    """
+    items = {}
+    for env, path, workload, role in bm.ec.resolved_roles(table):
+        shown = f"`{role}`" if role else "no role"
+        written = "workloads" in table["environments"][env]
+        cells = workload or ("untagged and listed cells" if written else "every cell")
+        items.setdefault(env, []).append(f"{path} {cells}: {shown}")
+    notices, left = [], ROLE_LINES_BUDGET
+    for done, (env, rows) in enumerate(items.items()):
+        text = _roles_notice(env, rows, left)
+        if len(text) > left:
+            notices.append(
+                f"roles for {len(items) - done} more environment(s) not shown, to keep this "
+                "report under GitHub's comment limit; `CONTRACT.md` §Resolution lists how each "
+                "cell resolves."
+            )
+            break
+        notices.append(text)
+        left -= len(text)
+    return [(NOTICE, text) for text in notices]
 
 
 def _config_defaults(table):
@@ -1825,10 +1875,10 @@ def _config_warnings(ctx):
 
 
 def config_status(ctx):
-    """The report's environment-table section: the verdict, the variable-references notice
-    and the tolerant defaults, or nothing when there is no sound table to describe —
-    `_config_warnings` reports that case instead, and a status section beside a refusal
-    would read as a second opinion.
+    """The report's environment-table section: the verdict, the variable-references notice,
+    the resolved roles and the tolerant defaults, or nothing when there is no sound table to
+    describe — `_config_warnings` reports that case instead, and a status section beside a
+    refusal would read as a second opinion.
 
     Read a second time rather than shared with the probe: `ctx` cannot carry it
     (`test_the_config_probe_feeds_nothing_a_run_reads`), and a module-level cache would
@@ -1842,7 +1892,9 @@ def config_status(ctx):
         table, _, notes = _config_table(ctx)
     except (Exception, SystemExit):  # noqa: BLE001 - the probe reports the failure itself
         return []
-    return [] if table is None else [(NOTICE, CONFIG_VALID), *notes, *_config_defaults(table)]
+    if table is None:
+        return []
+    return [(NOTICE, CONFIG_VALID), *notes, *_config_roles(table), *_config_defaults(table)]
 
 
 def _governing_team(ctx):

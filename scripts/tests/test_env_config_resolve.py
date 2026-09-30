@@ -2,61 +2,208 @@
 
 Resolution turns a validated table plus a cell's coordinates -- environment, path,
 workload -- into the five values the row carries. Three things here are load-bearing and
-each has its own test: the block -> path -> workload merge order, the layout derivation,
-and that a shared environment resolves `aws.apply` on both paths.
+each has its own test: the role rule over an identity, the layout derivation, and that a
+shared environment resolves `aws.apply` on both paths.
 
 Every assertion compares the whole resolved object against a hand-written literal. A
-membership check on one key cannot see an inverted merge order, which is where the
-fail-open hides: a plan tier silently keeping the block's write role.
+membership check on one key cannot see a role taken from the wrong path or workload, which
+is where the fail-open hides: a plan cell silently holding the write role.
 """
 
+import pytest
 from _loader import load_script
 
 env_config = load_script("env-config")
 
+_ACCOUNT = "111111111111"
 
-def _three_tier(path, workload):
-    """One table carrying a role at all three tiers, and a region only at the block."""
-    table = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "aws": {
-                    "region": "eu-west-1",
-                    "role": "arn:aws:iam::9817:role/block",
-                    "apply": {
-                        "role": "arn:aws:iam::9817:role/apply",
-                        "workloads": {"net-edge": {"role": "arn:aws:iam::9817:role/net-edge"}},
-                    },
+#: One identity per role shape, and one environment naming each.
+_ROLES = {
+    "layout": "folder",
+    "identities": {
+        "named": {"aws": {"account": _ACCOUNT, "plan": "shipmate-plan", "apply": "shipmate-apply"}},
+        "templ": {"aws": {"account": _ACCOUNT, "apply": "shipmate-apply-{workload}"}},
+        "mapped": {
+            "aws": {"account": {"core": _ACCOUNT, "net": "222222222222"}, "apply": "shipmate-apply"}
+        },
+        "full": {"aws": {"apply": "arn:aws:iam::333333333333:role/full"}},
+        "pathed": {"aws": {"account": _ACCOUNT, "plan": "ci/shipmate-plan"}},
+        "shared": {"aws": {"apply": "arn:aws:iam::444444444444:role/shared"}},
+    },
+    "environments": {
+        "bare": {"region": "eu-west-1"},
+        "named": {"region": "eu-west-1", "identity": "named"},
+        "listed": {"region": "eu-west-1", "identity": "named", "workloads": ["net", "core"]},
+        "templ": {"region": "eu-west-1", "identity": "templ", "workloads": ["core"]},
+        "mapped": {"region": "eu-west-1", "identity": "mapped", "workloads": ["core", "net"]},
+        "full": {"region": "eu-west-1", "identity": "full"},
+        "pathed": {"region": "eu-west-1", "identity": "pathed"},
+        "sbx": {"region": "eu-west-1", "identity": "shared", "shared": True},
+    },
+}
+
+
+def _cell(role_arn, cred_region, config_path, env_binding):
+    return {
+        "role_arn": role_arn,
+        "cred_region": cred_region,
+        "tf_vars": {},
+        "config_path": config_path,
+        "env_binding": env_binding,
+    }
+
+
+_RESOLVED = [
+    ("prod-us", "apply", "", _cell("", "", "apply", "prod-us-apply")),
+    ("bare", "apply", "net", _cell("", "", "apply", "bare-apply")),
+    (
+        "named",
+        "apply",
+        "",
+        _cell("arn:aws:iam::111111111111:role/shipmate-apply", "eu-west-1", "apply", "named-apply"),
+    ),
+    (
+        "named",
+        "plan",
+        "net",
+        _cell("arn:aws:iam::111111111111:role/shipmate-plan", "eu-west-1", "plan", "named-plan"),
+    ),
+    (
+        "listed",
+        "apply",
+        "core",
+        _cell(
+            "arn:aws:iam::111111111111:role/shipmate-apply", "eu-west-1", "apply", "listed-apply"
+        ),
+    ),
+    ("listed", "apply", "app", _cell("", "eu-west-1", "apply", "listed-apply")),
+    (
+        "templ",
+        "apply",
+        "core",
+        _cell(
+            "arn:aws:iam::111111111111:role/shipmate-apply-core",
+            "eu-west-1",
+            "apply",
+            "templ-apply",
+        ),
+    ),
+    ("templ", "apply", "app", _cell("", "eu-west-1", "apply", "templ-apply")),
+    ("templ", "apply", "", _cell("", "eu-west-1", "apply", "templ-apply")),
+    (
+        "mapped",
+        "apply",
+        "net",
+        _cell(
+            "arn:aws:iam::222222222222:role/shipmate-apply", "eu-west-1", "apply", "mapped-apply"
+        ),
+    ),
+    (
+        "full",
+        "apply",
+        "app",
+        _cell("arn:aws:iam::333333333333:role/full", "eu-west-1", "apply", "full-apply"),
+    ),
+    (
+        "pathed",
+        "plan",
+        "",
+        _cell(
+            "arn:aws:iam::111111111111:role/ci/shipmate-plan", "eu-west-1", "plan", "pathed-plan"
+        ),
+    ),
+    (
+        "sbx",
+        "plan",
+        "",
+        _cell("arn:aws:iam::444444444444:role/shared", "eu-west-1", "apply", "sbx"),
+    ),
+    ("full", "plan", "", _cell("", "eu-west-1", "plan", "full-plan")),
+]
+
+_IDS = [
+    "no-entry",
+    "no-identity",
+    "name-untagged",
+    "name-inert-tag",
+    "listed-tag",
+    "unlisted-tag",
+    "placeholder-listed",
+    "placeholder-unlisted",
+    "placeholder-untagged",
+    "account-map",
+    "full-arn",
+    "iam-path",
+    "shared-plan",
+    "no-plan-role",
+]
+
+
+@pytest.mark.parametrize(("env", "path", "workload", "expected"), _RESOLVED, ids=_IDS)
+def test_each_role_shape_resolves_one_cell(env, path, workload, expected):
+    """Mutations: fill `{workload}` for an unlisted tag -- `placeholder-unlisted` reds; take
+    the account from the wrong workload -- `account-map` reds; drop the shared switch --
+    `shared-plan` reds; treat an unlisted tag as inert under a written list -- `unlisted-tag`
+    reds.
+    """
+    table = env_config.validate_structure(_ROLES)
+    assert env_config.resolve(table, env, path, workload) == expected
+
+
+@pytest.mark.parametrize(
+    ("env", "workload"),
+    [("listed", ""), ("bare", "net"), ("named", "net"), ("listed", "core")],
+    ids=["untagged", "no-identity", "no-list", "listed"],
+)
+def test_a_tag_is_outside_nothing_unless_a_written_list_omits_it(env, workload):
+    """Mutations: drop the empty-tag test -- `untagged` returns the list; drop the membership
+    test -- `listed` returns the list."""
+    assert env_config.outside_workloads(_ROLES, env, workload) is None
+
+
+def test_a_tag_off_a_written_list_returns_the_list_sorted():
+    """`listed`'s identity does not vary, and its list still decides.
+
+    Mutation: return None whenever the identity does not vary -- this returns None.
+    """
+    assert env_config.outside_workloads(_ROLES, "listed", "app") == ["core", "net"]
+
+
+# --- the role map is keyed by the raw workload ------------------------------------------
+
+#: Two workloads whose tag values differ only in '-' against '_'. A resolution that
+#: normalized the key before the lookup could not tell them apart, and one of them would
+#: apply under a role that is not its own.
+_COLLIDING = {
+    "layout": "folder",
+    "identities": {
+        "dev": {
+            "aws": {
+                "apply": {
+                    "net-edge": "arn:aws:iam::9817:role/hyphen",
+                    "net_edge": "arn:aws:iam::9817:role/underscore",
                 }
             }
-        },
-    }
-    return env_config.resolve(table, "dev-eu", path, workload)
+        }
+    },
+    "environments": {
+        "dev-eu": {"region": "eu-west-1", "identity": "dev", "workloads": ["net-edge", "net_edge"]}
+    },
+}
 
 
-# --- 1: the three-tier merge, one boundary per test -----------------------------------
-
-
-def test_the_block_tier_resolves_when_no_higher_tier_sets_the_field():
-    """The plan path declares nothing, so the block's role and region stand.
-
-    Mutation: drop the block from the merge -- the plan path resolves no role at all.
-    """
-    assert _three_tier("plan", "") == {
-        "role_arn": "arn:aws:iam::9817:role/block",
+def test_two_workloads_differing_only_in_separator_resolve_separately():
+    """Mutation: normalize the key -- `workload.replace('-', '_')` -- and both cells take the
+    underscore role."""
+    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net-edge") == {
+        "role_arn": "arn:aws:iam::9817:role/hyphen",
         "cred_region": "eu-west-1",
         "tf_vars": {},
-        "config_path": "plan",
-        "env_binding": "dev-eu-plan",
+        "config_path": "apply",
+        "env_binding": "dev-eu-apply",
     }
-
-
-def test_the_path_tier_overrides_the_block():
-    """Mutation: swap the merge order so the block wins -- the apply path then resolves
-    the block role, and a plan tier could never take a role away from apply either."""
-    assert _three_tier("apply", "") == {
-        "role_arn": "arn:aws:iam::9817:role/apply",
+    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net_edge") == {
+        "role_arn": "arn:aws:iam::9817:role/underscore",
         "cred_region": "eu-west-1",
         "tf_vars": {},
         "config_path": "apply",
@@ -64,34 +211,7 @@ def test_the_path_tier_overrides_the_block():
     }
 
 
-def test_the_workload_tier_overrides_the_path():
-    """The workload sets only `role`, so `region` still merges in field by field.
-
-    Mutation: swap the path/workload order, or merge whole levels instead of fields --
-    the region is lost with the second.
-    """
-    assert _three_tier("apply", "net-edge") == {
-        "role_arn": "arn:aws:iam::9817:role/net-edge",
-        "cred_region": "eu-west-1",
-        "tf_vars": {},
-        "config_path": "apply",
-        "env_binding": "dev-eu-apply",
-    }
-
-
-def test_a_workload_with_no_tier_of_its_own_resolves_the_path_tier():
-    """Mutation: refuse or resolve empty when the workload is not in the table -- most
-    workloads have no override and must take the path tier's role."""
-    assert _three_tier("apply", "app") == {
-        "role_arn": "arn:aws:iam::9817:role/apply",
-        "cred_region": "eu-west-1",
-        "tf_vars": {},
-        "config_path": "apply",
-        "env_binding": "dev-eu-apply",
-    }
-
-
-# --- 2: derivation by layout ----------------------------------------------------------
+# --- derivation by layout -------------------------------------------------------------
 
 
 def _layout(layout, entry=None):
@@ -135,95 +255,12 @@ def test_folder_derives_nothing():
     }
 
 
-# --- 3: the one cross-level default ---------------------------------------------------
-
-
-def test_the_environment_region_inherits_into_the_block():
-    """Mutation: stop inheriting -- the credentials step loses its required region."""
-    entry = {"region": "eu-west-1", "aws": {"role": "arn:aws:iam::9817:role/block"}}
-    assert _layout("folder", entry) == {
-        "role_arn": "arn:aws:iam::9817:role/block",
-        "cred_region": "eu-west-1",
-        "tf_vars": {},
-        "config_path": "plan",
-        "env_binding": "dev-eu-plan",
-    }
-
-
-def test_the_provider_region_wins_over_the_environment_region():
-    """`cred_region` is the credentials step's region; `TF_VAR_region` under tf_vars is the
-    environment's own, and the two are not the same value.
-
-    Mutation: always use the environment-level value -- the credentials step then
-    authenticates in the wrong region.
-    """
-    entry = {
-        "region": "eu-west-1",
-        "aws": {"region": "us-east-1", "role": "arn:aws:iam::9817:role/block"},
-    }
-    assert _layout("tf_vars", entry) == {
-        "role_arn": "arn:aws:iam::9817:role/block",
-        "cred_region": "us-east-1",
-        "tf_vars": {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"},
-        "config_path": "plan",
-        "env_binding": "dev-eu-plan",
-    }
-
-
-# --- 4: the workload tier is keyed by the raw workload --------------------------------
-
-#: Two workloads whose tag values differ only in '-' against '_'. A resolution that
-#: normalized the key before the lookup could not tell them apart, and one of them would
-#: apply under a role that is not its own.
-_COLLIDING = {
-    "layout": "folder",
-    "environments": {
-        "dev-eu": {
-            "region": "eu-west-1",
-            "aws": {
-                "apply": {
-                    "role": "arn:aws:iam::9817:role/apply",
-                    "workloads": {
-                        "net-edge": {"role": "arn:aws:iam::9817:role/hyphen"},
-                        "net_edge": {"role": "arn:aws:iam::9817:role/underscore"},
-                    },
-                }
-            },
-        }
-    },
-}
-
-
-def test_two_workloads_differing_only_in_separator_resolve_separately():
-    """Mutation: normalize the key -- `{label}.workloads.{workload.upper().replace('-', '_')}`
-    -- and neither entry matches, so both cells silently take the tier's own apply role."""
-    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net-edge") == {
-        "role_arn": "arn:aws:iam::9817:role/hyphen",
-        "cred_region": "eu-west-1",
-        "tf_vars": {},
-        "config_path": "apply",
-        "env_binding": "dev-eu-apply",
-    }
-    assert env_config.resolve(_COLLIDING, "dev-eu", "apply", "net_edge") == {
-        "role_arn": "arn:aws:iam::9817:role/underscore",
-        "cred_region": "eu-west-1",
-        "tf_vars": {},
-        "config_path": "apply",
-        "env_binding": "dev-eu-apply",
-    }
-
-
-# --- 5 and 7: shared mode, the binding, and the tier the credential came from --------
+# --- shared mode, the binding, and the path the credential came from ------------------
 
 _SHARED = {
     "layout": "folder",
-    "environments": {
-        "dev-eu": {
-            "region": "eu-west-1",
-            "shared": True,
-            "aws": {"apply": {"role": "arn:aws:iam::9817:role/apply"}},
-        }
-    },
+    "identities": {"dev": {"aws": {"apply": "arn:aws:iam::9817:role/apply"}}},
+    "environments": {"dev-eu": {"region": "eu-west-1", "shared": True, "identity": "dev"}},
 }
 
 #: (the entry's `shared` value, or None for absent; the requested path) -> (env_binding,
@@ -270,16 +307,14 @@ def test_a_shared_environment_resolves_apply_on_the_plan_path():
 
 
 def test_an_unshared_environment_keeps_the_requested_path():
-    """The same table without the key: the plan tier declares nothing, so the apply role must
+    """The same table without the key: the identity sets no `aws.plan`, so the apply role must
     not reach the plan path.
 
     Mutation: treat every environment as shared.
     """
     unshared = {
-        "layout": "folder",
-        "environments": {
-            "dev-eu": {k: v for k, v in _SHARED["environments"]["dev-eu"].items() if k != "shared"}
-        },
+        **_SHARED,
+        "environments": {"dev-eu": {"region": "eu-west-1", "identity": "dev"}},
     }
     assert env_config.resolve(unshared, "dev-eu", "plan", "") == {
         "role_arn": "",
@@ -345,7 +380,7 @@ def test_the_flag_accessors_read_only_a_boolean_as_set():
     assert env_config.ungated_envs(table) == frozenset()
 
 
-# --- 6: no fallback to vars.* ---------------------------------------------------------
+# --- no fallback to vars.* ------------------------------------------------------------
 
 
 def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch):
@@ -369,7 +404,7 @@ def test_an_environment_absent_from_the_table_resolves_no_credential(monkeypatch
     }
 
 
-# --- 8: the environment's tf_vars merge over the derivation ---------------------------
+# --- the environment's tf_vars merge over the derivation ------------------------------
 
 
 def _with_vars(variables):
@@ -406,7 +441,7 @@ def test_tf_vars_may_set_a_value_to_an_explicit_empty_string():
     }
 
 
-# --- 9: the two paths inject the same variables ---------------------------------------
+# --- the two paths inject the same variables ------------------------------------------
 
 
 def test_plan_and_apply_resolve_identical_tf_vars():
@@ -418,142 +453,16 @@ def test_plan_and_apply_resolve_identical_tf_vars():
     """
     table = {
         "layout": "tf_vars",
-        "environments": {
-            "dev-eu": {
-                "region": "eu-west-1",
+        "identities": {
+            "dev": {
                 "aws": {
-                    "plan": {"role": "arn:aws:iam::9817:role/plan"},
-                    "apply": {"role": "arn:aws:iam::9817:role/apply"},
-                },
+                    "plan": "arn:aws:iam::9817:role/plan",
+                    "apply": "arn:aws:iam::9817:role/apply",
+                }
             }
         },
+        "environments": {"dev-eu": {"region": "eu-west-1", "identity": "dev"}},
     }
     expected = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
     assert env_config.resolve(table, "dev-eu", "plan", "")["tf_vars"] == expected
     assert env_config.resolve(table, "dev-eu", "apply", "")["tf_vars"] == expected
-
-
-# --- 10: an unlisted workload tag on a tier with no role to fall back to --------------
-
-#: An apply tier holding only workload roles: an unlisted tag resolves no credential here.
-_WORKLOAD_ONLY = """
-[environments.dev-eu]
-region = "eu-west-1"
-
-[environments.dev-eu.aws.apply.workloads.net-edge]
-role = "arn:aws:iam::9817:role/net-edge"
-
-[environments.dev-eu.aws.apply.workloads.app]
-role = "arn:aws:iam::9817:role/app"
-"""
-
-
-def _unlisted(toml, path, workload, env="dev-eu"):
-    """`unlisted_workload` over `toml` as a consumer would merge it, validated first."""
-    table = env_config.parse_table(f'layout = "folder"\n{toml}', {})
-    return env_config.unlisted_workload(env_config.validate_structure(table), env, path, workload)
-
-
-def test_an_unlisted_tag_on_a_tier_with_only_workload_roles_refuses():
-    """Mutation: return None where the refusal returns -- this case reds. The conditions it
-    rests on are pinned by the listed-tag case ("not a key") and the mixed shape ("no role")."""
-    assert _unlisted(_WORKLOAD_ONLY, "apply", "net") == ("aws.apply", ["app", "net-edge"])
-
-
-def test_a_listed_tag_is_not_refused():
-    """Mutation: drop the "not a key" condition -- this case refuses."""
-    assert _unlisted(_WORKLOAD_ONLY, "apply", "net-edge") is None
-
-
-def test_an_untagged_cell_is_not_refused():
-    """A stack with no workload tag and no cloud access is a valid credential-free cell.
-
-    Mutation: remove the empty-tag early return -- this case refuses with every key listed.
-    """
-    assert _unlisted(_WORKLOAD_ONLY, "apply", "") is None
-
-
-def test_a_tag_differing_only_in_punctuation_is_unlisted():
-    """Workload keys are matched as written, so `net_edge` is not `net-edge`.
-
-    Mutation: normalize `-` to `_` before the key lookup -- this case returns None.
-    """
-    assert _unlisted(_WORKLOAD_ONLY, "apply", "net_edge") == ("aws.apply", ["app", "net-edge"])
-
-
-def test_the_mixed_shape_keeps_its_fallback():
-    """Mutation: drop the "no role" condition -- this case refuses."""
-    toml = """
-[environments.dev-eu]
-region = "eu-west-1"
-
-[environments.dev-eu.aws.apply]
-role = "arn:aws:iam::9817:role/apply"
-
-[environments.dev-eu.aws.apply.workloads.net-edge]
-role = "arn:aws:iam::9817:role/net-edge"
-"""
-    assert _unlisted(toml, "apply", "net") is None
-
-
-def test_a_role_inherited_from_the_block_is_a_fallback():
-    """The tier is judged after inheritance: the block's role reaches `aws.apply`.
-
-    Mutation: read `entry["aws"]["apply"].get("role")` instead of the merged tier -- this
-    case refuses.
-    """
-    toml = """
-[environments.dev-eu]
-region = "eu-west-1"
-
-[environments.dev-eu.aws]
-role = "arn:aws:iam::9817:role/block"
-
-[environments.dev-eu.aws.apply.workloads.x]
-role = "arn:aws:iam::9817:role/x"
-"""
-    assert _unlisted(toml, "apply", "y") is None
-
-
-def test_a_shared_environment_is_judged_on_apply_from_the_plan_path():
-    """A shared environment resolves `aws.apply` on both paths, so the plan cell consults it.
-
-    Mutation: consult `aws.<path>` instead of the shared-aware tier -- `aws.plan` lists no
-    workloads, and this case returns None.
-    """
-    toml = """
-[environments.dev-eu]
-region = "eu-west-1"
-shared = true
-
-[environments.dev-eu.aws.apply.workloads.net-edge]
-role = "arn:aws:iam::9817:role/net-edge"
-"""
-    assert _unlisted(toml, "plan", "net") == ("aws.apply", ["net-edge"])
-
-
-def test_a_tier_listing_no_workloads_is_not_refused():
-    """An apply-only block on the plan path resolves no role and lists no workloads: the
-    cell stays credential-free, as before.
-
-    Mutation: refuse on "no role" alone, without requiring listed workloads -- this case
-    refuses.
-    """
-    toml = """
-[environments.dev-eu]
-region = "eu-west-1"
-
-[environments.dev-eu.aws.apply]
-role = "arn:aws:iam::9817:role/apply"
-"""
-    assert _unlisted(toml, "plan", "net") is None
-
-
-def test_no_entry_and_no_aws_block_are_not_refused():
-    """Mutation: drop the `aws` presence check -- the entry without a block raises KeyError."""
-    toml = """
-[environments.dev-eu]
-region = "eu-west-1"
-"""
-    assert _unlisted(toml, "apply", "net") is None
-    assert _unlisted(toml, "apply", "net", env="prod-us") is None

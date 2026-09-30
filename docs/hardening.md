@@ -82,7 +82,7 @@ expressions, whole, against the fence `getting-started.md` publishes. See
 | 4 | ≥1 approving review, code-owner review, dismiss stale, require approval of most recent push | Branch ruleset | Self-merge; the code-owner review is unforgeable at merge time (an App cannot be a `CODEOWNERS` entry) *provided a `CODEOWNERS` entry actually covers the IaC paths* — the rule is a no-op for changed files with no owner — and the approval *count* never is |
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — on a private repository this rule needs Enterprise, see "Plan prerequisites" | Environment | Unforgeable at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
-| 7 | Cloud credentials scoped to the environment that needs them — the OIDC path's role named per environment, by that environment's `aws` tier in the environment table; any residual static key as an environment secret — never repo- or org-level | Environment table (role); Environment (secret) | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; for the role the table's resolution rule is the scoping — see §7–9) |
+| 7 | Cloud credentials scoped to the environment that needs them — the OIDC path's role named by the identity each environment's entry names in the environment table; any residual static key as an environment secret — never repo- or org-level | Environment table (role); Environment (secret) | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; for the role the table's resolution rule is the scoping — see §7–9) |
 | 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since every cell-running job (plan, drift, apply, unlock) mints OIDC tokens unconditionally, this claim condition is the only thing that decides which role any of them may assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
@@ -93,7 +93,7 @@ expressions, whole, against the fence `getting-started.md` publishes. See
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
-| 18 | A role named per environment you want cloud access from — an `aws.plan` and an `aws.apply` tier in `.github/shipmate.toml`, never one block-level `aws.role` covering both (§7–9) | Environment table | Opting in per environment. The table has no level above the entry, so a role cannot be named once and picked up by every environment at a stroke; what each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate.toml` (`branch-protection.md`) |
+| 18 | An identity named by each environment you want cloud access from, with separate `aws.plan` and `aws.apply` roles in `.github/shipmate.toml` (§7–9) | Environment table | Opting in per environment. An identity is a role named once and picked up by every environment that names it, so one edit to `[identities.<name>]` retargets every environment carrying `identity = "<name>"`; `shipmate doctor`'s roles lines show what the branch's table resolves for each environment, and in them a referenced role shows the value comment-ops resolves, where a `shipmate-engine` Environment variable of the same name wins; a cell never reads that variable. What each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate.toml` (`branch-protection.md`) |
 | 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
@@ -481,26 +481,26 @@ every path.** Every job that runs a cell — the wave jobs of
 `drift.yml`'s `drift` job — requests `id-token: write` and runs a credentials
 step gated on a role resolving non-empty.
 
-**The role is the environment's `aws.plan` or `aws.apply` tier** in the
-environment table, read from the repository's default branch
-(`../CONTRACT.md` §Environment table). Branch content cannot rewrite it, there
-is no level above the entry to fall back to, and an environment with no entry —
-or an entry whose block resolves nothing on that path's tier — resolves no role,
+**The role is the `aws.plan` or `aws.apply` of the identity the environment
+names** in the environment table, read from the repository's default branch
+(`../CONTRACT.md` §Environment table). Branch content cannot rewrite it, and an
+environment with no entry — or an entry naming no identity, or an identity
+setting no role for that path — resolves no role,
 so the step is skipped and no cloud credential exists in the job. That is why
 the sample repos (null resources, local state) still run credential-free. Where
 a role does resolve, the assumed role's session env vars reach `tofu` — they are
 `AWS_*`, so the fingerprint excludes them (CONTRACT.md §Apply-match
 fingerprint). The plan and drift cells carry the identical step, resolving the
-`aws.plan` tier, so a read-only plan role is opted into by naming one there
+identity's `aws.plan`, so a read-only plan role is opted into by naming one there
 (`docs/aws.md` §Where the credentials step goes). Both sides are engine-wired,
-and the only thing that differs between them is which tier supplies the role —
+and the only thing that differs between them is which field supplies the role —
 which is what makes the trust policy, not the wiring, the boundary.
 
 No job interpolates a consumer *secret*: do not move a long-lived access key
 into an environment secret expecting the engine to pick it up — it will not,
 and that apply cell will fail at provider init. The role split controls 7 and
 9 describe is therefore the consumer's to configure, by giving the plan path and
-the apply path different roles — an `aws.plan` and an `aws.apply` tier — and
+the apply path different roles — an identity's `aws.plan` and `aws.apply` — and
 scoping each role's trust policy and permissions accordingly.
 The engine passes through whatever role each environment resolves; it enforces
 no split of its own.
@@ -514,16 +514,19 @@ no split of its own.
   worth nothing without control 6, so treat the two as one setting.
 
   **The environment table settles where the role is named, and leaves the trust
-  policy exactly where it was.** The table names one role per environment per
-  path, on the default branch, with nothing above the entry to inherit from — so
-  there is no repository- or organization-level value to leave behind, and no
-  pull request can point a cell at a different role. What the table does not do
+  policy exactly where it was.** The table names the roles once per identity,
+  per path, on the default branch, and an identity reaches only the environments
+  whose entry names it — so there is no repository- or organization-level value
+  to leave behind, and no pull request can point a cell at a different role.
+  One edit to an identity retargets every environment naming it; read
+  `shipmate doctor`'s roles lines on that pull request to see what each
+  environment then resolves. What the table does not do
   is decide who may assume the role it names: that is still the trust policy's
   `environment:` claim condition, and it is the only control that refuses a
   token.
 
   **That last sentence is the load-bearing one.** A plan cell executes
-  branch-authored HCL, so whatever role the `aws.plan` tier names is exposed to
+  branch-authored HCL, so whatever role the identity's `aws.plan` names is exposed to
   anyone who can push a branch; a drift cell runs only at the default branch
   ref, so naming an apply role there gains an over-scoped credential without the
   untrusted code. A role whose claim condition names `environment:<env>-apply`
@@ -534,43 +537,50 @@ no split of its own.
   requests are refused in `detect` before a cell exists. Check the claim
   condition on every role a plan environment can reach.
 
-  **One block-level `aws.role` covering both tiers collapses the split. Write
-  `aws.plan.role` and `aws.apply.role`, always.** A field written at provider-block
-  level inherits into every tier, so `aws.role` resolves for the plan path as
-  well as the apply path — and the plan path is reachable from any branch. The
-  shorthand therefore hands any-branch plan cells the apply role's permissions,
-  which is the whole of what the paragraphs above exist to prevent. It is a
-  regression, not a convenience, and it saves nothing: when the two roles differ,
-  `aws.role` plus `aws.apply.role` is the same two lines as `aws.plan.role` plus
-  `aws.apply.role`. The same applies to `aws.plan.role` naming the apply role's
-  ARN by mistake; `shipmate doctor` does not compare ARNs, so review is what
-  catches either.
+  **`aws.plan` naming the apply role collapses the split. Give the two paths
+  different roles, always.** The plan path is reachable from any branch, so an
+  apply role in `aws.plan` hands any-branch plan cells the apply role's
+  permissions, which is the whole of what the paragraphs above exist to prevent.
+  The one-role shorthand `aws.role` is refused, naming `aws.plan` and
+  `aws.apply`; the same ARN written into both fields is not, and `shipmate
+  doctor` does not compare ARNs. Its roles lines print both paths' roles side
+  by side, as the branch's table resolves them, so review is what catches it. A
+  referenced role there shows the value comment-ops resolves: a
+  `shipmate-engine` Environment variable of the same name wins in comment-ops,
+  and never in a cell.
 
   Yes:
 
   ```toml
   layout = "tf_vars"
 
+  [identities.prod]
+  aws.plan  = "arn:aws:iam::9817:role/prod-plan"
+  aws.apply = "arn:aws:iam::9817:role/prod-apply"
+
   [environments.prod]
-  region         = "eu-west-1"
-  aws.plan.role  = "arn:aws:iam::9817:role/prod-plan"
-  aws.apply.role = "arn:aws:iam::9817:role/prod-apply"
+  region   = "eu-west-1"
+  identity = "prod"
   ```
 
-  No — the plan tier inherits the apply role:
+  No — the plan path assumes the apply role:
 
   ```toml
   layout = "tf_vars"
 
+  [identities.prod]
+  aws.plan  = "arn:aws:iam::9817:role/prod-apply"
+  aws.apply = "arn:aws:iam::9817:role/prod-apply"
+
   [environments.prod]
   region   = "eu-west-1"
-  aws.role = "arn:aws:iam::9817:role/prod-apply"
+  identity = "prod"
   ```
 
-  Nothing refuses the shorthand: a block-level role is a legitimate shape for an
-  environment whose single role really is meant for both paths, so the engine
-  cannot tell the two intents apart. Decide it here, in the file, and pin it with
-  a `CODEOWNERS` entry over `/.github/shipmate.toml` (§3–5).
+  Nothing refuses this: one role on both paths is a legitimate shape for an
+  environment whose single role really is meant for both, so the engine cannot
+  tell the two intents apart. Decide it here, in the file, and pin it with a
+  `CODEOWNERS` entry over `/.github/shipmate.toml` (§3–5).
 - **Plan environments must have no approval-type protection rules (required
   reviewers, wait timers) and no deployment branch policy.** An approval rule
   blocks every plan cell outright, and a branch policy blocks every plan cell
@@ -587,8 +597,8 @@ no split of its own.
   readable by the same people for the same reason.
 
   The strongest version of this control is a plan environment with no secret in
-  it at all, and it is reachable today: name a read-only OIDC role in that
-  environment's `aws.plan` tier, which the engine's own
+  it at all, and it is reachable today: name a read-only OIDC role in the
+  `aws.plan` of the identity that environment names, which the engine's own
   `configure-aws-credentials` step in the plan cell assumes (`docs/aws.md`
   §Where the credentials step goes), with the role's trust policy conditioned on
   the plan environment's claim (`repo:<owner>/<repo>:environment:<env>-plan`,
@@ -620,9 +630,9 @@ no split of its own.
   on every role reachable from the repository, not only the apply role: see
   "What none of this fixes" for why it is the only bound that holds.
 - **In shared mode the plan path holds the apply role.** The bare `<env>`
-  resolves one role — the environment's `aws.apply` tier — and the wave jobs use
+  resolves one role — its identity's `aws.apply` — and the wave jobs use
   it, so it must be the apply role or every apply fails at
-  provider init, and the plan and drift cells resolve that same tier. So a
+  provider init, and the plan and drift cells resolve that same field. So a
   read-only plan role is unreachable for
   every shared env: plan cells assume the write role while executing
   branch-authored HCL ("Plan-time code execution" — a provider or an `external`
@@ -631,12 +641,12 @@ no split of its own.
   separate the two paths either: both tokens carry
   `repo:<owner>/<repo>:environment:<env>` — byte-identical `sub` — so no trust
   policy can admit the apply job and refuse the plan job. Naming a second role
-  does not help, an `aws.plan` tier included: the
+  does not help, an `aws.plan` included: the
   name is not a boundary, and code running in the job can assume any ARN it
-  likes. The environment table refuses an `aws.plan` tier on a shared
-  environment for that reason, and resolves `aws.apply` on both paths. The one
-  way out is to name no role for that environment at all — no role named for
-  either tier, or no `aws` block in its entry — which skips the credentials step and
+  likes. The environment table refuses a shared environment naming an identity
+  that sets `aws.plan` for that reason, and resolves `aws.apply` on both paths.
+  The one way out is to name no role for that environment at all — no
+  `identity` in its entry — which skips the credentials step and
   leaves the cell with no cloud credential — the shape the three local-backend sample
   repositories run in. Declining
   the grant is not an alternative: `id-token: write` is mandatory on the plan and
@@ -661,9 +671,10 @@ no split of its own.
   merged pull request under row 4, like naming a role in row 18 — and row 4's
   code-owner half is a no-op unless a `CODEOWNERS` entry covers
   `/.github/shipmate.toml`. One line moves plan cells running unreviewed branch
-  code onto the apply role, and the nightly drift run with them — including on a
-  repository that set no plan-side role at all, because the cell resolves the
-  `aws.apply` tier of the bare `<env>` it now binds. `shipmate doctor` reads the
+  code onto the apply role, and the nightly drift run with them — the cell
+  resolves its identity's `aws.apply` for the bare `<env>` it now binds, and an
+  identity setting `aws.plan` refuses there, so a shared environment's identity
+  never holds a plan-side role. `shipmate doctor` reads the
   key and reports a shared environment's protection shape and secrets.
 
 ## 10–12 and 20. Actions settings

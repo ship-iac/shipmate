@@ -17,8 +17,10 @@ a snippet worth publishing for this file is a snippet worth being able to merge.
 genuinely cannot be complete does not belong in ```toml.
 
 A fence holding `{ vars = "NAME" }` references is validated with every referenced variable set
-to `_PLACEHOLDER`, a value every string position accepts, so the example is judged on its
-shape rather than on this runner's variables.
+to a placeholder its position accepts, so the example is judged on its shape rather than on this
+runner's variables: `_ROLE_PLACEHOLDER` at an `aws.plan` or `aws.apply` position, because a role
+name there needs an `aws.account` and a fence must not add one for the placeholder's sake, and
+`_PLACEHOLDER` everywhere else.
 
 Sibling of `test_docs_yaml_parses.py`; both discover fences through `_loader.doc_fences`.
 """
@@ -41,8 +43,20 @@ _FENCE = re.compile(r"^(?P<indent>[ \t]*)```toml[ \t]*$\n(?P<body>.*?)^\1```", r
 # counts here and does not pair in _FENCE.
 _OPENER = re.compile(r"^[ \t]*```toml\b", re.M)
 
-#: An environment name, a team slug and a non-empty role or region all at once.
+#: An environment name, a team slug and a non-empty region all at once.
 _PLACEHOLDER = "dev"
+
+#: A role a consumer's variable would hold: a full ARN, which needs no `aws.account`.
+_ROLE_PLACEHOLDER = "arn:aws:iam::111111111111:role/dev"
+_ROLE_POSITION = re.compile(r"\.aws\.(plan|apply)(\.|$)")
+
+
+def _placeholders(body):
+    """`{NAME: value}` for every reference in `body`, by the position it sits at."""
+    return {
+        name: _ROLE_PLACEHOLDER if _ROLE_POSITION.search(path) else _PLACEHOLDER
+        for path, name in ec.references(ec.load_toml(body))
+    }
 
 
 # Discovery is by glob, so a page added later is covered without editing this file.
@@ -68,13 +82,14 @@ def test_every_fence_was_discovered():
 def test_toml_fence_is_a_configuration_a_consumer_could_merge(page, line, body):
     """Parse and validate, in the order the engine does.
 
-    Mutation: give one fence a second `[environments.<name>]` header for a name it already
-    declares, the Yes/No shape that shipped — `tomllib` refuses it as `Cannot declare ... twice`.
+    Mutations: give one fence a second `[environments.<name>]` header for a name it already
+    declares, the Yes/No shape that shipped — `tomllib` refuses it as `Cannot declare ... twice`;
+    give the role positions `_PLACEHOLDER` again — the variable-reference fence in CONTRACT.md,
+    whose `aws.apply` is a reference beside no account, refuses as a role name with no account.
     """
     where = f"{page.relative_to(ENGINE).as_posix()}:{line}"
     try:
-        variables = {name: _PLACEHOLDER for _, name in ec.references(ec.load_toml(body))}
-        table = ec.parse_table(body, variables)
+        table = ec.parse_table(body, _placeholders(body))
     except SystemExit as exc:
         pytest.fail(f"{where} ```toml fence does not parse: {str(exc).removeprefix('::error::')}")
     try:

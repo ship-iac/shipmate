@@ -225,26 +225,45 @@ def env_membership(all_stacks=False, base="", require_env_tag=True):
     return stacks_by_env, tags_by_stack
 
 
+def tagged_workloads(stacks_by_env, tags_by_stack):
+    """`{env: frozenset of the names its stacks' workload/<name> tags carry}`, every env of
+    `stacks_by_env` included.
+
+    Read from the tags, not the cells: a `tags` filter narrows the cells, and a workload on a
+    filtered-out stack is still tagged. Not through `workload_of` either: its two-tag refusal
+    is scoped to the cells a run runs."""
+    return {
+        env: frozenset(
+            t[len("workload/") :]
+            for s in stacks
+            for t in tags_by_stack.get(s, [])
+            if t.startswith("workload/")
+        )
+        for env, stacks in stacks_by_env.items()
+    }
+
+
 def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
-    """({env: [stacks...]}, cells). The map is returned as well as consumed because a
-    caller that scanned the whole tree feeds it to `env_config` as `all_envs`, and
-    re-scanning would be a second source that can disagree with this one."""
+    """(`tagged_workloads` of the scan, cells). The map is returned beside the cells because a
+    caller that scanned the whole tree feeds it to `env_config` as `tagged`, and re-scanning
+    would be a second source that can disagree with this one."""
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base, require_env_tag)
-    return stacks_by_env, build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
+    cells = build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
+    return tagged_workloads(stacks_by_env, tags_by_stack), cells
 
 
-def env_config(cells, all_envs=None, table=None):
+def env_config(cells, tagged=None, table=None):
     """The validated table for `cells`. One read per detect, not per row.
 
-    `all_envs` is the whole-tree environment scan, which only the unused-entry warning
-    reads; the caller passes it only where it actually scanned the whole tree, and `None`
-    otherwise. `table` is a mapping the caller already read from the default branch, for a
-    path needing a field of it before its cells exist; passing it here is what keeps that
-    path on one read.
+    `tagged` is the whole-tree `tagged_workloads` scan, which only the unused-entry and
+    untagged-workload warnings read; the caller passes it only where it actually scanned the
+    whole tree, and `None` otherwise. `table` is a mapping the caller already read from the
+    default branch, for a path needing a field of it before its cells exist; passing it here
+    is what keeps that path on one read.
     """
     envs = {c["environment"] for c in cells}
     table = ec.read_table() if table is None else table
-    return ec.validate(table, envs, all_envs=all_envs)
+    return ec.validate(table, envs, tagged=tagged)
 
 
 def stamp_rows(cells, table, tier):
@@ -274,30 +293,32 @@ def stamp_rows(cells, table, tier):
     return rows
 
 
-def refuse_workload_gaps(rows, table, tier):
-    """`SystemExit` when a row's `workload/<name>` tag the consulted tier does not list, and
-    that tier has no role to fall back to (`env-config`'s `unlisted_workload`): the cell would
-    otherwise run with no cloud credentials. The plan tier checks the apply tier too, for the
-    stacks the plan path plans.
+def refuse_workload_gaps(rows, table):
+    """`SystemExit` naming every row whose `workload/<name>` tag its environment's `workloads`
+    list does not name (`env-config`'s `outside_workloads`), in row order. Membership is per
+    environment, so the plan and apply paths refuse the same rows.
 
     Each caller passes only the rows it will run. A completed, excluded or held cell is not
     refused: a table-only change can make an applied cell look misconfigured, and refusing
     over it would strand every pull request that planned it. `test_workload_gap_guard.py`
     pins each call site.
     """
-    paths = (tier, "apply") if tier == "plan" else (tier,)
-    for cell, path in ((c, p) for c in rows for p in paths):
-        refused = ec.unlisted_workload(table, cell["environment"], path, cell["workload"])
-        if refused:
-            label, keys = refused
-            raise SystemExit(
-                f"::error::{cell['stack']} in {cell['environment']} carries "
-                f"workload/{cell['workload']}, which {label}.workloads does not list (it lists: "
-                f"{', '.join(keys)}), and {label} sets no role to fall back to. The cell would "
-                "run with no cloud credentials. Retag the stack, or add the workload to "
-                f"{ec.CONFIG_PATH} on the default branch, which is where this table is read "
-                "from: merge the workload entry there on its own pull request first."
+    items = []
+    for row in rows:
+        env, workload = row["environment"], row["workload"]
+        listed = ec.outside_workloads(table, env, workload)
+        if listed is not None:
+            items.append(
+                f"{row['stack']} in {env} (workload/{workload}; {env} lists {', '.join(listed)})"
             )
+    if items:
+        raise SystemExit(
+            f"::error::{len(items)} cell(s) carry a workload tag their environment's workloads "
+            f"list does not name: {'; '.join(items)}. A listed workload is the only one the "
+            "default branch grants a role to. Retag the stack, or add the workload to "
+            f"environments.<env>.workloads in {ec.CONFIG_PATH} on the default branch, which is "
+            "where this table is read from: merge it there on its own pull request first."
+        )
 
 
 def fork_pr_error(repository, head_repo, no_pull_request: bool):
@@ -473,13 +494,13 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
-    stacks_by_env, cells = compute_cells(all_stacks, base, tags=tags)
+    tagged, cells = compute_cells(all_stacks, base, tags=tags)
     # One call serves plan and drift, and only drift scans the whole tree. Under
     # `all_stacks=False` the map covers the CHANGED stacks alone, so passing it would
     # report every unchanged environment as an unused table entry on every plan.
-    table = env_config(cells, set(stacks_by_env) if all_stacks else None)
+    table = env_config(cells, tagged if all_stacks else None)
     cells = stamp_rows(cells, table, "plan")
-    refuse_workload_gaps(cells, table, "plan")
+    refuse_workload_gaps(cells, table)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")

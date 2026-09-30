@@ -53,17 +53,13 @@ _DRIFT_ENV = {
 _PLAN_ROLE = "arn:aws:iam::1:role/plan"
 _APPLY_ROLE = "arn:aws:iam::1:role/apply"
 
-#: A table whose two tiers hold distinct roles, so a detect resolving the wrong tier is a
+#: A table whose two paths hold distinct roles, so a detect resolving the wrong path is a
 #: different value rather than the same one. `layout = "folder"` derives no `tf_vars`, so an
 #: empty `tf_vars` on a stamped row is legitimate and is not evidence of a missing stamp.
 _TABLE = {
     "layout": "folder",
-    "environments": {
-        "dev-eu": {
-            "region": "eu-west-1",
-            "aws": {"plan": {"role": _PLAN_ROLE}, "apply": {"role": _APPLY_ROLE}},
-        }
-    },
+    "identities": {"dev": {"aws": {"plan": _PLAN_ROLE, "apply": _APPLY_ROLE}}},
+    "environments": {"dev-eu": {"region": "eu-west-1", "identity": "dev"}},
 }
 
 
@@ -92,7 +88,7 @@ def test_the_table_names_every_script_that_can_emit_rows():
 
 def test_the_plan_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
     """Call site 1: `build-matrix` main(). The plan workflow reads the plan credential, and a
-    cell that resolved `apply.role` here would hand a pull request's plan the role that
+    cell that resolved `aws.apply` here would hand a pull request's plan the role that
     mutates infrastructure.
 
     Mutations: pass `"apply"` at `build-matrix`'s call site; drop the `stamp_rows` wrapper
@@ -222,13 +218,8 @@ def test_a_shared_environment_resolves_the_apply_tier_on_the_plan_path(monkeypat
     """
     shared = {
         "layout": "folder",
-        "environments": {
-            "dev-eu": {
-                "region": "eu-west-1",
-                "shared": True,
-                "aws": {"apply": {"role": _APPLY_ROLE}},
-            }
-        },
+        "identities": {"dev": {"aws": {"apply": _APPLY_ROLE}}},
+        "environments": {"dev-eu": {"region": "eu-west-1", "shared": True, "identity": "dev"}},
     }
     outputs, _ = tbm._run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="cafe1234", table=shared)
     assert json.loads(outputs["matrix"])["include"] == [
