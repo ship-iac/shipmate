@@ -397,9 +397,9 @@ nothing for its cells to run as. The two absences refuse at the same site,
 `scripts/env-config` (§Refusals) — a file absent from the default branch, and a
 file that parses but declares no `layout`.
 
-The file holds five top-level settings and no others: `schema_version`,
-`layout`, `identities`, `environments`, `gate`. Any other top-level key refuses,
-naming the offending key and the five that are allowed. A key a *newer* engine
+The file holds four top-level settings and no others: `schema_version`,
+`layout`, `identities`, `environments`. Any other top-level key refuses,
+naming the offending key and the four that are allowed. A key a *newer* engine
 implements is refused by an older one on that same check, which is why a
 repository moves its pin before it adds a key.
 
@@ -417,14 +417,15 @@ it plans; changing any of those takes a merge to the default branch. `origin` is
 the base repository on every path — no checkout passes `repository:` — and a fork
 pull request is refused in `detect` before it plans.
 A job that checks out no consumer content reads the same file over the contents
-API instead — comment-ops, resolving `[gate]` before it authorizes — with the
+API instead — comment-ops, resolving the `gated = false` exemptions before it
+authorizes — with the
 same branch and the same refusal wording, so a consumer never gets two accounts
 of one problem depending on which job read it.
 
-**`needs`, `explicit`, `gated` and `[gate]` come from the default branch too.**
+**`needs`, `explicit` and `gated` come from the default branch too.**
 They are read from the same parsed mapping as the environment table, and a branch
-therefore cannot reorder its own apply waves, drop its own production exclusion,
-exempt itself from the review requirement or name the team that authorizes it.
+therefore cannot reorder its own apply waves, drop its own production exclusion
+or exempt itself from the review requirement.
 
 **The file must reach the default branch before the first plan run.** A pull
 request that only *adds* it is refused, because the branch its plan is compared
@@ -553,29 +554,6 @@ only the environments that name it. The cost is that one edit to an identity
 retargets every environment naming it; `shipmate doctor`'s roles lines list what
 each environment resolves (§Resolution).
 
-### The gate table
-
-`[gate]` holds the setting that decides who may apply and unlock by pull
-request comment. It is optional and strict about its key name, and a misspelled
-key is refused rather than left at its default:
-
-```toml
-layout = "tf_vars"
-```
-
-- **`approver_team`** — the bare GitHub team slug from the team's URL, not a
-  display name and not an `@org/team` reference. Its members are the ones the
-  `shipmate team` apply requirement admits (§Comment-ops). A value that is not a
-  slug is refused, because it would 404 in the membership lookup and refuse every
-  commenter under a message naming the team as though it had resolved.
-
-Which environments apply without an approving review is not a `[gate]` setting:
-each entry declares it as `gated = false` (§Comment-ops).
-
-**A declared empty value means what it says.** `approver_team = ""` authorizes
-nobody — which is also what an absent key does. The file is the only source, so
-emptying the setting removes what it granted and nothing else grants it back.
-
 ### The schema version
 
 `schema_version` is optional and, when written, must be the integer `1`. An
@@ -599,9 +577,8 @@ closed.
   refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
   refusal, which checks before anything reads `environments`; a misplaced
-  `schema_version` refuses as an unimplemented environment
-  key, identity key or identity field, or an unknown `[gate]` key, depending on
-  the header it fell under.
+  `schema_version` refuses as an unimplemented environment key, identity key or
+  identity field, depending on the header it fell under.
   `docs/troubleshooting.md` has the message for each position.
 - **Declaring one table twice is a parse error.** A dotted `aws.plan` under
   `[identities.dev]` plus a later `[identities.dev.aws]` header refuses with
@@ -648,7 +625,7 @@ tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
 
 - **Shape.** Exactly `{ vars = "NAME" }`: a mapping with one key, `vars`,
   holding a string, named after GitHub's `vars` context. It is valid at every
-  string position, list items, an identity map's values and `[gate]` included,
+  string position, list items and an identity map's values included,
   and it replaces the whole string before `{workload}` is filled. Any other
   mapping is ordinary data for the checks in §Refusals.
 - **Resolution.** Every reader of the file replaces each reference with the
@@ -677,10 +654,9 @@ tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
   is a variable edit, not a pull request.
 - **Authority.** A referenced value is governed by whoever GitHub permits to
   edit the repository's or the organization's variable it names, not by whoever
-  can merge to the default branch. That includes `gate.approver_team` and a
-  referenced `needs` item. Who may edit a variable is a GitHub
-  permission setting, outside this contract. A variable edit takes effect on the
-  next run.
+  can merge to the default branch. That includes a referenced `needs` item.
+  Who may edit a variable is a GitHub permission setting, outside this
+  contract. A variable edit takes effect on the next run.
 - **Plan and apply.** A cell's role and credentials region are outside the
   apply-match fingerprint (§Apply-match fingerprint): a variable feeding either,
   changed between plan and apply, reaches the apply with no re-plan. A
@@ -729,11 +705,9 @@ variable rows depend on the run as well as the file, so they are not structural.
 | An empty string or an empty map in an identity field | that resolves to a skipped credentials step, not to a credential |
 | `aws.account` that is not a 12-digit string | a TOML integer drops a leading `0` |
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
-| A top-level key other than `schema_version`, `layout`, `identities`, `environments`, `gate` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
+| A top-level key other than `schema_version`, `layout`, `identities`, `environments` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step — and, on an engine that predates a key, catches a file written for a newer one before it decides anything |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
-| A `[gate]` key other than `approver_team` | a misspelled gate key leaves the setting at its default while the repository believes it declared one |
-| `gate.approver_team` that is not a GitHub team slug | a display name, an `@org/team` reference or a stray quote 404s in the membership lookup, refusing every commenter under a message naming the team as though it had resolved |
 | A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
 | A file holding a reference, read by a step whose variables input is absent or empty | the engine did not pass `github-vars` to that step, or the repository reaches no variables at all; named as such rather than blamed on one variable |
 | `schema_version` other than the integer `1` | this engine implements version 1; a bool is refused explicitly, since `True == 1` would otherwise read `schema_version = true` as it |
@@ -1040,7 +1014,7 @@ body contains `shipmate` in any case; every other comment starts no runner.
 | `shipmate doctor` | active | none | read-only, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) |
 | `shipmate help` | active | none | none — read-only, open to any commenter |
 | `shipmate plan` | active | none | changes no infrastructure, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) — the same tier as `doctor` |
-| `shipmate unlock <env>` | active | required env | team membership plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
+| `shipmate unlock <env>` | active | required env | write access plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
 | `shipmate destroy` | reserved | — | — |
 
 Every dispatching verb dispatches the same file,
@@ -1202,10 +1176,9 @@ runs the harvest reads — so there is no self-harvest loop. `shipmate doctor`
 never affects `shipmate / gate`.
 
 Because the report enumerates the guardrails a repository is *missing* — an
-ungated default branch, an apply environment with no approval rule, the
-configured approver team and whether it resolves, an App installation short of
-the manifest's permissions — the `doctor` route is gated on the commenter's
-GitHub `author_association`.
+ungated default branch, an apply environment with no approval rule, an App
+installation short of the manifest's permissions — the `doctor` route is gated
+on the commenter's GitHub `author_association`.
 
 **What the engine enforces:** `doctor` runs only
 when `github.event.comment.author_association` is `OWNER`, `MEMBER` or
@@ -1270,11 +1243,11 @@ A parsed `shipmate apply <env>` command is authorized only when it satisfies
 apply requirements — named, Atlantis-style, checked in order, each with
 its own actionable rejection reason:
 
-- **shipmate team**: the commenter is a member of the team `gate.approver_team`
-  names in `.github/shipmate.toml` on the default branch (checked via a
-  short-lived GitHub App installation token, `members:read`). A repository that
-  declares no team authorizes nobody: every apply and unlock comment is
-  refused;
+- **write access**: the commenter's permission on the repository is `write` or
+  `admin`, read from GitHub's repository permission for the commenter at comment
+  time. `read` and `none` are refused, and so are any other value and a
+  permission that could not be read. Every account can read a public repository,
+  so there a commenter who is not a collaborator has `read` and is refused;
 - **not a draft**: the pull request is not a draft. `shipmate plan` plans a
   draft on request, so a draft head can carry apply checks with plan runs on
   them; a draft says the change is not ready for review, and applying it is
@@ -1338,7 +1311,7 @@ gated  = false
 
 It exempts one requirement, `reviewed`, and only its `REVIEW_REQUIRED`
 value. Everything else still decides, on an ungated environment exactly as on any
-other: `shipmate team` membership, `not a draft`, `mergeable`,
+other: `write access`, `not a draft`, `mergeable`,
 `undiverged` and the exact-plan rule are unchanged; a `CHANGES_REQUESTED` review still refuses,
 because an explicit human "no" is not an absent review; and an unknown or
 absent decision still fails closed. Nor does it touch the `<env>-apply`
@@ -1446,7 +1419,7 @@ reference (§Variable references), so the decision stays a merged commit.
 or killed apply. The env is required: a destructive verb gets no wildcard,
 so there is no bare form.
 
-It is authorized by shipmate team membership at comment time plus the
+It is authorized by the commenter's write access at comment time plus the
 `<env>-apply` environment its job binds — the same required reviewers and the
 same OIDC subject an apply of that environment binds. The other four apply
 requirements are deliberately absent: reviewed, because an approving review
@@ -1492,7 +1465,7 @@ fail-safe. The order is unlock, then `shipmate apply <env>`, then a re-plan if
 that refuses (`docs/troubleshooting.md`).
 
 The GitHub App carries this permission set: `actions: write`,
-`pull_requests: write`, `contents: read`, `members: read`, `checks: write`,
+`pull_requests: write`, `contents: read`, `checks: write`,
 `statuses: write`, `issues: write`, `environments: read` — the last for
 `shipmate doctor`'s plan-environment secret listing (names only; no GitHub REST
 path returns a secret's value, and this permission cannot write one), minted in
@@ -1504,9 +1477,9 @@ this permission too and so fails until Accept.
 Beyond minting the `workflow_dispatch`
 token for comment-ops (events created with the default `GITHUB_TOKEN` never
 trigger other workflows, so a private App is the only way to kick off the
-apply workflow from a comment) and reading team membership for
-authorization, the App authors every check/status/comment/issue that
-crosses a workflow-run boundary:
+apply workflow from a comment) and reading the apply checks that name the
+reviewed plan run for authorization, the App authors every
+check/status/comment/issue that crosses a workflow-run boundary:
 
 - **Apply checks** (`apply / <stack> / <env>`) — created pending by
   `actions/summary`, completed by `actions/apply-cell` — both mint an App

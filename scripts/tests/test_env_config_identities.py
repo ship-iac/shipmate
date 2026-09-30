@@ -48,8 +48,8 @@ def test_an_environment_aws_block_names_its_replacement():
     )
 
 
-#: `repo-example-stacks-aws/.github/shipmate.toml`'s layout and environment entries as shipped
-#: for v0.41.0, verbatim.
+#: `repo-example-stacks-aws/.github/shipmate.toml` as shipped for v0.41.0, without its `gate`
+#: table: its `schema_version`, `layout` and environment entries, verbatim.
 _STACKS_AWS_V0_41_0 = """\
 schema_version = 1
 
@@ -94,8 +94,9 @@ _STACKS_AWS_VARIABLES = {
 
 
 def test_the_v0_41_0_sample_table_refuses_once_per_environment():
-    """The last released sample table, fed through the real parser, refuses all at once, and
-    each line names `identity` as the replacement.
+    """The last released sample table, as shipped for v0.41.0 without its `gate` table, fed
+    through the real parser, refuses all at once, and each line names `identity` as the
+    replacement.
 
     Mutation: drop the `aws` case from the entry key loop -- each line becomes the generic
     unknown-key text.

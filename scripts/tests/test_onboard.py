@@ -452,17 +452,6 @@ def test_run_prints_nothing_of_its_own(capsys):
     assert captured.out == ""
 
 
-def test_main_rejects_a_team_flag(capsys):
-    """Nothing in this script reads a team, so a `--team` flag would be a value nothing
-    reads. Mutation: add `ap.add_argument("--team", default="")`; `--key k` does not exist,
-    so `_read_key` exits too, and the assertion is on argparse's usage error.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard.main(["--team", "ops", "--app-id", "1", "--key", "k"])
-    assert e.value.code == 2
-    assert "unrecognized arguments: --team ops" in capsys.readouterr().err
-
-
 def test_main_refuses_a_non_numeric_app_id():
     """Mutation: `_APP_ID_RE.fullmatch` to `args.app_id.isdigit()`, which accepts
     the superscript digit below."""
