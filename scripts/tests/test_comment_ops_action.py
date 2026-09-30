@@ -600,6 +600,22 @@ def test_the_doctor_token_can_comment_on_a_pull_request():
     assert "permission-issues" not in mint
 
 
+def test_the_authorization_mint_requests_only_checks_read_on_this_repository():
+    """Apply and unlock are authorized by the commenter's repository permission, read with the
+    workflow token, so the App token needs only the check-runs read of the reviewed-plan lookup.
+    The whole mapping, so any added scope or widened level turns this red.
+
+    Mutations: add the organization `members` permission back; widen `permission-checks` to
+    `write`."""
+    assert _mint_with("comment-ops", "apptoken") == {
+        "client-id": "${{ inputs.app-id }}",
+        "private-key": "${{ inputs.private-key }}",
+        "owner": "${{ github.repository_owner }}",
+        "repositories": "${{ github.event.repository.name }}",
+        "permission-checks": "read",
+    }
+
+
 def test_fullmint_requests_the_manifests_exact_permission_set():
     """The full-set probe mint must mirror app/manifest.json: a manifest bump that skips this step
     makes the permission-drift probe test the stale set, the drift the probe exists to catch. Parsed
@@ -1042,7 +1058,7 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     The third claim is executed by
     test_a_commenter_without_standing_is_refused_in_plans_own_words.
 
-    Mutations: add a login or team lookup to the `env:` vector; drop the reject step's
+    Mutations: add a login or permission lookup to the `env:` vector; drop the reject step's
     `authorized != 'true'` condition.
     """
     footer = cp.help_markdown().rsplit("\n", 1)[-1]

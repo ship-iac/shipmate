@@ -454,9 +454,9 @@ runs:
         private-key: ${{ inputs.private-key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
-        # Gather's reviewed-plan lookup reads check runs, within the manifest's `checks: write`.
-        # Unlock uses no scope but still mints: this outcome gates the resolve, gather and
-        # authorize `if:`s and the `App token unavailable` report.
+        # The reviewed-plan lookup reads check runs, which needs `checks: read` (within the
+        # manifest's `checks: write`). Unlock mints too, so an App missing from the repository
+        # is reported before any lookup runs.
         permission-checks: read
 
     - name: App token unavailable (App not installed?)
@@ -542,9 +542,9 @@ runs:
           -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
           --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
         echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
-        # The commenter's repository permission, on the workflow token. Into a variable, never
-        # a pipe (SIGPIPE under pipefail). A failed read or a value outside [a-z]+ is written
-        # empty, which authorize refuses; stderr stays in the log.
+        # The commenter's repository permission is read with the workflow token, into a variable
+        # because a pipe under pipefail turns SIGPIPE into a failure. A failed read or a value
+        # outside [a-z]+ is written empty, which authorize refuses, and stderr stays in the log.
         if ! perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$USER/permission" --jq '.permission'); then
           perm=""
         fi

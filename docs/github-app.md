@@ -222,9 +222,7 @@ organization level instead.** `vars` resolve organization → repository →
 environment, so a consumer repo holding no copy of its own reads the organization
 value and nothing else in the pipeline changes. Set it per repository wherever the
 App differs — one App per trust domain means one id per trust domain
-([`hardening.md`](hardening.md) §13–14).
-
-It is the only name that shares this way.
+([`hardening.md`](hardening.md) §13–14). It is the only name that shares this way.
 
 `gh variable set --org` defaults to `--visibility private`, which reaches
 private repositories only — an organization-wide default leaves every public

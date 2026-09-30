@@ -418,9 +418,8 @@ the base repository on every path — no checkout passes `repository:` — and a
 pull request is refused in `detect` before it plans.
 A job that checks out no consumer content reads the same file over the contents
 API instead — comment-ops, resolving the `gated = false` exemptions before it
-authorizes — with the
-same branch and the same refusal wording, so a consumer never gets two accounts
-of one problem depending on which job read it.
+authorizes — with the same branch and the same refusal wording, so a consumer
+never gets two accounts of one problem depending on which job read it.
 
 **`needs`, `explicit` and `gated` come from the default branch too.**
 They are read from the same parsed mapping as the environment table, and a branch
@@ -1245,9 +1244,12 @@ its own actionable rejection reason:
 
 - **write access**: the commenter's permission on the repository is `write` or
   `admin`, read from GitHub's repository permission for the commenter at comment
-  time. `read` and `none` are refused, and so are any other value and a
-  permission that could not be read. Every account can read a public repository,
-  so there a commenter who is not a collaborator has `read` and is refused;
+  time. GitHub reports the `maintain` role as `write` and `triage` as `read`,
+  and a custom role as the base role it extends, so a maintainer can apply and
+  a triager cannot. `read` and `none` are refused, and so are any other value
+  and a permission that could not be read. Every account can read a public
+  repository, so there a commenter who is not a collaborator has `read` and is
+  refused;
 - **not a draft**: the pull request is not a draft. `shipmate plan` plans a
   draft on request, so a draft head can carry apply checks with plan runs on
   them; a draft says the change is not ready for review, and applying it is

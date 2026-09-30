@@ -114,9 +114,9 @@ live probes.
   file is a note saying so, never an all-clear. Only the checks a file can be judged
   on by itself run here — the top-level keys, `schema_version`, `layout` and the
   environment entries; `tf_vars`-layout coverage and unused entries need a plan
-  matrix or a whole-tree environment scan, and the verdict names them as unchecked. A valid
-  file also gets its `needs` and
-  `explicit` values read back, absent ones included: `explicit` set on no entry
+  matrix or a whole-tree environment scan, and the verdict names them as
+  unchecked. A valid file also gets its `needs` and `explicit` values read back,
+  absent ones included: `explicit` set on no entry
   is legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Each variable reference is resolved
   and listed as `<key> from variable <NAME>`; an unset one is the invalid-file
