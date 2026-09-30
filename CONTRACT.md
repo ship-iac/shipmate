@@ -1789,13 +1789,14 @@ trigger alone closes two paths a trigger check alone would not:
 - Every GitHub-hosted Ubuntu image satisfies this, including the minimal
   `ubuntu-slim` image, whose
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
-  names the GitHub CLI. That one is load-bearing for the drift path: the
-  default-branch probe in engine `drift.yml`'s `detect` job calls `gh api`
-  before that job's `setup` step. Self-hosted runners must preinstall these
-  tools.
-- The engine's control jobs, which run neither `tofu` nor `terramate`, run on
-  `ubuntu-slim` whatever the caller passes; `docs/aws.md` §Runner choice lists
-  them. An account that cannot use that label leaves them waiting for a runner.
+  names the GitHub CLI. That one is load-bearing: the default-branch probe in
+  engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
+  step, and the control jobs below call `gh api` on the comment, apply, deploy
+  and unlock paths. Self-hosted runners must preinstall these tools.
+- The engine's ten control jobs, which run neither `tofu` nor `terramate`, run
+  on `ubuntu-slim` unconditionally: their workflows take no runner input.
+  `docs/aws.md` §Runner choice lists them. An account that cannot use that
+  label leaves them waiting for a runner.
 - The Python scripts have no third-party dependencies — nothing is
   `pip install`ed at runtime, so no Python setup step (or network access
   to a package index) is required or performed.

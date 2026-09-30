@@ -5,8 +5,9 @@ Every cell that runs `tofu init` on a plan or apply path restores the entry keye
 stack's `.terraform.lock.hcl`, exact match: a `restore-keys` prefix would hand one stack another
 stack's partial provider set. Only `drift-cell` saves, because it alone runs default-branch code;
 plan and apply cells run pull-request HCL. The save runs only after a restore that missed and an
-`init` that left at least one file in the cache, and it reuses the restore step's key, computed
-before `init` writes a lock the stack may gitignore.
+`init` that left at least one file in the cache, and it reuses the restore step's key, hashed
+before `init -reconfigure` can rewrite the committed lock (adding hashes, for example): a key
+hashed after it would name a lock no restore hashes.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
 save added to another cell, a dropped guard or a widened key. Each value is compared whole
@@ -103,14 +104,19 @@ def _engine_tree():
 
 
 def test_only_drift_saves_the_provider_cache():
-    savers = {
-        name
+    """Every `actions/cache/save` in the engine, by file and path, is drift's provider save and the
+    state save. Mutation: a save step with `path: ${{ runner.temp }}/.tofu-plugin-cache` added to
+    `plan-cell`."""
+    saves = sorted(
+        (name, (step.get("with") or {}).get("path"))
         for name, doc in _engine_tree().items()
         for step in _uses_steps(doc)
         if step["uses"].split("@")[0] == "actions/cache/save"
-        and "TF_PLUGIN_CACHE_DIR" in str((step.get("with") or {}).get("path"))
-    }
-    assert savers == {"drift-cell"}
+    )
+    assert saves == [
+        ("drift-cell", "${{ env.TF_PLUGIN_CACHE_DIR }}"),
+        ("state", "${{ inputs.path }}"),
+    ]
 
 
 def test_nothing_uses_the_combined_restore_and_save_action():
