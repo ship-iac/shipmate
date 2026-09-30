@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining fourteen
+shipmate:doctor -->`, upserted in place like the plan comment) combining thirteen
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -107,7 +107,6 @@ live probes.
   never runs completes green with nothing done, and a job whose `if:` is too
   wide runs on an event it was never meant to see. The fence in
   [`getting-started.md`](getting-started.md) has every expression.
-- **Whether the configured approver team resolves in the org.**
 - **Whether `.github/shipmate.toml` at the commit under examination is valid.**
   Read through the API at that commit, never from the default branch and never
   substituted by it, so a malformed or misplaced setting is reported on the pull
@@ -133,13 +132,11 @@ annotations GitHub already recorded on this commit's workflow runs — shipmate'
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only twelve of the fourteen probes can produce a finding from the plan path's
-own `annotate`-mode run (`actions/summary`). The approver-team probe runs only
-in `report` mode, because the plan path's App token is minted without
-`members: read` and could not look a team up, and
-the App-permission-drift probe only has something to report when a
-full-manifest permission-set mint was actually attempted, which only
-`shipmate doctor` does. Both are effectively comment-path-only. `doctor`
+Only twelve of the thirteen probes can produce a finding from the plan path's
+own `annotate`-mode run (`actions/summary`). The App-permission-drift probe
+only has something to report when a full-manifest permission-set mint was
+actually attempted, which only `shipmate doctor` does. It is effectively
+comment-path-only. `doctor`
 degrades to a "could not verify" warning naming each probe that was skipped on
 an API error, and always exits 0, so a probe failure never fails the plan run.
 One such failure is the App token lacking read access to `rules/branches` or

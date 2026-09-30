@@ -48,7 +48,8 @@ def test_an_environment_aws_block_names_its_replacement():
     )
 
 
-#: `repo-example-stacks-aws/.github/shipmate.toml` as shipped for v0.41.0, verbatim.
+#: `repo-example-stacks-aws/.github/shipmate.toml`'s layout and environment entries as shipped
+#: for v0.41.0, verbatim.
 _STACKS_AWS_V0_41_0 = """\
 schema_version = 1
 
@@ -56,11 +57,6 @@ schema_version = 1
 # and `TF_VAR_region` from its `region`. Under `tf_vars` every environment in the matrix
 # needs an entry with a non-empty region, or the run refuses at detect.
 layout = "tf_vars"
-
-# Who may drive shipmate by pull-request comment. Every repository declares its own
-# team: the engine reads this file and no repository variable.
-[gate]
-approver_team = "deployers"
 
 # The environment's own `region` inherits into the provider block, so the credentials
 # step gets the same region the stack does. `plan` and `apply` are separate roles: the

@@ -316,9 +316,6 @@ creates all of them, including `shipmate-engine` and its branch policy:
   ```toml
   layout = "tf_vars"
 
-  [gate]
-  approver_team = "platform-approvers"
-
   [environments.dev-eu]
   region = "eu-west-1"
   ```

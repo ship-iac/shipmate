@@ -454,10 +454,9 @@ runs:
         private-key: ${{ inputs.private-key }}
         owner: ${{ github.repository_owner }}
         repositories: ${{ github.event.repository.name }}
-        # The reviewed-plan lookup in `Gather authorization inputs` reads the head's check
-        # runs. `checks` is declared `write` in app/manifest.json, so read is a subset of what
-        # the installation already granted -- no re-approval, no consumer change. An unlock
-        # runs no lookup and uses no scope from this token.
+        # Gather's reviewed-plan lookup reads check runs, within the manifest's `checks: write`.
+        # Unlock uses no scope but still mints: this outcome gates the resolve, gather and
+        # authorize `if:`s and the `App token unavailable` report.
         permission-checks: read
 
     - name: App token unavailable (App not installed?)

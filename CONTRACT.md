@@ -561,9 +561,6 @@ key is refused rather than left at its default:
 
 ```toml
 layout = "tf_vars"
-
-[gate]
-approver_team = "platform-approvers"
 ```
 
 - **`approver_team`** — the bare GitHub team slug from the team's URL, not a
@@ -638,9 +635,6 @@ Any string value in the file may instead name a GitHub variable:
 
 ```toml
 layout = "tf_vars"
-
-[gate]
-approver_team = { vars = "APPROVERS" }
 
 [identities.prod]
 aws.apply = { vars = "PROD_APPLY_ROLE" }
@@ -1111,7 +1105,7 @@ only labels the output as shipmate's own.
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines fourteen live settings probes (gate ruleset,
+same way. It combines thirteen live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
@@ -1131,7 +1125,7 @@ the environment table at the commit under examination — `.github/shipmate.toml
 parsed and checked against every rule a file can be judged on by itself, so a
 malformed or misplaced setting is reported before it merges to the branch
 execution reads it from,
-approver-team resolvability, and App installation permission
+and App installation permission
 drift — see `docs/branch-protection.md`) with a harvest of the warning and
 failure annotations GitHub already recorded on this commit's workflow runs
 (shipmate's own and any other Actions workflow run on that commit;
@@ -1142,15 +1136,13 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only twelve of the fourteen
+plenty. Only twelve of the thirteen
 probes can produce a finding from the plan path's own `annotate`-mode
-invocation: the approver-team probe runs only in `report` mode, because the
-plan path's App token is minted without `members: read` and could not look a
-team up; the
+invocation: the
 App-permission-drift probe only has something to report when a
 full-manifest permission-set mint was actually attempted, which only
-`shipmate doctor` does. Both probes are effectively comment-path-only —
-they surface findings only via `shipmate doctor`, never on the plan path's
+`shipmate doctor` does. That probe is effectively comment-path-only —
+it surfaces findings only via `shipmate doctor`, never on the plan path's
 own annotations.
 
 Four of the probes are narrower than the repository. All three environment

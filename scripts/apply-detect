@@ -333,7 +333,7 @@ def main():
         return
 
     # Read after the unlock return, so `run_unlock`'s own `env_config` stays that
-    # path's single read. Structure-validated before the refusal reads `[gate]`;
+    # path's single read. Structure-validated before the refusal reads `gated`;
     # `validate` re-runs it below, which costs nothing and parses nothing again.
     table = bm.ec.read_table()
     bm.ec.validate_structure(table)

@@ -298,10 +298,7 @@ _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 _RESERVED_WORKLOADS = ("vars", "role", "region")
 
 #: Everything the file may declare at its top level.
-_TOP_KEYS = ("schema_version", "layout", "identities", "environments", "gate")
-
-#: Everything a `[gate]` table may declare.
-_GATE_KEYS = ("approver_team",)
+_TOP_KEYS = ("schema_version", "layout", "identities", "environments")
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
 #: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Lowercase
@@ -309,11 +306,6 @@ _GATE_KEYS = ("approver_team",)
 #: letter can never name an environment, so its flags and its `needs` would apply to
 #: nothing while reading as though they held.
 _ENV_ENTRY = re.compile(r"[a-z0-9][a-z0-9_-]*")
-
-#: A GitHub team slug: the bare name from the team's URL. Wider than an env entry, which is
-#: lowercase-only because its source forbids uppercase; a team slug has no such source. The
-#: empty string is legal separately -- a declared empty team authorizes nobody.
-_TEAM_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 
 
 def _mapping(value, where):
@@ -924,58 +916,6 @@ def _check_env_name(e, label, matched):
             )
 
 
-def validate_team_slug(team, key):
-    """`team`, or `SystemExit` unless it is a GitHub team slug or the empty string.
-
-    A charset rule, as environment names have one. An empty team is legal and authorizes
-    nobody. Anything else that is not a slug -- a display name carrying a space, an
-    `@org/team` reference, a pasted quote, a trailing space -- 404s in the membership lookup
-    that decides `is_member`, so every commenter is refused under a message naming the team
-    as though it had resolved.
-    """
-    _string(team, key)
-    if team and not _TEAM_SLUG.fullmatch(team):
-        raise SystemExit(
-            f"::error::{key} is {team!r}, which is not a GitHub team slug; use the bare "
-            f"slug from the team's URL (letters, digits, '-' and '_'), not a display name "
-            f"or an @org/team reference."
-        )
-    return team
-
-
-def _check_gate(gate, errors):
-    """One `[gate]` table's shape, one message per check into `errors`. A non-mapping
-    `[gate]` gets its one message and no per-key or `approver_team` check.
-
-    Strict keys, as an environment entry is: a misspelled gate key leaves the setting at its
-    default while the repository believes it declared one.
-    """
-    with _gather(errors) as shape:
-        _mapping(gate, "gate")
-    if not shape.ok:
-        return
-    for key in sorted(gate):
-        if key not in _GATE_KEYS:
-            errors.append(
-                f"::error::gate.{key} is not a key this engine implements. "
-                f"The gate table holds {', '.join(_GATE_KEYS)}."
-            )
-    if "approver_team" in gate:
-        with _gather(errors):
-            validate_team_slug(gate["approver_team"], "gate.approver_team")
-
-
-def gate_approver_team(table):
-    """The team slug whose members may `apply` and `unlock` by comment.
-
-    Those two verbs only: `plan`, `doctor` and `help` are gated by the commenter's
-    `author_association`, not by this team.
-
-    A declared empty team authorizes nobody, which is what an absent key does too.
-    """
-    return table.get("gate", {}).get("approver_team", "")
-
-
 def _check_version(table):
     """Refuse a file declaring a schema version this engine does not implement.
 
@@ -1020,9 +960,8 @@ def validate_structure(table):
     non-mapping `identities` skips every identity check and every entry's `identity` and
     `workloads` checks, a refused identity the role checks of each entry naming it, a
     non-mapping `environments` skips every entry, a non-mapping entry its own checks and its
-    `needs`, a non-mapping `tf_vars` its per-name checks, a refused `needs` list the cycle
-    check, and a non-mapping `[gate]` its per-key and `approver_team` checks. The role checks
-    of one workload stop at its first refusal.
+    `needs`, a non-mapping `tf_vars` its per-name checks, and a refused `needs` list the cycle
+    check. The role checks of one workload stop at its first refusal.
 
     Identities are checked before entries, each once, whatever the number of entries naming it.
 
@@ -1066,7 +1005,6 @@ def validate_structure(table):
         _mapping(environments, "environments")
     if shape.ok:
         _check_entries(environments, errors, identities)
-    _check_gate(table.get("gate", {}), errors)
     if errors:
         raise SystemExit("\n".join(errors))
     return table

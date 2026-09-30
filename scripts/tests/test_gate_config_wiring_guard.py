@@ -88,13 +88,12 @@ def _resolve(monkeypatch, tmp_path, table):
 
 
 def test_the_file_is_the_only_source(monkeypatch, tmp_path):
-    """Both outputs come from the table, sorted. Mutations: read either value from the
-    process environment -- there is no variable left to read, so the output goes empty and
-    every environment holds while the file says otherwise; or have `ungated_envs` return the
+    """The output comes from the table, sorted. Mutations: read the value from the process
+    environment -- there is no variable left to read, so the output goes empty and every
+    environment holds while the file says otherwise; or have `ungated_envs` return the
     `gated = true` entries -- `prod` replaces both dev entries."""
     table = {
         "layout": "folder",
-        "gate": {"approver_team": "platform"},
         "environments": {
             "dev-us": {"gated": False},
             "dev-eu": {"gated": False},
@@ -104,17 +103,13 @@ def test_the_file_is_the_only_source(monkeypatch, tmp_path):
     }
     assert _resolve(monkeypatch, tmp_path, table) == {
         "ungated_envs": "dev-eu,dev-us",
-        "approvers_team": "platform",
     }
 
 
-def test_a_file_declaring_no_gate_resolves_to_empty(monkeypatch, tmp_path):
-    """The minimum configuration: a file with no `[gate]` is valid, authorizes nobody by
-    team and exempts no environment. Mutation: return a non-empty default for either."""
-    assert _resolve(monkeypatch, tmp_path, {"layout": "tf_vars"}) == {
-        "ungated_envs": "",
-        "approvers_team": "",
-    }
+def test_a_file_declaring_no_exemption_resolves_to_empty(monkeypatch, tmp_path):
+    """The minimum configuration: a file with no `gated = false` entry is valid and exempts
+    no environment. Mutation: return a non-empty default."""
+    assert _resolve(monkeypatch, tmp_path, {"layout": "tf_vars"}) == {"ungated_envs": ""}
 
 
 def test_the_table_is_validated_before_it_is_resolved(monkeypatch, tmp_path):

@@ -763,7 +763,6 @@ def test_authorize_step_receives_the_resolved_ungated_envs():
         == "${{ steps.gate.outputs.ungated_envs }}"
     )
     assert "ungated-envs" not in action_yaml("comment-ops")["inputs"]
-    assert "approvers-team" not in action_yaml("comment-ops")["inputs"]
 
 
 #: The exemption report's whole body, hand-written. It claims PERMISSION and
