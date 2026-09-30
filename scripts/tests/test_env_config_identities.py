@@ -386,8 +386,9 @@ def test_a_workloads_value_that_is_not_a_list_of_distinct_names_refuses(workload
 )
 def test_a_varying_identity_needs_a_workloads_list(aws):
     """Mutations: drop the check -- every case validates; test only for `{workload}` when
-    deciding whether an identity varies -- the two map cases refuse with a role-map line for
-    workload `None` instead."""
+    deciding whether an identity varies -- the two map cases refuse naming workload `None`
+    instead: `role-map` as missing from `aws.apply`, `account-map` as missing from
+    `aws.account`."""
     assert _refusal(_named(aws)) == (
         "::error::environment dev-eu names identity dev, whose roles vary by workload, and "
         'lists no workloads. List the workloads it admits: workloads = ["…"].'
