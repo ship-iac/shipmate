@@ -97,7 +97,7 @@ jobs:
   summary:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     # The gate write goes through a minted App token, not GITHUB_TOKEN. Same environment as
     # apply-env-level.yml's `complete` job: deployment branch policy restricts it to the default
     # branch, which is also this workflow's own trigger, so it never blocks the real run.

@@ -20,7 +20,7 @@ jobs:
     # Display name only: the calling job is already `review`, and a called workflow's jobs display
     # as `<caller job> / <this name>`.
     name: decision
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     # How a callee reaches the App key, the same mechanism the `summary` job uses.
     environment: shipmate-engine
     permissions: {}

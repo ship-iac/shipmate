@@ -18,7 +18,7 @@ jobs:
   # Pre-flight, before any wave runs: verify that the environments the waves will bind exist,
   # then capture the apply-check ids. It needs no secret and no environment.
   snapshot:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     # Permissions cap at each `uses:` boundary, so every calling job must also grant checks:read or
     # this job fails at workflow-resolution time. actions:read is not decorative: on a private
     # repository, listing environments 403s with checks:read alone, and actions:read unlocks it
@@ -180,7 +180,7 @@ jobs:
   complete:
     needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7]
     if: ${{ always() && needs.snapshot.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     permissions: { actions: read }
     environment: shipmate-engine
     steps:

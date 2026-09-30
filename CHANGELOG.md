@@ -25,12 +25,17 @@ section below names the SHA the release tags.
 - **`scripts/onboard` takes no `--team`; the approver team is read from `[gate] approver_team` in the checkout's table.**
 - **`scripts/onboard --key` is needed only while `shipmate-engine` holds no App private key.**
 - **`scripts/onboard`'s closing checklist marks each item `ok`, `todo` or `cannot check` from what the run read.**
+- **The provider cache serves only stacks with a committed `.terraform.lock.hcl`, restored per stack, and only drift runs save it.**
+- **Plan cells render the text and JSON plans concurrently.**
+- **The control jobs that run no `tofu` run on `ubuntu-slim`.**
+- **Comments by bots or without `shipmate` start no comment-ops job.**
 
 ### Fixed
 
 - **The Terramate download retries transient errors three times, and a failed install names the release URL and the status it answers.**
 - **`shipmate / gate`'s hold is read from every page of the head's status contexts, so a head carrying many no longer lets an apply green a held gate.**
 - **`scripts/onboard` and `scripts/register-app` write UTF-8 on a Windows console, and the docs run them with `python`.**
+- **The provider cache no longer serves an empty entry saved by a detect job.**
 
 ## [0.41.0] — 2026-09-28
 

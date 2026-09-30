@@ -68,6 +68,13 @@ runs:
         [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
         echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
+    - name: Restore provider cache
+      if: ${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.stack)) != '' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.stack)) }}
+
     - name: Initialize the stack
       shell: bash
       env:
@@ -119,8 +126,16 @@ runs:
         STACK: ${{ inputs.stack }}
       run: |
         set -euo pipefail
-        tofu -chdir="$STACK" show -no-color stack.otplan > plan.txt
-        tofu -chdir="$STACK" show -json stack.otplan > plan.json
+        # plan.txt must stay `show -no-color` output: apply-cell re-renders the stored plan with
+        # this command, and the digest of that text binds the apply.
+        tofu -chdir="$STACK" show -no-color stack.otplan > plan.txt &
+        text_pid=$!
+        tofu -chdir="$STACK" show -json stack.otplan > plan.json &
+        json_pid=$!
+        rc=0
+        wait "$text_pid" || rc=1
+        wait "$json_pid" || rc=1
+        [ "$rc" -eq 0 ] || exit "$rc"
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
 
     - name: Encrypt plan artifact at rest (no-op without a passphrase)
