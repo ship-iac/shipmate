@@ -24,6 +24,7 @@ applies nothing, so it must never carry this record).
 
 import json
 import os
+import re
 
 
 def parse_ungated_envs(raw):
@@ -84,10 +85,35 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     return None
 
 
+def _permission_reason(permission, verb):
+    """Reject reason for the commenter's repository permission, or None to pass.
+
+    `write` and `admin` pass. Anything else refuses, and an unreadable value (empty, or
+    outside `[a-z]+`) is never quoted back. `fullmatch`, not `match` with `^...$`: `$`
+    matches before a trailing newline, so `"write\\n"` would pass the charset check."""
+    if permission in ("write", "admin"):
+        return None
+    if permission in ("read", "none"):
+        return (
+            f"not authorized: `shipmate {verb}` needs write access to this repository, "
+            f"and the commenter's permission is `{permission}`."
+        )
+    if not re.fullmatch(r"[a-z]+", permission):
+        return (
+            f"not authorized: could not read the commenter's permission on this repository, "
+            f"so `shipmate {verb}` was not run. This run's log has the API response; "
+            f"comment again."
+        )
+    return (
+        f"not authorized: `shipmate {verb}` needs write access to this repository, and "
+        f"GitHub reported the commenter's permission as `{permission}`, which this engine "
+        f"does not admit."
+    )
+
+
 def decide(
     *,
-    is_member,
-    approvers_team,
+    permission,
     review_decision,
     pr,
     plan_runs,
@@ -97,11 +123,13 @@ def decide(
 ):
     """Return (authorized, reason). reason is '' when authorized.
 
-    For verb="unlock": team membership is the only requirement. The checks
-    below authorize applying a reviewed plan; unlock applies none:
+    Both verbs first require the commenter's repository permission to be `write`
+    or `admin`. For verb="unlock" that is the only requirement. The checks below
+    authorize applying a reviewed plan; unlock applies none:
 
     - reviewDecision: an approval reviews a diff; unlock applies none. What
-      bounds unlock is team membership plus the <env>-apply environment.
+      bounds unlock is the commenter's write access plus the <env>-apply
+      environment.
     - mergeable: measured behaviour — a merged PR reports mergeable: null,
       which the apply path reads as "still computing" and refuses. A stranded
       lock from a cancelled post-merge deploy is reachable only from a merged
@@ -113,11 +141,9 @@ def decide(
       review does not bound it. Not a reachability argument like mergeable's —
       a draft's lock is releasable, it is its apply that must wait.
     """
-    if not is_member:
-        return False, (
-            f"not authorized: the commenter is not a member of the "
-            f"required approver team `{approvers_team}`."
-        )
+    permission_reason = _permission_reason(permission, verb)
+    if permission_reason:
+        return False, permission_reason
     if verb == "unlock":
         # Everything below authorizes applying a reviewed plan; unlock applies
         # none. See the docstring for why each check is inapplicable rather
@@ -170,7 +196,6 @@ def main():
     # from that head's own check-runs, so no entry can be for another head and
     # there is nothing left to compare a head SHA against.
     plan_runs = _read_json("PLAN_RUN_JSON", {})
-    is_member = os.environ.get("IS_MEMBER", "false") == "true"
     review_decision = os.environ.get("REVIEW_DECISION", "")
     # One read, used for both the decision and the reported output — the value
     # the decision used and the value reported can never differ.
@@ -180,8 +205,7 @@ def main():
     if verb not in ("apply", "unlock"):
         raise SystemExit(f"::error::unknown verb {verb!r}")
     ok, reason = decide(
-        is_member=is_member,
-        approvers_team=os.environ.get("APPROVERS_TEAM", ""),
+        permission=os.environ.get("PERMISSION", ""),
         review_decision=review_decision,
         pr=pr,
         plan_runs=plan_runs,

@@ -8,7 +8,6 @@
     "actions": "write",
     "pull_requests": "write",
     "contents": "read",
-    "members": "read",
     "checks": "write",
     "statuses": "write",
     "issues": "write",

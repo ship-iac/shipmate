@@ -684,14 +684,50 @@ def test_the_authorize_step_reads_the_files_the_gather_step_writes(tmp_path, mon
         monkeypatch.setenv(key, path)
     monkeypatch.chdir(tmp_path)
     for key, value in {
-        "IS_MEMBER": "true",
-        "APPROVERS_TEAM": "deployers",
+        "PERMISSION": "write",
         "REVIEW_DECISION": "NONE",
         "GITHUB_OUTPUT": "out.txt",
     }.items():
         monkeypatch.setenv(key, value)
     load_script("authorize").main()
     assert "authorized=true" in (tmp_path / "out.txt").read_text(encoding="utf-8")
+
+
+#: The whole `env:` of `Gather authorization inputs`, hand-written. `GH_TOKEN` is the workflow
+#: token, which the permission read inherits; `APP_TOKEN` serves only the check-runs read.
+_GATHER_ENV = {
+    "GH_TOKEN": "${{ github.token }}",
+    "APP_TOKEN": "${{ steps.apptoken.outputs.token }}",
+    "OWNER": "${{ github.repository_owner }}",
+    "USER": "${{ inputs.comment-user }}",
+    "PR_NUMBER": "${{ inputs.pr-number }}",
+    "SHIPMATE_VERB": "${{ steps.parse.outputs.route }}",
+    "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+}
+
+#: The whole `env:` of `Authorize`, hand-written. `PERMISSION` is the hop from gather's
+#: `permission` output; a wrong name reads as empty and refuses every commenter.
+_AUTHORIZE_ENV = {
+    "PERMISSION": "${{ steps.gather.outputs.permission }}",
+    "REVIEW_DECISION": "${{ steps.gather.outputs.review_decision }}",
+    "PR_JSON": "pr.json",
+    "PLAN_RUN_JSON": "plan_run.json",
+    "SHIPMATE_ENV": "${{ steps.parse.outputs.env }}",
+    "SHIPMATE_GATE_UNGATED_ENVS": "${{ steps.gate.outputs.ungated_envs }}",
+    "SHIPMATE_VERB": "${{ steps.parse.outputs.route }}",
+}
+
+
+def test_the_gather_step_binds_exactly_this_env():
+    """Mutation: set `GH_TOKEN` to `${{ steps.apptoken.outputs.token }}`, and the permission
+    read runs on the App token."""
+    assert _gather_step()["env"] == _GATHER_ENV
+
+
+def test_the_authorize_step_binds_exactly_this_env():
+    """Mutation: bind `PERMISSION` to `steps.gather.outputs.permissions`, which no step
+    writes."""
+    assert _authorize_step()["env"] == _AUTHORIZE_ENV
 
 
 def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs():
@@ -774,7 +810,7 @@ def test_authorize_step_supplies_every_env_var_authorize_reads():
 #: the two routes: narrow one back and an unlock parses, authorizes and then
 #: silently does nothing.
 _SHARED_ROUTE_IFS = {
-    "Mint App token (members:read, checks:read)": (
+    "Mint App token (checks:read)": (
         "${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}"
     ),
     "App token unavailable (App not installed?)": (
@@ -820,7 +856,7 @@ def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
 #: What both verb-carrying steps must bind SHIPMATE_VERB to, hand-written.
 #: test_authorize_step_supplies_every_env_var_authorize_reads is a subset-of-KEYS check and
 #: cannot see the value: with `Authorize`'s binding hardcoded to a literal `unlock`, every
-#: `shipmate apply` authorizes on team membership alone -- no mergeable, no review policy, no
+#: `shipmate apply` authorizes on write access alone -- no mergeable, no review policy, no
 #: reviewed plan -- and the whole suite stays green.
 _VERB_BINDING = "${{ steps.parse.outputs.route }}"
 
@@ -910,7 +946,7 @@ _STEP_NAMES = [
     "Doctor \u2014 mint an environments-scoped token for the plan-env secret probe",
     "Doctor \u2014 gather head SHA, declared environments, annotations",
     "Doctor \u2014 render and upsert the sticky comment",
-    "Mint App token (members:read, checks:read)",
+    "Mint App token (checks:read)",
     "App token unavailable (App not installed?)",
     "Resolve gate configuration",
     "Gate configuration unreadable",
@@ -993,7 +1029,7 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
 
     * the footer says it, of `plan` specifically;
     * `plan`'s own authorization step keys on the guard step's single classification of the
-      author and on nothing else -- not team membership, not the commenter's login, and not a
+      author and on nothing else -- not repository permission, not the commenter's login, and not a
       second `case` of its own. The whole `env:` vector pins every *input-borne* source of
       standing, which is what this action's steps read; the runner's own context
       (`$GITHUB_EVENT_PATH` and friends) is outside it, and passing values through `env:` is
@@ -1101,7 +1137,7 @@ def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(tm
 
 def test_no_step_on_the_plan_route_touches_the_app_key():
     """A plan needs no App token: the caller's own dispatch step mints for the dispatch, and the
-    route runs no membership or check-runs lookup. A plan step that quietly acquired one would widen
+    route runs no permission or check-runs lookup. A plan step that quietly acquired one would widen
     the private key's blast radius to a route nothing else about this action watches. Parsed steps,
     so a commented-out mint reads as absent, as it does at runtime; every step naming the route, so
     the shared acknowledgement is included rather than excused."""
