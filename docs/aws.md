@@ -223,11 +223,22 @@ prefix.
 
 ## Runner choice
 
-The documented fences in [`getting-started.md`](getting-started.md) and
-[`drift.md`](drift.md) pass no `runs_on:`, so every job runs on the
-`ubuntu-latest` default. Only the `plan` and `drift` jobs accept `runs_on:`.
-The three credential-free samples pass `runs_on: ubuntu-slim` to both; their
-cells download only `hashicorp/random`. An AWS repository's cells pull
+Only the `plan` and `drift` jobs accept `runs_on:`. The documented fences in
+[`getting-started.md`](getting-started.md) and [`drift.md`](drift.md) pass
+none, so those jobs run on the `ubuntu-latest` default. Outside them the
+runner is fixed:
+
+- `ubuntu-slim`: the control jobs, which run neither `tofu` nor `terramate`.
+  These are `guard` and `summary` in `apply.yml` and `apply-all.yml`, `review`
+  in `apply-review.yml`, `snapshot` and `complete` in `apply-env-level.yml`,
+  `summary` in `deploy.yml`, `guard` in `unlock.yml`, and `ops` in
+  `comment-ops.yml`.
+- `ubuntu-latest`: every detect job, which runs `terramate`, and every apply
+  and unlock cell, which runs `tofu`.
+
+The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
+`drift`; their cells download only `hashicorp/random`. An AWS repository's
+cells pull
 `hashicorp/aws`. Commit each stack's `.terraform.lock.hcl` to have the provider
 cache serve it ([`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards,
 "Consumer gitignore requirement"). With the lock gitignored, as it is in

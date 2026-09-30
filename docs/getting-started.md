@@ -390,11 +390,13 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: apply` with no `environment` | `all` | `apply-all.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
-Only the `plan` and `drift` jobs accept a `runs_on:` input; the engine's jobs
-behind every other call run on `ubuntu-latest`. The fence below omits it, as
-`repo-example-stacks-aws` does, so those two run on `ubuntu-latest` too. Pass it
-only for a different label your plan actually offers; one it does not leaves
-every job of that call waiting for a runner that never arrives.
+Only the `plan` and `drift` jobs accept a `runs_on:` input. Behind every other
+call the engine's detect jobs and cells run on `ubuntu-latest` and its control
+jobs on `ubuntu-slim` ([`aws.md`](aws.md) §Runner choice). The fence below
+omits it, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
+`ubuntu-latest` too. Pass it only for a different label your plan actually
+offers; one it does not leaves every job of that call waiting for a runner that
+never arrives.
 
 ```yaml
 name: shipmate

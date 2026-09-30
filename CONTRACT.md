@@ -1791,6 +1791,9 @@ trigger alone closes two paths a trigger check alone would not:
   default-branch probe in engine `drift.yml`'s `detect` job calls `gh api`
   before that job's `setup` step. Self-hosted runners must preinstall these
   tools.
+- The engine's control jobs, which run neither `tofu` nor `terramate`, run on
+  `ubuntu-slim` whatever the caller passes; `docs/aws.md` §Runner choice lists
+  them. An account that cannot use that label leaves them waiting for a runner.
 - The Python scripts have no third-party dependencies — nothing is
   `pip install`ed at runtime, so no Python setup step (or network access
   to a package index) is required or performed.

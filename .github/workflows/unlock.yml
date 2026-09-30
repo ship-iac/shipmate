@@ -17,7 +17,7 @@ jobs:
   # requirement in scripts/authorize. A human cannot make github.actor a bot login, so this rejects
   # any human dispatch -- though it admits any bot actor with actions:write, not only this App.
   guard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     permissions: {}
     steps:
       - name: Reject dispatches that did not come from a bot actor

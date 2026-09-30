@@ -27,6 +27,7 @@ section below names the SHA the release tags.
 - **`scripts/onboard`'s closing checklist marks each item `ok`, `todo` or `cannot check` from what the run read.**
 - **The provider cache serves only stacks with a committed `.terraform.lock.hcl`, restored per stack, and only drift runs save it.**
 - **Plan cells render the text and JSON plans concurrently.**
+- **The control jobs that run no `tofu` run on `ubuntu-slim`.**
 
 ### Fixed
 

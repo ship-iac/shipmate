@@ -21,7 +21,7 @@ jobs:
   # comment and refreshing the gate when `detect` genuinely fails. `needs.guard.result == 'success'`
   # is false only for an unauthorised dispatch. No secrets, no environment, no checkout.
   guard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     permissions: {}
     steps:
       - name: Reject dispatches that did not come from a bot actor
@@ -151,7 +151,7 @@ jobs:
     # `always()` must still post the comment and refresh the gate when an envlevel failed or was
     # cancelled, and when `detect` itself failed: a `needs` cycle, a cell recording no plan run.
     if: ${{ always() && needs.guard.result == 'success' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as
     # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
     # the default branch, so a branch-authored workflow naming it is denied and never sees the key.
