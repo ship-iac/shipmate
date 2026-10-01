@@ -161,9 +161,12 @@ def cell_line(circle, stack, env, state, url=None, text=""):
 
 
 def header(verb, env=""):
-    """`### shipmate <verb> <env>`, `### shipmate <verb>` without `env`, `### shipmate` without
-    `verb` (a comment that did not parse). `env` is `_md_escape`d."""
-    return " ".join(["### shipmate", *(w for w in (verb, _md_escape(env)) if w)])
+    """`### shipmate <verb> <env>`, `### shipmate <verb>` without `env`, and `### shipmate`
+    without `verb` whatever `env` is (a comment that did not parse, or named no known verb).
+    Both words are `_md_escape`d."""
+    if not verb:
+        return "### shipmate"
+    return " ".join(["### shipmate", *(_md_escape(w) for w in (verb, env) if w)])
 
 
 def at_sha(sha):

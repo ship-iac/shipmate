@@ -190,11 +190,13 @@ def test_cell_line_escapes_author_controlled_names():
 
 
 def test_header_forms():
-    """Mutation: dropping `_md_escape(env)` reddens the escaped-environment case."""
+    """Mutations: dropping `_md_escape` reddens the escaped-environment case; keeping `env` when
+    `verb` is empty reddens the empty-verb-with-env case."""
     assert sc.header("plan") == "### shipmate plan"
     assert sc.header("apply", "x<y>") == "### shipmate apply x&lt;y&gt;"
     assert sc.header("apply", "dev-eu") == "### shipmate apply dev-eu"
     assert sc.header("") == "### shipmate"
+    assert sc.header("", "dev-eu") == "### shipmate"
 
 
 def test_at_sha_shortens_a_valid_sha_and_names_anything_else_unknown():

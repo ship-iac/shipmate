@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import sys
 
 import pytest
 from _loader import (
@@ -41,7 +42,7 @@ _GATE = "steps.guard.outputs.privileged_association"
 _CLAIM = "organization members and repository collaborators"
 # The doctor rejection's own sentence. `_CLAIM` alone no longer selects it: the
 # plan rejection makes the same promise, in its own words, about its own gate.
-_DOCTOR_REASON = r"\`doctor\` reports this repository's settings"
+_DOCTOR_REASON = "`doctor` reports this repository's settings"
 # Markers of a step that handles doctor's machinery or performs one of its
 # disclosure-bearing settings reads, regardless of how the step is conditioned.
 _DOCTOR_TOUCHES = (
@@ -460,7 +461,7 @@ def test_the_shipped_help_text_matches_the_gate_it_describes():
     later relaxation of the gate would leave the engine telling commenters something untrue. The
     three user-visible statements of the rule are pinned together: the help footer, the refusal
     comment, and the allowlist that enforces it."""
-    footer = cp.help_markdown().rsplit("\n", 1)[-1]
+    footer = cp.help_markdown(_RUN_URL).split("\n\n")[-2]
     assert _CLAIM in footer, footer
     assert _CLAIM in _ACTION
     assert _ALLOWLIST in _ACTION
@@ -781,31 +782,209 @@ def test_authorize_step_receives_the_resolved_ungated_envs():
     assert "ungated-envs" not in action_yaml("comment-ops")["inputs"]
 
 
-#: The exemption report's whole body, hand-written. It claims PERMISSION and
-#: never completion -- at comment time the dispatch has not run, so any verb
-#: about the outcome would be a claim this step cannot make.
-_EXEMPTION_BODY = (
-    ":memo: shipmate: environment \\`$ENVIRONMENT\\` is permitted to apply "
-    "without an approving review, per \\`gated = false\\` on its entry in "
-    "\\`.github/shipmate.toml\\` — see the apply result comment for what actually applied."
+_RUN_URL = "https://github.com/org/repo/actions/runs/7777"
+_FOOTER = f"[run]({_RUN_URL}). Comment `shipmate help` for the available commands."
+_PARSED_VERB = "${{ steps.parse.outputs.verb }}"
+_PARSED_ENV = "${{ steps.parse.outputs.env }}"
+
+#: Every reply step's shell body, hand-written: the comment comes from reply-comment alone, so
+#: no step formats a header, verdict or footer of its own.
+_REPLY_RUN = (
+    "set -euo pipefail\n"
+    'body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")\n'
+    'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" '
+    ">/dev/null\n"
+)
+
+#: Each reply step's header words, outcome and text, hand-written. `refused` where the engine
+#: decided not to run the command, `failed` where it could not.
+_REPLIES = {
+    "Reject malformed / reserved command": {
+        "SHIPMATE_REPLY_VERB": _PARSED_VERB,
+        "SHIPMATE_REPLY_ENV": _PARSED_ENV,
+        "SHIPMATE_REPLY_OUTCOME": "refused",
+        "SHIPMATE_REPLY_TEXT": "${{ steps.parse.outputs.error }}",
+    },
+    "Reject an unauthorized plan": {
+        "SHIPMATE_REPLY_VERB": "plan",
+        "SHIPMATE_REPLY_OUTCOME": "refused",
+        "SHIPMATE_REPLY_TEXT": "${{ steps.planauthz.outputs.reason }}",
+    },
+    "Doctor: reject a commenter without a privileged association": {
+        "SHIPMATE_REPLY_VERB": "doctor",
+        "SHIPMATE_REPLY_OUTCOME": "refused",
+        "SHIPMATE_REPLY_TEXT": (
+            "`doctor` reports this repository's settings, so it answers only organization "
+            "members and repository collaborators."
+        ),
+    },
+    "Doctor: App token unavailable": {
+        "SHIPMATE_REPLY_VERB": "doctor",
+        "SHIPMATE_REPLY_OUTCOME": "failed",
+        "SHIPMATE_REPLY_TEXT": (
+            "could not mint a GitHub App token. Is the shipmate App installed on this "
+            "repository? Ask an org admin to install it, then re-run `shipmate doctor`."
+        ),
+    },
+    "App token unavailable (App not installed?)": {
+        "SHIPMATE_REPLY_VERB": _PARSED_VERB,
+        "SHIPMATE_REPLY_ENV": _PARSED_ENV,
+        "SHIPMATE_REPLY_OUTCOME": "failed",
+        "SHIPMATE_REPLY_TEXT": (
+            "could not mint a GitHub App token. Is the shipmate App installed on this "
+            "repository (with checks:read)? Ask an org admin to install it, then retry."
+        ),
+    },
+    "Gate configuration unreadable": {
+        "SHIPMATE_REPLY_VERB": _PARSED_VERB,
+        "SHIPMATE_REPLY_ENV": _PARSED_ENV,
+        "SHIPMATE_REPLY_OUTCOME": "refused",
+        "SHIPMATE_REPLY_TEXT": (
+            "could not resolve the gate settings from `.github/shipmate.toml` on the default "
+            "branch, so this command was not run. The file is not merged there, it does not "
+            "validate, or a variable it references is unset or empty, this run's log says "
+            "which. Fix that and comment again."
+        ),
+    },
+    "Report the review exemption": {
+        "SHIPMATE_REPLY_VERB": "apply",
+        "SHIPMATE_REPLY_ENV": "${{ steps.authz.outputs.environment }}",
+        "SHIPMATE_REPLY_OUTCOME": "notice",
+        "SHIPMATE_REPLY_TEXT": (
+            "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an "
+            "approving review (`gated = false` in `.github/shipmate.toml`). The apply result "
+            "comment shows what applied."
+        ),
+    },
+    "Reject with reason": {
+        "SHIPMATE_REPLY_VERB": _PARSED_VERB,
+        "SHIPMATE_REPLY_ENV": _PARSED_ENV,
+        "SHIPMATE_REPLY_OUTCOME": "refused",
+        "SHIPMATE_REPLY_TEXT": "${{ steps.authz.outputs.reason }}",
+    },
+}
+
+
+def test_every_reply_step_names_its_header_outcome_and_text():
+    """The whole reply vector of every step that posts one, against the table above. A step
+    gaining or losing a reply, or a reply changing class, fails here.
+
+    Mutations: set `Doctor: App token unavailable`'s outcome to `refused`; drop
+    `SHIPMATE_REPLY_ENV` from `Reject with reason`.
+    """
+    got = {
+        s["name"]: {k: v for k, v in s["env"].items() if k.startswith("SHIPMATE_REPLY_")}
+        for s in action_steps("comment-ops")
+        if "SHIPMATE_REPLY_OUTCOME" in (s.get("env") or {})
+    }
+    assert got == _REPLIES
+
+
+def test_every_reply_step_posts_the_body_reply_comment_rendered():
+    """Mutation: post `-f body=":x: shipmate: $REASON"` in `Reject with reason` instead."""
+    for name in _REPLIES:
+        run = step_by("comment-ops", name=name)["run"]
+        if name == "Gate configuration unreadable":
+            assert run.startswith(_REPLY_RUN), run
+            assert run.rstrip().endswith("exit 1"), run
+        else:
+            assert run == _REPLY_RUN, name
+
+
+_EXPR = re.compile(r"\$\{\{ (.+?) \}\}")
+
+#: A `gh` that saves the comment body it is handed and answers as the API does.
+_BODY_GH = (
+    "#!/bin/bash\n"
+    'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+    "done\n"
+    "echo '{}'\n"
 )
 
 
-def _exemption_step():
-    return step_by("comment-ops", name="Report the review exemption")
+def _posted_body(tmp_path, name, context):
+    """Run step `name`'s shipped body under its own `env:`, each `${{ X }}` in it replaced by
+    `context[X]`, against a `gh` that saves the comment body; return that body."""
+    step = step_by("comment-ops", name=name)
+    for tool, text in (
+        ("gh", _BODY_GH),
+        ("python3", f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'),
+    ):
+        (tmp_path / tool).write_text(text, encoding="utf-8", newline="\n")
+        (tmp_path / tool).chmod(0o755)
+    context = {"github.token": "test_token", "inputs.pr-number": "42", **context}
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+        "GITHUB_ACTION_PATH": str(ACTIONS / "comment-ops"),
+        "GITHUB_REPOSITORY": "org/repo",
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_RUN_ID": "7777",
+    }
+    for key, value in step["env"].items():
+        env[key] = _EXPR.sub(lambda m: context[m[1]], str(value))
+    result = run_step(tmp_path, step["run"], env)
+    assert result.returncode == 0, result.stderr
+    return (tmp_path / "body.txt").read_text(encoding="utf-8")
+
+
+@bash_only
+def test_a_command_naming_no_known_verb_is_refused_under_the_bare_header(tmp_path):
+    """`shipmate aply dev-eu` parses to an empty verb and `dev-eu`: the header names neither.
+
+    Mutations: post `$ERROR` without reply-comment; keep the env in `header` when the verb is
+    empty.
+    """
+    body = _posted_body(
+        tmp_path,
+        "Reject malformed / reserved command",
+        {
+            "steps.parse.outputs.verb": "",
+            "steps.parse.outputs.env": "dev-eu",
+            "steps.parse.outputs.error": "unknown verb `aply` (try `shipmate help`)",
+        },
+    )
+    assert body == (
+        f"### shipmate\n\n🔴 refused: unknown verb `aply` (try `shipmate help`)\n\n{_FOOTER}"
+    )
+
+
+@bash_only
+def test_an_unauthorized_plan_is_refused_under_the_plan_header(tmp_path):
+    """Mutation: post `$REASON` without reply-comment."""
+    body = _posted_body(
+        tmp_path,
+        "Reject an unauthorized plan",
+        {"steps.planauthz.outputs.reason": _PLAN_FORK_REASON},
+    )
+    assert body == f"### shipmate plan\n\n🔴 refused: {_PLAN_FORK_REASON}\n\n{_FOOTER}"
 
 
 def test_the_exemption_report_fires_only_when_the_exemption_fired():
     """Not on `authorized == 'true'`: an ordinary reviewed apply is authorized too, and this
     sentence over it would be false."""
-    assert _exemption_step()["if"] == "${{ steps.authz.outputs.ungated_exemption == 'true' }}"
-    assert _exemption_step()["env"]["ENVIRONMENT"] == "${{ steps.authz.outputs.environment }}"
+    step = step_by("comment-ops", name="Report the review exemption")
+    assert step["if"] == "${{ steps.authz.outputs.ungated_exemption == 'true' }}"
 
 
-def test_the_exemption_report_claims_permission_never_completion():
-    run = _exemption_step()["run"]
-    assert f'-f body="{_EXEMPTION_BODY}"' in run, (
-        f"the exemption report's body is not the pinned sentence: {run!r}"
+@bash_only
+def test_the_exemption_report_claims_permission_never_completion(tmp_path):
+    """At comment time the dispatch has not run, so any verb about the outcome would be a claim
+    this step cannot make. The whole body, hand-written.
+
+    Mutation: map the step's outcome to `refused`.
+    """
+    body = _posted_body(
+        tmp_path,
+        "Report the review exemption",
+        {"steps.authz.outputs.environment": "dev-eu"},
+    )
+    assert body == (
+        "### shipmate apply dev-eu\n\n"
+        "⚪ dev-eu: ungated, permitted to apply without an approving review "
+        "(`gated = false` in `.github/shipmate.toml`). The apply result comment shows what "
+        "applied.\n\n"
+        f"{_FOOTER}"
     )
 
 
@@ -909,7 +1088,7 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
         ("comment-ops", "Resolve gate configuration"): "${{ inputs.github-vars }}",
         (
             "comment-ops",
-            "Doctor — render and upsert the sticky comment",
+            "Doctor: render and upsert the sticky comment",
         ): "${{ inputs.github-vars }}",
         (
             "summary",
@@ -954,13 +1133,13 @@ _STEP_NAMES = [
     "Acknowledge a command that changes no infrastructure",
     "Authorize plan",
     "Reject an unauthorized plan",
-    "Doctor \u2014 reject a commenter without a privileged association",
+    "Doctor: reject a commenter without a privileged association",
     "Mint App token for doctor",
-    "Doctor \u2014 App token unavailable",
-    "Doctor \u2014 probe the manifest's full permission set",
-    "Doctor \u2014 mint an environments-scoped token for the plan-env secret probe",
-    "Doctor \u2014 gather head SHA, declared environments, annotations",
-    "Doctor \u2014 render and upsert the sticky comment",
+    "Doctor: App token unavailable",
+    "Doctor: probe the manifest's full permission set",
+    "Doctor: mint an environments-scoped token for the plan-env secret probe",
+    "Doctor: gather head SHA, declared environments, annotations",
+    "Doctor: render and upsert the sticky comment",
     "Mint App token (checks:read)",
     "App token unavailable (App not installed?)",
     "Resolve gate configuration",
@@ -993,17 +1172,8 @@ _PLAN_ASSOCIATION_REASON = (
 )
 _PLAN_FORK_REASON = (
     "this pull request's head is in `someone/fork`, and shipmate plans only branches of this "
-    "repository — a fork's plan would execute the pull request's own Terramate/OpenTofu code "
+    "repository: a fork's plan would execute the pull request's own Terramate/OpenTofu code "
     "with everything the plan environment holds."
-)
-
-#: The plan rejection's whole body, hand-written. It renders whichever reason
-#: `planauthz` wrote; a body that hard-codes one of them again silently tells a
-#: fork's commenter to go and get a collaborator role.
-_PLAN_REJECT_RUN = (
-    "set -euo pipefail\n"
-    'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f '
-    'body=":x: shipmate: $REASON" >/dev/null\n'
 )
 
 
@@ -1061,7 +1231,7 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     Mutations: add a login or permission lookup to the `env:` vector; drop the reject step's
     `authorized != 'true'` condition.
     """
-    footer = cp.help_markdown().rsplit("\n", 1)[-1]
+    footer = cp.help_markdown(_RUN_URL).split("\n\n")[-2]
     promise = next(s for s in footer.split(";") if _CLAIM in s)
     assert "`plan`" in promise, promise
     assert _CLAIM in _PLAN_ASSOCIATION_REASON
@@ -1078,12 +1248,14 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
     assert reject["if"] == (
         "${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}"
     )
+    # The reply renders whichever reason `planauthz` wrote; a text that hard-codes one of them
+    # again tells a fork's commenter to go and get a collaborator role.
     assert reject["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
-        "REASON": "${{ steps.planauthz.outputs.reason }}",
+        **_REPLIES["Reject an unauthorized plan"],
     }
-    assert reject["run"] == _PLAN_REJECT_RUN
+    assert reject["run"] == _REPLY_RUN
 
 
 @bash_only

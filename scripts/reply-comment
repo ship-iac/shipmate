@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Print a one-verdict reply comment: a refusal, a failure or a notice.
+
+The bash sites in `actions/comment-ops` and `actions/dispatch` post their replies through this,
+so every one carries the shared header and footer from `summary-comment`. Reads:
+
+- `SHIPMATE_REPLY_VERB`, `SHIPMATE_REPLY_ENV`: the header words, `_md_escape`d there; an empty
+  verb gives `### shipmate`.
+- `SHIPMATE_REPLY_OUTCOME`: `refused` (the engine decided not to run the command), `failed` (it
+  could not), or `notice`. Anything else prints `::error::` to stderr and exits 1, so a caller
+  capturing stdout posts nothing.
+- `SHIPMATE_REPLY_TEXT`: the reason or notice, engine-authored and printed unescaped.
+
+The footer links this run (`current_run_url()`).
+"""
+
+import os
+import sys
+
+from _shipmate import _load, current_run_url, utf8_output
+
+sc = _load("summary-comment")
+
+VERDICTS = {"refused": "🔴 refused: ", "failed": "🔴 failed: ", "notice": "⚪ "}
+
+
+def body(verb, env, outcome, text, run_url):
+    """The whole comment body for `outcome`, which must be a key of `VERDICTS`."""
+    return f"{sc.header(verb, env)}\n\n{VERDICTS[outcome]}{text}\n\n{sc.footer(run_url)}"
+
+
+def main():
+    utf8_output()
+    outcome = os.environ.get("SHIPMATE_REPLY_OUTCOME", "")
+    if outcome not in VERDICTS:
+        print(
+            f"::error::SHIPMATE_REPLY_OUTCOME must be refused, failed or notice (got: {outcome})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(
+        body(
+            os.environ.get("SHIPMATE_REPLY_VERB", ""),
+            os.environ.get("SHIPMATE_REPLY_ENV", ""),
+            outcome,
+            os.environ.get("SHIPMATE_REPLY_TEXT", ""),
+            current_run_url(),
+        )
+    )
+
+
+if __name__ == "__main__":
+    main()
