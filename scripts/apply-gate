@@ -160,9 +160,9 @@ def plan_hashes_by_name(check_run_lines, app_id):
     """Map each App-authored apply check name to the sha256 of the plan text the trusted
     summary job published for it, read from the same `external_id` record.
 
-    A name is absent when its newest run records no 64-lowercase-hex `plan_sha256` -- most
-    often a check written before the engine recorded one. Absence is not an error here; each
-    caller decides what an unbound plan text means for the action it is about to take."""
+    A name is absent when its newest run records no 64-lowercase-hex `plan_sha256`. Absence is
+    not an error here; each caller decides what an unbound plan text means for the action it
+    is about to take."""
     out = {}
     for name, record in _records_by_name(check_run_lines, app_id).items():
         digest = record.get("plan_sha256")

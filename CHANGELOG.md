@@ -21,7 +21,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **Credentials live in `[identities.<name>]`; an environment names one with `identity` and lists the workloads it admits with `workloads`. The environment `aws` block, its per-tier and per-workload overrides and `aws.region` are retired, and each refuses naming its replacement.**
+- **Credentials live only in `[identities.<name>]`; an environment names one with `identity` and lists the workloads it admits with `workloads`.**
 - **A stack carrying two `workload/*` tags is refused at detect.**
 - **A workload tag outside the environment's `workloads` list is refused at detect, naming every such cell.**
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
@@ -44,6 +44,7 @@ section below names the SHA the release tags.
 - **`scripts/onboard` and `scripts/register-app` write UTF-8 on a Windows console, and the docs run them with `python`.**
 - **The provider cache no longer serves an empty entry saved by a detect job.**
 - **A stack name or annotation text spelling an HTML entity, such as `&#91;`, renders as written in a shipmate comment.**
+- **A `rocket` reaction that cannot be posted no longer fails an authorized comment command before its dispatch.**
 
 ## [0.41.0] — 2026-09-28
 

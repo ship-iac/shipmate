@@ -206,6 +206,29 @@ def test_the_rocket_reaction_stays_on_an_authorized_dispatch():
     assert "steps.verdict.outputs.authorized == 'true'" in block
 
 
+@bash_only
+def test_a_failed_rocket_reaction_does_not_fail_the_authorized_command(tmp_path):
+    """A failed step skips the caller's dispatch, so a failed cosmetic reaction would drop an
+    authorized command.
+
+    Mutation: drop `|| true` from the `rocket` POST -- the step exits non-zero with no notice.
+    """
+    gh_path = tmp_path / "gh"
+    gh_path.write_text("#!/bin/bash\nexit 1\n")
+    gh_path.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
+    env["GH_TOKEN"] = "test_token"  # noqa: S105
+    env["COMMENT_ID"] = "7"
+    env["GITHUB_REPOSITORY"] = "org/repo"
+
+    result = run_step(tmp_path, step_by("comment-ops", name="React on accept")["run"], env)
+    assert (result.returncode, result.stdout) == (
+        0,
+        "::notice title=comment-ops::command authorized (the caller's next step dispatches it)\n",
+    )
+
+
 def test_summary_doctor_step_reads_the_head_sha_it_was_given():
     """annotate mode must probe the same commit the plan ran on: without SHIPMATE_HEAD_SHA the pin
     probe's contents reads fall back to the default branch, where a pin bump on this PR is not

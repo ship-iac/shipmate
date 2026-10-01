@@ -106,21 +106,19 @@ def with_plan_runs(cells, plan_runs, plan_hashes):
     if missing:
         raise SystemExit(
             f"::error::apply aborted: no plan run recorded for {', '.join(missing)}: the "
-            "apply check names no plan run to apply from, most likely a check written "
-            "before this engine version, and post-merge possibly no apply check for that "
-            "cell at all. Re-plan these stacks on their pull request, then apply again; if "
-            "that pull request has already merged, a new pull request touching them plans "
-            "and applies them afresh."
+            "apply check names no plan run to apply from (post-merge, the cell may have no "
+            "apply check at all), so the apply is refused. Re-plan these stacks on their pull "
+            "request, then apply again; if that pull request has already merged, a new pull "
+            "request touching them plans and applies them afresh."
         )
     unbound = [_check_name(c["stack"], c["environment"]) for c, _, digest in named if not digest]
     if unbound:
         raise SystemExit(
             f"::error::apply aborted: no plan-text digest recorded for {', '.join(unbound)}: "
             "the reviewed plan text cannot be checked against the plan that would be applied, "
-            "so this apply is refused rather than run unverified. The check was written before "
-            "this engine version. Re-plan these stacks on their pull request, then apply "
-            "again; if that pull request has already merged, a new pull request touching them "
-            "plans and applies them afresh."
+            "so this apply is refused rather than run unverified. Re-plan these stacks on "
+            "their pull request, then apply again; if that pull request has already merged, a "
+            "new pull request touching them plans and applies them afresh."
         )
     return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, run, digest in named]
 

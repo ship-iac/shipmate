@@ -2911,7 +2911,7 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
 
     Mutations: print a second `[environments.dev-eu]` header in the template, the duplicate
     form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`; or write the
-    retired `aws.plan.role = "shipmate-plan"` -- `validate_structure` refuses `role` as a
+    one-role `aws.plan.role = "shipmate-plan"` -- `validate_structure` refuses `role` as a
     workload name.
     """
     onboard._checklist(ctx(root=tmp_path))
