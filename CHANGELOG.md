@@ -43,6 +43,7 @@ section below names the SHA the release tags.
 - **`shipmate / gate`'s hold is read from every page of the head's status contexts, so a head carrying many no longer lets an apply green a held gate.**
 - **`scripts/onboard` and `scripts/register-app` write UTF-8 on a Windows console, and the docs run them with `python`.**
 - **The provider cache no longer serves an empty entry saved by a detect job.**
+- **A stack name or annotation text spelling an HTML entity, such as `&#91;`, renders as written in a shipmate comment.**
 
 ## [0.41.0] — 2026-09-28
 

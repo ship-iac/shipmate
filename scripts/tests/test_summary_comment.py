@@ -129,6 +129,17 @@ def test_md_escape_neutralizes_markdown_link_syntax():
     assert sc._md_escape("[x](https://e)") == "&#91;x&#93;(https://e)"
 
 
+def test_md_escape_neutralizes_an_entity_a_name_spells():
+    """`&` is escaped before the other replacements, and only where it starts an entity.
+
+    Mutations: drop the `&` escape -- `&#91;` reaches the comment and renders `[`; move it last
+    -- the `&#91;` the `[` escape wrote becomes `&amp;#91;`; escape every `&` -- `&&` is lost.
+    """
+    assert sc._md_escape("&#91;x&lt;&amp;[a && b]") == (
+        "&amp;#91;x&amp;lt;&amp;amp;&#91;a && b&#93;"
+    )
+
+
 CHECKS = {
     "shipmate / stacks/app / dev-eu": {"html_url": "https://ck/app-eu"},
     "shipmate / stacks/db / dev-us": {"html_url": "https://ck/db-us"},
