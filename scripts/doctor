@@ -1672,6 +1672,20 @@ def _one_line(s, limit=200):
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
+def _whole_items(items, sep, limit=400):
+    """`items` joined by `sep`, cut before the first item that would pass `limit`, so no env
+    name is shown half-cut."""
+    joined = sep.join(items)
+    if len(joined) <= limit:
+        return joined
+    shown = []
+    for item in items:
+        if len(sep.join([*shown, item, "…"])) > limit:
+            break
+        shown.append(item)
+    return sep.join([*shown, "…"])
+
+
 CONFIG_PATH = bm.ec.CONFIG_PATH
 #: The refusal lines one invalid-file finding shows. The finding lands in the PR comment and
 #: in an annotation, so it stays bounded however many errors the file holds.
@@ -1771,13 +1785,14 @@ def _config_defaults(table):
     """
     order = bm.ec.env_order(table)
     envs = bm.ec.explicit_envs(table)
-    shown = "; ".join(
-        f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())
+    shown = _whole_items(
+        [f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())],
+        "; ",
     )
     return [
         (
             NOTICE,
-            f"`needs` orders {_one_line(shown, 400)}: a bare `shipmate apply` applies "
+            f"`needs` orders {shown}: a bare `shipmate apply` applies "
             "one env-level fully before it starts the next."
             if order
             else "`needs`: declared by no environment, so every environment sits at one level, "
@@ -1785,7 +1800,7 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"`explicit = true` on {_one_line(', '.join(envs), 400)}: a bare "
+            f"`explicit = true` on {_whole_items(envs, ', ')}: a bare "
             "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             if envs
             else "`explicit`: set on no environment, so every environment applies on a bare "

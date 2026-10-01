@@ -4535,6 +4535,46 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
     ]
 
 
+def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
+    """Each defaults line is cut before the first env name that would pass 400 characters,
+    never inside one.
+
+    Mutations: render `shown` or the explicit list through `_one_line(..., 400)` again --
+    the last name shown is cut mid-text; drop the `…` -- the cut reads as the whole list.
+    """
+    name = "environment-with-a-long-name-{:02d}".format
+    table = {
+        "environments": {
+            name(i): {"explicit": True, **({"needs": [name(i - 1)]} if i else {})}
+            for i in range(20)
+        }
+    }
+    assert doctor._config_defaults(table) == [
+        (
+            doctor.NOTICE,
+            "`needs` orders "
+            "environment-with-a-long-name-01 after environment-with-a-long-name-00; "
+            "environment-with-a-long-name-02 after environment-with-a-long-name-01; "
+            "environment-with-a-long-name-03 after environment-with-a-long-name-02; "
+            "environment-with-a-long-name-04 after environment-with-a-long-name-03; "
+            "environment-with-a-long-name-05 after environment-with-a-long-name-04; "
+            "…: a bare `shipmate apply` applies one env-level fully before it starts the next.",
+        ),
+        (
+            doctor.NOTICE,
+            "`explicit = true` on "
+            "environment-with-a-long-name-00, environment-with-a-long-name-01, "
+            "environment-with-a-long-name-02, environment-with-a-long-name-03, "
+            "environment-with-a-long-name-04, environment-with-a-long-name-05, "
+            "environment-with-a-long-name-06, environment-with-a-long-name-07, "
+            "environment-with-a-long-name-08, environment-with-a-long-name-09, "
+            "environment-with-a-long-name-10, environment-with-a-long-name-11, "
+            "…: a bare `shipmate apply` skips those, and each needs its own "
+            "`shipmate apply <env>`.",
+        ),
+    ]
+
+
 #: A varying identity with two workloads listed out of alphabetical order, an apply-only
 #: identity named by a shared and by two unshared environments, one of them writing
 #: `workloads`, and an entry naming none.
