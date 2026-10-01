@@ -4601,6 +4601,12 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
     ]
 
 
+def test_a_first_item_over_the_budget_is_cut_inside_rather_than_dropped():
+    """Mutation: return `sep.join([*shown, "…"])` whatever `shown` holds -- the line is `…`."""
+    item = "a after " + ", ".join(f"predecessor-{i:02d}" for i in range(30))
+    assert doctor._whole_items([item, "b after a"], "; ") == item[:399] + "…"
+
+
 #: A varying identity with two workloads listed out of alphabetical order, an apply-only
 #: identity named by a shared and by two unshared environments, one of them writing
 #: `workloads`, and an entry naming none.

@@ -1674,7 +1674,8 @@ def _one_line(s, limit=200):
 
 def _whole_items(items, sep, limit=400):
     """`items` joined by `sep`, cut before the first item that would pass `limit`, so no env
-    name is shown half-cut."""
+    name is shown half-cut. A first item over `limit` on its own is cut inside instead, so
+    the line never shows nothing but the `…`."""
     joined = sep.join(items)
     if len(joined) <= limit:
         return joined
@@ -1683,7 +1684,7 @@ def _whole_items(items, sep, limit=400):
         if len(sep.join([*shown, item, "…"])) > limit:
             break
         shown.append(item)
-    return sep.join([*shown, "…"])
+    return sep.join([*shown, "…"]) if shown else _one_line(joined, limit)
 
 
 CONFIG_PATH = bm.ec.CONFIG_PATH
@@ -1881,7 +1882,8 @@ def config_status(ctx):
     describe — `_config_warnings` reports that case instead, and a status section beside a
     refusal would read as a second opinion.
 
-    Read a second time rather than shared with the probe: `ctx` cannot carry it
+    The examined commit's table is read a second time rather than shared with the probe:
+    `ctx` holds only the default branch's (`_default_branch_table`) and cannot carry this one
     (`test_the_config_probe_feeds_nothing_a_run_reads`), and a module-level cache would
     outlive a single run for the reason `_scan_workflow_texts` gives. `_contents_ref` pins
     a 40-char SHA, so both reads see the same bytes.
