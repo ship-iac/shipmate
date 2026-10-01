@@ -1,0 +1,15 @@
+
+OpenTofu will perform the following actions:
+
+  # random_id.e will be imported
+  # (imported from "AAAAAA")
+    resource "random_id" "e" {
+        b64_std     = "AAAAAA=="
+        b64_url     = "AAAAAA"
+        byte_length = 4
+        dec         = "0"
+        hex         = "00000000"
+        id          = "AAAAAA"
+    }
+
+Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.

@@ -476,6 +476,35 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
     )
 
 
+#: Fails every call and saves the comment body it is handed.
+_BODY_FAILURE_STUB = (
+    "#!/bin/bash\n"
+    'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+    "done\n"
+    "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+)
+
+
+@bash_only
+def test_a_failed_dispatch_posts_the_shared_failure_reply(tmp_path):
+    """The whole comment: header naming the verb and environment, a `failed` verdict, and the
+    footer that carries the run link.
+
+    Mutations: post the old `:x: shipmate:` sentence without reply-comment; set the outcome to
+    `refused`.
+    """
+    result, _ = _run_dispatch(
+        tmp_path, verb="apply", environment="dev-eu", gh_stub=_BODY_FAILURE_STUB
+    )
+    assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
+    assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
+        "### shipmate apply dev-eu\n\n"
+        "🔴 failed: the command was authorized, but dispatching its workflow failed, so no run "
+        "started. The error is in this run's log.\n\n"
+        f"[run]({_RUN_URL}). Comment `shipmate help` for the available commands."
+    )
+
+
 @bash_only
 def test_a_successful_dispatch_comments_nothing(tmp_path):
     """`summary` owns the pull request on a run that starts. This comment exists only for the

@@ -106,7 +106,7 @@ def _status_argv(state, title):
         "-f",
         "context=shipmate / gate",
         "-f",
-        f"description={title} — deploy env-level applies completed",
+        f"description={title} (deploy env-level applies completed)",
         "-f",
         "target_url=https://example.invalid/acme/demo/actions/runs/999",
     ]
@@ -170,7 +170,7 @@ _SLACK_RUN = (
     "# The `secrets` context is not available in a step's `if:`.\n"
     '[ -n "$SLACK" ] || exit 0\n'
     "python3 -c \"import json;open('p.json','w').write(json.dumps({'text':':rotating_light: "
-    "shipmate deploy failed on main — a wave apply failed or was cancelled.'}))\"\n"
+    "shipmate deploy failed on main: a wave apply failed or was cancelled.'}))\"\n"
     "curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' "
     '--data @p.json "$SLACK"\n'
 )

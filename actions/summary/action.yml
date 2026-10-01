@@ -20,7 +20,7 @@ inputs:
     description: >-
       '"true"' when a human named this plan (the plan workflow's workflow_dispatch leg). Such a
       run's own per-cell checks are attached to the ref it was dispatched on, not to the pull
-      request head, so they are mirrored onto the head here. Empty or "false" mirrors nothing —
+      request head, so they are mirrored onto the head here. Empty or "false" mirrors nothing:
       under a pull-request event those checks are already on the head, and a second copy would
       put two producers behind one check name. gate-state also reads it, with is-draft, to tell
       an autoplan of a draft from a requested plan.
@@ -174,7 +174,7 @@ runs:
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state" > gate.json
 
-    - name: Doctor — settings-drift warnings (annotations only, never blocks)
+    - name: "Doctor: settings-drift warnings (annotations only, never blocks)"
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -274,7 +274,7 @@ runs:
           doctor_warned=true
         fi
         if [ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$doctor_warned" = "false" ]; then
-          echo "nothing changed, no existing plan comment, no doctor findings — nothing to post"
+          echo "nothing changed, no existing plan comment, no doctor findings; nothing to post"
           exit 0
         fi
         if [ -n "$id" ]; then

@@ -133,7 +133,7 @@ def main():
             fh.write(f"lock_operation={lock['operation']}\n")
     if lock:
         print(
-            f"::notice title=lock-info::state lock held — id={lock['id']} "
+            f"::notice title=lock-info::state lock held: id={lock['id']} "
             f"created={lock['created']} operation={lock['operation']}"
         )
     else:

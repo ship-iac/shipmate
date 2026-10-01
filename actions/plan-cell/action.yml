@@ -8,7 +8,7 @@ inputs:
     description: Environment name, e.g. dev-eu.
     required: true
   expected-head:
-    description: The commit this run is planning, e.g. the pull request's head SHA. Empty is refused — a plan whose provenance is unrecorded cannot be applied.
+    description: The commit this run is planning, e.g. the pull request's head SHA. Empty is refused; a plan whose provenance is unrecorded cannot be applied.
     required: true
   plan-passphrase:
     description: Passphrase to encrypt the .otplan artifact at rest. Empty = plaintext.
@@ -22,7 +22,7 @@ inputs:
     required: false
     default: ""
   consumer-secrets:
-    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case — a consumer forwarding no secrets. Values are masked before anything is written.
+    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case (a consumer forwarding no secrets). Values are masked before anything is written.
     required: false
     default: ""
 runs:
@@ -38,12 +38,12 @@ runs:
       run: |
         set -euo pipefail
         if [ -z "${EXPECTED_HEAD:-}" ]; then
-          echo "::error::plan-cell needs the expected-head input — the commit this run is planning — and it is empty. The engine's plan workflow supplies it, so no consumer setting causes this. Report it with this run's link through the bug report template."
+          echo "::error::plan-cell needs the expected-head input (the commit this run is planning), and it is empty. The engine's plan workflow supplies it, so no consumer setting causes this. Report it with this run's link through the bug report template."
           exit 1
         fi
         observed=$(git rev-parse HEAD)
         if [ "$observed" != "$EXPECTED_HEAD" ]; then
-          echo "::error::plan-cell has $observed checked out but this run reports $EXPECTED_HEAD as the commit it is planning. The plan would describe a tree nobody reviewed — the checkout ref is not the planned commit. The engine's plan workflow supplies both, so no consumer setting causes this. Report it with this run's link through the bug report template."
+          echo "::error::plan-cell has $observed checked out but this run reports $EXPECTED_HEAD as the commit it is planning. The plan would describe a tree nobody reviewed: the checkout ref is not the planned commit. The engine's plan workflow supplies both, so no consumer setting causes this. Report it with this run's link through the bug report template."
           exit 1
         fi
         echo "head=$observed" >> "$GITHUB_OUTPUT"
@@ -169,16 +169,20 @@ runs:
       env:
         ENV: ${{ inputs.env }}
         STACK_NAME: ${{ inputs.stack }}
+        CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
+        # The heading is cosmetic: a failure to compute it falls back to the cell's names rather
+        # than failing the plan.
+        line=$(python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary" --step-line) || line="$STACK_NAME ($ENV)"
         {
-          echo "## $STACK_NAME / $ENV"
+          echo "## $line"
           echo '```'
           head -c 65536 plan.txt
           bytes=$(wc -c < plan.txt)
           echo ''
           echo '```'
           if [ "$bytes" -gt 65536 ]; then
-            echo "_Plan truncated at 64 KiB ($bytes bytes total) — full plan in this job's raw log._"
+            echo "_Plan truncated at 64 KiB ($bytes bytes total); the full plan is in this job's raw log._"
           fi
         } >> "$GITHUB_STEP_SUMMARY"
 

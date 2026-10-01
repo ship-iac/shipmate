@@ -1,12 +1,30 @@
 #!/usr/bin/env python3
-"""Write a plan cell's cell.json from env vars.
+"""Write a plan cell's cell.json from env vars, or print its step-summary line.
 
 Used by actions/plan-cell's `Write cell summary` step. Built from env vars rather than shell
 interpolation so an author-controlled stack/env cannot inject shell or break the JSON.
+
+`--step-line` prints the cell's line for the `Step summary` step: the plan comment's cell line
+without a link, from `STACK_NAME`, `ENV`, `CHANGED` and the counts in `plan.txt`.
 """
 
 import json
 import os
+import pathlib
+import sys
+
+
+def step_line():
+    # Imported here so the fail-closed cell.json path imports nothing beyond the stdlib.
+    from _shipmate import _load
+
+    sc = _load("summary-comment")
+    cell = {"changed": os.environ["CHANGED"] == "true"}
+    # The same derivation as summary-comment's load_cells, so the step summary and the comment
+    # name one state.
+    tally = sc.counts(pathlib.Path("plan.txt")) or ("?",) * 5
+    cell["add"], cell["change"], cell["destroy"], cell["import"], cell["forget"] = tally
+    return sc.cell_line(sc.emoji(cell), os.environ["STACK_NAME"], os.environ["ENV"], sc.state(cell))
 
 
 def main():
@@ -26,4 +44,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = sys.argv[1:]
+    if args == ["--step-line"]:
+        print(step_line())
+    elif args:
+        raise SystemExit(f"::error::plan-cell-summary takes no argument or --step-line, got {args}")
+    else:
+        main()

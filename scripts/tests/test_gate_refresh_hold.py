@@ -71,7 +71,7 @@ GREEN_ARGV = [
     "-f",
     "context=shipmate / gate",
     "-f",
-    "description=all applies complete — nothing left to apply",
+    "description=all applies complete, nothing left to apply",
     "-f",
     "target_url=https://example.invalid/acme/demo/actions/runs/999",
 ]

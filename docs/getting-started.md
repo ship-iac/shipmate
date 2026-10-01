@@ -362,7 +362,7 @@ pending with the draft reason. Mark the pull request ready, or comment
 **`name: shipmate` on a calling job is a contract literal, not decoration.**
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 that name is what makes the plan cells `shipmate / <stack> / <env>` and lets the
-plan comment's `[plan]` links resolve to them. The `plan`, `comment-ops` and
+plan comment's `plan` links resolve to them. The `plan`, `comment-ops` and
 `drift` jobs all carry it. Rename one and the run still happens; every one of
 those links falls back to the workflow-run page instead. `shipmate doctor`
 reports it.

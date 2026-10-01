@@ -1,11 +1,18 @@
 import io
 import json
+import pathlib
 
 import pytest
 from _loader import ENGINE as _ENGINE
 from _loader import load_script, run_lines, step_by
 
 sc = load_script("summary-comment")
+
+_COUNT_KEYS = ("add", "change", "destroy", "import", "forget")
+
+
+def _bare_app(url):
+    return f'🟡 stacks/app (dev-eu): +1 ~0 -0 <a href="{url}">plan</a>'
 
 
 def _cell(**kw):
@@ -16,6 +23,8 @@ def _cell(**kw):
         "add": 1,
         "change": 0,
         "destroy": 0,
+        "import": 0,
+        "forget": 0,
         "changed": True,
     }
     base.update(kw)
@@ -97,8 +106,9 @@ def test_emoji_verdicts():
     assert sc.emoji(_cell()) == "🟡"
 
 
-def test_md_escape_neutralizes_pipes_and_newlines():
-    assert sc._md_escape("a|b\nc") == "a\\|b c"
+def test_md_escape_keeps_pipes_and_neutralizes_newlines():
+    """Mutation: escape `|` as `&#124;` -- red. Mutation: drop the `\\n` replace -- red."""
+    assert sc._md_escape("a|b\nc") == "a|b c"
 
 
 def test_md_escape_neutralizes_angle_brackets():
@@ -144,86 +154,190 @@ def test_check_url_ignores_an_unprefixed_check_and_falls_back_to_the_run_url():
     assert sc.check_url(cell, {"a / dev": {"html_url": "https://ck/a"}}, RUN_URL) == RUN_URL
 
 
-def test_build_table_row_per_cell_with_emoji_counts_and_link():
-    cells = [
-        _cell(),
-        _cell(stack="stacks/db", stack_path="stacks/db", environment="dev-us", add=0, destroy=2),
-    ]
-    table = sc.build_table(cells, CHECKS, RUN_URL)
-    assert "| 🟡 | stacks/app | dev-eu | 1 | 0 | 0 | [plan](https://ck/app-eu) |" in table
-    assert "| 🟡 | stacks/db | dev-us | 0 | 0 | 2 | [plan](https://ck/db-us) |" in table
+SHA = "0123456789abcdef0123456789abcdef01234567"
+FOOT = "[run](https://gh/run/1). Comment `shipmate help` for the available commands."
+HEAD = "<!-- shipmate:summary -->\n### shipmate plan\n\n"
 
 
-def test_build_table_empty_case():
-    assert "_(no stacks changed)_" in sc.build_table([], {}, RUN_URL)
+def test_worst_orders_circles_worst_first():
+    """Mutation: reversing `CIRCLES` reddens every case."""
+    assert sc.CIRCLES == ("🔴", "🟠", "🟡", "⚪", "🟢")
+    assert sc.worst(["🟢", "🟡", "⚪"]) == "🟡"
+    assert sc.worst(["🟢", "🔴", "🟠"]) == "🔴"
+    assert sc.worst([]) == "🟢"
+
+
+def test_link_attribute_escapes_the_url():
+    """Mutation: dropping `quote=True` leaves the `"` raw, closing the attribute."""
+    assert sc.link('https://x/?a="b"&c=1', "plan") == (
+        '<a href="https://x/?a=&quot;b&quot;&amp;c=1">plan</a>'
+    )
+
+
+def test_cell_line_without_a_url_ends_at_the_state():
+    """Mutation: emitting `link(url or "", text)` unconditionally appends `<a href="">`."""
+    assert sc.cell_line("🟢", "a", "dev", "no changes") == "🟢 a (dev): no changes"
+    assert sc.cell_line("🟡", "a", "dev", "+1 ~0 -0", "https://u", "logs") == (
+        '🟡 a (dev): +1 ~0 -0 <a href="https://u">logs</a>'
+    )
+
+
+def test_cell_line_escapes_author_controlled_names():
+    """Mutation: dropping `_md_escape` from either name lets it close `<summary>` or form a
+    link."""
+    assert sc.cell_line("🟢", "x</summary>[a](b)", "e<v>", "no changes") == (
+        "🟢 x&lt;/summary&gt;&#91;a&#93;(b) (e&lt;v&gt;): no changes"
+    )
+
+
+def test_header_forms():
+    """Mutations: dropping `_md_escape` reddens the escaped-environment case; keeping `env` when
+    `verb` is empty reddens the empty-verb-with-env case."""
+    assert sc.header("plan") == "### shipmate plan"
+    assert sc.header("apply", "x<y>") == "### shipmate apply x&lt;y&gt;"
+    assert sc.header("apply", "dev-eu") == "### shipmate apply dev-eu"
+    assert sc.header("") == "### shipmate"
+    assert sc.header("", "dev-eu") == "### shipmate"
+
+
+def test_at_sha_shortens_a_valid_sha_and_names_anything_else_unknown():
+    """Mutations: `sha[:8]` reddens the valid case; replacing the hex check with `if sha`
+    reddens the uppercase case."""
+    assert sc.at_sha(SHA) == "at 0123456"
+    assert sc.at_sha("") == "at an unknown commit"
+    assert sc.at_sha(SHA.upper()) == "at an unknown commit"
+
+
+def test_footer_with_and_without_the_help_hint():
+    assert sc.footer(RUN_URL) == FOOT
+    assert sc.footer(RUN_URL, hint=False) == "[run](https://gh/run/1)"
+
+
+def test_verdict_reads_the_cells_only():
+    """Mutation: counting every cell as changing (`n = len(cells)`) renders `3 of 3`."""
+    unchanged = _cell(changed=False)
+    assert sc.verdict([], SHA) == "🟢 no changes at 0123456"
+    assert sc.verdict([unchanged, unchanged], SHA) == "🟢 no changes at 0123456"
+    assert sc.verdict([unchanged, _cell(), unchanged], SHA) == "🟡 1 of 3 cells change at 0123456"
+    assert sc.verdict([_cell()], SHA) == "🟡 1 of 1 cells change at 0123456"
+
+
+_BARE_APP = '🟡 stacks/app (dev-eu): +1 ~0 -0 <a href="https://ck/app-eu">plan</a>'
 
 
 def test_render_section_full_plan_in_diff_fence():
-    s = sc.render_section(_cell(), "  + resource added", "https://ck/app-eu", 10_000)
-    assert s.startswith("<details><summary>🟡 stacks/app / dev-eu — +1 ~0 -0</summary>")
-    assert "```diff\n+   resource added\n```" in s
-    assert s.endswith("</details>")
+    s = sc.render_section(_BARE_APP, "  + resource added", "https://ck/app-eu", 10_000)
+    assert s == (
+        f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   resource added\n```\n</details>"
+    )
 
 
 def test_render_section_truncates_to_limit_with_check_link():
     plan = "\n".join(f"  + resource_{i}" for i in range(5_000))
-    s = sc.render_section(_cell(), plan, "https://ck/app-eu", 3_000)
+    s = sc.render_section(_BARE_APP, plan, "https://ck/app-eu", 3_000)
     assert len(s) <= 3_000
-    assert "Truncated" in s and "https://ck/app-eu" in s
-    assert s.rstrip().endswith("</details>")
+    assert s.startswith(f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   resource_0\n")
+    assert s.endswith(
+        "\n```\n\n_Truncated, [full plan in the check run](https://ck/app-eu)._\n</details>"
+    )
 
 
-def test_render_section_degrades_to_link_only_when_first_line_exceeds_room():
-    # A single line longer than the truncated slice has no newline to cut at ("cut at a line
-    # boundary" per CONTRACT.md), so it must degrade to link-only rather than emit a
-    # mid-line-truncated fence.
-    plan = "x" * 5_000
-    s = sc.render_section(_cell(), plan, "https://ck/app-eu", 3_000)
-    assert "```" not in s
-    assert "https://ck/app-eu" in s
+def test_render_section_degrades_to_the_bare_line_when_first_line_exceeds_room():
+    # A single line longer than the truncated slice has no newline to cut at, so it degrades to
+    # the bare line rather than emit a mid-line-truncated fence.
+    assert sc.render_section(_BARE_APP, "x" * 5_000, "https://ck/app-eu", 3_000) == _BARE_APP
 
 
-def test_render_section_link_only_when_limit_tiny_or_plan_missing():
-    tiny = sc.render_section(_cell(), "  + x", "https://ck/app-eu", 250)
-    assert "```" not in tiny and "https://ck/app-eu" in tiny
-    missing = sc.render_section(_cell(), None, "https://ck/app-eu", 10_000)
-    assert "```" not in missing and "https://ck/app-eu" in missing
+def test_render_section_bare_line_when_limit_tiny_or_plan_missing():
+    assert sc.render_section(_BARE_APP, "  + x", "https://ck/app-eu", 250) == _BARE_APP
+    assert sc.render_section(_BARE_APP, None, "https://ck/app-eu", 10_000) == _BARE_APP
 
 
-def test_build_comment_marker_first_no_change_cells_have_no_details():
+def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
+    """Mutation: joining every section with one newline keeps the next line inside the
+    `<details>` HTML block, where its link renders literally."""
     cells = [
-        (_cell(changed=False, add=0), "no changes"),
-        (_cell(stack="stacks/db", stack_path="stacks/db", environment="dev-us"), "  + one"),
+        (_cell(), "  + one"),
+        (_cell(changed=False, stack="stacks/db", stack_path="stacks/db"), None),
+        (_cell(changed=False, stack="stacks/dns", stack_path="stacks/dns"), None),
     ]
-    body = sc.build_comment(cells, CHECKS, RUN_URL)
-    assert body.startswith(sc.MARKER)
-    assert body.count("<details>") == 1
-    assert "stacks/db / dev-us" in body
+    assert sc.build_comment(cells, CHECKS, RUN_URL, SHA) == (
+        HEAD + "🟡 1 of 3 cells change at 0123456\n\n"
+        f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   one\n```\n</details>\n\n"
+        '🟢 stacks/db (dev-eu): no changes <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/dns (dev-eu): no changes <a href="https://gh/run/1">plan</a>\n\n' + FOOT
+    )
 
 
-def test_build_comment_stays_under_budget_and_keeps_every_cells_link():
-    cells = []
-    for i in range(30):
-        c = _cell(stack=f"stacks/s{i:02}", stack_path=f"stacks/s{i:02}")
-        cells.append((c, "\n".join(f"  + resource_{j}" for j in range(500))))
-    body = sc.build_comment(cells, {}, RUN_URL)
+def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
+    """Mutation: sorting by `(stack, environment)` puts stacks/app (prod) first."""
+    _write_cell(
+        tmp_path,
+        _cell(environment="prod"),
+        "  + resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
+    )
+    _write_cell(
+        tmp_path,
+        _cell(stack="stacks/db", stack_path="stacks/db", environment="dev", changed=False),
+        "No changes. Your infrastructure matches the configuration.\n",
+    )
+    checks = {"shipmate / stacks/app / prod": {"html_url": "https://ck/app-prod"}}
+    body = sc.build_comment(sc.load_cells(str(tmp_path)), checks, RUN_URL, SHA)
+    assert body == (
+        HEAD + "🟡 1 of 2 cells change at 0123456\n\n"
+        '🟢 stacks/db (dev): no changes <a href="https://gh/run/1">plan</a>\n\n'
+        '<details><summary>🟡 stacks/app (prod): +1 ~0 -0 <a href="https://ck/app-prod">plan</a>'
+        "</summary>\n\n```diff\n+   resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n```\n"
+        "</details>\n\n" + FOOT
+    )
+
+
+def test_zero_cells_render_header_verdict_and_footer():
+    assert sc.build_comment([], {}, RUN_URL, SHA) == HEAD + "🟢 no changes at 0123456\n\n" + FOOT
+
+
+def _bare(i):
+    return f'🟡 s{i:03} (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">plan</a>'
+
+
+def _fold_out_rows(body, verdict):
+    """The plan rows of the body's first fold-out (cell 0's, truncated), and what follows it."""
+    opening = HEAD + verdict + f"\n\n<details><summary>{_bare(0)}</summary>\n\n```diff\n"
+    trailer = "\n```\n\n_Truncated, [full plan in the check run](https://gh/run/1)._\n</details>"
+    assert body.startswith(opening)
+    rows, rest = body[len(opening) :].split(trailer, 1)
+    return rows.split("\n"), rest
+
+
+def test_a_256_cell_fan_out_of_oversized_plans_keeps_every_cell_line():
+    """Every remaining cell's bare line is reserved before a fold-out is sized. Mutation:
+    dropping `reserve` from `render_section`'s limit lets cell 0 take the whole budget, and
+    the 255 bare lines after it push the body past the hard cap."""
+    giant = "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)
+    cells = [(_cell(stack=f"s{i:03}", stack_path=f"s{i:03}"), giant) for i in range(256)]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)
     assert len(body) <= sc.SIZE_BUDGET
-    for i in range(30):
-        assert f"stacks/s{i:02}" in body
+    rows, rest = _fold_out_rows(body, "🟡 256 of 256 cells change at 0123456")
+    assert set(rows) == {"+   r"}
+    assert rest == "\n\n" + "\n".join(_bare(i) for i in range(1, 256)) + "\n\n" + FOOT
 
 
-def test_build_comment_hard_cap_fallback_drops_details_never_the_table():
+def test_an_early_giant_plan_cannot_drop_a_later_cells_line():
+    """Mutation: dropping `reserve` from `render_section`'s limit sizes cell 0 to the whole
+    budget, and the later lines push the body past SIZE_BUDGET."""
     cells = [
-        (_cell(stack=f"stacks/s{i:03}", stack_path=f"stacks/s{i:03}"), "  + r") for i in range(300)
+        (_cell(stack="s000", stack_path="s000"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)),
+        (_cell(stack="s001", stack_path="s001"), "  + x"),
+        (_cell(stack="s002", stack_path="s002", changed=False), None),
     ]
-    body = sc.build_comment(cells, {}, RUN_URL)
-    assert len(body) <= sc.HARD_CAP
-    assert "stacks/s299" in body  # The table row is always present.
-
-
-def test_build_comment_footer_links_run():
-    body = sc.build_comment([], {}, RUN_URL)
-    assert RUN_URL in body
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)
+    assert len(body) <= sc.SIZE_BUDGET
+    rows, rest = _fold_out_rows(body, "🟡 2 of 3 cells change at 0123456")
+    assert set(rows) == {"+   r"}
+    assert rest == (
+        "\n\n" + _bare(1) + "\n"
+        '🟢 s002 (dev-eu): no changes <a href="https://gh/run/1">plan</a>\n\n' + FOOT
+    )
 
 
 def test_build_comment_footer_points_at_the_comment_commands():
@@ -232,31 +346,32 @@ def test_build_comment_footer_points_at_the_comment_commands():
     undiscoverable from the pull request, which the sticky comment fixes with one line pointing
     at `shipmate help` -- a pointer to the command list, not a report of doctor's output, so
     the plan comment stays free of any coupling to doctor."""
-    body = sc.build_comment([], {}, RUN_URL)
-    assert sc.FOOTER_HINT in body
+    body = sc.build_comment([], {}, RUN_URL, SHA)
+    assert body.endswith(sc.FOOTER_HINT)
     assert "shipmate help" in sc.FOOTER_HINT
     # No coupling back to doctor: this line names the command list and nothing about findings,
     # probes or the report.
     assert "doctor" not in sc.FOOTER_HINT
 
 
-def test_the_footer_hint_is_not_itself_a_shipmate_command():
-    """The hint ships inside a bot comment on every plan run. A line matching the command
-    grammar would make the plan comment a shipmate command; the `[bot]` loop guard would ignore
-    it, but relying on that alone is one deletion away from a retrigger loop."""
+def test_no_line_of_the_comment_is_itself_a_shipmate_command():
+    """The comment ships on every plan run. A line matching the command grammar would make it a
+    shipmate command; the `[bot]` loop guard would ignore it, but relying on that alone is one
+    deletion away from a retrigger loop."""
     cp = load_script("comment-parse")
-    for line in sc.build_comment([], {}, RUN_URL).splitlines():
+    cells = [(_cell(), "  + one"), (_cell(changed=False, stack="b", stack_path="b"), None)]
+    for line in sc.build_comment(cells, {}, RUN_URL, SHA).splitlines():
         assert not cp._SHIPMATE_LINE.match(line.strip()), line
 
 
-def test_build_comment_fails_loud_when_even_the_table_overflows():
+def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
     long_name = "s" * 400
     cells = [
         (_cell(stack=f"stacks/{long_name}{i:03}", stack_path=f"stacks/{long_name}{i:03}"), "  + r")
         for i in range(300)
     ]
     with pytest.raises(SystemExit, match="comment cap"):
-        sc.build_comment(cells, {}, RUN_URL)
+        sc.build_comment(cells, {}, RUN_URL, SHA)
 
 
 def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
@@ -307,9 +422,9 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
     line = "  + resource line padded to a fixed width for this test case\n"  # 63 chars.
     (d / "plan.txt").write_text(line * 1_112 + _MIXED)  # Over 70_000 chars, past SIZE_BUDGET.
     cells = sc.load_cells(str(tmp_path))
-    assert (cells[0][0]["add"], cells[0][0]["change"], cells[0][0]["destroy"]) == (1, 2, 2)
+    assert sc.state(cells[0][0]) == "+1 ~2 -2"
     assert len(cells[0][1]) == sc.SIZE_BUDGET
-    body = sc.build_comment(cells, {}, RUN_URL)
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)
     assert "Truncated" in body
 
 
@@ -337,13 +452,13 @@ _HEREDOC = (
     "\n"
 )
 _COUNTS_FIXTURES = {
-    "mixed": (_MIXED, (1, 2, 2)),
+    "mixed": (_MIXED, (1, 2, 2, 0, 0)),
     "no-changes": (
         "No changes. Your infrastructure matches the configuration.\n"
         "\n"
         "OpenTofu has compared your real infrastructure against your configuration\n"
         "and found no differences, so no changes are needed.\n",
-        (0, 0, 0),
+        (0, 0, 0, 0, 0),
     ),
     "outputs-only": (
         "Changes to Outputs:\n"
@@ -351,27 +466,30 @@ _COUNTS_FIXTURES = {
         "\n"
         "You can apply this plan to save these new output values to the OpenTofu\n"
         "state, without changing any real infrastructure.\n",
-        (0, 0, 0),
+        (0, 0, 0, 0, 0),
     ),
-    "import-only": ("Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.\n", (0, 0, 0)),
-    "forget": ("Plan: 0 to add, 0 to change, 0 to destroy, 1 to forget.\n", (0, 0, 0)),
-    "heredoc-above-tally": (_HEREDOC + "Plan: 1 to add, 2 to change, 2 to destroy.\n", (1, 2, 2)),
+    "import-only": ("Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.\n", (0, 0, 0, 1, 0)),
+    "forget": ("Plan: 0 to add, 0 to change, 0 to destroy, 1 to forget.\n", (0, 0, 0, 0, 1)),
+    "heredoc-above-tally": (
+        _HEREDOC + "Plan: 1 to add, 2 to change, 2 to destroy.\n",
+        (1, 2, 2, 0, 0),
+    ),
     "heredoc-only": (_HEREDOC, None),
     "two-tallies": (
         "Plan: 1 to add, 0 to change, 0 to destroy.\nPlan: 9 to add, 0 to change, 0 to destroy.\n",
         None,
     ),
     "empty": ("", None),
-    "crlf": (_MIXED.replace("\n", "\r\n"), (1, 2, 2)),
+    "crlf": (_MIXED.replace("\n", "\r\n"), (1, 2, 2, 0, 0)),
     "crlf-no-changes": (
         "No changes. Your infrastructure matches the configuration.\r\n",
-        (0, 0, 0),
+        (0, 0, 0, 0, 0),
     ),
     "lone-cr-in-author-text": (
         "            first\rPlan: 9 to add, 0 to change, 0 to destroy.\n" + _MIXED,
-        (1, 2, 2),
+        (1, 2, 2, 0, 0),
     ),
-    "past-size-budget": ("  + r\n" * (sc.SIZE_BUDGET // 6 + 1) + _MIXED, (1, 2, 2)),
+    "past-size-budget": ("  + r\n" * (sc.SIZE_BUDGET // 6 + 1) + _MIXED, (1, 2, 2, 0, 0)),
 }
 
 
@@ -408,9 +526,8 @@ def test_the_comment_counts_come_from_plan_text_not_cell_json(tmp_path):
         _cell(add=99, change=99, destroy=99),
         "  + resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
     )
-    body = sc.build_comment(sc.load_cells(str(tmp_path)), {}, RUN_URL)
-    assert "| 🟡 | stacks/app | dev-eu | 1 | 0 | 0 | [plan](" in body
-    assert "<summary>🟡 stacks/app / dev-eu — +1 ~0 -0</summary>" in body
+    body = sc.build_comment(sc.load_cells(str(tmp_path)), {}, RUN_URL, SHA)
+    assert f"<details><summary>{_bare_app(RUN_URL)}</summary>" in body.splitlines()
     assert "99" not in body
 
 
@@ -418,13 +535,15 @@ def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path
     """Mutation: printing the warning twice reddens the exact stdout comparison."""
     _write_cell(tmp_path, _cell())
     cells = sc.load_cells(str(tmp_path))
-    assert [(c["add"], c["change"], c["destroy"]) for c, _ in cells] == [("?", "?", "?")]
+    assert [tuple(c[k] for k in _COUNT_KEYS) for c, _ in cells] == [("?",) * 5]
     assert capsys.readouterr().out == (
         "::warning::plan text for stacks/app / dev-eu has no single OpenTofu tally line; "
         "its counts render as ?\n"
     )
-    body = sc.build_comment(cells, {}, RUN_URL)
-    assert "| 🟡 | stacks/app | dev-eu | ? | ? | ? | [plan](" in body
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)
+    assert '🟡 stacks/app (dev-eu): +? ~? -? <a href="https://gh/run/1">plan</a>' in (
+        body.splitlines()
+    )
 
 
 def test_the_warning_escapes_a_newline_in_an_untrusted_name(tmp_path, capsys):
@@ -439,11 +558,11 @@ def test_the_warning_escapes_a_newline_in_an_untrusted_name(tmp_path, capsys):
 
 def test_load_cells_accepts_a_cell_json_without_counts(tmp_path):
     cell = _cell()
-    for k in ("add", "change", "destroy"):
+    for k in _COUNT_KEYS:
         del cell[k]
     _write_cell(tmp_path, cell, _MIXED)
     [(loaded, _)] = sc.load_cells(str(tmp_path))
-    assert (loaded["add"], loaded["change"], loaded["destroy"]) == (1, 2, 2)
+    assert tuple(loaded[k] for k in _COUNT_KEYS) == (1, 2, 2, 0, 0)
 
 
 def test_load_cells_still_fails_loud_without_changed(tmp_path):
@@ -527,7 +646,7 @@ def test_the_sticky_upsert_anchors_the_marker_at_the_body_start():
     block = _upsert_step()
     assert "startswith" in block
     assert "contains" not in block
-    assert sc.build_comment([], {}, "u").splitlines()[0] == sc.MARKER
+    assert sc.build_comment([], {}, "u", SHA).splitlines()[0] == sc.MARKER
 
 
 def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
@@ -615,7 +734,7 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     # a leftover from nothing.
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines()]
-    doctor = next(i for i, n in enumerate(names) if n.startswith("- name: Doctor"))
+    doctor = next(i for i, n in enumerate(names) if n.startswith('- name: "Doctor:'))
     upsert = next(i for i, n in enumerate(names) if n == "- name: Upsert sticky comment")
     assert doctor < upsert
     assert "> doctor.txt" in src
@@ -638,6 +757,7 @@ def _run_main(tmp_path, monkeypatch, cells, stdin=""):
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://gh")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    monkeypatch.setenv("HEAD_SHA", SHA)
     monkeypatch.setattr(sc.sys, "stdin", io.StringIO(stdin))
     sc.main()
     return out.read_text(encoding="utf-8")
@@ -657,9 +777,16 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     assert "${{ steps.build.outputs.count }}" in src
     assert "${{ steps.build.outputs.pending }}" in src
     # ...and the step producing them is the one those expressions name.
-    build = src.split("- name: Build comment + gate state", 1)[1].split("\n    - name:", 1)[0]
-    assert "id: build" in build
-    assert "scripts/summary-comment" in build
+    build = step_by("summary", name="Build comment + gate state")
+    assert build["id"] == "build"
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" < check-runs.jsonl' in (
+        run_lines(build)
+    )
+    # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`.
+    assert build["env"] == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "HEAD_SHA": "${{ inputs.head-sha }}",
+    }
 
 
 def test_main_reports_zero_count_when_no_cell_summaries_arrived(tmp_path, monkeypatch):
@@ -688,12 +815,40 @@ def test_marker_round_trip_guard_summary_action_matches_script():
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     assert src.count(sc.MARKER) >= 1, "upsert step no longer greps the script's marker"
     assert "scripts/summary-comment" in src, "summary action no longer calls summary-comment"
-    assert sc.build_comment([], {}, "u").startswith(sc.MARKER)
+    assert sc.build_comment([], {}, "u", SHA).startswith(sc.MARKER)
 
 
-def test_comment_links_to_this_run(tmp_path, monkeypatch):
-    # The summary job runs inside the plan run, so this run holds the logs and the artifacts
-    # the footer promises.
+def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(tmp_path, monkeypatch):
+    """The summary job runs inside the plan run, so this run holds the logs and the artifacts
+    the footer promises. Mutation: `main` passing `""` for the SHA renders `at an unknown
+    commit`."""
     _run_main(tmp_path, monkeypatch, [_cell()])
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
-    assert "[Logs & artifacts](https://gh/o/r/actions/runs/1)" in body
+    run = "https://gh/o/r/actions/runs/1"
+    assert body == (
+        HEAD + "🟡 1 of 1 cells change at 0123456\n\n"
+        f"<details><summary>{_bare_app(run)}</summary>\n\n```diff\n+   resource added\n\n"
+        "Plan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>\n\n"
+        f"[run]({run}). Comment `shipmate help` for the available commands."
+    )
+
+
+_FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.parametrize(
+    ("name", "tally", "state"),
+    [
+        ("import-forget", (1, 0, 0, 1, 1), "+1 ~0 -0, 1 import, 1 forget"),
+        ("import-only", (0, 0, 0, 1, 0), "+0 ~0 -0, 1 import"),
+        ("forget-only", (0, 0, 0, 0, 1), "+0 ~0 -0, 1 forget"),
+    ],
+)
+def test_import_and_forget_counts_from_raw_tofu_captures(name, tally, state):
+    """Fixtures: OpenTofu 1.12.4, `tofu show -no-color`, captured raw (the command plan-cell
+    runs; tofu omits a zero import or forget count from the tally line). Mutations: discarding
+    the import group reddens import-forget and import-only; rendering a zero import count
+    reddens forget-only."""
+    got = sc.counts(_FIXTURES / f"{name}.plan.txt")
+    assert got == tally
+    assert sc.state({"changed": True, **dict(zip(_COUNT_KEYS, got, strict=True))}) == state

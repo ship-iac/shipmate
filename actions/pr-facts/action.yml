@@ -1,6 +1,6 @@
 name: shipmate pr-facts
 description: >-
-  Resolve the pull request's facts — head SHA, head repository, base SHA, number, draft flag —
+  Resolve the pull request's facts (head SHA, head repository, base SHA, number, draft flag)
   for either plan trigger: from the event payload on a pull-request event, from the API by the
   dispatched pr_number otherwise. Every later job reads these outputs instead of the event
   payload, so the fork refusal, the draft skip and the checkout ref cannot read two different

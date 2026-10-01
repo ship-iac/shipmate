@@ -40,13 +40,13 @@ def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
     """
     assert step_by("comment-ops", name="Resolve gate configuration")["continue-on-error"] is True
     report = step_by("comment-ops", name="Gate configuration unreadable")
-    assert report["env"] == {
+    # The reply's own variables are pinned whole by `_REPLIES` in test_comment_ops_action.py.
+    assert {k: v for k, v in report["env"].items() if not k.startswith("SHIPMATE_REPLY_")} == {
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
     run = report["run"]
     assert 'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"' in run
-    assert r"\`.github/shipmate.toml\`" in run
     assert run.strip().endswith("exit 1")
 
 

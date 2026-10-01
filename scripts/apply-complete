@@ -100,7 +100,7 @@ def main():
     if snapshot and len(unmatched) == len(snapshot):
         print(
             RETRY_PREFIX + f"none of the {len(snapshot)} snapshot cells matched a job in this "
-            "run's listing — a run always lists its own wave jobs, so the listing cannot "
+            "run's listing. A run always lists its own wave jobs, so the listing cannot "
             "be trusted; refusing to complete nothing",
             file=sys.stderr,
         )

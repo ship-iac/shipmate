@@ -395,8 +395,8 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, m
             ],
         )
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan-text digest recorded for apply / stacks/app / dev-us "
-        "— the reviewed plan text cannot be checked against the plan that would be applied, so "
+        "::error::apply aborted: no plan-text digest recorded for apply / stacks/app / dev-us: "
+        "the reviewed plan text cannot be checked against the plan that would be applied, so "
         "this apply is refused rather than run unverified. The check was written before this "
         "engine version. Re-plan these stacks on their pull request, then apply again; if that "
         "pull request has already merged, a new pull request touching them plans and applies "
@@ -425,8 +425,8 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
             ],
         )
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan run recorded for apply / stacks/app / dev-us — the "
-        "apply check names no plan run to apply from — most likely a check written "
+        "::error::apply aborted: no plan run recorded for apply / stacks/app / dev-us: the "
+        "apply check names no plan run to apply from, most likely a check written "
         "before this engine version, and post-merge possibly no apply check for that "
         "cell at all. Re-plan these stacks on their pull request, then apply again; if "
         "that pull request has already merged, a new pull request touching them plans "

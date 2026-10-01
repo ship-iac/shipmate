@@ -29,7 +29,7 @@ def bodies(cells_dir, head_sha):
     plan_run = os.environ.get("GITHUB_RUN_ID", "")
     if not re.fullmatch(r"[0-9]+", plan_run):
         raise SystemExit(
-            "::error::GITHUB_RUN_ID is unset or not a decimal run id — every apply "
+            "::error::GITHUB_RUN_ID is unset or not a decimal run id: every apply "
             "check must record the plan run that produced its cell, or apply can "
             "never find the reviewed plan."
         )
@@ -41,13 +41,13 @@ def bodies(cells_dir, head_sha):
         cell = json.loads(cj.read_text(encoding="utf-8"))
         if "fingerprint" not in cell:
             raise SystemExit(
-                f"::error::{cj} has no 'fingerprint' key — plan-cell and summary "
+                f"::error::{cj} has no 'fingerprint' key: plan-cell and summary "
                 "are from mismatched engine revisions; re-run the plan."
             )
         txt = cj.with_name("plan.txt")
         if not txt.is_file():
             raise SystemExit(
-                f"::error::{cj} has no plan.txt beside it — the plan text a reviewer "
+                f"::error::{cj} has no plan.txt beside it: the plan text a reviewer "
                 "reads cannot be bound to the plan that will be applied. plan-cell and "
                 "summary are from mismatched engine revisions; re-run the plan."
             )

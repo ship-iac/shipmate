@@ -8,17 +8,17 @@ inputs:
     description: GitHub App private key (from the shipmate-engine environment secret).
     required: true
   environment:
-    description: Target environment, e.g. dev-eu. Carried by unlock always, by apply only when non-empty — an empty environment IS the bare `shipmate apply` (all non-explicit environments). Unused on the plan route, whose dispatched run carries no environment.
+    description: Target environment, e.g. dev-eu. Carried by unlock always, by apply only when non-empty; an empty environment IS the bare `shipmate apply` (all non-explicit environments). Unused on the plan route, whose dispatched run carries no environment.
     required: false
     default: ''
   verb:
-    description: Which job to run in shipmate.yml — plan, apply or unlock. Sent in the dispatch body, where the jobs' `if:` expressions read it. No default — a guessed verb runs one verb's job with another verb's inputs. `actions/comment-ops` exposes this as its `verb` output.
+    description: Which job to run in shipmate.yml (plan, apply or unlock). Sent in the dispatch body, where the jobs' `if:` expressions read it. No default; a guessed verb runs one verb's job with another verb's inputs. `actions/comment-ops` exposes this as its `verb` output.
     required: true
   ref:
     description: PR head SHA to check out and apply. Empty and unused on the plan route, whose dispatched run resolves the head from the pull request itself.
     required: true
   pr-number:
-    description: PR number the dispatched run belongs to — the plan body carries it beside the verb alone, and the unlock body not at all.
+    description: PR number the dispatched run belongs to; the plan body carries it beside the verb alone, and the unlock body not at all.
     required: true
 runs:
   using: composite
@@ -58,11 +58,15 @@ runs:
       run: |
         set -euo pipefail
         # Every refusal below lands on a run whose checks attach to the dispatch ref, so the pull
-        # request would show nothing. Link, never the API's answer: that has no bounded length and
-        # a comment body does. `|| true` so a cosmetic failure cannot mask the refusal's status.
+        # request would show nothing. The footer links this run, never the API's answer: that has
+        # no bounded length. `|| return 0`, `|| true`: a cosmetic failure cannot mask the status.
         say_no_run_started() {
+          local body
+          body=$(SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME=failed \
+            SHIPMATE_REPLY_TEXT="the command was authorized, but dispatching its workflow failed, so no run started. The error is in this run's log." \
+            python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment") || return 0
           GH_TOKEN="$COMMENT_TOKEN" gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            -f body=":x: shipmate: the command was authorized, but dispatching its workflow failed, so no run started. The error is in [this run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)." >/dev/null || true
+            -f body="$body" >/dev/null || true
         }
         # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
         # the input arrives with the empty string. Refuse rather than default: a default runs one

@@ -42,7 +42,7 @@ _NUMBER = re.compile(r"[1-9][0-9]{0,9}")
 KEYS = ("head_sha", "head_repo", "base_sha", "pr_number", "is_draft", "on_demand")
 
 _DELETED_FORK = (
-    "::error::this pull request's head repository no longer exists — a deleted fork — so "
+    "::error::this pull request's head repository no longer exists (a deleted fork), so "
     "there is nothing to check the fork refusal against, and planning it would run code "
     "from a repository that is gone. Close the pull request, or push the branch to this "
     "repository and open it here."
@@ -77,7 +77,7 @@ def _facts(pr, on_demand):
     missing = [key for key in ("head_sha", "base_sha", "pr_number") if not facts[key]]
     if missing:
         raise SystemExit(
-            "::error::this run's pull request is missing " + ", ".join(missing) + " — every "
+            "::error::this run's pull request is missing " + ", ".join(missing) + ". Every "
             "pull request has them, so the event payload was unreadable or the API answered a "
             "partial object. Nothing else names the commit to plan: without it the checkout "
             "stays on the base, the matrix comes out empty, and the gate greens with nothing "
@@ -87,7 +87,7 @@ def _facts(pr, on_demand):
     if state != "open":
         raise SystemExit(
             f"::error::pull request #{facts['pr_number']} is {state or 'in an unknown state'}, "
-            "not open — there is nothing to plan. Planning a closed pull request would queue "
+            "not open, so there is nothing to plan. Planning a closed pull request would queue "
             "apply checks on a head the deploy path has already been through."
         )
     return facts
@@ -141,7 +141,7 @@ def main():
             raise SystemExit(
                 "::error::this run has neither a pull request nor a pr_number input, so there "
                 "is nothing to plan. A pull-request event supplies the first and a dispatched "
-                "plan the second — declare a `pr_number` input under "
+                "plan the second. Declare a `pr_number` input under "
                 "`.github/workflows/shipmate.yml`'s `workflow_dispatch` trigger, and dispatch "
                 "with `verb: plan` (see `docs/getting-started.md`)."
             )

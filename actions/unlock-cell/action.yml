@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ""
   consumer-secrets:
-    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case — a consumer forwarding no secrets. Values are masked before anything is written.
+    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case (a consumer forwarding no secrets). Values are masked before anything is written.
     required: false
     default: ""
 runs:
@@ -88,7 +88,7 @@ runs:
           # operator reading that would take the cell for clean while it may still be locked. It
           # fails the cell rather than annotating: the engine failing to look is not a success,
           # and an annotation on a green run across dozens of cells is easy to miss.
-          echo "::error::could not determine whether a lock is held for $STACK_NAME / $ENV — see the log"
+          echo "::error::could not determine whether a lock is held for $STACK_NAME / $ENV, see the log"
           exit 1
         fi
 
@@ -119,7 +119,7 @@ runs:
         if [ -n "$LOCK_OPERATION" ]; then msg="$msg, operation $LOCK_OPERATION"; fi
         echo "::notice::$msg"
         {
-          echo "## $STACK_NAME / $ENV — state lock released"
+          echo "## 🟢 $STACK_NAME ($ENV): state lock released"
           echo ""
           echo "Released lock \`$LOCK_ID\`."
           echo ""

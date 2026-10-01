@@ -57,7 +57,7 @@ runs:
             # truncated listing matches a subset of cells and so slips past the script's
             # all-cells-unmatched floor.
             rc=75
-            echo "retry: the run jobs listing came back empty or unreadable — cannot tell which wave cells succeeded" \
+            echo "retry: the run jobs listing came back empty or unreadable; cannot tell which wave cells succeeded" \
               > "$RUNNER_TEMP/diagnostics.txt"
           fi
           # Ids accumulate and are deduped after the loop: replicas differ, so a later

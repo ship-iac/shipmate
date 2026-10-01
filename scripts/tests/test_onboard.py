@@ -823,7 +823,7 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
         (
             "differs",
             "shipmate-engine branch policy",
-            "also permits release/* — a workflow on those branches can still claim what "
+            "also permits release/*: a workflow on those branches can still claim what "
             "`shipmate-engine` scopes. Remove them by hand if that is not intended.",
         ),
         ("ok", "shipmate-engine SHIPMATE_APP_PRIVATE_KEY", ""),
@@ -1203,7 +1203,7 @@ def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monk
         (
             "differs",
             "SHIPMATE_APP_ID",
-            "repository has 123, asserted at organization level — delete it with "
+            "repository has 123, asserted at organization level; delete it with "
             "`gh variable delete SHIPMATE_APP_ID` or drop --vars-at-org",
         )
     ]
@@ -1970,7 +1970,7 @@ def test_gate_under_another_integration_id_is_reported_not_edited(monkeypatch):
             "differs",
             "gate ruleset",
             "`shipmate / gate` is required under integration_id 15368, not the shipmate "
-            "App (4326562) — a status from another identity satisfies it. Change it by hand.",
+            "App (4326562), so a status from another identity satisfies it. Change it by hand.",
         )
     ]
     assert onboard._exit_code() == 2
@@ -2066,7 +2066,7 @@ def test_an_invisible_shipmate_gate_ruleset_is_reported_not_fatal(monkeypatch):
             "the rulesets POST was rejected (HTTP 422). Most likely a `shipmate-gate` "
             "ruleset already exists but requires nothing on this branch, because its "
             "enforcement is `evaluate` or `disabled` and the effective-rules read cannot "
-            "see it — 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` "
+            "see it. A 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` "
             "before acting. Set it to active, or delete it and run this again.",
         )
     ]
@@ -2363,7 +2363,7 @@ todo          SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
 
 todo          `.github/shipmate.toml`
     A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`
-    table for every environment that needs a region or a cloud role — under `layout
+    table for every environment that needs a region or a cloud role. Under `layout
     = "tf_vars"` every environment needs one, carrying a region, or the run refuses.
     Tables are keyed by the logical environment name (`dev-eu`), never by its
     `-plan` / `-apply` half. Top-level settings go above the first table header: a
@@ -2394,7 +2394,7 @@ cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
     does not hold. Check it, or add the repository, at
     https://github.com/organizations/<org>/settings/apps/shipmate/installations
-    — substitute your org and the App name you registered (docs/github-app.md §4).
+    Substitute your org and the App name you registered (docs/github-app.md §4).
     The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
 todo          approving review before apply
@@ -2434,7 +2434,7 @@ cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
     does not hold. Check it, or add the repository, at
     https://github.com/organizations/<org>/settings/apps/shipmate/installations
-    — substitute your org and the App name you registered (docs/github-app.md §4).
+    Substitute your org and the App name you registered (docs/github-app.md §4).
     The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
 ok            approving review before apply

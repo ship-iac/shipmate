@@ -1,7 +1,14 @@
+import pathlib
+import shutil
+import subprocess
+import sys
+
 import pytest
 from _loader import load_script
 
 cp = load_script("comment-parse")
+
+_RUN_URL = "https://github.com/org/repo/actions/runs/7777"
 
 
 def test_valid_apply():
@@ -234,7 +241,7 @@ def test_malformed_command_points_at_help(body):
 
 
 def test_help_markdown_lists_every_verb():
-    md = cp.help_markdown()
+    md = cp.help_markdown(_RUN_URL)
     assert md.startswith(cp.HELP_MARKER)
     for verb, spec in cp.VERBS.items():
         assert f"shipmate {verb}" in md
@@ -245,12 +252,12 @@ def test_help_markdown_lists_every_verb():
 def test_help_has_no_bare_command_line():
     """A bare line matching the grammar would make the help comment itself a command and
     retrigger comment-ops on the bot's own comment."""
-    for line in cp.help_markdown().splitlines():
+    for line in cp.help_markdown(_RUN_URL).splitlines():
         assert cp._CMD.match(line.strip()) is None, line
     # is_command is set by _CMD or _SHIPMATE_LINE (^shipmate\b), and the per-line check above
     # covers only _CMD, so the property that matters is asserted too: parsing the whole rendered
     # comment must not be recognized as a command at all.
-    assert cp.parse(cp.help_markdown())["is_command"] is False
+    assert cp.parse(cp.help_markdown(_RUN_URL))["is_command"] is False
 
 
 def test_main_writes_route_output(tmp_path, monkeypatch):
@@ -266,12 +273,102 @@ def test_main_writes_route_output(tmp_path, monkeypatch):
     assert "route=apply" in lines
 
 
+def test_help_carries_the_shared_header_and_a_footer_without_the_hint():
+    """The help is the command list, so its footer links the run and names no help command.
+
+    Mutations: render the footer with the hint; restore `### shipmate commands`.
+    """
+    lines = cp.help_markdown(_RUN_URL).splitlines()
+    assert lines[:3] == [cp.HELP_MARKER, "### shipmate help", ""]
+    assert lines[-2:] == ["", f"[run]({_RUN_URL})"]
+
+
+def _main_output(tmp_path, monkeypatch, body):
+    out = tmp_path / "out.txt"
+    out.touch()
+    monkeypatch.setenv("COMMENT_BODY", body)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    cp.main()
+    return out.read_text(encoding="utf-8").splitlines()
+
+
+def test_main_names_a_reserved_verb_it_does_not_route(tmp_path, monkeypatch):
+    """`shipmate destroy` is refused, but its reply is headed `### shipmate destroy`.
+
+    Mutation: write the route as the verb.
+    """
+    assert _main_output(tmp_path, monkeypatch, "shipmate destroy") == [
+        "is_command=true",
+        "valid=false",
+        "verb=destroy",
+        "env=",
+        "route=",
+        "error=verb `destroy` is reserved and not yet implemented",
+    ]
+
+
+def test_main_writes_no_verb_for_an_unknown_one(tmp_path, monkeypatch):
+    """Mutation: write any parsed verb, and the reply would be headed `### shipmate aply dev-eu`."""
+    assert _main_output(tmp_path, monkeypatch, "shipmate aply dev-eu") == [
+        "is_command=true",
+        "valid=false",
+        "verb=",
+        "env=dev-eu",
+        "route=",
+        "error=unknown verb `aply` (try `shipmate help`)",
+    ]
+
+
+def test_main_writes_no_verb_for_a_malformed_line(tmp_path, monkeypatch):
+    """Mutation: write `r['verb']` without the `VERBS` check, and a line the grammar rejects
+    writes `verb=None`."""
+    assert _main_output(tmp_path, monkeypatch, "shipmate Apply") == [
+        "is_command=true",
+        "valid=false",
+        "verb=",
+        "env=",
+        "route=",
+        "error=malformed: expected `shipmate <verb> [env] [tag-filter]` (try `shipmate help`)",
+    ]
+
+
+def test_parse_does_not_import_summary_comment(tmp_path):
+    """Every PR comment runs comment-parse, so a summary-comment that fails at import must not
+    stop a command from parsing. Runs a copy of the script beside a summary-comment that raises.
+
+    Mutation: load summary-comment at module level, and the run exits non-zero with no output.
+    """
+    scripts = pathlib.Path(cp.__file__).parent
+    for name in ("comment-parse", "_shipmate.py"):
+        shutil.copy(scripts / name, tmp_path / name)
+    (tmp_path / "summary-comment").write_text("raise RuntimeError('broken')\n", encoding="utf-8")
+    out = tmp_path / "out.txt"
+    out.touch()
+    subprocess.run(
+        [sys.executable, str(tmp_path / "comment-parse")],
+        env={"COMMENT_BODY": "shipmate apply dev-eu", "GITHUB_OUTPUT": str(out)},
+        check=True,
+        timeout=60,
+    )
+    assert out.read_text(encoding="utf-8").splitlines() == [
+        "is_command=true",
+        "valid=true",
+        "verb=apply",
+        "env=dev-eu",
+        "route=apply",
+        "error=",
+    ]
+
+
 def test_main_help_markdown_flag(monkeypatch, capsys):
     # Pins the --help-markdown CLI surface: it must print help_markdown() to stdout and return
     # without ever needing GITHUB_OUTPUT. The variable is unset to prove that path is not
     # touched, since main() would raise KeyError otherwise.
     monkeypatch.setattr("sys.argv", ["comment-parse", "--help-markdown"])
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "org/repo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "7777")
     cp.main()
     assert capsys.readouterr().out.startswith(cp.HELP_MARKER)
 
@@ -290,11 +387,11 @@ def test_unlock_without_an_env_is_rejected():
 def test_plan_appears_in_the_help_output_as_active():
     """`plan` renders as a no-argument command, backticked, with an empty status column -- the
     rendering active verbs get."""
-    assert "| `shipmate plan` |  |" in cp.help_markdown()
+    assert "| `shipmate plan` |  |" in cp.help_markdown(_RUN_URL)
 
 
 def test_unlock_appears_in_the_help_output():
-    md = cp.help_markdown()
+    md = cp.help_markdown(_RUN_URL)
     assert "shipmate unlock <env>" in md
 
 

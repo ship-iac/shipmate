@@ -49,14 +49,14 @@ inputs:
     required: false
     default: ""
   results:
-    description: "join(needs.*.result, ',') from the caller — feeds the short-form nothing-pending sentence."
+    description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
     required: true
   gate-verdict:
-    description: Gate verdict from gate-refresh — 'complete' or anything else. Empty until the gate has run.
+    description: Gate verdict from gate-refresh, 'complete' or anything else. Empty until the gate has run.
     required: false
     default: ""
   head-sha:
-    description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one.
+    description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one, and the verdict line names it.
     required: true
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
@@ -78,7 +78,7 @@ runs:
       # transient artifact-API 5xx or a 403 must not skip `Mint App installation token` and
       # `Post apply result comment`, leaving a developer whose apply fully succeeded with no PR
       # comment at all. The renderer already handles an empty or partial cells directory --
-      # missing cells render as not-attempted rows, or the whole run degrades to the short form.
+      # missing cells render as not-attempted lines, one per expected cell, under the verdict.
       continue-on-error: true
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
@@ -165,6 +165,7 @@ runs:
         SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-comment" < jobs.jsonl

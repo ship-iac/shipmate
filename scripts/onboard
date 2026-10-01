@@ -322,7 +322,7 @@ def _ensure_policy(ctx, name):
         report(
             "differs",
             subject,
-            f"also permits {', '.join(extra)} — a workflow on those branches can still "
+            f"also permits {', '.join(extra)}: a workflow on those branches can still "
             f"claim what `{name}` scopes. Remove them by hand if that is not intended.",
         )
 
@@ -524,7 +524,7 @@ def _report_org_leftovers(ctx):
         report(
             "differs",
             APP_ID_VAR,
-            f"repository has {current}, asserted at organization level — delete it with "
+            f"repository has {current}, asserted at organization level; delete it with "
             f"`gh variable delete {APP_ID_VAR}` or drop --vars-at-org",
         )
 
@@ -688,7 +688,7 @@ def _ruleset_body(ctx):
 _NAME_TAKEN = (
     "the rulesets POST was rejected (HTTP 422). Most likely a `shipmate-gate` ruleset "
     "already exists but requires nothing on this branch, because its enforcement is "
-    "`evaluate` or `disabled` and the effective-rules read cannot see it — 422 has other "
+    "`evaluate` or `disabled` and the effective-rules read cannot see it. A 422 has other "
     "causes, so read `gh api repos/OWNER/REPO/rulesets` before acting. Set it to active, "
     "or delete it and run this again."
 )
@@ -808,7 +808,7 @@ def _reconcile_ruleset(ctx):
             "differs",
             subject,
             f"`{GATE}` is required under integration_id {chk.get('integration_id')!r}, not the "
-            f"shipmate App ({app_id}) — a status from another identity satisfies it. "
+            f"shipmate App ({app_id}), so a status from another identity satisfies it. "
             "Change it by hand.",
         )
     elif not params.get("strict_required_status_checks_policy"):
@@ -904,7 +904,7 @@ def _reconcile_shim(ctx):
 #: placeholder to substitute, so no line carrying one runs as printed.
 _TABLE_TEMPLATE = [
     "A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`",
-    "table for every environment that needs a region or a cloud role — under `layout",
+    "table for every environment that needs a region or a cloud role. Under `layout",
     '= "tf_vars"` every environment needs one, carrying a region, or the run refuses.',
     "Tables are keyed by the logical environment name (`dev-eu`), never by its",
     "`-plan` / `-apply` half. Top-level settings go above the first table header: a",
@@ -976,7 +976,7 @@ def _app_item(ctx):
             f"Reading `repos/{ctx['repo']}/installation` needs an App JWT, which this run",
             "does not hold. Check it, or add the repository, at",
             "https://github.com/organizations/<org>/settings/apps/shipmate/installations",
-            "— substitute your org and the App name you registered (docs/github-app.md §4).",
+            "Substitute your org and the App name you registered (docs/github-app.md §4).",
             "The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.",
         ],
     )

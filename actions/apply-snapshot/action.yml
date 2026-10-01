@@ -1,5 +1,5 @@
 name: shipmate apply-snapshot
-description: Map every cell in this run's wave matrices to its pre-existing App-authored apply-check ids, before any wave applies. Holds no App key — GITHUB_TOKEN's checks:read is enough to list check-runs.
+description: Map every cell in this run's wave matrices to its pre-existing App-authored apply-check ids, before any wave applies. Holds no App key; GITHUB_TOKEN's checks:read is enough to list check-runs.
 inputs:
   head-sha:
     description: PR head SHA carrying the pending apply checks.

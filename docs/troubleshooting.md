@@ -80,7 +80,7 @@ live probes.
   names a called workflow's check runs `<caller job> / <callee job>`, so that
   name is what makes the plan cell checks `shipmate / <stack> / <env>`. Under
   another name the plan still runs and the gate is unaffected; what is lost is
-  every `[plan]` link in the plan comment, which falls back to the workflow-run
+  every `plan` link in the plan comment, which falls back to the workflow-run
   page instead of the cell's own check. A job with no `name:` is judged by its
   job id, which is what GitHub displays then.
 - **Whether `shipmate.yml` can serve a dispatched verb at all.** That needs the
@@ -198,7 +198,7 @@ installation is missing permissions the manifest declares.
 **What the engine enforces.** `shipmate doctor` runs only for a commenter
 GitHub classifies as `OWNER`, `MEMBER` or `COLLABORATOR` in
 `github.event.comment.author_association` — organization members and repository
-collaborators. Any other commenter gets a single-line refusal saying exactly
+collaborators. Any other commenter gets a `🔴 refused:` reply saying exactly
 that; no App token is minted and no probe runs. `CONTRIBUTOR` is deliberately
 excluded — its only signal is one merged pull request, not a standing
 relationship to the repository. The gate fails closed: an association the engine
@@ -661,7 +661,7 @@ a well-formed one that names no role.
 ### A state lock is held
 
 Every apply of the cell fails acquiring the lock, and the apply result comment
-carries a 🔒 line under its table naming each such cell, the held lock's id, the
+carries a `state lock held:` note under its cell lines naming each such cell, the held lock's id, the
 command that releases it, and — when the backend reported a usable timestamp —
 when it was taken. Per-cell concurrency admits one apply at a time, so the
 holder was that cell's own most recent apply run — one that was cancelled or
@@ -746,7 +746,7 @@ in a fork is refused earlier still, at `detect` ("A fork's pull request is
 refused", below).
 
 **The gate is pending with the draft reason.** The description reads "the pull
-request was a draft when this run started, so nothing was planned — comment
+request was a draft when this run started, so nothing was planned; comment
 `shipmate plan`, or mark it ready". Autoplan skips a draft's plan jobs, so the
 gate has nothing to green over. Recover either way:
 
@@ -793,8 +793,9 @@ ruleset.
 
 ### An environment was held for review, or the apply was refused
 
-The apply comment says *"Held — the pull request's review state does not
-permit applying"*, or `shipmate apply` was refused with a review reason.
+The apply comment carries a line
+`⚪ <env>: held, the review state does not permit applying`, or
+`shipmate apply` was refused with a review reason.
 
 `gated = false` on an entry in `.github/shipmate.toml` exempts that environment
 from the review requirement and nothing else. A targeted `shipmate apply <env>`
@@ -858,14 +859,14 @@ file broken this way also refuses every plan run, which is the louder signal of
 the two.
 
 **A held environment is also an explicit environment.** When both causes apply
-it is listed once, under the held sentence, because the hold is the thing to
+it is listed once, on its held line, because the hold is the thing to
 clear first. Clearing it does not release the environment into a bare
 `shipmate apply`, though: its entry still holds `explicit = true`, so it still
-needs a targeted `shipmate apply <env>`. The held sentence names that command
-beside it: `` `prod` (explicit: once the hold clears, comment `shipmate apply prod`) ``.
+needs a targeted `shipmate apply <env>`. The held line names that command:
+``⚪ prod: held, the review state does not permit applying; once it clears, comment `shipmate apply prod` ``.
 
-**An ungated environment that is also explicit is not held.** It is reported as
-excluded, with the usual "run `shipmate apply <env>`" — and that targeted apply
+**An ungated environment that is also explicit is not held.** It gets the explicit
+line, ``🟡 <env>: left pending (explicit), comment `shipmate apply <env>` `` — and that targeted apply
 then succeeds without an approving review, because the environment is
 ungated. `gated` and `explicit` are independent: the first decides whether a
 review is required, the second only decides that a bare apply will not reach it.

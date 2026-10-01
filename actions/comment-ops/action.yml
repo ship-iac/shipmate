@@ -36,7 +36,7 @@ outputs:
     description: PR head SHA; empty on the plan route, whose dispatched run resolves the head from the pull request itself.
     value: ${{ steps.authz.outputs.head_sha }}
   verb:
-    description: The parsed verb, forwarded to actions/dispatch — plan, apply or unlock, which select a job in the consumer's one shipmate.yml. The `doctor` and `help` routes are answered in place and never reach a dispatch.
+    description: The parsed verb, forwarded to actions/dispatch (plan, apply or unlock, which select a job in the consumer's one shipmate.yml). The `doctor` and `help` routes are answered in place and never reach a dispatch.
     value: ${{ steps.parse.outputs.route }}
 runs:
   using: composite
@@ -101,10 +101,14 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
-        ERROR: ${{ steps.parse.outputs.error }}
+        SHIPMATE_REPLY_VERB: ${{ steps.parse.outputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_REPLY_OUTCOME: refused
+        SHIPMATE_REPLY_TEXT: ${{ steps.parse.outputs.error }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: $ERROR" >/dev/null
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
     - name: Post help
       if: ${{ steps.parse.outputs.route == 'help' }}
@@ -161,7 +165,7 @@ runs:
         HEAD_REPO=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.repo.full_name 2>/dev/null || true)
         if [ -n "$HEAD_REPO" ] && [ "$HEAD_REPO" != "null" ] && [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
           echo "authorized=false" >> "$GITHUB_OUTPUT"
-          echo "reason=this pull request's head is in \`$HEAD_REPO\`, and shipmate plans only branches of this repository — a fork's plan would execute the pull request's own Terramate/OpenTofu code with everything the plan environment holds." >> "$GITHUB_OUTPUT"
+          echo "reason=this pull request's head is in \`$HEAD_REPO\`, and shipmate plans only branches of this repository: a fork's plan would execute the pull request's own Terramate/OpenTofu code with everything the plan environment holds." >> "$GITHUB_OUTPUT"
           exit 0
         fi
         if [ -z "$HEAD_REPO" ] || [ "$HEAD_REPO" = "null" ]; then
@@ -178,24 +182,31 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
-        REASON: ${{ steps.planauthz.outputs.reason }}
+        SHIPMATE_REPLY_VERB: plan
+        SHIPMATE_REPLY_OUTCOME: refused
+        SHIPMATE_REPLY_TEXT: ${{ steps.planauthz.outputs.reason }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: $REASON" >/dev/null
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
-    - name: Doctor — reject a commenter without a privileged association
+    - name: "Doctor: reject a commenter without a privileged association"
       # Silence would be indistinguishable from a broken engine, so say why. GITHUB_TOKEN, not
-      # the App: this must answer even where the App is not installed. One line, no probe
-      # results -- the point is to disclose nothing. The wording names GitHub's classification
-      # of the author, not the "write access" this gate does not verify.
+      # the App: this must answer even where the App is not installed. A refusal reply with no
+      # probe results -- the point is to disclose nothing. The wording names GitHub's
+      # classification of the author, not the "write access" this gate does not verify.
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: doctor
+        SHIPMATE_REPLY_OUTCOME: refused
+        SHIPMATE_REPLY_TEXT: "`doctor` reports this repository's settings, so it answers only organization members and repository collaborators."
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: \`doctor\` reports this repository's settings, so it answers only organization members and repository collaborators." >/dev/null
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
     - name: Mint App token for doctor
       id: doctortoken
@@ -220,17 +231,21 @@ runs:
         # `actions: write` app/manifest.json declares, so no re-approval is needed.
         permission-actions: read
 
-    - name: Doctor — App token unavailable
+    - name: "Doctor: App token unavailable"
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome != 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: doctor
+        SHIPMATE_REPLY_OUTCOME: failed
+        SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository? Ask an org admin to install it, then re-run `shipmate doctor`."
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not mint a GitHub App token — is the shipmate App installed on this repository? Ask an org admin to install it, then re-run \`shipmate doctor\`." >/dev/null
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
-    - name: Doctor — probe the manifest's full permission set
+    - name: "Doctor: probe the manifest's full permission set"
       id: fullmint
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
       # A mint requesting every permission app/manifest.json declares fails when the
@@ -251,7 +266,7 @@ runs:
         permission-issues: write
         permission-environments: read
 
-    - name: Doctor — mint an environments-scoped token for the plan-env secret probe
+    - name: "Doctor: mint an environments-scoped token for the plan-env secret probe"
       id: envtoken
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
       # Its own mint, so a permission request no org owner has accepted yet costs this one
@@ -265,7 +280,7 @@ runs:
         repositories: ${{ github.event.repository.name }}
         permission-environments: read
 
-    - name: Doctor — gather head SHA, declared environments, annotations
+    - name: "Doctor: gather head SHA, declared environments, annotations"
       id: gatherdoc
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
       shell: bash
@@ -352,7 +367,7 @@ runs:
         fi
         echo "plan_run_ids=$(printf '%s' "$run_ids" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
 
-    - name: Doctor — render and upsert the sticky comment
+    - name: "Doctor: render and upsert the sticky comment"
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
       shell: bash
       env:
@@ -426,7 +441,7 @@ runs:
           # this annotation, invisible from the pull request, so the commenter's next move is
           # another `shipmate doctor` -- a second mint and 30-60s of probes for a report this
           # run already rendered. A failed listing skips the post so the next run can recover.
-          echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run — $retry_hint"
+          echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run: $retry_hint"
           exit 0
         fi
         # --paginate evaluates --jq per page, so a marker match on >1 page emits one id per
@@ -465,9 +480,14 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ steps.parse.outputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_REPLY_OUTCOME: failed
+        SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository (with checks:read)? Ask an org admin to install it, then retry."
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not mint a GitHub App token — is the shipmate App installed on this repository (with checks:read)? Ask an org admin to install it, then retry." >/dev/null
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
     - name: Resolve gate configuration
       id: gate
@@ -493,9 +513,14 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ steps.parse.outputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_REPLY_OUTCOME: refused
+        SHIPMATE_REPLY_TEXT: "could not resolve the gate settings from `.github/shipmate.toml` on the default branch, so this command was not run. The file is not merged there, it does not validate, or a variable it references is unset or empty, this run's log says which. Fix that and comment again."
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: could not resolve the gate settings from \`.github/shipmate.toml\` on the default branch, so this command was not run. The file is not merged there, it does not validate, or a variable it references is unset or empty — this run's log says which. Fix that and comment again." >/dev/null
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
         # The resolve's own failure, re-raised: `continue-on-error` above kept the job alive
         # long enough to post this, and a green run over an unauthorized command is not a
         # verdict this action may render.
@@ -613,18 +638,22 @@ runs:
 
     # A report, not a decision: authorize already decided. It exists because `reviewDecision`
     # keeps no history -- once the review lands, nothing else records that this apply was
-    # permitted without one. The wording matches apply-comment's bare-path sentence and claims
-    # permission, never completion: nothing has applied at comment time.
+    # permitted without one. The wording claims permission, never completion: nothing has
+    # applied at comment time.
     - name: Report the review exemption
       if: ${{ steps.authz.outputs.ungated_exemption == 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
-        ENVIRONMENT: ${{ steps.authz.outputs.environment }}
+        SHIPMATE_REPLY_VERB: apply
+        SHIPMATE_REPLY_ENV: ${{ steps.authz.outputs.environment }}
+        SHIPMATE_REPLY_OUTCOME: notice
+        SHIPMATE_REPLY_TEXT: "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an approving review (`gated = false` in `.github/shipmate.toml`). The apply result comment shows what applied."
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":memo: shipmate: environment \`$ENVIRONMENT\` is permitted to apply without an approving review, per \`gated = false\` on its entry in \`.github/shipmate.toml\` — see the apply result comment for what actually applied." >/dev/null
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
     - name: Reject with reason
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
@@ -632,7 +661,11 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
-        REASON: ${{ steps.authz.outputs.reason }}
+        SHIPMATE_REPLY_VERB: ${{ steps.parse.outputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_REPLY_OUTCOME: refused
+        SHIPMATE_REPLY_TEXT: ${{ steps.authz.outputs.reason }}
       run: |
         set -euo pipefail
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: $REASON" >/dev/null
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null

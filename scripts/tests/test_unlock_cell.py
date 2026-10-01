@@ -44,7 +44,7 @@ _EXPECTED_RUNS = [
 _RELEASE_IF = "${{ steps.probe.outputs.held == 'true' }}"
 
 _NO_LOCK = "::notice::no state lock held for app / dev-eu"
-_UNDETERMINED = "::error::could not determine whether a lock is held for app / dev-eu — see the log"
+_UNDETERMINED = "::error::could not determine whether a lock is held for app / dev-eu, see the log"
 
 
 def _live_lines():
@@ -186,6 +186,24 @@ def test_the_release_notice_omits_the_optional_fields_when_blank(tmp_path):
     assert "created" not in r.stdout
     assert "operation" not in r.stdout
     assert _RELEASE_ENV["LOCK_ID"] in summary
+
+
+@bash_only
+def test_the_release_summary_heads_with_the_cell_line_whole(tmp_path):
+    """Mutation: write `## $STACK_NAME / $ENV: state lock released` as the heading."""
+    r, summary = _run_body(
+        tmp_path, "release", {**_RELEASE_ENV, "LOCK_CREATED": "", "LOCK_OPERATION": ""}
+    )
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert summary == (
+        "## 🟢 app (dev-eu): state lock released\n"
+        "\n"
+        "Released lock `0123abcd-4567-89ef-0123-456789abcdef`.\n"
+        "\n"
+        "Releasing a lock is not recovery: the run that held it may have left\n"
+        "the environment part-changed. Re-run the deploy for this cell, and\n"
+        "re-plan first if its plan is now stale.\n"
+    )
 
 
 @bash_only

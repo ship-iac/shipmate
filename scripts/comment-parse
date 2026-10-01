@@ -16,6 +16,8 @@ import os
 import re
 import sys
 
+from _shipmate import _load, current_run_url
+
 # `shipmate` as a whole word, then verb, optional env, optional tag-filter. env is lower kebab
 # (matching GitHub env naming); tag-filter allows the on-disk tag charset. env is tried first
 # (leftmost), so a bare token that fits both charsets parses as the env.
@@ -58,7 +60,7 @@ VERBS = {
         "status": ACTIVE,
         "args": "",
         "desc": (
-            "Plan this pull request's changed stacks on demand — the same plan a push "
+            "Plan this pull request's changed stacks on demand: the same plan a push "
             "produces, including on a draft. Re-planning is safe and replaces the plan of "
             "record for the current head."
         ),
@@ -66,7 +68,7 @@ VERBS = {
     "destroy": {
         "status": RESERVED,
         "args": "[env]",
-        "desc": "Destroy an environment's stacks — not yet implemented.",
+        "desc": "Destroy an environment's stacks (not yet implemented).",
     },
     "unlock": {
         "status": ACTIVE,
@@ -150,17 +152,21 @@ def parse(body):
     return result
 
 
-def help_markdown():
-    """The command list, rendered from VERBS so it cannot drift from the parser.
+def help_markdown(run_url):
+    """The command list, rendered from VERBS so it cannot drift from the parser, under the shared
+    header and above a footer linking `run_url` without the help hint (this is the help).
 
     Every usage string is inside backticks or a table cell on purpose: a bare
     line matching `_CMD` would make this very comment a shipmate command and
     retrigger comment-ops on the bot's own comment
     (test_help_has_no_bare_command_line guards it).
     """
+    # Loaded here, not at import: every PR comment runs this script, and a summary-comment
+    # import error must not silence every command (test_parse_does_not_import_summary_comment).
+    sc = _load("summary-comment")
     lines = [
         HELP_MARKER,
-        "### shipmate commands",
+        sc.header("help"),
         "",
         "Comment one of these on a pull request:",
         "",
@@ -184,21 +190,25 @@ def help_markdown():
             "`doctor` and `help` are read-only, and `plan` changes no "
             "infrastructure. `help` answers anyone; `doctor` reports this "
             "repository's own settings, and it and `plan` answer only "
-            "organization members and repository collaborators — GitHub's "
+            "organization members and repository collaborators: GitHub's "
             "classification of the comment's author, not a check of write access."
         ),
+        "",
+        sc.footer(run_url, hint=False),
     ]
     return "\n".join(lines)
 
 
 def main():
     if "--help-markdown" in sys.argv:
-        print(help_markdown())
+        print(help_markdown(current_run_url()))
         return
     r = parse(os.environ.get("COMMENT_BODY", ""))
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"is_command={'true' if r['is_command'] else 'false'}\n")
         fh.write(f"valid={'true' if r['valid'] else 'false'}\n")
+        # A verb outside VERBS is written empty, so a reply to `shipmate aply` names no verb.
+        fh.write(f"verb={r['verb'] if r['verb'] in VERBS else ''}\n")
         fh.write(f"env={r['env'] or ''}\n")
         fh.write(f"route={r['route'] or ''}\n")
         fh.write(f"error={r['error'] or ''}\n")

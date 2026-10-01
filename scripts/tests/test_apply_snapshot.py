@@ -104,7 +104,7 @@ def test_an_empty_app_id_refuses_before_any_check_is_read(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.main()
     assert str(exc.value) == (
-        "::error::SHIPMATE_APP_ID is empty — set the SHIPMATE_APP_ID repo/org "
+        "::error::SHIPMATE_APP_ID is empty; set the SHIPMATE_APP_ID repo/org "
         "variable to the shipmate App id (see docs/github-app.md)."
     )
 
@@ -118,6 +118,6 @@ def test_an_empty_app_id_is_reported_before_malformed_input(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         apply_snapshot.main()
     assert str(exc.value) == (
-        "::error::SHIPMATE_APP_ID is empty — set the SHIPMATE_APP_ID repo/org "
+        "::error::SHIPMATE_APP_ID is empty; set the SHIPMATE_APP_ID repo/org "
         "variable to the shipmate App id (see docs/github-app.md)."
     )

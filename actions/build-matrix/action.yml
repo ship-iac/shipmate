@@ -16,7 +16,7 @@ inputs:
     default: ""
   head-sha:
     description: >-
-      The pull request's head commit — the commit this run is planning. Wire it to the
+      The pull request's head commit, the commit this run is planning. Wire it to the
       `head-sha` output of shipmate's `pr-facts` action. Empty is refused: a run that does not
       state the commit it is planning cannot have its checkout checked, and a checkout left on
       the base or the dispatch ref plans a different tree and reports no changes.
