@@ -751,6 +751,103 @@ def test_the_authorize_step_binds_exactly_this_env():
     assert _authorize_step()["env"] == _AUTHORIZE_ENV
 
 
+#: A `gh` that logs the endpoint each call reads and answers it as the API does after `--jq`.
+#: `PERM_ANSWER=FAIL` fails the permission read, as a 404 does.
+_GATHER_GH = """#!/bin/bash
+for a in "$@"; do
+  if [[ "$a" == repos/* || "$a" == graphql ]]; then echo "$a" >> endpoints.txt; break; fi
+done
+if [[ "$*" == *collaborators* ]]; then
+  if [ "$PERM_ANSWER" = FAIL ]; then exit 1; fi
+  echo "$PERM_ANSWER"
+elif [[ "$*" == *pulls/* ]]; then
+  echo '{"mergeable": true, "mergeable_state": "clean", "head": {"sha": "abc"}}'
+elif [[ "$*" == *graphql* ]]; then
+  echo APPROVED
+fi
+"""
+
+
+def _run_gather(tmp_path, perm_answer):
+    """Run the gather step's shipped body; return (outputs, endpoints read in order)."""
+    for tool, text in (
+        ("gh", _GATHER_GH),
+        ("python3", f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'),
+    ):
+        (tmp_path / tool).write_text(text, encoding="utf-8", newline="\n")
+        (tmp_path / tool).chmod(0o755)
+    out_file = tmp_path / "github_output"
+    out_file.write_text("", encoding="utf-8")
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+        "GITHUB_ACTION_PATH": str(ACTIONS / "comment-ops"),
+        "GITHUB_REPOSITORY": "org/repo",
+        "GITHUB_OUTPUT": str(out_file),
+        "OWNER": "org",
+        "USER": "alice",
+        "PR_NUMBER": "42",
+        "SHIPMATE_VERB": "apply",
+        "SHIPMATE_APP_ID": "1",
+        "APP_TOKEN": "app_token",
+        "PERM_ANSWER": perm_answer,
+    }
+    result = run_step(tmp_path, _gather_step()["run"], env)
+    assert result.returncode == 0, result.stderr
+    outputs = dict(line.split("=", 1) for line in out_file.read_text().splitlines())
+    return outputs, (tmp_path / "endpoints.txt").read_text().splitlines()
+
+
+_PERMISSION_READ = "repos/org/repo/collaborators/alice/permission"
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("answer", "permission"), [("read", "read"), ("none", "none"), ("FAIL", "")]
+)
+def test_the_gather_step_reads_nothing_more_for_a_commenter_without_write(
+    tmp_path, answer, permission
+):
+    """The permission is read first, and a commenter without write access stops the step there:
+    authorize refuses on the permission before any other input, with the same reason the
+    skipped reads would have reached.
+
+    Mutations: remove the early `exit 0` -- the pull request, review and check-runs reads run;
+    have `decide` refuse an unmergeable pull request before the permission -- the empty
+    `pr.json` changes the reason.
+    """
+    outputs, endpoints = _run_gather(tmp_path, answer)
+    assert endpoints == [_PERMISSION_READ]
+    assert outputs == {"permission": permission}
+    assert (tmp_path / "pr.json").read_text() == "{}\n"
+    assert (tmp_path / "plan_run.json").read_text() == "{}\n"
+    az = load_script("authorize")
+    full = {
+        "review_decision": "APPROVED",
+        "pr": {"mergeable": True, "mergeable_state": "clean"},
+        "plan_runs": {"apply / stacks/app / dev-eu": "555"},
+    }
+    skipped = {"review_decision": "", "pr": {}, "plan_runs": {}}
+    for verb in ("apply", "unlock"):
+        refused = az.decide(permission=permission, verb=verb, **skipped)
+        assert not refused[0]
+        assert refused == az.decide(permission=permission, verb=verb, **full)
+
+
+@bash_only
+def test_the_gather_step_reads_the_permission_before_the_pull_request(tmp_path):
+    """Mutation: move the permission read back below the review-decision read -- it is read
+    third."""
+    outputs, endpoints = _run_gather(tmp_path, "write")
+    assert endpoints == [
+        _PERMISSION_READ,
+        "repos/org/repo/pulls/42",
+        "graphql",
+        "repos/org/repo/commits/abc/check-runs?filter=all&per_page=100",
+    ]
+    assert outputs == {"permission": "write", "review_decision": "APPROVED"}
+
+
 def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs():
     """The reviewed-plan lookup is the head's own apply checks, each of which records the plan run
     its plan came from. The plan-workflow lookup it replaced resolved one run for the whole command

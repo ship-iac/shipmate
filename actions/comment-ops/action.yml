@@ -540,6 +540,21 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |
         set -euo pipefail
+        # The commenter's repository permission is read with the workflow token, into a variable
+        # because a pipe under pipefail turns SIGPIPE into a failure. A failed read or a value
+        # outside [a-z]+ is written empty, which authorize refuses, and stderr stays in the log.
+        if ! perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$USER/permission" --jq '.permission'); then
+          perm=""
+        fi
+        [[ "$perm" =~ ^[a-z]+$ ]] || perm=""
+        echo "permission=$perm" >> "$GITHUB_OUTPUT"
+        # authorize refuses on the permission before it reads anything else, so a commenter
+        # without write access costs none of the reads below.
+        if [ "$perm" != write ] && [ "$perm" != admin ]; then
+          echo '{}' > pr.json
+          echo '{}' > plan_run.json
+          exit 0
+        fi
         # Retry until `mergeable` is computed; GitHub computes it asynchronously. Not for
         # unlock, which ignores `mergeable`: a merged pull request reports it null forever --
         # exactly the stranded-lock case unlock exists for -- so the retries would cost 15s
@@ -567,14 +582,6 @@ runs:
           -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
           --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
         echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
-        # The commenter's repository permission is read with the workflow token, into a variable
-        # because a pipe under pipefail turns SIGPIPE into a failure. A failed read or a value
-        # outside [a-z]+ is written empty, which authorize refuses, and stderr stays in the log.
-        if ! perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$USER/permission" --jq '.permission'); then
-          perm=""
-        fi
-        [[ "$perm" =~ ^[a-z]+$ ]] || perm=""
-        echo "permission=$perm" >> "$GITHUB_OUTPUT"
         # The reviewed plan runs for the CURRENT head: every App-authored apply check on the
         # head records the plan run its plan came from, so a record read here is for this head
         # by construction -- no plan-workflow lookup, and no head SHA left to compare. An empty
