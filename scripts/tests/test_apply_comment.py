@@ -404,8 +404,8 @@ def test_the_targeted_form_keeps_only_the_no_review_and_gate_lines():
 
 
 def test_the_footer_lines_escape_every_env_name():
-    """Env names are author-controlled. Mutation: pass `held` to `_disposition_lines` unescaped --
-    red (both the held line and its command)."""
+    """Env names are author-controlled. Mutation: `_dispositions` escapes `excluded` but not
+    `held` -- red (both the held line and its command)."""
     assert ac._footer_parts("pending", ["e<1"], ["s<2"], "", ["h<3", "e<1"], ["u<4"], ["r<5"]) == [
         "⚪ s&lt;2: skipped, ordered after an environment not applying this run",
         "⚪ h&lt;3: held, the review state does not permit applying",
@@ -731,6 +731,84 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
         PENDING,
         "",
         FOOT,
+    ]
+
+
+def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
+    """256 applied cells, one per environment, every environment under a null review decision: one
+    no-review line per environment pushes the body past HARD_CAP with no blocked row, and the
+    compact form names them all on one line.
+
+    Mutation: restore `and any(r["status"] == "blocked" for r in rows)` on the `_compact` branch
+    in `build_comment` -- SystemExit, red."""
+    envs = [f"env-{i}" for i in range(256)]
+    rows = [
+        _row(environment=e, stack_path="stacks/app", stack_display="stacks/app", apply_text=None)
+        for e in envs
+    ]
+    jobs = [
+        _job(f"wave0 / apply / stacks/app / {e}", _JOB_URL.format(23456789000 + i))
+        for i, e in enumerate(envs)
+    ]
+    body = ac.build_comment(
+        rows,
+        jobs,
+        RUN_URL,
+        "pending",
+        [],
+        [],
+        "",
+        "success",
+        review_not_required=envs,
+        head_sha=SHA,
+    )
+    assert len(body) <= ac.sc.HARD_CAP
+    lines = body.split("\n")
+    assert lines[:4] == ["### shipmate apply", "", "🟢 256 applied at 0123456", ""]
+    assert lines[4:260] == [
+        f'🟢 stacks/app (env-{i}): applied <a href="{_JOB_URL.format(23456789000 + i)}">logs</a>'
+        for i in range(256)
+    ]
+    assert lines[260:] == [
+        "",
+        "no review required: "
+        + ", ".join(f"env-{i}" for i in range(256))
+        + ", the pull request's review state required no approving review, so `gated` had "
+        "nothing to enforce (docs/hardening.md #3-5)",
+        PENDING,
+        "",
+        FOOT,
+    ]
+
+
+def test_the_compact_footer_lines_group_every_disposition():
+    """One line per disposition, environments comma-separated, in the per-environment order; the
+    held line names no single cause and lists the explicit held envs for their command, the
+    ungated line carries no completion verb, the no-review line never says nobody reviewed.
+
+    Mutation: `ungated: {...}, applied, {_UNGATED}` in `_grouped_lines` -- red.
+    Mutation: delete the `held_explicit` clause in `_grouped_lines` -- red."""
+    assert ac._footer_parts(
+        "pending",
+        ["prod", "prod-us", "sbx"],
+        ["stg", "uat"],
+        "",
+        ["dev", "sbx"],
+        ["dev-eu", "dev-us"],
+        ["qa", "qa-us"],
+        compact=True,
+    ) == [
+        "🟡 left pending (explicit): prod, prod-us; comment `shipmate apply <env>` for each",
+        "⚪ skipped, ordered after an environment not applying this run: stg, uat",
+        "⚪ held, the review state does not permit applying: dev, sbx; once the hold clears, "
+        "comment `shipmate apply <env>` for sbx",
+        "held: get an approving review, or resolve or dismiss a requested-changes review. "
+        "The run log's apply-all-detect notice names the decision seen.",
+        "ungated: dev-eu, dev-us, permitted to apply without an approving review "
+        "(`gated = false` in `.github/shipmate.toml`)",
+        "no review required: qa, qa-us, the pull request's review state required no approving "
+        "review, so `gated` had nothing to enforce (docs/hardening.md #3-5)",
+        PENDING,
     ]
 
 

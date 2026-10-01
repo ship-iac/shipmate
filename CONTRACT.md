@@ -2257,16 +2257,30 @@ decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
 character instead of aborting the render. Terminal escape sequences (colour
 codes and similar) are stripped from that text as it is read, since the apply
 output is tofu's own and is not required to be colour-free. Every remaining
-row's bare line is reserved up front. When even the bare lines exceed the cap
-and a row is blocked, the comment falls back to a compact form: every row keeps
-its line and its `logs` link, a blocked row's state reads `blocked` without its
-reason, and one note follows the row lines:
+row's bare line is reserved up front. When even the bare lines exceed the cap,
+the comment falls back to a compact form: every row keeps its line and its
+`logs` link, a blocked row's state reads `blocked` without its reason, and,
+when a row is blocked, one note follows the row lines:
 
 `blocked: each blocked cell's reason is in its logs.`
 
-A 256-cell run with every cell blocked needs this form, because a blocked
-reason is the one free text a bare line carries. Past the compact form the
-render fails loud rather than post a comment that would exceed GitHub's cap.
+In the compact form each footer disposition is one line naming its
+environments comma-separated (`<envs>`), in the per-environment order; the
+`held:` remedy line and the `gate:` line are unchanged:
+
+- `` 🟡 left pending (explicit): <envs>; comment `shipmate apply <env>` for each ``
+- `⚪ skipped, ordered after an environment not applying this run: <envs>`
+- `⚪ held, the review state does not permit applying: <envs>`, followed by
+  `` ; once the hold clears, comment `shipmate apply <env>` for <envs> `` naming
+  the held environments that are also explicit, when there are any
+- `` ungated: <envs>, permitted to apply without an approving review (`gated = false` in `.github/shipmate.toml`) ``
+- `` no review required: <envs>, the pull request's review state required no approving review, so `gated` had nothing to enforce (docs/hardening.md #3-5) ``
+
+A 256-cell run needs this form when every cell is blocked, because a blocked
+reason is the one free text a bare line carries, and when its cells span 256
+environments, because each environment otherwise gets its own footer line.
+Past the compact form the render fails loud rather than post a comment that
+would exceed GitHub's cap.
 
 The data feeding the comment ships in the per-cell artifact
 `apply-summary.<env>.<slug>` (see Apply summary artifacts, above); per-cell

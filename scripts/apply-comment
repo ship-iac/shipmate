@@ -509,35 +509,89 @@ def _held_line(env, explicit):
     return f"{line}; once it clears, comment `shipmate apply {env}`" if explicit else line
 
 
-def _disposition_lines(excluded, skipped, held, applied_ungated):
-    """The all-environments form's lines, `env`s already escaped by the caller."""
+_NO_REVIEW = (
+    "the pull request's review state required no approving review, so `gated` had nothing to "
+    "enforce (docs/hardening.md #3-5)"
+)
+_UNGATED = (
+    "permitted to apply without an approving review (`gated = false` in `.github/shipmate.toml`)"
+)
+
+
+def _dispositions(excluded, skipped, env_name, held, applied_ungated, review_not_required):
+    """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
+    Explicit, skipped, held and ungated are all-environments concepts, empty in the targeted
+    form. A held env that is also explicit is listed under `held` only, and under `held_explicit`
+    for its command."""
+    if env_name:
+        excluded = skipped = held = applied_ungated = ()
+    excluded, held = _esc(excluded), _esc(held)
+    return {
+        "explicit": [e for e in excluded if e not in held],
+        "skipped": _esc(skipped),
+        "held": held,
+        "held_explicit": [e for e in held if e in excluded],
+        "ungated": _esc(applied_ungated),
+        "no_review": _esc(review_not_required),
+    }
+
+
+def _per_env_lines(d):
     lines = [
-        f"🟡 {e}: left pending (explicit), comment `shipmate apply {e}`"
-        for e in excluded
-        if e not in held
+        f"🟡 {e}: left pending (explicit), comment `shipmate apply {e}`" for e in d["explicit"]
     ]
     lines += [
-        f"⚪ {e}: skipped, ordered after an environment not applying this run" for e in skipped
+        f"⚪ {e}: skipped, ordered after an environment not applying this run" for e in d["skipped"]
     ]
-    lines += [_held_line(e, e in excluded) for e in held]
-    if held:
+    lines += [_held_line(e, e in d["held_explicit"]) for e in d["held"]]
+    if d["held"]:
         lines.append(_HELD_REMEDY)
-    lines += [
-        f"ungated: {e}, permitted to apply without an approving review "
-        "(`gated = false` in `.github/shipmate.toml`)"
-        for e in applied_ungated
-    ]
+    lines += [f"ungated: {e}, {_UNGATED}" for e in d["ungated"]]
+    return lines + [f"no review required: {e}, {_NO_REVIEW}" for e in d["no_review"]]
+
+
+def _grouped_lines(d):
+    """The compact form's footer lines: one per disposition, its environments comma-separated."""
+    g = {k: ", ".join(v) for k, v in d.items()}
+    lines = []
+    if g["explicit"]:
+        lines.append(
+            f"🟡 left pending (explicit): {g['explicit']}; comment `shipmate apply <env>` for each"
+        )
+    if g["skipped"]:
+        lines.append(
+            f"⚪ skipped, ordered after an environment not applying this run: {g['skipped']}"
+        )
+    if g["held"]:
+        line = f"⚪ held, the review state does not permit applying: {g['held']}"
+        if g["held_explicit"]:
+            line += (
+                f"; once the hold clears, comment `shipmate apply <env>` for {g['held_explicit']}"
+            )
+        lines += [line, _HELD_REMEDY]
+    if g["ungated"]:
+        lines.append(f"ungated: {g['ungated']}, {_UNGATED}")
+    if g["no_review"]:
+        lines.append(f"no review required: {g['no_review']}, {_NO_REVIEW}")
     return lines
 
 
 def _footer_parts(
-    gate, excluded, skipped, env_name, held=(), applied_ungated=(), review_not_required=()
+    gate,
+    excluded,
+    skipped,
+    env_name,
+    held=(),
+    applied_ungated=(),
+    review_not_required=(),
+    compact=False,
 ):
     """The lines above the footer: in the all-environments form, one line per environment for
     each disposition this run produced (explicit left pending, skipped, held for review, applied
     ungated) and a `held:` remedy line when any is held; in both forms, one no-review-required
     line per environment; then the `gate:` line. Env names are author-controlled, so
-    `_md_escape`d.
+    `_md_escape`d. `compact` renders each disposition as one line naming its environments
+    comma-separated, with the same meanings, for the hard-cap fallback.
 
     `excluded` can overlap `held`. A held env that is also in `excluded` is
     listed once, on its held line, with its `shipmate apply <env>` command: once
@@ -566,14 +620,8 @@ def _footer_parts(
     code-owner review can still be required at count 0. `build_comment` narrows
     it to envs with an applied, failed or unrecorded row, where infrastructure
     may have changed, so a run with no rows never names one."""
-    lines = []
-    if not env_name:
-        lines = _disposition_lines(_esc(excluded), _esc(skipped), _esc(held), _esc(applied_ungated))
-    lines += [
-        f"no review required: {e}, the pull request's review state required no approving "
-        "review, so `gated` had nothing to enforce (docs/hardening.md #3-5)"
-        for e in _esc(review_not_required)
-    ]
+    d = _dispositions(excluded, skipped, env_name, held, applied_ungated, review_not_required)
+    lines = _grouped_lines(d) if compact else _per_env_lines(d)
     lines.append(
         "gate: complete"
         if gate == "complete"
@@ -605,9 +653,13 @@ def _tail(notes, parts, run_url):
 
 def _compact(head, rows, urls, bares, notes, parts, run_url):
     """The hard-cap fallback, tried only after the normal render overflows HARD_CAP: every row's
-    bare line with a blocked row's state shortened to `blocked`, and `_BLOCKED_NOTE` leading the
-    notes. A blocked reason is the one free text a bare line carries, so a 256-cell run that is
-    all blocked can overflow with the reasons and fit without them."""
+    bare line with a blocked row's state shortened to `blocked` and `_BLOCKED_NOTE` leading the
+    notes when a row is blocked, above the grouped footer `parts`. A blocked reason is the one
+    free text a bare line carries, and the footer lines grow with the environment count, so a
+    256-cell run that is all blocked, or spread over 256 environments, can overflow in the
+    normal form and fit in this one."""
+    if any(r["status"] == "blocked" for r in rows):
+        notes = (_BLOCKED_NOTE, *notes)
     circle, word = _STATUS["blocked"]
     lines = [
         sc.cell_line(circle, r["stack_display"], r["environment"], word, u, "logs")
@@ -615,7 +667,7 @@ def _compact(head, rows, urls, bares, notes, parts, run_url):
         else b
         for r, u, b in zip(rows, urls, bares, strict=True)
     ]
-    return "\n\n".join((head, "\n".join(lines), _tail((_BLOCKED_NOTE, *notes), parts, run_url)))
+    return "\n\n".join((head, "\n".join(lines), _tail(notes, parts, run_url)))
 
 
 def build_comment(
@@ -638,8 +690,8 @@ def build_comment(
 
     Every row is guaranteed its bare line: the space all remaining rows' bare lines need is
     reserved up front, together, so an early giant apply.txt cannot starve a later row. When
-    even the bare lines overflow HARD_CAP and a row is blocked, `_compact` renders them without
-    the blocked reasons; past that a SystemExit names the cause."""
+    even the bare lines overflow HARD_CAP, `_compact` renders them without the blocked reasons
+    and with one footer line per disposition; past that a SystemExit names the cause."""
     ran = {r["environment"] for r in rows if r["status"] in _SECTION_STATUSES}
     head = f"{sc.header('apply', env_name)}\n\n"
     head += _verdict(rows, _results_failed(results_csv), held, head_sha)
@@ -648,7 +700,7 @@ def build_comment(
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
     )
-    parts = _footer_parts(
+    dispositions = (
         gate,
         excluded,
         skipped,
@@ -657,6 +709,7 @@ def build_comment(
         applied_ungated,
         [e for e in review_not_required if e in ran],
     )
+    parts = _footer_parts(*dispositions)
     tail = _tail(notes, parts, run_url)
     urls = [_job_url(r, jobs, run_url) for r in rows]
     bares = [_cell_line(r, u) for r, u in zip(rows, urls, strict=True)]
@@ -674,7 +727,8 @@ def build_comment(
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, sc._join(sections), tail) if p)
     # Past SIZE_BUDGET every row is already its bare line; only the compact form is smaller.
-    if len(body) > sc.HARD_CAP and any(r["status"] == "blocked" for r in rows):
+    if len(body) > sc.HARD_CAP:
+        parts = _footer_parts(*dispositions, compact=True)
         body = _compact(head, rows, urls, bares, notes, parts, run_url)
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
