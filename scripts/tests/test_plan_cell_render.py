@@ -20,12 +20,15 @@ _JSON = '{"format_version":"1.2"}\n'
 
 #: The `-json` arm sleeps before writing, so a step that returns without awaiting it leaves
 #: plan.json incomplete. It drops its stderr first: an inherited pipe would hold subprocess.run
-#: open until the sleep ends and hide an early return.
+#: open until the sleep ends and hide an early return. `FAIL=both` reverses the timing, so the
+#: json error is written first.
 _STUBS = r"""
 tofu() {
   case "$*" in
-    *-no-color*) [ "$FAIL" = text ] && return 3 ; printf 'plan text\n' ;;
-    *-json*) exec 2>/dev/null ; sleep 1 ; [ "$FAIL" = json ] && return 4 ;
+    *-no-color*) [ "$FAIL" = both ] && { sleep 1 ; printf 'text error\n' >&2 ; return 3 ; } ;
+      [ "$FAIL" = text ] && return 3 ; printf 'plan text\n' ;;
+    *-json*) [ "$FAIL" = both ] && { printf 'json error\n' >&2 ; return 4 ; } ;
+      exec 2>/dev/null ; sleep 1 ; [ "$FAIL" = json ] && return 4 ;
       printf '{"format_version":"1.2"}\n' ;;
   esac
 }
@@ -77,6 +80,15 @@ def test_a_failing_text_render_fails_the_step_after_the_json_render_finished(tmp
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert _read(tmp_path, "plan.json") == _JSON
     assert not (tmp_path / "rt" / "classified").exists()
+
+
+@bash_only
+def test_two_failing_renders_print_their_errors_text_first(tmp_path):
+    """Mutations: drop the `2> show-json.err` redirect -- the json error prints first; drop the
+    `cat` -- neither error prints."""
+    r = _run(tmp_path, "both")
+    assert r.returncode != 0
+    assert r.stderr == "text error\njson error\n"
 
 
 pcs = load_script("plan-cell-summary")
