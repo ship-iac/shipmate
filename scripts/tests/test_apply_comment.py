@@ -645,6 +645,64 @@ def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
         _comment(rows)
 
 
+_PLANNED_HEAD = "reviewed plan records no commit or was produced from a different one; re-plan"
+_JOB_URL = "https://github.com/ship-iac/repo-example-stacks/actions/runs/12345678901/job/{:011}"
+
+
+def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
+    """The reasons push 256 blocked lines past HARD_CAP; the compact form drops them, keeps every
+    line and its link, and points at the logs.
+
+    Mutation: delete the `_compact` branch in `build_comment` -- SystemExit, red."""
+    env = "production-eu-west-1"
+    rows, jobs = [], []
+    for i in range(256):
+        path = f"stacks/platform/services/service-{i:03}"
+        rows.append(
+            _row(
+                environment=env,
+                stack_path=path,
+                stack_display=path,
+                status="blocked",
+                reason=_PLANNED_HEAD,
+                apply_text=None,
+            )
+        )
+        jobs.append(_job(f"wave0 / apply / {path} / {env}", _JOB_URL.format(23456789000 + i)))
+    body = ac.build_comment(rows, jobs, RUN_URL, "pending", [], [], env, "failure", head_sha=SHA)
+    assert len(body) <= ac.sc.HARD_CAP
+    lines = body.split("\n")
+    assert lines[:4] == [
+        "### shipmate apply production-eu-west-1",
+        "",
+        "🔴 256 blocked at 0123456",
+        "",
+    ]
+    assert lines[4] == (
+        "⚪ stacks/platform/services/service-000 (production-eu-west-1): blocked "
+        '<a href="https://github.com/ship-iac/repo-example-stacks/actions/runs/12345678901'
+        '/job/23456789000">logs</a>'
+    )
+    assert lines[259] == (
+        "⚪ stacks/platform/services/service-255 (production-eu-west-1): blocked "
+        '<a href="https://github.com/ship-iac/repo-example-stacks/actions/runs/12345678901'
+        '/job/23456789255">logs</a>'
+    )
+    assert lines[4:260] == [
+        f"⚪ stacks/platform/services/service-{i:03} (production-eu-west-1): blocked "
+        f'<a href="{_JOB_URL.format(23456789000 + i)}">logs</a>'
+        for i in range(256)
+    ]
+    assert lines[260:] == [
+        "",
+        "blocked: each blocked cell's reason is in its logs.",
+        "",
+        PENDING,
+        "",
+        FOOT,
+    ]
+
+
 def _fence_delimiter_lines(rendered):
     """All-backtick lines emitted in `rendered` -- the real fence delimiters, read from the output
     rather than re-derived from the helper the renderer is supposed to have called. A renderer that

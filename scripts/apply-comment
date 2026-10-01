@@ -595,6 +595,29 @@ def _results_failed(results_csv):
     return any(t not in ("success", "skipped") for t in tokens)
 
 
+_BLOCKED_NOTE = "blocked: each blocked cell's reason is in its logs."
+
+
+def _tail(notes, parts, run_url):
+    """The non-empty notes, then the footer lines, then the footer, a blank line between each."""
+    tail = "\n\n".join(p for p in ("\n".join(n for n in notes if n), "\n".join(parts)) if p)
+    return tail + "\n\n" + sc.footer(run_url)
+
+
+def _compact(head, rows, urls, notes, parts, run_url):
+    """The hard-cap fallback, tried only after the normal render overflows HARD_CAP: every row's
+    bare line with a blocked row's state shortened to `blocked`, and `_BLOCKED_NOTE` leading the
+    notes. A blocked reason is the one free text a bare line carries, so a 256-cell run that is
+    all blocked can overflow with the reasons and fit without them."""
+    lines = [
+        sc.cell_line("⚪", r["stack_display"], r["environment"], "blocked", u, "logs")
+        if r["status"] == "blocked"
+        else _cell_line(r, u)
+        for r, u in zip(rows, urls, strict=True)
+    ]
+    return "\n\n".join((head, "\n".join(lines), _tail((_BLOCKED_NOTE, *notes), parts, run_url)))
+
+
 def build_comment(
     rows,
     jobs,
@@ -614,7 +637,9 @@ def build_comment(
     footer lines, the footer. With no rows it is header, verdict, footer lines and footer.
 
     Every row is guaranteed its bare line: the space all remaining rows' bare lines need is
-    reserved up front, together, so an early giant apply.txt cannot starve a later row."""
+    reserved up front, together, so an early giant apply.txt cannot starve a later row. When
+    even the bare lines overflow HARD_CAP and a row is blocked, `_compact` renders them without
+    the blocked reasons; past that a SystemExit names the cause."""
     ran = {r["environment"] for r in rows if r["status"] in _SECTION_STATUSES}
     head = f"{sc.header('apply', env_name)}\n\n"
     head += _verdict(rows, _results_failed(results_csv), held, head_sha)
@@ -632,8 +657,7 @@ def build_comment(
         applied_ungated,
         [e for e in review_not_required if e in ran],
     )
-    tail = "\n\n".join(p for p in ("\n".join(n for n in notes if n), "\n".join(parts)) if p)
-    tail += "\n\n" + sc.footer(run_url)
+    tail = _tail(notes, parts, run_url)
     urls = [_job_url(r, jobs, run_url) for r in rows]
     bares = [_cell_line(r, u) for r, u in zip(rows, urls, strict=True)]
     used = len(head) + len(tail) + 4
@@ -649,7 +673,9 @@ def build_comment(
         sections.append(section)
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, sc._join(sections), tail) if p)
-    # Past SIZE_BUDGET every row is already its bare line, the smallest body there is.
+    # Past SIZE_BUDGET every row is already its bare line; only the compact form is smaller.
+    if len(body) > sc.HARD_CAP and any(r["status"] == "blocked" for r in rows):
+        body = _compact(head, rows, urls, notes, parts, run_url)
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
     if len(body) > sc.HARD_CAP:
