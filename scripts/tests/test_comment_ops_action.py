@@ -883,6 +883,29 @@ def test_every_reply_step_names_its_header_outcome_and_text():
     assert got == _REPLIES
 
 
+#: An issue-comment endpoint at the end of a path; `/comments/<id>/reactions` is not one.
+_COMMENT_ENDPOINT = re.compile(r"/comments\b(?!/)")
+
+#: The steps that post a comment reply-comment does not render: help prints its own frame, and
+#: the doctor report is a sticky upsert of doctor's own body.
+_NON_REPLY_POSTERS = {"Post help", "Doctor: render and upsert the sticky comment"}
+
+
+def test_every_step_posting_a_comment_is_a_reply_step_or_a_named_poster():
+    """The reply guards above select by `SHIPMATE_REPLY_OUTCOME`, so a new step posting a
+    hand-formatted comment without it escapes them; this selects by the endpoint instead.
+
+    Mutation: add a step whose `run` is `gh api -X POST
+    "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: x"` with no
+    reply env -- red."""
+    posters = {
+        s["name"]
+        for s in action_steps("comment-ops")
+        if _COMMENT_ENDPOINT.search(s.get("run") or "")
+    }
+    assert posters == set(_REPLIES) | _NON_REPLY_POSTERS
+
+
 #: The gate step's whole body: no later step keys on its outcome, so its `exit 1` is the only
 #: thing that stops an unresolvable gate configuration from reaching authorization.
 _GATE_UNREADABLE_RUN = _REPLY_RUN + (
