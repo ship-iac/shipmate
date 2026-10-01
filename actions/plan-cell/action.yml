@@ -169,16 +169,20 @@ runs:
       env:
         ENV: ${{ inputs.env }}
         STACK_NAME: ${{ inputs.stack }}
+        CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
+        # The heading is cosmetic: a failure to compute it falls back to the cell's names rather
+        # than failing the plan.
+        line=$(python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary" --step-line) || line="$STACK_NAME ($ENV)"
         {
-          echo "## $STACK_NAME / $ENV"
+          echo "## $line"
           echo '```'
           head -c 65536 plan.txt
           bytes=$(wc -c < plan.txt)
           echo ''
           echo '```'
           if [ "$bytes" -gt 65536 ]; then
-            echo "_Plan truncated at 64 KiB ($bytes bytes total) — full plan in this job's raw log._"
+            echo "_Plan truncated at 64 KiB ($bytes bytes total); the full plan is in this job's raw log._"
           fi
         } >> "$GITHUB_STEP_SUMMARY"
 

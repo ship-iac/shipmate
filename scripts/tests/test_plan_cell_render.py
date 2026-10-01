@@ -9,8 +9,9 @@ a function before PATH, and a function behind `&` runs in a subshell like the bi
 """
 
 import os
+import pathlib
 
-from _loader import bash_only, run_step, step_by
+from _loader import bash_only, load_script, run_step, step_by
 
 _TEXT = "plan text\n"
 _JSON = '{"format_version":"1.2"}\n'
@@ -74,3 +75,72 @@ def test_a_failing_text_render_fails_the_step_after_the_json_render_finished(tmp
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert _read(tmp_path, "plan.json") == _JSON
     assert not (tmp_path / "rt" / "classified").exists()
+
+
+pcs = load_script("plan-cell-summary")
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+
+
+def _step_line(tmp_path, monkeypatch, plan_text, changed):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "plan.txt").write_text(plan_text, encoding="utf-8")
+    monkeypatch.setenv("STACK_NAME", "stacks/<app>")
+    monkeypatch.setenv("ENV", "dev-eu")
+    monkeypatch.setenv("CHANGED", changed)
+    return pcs.step_line()
+
+
+def test_step_line_names_an_import_only_plan_by_its_tally(tmp_path, monkeypatch):
+    """Mutation: format the line locally (`f"{sc.emoji(cell)} {stack} ({env}): ..."`) instead of
+    through `cell_line`, which leaves the stack name unescaped."""
+    plan = (FIXTURES / "import-only.plan.txt").read_text(encoding="utf-8")
+    line = _step_line(tmp_path, monkeypatch, plan, "true")
+    assert line == "🟡 stacks/&lt;app&gt; (dev-eu): +0 ~0 -0, 1 import"
+
+
+def test_step_line_names_an_unchanged_plan(tmp_path, monkeypatch):
+    """Mutation: format the line locally instead of through `cell_line`."""
+    plan = "No changes. Your infrastructure matches the configuration.\n"
+    line = _step_line(tmp_path, monkeypatch, plan, "false")
+    assert line == "🟢 stacks/&lt;app&gt; (dev-eu): no changes"
+
+
+def _run_summary(tmp_path, python3_body, plan_text):
+    """The `Step summary` body under GitHub's `bash -eo pipefail`, `python3` stubbed."""
+    step = step_by("plan-cell", name="Step summary (plan text, 64KiB cap)")
+    body = f"set -eo pipefail\npython3() {{ {python3_body} ; }}\n" + step["run"]
+    (tmp_path / "plan.txt").write_text(plan_text, encoding="utf-8", newline="\n")
+    summary = tmp_path / "summary.md"
+    env = {
+        **os.environ,
+        "STACK_NAME": "stacks/app",
+        "ENV": "dev-eu",
+        "GITHUB_ACTION_PATH": str(tmp_path),
+        "GITHUB_STEP_SUMMARY": str(summary),
+    }
+    r = run_step(tmp_path, body, env)
+    return r, summary.read_text(encoding="utf-8")
+
+
+@bash_only
+def test_step_summary_heads_the_plan_with_the_step_line_whole(tmp_path):
+    """Mutation: write `## $STACK_NAME / $ENV` in place of `## $line`."""
+    r, summary = _run_summary(tmp_path, "echo '🟡 stacks/app (dev-eu): +1 ~0 -0'", "plan text\n")
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert summary == "## 🟡 stacks/app (dev-eu): +1 ~0 -0\n```\nplan text\n\n```\n"
+
+
+@bash_only
+def test_a_failing_step_line_falls_back_and_a_long_plan_is_truncated_whole(tmp_path):
+    """The heading is cosmetic, so a failure to compute it must not fail the plan. Mutations:
+    drop `|| line="$STACK_NAME ($ENV)"` (the step fails); put the dash back in the truncation
+    line."""
+    plan = "x" * 65537
+    r, summary = _run_summary(tmp_path, "return 1", plan)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert summary == (
+        "## stacks/app (dev-eu)\n```\n"
+        + "x" * 65536
+        + "\n```\n_Plan truncated at 64 KiB (65537 bytes total); the full plan is in this job's"
+        " raw log._\n"
+    )
