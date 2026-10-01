@@ -680,8 +680,8 @@ def build_comment(
     # the POST on an oversized body.
     if len(body) > sc.HARD_CAP:
         raise SystemExit(
-            "::error::the apply comment's cell lines alone exceed the 65,536-char comment "
-            "cap, shorten stack/env display names"
+            "::error::apply comment exceeds the 65,536-character comment cap even in its "
+            "compact form; shorten stack or environment names"
         )
     return body
 

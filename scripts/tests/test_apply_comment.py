@@ -636,6 +636,12 @@ def test_an_early_giant_apply_cannot_drop_a_later_cells_line():
     )
 
 
+_OVER_CAP = (
+    "::error::apply comment exceeds the 65,536-character comment cap even in its compact form; "
+    "shorten stack or environment names"
+)
+
+
 def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
     """Mutation: delete the HARD_CAP check -- no SystemExit, red."""
     long_name = "s" * 400
@@ -643,8 +649,31 @@ def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
         _row(stack_display=f"{long_name}{i:03}", stack_path=f"stacks/{long_name}{i:03}")
         for i in range(300)
     ]
-    with pytest.raises(SystemExit, match="65,536-char comment cap"):
+    with pytest.raises(SystemExit) as exc:
         _comment(rows)
+    assert exc.value.code == _OVER_CAP
+
+
+def test_build_comment_fails_loud_when_even_the_compact_form_overflows():
+    """256 blocked rows whose names alone pass HARD_CAP: the compact form is tried and is still
+    too large.
+
+    Mutation: `return _compact(...)` in `build_comment` -- the oversized body is returned, no
+    SystemExit, red."""
+    long_name = "s" * 300
+    rows = [
+        _row(
+            stack_display=f"{long_name}{i:03}",
+            stack_path=f"stacks/{long_name}{i:03}",
+            status="blocked",
+            reason="upstream failed",
+            apply_text=None,
+        )
+        for i in range(256)
+    ]
+    with pytest.raises(SystemExit) as exc:
+        _comment(rows)
+    assert exc.value.code == _OVER_CAP
 
 
 _PLANNED_HEAD = "reviewed plan records no commit or was produced from a different one; re-plan"
