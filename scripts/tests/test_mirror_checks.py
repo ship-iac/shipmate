@@ -200,7 +200,7 @@ EXPECTED_STEP_NAMES = [
     "Mirror this run's per-cell plan checks onto the head",
     "Build comment + gate state",
     "Decide gate state and comment mode",
-    "Doctor — settings-drift warnings (annotations only, never blocks)",
+    "Doctor: settings-drift warnings (annotations only, never blocks)",
     "Upsert sticky comment",
     "Create/refresh gate",
 ]

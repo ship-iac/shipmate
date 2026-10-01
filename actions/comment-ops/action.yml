@@ -441,7 +441,7 @@ runs:
           # this annotation, invisible from the pull request, so the commenter's next move is
           # another `shipmate doctor` -- a second mint and 30-60s of probes for a report this
           # run already rendered. A failed listing skips the post so the next run can recover.
-          echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run — $retry_hint"
+          echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run: $retry_hint"
           exit 0
         fi
         # --paginate evaluates --jq per page, so a marker match on >1 page emits one id per

@@ -52,7 +52,7 @@ import re
 import sys
 import urllib.parse
 
-from _shipmate import _load
+from _shipmate import _load, current_run_url, utf8_output
 
 bm = _load("build-matrix")
 _gh_json = bm.gh_json
@@ -72,22 +72,22 @@ WARNING, NOTICE = "warning", "notice"
 # Findings of the review-rule probe. Format templates rather than finished
 # tuples: each names the default branch, which is per repository.
 _REVIEW_RULE_ABSENT = (
-    "no active ruleset puts a `pull_request` rule on `{branch}` — nothing there "
+    "no active ruleset puts a `pull_request` rule on `{branch}`, so nothing there "
     "requires the code-owner review that a leaked App private key cannot forge "
-    "(docs/hardening.md #3–5). Classic branch protection is not reported by this "
+    "(docs/hardening.md #3 to #5). Classic branch protection is not reported by this "
     "endpoint, so check it if that is what this repository uses."
 )
 _CODE_OWNER_REVIEW_OFF = (
-    "the `pull_request` rule on `{branch}` does not require code-owner review — "
+    "the `pull_request` rule on `{branch}` does not require code-owner review: "
     "the shipmate App can submit a counting approving review, so an approval count "
     "is no substitute against a leaked App private key. Set "
     "`require_code_owner_review`, and a `CODEOWNERS` entry covering the paths the "
     "IaC lives in: the rule is a no-op for changed files with no owner "
-    "(docs/hardening.md #3–5)."
+    "(docs/hardening.md #3 to #5)."
 )
 _SOLE_MAINTAINER_REVIEW = (
     "the `pull_request` rule on `{branch}` requires no approving review "
-    "(sole-maintainer mode, docs/hardening.md #3–5) — a supported mode. "
+    "(sole-maintainer mode, docs/hardening.md #3 to #5): a supported mode. "
     "`require_code_owner_review` is on, so the merge-side control a leaked App "
     "private key cannot satisfy is still in place."
 )
@@ -95,21 +95,20 @@ _NO_REQUIRED_REVIEW = (
     "the `pull_request` rule on `{branch}` requires 0 approving reviews, so "
     "these gated environments can apply without an approving review: {envs}. One is held "
     "only where a code-owner review is required for the changed files. `gated` can "
-    "only relax a review requirement the ruleset sets (docs/hardening.md #3–5); set "
+    "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
     "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
     "environments meant to apply unreviewed."
 )
 _ENV_NAME_CAP = 10
 # Same degrade posture as `_unverified`: unread is not misconfigured.
 _REVIEW_RULE_UNREADABLE = (
-    "the `pull_request` rule on `{branch}` carried no parameters — review "
-    "requirements not verified."
+    "the `pull_request` rule on `{branch}` carried no parameters: review requirements not verified."
 )
 
 DOCTOR_MARKER = "<!-- shipmate:doctor -->"
 ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
 HARVEST_LEVELS = ("warning", "failure")
-_LEVEL_EMOJI = {WARNING: ":warning:", NOTICE: ":information_source:"}
+_LEVEL_EMOJI = {WARNING: "🟠", NOTICE: "⚪"}
 # github-actions authors the plan/apply/drift auto check-runs carrying shipmate's ::warning::
 # emissions; the shipmate App is matched by id instead (org-dependent slug). A consumer's own
 # non-shipmate workflows are indistinguishable here and remain, hence the generic "workflow runs".
@@ -117,15 +116,15 @@ _HARVEST_APP_SLUGS = ("github-actions",)
 # Covers both shapes the gather step reports: nothing read at all, and some read
 # but not all. A list item, so it reads as a peer of the rows it follows.
 HARVEST_INCOMPLETE = (
-    "- :warning: could not read all of this commit's check runs — any warnings recorded on "
+    "- ⚪ could not read all of this commit's check runs, so any warnings recorded on "
     "the ones that could not be read are missing from this list."
 )
 # Distinct from HARVEST_INCOMPLETE: every read succeeded, nothing is recorded YET. An empty
 # payload is byte-identical to "no warnings", so without this a `shipmate doctor` typed while the
 # plan run is queued gets an all-clear that is never refreshed.
 HARVEST_PENDING = (
-    "- :hourglass: some of this commit's workflow runs had not finished when this report was "
-    "rendered — warnings they record later are not in this list; comment `shipmate doctor` "
+    "- ⚪ some of this commit's workflow runs had not finished when this report was "
+    "rendered: warnings they record later are not in this list. Comment `shipmate doctor` "
     "again once they have finished."
 )
 
@@ -146,7 +145,7 @@ def _gate_rule_warnings(ctx):
                     (
                         WARNING,
                         f"gate ruleset does not pin `integration_id` to the shipmate App "
-                        f"(found {chk.get('integration_id')!r}) — a forged `{GATE}` status "
+                        f"(found {chk.get('integration_id')!r}), so a forged `{GATE}` status "
                         "from another identity would satisfy the required check.",
                     )
                 )
@@ -155,14 +154,14 @@ def _gate_rule_warnings(ctx):
                     (
                         WARNING,
                         "gate ruleset does not require branches to be up to date "
-                        "(strict) — plans can go stale against the base before merge.",
+                        "(strict), so plans can go stale against the base before merge.",
                     )
                 )
             return out
     return [
         (
             WARNING,
-            f"no active ruleset requires `{GATE}` on `{default_branch}` — "
+            f"no active ruleset requires `{GATE}` on `{default_branch}`, so "
             "merges are not gated (see docs/branch-protection.md).",
         )
     ]
@@ -278,7 +277,7 @@ def _existing_env_names(ctx):
     if listing["total_count"] > len(names):
         raise SystemExit(
             f"::error::the environments listing is truncated ({listing['total_count']} "
-            f"environments, {len(names)} read) — which environments exist cannot be "
+            f"environments, {len(names)} read), and which environments exist cannot be "
             "determined from a partial listing."
         )
     return names
@@ -300,8 +299,8 @@ def _bound_names(ctx):
 def _shared_intro(env):
     """Opening clause of a shared-role finding."""
     return (
-        f"GitHub Environment `{env}` — shared between plan and apply by `shared = true` in "
-        f"its `[environments.{env}]` entry —"
+        f"GitHub Environment `{env}` (shared between plan and apply by `shared = true` in "
+        f"its `[environments.{env}]` entry)"
     )
 
 
@@ -318,7 +317,7 @@ def _missing(name, env, role):
     they run."""
     jobs = "plan and apply" if role == "shared" else role
     return (
-        f"GitHub Environment `{name}` does not exist — the {jobs} jobs for stacks tagged "
+        f"GitHub Environment `{name}` does not exist: the {jobs} jobs for stacks tagged "
         f"`env:{env}` bind a name GitHub auto-creates empty, with no secrets and none "
         "of its protection rules. Create it."
     )
@@ -326,7 +325,7 @@ def _missing(name, env, role):
 
 DEFAULT_TABLE_UNREADABLE = (
     NOTICE,
-    "the environment probes were skipped — the default branch's `.github/shipmate.toml` "
+    "the environment probes were skipped: the default branch's `.github/shipmate.toml` "
     "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
     "and it alone selects which GitHub Environments a run binds. While that holds, every run "
     "refuses at detect.",
@@ -336,7 +335,7 @@ DEFAULT_TABLE_UNREADABLE = (
 # table meets the same refusal.
 ENV_PROBES_INTERPRETER_REFUSED = (
     NOTICE,
-    "the environment probes were skipped — this runner's Python refuses the environment "
+    "the environment probes were skipped: this runner's Python refuses the environment "
     "table, so which GitHub Environments a run binds cannot be determined here.",
 )
 
@@ -346,7 +345,7 @@ def _environment_warnings(ctx):
         return [
             (
                 NOTICE,
-                "no plan run with cell summaries for this commit — the declared "
+                "no plan run with cell summaries for this commit: the declared "
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
@@ -374,7 +373,7 @@ def _env_shape_findings(name, env, data, role):
             (
                 WARNING,
                 f"GitHub Environment `{name}` is a plan environment but has "
-                f"protection rules ({', '.join(approval)}) — plan jobs will not "
+                f"protection rules ({', '.join(approval)}), so plan jobs will not "
                 f"start immediately; put reviewers on `{env}-apply` instead.",
             )
         )
@@ -383,7 +382,7 @@ def _env_shape_findings(name, env, data, role):
             (
                 WARNING,
                 f"GitHub Environment `{name}` is a plan environment but has a "
-                "deployment branch policy — plan jobs run at the pull request's "
+                "deployment branch policy. Plan jobs run at the pull request's "
                 "base ref, so a policy that does not name every branch pull "
                 "requests target refuses those plan cells; plan environments "
                 "must allow all branches.",
@@ -397,7 +396,7 @@ def _env_shape_findings(name, env, data, role):
             (
                 NOTICE,
                 f"GitHub Environment `{name}` has no approval rules (required reviewers "
-                "or a wait timer) — pre-merge applies to it are unreviewed.",
+                "or a wait timer), so pre-merge applies to it are unreviewed.",
             )
         )
     if role == "shared" and approval:
@@ -405,7 +404,7 @@ def _env_shape_findings(name, env, data, role):
             (
                 WARNING,
                 f"{_shared_intro(env)} has "
-                f"protection rules ({', '.join(approval)}) — a protection rule gates every "
+                f"protection rules ({', '.join(approval)}). A protection rule gates every "
                 "job that binds the environment and GitHub offers no per-job filter, so "
                 "the plan cells and the nightly drift run will not start immediately "
                 f"either. To gate applies only, split it into `{env}-plan` and "
@@ -420,7 +419,7 @@ def _env_shape_findings(name, env, data, role):
             (
                 NOTICE,
                 f"{_shared_intro(env)} has a "
-                "deployment branch policy — on a shared environment that policy is what "
+                "deployment branch policy. On a shared environment that policy is what "
                 "scopes which branches may claim its secrets, and it is also what refuses "
                 "plan cells whose base ref it does not name. Correct while every pull "
                 "request targets a branch it names; open it up, or split into "
@@ -432,7 +431,7 @@ def _env_shape_findings(name, env, data, role):
             (
                 NOTICE,
                 f"{_shared_intro(env)} has no "
-                "approval rules (required reviewers or a wait timer) — pre-merge applies "
+                "approval rules (required reviewers or a wait timer), so pre-merge applies "
                 "to it are unreviewed, and no reviewer gate is available while it is "
                 "shared: a reviewer here would stall the plan cells and the nightly drift "
                 f"run. Split it into `{env}-plan` and `{env}-apply` if you need one.",
@@ -473,7 +472,7 @@ def _env_protection_warnings(ctx):
                 (
                     NOTICE,
                     f"GitHub Environment `{name}` exists but its settings could not be "
-                    f"read ({_degrade_reason(e)}) — its plan/apply protection shape was "
+                    f"read ({_degrade_reason(e)}), so its plan/apply protection shape was "
                     "not checked.",
                 )
             )
@@ -504,7 +503,7 @@ def _engine_environment_warnings(ctx):
         return [
             (
                 WARNING,
-                f"GitHub Environment `{_ENGINE_ENV}` does not exist — nothing scopes "
+                f"GitHub Environment `{_ENGINE_ENV}` does not exist, so nothing scopes "
                 "which branches may claim the shipmate App private key. If the key is "
                 "still a repository secret, every branch's workflow can read it (see "
                 "docs/github-app.md).",
@@ -517,7 +516,7 @@ def _engine_environment_warnings(ctx):
             (
                 NOTICE,
                 f"GitHub Environment `{_ENGINE_ENV}` exists but its settings could not be "
-                f"read ({_degrade_reason(e)}) — its branch-policy scoping was not checked.",
+                f"read ({_degrade_reason(e)}), so its branch-policy scoping was not checked.",
             )
         ]
     policy = env.get("deployment_branch_policy")
@@ -525,7 +524,7 @@ def _engine_environment_warnings(ctx):
         return [
             (
                 WARNING,
-                f"GitHub Environment `{_ENGINE_ENV}` has no deployment branch policy — "
+                f"GitHub Environment `{_ENGINE_ENV}` has no deployment branch policy, so "
                 "a workflow on any branch can still claim the App private key it "
                 f"holds. Restrict it to `{default_branch}`.",
             )
@@ -538,7 +537,7 @@ def _engine_environment_warnings(ctx):
             (
                 WARNING,
                 f"GitHub Environment `{_ENGINE_ENV}`'s deployment branch policy does not "
-                f"use a custom policy naming `{default_branch}` — its actual scope could "
+                f"use a custom policy naming `{default_branch}`, so its actual scope could "
                 "not be confirmed as default-branch-only.",
             )
         ]
@@ -549,20 +548,20 @@ def _engine_environment_warnings(ctx):
             (
                 NOTICE,
                 f"could not read `{_ENGINE_ENV}`'s deployment branch policies "
-                f"({_degrade_reason(e)}) — its scope was not checked.",
+                f"({_degrade_reason(e)}), so its scope was not checked.",
             )
         ]
     names = {p.get("name") for p in (policies or {}).get("branch_policies", [])}
     if names != {default_branch}:
         if default_branch not in names:
             detail = (
-                f"does not name `{default_branch}` — a branch other than the "
+                f"does not name `{default_branch}`, so a branch other than the "
                 "default can still claim the App private key."
             )
         else:
             extra = ", ".join(sorted(f"`{n}`" for n in names - {default_branch}))
             detail = (
-                f"also permits {extra} — a workflow on those branches can still "
+                f"also permits {extra}, so a workflow on those branches can still "
                 "claim the App private key."
             )
         return [
@@ -583,7 +582,7 @@ _APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 # silent skip reads as "no plan environment holds a secret" — the one claim this probe exists for.
 _ENV_TOKEN_UNCHECKED = (
     WARNING,
-    "plan-environment secrets were not checked — minting a token with the "
+    "plan-environment secrets were not checked: minting a token with the "
     "`environments: read` permission `app/manifest.json` declares did not succeed, "
     "which usually means the shipmate App installation has not accepted the "
     "permission request yet. Accept it in the installation settings, then comment "
@@ -651,7 +650,7 @@ def _app_key_findings(env, names, total, noun):
         return [
             (
                 WARNING,
-                f"{noun} `{env}` holds `{_APP_KEY_NAME}` — plan-time "
+                f"{noun} `{env}` holds `{_APP_KEY_NAME}`, so plan-time "
                 "code execution can mint an App token with it, forge the "
                 f"`{GATE}` status and approve its own pull request. The key belongs "
                 f"only in `{_ENGINE_ENV}` (docs/github-app.md §Key-exposure "
@@ -664,7 +663,7 @@ def _app_key_findings(env, names, total, noun):
                 WARNING,
                 f"{noun} `{env}` holds {total} secret(s) but only "
                 f"{len(names)} name(s) could be read, so whether `{_APP_KEY_NAME}` "
-                "is one of them was not determined — no document blesses that "
+                "is one of them was not determined, and no document blesses that "
                 "configuration. List the environment's secrets in its settings and "
                 "remove the key if it is there (docs/github-app.md §Key-exposure "
                 "boundary).",
@@ -682,17 +681,17 @@ def _secret_finding(name, role, count, shown):
     contradict `_env_protection_warnings`' NOTICE about the same setting."""
     if role == "shared":
         return (
-            f"{_shared_intro(name)} holds {count} secret(s) ({shown}) — it is the apply "
+            f"{_shared_intro(name)} holds {count} secret(s) ({shown}). It is the apply "
             "environment too, so a plan cell "
             "runs the pull request branch's own code with everything it releases: any "
             "credential held there for applying is reachable by plan-time code. "
             "Protection rules on it would stall those plan cells, so it cannot be gated "
-            "either — treat anything it holds as readable by anyone who can push a "
+            "either. Treat anything it holds as readable by anyone who can push a "
             "branch, and keep them read-only and blast-radius-free, or move to OIDC "
             "(docs/hardening.md control 8)."
         )
     return (
-        f"{_env_noun(role)} `{name}` holds {count} secret(s) ({shown}) — a plan "
+        f"{_env_noun(role)} `{name}` holds {count} secret(s) ({shown}). A plan "
         "cell runs the pull request branch's own code with whatever this "
         "environment releases to it, and a plan environment must have no "
         "approval rules and no deployment branch policy for its plan cells to "
@@ -750,7 +749,7 @@ def _plan_env_secret_warnings(ctx):
                 (
                     NOTICE,
                     f"GitHub Environment `{name}`'s secrets could not be listed "
-                    f"({_degrade_reason(e)}) — whether this {_env_noun(role)} holds "
+                    f"({_degrade_reason(e)}), so whether this {_env_noun(role)} holds "
                     "credentials reachable by plan-time code was not checked.",
                 )
             )
@@ -785,10 +784,10 @@ def _unverified(subject):
     commit may not be silently substituted with a weaker read.
     """
     return (
-        (NOTICE, f"could not read `{_WORKFLOWS_DIR}` — {subject} not verified."),
+        (NOTICE, f"could not read `{_WORKFLOWS_DIR}`: {subject} not verified."),
         (
             NOTICE,
-            f"{subject} not verified — the commit under examination could not be determined.",
+            f"{subject} not verified: the commit under examination could not be determined.",
         ),
     )
 
@@ -798,7 +797,7 @@ PIN_UNREADABLE, PIN_NO_COMMIT = _unverified("engine pin freshness")
 # repository misconfiguration, and no other repository is read in its place.
 PIN_NO_ENGINE = (
     NOTICE,
-    "engine pin freshness not verified — the engine repository could not be determined.",
+    "engine pin freshness not verified: the engine repository could not be determined.",
 )
 
 
@@ -917,7 +916,7 @@ def _pins_in_text(text, fname, ctx, seen):
             out.append(
                 (
                     WARNING,
-                    f"`{fname}` pins `{slug}@{ref}` by tag or branch — pin a "
+                    f"`{fname}` pins `{slug}@{ref}` by tag or branch. Pin a "
                     "commit SHA (a moving ref lets the engine change under your "
                     "deploy credentials).",
                 )
@@ -977,8 +976,7 @@ def _pin_warnings(ctx):
             out.append(
                 (
                     NOTICE,
-                    f"could not read `{slug}`'s latest release — engine pin freshness "
-                    "not verified.",
+                    f"could not read `{slug}`'s latest release: engine pin freshness not verified.",
                 )
             )
             continue
@@ -988,7 +986,7 @@ def _pin_warnings(ctx):
                 (
                     WARNING,
                     f"`{fname}` pins `{slug}@{ref[:7]}`, which differs from the latest "
-                    f"release {tag} (`{sha[:7]}`) — re-pin to pick up fixes.",
+                    f"release {tag} (`{sha[:7]}`). Re-pin to pick up fixes.",
                 )
             )
     return out
@@ -1121,7 +1119,7 @@ def _unsafe_checkout_warnings(text, name):
     return [
         (
             WARNING,
-            f"`{name}` sets `allow-unsafe-pr-checkout` to something other than `false` — "
+            f"`{name}` sets `allow-unsafe-pr-checkout` to something other than `false`: "
             "that input turns off `actions/checkout`'s own refusal to check out a fork's "
             "head, which is the outermost guard on shipmate's plan path. Under "
             "`pull_request_target` the job runs at the base ref and may hold this "
@@ -1170,15 +1168,15 @@ def _fork_trigger_warnings(ctx):
         return out + [
             (
                 WARNING,
-                f"`{name}` triggers on `pull_request_target` — that trigger runs at "
+                f"`{name}` triggers on `pull_request_target`. That trigger runs at "
                 "the base ref with this repository's secrets, and on a pull request "
                 "into the default branch that is the ref `shipmate-engine`'s branch "
                 "policy trusts, so a fork can reach them. shipmate's own `shipmate.yml` "
-                "uses this trigger safely because the job holding the App key — the "
-                "`summary` job inside the engine's reusable plan workflow — runs "
+                "uses this trigger safely because the job holding the App key (the "
+                "`summary` job inside the engine's reusable plan workflow) runs "
                 "no *consumer* repository content. If this workflow checks out or acts "
                 "on the pull request's own code in a job binding a CREDENTIALED "
-                "environment — one holding the App key or cloud credentials — it "
+                "environment (one holding the App key or cloud credentials), it "
                 "does not have that property. Remove the trigger or split those "
                 "two things apart (see docs/hardening.md).",
             )
@@ -1318,10 +1316,10 @@ def _shim_job_name_finding(text, name):
     return [
         (
             WARNING,
-            f"`{name}`'s calling job is not named `{_SHIM_JOB_NAME}` — GitHub names a called "
+            f"`{name}`'s calling job is not named `{_SHIM_JOB_NAME}`. GitHub names a called "
             "workflow's check runs `<caller job> / <callee job>`, so this repository's plan cell "
             f"checks are not `{_SHIM_JOB_NAME} / <stack> / <env>`. The plan runs and the gate is "
-            "unaffected; what is lost is every `[plan]` link in the plan comment, which falls "
+            "unaffected; what is lost is every `plan` link in the plan comment, which falls "
             "back to the workflow-run page instead of the cell's own check. Rename the job "
             f"`{_SHIM_JOB_NAME}` (docs/getting-started.md).",
         )
@@ -1451,7 +1449,7 @@ def _dispatch_input_findings(on_text, name):
             (
                 WARNING,
                 f"`{name}`'s `workflow_dispatch` trigger declares no "
-                f"{_and_list(missing)} input — `actions/dispatch` sends one body per verb, and "
+                f"{_and_list(missing)} input. `actions/dispatch` sends one body per verb, and "
                 "GitHub refuses a body naming an input the workflow does not declare: "
                 "`Unexpected inputs provided`, no run created, and the pull request pointed at "
                 "the comment-handling run by a comment saying the dispatch failed. Declare "
@@ -1466,7 +1464,7 @@ def _dispatch_input_findings(on_text, name):
         out.append(
             (
                 WARNING,
-                f"`{name}`'s `verb` input does not offer `{_VERB_OPTIONS}` — that is the whole "
+                f"`{name}`'s `verb` input does not offer `{_VERB_OPTIONS}`, which is the whole "
                 "set of verbs this file routes. A missing option is refused at the dispatch "
                 "form and at the API, so that verb reaches nothing; an extra one offers a verb "
                 "no job's `if:` selects, and its run completes with every job skipped, which "
@@ -1479,7 +1477,7 @@ def _dispatch_input_findings(on_text, name):
         out.append(
             (
                 WARNING,
-                f"`{name}` declares the {_and_list(required)} input `required: true` — at "
+                f"`{name}` declares the {_and_list(required)} input `required: true`, but at "
                 "least one dispatch body leaves it empty, and GitHub reads an omitted or empty "
                 "value for a required input as not provided: `Required input not provided`, "
                 "HTTP 422 and no run, so one required input refuses a whole verb. `verb` is the "
@@ -1536,7 +1534,7 @@ def _dispatch_wiring_finding(text, name):
         out.append(
             (
                 WARNING,
-                f"`{name}` declares no `workflow_dispatch` trigger — every commented verb is "
+                f"`{name}` declares no `workflow_dispatch` trigger, so every commented verb is "
                 "authorized, reacted to with a rocket, and then dispatches nothing: "
                 "GitHub answers the dispatch with `Workflow does not have 'workflow_dispatch' "
                 "trigger`, no run is created, and the pull request gets a comment saying the "
@@ -1551,7 +1549,7 @@ def _dispatch_wiring_finding(text, name):
         out.append(
             (
                 WARNING,
-                f"`{name}` does not call the engine's plan workflow — the dispatch is accepted "
+                f"`{name}` does not call the engine's plan workflow, so the dispatch is accepted "
                 "and the run starts, with nothing in it that resolves the pull request, plans a "
                 "cell or reports a gate status, so a commented `shipmate plan` produces a green "
                 "run and no plan. That call is the whole `plan` job: `uses: "
@@ -1622,8 +1620,8 @@ def _routing_finding(text, name):
             out.append(
                 (
                     WARNING,
-                    f"`{name}` has {count} jobs calling the engine's `{callee}` — exactly one "
-                    "does, selected by the `if:` that routes its event. With none, the verb or "
+                    f"`{name}` has {count} jobs calling the engine's `{callee}`: it needs exactly "
+                    "one, selected by the `if:` that routes its event. With none, the verb or "
                     "event it serves reaches nothing and its run completes with every job "
                     "skipped, which reads as success everywhere; with more than one, either "
                     "the work runs twice or one of them is unreachable "
@@ -1636,7 +1634,7 @@ def _routing_finding(text, name):
             out.append(
                 (
                     WARNING,
-                    f"`{name}`'s job calling the engine's `{callee}` declares no `if:` — it "
+                    f"`{name}`'s job calling the engine's `{callee}` declares no `if:`, so it "
                     "then runs on every one of this file's triggers, so a `push` starts a plan "
                     f"and an `issue_comment` starts an apply. Add `if: {expected}` "
                     "(docs/getting-started.md).",
@@ -1647,7 +1645,7 @@ def _routing_finding(text, name):
                 (
                     WARNING,
                     f"`{name}`'s job calling the engine's `{callee}` is selected by "
-                    f"`{_normalize_if(found)}`, not `{_normalize_if(expected)}` — a wrong "
+                    f"`{_normalize_if(found)}`, not `{_normalize_if(expected)}`. A wrong "
                     "expression routes a verb nowhere and its dispatched run completes with "
                     "every job skipped, which reads as success everywhere "
                     "(docs/getting-started.md).",
@@ -1688,12 +1686,12 @@ ROLE_LINES_BUDGET = 8000
 # misconfiguration. Never an all-clear, and never a read of another revision in its place.
 CONFIG_UNREADABLE = (
     NOTICE,
-    f"could not read `{CONFIG_PATH}` at the commit under examination — its settings were "
+    f"could not read `{CONFIG_PATH}` at the commit under examination, so its settings were "
     "not validated here. The default branch's copy was not read in its place.",
 )
 CONFIG_NO_COMMIT = (
     NOTICE,
-    f"`{CONFIG_PATH}` not validated — the commit under examination could not be determined.",
+    f"`{CONFIG_PATH}` not validated: the commit under examination could not be determined.",
 )
 # The verdict names the checks it did NOT run: each needs the plan matrix or the whole-tree
 # environment scan, neither of which doctor has, so a bare "valid" here would claim a clean
@@ -1704,7 +1702,7 @@ CONFIG_VALID = (
     "identities and the environment entries. Not checked here, for want of a plan matrix "
     "and a whole-tree environment scan: `tf_vars`-layout coverage of the planned "
     "environments, entries that no stack tags, workload tags outside an environment's "
-    "`workloads` and listed workloads no stack tags — `detect` checks each of those on the "
+    "`workloads` and listed workloads no stack tags. `detect` checks each of those on the "
     "runs where it applies. Execution reads the default branch's copy of this file, never "
     "this branch's."
 )
@@ -1780,18 +1778,18 @@ def _config_defaults(table):
     return [
         (
             NOTICE,
-            f"`needs` orders {_one_line(shown, 400)} — a bare `shipmate apply` applies "
+            f"`needs` orders {_one_line(shown, 400)}: a bare `shipmate apply` applies "
             "one env-level fully before it starts the next."
             if order
-            else "`needs`: declared by no environment — every environment sits at one level, "
+            else "`needs`: declared by no environment, so every environment sits at one level, "
             "and a bare `shipmate apply` applies them all together.",
         ),
         (
             NOTICE,
-            f"`explicit = true` on {_one_line(', '.join(envs), 400)} — a bare "
+            f"`explicit = true` on {_one_line(', '.join(envs), 400)}: a bare "
             "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             if envs
-            else "`explicit`: set on no environment — every environment applies on a bare "
+            else "`explicit`: set on no environment, so every environment applies on a bare "
             "`shipmate apply`, production included.",
         ),
     ]
@@ -1929,7 +1927,7 @@ def _app_permission_warnings(ctx):
         (
             WARNING,
             f"{_one_line(ctx['app_permission_error'])}, which usually means the shipmate App "
-            "installation is missing a permission the manifest declares — re-accept the App's "
+            "installation is missing a permission the manifest declares. Re-accept the App's "
             "permission request in the installation settings (or retry if the API was "
             "transiently failing).",
         )
@@ -1981,7 +1979,7 @@ def warnings(ctx):
                 (
                     WARNING,
                     f"doctor could not verify the {_probe_label(probe)} settings "
-                    f"({_degrade_reason(e)}) — probe skipped.",
+                    f"({_degrade_reason(e)}): probe skipped.",
                 )
             )
     return out
@@ -2177,13 +2175,12 @@ def _provenance(ctx):
     summaries could then be downloaded, so a non-empty set is no evidence that
     any environment was probed. A preamble keyed on it would claim a coverage
     the probes never had."""
-    head = ctx["head_sha"][:7] or "(unknown commit)"
     runs = ctx["plan_run_ids"]
     if runs:
         named = _one_line(", ".join(runs), 120)
         plural = "s" if len(runs) > 1 else ""
-        return f"_Commit `{head}`; cell summaries from plan run{plural} {named}._"
-    return f"_Commit `{head}`; no plan records on this commit's apply checks._"
+        return f"Cell summaries from plan run{plural} {named}."
+    return "No plan records on this commit's apply checks."
 
 
 def _all_clear_line(ctx):
@@ -2199,13 +2196,13 @@ def _all_clear_line(ctx):
     envs = sorted(ctx.get("envs") or ())
     if not envs:
         return (
-            "- :white_check_mark: no problems found by the settings probes — and no "
+            "- 🟢 no problems found by the settings probes. No "
             "environments were probed, since no declared environment set was available "
             "for this commit."
         )
     named = _code_spans([_md_escape(e) for e in envs])
     return (
-        "- :white_check_mark: no problems found by the settings probes. The environment "
+        "- 🟢 no problems found by the settings probes. The environment "
         "probes covered only the environments of the stacks changed in this pull request: "
         f"{named}."
     )
@@ -2228,10 +2225,10 @@ def _truncated_checks(annotations):
 
 
 def _render_annotation_row(a):
-    emoji = ":x:" if a.get("annotation_level") == "failure" else ":warning:"
+    emoji = "🔴" if a.get("annotation_level") == "failure" else "🟠"
     title = _md_escape(_one_line(a.get("title") or "", 120))
     msg = _md_escape(_one_line(a.get("message") or "", 300))
-    return f"  - {emoji} {title} — {msg}" if title else f"  - {emoji} {msg}"
+    return f"  - {emoji} {title}: {msg}" if title else f"  - {emoji} {msg}"
 
 
 def _emit_section(lines, name, rows, used, budget):
@@ -2279,7 +2276,7 @@ def _harvest_lines(sections, annotations, budget):
     if any_truncated:
         lines.append(
             "- _GitHub keeps at most 10 annotations per level per step, so this list "
-            "may be truncated — see the run logs for the full set._"
+            "may be truncated. See the run logs for the full set._"
         )
     return lines, dropped
 
@@ -2299,12 +2296,46 @@ def _findings_lines(findings, budget):
     return lines, dropped
 
 
-def _report_head(ctx):
+def _plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _verdict(findings, sections, ctx):
+    """The line under the header: `N errors` (harvested failure annotations), `N warnings`
+    (warning findings plus harvested warning annotations), `N notices` (notice findings), zero
+    counts omitted, then `harvest incomplete` when the harvest failed or is still pending. Errors
+    are 🔴, warnings 🟠, notices and `harvest incomplete` ⚪, and the line takes the worst;
+    `🟢 no problems found` when there is no token. Then `at_sha`. `config_status` lines are
+    status and count toward nothing.
+
+    Harvested rows are counted from `harvest_sections`, after its filter, so a plan-path doctor
+    annotation the live probes re-state is counted once, and a row the budget drops still counts.
+    """
+    harvested = [a.get("annotation_level") for rows in sections.values() for a in rows]
+    levels = [lvl for lvl, _ in findings]
+    counts = (
+        ("🔴", harvested.count("failure"), "error"),
+        ("🟠", levels.count(WARNING) + harvested.count("warning"), "warning"),
+        ("⚪", levels.count(NOTICE), "notice"),
+    )
+    tokens = [(circle, _plural(n, word)) for circle, n, word in counts if n]
+    if ctx.get("harvest_failed") or ctx.get("harvest_pending"):
+        tokens.append(("⚪", "harvest incomplete"))
+    sha = sc.at_sha(ctx["head_sha"])
+    if not tokens:
+        return f"🟢 no problems found {sha}"
+    circle = sc.worst(c for c, _ in tokens)
+    return f"{circle} {', '.join(t for _, t in tokens)} {sha}"
+
+
+def _report_head(ctx, verdict):
     """Shared by both render paths -- the marker is this comment's identity (the
     upsert PATCHes by it), so neither path can drift out of marker compliance."""
     return [
         DOCTOR_MARKER,
-        "### shipmate doctor",
+        sc.header("doctor"),
+        "",
+        verdict,
         "",
         _provenance(ctx),
         "",
@@ -2323,14 +2354,15 @@ def _finding_row(lvl, text):
     return f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}"
 
 
-def _findings_only_report(findings, ctx):
+def _findings_only_report(findings, ctx, verdict):
     """Last-ditch fallback: a body still over sc.HARD_CAP with the harvest
     already excluded means the findings themselves are unexpectedly large.
     Hard-truncates them with a count, so the comment still posts rather than
-    the whole POST failing with a 422."""
-    head = _report_head(ctx)
+    the whole POST failing with a 422. Keeps the full report's `verdict`."""
+    head = _report_head(ctx, verdict)
+    tail = ["", sc.footer(current_run_url())]
     # 200 chars of headroom for the omitted-count line appended below.
-    budget = max(0, sc.HARD_CAP - len("\n".join(head)) - 200)
+    budget = max(0, sc.HARD_CAP - len("\n".join(head)) - len("\n".join(tail)) - 200)
     if findings:
         lines, dropped = _findings_lines(findings, budget)
     else:
@@ -2338,9 +2370,9 @@ def _findings_only_report(findings, ctx):
     if dropped:
         lines.append(
             f"- _{dropped} more finding(s) omitted to keep this comment within the size "
-            "limit — see the workflow run for the full list._"
+            "limit. See the workflow run for the full list._"
         )
-    return "\n".join(head + lines)
+    return "\n".join(head + lines + tail)
 
 
 def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending):
@@ -2358,10 +2390,10 @@ def _harvest_body(sections, annotations, budget, harvest_failed, harvest_pending
         if dropped:
             lines.append(
                 f"- _{dropped} more warning(s) omitted to keep this comment within the "
-                "size limit — see the run logs for the full set._"
+                "size limit. See the run logs for the full set._"
             )
     elif not harvest_failed and not harvest_pending:
-        lines = [":white_check_mark: no warnings on this commit's workflow runs."]
+        lines = ["🟢 no warnings on this commit's workflow runs."]
     if harvest_pending:
         lines.append(HARVEST_PENDING)
     if harvest_failed:
@@ -2376,7 +2408,9 @@ CONFIG_HEADING = "#### the environment table at this commit"
 
 
 def render_report(findings, annotations, ctx, status=()):
-    out = _report_head(ctx)
+    sections = harvest_sections(annotations)
+    verdict = _verdict(findings, sections, ctx)
+    out = _report_head(ctx, verdict)
     if findings:
         out += [_finding_row(lvl, text) for lvl, text in findings]
     else:
@@ -2384,11 +2418,12 @@ def render_report(findings, annotations, ctx, status=()):
     if status:
         out += ["", CONFIG_HEADING, ""] + [_finding_row(lvl, text) for lvl, text in status]
     heading = ["", "#### warnings from this commit's workflow runs", ""]
-    sections = harvest_sections(annotations)
+    tail = ["", sc.footer(current_run_url())]
     # The settings-probe section above is never truncated -- it is the part a
     # stale comment can't recover from the run logs -- so the harvest gets
     # whatever's left of sc.SIZE_BUDGET, not a fixed share.
-    budget = max(0, sc.SIZE_BUDGET - len("\n".join(out)) - len("\n".join(heading)))
+    # The +1 is the newline that joins the harvest rows to the footer.
+    budget = max(0, sc.SIZE_BUDGET - len("\n".join(out + heading + tail)) - 1)
     lines = _harvest_body(
         sections,
         annotations,
@@ -2396,16 +2431,17 @@ def render_report(findings, annotations, ctx, status=()):
         bool(ctx.get("harvest_failed")),
         bool(ctx.get("harvest_pending")),
     )
-    body = "\n".join(out + heading + lines)
+    body = "\n".join(out + heading + lines + tail)
     if len(body) > sc.HARD_CAP:
         # The harvest section is already budgeted against sc.SIZE_BUDGET above, so overflow this
         # large can only come from the settings-probe findings themselves — degrade those too
         # rather than let the comment-ops render step's `gh api ... -F body=@doctor.md` 422.
-        body = _findings_only_report(findings, ctx)
+        body = _findings_only_report(findings, ctx, verdict)
     return body
 
 
 def main():
+    utf8_output()
     mode = os.environ.get("SHIPMATE_DOCTOR_MODE", "")
     if mode not in MODES:
         raise SystemExit(f"SHIPMATE_DOCTOR_MODE must be one of {', '.join(MODES)} (got: {mode!r})")

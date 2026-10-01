@@ -733,7 +733,7 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     # a leftover from nothing.
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines()]
-    doctor = next(i for i, n in enumerate(names) if n.startswith("- name: Doctor"))
+    doctor = next(i for i, n in enumerate(names) if n.startswith('- name: "Doctor:'))
     upsert = next(i for i, n in enumerate(names) if n == "- name: Upsert sticky comment")
     assert doctor < upsert
     assert "> doctor.txt" in src

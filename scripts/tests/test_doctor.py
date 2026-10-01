@@ -65,6 +65,14 @@ def _plan_env_secret_token(monkeypatch):
     monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
 
 
+@pytest.fixture(autouse=True)
+def _run_context(monkeypatch):
+    """The runner defaults `current_run_url()` reads for the report's footer."""
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
+    monkeypatch.setenv("GITHUB_RUN_ID", "77")
+
+
 def test_mode_must_be_set(monkeypatch):
     monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "")
     monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
@@ -90,7 +98,7 @@ def test_envs_unavailable_skips_the_probes_that_need_the_declared_set(monkeypatc
     assert doctor._environment_warnings(_ctx(envs=set())) == [
         (
             doctor.NOTICE,
-            "no plan run with cell summaries for this commit \u2014 the declared "
+            "no plan run with cell summaries for this commit: the declared "
             "environment set is unknown, so the environment probes were skipped.",
         )
     ]
@@ -321,28 +329,28 @@ def _existence(*names, table=CANONICAL):
 #: Every finding the split and shared namings produce, hand-written.
 _MISSING_PLAN = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu-plan` does not exist \u2014 the plan jobs for stacks tagged "
+    "GitHub Environment `dev-eu-plan` does not exist: the plan jobs for stacks tagged "
     "`env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of its "
     "protection rules. Create it.",
 )
 _MISSING_APPLY = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu-apply` does not exist \u2014 the apply jobs for stacks tagged "
+    "GitHub Environment `dev-eu-apply` does not exist: the apply jobs for stacks tagged "
     "`env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of its "
     "protection rules. Create it.",
 )
 _MISSING_SHARED = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu` does not exist \u2014 the plan and apply jobs for stacks "
+    "GitHub Environment `dev-eu` does not exist: the plan and apply jobs for stacks "
     "tagged `env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of "
     "its protection rules. Create it.",
 )
 #: The shared-mode NOTICE for a bare `dev-eu` with no approval rules.
 _SHARED_UNREVIEWED = (
     doctor.NOTICE,
-    "GitHub Environment `dev-eu` \u2014 shared between plan and apply by `shared = true` in its "
-    "`[environments.dev-eu]` entry \u2014 has no approval rules (required reviewers or a wait "
-    "timer) \u2014 pre-merge applies to it are unreviewed, and no reviewer gate is available "
+    "GitHub Environment `dev-eu` (shared between plan and apply by `shared = true` in its "
+    "`[environments.dev-eu]` entry) has no approval rules (required reviewers or a wait "
+    "timer), so pre-merge applies to it are unreviewed, and no reviewer gate is available "
     "while it is shared: a reviewer here would stall the plan cells and the nightly drift run. "
     "Split it into `dev-eu-plan` and `dev-eu-apply` if you need one.",
 )
@@ -372,7 +380,7 @@ def test_the_table_selects_the_mode(monkeypatch):
 #: Hand-written: the environment probes' one finding when the default branch's table is unusable.
 _DEFAULT_TABLE_SKIPPED = (
     doctor.NOTICE,
-    "the environment probes were skipped — the default branch's `.github/shipmate.toml` "
+    "the environment probes were skipped: the default branch's `.github/shipmate.toml` "
     "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
     "and it alone selects which GitHub Environments a run binds. While that holds, every run "
     "refuses at detect.",
@@ -463,7 +471,7 @@ def test_an_interpreter_below_the_floor_skips_the_environment_probes(monkeypatch
     assert found == [
         (
             doctor.NOTICE,
-            "the environment probes were skipped — this runner's Python refuses the "
+            "the environment probes were skipped: this runner's Python refuses the "
             "environment table, so which GitHub Environments a run binds cannot be "
             "determined here.",
         )
@@ -482,7 +490,7 @@ def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
     assert found == [
         (
             doctor.NOTICE,
-            "no plan run with cell summaries for this commit — the declared "
+            "no plan run with cell summaries for this commit: the declared "
             "environment set is unknown, so the environment probes were skipped.",
         )
     ]
@@ -887,9 +895,9 @@ def test_a_shared_env_with_reviewers_names_the_key_that_shares_it(monkeypatch):
     assert doctor._env_protection_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "GitHub Environment `dev-eu` \u2014 shared between plan and apply by `shared = true` "
-            "in its `[environments.dev-eu]` entry \u2014 has protection rules "
-            "(required_reviewers) \u2014 a protection rule gates every job that binds the "
+            "GitHub Environment `dev-eu` (shared between plan and apply by `shared = true` "
+            "in its `[environments.dev-eu]` entry) has protection rules "
+            "(required_reviewers). A protection rule gates every job that binds the "
             "environment and GitHub offers no per-job filter, so the plan cells and the "
             "nightly drift run will not start immediately either. To gate applies only, split "
             "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared = true` from its "
@@ -1687,7 +1695,7 @@ def test_report_renders_probe_and_harvest_sections():
         [(doctor.WARNING, "gate ruleset is missing")], [_ann(title="stale codegen")], _ctx()
     )
     assert body.startswith(doctor.DOCTOR_MARKER)
-    assert ":warning: gate ruleset is missing" in body
+    assert "- 🟠 gate ruleset is missing" in body
     assert "stale codegen" in body
     assert "shipmate · plan / shipmate / detect" in body
     assert _ctx()["head_sha"][:7] in body
@@ -1696,14 +1704,151 @@ def test_report_renders_probe_and_harvest_sections():
 
 def test_report_renders_notes_as_info_not_warning():
     body = doctor.render_report([(doctor.NOTICE, "apply env has no protection")], [], _ctx())
-    assert ":information_source: apply env has no protection" in body
-    assert ":warning: apply env has no protection" not in body
+    assert "- ⚪ apply env has no protection" in body
+    assert "- 🟠 apply env has no protection" not in body
 
 
 def test_report_all_clear():
     body = doctor.render_report([], [], _ctx())
     assert "no problems found" in body
     assert "no warnings" in body
+
+
+_FOOTER = (
+    "[run](https://github.com/o/r/actions/runs/77). "
+    "Comment `shipmate help` for the available commands."
+)
+_COVERED = (
+    "- 🟢 no problems found by the settings probes. The environment probes covered only the "
+    "environments of the stacks changed in this pull request: `dev-eu`."
+)
+
+
+def test_report_with_no_findings_is_the_whole_all_clear_body():
+    """Mutation: render the verdict without `at_sha` -- `🟢 no problems found` alone. Mutation:
+    drop the footer from `render_report`'s tail."""
+    assert doctor.render_report([], [], _ctx()) == (
+        "<!-- shipmate:doctor -->\n"
+        "### shipmate doctor\n"
+        "\n"
+        "🟢 no problems found at fffffff\n"
+        "\n"
+        "Cell summaries from plan run 1281.\n"
+        "\n"
+        "#### repository settings\n"
+        "\n"
+        f"{_COVERED}\n"
+        "\n"
+        "#### warnings from this commit's workflow runs\n"
+        "\n"
+        "🟢 no warnings on this commit's workflow runs.\n"
+        "\n"
+        f"{_FOOTER}"
+    )
+
+
+def test_report_with_a_warning_a_notice_and_a_harvested_failure_is_the_whole_body():
+    """Mutation: the verdict ignores harvested failures (`harvested.count("failure")` -> 0): it
+    reads `🟠 1 warning, 1 notice`. Mutation: `_LEVEL_EMOJI[WARNING]` -> ⚪."""
+    findings = [
+        (doctor.WARNING, "gate ruleset is missing"),
+        (doctor.NOTICE, "apply env has no protection"),
+    ]
+    anns = [_ann(level="failure", title="plan failed", message="exit 1", check="app / dev-eu")]
+    assert doctor.render_report(findings, anns, _ctx()) == (
+        "<!-- shipmate:doctor -->\n"
+        "### shipmate doctor\n"
+        "\n"
+        "🔴 1 error, 1 warning, 1 notice at fffffff\n"
+        "\n"
+        "Cell summaries from plan run 1281.\n"
+        "\n"
+        "#### repository settings\n"
+        "\n"
+        "- 🟠 gate ruleset is missing\n"
+        "- ⚪ apply env has no protection\n"
+        "\n"
+        "#### warnings from this commit's workflow runs\n"
+        "\n"
+        "- **app / dev-eu**\n"
+        "  - 🔴 plan failed: exit 1\n"
+        "\n"
+        f"{_FOOTER}"
+    )
+
+
+def test_report_with_a_pending_harvest_and_no_findings_is_the_whole_body():
+    """Mutation: drop the `harvest incomplete` token: the verdict reads `🟢 no problems found`."""
+    assert doctor.render_report([], [], _ctx(harvest_pending=True)) == (
+        "<!-- shipmate:doctor -->\n"
+        "### shipmate doctor\n"
+        "\n"
+        "⚪ harvest incomplete at fffffff\n"
+        "\n"
+        "Cell summaries from plan run 1281.\n"
+        "\n"
+        "#### repository settings\n"
+        "\n"
+        f"{_COVERED}\n"
+        "\n"
+        "#### warnings from this commit's workflow runs\n"
+        "\n"
+        "- ⚪ some of this commit's workflow runs had not finished when this report was "
+        "rendered: warnings they record later are not in this list. Comment `shipmate doctor` "
+        "again once they have finished.\n"
+        "\n"
+        f"{_FOOTER}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("findings", "levels", "over", "line"),
+    [
+        ([(doctor.WARNING, "w")], [], {}, "🟠 1 warning at fffffff"),
+        ([(doctor.NOTICE, "n")], ["warning", "warning"], {}, "🟠 2 warnings, 1 notice at fffffff"),
+        (
+            [(doctor.NOTICE, "n")],
+            [],
+            {"harvest_failed": True},
+            "⚪ 1 notice, harvest incomplete at fffffff",
+        ),
+        ([], ["failure", "failure"], {"head_sha": "unknown"}, "🔴 2 errors at an unknown commit"),
+    ],
+)
+def test_the_verdict_counts_and_takes_the_worst_circle(findings, levels, over, line):
+    """Mutation: the verdict's warning circle 🟠 -> ⚪ (first two rows). Mutation: drop the
+    `harvest_failed` half of the `harvest incomplete` condition (third row). Mutation: `_plural`
+    always singular (second and fourth rows)."""
+    anns = [_ann(level=lvl, title=f"t{i}") for i, lvl in enumerate(levels)]
+    body = doctor.render_report(findings, anns, _ctx(**over))
+    assert body.splitlines()[3] == line
+
+
+def test_the_environment_table_status_counts_toward_nothing_in_the_verdict():
+    """Mutation: hand `_verdict` `findings + list(status)`: it reads `⚪ 1 notice`."""
+    body = doctor.render_report([], [], _ctx(), [(doctor.NOTICE, doctor.CONFIG_VALID)])
+    assert body.splitlines()[3] == "🟢 no problems found at fffffff"
+
+
+def test_the_findings_only_fallback_keeps_the_verdict_and_the_footer():
+    """Mutation: give `_findings_only_report` an empty verdict. Mutation: drop its footer."""
+    findings = [(doctor.WARNING, "x" * 200) for _ in range(400)]
+    lines = doctor.render_report(findings, [], _ctx()).splitlines()
+    assert "#### warnings from this commit's workflow runs" not in lines  # The fallback fired.
+    assert lines[3] == "🟠 400 warnings at fffffff"
+    assert lines[-2:] == ["", _FOOTER]
+
+
+def test_the_harvest_budget_leaves_room_for_the_footer():
+    """Everything but the omitted-count note fits `sc.SIZE_BUDGET`. Short rows keep the slack a
+    dropped row leaves below the footer's length. Mutation: drop `tail` from the harvest budget's
+    subtraction."""
+    anns = [_ann(title="t", message="m", check=f"c{i}") for i in range(5000)]
+    lines = doctor.render_report([], anns, _ctx()).splitlines()
+    kept = [ln for ln in lines if not ln.startswith("- _") or "omitted" not in ln]
+    assert len(kept) == len(lines) - 1
+    assert lines[-1] == _FOOTER
+    assert len("\n".join(kept)) <= doctor.sc.SIZE_BUDGET
 
 
 def test_all_clear_names_the_environments_the_probes_actually_covered():
@@ -1719,7 +1864,7 @@ def test_all_clear_names_the_environments_the_probes_actually_covered():
 
 def test_all_clear_says_when_no_environments_were_probed():
     body = doctor.render_report([], [], _ctx(envs=set()))
-    assert "no environments were probed" in body
+    assert "No environments were probed" in body
 
 
 def test_all_clear_escapes_and_bounds_the_environment_names():
@@ -1742,7 +1887,7 @@ def test_all_clear_names_ten_environments_then_a_count():
     `_one_line(..., 400)` cut in `_all_clear_line` -- the count suffix is missing."""
     shown = ", ".join(f"`env-{i:02}`" for i in range(10)) + " and 2 more"
     assert doctor._all_clear_line(_ctx(envs={f"env-{i:02}" for i in range(12)})) == (
-        "- :white_check_mark: no problems found by the settings probes. The environment "
+        "- 🟢 no problems found by the settings probes. The environment "
         "probes covered only the environments of the stacks changed in this pull request: "
         f"{shown}."
     )
@@ -1751,7 +1896,7 @@ def test_all_clear_names_ten_environments_then_a_count():
 def test_findings_only_fallback_uses_the_same_all_clear_line():
     # Two renderers emit the all-clear; the scope statement must not live in
     # only one of them.
-    body = doctor._findings_only_report([], _ctx(envs={"dev-eu"}))
+    body = doctor._findings_only_report([], _ctx(envs={"dev-eu"}), "🟢 no problems found")
     assert "`dev-eu`" in body
     assert "changed in this pull request" in body
 
@@ -1761,9 +1906,9 @@ def test_harvest_incomplete_note_says_the_harvest_is_incomplete():
     wiring but not the note's meaning: swap the constant for an all-clear and they stay green.
     Pinned here on a stable stem -- the warning level, and a phrase unreadable as "everything
     is fine" -- not the whole sentence, so ordinary rewording stays cheap."""
-    assert doctor.HARVEST_INCOMPLETE.startswith("- :warning:")
+    assert doctor.HARVEST_INCOMPLETE.startswith("- ⚪")
     assert "could not read all" in doctor.HARVEST_INCOMPLETE
-    assert ":white_check_mark:" not in doctor.HARVEST_INCOMPLETE
+    assert "🟢" not in doctor.HARVEST_INCOMPLETE
 
 
 def test_report_states_when_the_whole_harvest_failed():
@@ -1868,7 +2013,7 @@ def test_harvest_pending_note_says_runs_had_not_finished():
     # is the exact false all-clear it exists to prevent.
     assert "had not finished" in doctor.HARVEST_PENDING
     assert "shipmate doctor" in doctor.HARVEST_PENDING  # It tells the reader what to do.
-    assert ":white_check_mark:" not in doctor.HARVEST_PENDING
+    assert "🟢" not in doctor.HARVEST_PENDING
     assert doctor.HARVEST_PENDING != doctor.HARVEST_INCOMPLETE
 
 
@@ -1928,7 +2073,7 @@ def test_provenance_and_probe_coverage_can_disagree_without_contradicting(monkey
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply"))
     findings = doctor._environment_warnings(_ctx(envs=set()))
     body = doctor.render_report(findings, [], _ctx(plan_run_ids=["1281"]))
-    assert "cell summaries from plan run 1281" in body
+    assert "Cell summaries from plan run 1281." in body
     assert "environment probes were skipped" in body
 
 
@@ -1960,7 +2105,7 @@ def test_provenance_names_every_run_the_head_recorded():
     names the whole set. Naming only the first would attribute the report to a
     plan run half of it did not come from."""
     text = doctor._provenance(_ctx(plan_run_ids=["1281", "1290"]))
-    assert text == f"_Commit `{_HEAD[:7]}`; cell summaries from plan runs 1281, 1290._"
+    assert text == "Cell summaries from plan runs 1281, 1290."
 
 
 def test_provenance_states_the_run_without_a_coverage_claim():
@@ -1969,7 +2114,7 @@ def test_provenance_states_the_run_without_a_coverage_claim():
     `envs`. Wording that implies the declared environment set came from these
     runs, or that mentions the probes at all, fails here."""
     text = doctor._provenance(_ctx(plan_run_ids=["1281"]))
-    assert text == f"_Commit `{_HEAD[:7]}`; cell summaries from plan run 1281._"
+    assert text == "Cell summaries from plan run 1281."
 
 
 def test_provenance_says_so_when_the_head_recorded_no_plan_run():
@@ -1977,7 +2122,7 @@ def test_provenance_says_so_when_the_head_recorded_no_plan_run():
     yet, or every record is from an older engine version. Naming the absence is
     the whole degrade path: doctor still reports its settings probes."""
     text = doctor._provenance(_ctx(plan_run_ids=[]))
-    assert text == f"_Commit `{_HEAD[:7]}`; no plan records on this commit's apply checks._"
+    assert text == "No plan records on this commit's apply checks."
 
 
 def test_provenance_one_lines_an_overlong_plan_run_id():
@@ -2523,10 +2668,10 @@ def test_fork_trigger_probe_is_registered(monkeypatch):
 # The finding's whole text, hand-written and never derived from `doctor`: `shipmate` is
 # spelled out here, so renaming `doctor._SHIM_JOB_NAME` reddens this rather than following it.
 _WRONG_JOB_NAME_TEXT = (
-    "`shipmate.yml`'s calling job is not named `shipmate` — GitHub names a called workflow's check "
+    "`shipmate.yml`'s calling job is not named `shipmate`. GitHub names a called workflow's check "
     "runs `<caller job> / <callee job>`, so this repository's plan cell checks are not "
     "`shipmate / <stack> / <env>`. The plan runs and the gate is unaffected; what is lost is "
-    "every `[plan]` link in the plan comment, which falls back to the workflow-run page instead "
+    "every `plan` link in the plan comment, which falls back to the workflow-run page instead "
     "of the cell's own check. Rename the job `shipmate` (docs/getting-started.md)."
 )
 
@@ -2729,7 +2874,7 @@ _WF_NO_ENGINE_CALL = (
 # in full rather than by substring, so a reworded message is a deliberate edit here and
 # the three cannot collapse into one another.
 _NO_TRIGGER_TEXT = (
-    "`shipmate.yml` declares no `workflow_dispatch` trigger — every commented verb is "
+    "`shipmate.yml` declares no `workflow_dispatch` trigger, so every commented verb is "
     "authorized, reacted to with a rocket, and then dispatches nothing: GitHub answers the "
     "dispatch with `Workflow does not have 'workflow_dispatch' trigger`, no run is created, "
     "and the pull request gets a comment saying the dispatch failed and linking the "
@@ -2737,7 +2882,7 @@ _NO_TRIGGER_TEXT = (
     "`environment`, `ref` and `pr_number` inputs (docs/getting-started.md)."
 )
 _NO_PR_NUMBER_TEXT = (
-    "`shipmate.yml`'s `workflow_dispatch` trigger declares no `pr_number` input — "
+    "`shipmate.yml`'s `workflow_dispatch` trigger declares no `pr_number` input. "
     "`actions/dispatch` sends one body per verb, and GitHub refuses a body naming an input "
     "the workflow does not declare: `Unexpected inputs provided`, no run created, and the "
     "pull request pointed at the comment-handling run by a comment saying the dispatch "
@@ -2745,28 +2890,28 @@ _NO_PR_NUMBER_TEXT = (
     "`inputs:` (docs/getting-started.md)."
 )
 _REQUIRED_REF_TEXT = (
-    "`shipmate.yml` declares the `ref` input `required: true` — at least one dispatch body "
+    "`shipmate.yml` declares the `ref` input `required: true`, but at least one dispatch body "
     "leaves it empty, and GitHub reads an omitted or empty value for a required input as not "
     "provided: `Required input not provided`, HTTP 422 and no run, so one required input "
     "refuses a whole verb. `verb` is the only required one; give the rest `required: false` "
     "and `default: ''` (docs/getting-started.md)."
 )
 _REQUIRED_TAGS_TEXT = (
-    "`shipmate.yml` declares the `tags` input `required: true` — at least one dispatch body "
+    "`shipmate.yml` declares the `tags` input `required: true`, but at least one dispatch body "
     "leaves it empty, and GitHub reads an omitted or empty value for a required input as not "
     "provided: `Required input not provided`, HTTP 422 and no run, so one required input "
     "refuses a whole verb. `verb` is the only required one; give the rest `required: false` "
     "and `default: ''` (docs/getting-started.md)."
 )
 _SHORT_OPTIONS_TEXT = (
-    "`shipmate.yml`'s `verb` input does not offer `[plan, apply, unlock, drift]` — that is "
+    "`shipmate.yml`'s `verb` input does not offer `[plan, apply, unlock, drift]`, which is "
     "the whole set of verbs this file routes. A missing option is refused at the dispatch "
     "form and at the API, so that verb reaches nothing; an extra one offers a verb no job's "
     "`if:` selects, and its run completes with every job skipped, which reads as success "
     "everywhere. Write `options: [plan, apply, unlock, drift]` (docs/getting-started.md)."
 )
 _NO_ENGINE_CALL_TEXT = (
-    "`shipmate.yml` does not call the engine's plan workflow — the dispatch is accepted and the "
+    "`shipmate.yml` does not call the engine's plan workflow, so the dispatch is accepted and the "
     "run starts, with nothing in it that resolves the pull request, plans a cell or reports a "
     "gate status, so a commented `shipmate plan` produces a green run and no plan. That call "
     "is the whole `plan` job: `uses: <engine>/.github/workflows/plan.yml@<sha>` "
@@ -2973,7 +3118,7 @@ _EDITED_IF_TEXT = (
     "`shipmate.yml`'s job calling the engine's `apply.yml` is selected by "
     "`github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'`, not "
     "`github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
-    "&& inputs.environment != ''` — a wrong expression routes a verb nowhere and its "
+    "&& inputs.environment != ''`. A wrong expression routes a verb nowhere and its "
     "dispatched run completes with every job skipped, which reads as success everywhere "
     "(docs/getting-started.md)."
 )
@@ -2981,7 +3126,7 @@ _EDITED_IF_TEXT = (
 
 def _wrong_count_text(callee, count):
     return (
-        f"`shipmate.yml` has {count} jobs calling the engine's `{callee}` — exactly one does, "
+        f"`shipmate.yml` has {count} jobs calling the engine's `{callee}`: it needs exactly one, "
         "selected by the `if:` that routes its event. With none, the verb or event it serves "
         "reaches nothing and its run completes with every job skipped, which reads as success "
         "everywhere; with more than one, either the work runs twice or one of them is "
@@ -3117,11 +3262,11 @@ def test_the_workflow_directory_degrades_read_as_written():
     assert (doctor.ROUTING_UNREADABLE, doctor.ROUTING_NO_COMMIT) == (
         (
             "notice",
-            "could not read `.github/workflows` — the workflow file's event routing not verified.",
+            "could not read `.github/workflows`: the workflow file's event routing not verified.",
         ),
         (
             "notice",
-            "the workflow file's event routing not verified — the commit under examination "
+            "the workflow file's event routing not verified: the commit under examination "
             "could not be determined.",
         ),
     )
@@ -3308,7 +3453,7 @@ def _no_required_review(envs, level=doctor.NOTICE):
         f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews, so "
         f"these gated environments can apply without an approving review: {envs}. One is held "
         "only where a code-owner review is required for the changed files. `gated` can "
-        "only relax a review requirement the ruleset sets (docs/hardening.md #3–5); set "
+        "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
         "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
         "environments meant to apply unreviewed.",
     )
@@ -3416,7 +3561,7 @@ def test_review_rule_count_zero_escapes_an_environment_name_once(monkeypatch):
         "0 approving reviews, so these gated environments can apply without an approving "
         "review: `a\\|b&lt;c`. One is held only where a code-owner review is required for the "
         "changed files. `gated` can only relax a review requirement the ruleset sets "
-        "(docs/hardening.md #3–5); set `required_approving_review_count` to 1 or more, or set "
+        "(docs/hardening.md #3 to #5); set `required_approving_review_count` to 1 or more, or set "
         "`gated = false` on the environments meant to apply unreviewed."
     )
 
@@ -3639,12 +3784,12 @@ def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeyp
     assert doctor._plan_env_secret_warnings(_ctx()) == [
         (
             doctor.NOTICE,
-            "GitHub Environment `dev-eu` \u2014 shared between plan and apply by `shared = true` "
-            "in its `[environments.dev-eu]` entry \u2014 holds 1 secret(s) (`AWS_ROLE_ARN`) "
-            "\u2014 it is the apply environment too, so a plan cell runs the pull request "
+            "GitHub Environment `dev-eu` (shared between plan and apply by `shared = true` "
+            "in its `[environments.dev-eu]` entry) holds 1 secret(s) (`AWS_ROLE_ARN`). "
+            "It is the apply environment too, so a plan cell runs the pull request "
             "branch's own code with everything it releases: any credential held there for "
             "applying is reachable by plan-time code. Protection rules on it would stall those "
-            "plan cells, so it cannot be gated either \u2014 treat anything it holds as readable "
+            "plan cells, so it cannot be gated either. Treat anything it holds as readable "
             "by anyone who can push a branch, and keep them read-only and blast-radius-free, or "
             "move to OIDC (docs/hardening.md control 8).",
         )
@@ -4237,7 +4382,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             "of a plan matrix and a whole-tree environment scan: `tf_vars`-layout coverage of "
             "the planned environments, entries "
             "that no stack tags, workload tags outside an environment's `workloads` and listed "
-            "workloads no stack tags \u2014 `detect` checks each of those on the runs where it "
+            "workloads no stack tags. `detect` checks each of those on the runs where it "
             "applies. "
             "Execution reads the default branch's copy of this file, never this branch's.",
         ),
@@ -4257,12 +4402,12 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`needs` orders dev-us after dev-eu \u2014 a bare `shipmate apply` applies "
+            "`needs` orders dev-us after dev-eu: a bare `shipmate apply` applies "
             "one env-level fully before it starts the next.",
         ),
         (
             doctor.NOTICE,
-            "`explicit = true` on prod \u2014 a bare `shipmate apply` skips those, and each "
+            "`explicit = true` on prod: a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
     ]
@@ -4325,12 +4470,12 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`needs` orders prod after dev — a bare `shipmate apply` applies "
+            "`needs` orders prod after dev: a bare `shipmate apply` applies "
             "one env-level fully before it starts the next.",
         ),
         (
             doctor.NOTICE,
-            "`explicit = true` on prod — a bare `shipmate apply` skips those, and each "
+            "`explicit = true` on prod: a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
     ]
@@ -4416,12 +4561,12 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
         ),
         (
             doctor.NOTICE,
-            "`needs`: declared by no environment \u2014 every environment sits at one level, "
+            "`needs`: declared by no environment, so every environment sits at one level, "
             "and a bare `shipmate apply` applies them all together.",
         ),
         (
             doctor.NOTICE,
-            "`explicit`: set on no environment \u2014 every environment applies on a bare "
+            "`explicit`: set on no environment, so every environment applies on a bare "
             "`shipmate apply`, production included.",
         ),
     ]
@@ -4579,12 +4724,12 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
     assert doctor.config_status(_ctx())[1:] == [
         (
             doctor.NOTICE,
-            "`needs`: declared by no environment \u2014 every environment sits at one level, "
+            "`needs`: declared by no environment, so every environment sits at one level, "
             "and a bare `shipmate apply` applies them all together.",
         ),
         (
             doctor.NOTICE,
-            "`explicit`: set on no environment \u2014 every environment applies on a bare "
+            "`explicit`: set on no environment, so every environment applies on a bare "
             "`shipmate apply`, production included.",
         ),
     ]

@@ -514,7 +514,7 @@ def _report_ctx():
     }
 
 
-def test_the_doctor_upsert_anchors_the_marker_at_the_body_start():
+def test_the_doctor_upsert_anchors_the_marker_at_the_body_start(monkeypatch):
     """`render_report` emits `DOCTOR_MARKER` as the body's first line, so the sticky lookup must
     anchor there. A `contains` match also hits any comment that merely quotes the marker: the sticky
     plan comment embeds `tofu plan` output verbatim, so a plan containing `<!-- shipmate:doctor -->`
@@ -523,6 +523,9 @@ def test_the_doctor_upsert_anchors_the_marker_at_the_body_start():
     code = _code(_step("body=@doctor.md"))
     assert "startswith" in code
     assert "contains" not in code
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_RUN_ID", "1")
     assert doctor.render_report([], [], _report_ctx()).splitlines()[0] == doctor.DOCTOR_MARKER
 
 
@@ -1092,7 +1095,7 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
         ): "${{ inputs.github-vars }}",
         (
             "summary",
-            "Doctor — settings-drift warnings (annotations only, never blocks)",
+            "Doctor: settings-drift warnings (annotations only, never blocks)",
         ): "${{ inputs.github-vars }}",
     }
 
