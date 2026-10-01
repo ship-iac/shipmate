@@ -294,10 +294,8 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_
 
 
 def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_path):
-    """The upgrade shape: `stacks/dns` was applied by an older engine version, so its completed
-    check carries a legacy bare-hex record naming no plan run. Only cells still to be applied
-    need one -- refusing over an already-applied cell would strand every pull request open
-    across the upgrade."""
+    """`stacks/dns` is applied and its completed check carries a bare-hex record naming no plan
+    run. Only cells still to be applied need one, so it does not block the rest."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,

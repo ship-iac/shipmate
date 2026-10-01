@@ -122,8 +122,8 @@ def _records_by_name(check_run_lines, app_id):
     one record shape rather than each re-deriving it. Each call re-runs the chain; nothing
     here is memoized.
 
-    A name is absent when that newest run carries no decodable record: a legacy bare-hex
-    external_id from an older engine version, a null/empty/non-JSON one, or one that decodes
+    A name is absent when that newest run carries no decodable record: a
+    null/empty/non-JSON external_id (a bare hex digest included), or one that decodes
     to something other than an object. No JSONDecodeError escapes."""
     out = {}
     for name, run in latest_by_name(from_app(parse_jsonl(check_run_lines), app_id)).items():

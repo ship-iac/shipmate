@@ -274,10 +274,8 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
 
 
 def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
-    """The upgrade shape: dev-us was applied pre-merge by an older engine version, so its
-    completed check carries a legacy bare-hex record. The attachment runs after the pending
-    filter -- otherwise every pull request merged across the upgrade refuses its whole deploy
-    over a cell that is already applied."""
+    """dev-us was applied pre-merge and its completed check carries a bare-hex record. The
+    attachment runs after the pending filter, so an applied cell never refuses the deploy."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,

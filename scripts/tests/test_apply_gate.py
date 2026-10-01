@@ -359,8 +359,8 @@ def test_plan_runs_ignores_foreign_app_even_when_newest():
 
 
 def test_plan_runs_legacy_bare_hex_external_id_is_absent():
-    # Records written by an engine version before external_id carried JSON are a bare 64-hex
-    # fingerprint. They read as absent, never as a JSONDecodeError traceback.
+    # A bare 64-hex external_id is not JSON: it reads as absent, never as a JSONDecodeError
+    # traceback.
     line = _ext("apply / stacks/app / dev-eu", 1, LEGACY_HEX)
     assert ag.plan_runs_by_name([line], "999") == {}
 
@@ -456,7 +456,7 @@ def test_plan_hashes_uppercase_digest_is_absent():
 
 
 def test_plan_hashes_missing_key_is_absent():
-    # A check written by an engine version before the digest existed.
+    # A record that carries no digest.
     line = _ext("apply / stacks/app / dev-eu", 1, _record())
     assert ag.plan_hashes_by_name([line], "999") == {}
 

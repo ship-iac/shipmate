@@ -2168,7 +2168,7 @@ def test_plan_runs_line_states_the_run_without_a_coverage_claim():
 
 def test_plan_runs_line_says_so_when_the_head_recorded_no_plan_run():
     """No apply check on this head carries a plan record -- nothing was planned
-    yet, or every record is from an older engine version. Naming the absence is
+    yet, or no record is readable. Naming the absence is
     the whole degrade path: doctor still reports its settings probes."""
     text = doctor._plan_runs_line(_ctx(plan_run_ids=[]))
     assert text == "No plan records on this commit's apply checks."

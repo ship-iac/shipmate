@@ -433,10 +433,8 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
 
 
 def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
-    """The upgrade shape: dev-us was applied by an older engine version, so its completed check
-    carries a legacy bare-hex record. Only cells still to be applied need a plan run, so the
-    attachment runs after the pending filter -- otherwise every pull request open across the
-    upgrade is stranded."""
+    """dev-us is applied and its completed check carries a bare-hex record. Only cells still to
+    be applied need a plan run, so the attachment runs after the pending filter."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
