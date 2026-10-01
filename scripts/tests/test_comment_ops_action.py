@@ -835,6 +835,21 @@ def test_the_gather_step_reads_nothing_more_for_a_commenter_without_write(
 
 
 @bash_only
+@pytest.mark.parametrize("permission", ["admin", "write", "maintain", "triage", "read", "none"])
+def test_the_gather_step_stops_exactly_where_authorize_refuses_the_permission(tmp_path, permission):
+    """The early exit spells authorize's permission pass set a second time. A value authorize
+    admits but the gather step stops on reaches authorize with an empty `pr.json` and is
+    refused as an uncomputed mergeability.
+
+    Mutations: admit `maintain` in `authorize._permission_reason` -- the gather step still
+    stops for it; drop `admin` from the early exit -- it stops for an admin.
+    """
+    _, endpoints = _run_gather(tmp_path, permission)
+    admitted = load_script("authorize")._permission_reason(permission, "apply") is None
+    assert (endpoints != [_PERMISSION_READ]) == admitted
+
+
+@bash_only
 def test_the_gather_step_reads_the_permission_before_the_pull_request(tmp_path):
     """Mutation: move the permission read back below the review-decision read -- it is read
     third."""

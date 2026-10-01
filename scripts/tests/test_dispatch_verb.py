@@ -440,9 +440,8 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
     )
 
 
-#: Fails like `_NOT_FOUND_STUB` and records every argv, so what the failure branch
-#: does after the refusal is observable rather than inferred.
-#: Records each call's token ahead of its argv, then fails it.
+#: Fails like `_NOT_FOUND_STUB` and records each call's token ahead of its argv, so what
+#: the failure branch does after the refusal is observable rather than inferred.
 _RECORDING_FAILURE_STUB = (
     "#!/bin/bash\nprintf 'token=%s\\n' \"$GH_TOKEN\" >> argv.txt\n"
     "printf '%s\\n' \"$@\" >> argv.txt\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
