@@ -2122,7 +2122,8 @@ footer. A run with no rows to render is the header, the verdict line, the
 footer lines and the hint.
 
 - **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
-  apply` for a bare one; the verdict and footer lines name the environments.
+  apply` for a bare one; the row lines and the footer lines name the
+  environments.
 - **Verdict line.** With rows: one count per display status, in the order
   `N failed`, `N not recorded`, `N not attempted`, `N blocked`, `N applied`,
   zero counts omitted, joined by `, `. When the job-level `SHIPMATE_RESULTS`

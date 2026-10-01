@@ -163,7 +163,6 @@ jobs:
     permissions: { actions: read }
     steps:
       - name: Complete gate if every apply check is done
-        id: gate
         uses: $/actions/gate-refresh
         with:
           head-sha: ${{ inputs.ref }}
