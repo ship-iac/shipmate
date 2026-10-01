@@ -1905,7 +1905,15 @@ def _default_branch_table(ctx):
     The default branch, not the commit under examination: execution reads that copy, so on a
     pull request that edits the table every run until merge still follows the default
     branch's. The readers of `env-config` below may only see a validated table.
+
+    Read once per run and kept on `ctx`, so every probe judges the same copy.
     """
+    if "default_branch_table" not in ctx:
+        ctx["default_branch_table"] = _read_default_branch_table(ctx)
+    return ctx["default_branch_table"]
+
+
+def _read_default_branch_table(ctx):
     ref = urllib.parse.quote(ctx["default_branch"], safe="")
     text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}?ref={ref}")
     if text is None:

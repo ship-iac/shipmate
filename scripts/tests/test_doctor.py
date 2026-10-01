@@ -274,6 +274,34 @@ def test_healthy_repo_emits_nothing(monkeypatch):
     assert doctor.warnings(_ctx()) == []
 
 
+def test_one_run_reads_the_default_branch_table_once(monkeypatch):
+    """Every probe that needs the default branch's table judges one read of it: the review
+    count-0 path and the three environment probes behind `_shared_envs`.
+
+    Mutation: have `_default_branch_table` call `_read_default_branch_table` without the
+    `ctx` memo -- the file is read four times.
+    """
+    rules = [_gate_rule()[0], _pull_request_rule(count=0)]
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": rules,
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
+        ),
+        **_quiet_new_probes(),
+    }
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    ctx = _ctx()
+    doctor.warnings(ctx)
+    doctor.config_status(ctx)
+    assert asked.count(_CONFIG_ON_DEFAULT) == 1
+
+
 def test_missing_environment_of_the_split_pair_warned(monkeypatch):
     """Split mode with one half absent names the absent half SPECIFICALLY, not
     the pair: naming both would tell a consumer to create an environment they
@@ -538,10 +566,8 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
         listing,
         on_default,
         listing,
-        on_default,
         f"repos/{_REPO}/environments/dev-eu",
         listing,
-        on_default,
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
 
