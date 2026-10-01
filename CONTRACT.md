@@ -1168,8 +1168,7 @@ Those warnings are not read from the sticky plan comment — a plan run writes t
 full plan comment (a verdict line linking the run, and one line or fold-out
 per cell) but does not append doctor findings to it. A run with nothing planned
 writes no comment at all *unless* doctor emitted a warning, so the pull request
-still links the run whose page shows them, and that comment carries the help
-hint (see §Plan comment). Instead, `actions/summary` runs
+still links the run whose page shows them (see §Plan comment). Instead, `actions/summary` runs
 `scripts/doctor` on every plan run and emits its findings as
 workflow-command annotations, verbatim:
 
@@ -2020,8 +2019,8 @@ applies that no longer exist. With no comment yet, none is posted — a docs-onl
 or engine-pin-bump pull request carries no shipmate comment — with one
 exception: a run where `doctor` emitted a warning still posts. Doctor's
 findings are annotations with no file/line, so they render only on the run page
-(see §Comment-ops/doctor), this comment's verdict links that run from the
-pull request, and the comment ends with the help hint (see below). `::notice::`
+(see §Comment-ops/doctor), and this comment's verdict links that run from the
+pull request. `::notice::`
 findings do not trigger the exception: they are informational, and would put a
 comment on every quiet run.
 
@@ -2033,13 +2032,10 @@ trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, one line or fold-out per planned stack ×
-environment, sorted by environment then stack. When `doctor` emitted a warning on
-this run, a blank line and the help hint
-``Comment `shipmate help` for the available commands.`` follow, because the
-reader has settings drift to act on; otherwise there is no footer, since both
-verdicts are normal results and the verdict links the run. The doctor step runs
-before the comment is built and records that decision once, as its `warned`
-output, which both the comment build and the post-or-skip rule read.
+environment, sorted by environment then stack. There is no footer and no help
+hint, whether or not `doctor` warned: both verdicts are normal results and the
+verdict links the run. The doctor step records its decision once, as its
+`warned` output, which the post-or-skip rule reads.
 
 - **Verdict line.** `🟢 no changes` when no cell changes (zero cells
   included), else `🟡 N of M cells change`, then

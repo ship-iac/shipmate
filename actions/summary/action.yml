@@ -168,7 +168,7 @@ runs:
           echo "::warning::doctor probes errored; settings-drift check skipped"
         fi
         # Warnings (actionable misconfiguration) only: a `::notice::` finding is informational.
-        # The one reading of doctor's result: the comment build and the upsert both take `warned`.
+        # The one reading of doctor's result: the upsert takes `warned`.
         warned=false
         if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then
           warned=true
@@ -181,7 +181,6 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
-        SHIPMATE_DOCTOR_WARNED: ${{ steps.doctor.outputs.warned }}
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
@@ -272,7 +271,7 @@ runs:
         # engine-pin-bump pull request carries no plan comment at all. The gate is written by a
         # later step regardless.
         # A run where doctor warned still posts: doctor's annotations render only on the run
-        # page, which the verdict links, and that comment carries the help hint.
+        # page, and the comment's verdict links that run.
         # An existing comment is always kept current instead of suppressed, or a pull request
         # that planned changes and then pushed them away would keep displaying applies that no
         # longer exist.

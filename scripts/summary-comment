@@ -19,8 +19,7 @@ doctor already load this module.
 
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface,
 and shows only where the reader has something to do: under a refusal or a failure, under an
-apply or doctor verdict that is not 🟢, and under a plan comment of a run where doctor warned
-(`SHIPMATE_DOCTOR_WARNED`).
+apply or doctor verdict that is not 🟢. A plan comment never carries it.
 """
 
 import html
@@ -289,19 +288,17 @@ def _join(sections):
     return "".join(out)
 
 
-def build_comment(cells, checks, run_url, head_sha, hint=False):
+def build_comment(cells, checks, run_url, head_sha):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, every cell in order
-    (a fold-out for a changed cell with plan text, else its bare line), then `FOOTER_HINT` when
-    `hint` (doctor warned on this run, so the reader has something to act on). Otherwise no
-    footer: the verdict links the run, and neither plan verdict asks anything. Every cell is
+    (a fold-out for a changed cell with plan text, else its bare line). No footer: the verdict
+    links the run, and neither plan verdict asks anything. Every cell is
     guaranteed its bare line: the space all remaining cells' bare lines need is reserved up
     front, so an early giant plan cannot starve a later cell."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     urls = [check_url(c, checks, run_url) for c in meta]
     bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
-    tail = FOOTER_HINT if hint else ""
-    used = len(head) + len(tail) + 4
+    used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
     for (c, text), url, bare in zip(cells, urls, bares, strict=True):
@@ -311,7 +308,7 @@ def build_comment(cells, checks, run_url, head_sha, hint=False):
             section = render_section(bare, text, url, SIZE_BUDGET - used - reserve - 2)
         sections.append(section)
         used += len(section) + 2
-    body = "\n\n".join(p for p in (head, _join(sections), tail) if p)
+    body = "\n\n".join(p for p in (head, _join(sections)) if p)
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
@@ -410,9 +407,8 @@ def main():
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the verdict's run link and the per-cell fallback link promise.
     url = current_run_url()
-    warned = os.environ.get("SHIPMATE_DOCTOR_WARNED", "") == "true"
     with open("comment.md", "w", encoding="utf-8") as fh:
-        fh.write(build_comment(cells, checks, url, os.environ.get("HEAD_SHA", ""), warned))
+        fh.write(build_comment(cells, checks, url, os.environ.get("HEAD_SHA", "")))
     pending = any(c["changed"] for c, _ in cells)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n")
