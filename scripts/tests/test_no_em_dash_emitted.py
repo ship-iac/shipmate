@@ -11,6 +11,9 @@ are out of scope.
 Threat model: accidental regression, a new message written with a dash. The helpers
 under `scripts/` carry no extension, so Python is recognised by a `python3` shebang or
 a `.py` suffix, and any other file there fails the scan rather than being skipped.
+
+Ceiling: a YAML line starting with `#` is skipped as a shell comment, so a markdown heading
+inside a `run:` heredoc is skipped too. No heredoc in the tree carries a `#` line today.
 """
 
 import ast
@@ -70,7 +73,7 @@ def _python_hits(path, src):
     for n in ast.walk(tree):
         is_str = isinstance(n, ast.Constant) and isinstance(n.value, str)
         if is_str and id(n) not in docs and _has(n.value):
-            span = range(n.lineno, n.end_lineno + 1)
+            span = range(n.lineno, (n.end_lineno or n.lineno) + 1)
             hits += [ln for ln in span if _has(lines[ln - 1])] or [n.lineno]
     return [f"{path.relative_to(ENGINE).as_posix()}:{ln}" for ln in hits]
 
