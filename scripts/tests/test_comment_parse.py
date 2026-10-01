@@ -1,3 +1,8 @@
+import pathlib
+import shutil
+import subprocess
+import sys
+
 import pytest
 from _loader import load_script
 
@@ -324,6 +329,34 @@ def test_main_writes_no_verb_for_a_malformed_line(tmp_path, monkeypatch):
         "env=",
         "route=",
         "error=malformed: expected `shipmate <verb> [env] [tag-filter]` (try `shipmate help`)",
+    ]
+
+
+def test_parse_does_not_import_summary_comment(tmp_path):
+    """Every PR comment runs comment-parse, so a summary-comment that fails at import must not
+    stop a command from parsing. Runs a copy of the script beside a summary-comment that raises.
+
+    Mutation: load summary-comment at module level, and the run exits non-zero with no output.
+    """
+    scripts = pathlib.Path(cp.__file__).parent
+    for name in ("comment-parse", "_shipmate.py"):
+        shutil.copy(scripts / name, tmp_path / name)
+    (tmp_path / "summary-comment").write_text("raise RuntimeError('broken')\n", encoding="utf-8")
+    out = tmp_path / "out.txt"
+    out.touch()
+    subprocess.run(
+        [sys.executable, str(tmp_path / "comment-parse")],
+        env={"COMMENT_BODY": "shipmate apply dev-eu", "GITHUB_OUTPUT": str(out)},
+        check=True,
+        timeout=60,
+    )
+    assert out.read_text(encoding="utf-8").splitlines() == [
+        "is_command=true",
+        "valid=true",
+        "verb=apply",
+        "env=dev-eu",
+        "route=apply",
+        "error=",
     ]
 
 

@@ -18,8 +18,6 @@ import sys
 
 from _shipmate import _load, current_run_url
 
-sc = _load("summary-comment")
-
 # `shipmate` as a whole word, then verb, optional env, optional tag-filter. env is lower kebab
 # (matching GitHub env naming); tag-filter allows the on-disk tag charset. env is tried first
 # (leftmost), so a bare token that fits both charsets parses as the env.
@@ -163,6 +161,9 @@ def help_markdown(run_url):
     retrigger comment-ops on the bot's own comment
     (test_help_has_no_bare_command_line guards it).
     """
+    # Loaded here, not at import: every PR comment runs this script, and a summary-comment
+    # import error must not silence every command (test_parse_does_not_import_summary_comment).
+    sc = _load("summary-comment")
     lines = [
         HELP_MARKER,
         sc.header("help"),
