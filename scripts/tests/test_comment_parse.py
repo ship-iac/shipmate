@@ -273,14 +273,50 @@ def test_main_writes_route_output(tmp_path, monkeypatch):
     assert "route=apply" in lines
 
 
+#: The whole help comment, hand-written.
+_HELP = (
+    "<!-- shipmate:help -->\n"
+    "### shipmate help\n"
+    "\n"
+    "Comment one of these on a pull request:\n"
+    "\n"
+    "| command | status | what it does |\n"
+    "| --- | --- | --- |\n"
+    "| `shipmate apply [env]` |  | Apply the reviewed plan for one environment, or every "
+    "non-explicit environment when the environment is omitted. |\n"
+    "| `shipmate destroy [env]` | reserved | Destroy an environment's stacks (not yet "
+    "implemented). |\n"
+    "| `shipmate doctor` |  | Report setup problems: repository settings, environments, App "
+    "permissions, and warnings from this commit's workflow runs. |\n"
+    "| `shipmate help` |  | Show this command list. |\n"
+    "| `shipmate plan` |  | Plan this pull request's changed stacks on demand: the same plan a "
+    "push produces, including on a draft. Re-planning is safe and replaces the plan of record "
+    "for the current head. |\n"
+    "| `shipmate unlock <env>` |  | Release a state lock stranded by a cancelled or killed "
+    "apply, so the environment's stacks can apply again. Does not re-apply, and does not "
+    "recover a partial apply. |\n"
+    "\n"
+    "The environment is a GitHub Environment name such as `dev-eu`. Applying requires write "
+    "access to this repository, an approving review where the branch ruleset asks for one, a "
+    "plan for the current head commit, and a pull request that is not a draft. Unlocking "
+    "requires write access to this repository, but no review, no plan and no such readiness. "
+    "`doctor` and `help` are read-only, and `plan` changes no infrastructure. `help` answers "
+    "anyone; `doctor` reports this repository's own settings, and it and `plan` answer only "
+    "organization members and repository collaborators: GitHub's classification of the "
+    "comment's author, not a check of write access.\n"
+    "\n"
+    "[run](https://github.com/org/repo/actions/runs/7777)"
+)
+
+
 def test_help_carries_the_shared_header_and_a_footer_without_the_hint():
     """The help is the command list, so its footer links the run and names no help command.
+    The whole body, so a reworded row or paragraph between the header and footer fails too.
 
-    Mutations: render the footer with the hint; restore `### shipmate commands`.
+    Mutations: render the footer with the hint; restore `### shipmate commands`; drop
+    "including on a draft" from `plan`'s description.
     """
-    lines = cp.help_markdown(_RUN_URL).splitlines()
-    assert lines[:3] == [cp.HELP_MARKER, "### shipmate help", ""]
-    assert lines[-2:] == ["", f"[run]({_RUN_URL})"]
+    assert cp.help_markdown(_RUN_URL) == _HELP
 
 
 def _main_output(tmp_path, monkeypatch, body):

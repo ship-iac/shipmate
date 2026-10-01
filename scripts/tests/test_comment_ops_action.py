@@ -966,19 +966,25 @@ _REPLIES = {
 }
 
 
+#: The rest of every reply step's `env:`: the workflow token posts, because the App token may be
+#: the very thing that failed.
+_REPLY_POST_ENV = {"GH_TOKEN": "${{ github.token }}", "PR_NUMBER": "${{ inputs.pr-number }}"}
+
+
 def test_every_reply_step_names_its_header_outcome_and_text():
-    """The whole reply vector of every step that posts one, against the table above. A step
+    """The whole `env:` of every step that posts a reply, against the table above. A step
     gaining or losing a reply, or a reply changing class, fails here.
 
     Mutations: set `Doctor: App token unavailable`'s outcome to `refused`; drop
-    `SHIPMATE_REPLY_ENV` from `Reject with reason`.
+    `SHIPMATE_REPLY_ENV` from `Reject with reason`; bind `Gate configuration unreadable`'s
+    `GH_TOKEN` to `steps.apptoken.outputs.token`.
     """
     got = {
-        s["name"]: {k: v for k, v in s["env"].items() if k.startswith("SHIPMATE_REPLY_")}
+        s["name"]: s["env"]
         for s in action_steps("comment-ops")
         if "SHIPMATE_REPLY_OUTCOME" in (s.get("env") or {})
     }
-    assert got == _REPLIES
+    assert got == {name: {**_REPLY_POST_ENV, **reply} for name, reply in _REPLIES.items()}
 
 
 #: An issue-comment endpoint at the end of a path; `/comments/<id>/reactions` is not one.
