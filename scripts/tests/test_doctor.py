@@ -1749,17 +1749,21 @@ def test_report_with_no_findings_is_the_whole_all_clear_body():
 
 def test_report_with_a_warning_a_notice_and_a_harvested_failure_is_the_whole_body():
     """Mutation: the verdict ignores harvested failures (`harvested.count("failure")` -> 0): it
-    reads `🟠 1 warning, 1 notice`. Mutation: `_LEVEL_EMOJI[WARNING]` -> ⚪."""
+    reads `🟠 2 warnings, 1 notice`. Mutation: `_LEVEL_EMOJI[WARNING]` -> ⚪. Mutation: `🟠` -> `⚪`
+    in `_render_annotation_row`'s warning branch."""
     findings = [
         (doctor.WARNING, "gate ruleset is missing"),
         (doctor.NOTICE, "apply env has no protection"),
     ]
-    anns = [_ann(level="failure", title="plan failed", message="exit 1", check="app / dev-eu")]
+    anns = [
+        _ann(level="failure", title="plan failed", message="exit 1", check="app / dev-eu"),
+        _ann(level="warning", title="provider", message="deprecated", check="app / dev-eu"),
+    ]
     assert doctor.render_report(findings, anns, _ctx()) == (
         "<!-- shipmate:doctor -->\n"
         "### shipmate doctor\n"
         "\n"
-        "🔴 1 error, 1 warning, 1 notice at fffffff\n"
+        "🔴 1 error, 2 warnings, 1 notice at fffffff\n"
         "\n"
         "Cell summaries from plan run 1281.\n"
         "\n"
@@ -1772,6 +1776,7 @@ def test_report_with_a_warning_a_notice_and_a_harvested_failure_is_the_whole_bod
         "\n"
         "- **app / dev-eu**\n"
         "  - 🔴 plan failed: exit 1\n"
+        "  - 🟠 provider: deprecated\n"
         "\n"
         f"{_FOOTER}"
     )
