@@ -274,6 +274,34 @@ def test_healthy_repo_emits_nothing(monkeypatch):
     assert doctor.warnings(_ctx()) == []
 
 
+def test_one_run_reads_the_default_branch_table_once(monkeypatch):
+    """Every probe that needs the default branch's table judges one read of it: the review
+    count-0 path and the three environment probes behind `_shared_envs`.
+
+    Mutation: have `_default_branch_table` call `_read_default_branch_table` without the
+    `ctx` memo -- the file is read four times.
+    """
+    rules = [_gate_rule()[0], _pull_request_rule(count=0)]
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": rules,
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
+        ),
+        **_quiet_new_probes(),
+    }
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    ctx = _ctx()
+    doctor.warnings(ctx)
+    doctor.config_status(ctx)
+    assert asked.count(_CONFIG_ON_DEFAULT) == 1
+
+
 def test_missing_environment_of_the_split_pair_warned(monkeypatch):
     """Split mode with one half absent names the absent half SPECIFICALLY, not
     the pair: naming both would tell a consumer to create an environment they
@@ -538,10 +566,8 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
         listing,
         on_default,
         listing,
-        on_default,
         f"repos/{_REPO}/environments/dev-eu",
         listing,
-        on_default,
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
 
@@ -4535,6 +4561,52 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
     ]
 
 
+def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
+    """Each defaults line is cut before the first env name that would pass 400 characters,
+    never inside one.
+
+    Mutations: render `shown` or the explicit list through `_one_line(..., 400)` again --
+    the last name shown is cut mid-text; drop the `…` -- the cut reads as the whole list.
+    """
+    name = "environment-with-a-long-name-{:02d}".format
+    table = {
+        "environments": {
+            name(i): {"explicit": True, **({"needs": [name(i - 1)]} if i else {})}
+            for i in range(20)
+        }
+    }
+    assert doctor._config_defaults(table) == [
+        (
+            doctor.NOTICE,
+            "`needs` orders "
+            "environment-with-a-long-name-01 after environment-with-a-long-name-00; "
+            "environment-with-a-long-name-02 after environment-with-a-long-name-01; "
+            "environment-with-a-long-name-03 after environment-with-a-long-name-02; "
+            "environment-with-a-long-name-04 after environment-with-a-long-name-03; "
+            "environment-with-a-long-name-05 after environment-with-a-long-name-04; "
+            "…: a bare `shipmate apply` applies one env-level fully before it starts the next.",
+        ),
+        (
+            doctor.NOTICE,
+            "`explicit = true` on "
+            "environment-with-a-long-name-00, environment-with-a-long-name-01, "
+            "environment-with-a-long-name-02, environment-with-a-long-name-03, "
+            "environment-with-a-long-name-04, environment-with-a-long-name-05, "
+            "environment-with-a-long-name-06, environment-with-a-long-name-07, "
+            "environment-with-a-long-name-08, environment-with-a-long-name-09, "
+            "environment-with-a-long-name-10, environment-with-a-long-name-11, "
+            "…: a bare `shipmate apply` skips those, and each needs its own "
+            "`shipmate apply <env>`.",
+        ),
+    ]
+
+
+def test_a_first_item_over_the_budget_is_cut_inside_rather_than_dropped():
+    """Mutation: return `sep.join([*shown, "…"])` whatever `shown` holds -- the line is `…`."""
+    item = "a after " + ", ".join(f"predecessor-{i:02d}" for i in range(30))
+    assert doctor._whole_items([item, "b after a"], "; ") == item[:399] + "…"
+
+
 #: A varying identity with two workloads listed out of alphabetical order, an apply-only
 #: identity named by a shared and by two unshared environments, one of them writing
 #: `workloads`, and an entry naming none.
@@ -4710,6 +4782,12 @@ def test_a_heading_over_the_budget_shows_no_items_and_stops():
     assert doctor._roles_notice(env, rows, doctor.ROLE_LINES_BUDGET) == (
         f"`{env}` resolves these roles at the commit under examination:  … and 2 more."
     )
+
+
+def test_the_contract_states_the_roles_budget_doctor_applies():
+    """Mutations: set `ROLE_LINES_BUDGET` to 9000; write `9,000-character` in `CONTRACT.md`."""
+    contract = " ".join((ENGINE / "CONTRACT.md").read_text(encoding="utf-8").split())
+    assert f"The notices share an {doctor.ROLE_LINES_BUDGET:,}-character budget," in contract
 
 
 def test_a_later_environment_over_the_budget_is_cut_against_what_is_left():

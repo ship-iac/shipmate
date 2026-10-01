@@ -116,6 +116,9 @@ def emoji(cell):
     return "🟡" if cell["changed"] else "🟢"
 
 
+_ENTITY_START = re.compile(r"&(?=#|\w+;)")
+
+
 def _md_escape(s):
     """Neutralize structure characters in author-controlled display names (a stack path is
     chosen by the pull request author) for the contexts they appear in: a bare cell line, a
@@ -124,11 +127,14 @@ def _md_escape(s):
     from. `[`/`]` are escaped so a name like `[approve this deploy](https://evil)` cannot form a
     live markdown link inside the trusted bot comment. Newlines become spaces so a name cannot
     start a line of its own. `|` stays: no comment renders a name in a table, and a name cannot
-    form a table's delimiter row because every line it sits on starts with engine text. Every
-    entity reads as its character outside a code span; inside one (a doctor row's backticked
-    environment name) it shows as written."""
+    form a table's delimiter row because every line it sits on starts with engine text. An `&`
+    that starts an entity reference becomes `&amp;`, first, so a name holding `&#91;` cannot
+    render as `[`; any other `&` stays, so a doctor row's backticked `&&` reads as written.
+    Every entity reads as its character outside a code span; inside one (a doctor row's
+    backticked environment name) it shows as written."""
     return (
-        s.replace("\r", " ")
+        _ENTITY_START.sub("&amp;", s)
+        .replace("\r", " ")
         .replace("\n", " ")
         .replace("<", "&lt;")
         .replace(">", "&gt;")

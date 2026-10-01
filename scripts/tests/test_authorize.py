@@ -107,8 +107,8 @@ def test_unmergeable_rejected():
 
 
 def test_review_decision_none_authorizes():
-    # NONE is comment-ops' sentinel for a null reviewDecision, which means the ruleset requires
-    # no review.
+    # NONE is comment-ops' sentinel for a null reviewDecision: no rule requires a review, or
+    # the only review rule is code-owner review and no changed file has an owner.
     ok, reason = _decide(review_decision="NONE")
     assert ok and reason == ""
 

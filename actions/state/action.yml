@@ -20,7 +20,7 @@ runs:
   steps:
     - name: Validate mode
       shell: bash
-      # Pass the input via env (never interpolate ${{ }} into the script body) —
+      # Pass the input via env (never interpolate ${{ }} into the script body):
       # injection-safe, and keeps the block lintable by shellcheck.
       env:
         MODE: ${{ inputs.mode }}

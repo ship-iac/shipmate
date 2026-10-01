@@ -9,7 +9,9 @@ moved on carries no apply checks yet, and each cell re-verifies the commit its
 plan came from before applying it. Review policy is delegated to the branch
 ruleset via GitHub's `reviewDecision`, not re-derived here: only the explicit
 pass values `NONE` (comment-ops' sentinel for a null
-decision — no review required by the ruleset) and `APPROVED` authorize; any
+decision, which GitHub returns when no rule requires a review and also when
+the only review rule is code-owner review and no changed file has an owner) and
+`APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
 `REVIEW_REQUIRED` also authorizes for an environment whose entry holds
 `gated = false`.
@@ -38,9 +40,10 @@ def parse_ungated_envs(raw):
 
 
 def _review_not_required(review_decision, environment, ungated_envs):
-    """Whether a gated `environment` is authorized only because no branch rule requires a
-    review: a `NONE` decision, and no `gated = false` entry for it. The apply comment names
-    each such environment."""
+    """Whether a gated `environment` is authorized only by a `NONE` decision, with no
+    `gated = false` entry for it. GitHub returns that null decision when no rule requires a
+    review and also when the only review rule is code-owner review and no changed file has an
+    owner. The apply comment names each such environment."""
     return review_decision == "NONE" and environment.casefold() not in ungated_envs
 
 
@@ -48,7 +51,8 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     """Reject reason for the ruleset-delegated review check, or None to pass.
 
     Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
-    null decision — no review required by the ruleset) and APPROVED. Anything
+    null decision, which also covers required code-owner review that owns none of
+    the changed files) and APPROVED. Anything
     else fails closed. An environment whose entry holds `gated = false` is exempt
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
     any entry holds `gated = false`, and is partitioned per env in apply-all-detect."""

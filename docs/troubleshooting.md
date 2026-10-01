@@ -807,7 +807,7 @@ per environment on the apply path, from the review decision read there:
 
 | `reviewDecision` when the apply runs | what applies |
 |---|---|
-| `NONE` (the ruleset requires no review) or `APPROVED` | everything pending — no partition |
+| `NONE` (no rule requires a review, or the only review rule is code-owner review and no changed file has an owner) or `APPROVED` | everything pending — no partition |
 | `REVIEW_REQUIRED` | the ungated environments; every other pending environment is held — all of them when no entry holds `gated = false` |
 | `CHANGES_REQUESTED` | nothing — every environment is held, ungated ones included |
 | anything else, or no decision arrived | nothing — every environment is held |

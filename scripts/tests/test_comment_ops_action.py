@@ -751,6 +751,118 @@ def test_the_authorize_step_binds_exactly_this_env():
     assert _authorize_step()["env"] == _AUTHORIZE_ENV
 
 
+#: A `gh` that logs the endpoint each call reads and answers it as the API does after `--jq`.
+#: `PERM_ANSWER=FAIL` fails the permission read, as a 404 does.
+_GATHER_GH = """#!/bin/bash
+for a in "$@"; do
+  if [[ "$a" == repos/* || "$a" == graphql ]]; then echo "$a" >> endpoints.txt; break; fi
+done
+if [[ "$*" == *collaborators* ]]; then
+  if [ "$PERM_ANSWER" = FAIL ]; then exit 1; fi
+  echo "$PERM_ANSWER"
+elif [[ "$*" == *pulls/* ]]; then
+  echo '{"mergeable": true, "mergeable_state": "clean", "head": {"sha": "abc"}}'
+elif [[ "$*" == *graphql* ]]; then
+  echo APPROVED
+fi
+"""
+
+
+def _run_gather(tmp_path, perm_answer):
+    """Run the gather step's shipped body; return (outputs, endpoints read in order)."""
+    for tool, text in (
+        ("gh", _GATHER_GH),
+        ("python3", f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'),
+    ):
+        (tmp_path / tool).write_text(text, encoding="utf-8", newline="\n")
+        (tmp_path / tool).chmod(0o755)
+    out_file = tmp_path / "github_output"
+    out_file.write_text("", encoding="utf-8")
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+        "GITHUB_ACTION_PATH": str(ACTIONS / "comment-ops"),
+        "GITHUB_REPOSITORY": "org/repo",
+        "GITHUB_OUTPUT": str(out_file),
+        "OWNER": "org",
+        "USER": "alice",
+        "PR_NUMBER": "42",
+        "SHIPMATE_VERB": "apply",
+        "SHIPMATE_APP_ID": "1",
+        "APP_TOKEN": "app_token",
+        "PERM_ANSWER": perm_answer,
+    }
+    result = run_step(tmp_path, _gather_step()["run"], env)
+    assert result.returncode == 0, result.stderr
+    outputs = dict(line.split("=", 1) for line in out_file.read_text().splitlines())
+    return outputs, (tmp_path / "endpoints.txt").read_text().splitlines()
+
+
+_PERMISSION_READ = "repos/org/repo/collaborators/alice/permission"
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("answer", "permission"), [("read", "read"), ("none", "none"), ("FAIL", "")]
+)
+def test_the_gather_step_reads_nothing_more_for_a_commenter_without_write(
+    tmp_path, answer, permission
+):
+    """The permission is read first, and a commenter without write access stops the step there:
+    authorize refuses on the permission before any other input, with the same reason the
+    skipped reads would have reached.
+
+    Mutations: remove the early `exit 0` -- the pull request, review and check-runs reads run;
+    have `decide` refuse an unmergeable pull request before the permission -- the empty
+    `pr.json` changes the reason.
+    """
+    outputs, endpoints = _run_gather(tmp_path, answer)
+    assert endpoints == [_PERMISSION_READ]
+    assert outputs == {"permission": permission}
+    assert (tmp_path / "pr.json").read_text() == "{}\n"
+    assert (tmp_path / "plan_run.json").read_text() == "{}\n"
+    az = load_script("authorize")
+    full = {
+        "review_decision": "APPROVED",
+        "pr": {"mergeable": True, "mergeable_state": "clean"},
+        "plan_runs": {"apply / stacks/app / dev-eu": "555"},
+    }
+    skipped = {"review_decision": "", "pr": {}, "plan_runs": {}}
+    for verb in ("apply", "unlock"):
+        refused = az.decide(permission=permission, verb=verb, **skipped)
+        assert not refused[0]
+        assert refused == az.decide(permission=permission, verb=verb, **full)
+
+
+@bash_only
+@pytest.mark.parametrize("permission", ["admin", "write", "maintain", "triage", "read", "none"])
+def test_the_gather_step_stops_exactly_where_authorize_refuses_the_permission(tmp_path, permission):
+    """The early exit spells authorize's permission pass set a second time. A value authorize
+    admits but the gather step stops on reaches authorize with an empty `pr.json` and is
+    refused as an uncomputed mergeability.
+
+    Mutations: admit `maintain` in `authorize._permission_reason` -- the gather step still
+    stops for it; drop `admin` from the early exit -- it stops for an admin.
+    """
+    _, endpoints = _run_gather(tmp_path, permission)
+    admitted = load_script("authorize")._permission_reason(permission, "apply") is None
+    assert (endpoints != [_PERMISSION_READ]) == admitted
+
+
+@bash_only
+def test_the_gather_step_reads_the_permission_before_the_pull_request(tmp_path):
+    """Mutation: move the permission read back below the review-decision read -- it is read
+    third."""
+    outputs, endpoints = _run_gather(tmp_path, "write")
+    assert endpoints == [
+        _PERMISSION_READ,
+        "repos/org/repo/pulls/42",
+        "graphql",
+        "repos/org/repo/commits/abc/check-runs?filter=all&per_page=100",
+    ]
+    assert outputs == {"permission": "write", "review_decision": "APPROVED"}
+
+
 def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs():
     """The reviewed-plan lookup is the head's own apply checks, each of which records the plan run
     its plan came from. The plan-workflow lookup it replaced resolved one run for the whole command
@@ -869,19 +981,25 @@ _REPLIES = {
 }
 
 
+#: The rest of every reply step's `env:`: the workflow token posts, because the App token may be
+#: the very thing that failed.
+_REPLY_POST_ENV = {"GH_TOKEN": "${{ github.token }}", "PR_NUMBER": "${{ inputs.pr-number }}"}
+
+
 def test_every_reply_step_names_its_header_outcome_and_text():
-    """The whole reply vector of every step that posts one, against the table above. A step
+    """The whole `env:` of every step that posts a reply, against the table above. A step
     gaining or losing a reply, or a reply changing class, fails here.
 
     Mutations: set `Doctor: App token unavailable`'s outcome to `refused`; drop
-    `SHIPMATE_REPLY_ENV` from `Reject with reason`.
+    `SHIPMATE_REPLY_ENV` from `Reject with reason`; bind `Gate configuration unreadable`'s
+    `GH_TOKEN` to `steps.apptoken.outputs.token`.
     """
     got = {
-        s["name"]: {k: v for k, v in s["env"].items() if k.startswith("SHIPMATE_REPLY_")}
+        s["name"]: s["env"]
         for s in action_steps("comment-ops")
         if "SHIPMATE_REPLY_OUTCOME" in (s.get("env") or {})
     }
-    assert got == _REPLIES
+    assert got == {name: {**_REPLY_POST_ENV, **reply} for name, reply in _REPLIES.items()}
 
 
 #: An issue-comment endpoint at the end of a path; `/comments/<id>/reactions` is not one.

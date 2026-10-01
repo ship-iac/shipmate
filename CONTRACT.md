@@ -1286,8 +1286,9 @@ its own actionable rejection reason:
   with conflicts;
 - **mergeable**: the pull request is mergeable;
 - **reviewed**: the pull request satisfies the branch ruleset's review policy
-  — GitHub's `reviewDecision` is `APPROVED`, or is null (no review required by
-  the ruleset; normalized to the explicit `NONE` sentinel in transit). The
+  — GitHub's `reviewDecision` is `APPROVED`, or is null (no rule requires a
+  review, or the only review rule is code-owner review and no changed file has an
+  owner; normalized to the explicit `NONE` sentinel in transit). The
   ruleset (required approving reviews, CODEOWNERS, last-push approval) is the
   single source of review policy; shipmate imposes none of its own. A ruleset
   requiring zero approvals reports no decision even when an approval exists,
@@ -1875,8 +1876,8 @@ trigger alone closes two paths a trigger check alone would not:
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. That one is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
-  step, and the control jobs below call `gh api` on the comment, apply, deploy
-  and unlock paths. Self-hosted runners must preinstall these tools.
+  step, and the control jobs below call `gh api` on the comment, apply and
+  deploy paths. Self-hosted runners must preinstall these tools.
 - The engine's ten control jobs, which run neither `tofu` nor `terramate`, run
   on `ubuntu-slim` unconditionally: their workflows take no runner input.
   `docs/aws.md` §Runner choice lists them. An account that cannot use that

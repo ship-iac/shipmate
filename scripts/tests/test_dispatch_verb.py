@@ -440,10 +440,11 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
     )
 
 
-#: Fails like `_NOT_FOUND_STUB` and records every argv, so what the failure branch
-#: does after the refusal is observable rather than inferred.
+#: Fails like `_NOT_FOUND_STUB` and records each call's token ahead of its argv, so what
+#: the failure branch does after the refusal is observable rather than inferred.
 _RECORDING_FAILURE_STUB = (
-    "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+    "#!/bin/bash\nprintf 'token=%s\\n' \"$GH_TOKEN\" >> argv.txt\n"
+    "printf '%s\\n' \"$@\" >> argv.txt\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 )
 #: The run link, hand-written from the three runner variables the step reads.
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
@@ -467,8 +468,8 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
     # Both calls, in one argv: the comment must not erase the record of the dispatch it
     # is reporting on.
     assert _DISPATCH_PATH in argv, f"the dispatch was never attempted: {argv!r}"
-    assert "repos/org/repo/issues/42/comments" in argv, (
-        f"a failed {verb} dispatch must comment on the pull request, gh saw: {argv!r}"
+    assert "token=workflow_token\napi\n-X\nPOST\nrepos/org/repo/issues/42/comments\n" in argv, (
+        f"a failed {verb} dispatch must comment with the workflow token, gh saw: {argv!r}"
     )
     assert _RUN_URL in argv, f"the comment must carry the run link, gh saw: {argv!r}"
     assert "Not Found (HTTP 404)" not in argv, (

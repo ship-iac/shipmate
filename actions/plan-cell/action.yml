@@ -60,7 +60,7 @@ runs:
     - name: Stack slug
       id: ids
       shell: bash
-      # Author-controlled $STACK via env (never interpolated) — injection-safe.
+      # Author-controlled $STACK via env (never interpolated), so injection-safe.
       env:
         STACK: ${{ inputs.stack }}
       run: |
@@ -145,13 +145,15 @@ runs:
         set -euo pipefail
         # plan.txt must stay `show -no-color` output: apply-cell re-renders the stored plan with
         # this command, and the digest of that text binds the apply.
-        tofu -chdir="$STACK" show -no-color stack.otplan > plan.txt &
+        tofu -chdir="$STACK" show -no-color stack.otplan > plan.txt 2> show-text.err &
         text_pid=$!
-        tofu -chdir="$STACK" show -json stack.otplan > plan.json &
+        tofu -chdir="$STACK" show -json stack.otplan > plan.json 2> show-json.err &
         json_pid=$!
         rc=0
         wait "$text_pid" || rc=1
         wait "$json_pid" || rc=1
+        # Shared stderr would interleave two failures line by line.
+        cat show-text.err show-json.err >&2
         [ "$rc" -eq 0 ] || exit "$rc"
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
 
