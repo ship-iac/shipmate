@@ -326,7 +326,7 @@ Two things to know before relying on it:
   while code-owner review is on, and a warning beside the code-owner warning
   while that review is off. With the table unreadable it names none, and reports only
   the sole-maintainer note, or only the code-owner warning when that review is
-  off. The apply result comment also names each
+  off. A notice annotation in the apply run's log also names each
   gated environment a run applied while `reviewDecision` was `NONE`, stating that
   no approving review was required.
 

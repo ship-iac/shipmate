@@ -11,7 +11,8 @@ so every one carries the shared header and footer from `summary-comment`. Reads:
   capturing stdout posts nothing.
 - `SHIPMATE_REPLY_TEXT`: the reason or notice, engine-authored and printed unescaped.
 
-The footer links this run (`current_run_url()`).
+The footer links this run (`current_run_url()`), then `FOOTER_HINT` on a refusal or a failure;
+a notice asks nothing of the reader, so it carries no hint.
 """
 
 import os
@@ -26,7 +27,8 @@ VERDICTS = {"refused": "🔴 refused: ", "failed": "🔴 failed: ", "notice": "�
 
 def body(verb, env, outcome, text, run_url):
     """The whole comment body for `outcome`, which must be a key of `VERDICTS`."""
-    return f"{sc.header(verb, env)}\n\n{VERDICTS[outcome]}{text}\n\n{sc.footer(run_url)}"
+    foot = sc.footer(run_url, hint=outcome != "notice")
+    return f"{sc.header(verb, env)}\n\n{VERDICTS[outcome]}{text}\n\n{foot}"
 
 
 def main():

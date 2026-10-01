@@ -13,13 +13,13 @@ Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
-The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `header`, `at_sha`,
-`footer`, `tally`, `_join`) lives here because apply-comment and doctor already load this module.
+The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `header`, `provenance`,
+`footer`, `footer_hint`, `tally`, `_join`, `command_data`) lives here because apply-comment and
+doctor already load this module.
 
-`FOOTER_HINT` exists for discoverability and nothing more: doctor's findings
-surface as workflow annotations on the plan run, those carry no `file=`/`line=`
-so they render only on the run page, and the comment commands would otherwise
-have no pull-request-visible surface at all.
+`FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface,
+and shows only where the reader has something to do: under a refusal or a failure, and under an
+apply or doctor verdict that is not 🟢. A plan comment carries no hint.
 """
 
 import html
@@ -35,8 +35,8 @@ ag = _load("apply-gate")
 
 MARKER = "<!-- shipmate:summary -->"
 # Phrased so the line does not itself match the comment grammar (`^shipmate <verb>`), which
-# would make this comment a command. It names no doctor output, so the plan comment gains no
-# coupling to doctor; the module docstring says why the hint is here at all.
+# would make the comment a command. It names no doctor output, so no comment carrying it gains a
+# coupling to doctor; the module docstring says where the hint shows.
 FOOTER_HINT = "Comment `shipmate help` for the available commands."
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
@@ -171,16 +171,35 @@ def header(verb, env=""):
     return " ".join(["### shipmate", *(_md_escape(w) for w in (verb, env) if w)])
 
 
-def at_sha(sha):
-    """`at <first 7 chars>` for a 40-char lowercase hex SHA, `at an unknown commit` otherwise:
-    the verdict is display, so an unreadable SHA never costs the comment."""
-    return f"at {sha[:7]}" if _SHA.fullmatch(sha or "") else "at an unknown commit"
+def provenance(sha):
+    """A verdict's ending: `at [<first 7 chars>](<commit url>) in [run #<n>](<run url>)` for a
+    40-char lowercase hex SHA, `at an unknown commit in [run #<n>](<run url>)` otherwise. The
+    verdict is display, so an unreadable SHA never costs the comment. Reads the runner's
+    `GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`, `GITHUB_RUN_NUMBER` and `GITHUB_RUN_ID`."""
+    run = f"in [run #{os.environ['GITHUB_RUN_NUMBER']}]({current_run_url()})"
+    if not _SHA.fullmatch(sha or ""):
+        return f"at an unknown commit {run}"
+    commit = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/commit/{sha}"
+    return f"at [{sha[:7]}]({commit}) {run}"
 
 
 def footer(run_url, hint=True):
-    """`[run](<run_url>)`, then `. ` and `FOOTER_HINT` when `hint` (off only for the help reply,
-    which is the command list)."""
+    """`[run](<run_url>)`, then `. ` and `FOOTER_HINT` when `hint`: the footer of a comment whose
+    verdict carries no `provenance`. `hint` is off for the help reply, which is the command list,
+    and for a notice, which asks nothing of the reader."""
     return f"[run]({run_url}). {FOOTER_HINT}" if hint else f"[run]({run_url})"
+
+
+def footer_hint(verdict):
+    """The footer of an apply or doctor comment, whose `verdict` line carries `provenance`:
+    `FOOTER_HINT` unless the verdict's circle is 🟢, else empty."""
+    return "" if verdict.startswith("🟢") else FOOTER_HINT
+
+
+def command_data(s):
+    """`s` escaped as workflow-command data (`%`, CR, LF): a raw newline in an author-controlled
+    name would start a second workflow command."""
+    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
 def check_url(cell, checks, run_url):
@@ -247,14 +266,14 @@ def render_section(line, plan_text, url, limit):
 
 
 def verdict(cells, head_sha):
-    """The line under the header: `🟢 no changes at <sha>` when no cell changes (zero cells
-    included), else `🟡 N of M cells change at <sha>`. It reads the cells only: every failed
+    """The line under the header: `🟢 no changes` when no cell changes (zero cells included),
+    else `🟡 N of M cells change`, then `provenance`. It reads the cells only: every failed
     plan job holds the gate, and a held run posts no comment."""
     circle = worst(emoji(c) for c in cells)
     if circle == "🟢":
-        return f"🟢 no changes {at_sha(head_sha)}"
+        return f"🟢 no changes {provenance(head_sha)}"
     n = sum(1 for c in cells if c["changed"])
-    return f"{circle} {n} of {len(cells)} cells change {at_sha(head_sha)}"
+    return f"{circle} {n} of {len(cells)} cells change {provenance(head_sha)}"
 
 
 def _join(sections):
@@ -271,15 +290,15 @@ def _join(sections):
 
 def build_comment(cells, checks, run_url, head_sha):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, every cell in order
-    (a fold-out for a changed cell with plan text, else its bare line), footer. Every cell is
+    (a fold-out for a changed cell with plan text, else its bare line). No footer: the verdict
+    links the run, and neither plan verdict asks anything of the reader. Every cell is
     guaranteed its bare line: the space all remaining cells' bare lines need is reserved up
     front, so an early giant plan cannot starve a later cell."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha)}"
-    tail = footer(run_url)
     urls = [check_url(c, checks, run_url) for c in meta]
     bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
-    used = len(head) + len(tail) + 4
+    used = len(head) + 2
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
     for (c, text), url, bare in zip(cells, urls, bares, strict=True):
@@ -289,7 +308,7 @@ def build_comment(cells, checks, run_url, head_sha):
             section = render_section(bare, text, url, SIZE_BUDGET - used - reserve - 2)
         sections.append(section)
         used += len(section) + 2
-    body = "\n\n".join(p for p in (head, _join(sections), tail) if p)
+    body = "\n\n".join(p for p in (head, _join(sections)) if p)
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
@@ -361,11 +380,8 @@ def load_cells(cells_dir):
         tally = counts(txt)
         if tally is None:
             name = f"{cell['stack_path']} / {cell['environment']}"
-            # Workflow-command data escaping: cell.json is untrusted, and a raw newline in a
-            # name would start a second workflow command.
-            name = name.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
             print(
-                f"::warning::plan text for {name} has no single OpenTofu tally line; "
+                f"::warning::plan text for {command_data(name)} has no single OpenTofu tally line; "
                 "its counts render as ?"
             )
             tally = ("?",) * 5
@@ -389,7 +405,7 @@ def main():
     checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
     cells = load_cells(os.environ.get("CELLS", "cells"))
     # This job runs inside the plan run, so this run holds the logs and the
-    # artifacts the footer and the per-cell fallback link promise.
+    # artifacts the verdict's run link and the per-cell fallback link promise.
     url = current_run_url()
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(build_comment(cells, checks, url, os.environ.get("HEAD_SHA", "")))

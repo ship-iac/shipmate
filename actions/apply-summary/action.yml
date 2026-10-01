@@ -41,20 +41,16 @@ inputs:
     required: false
     default: ""
   applied-ungated-envs:
-    description: "JSON array of environments applied without an approving review, per `gated = false` on their entries (all-environments form only). Empty = []."
+    description: "JSON array of environments applied without an approving review, per `gated = false` on their entries (all-environments form only); the render step annotates each with a notice, not a comment line. Empty = []."
     required: false
     default: ""
   review-not-required-envs:
-    description: "JSON array of gated environments authorized under a null review decision, because the pull request's review state required none (both forms). Only those with an applied, failed or unrecorded row are named. Empty = []."
+    description: "JSON array of gated environments authorized under a null review decision, because the pull request's review state required none (both forms). The render step annotates each with an applied, failed or unrecorded row with a notice, not a comment line. Empty = []."
     required: false
     default: ""
   results:
     description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
     required: true
-  gate-verdict:
-    description: Gate verdict from gate-refresh, 'complete' or anything else. Empty until the gate has run.
-    required: false
-    default: ""
   head-sha:
     description: PR head SHA carrying the apply checks; their state tells an applied cell from a recorded one, and the verdict line names it.
     required: true
@@ -157,7 +153,6 @@ runs:
         SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}
         SHIPMATE_ENVLEVEL3_WAVES: ${{ inputs.envlevel3-waves }}
         SHIPMATE_RESULTS: ${{ inputs.results }}
-        SHIPMATE_GATE: ${{ inputs.gate-verdict }}
         SHIPMATE_EXCLUDED_ENVS: ${{ inputs.excluded-envs }}
         SHIPMATE_SKIPPED_ENVS: ${{ inputs.skipped-envs }}
         SHIPMATE_REVIEW_HELD_ENVS: ${{ inputs.review-held-envs }}

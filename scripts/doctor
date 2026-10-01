@@ -52,7 +52,7 @@ import re
 import sys
 import urllib.parse
 
-from _shipmate import _load, current_run_url, utf8_output
+from _shipmate import _load, utf8_output
 
 bm = _load("build-matrix")
 _gh_json = bm.gh_json
@@ -2304,7 +2304,7 @@ def _verdict(findings, sections, ctx):
     (warning findings plus harvested warning annotations), `N notices` (notice findings), zero
     counts omitted, then `harvest incomplete` when the harvest failed or is still pending. Errors
     are 🔴, warnings 🟠, notices and `harvest incomplete` ⚪, and the line takes the worst;
-    `🟢 no problems found` when there is no token. Then `at_sha`. `config_status` lines are
+    `🟢 no problems found` when there is no token. Then `provenance`. `config_status` lines are
     status and count toward nothing.
 
     Harvested rows are counted from `harvest_sections`, after its filter, so a plan-path doctor
@@ -2320,7 +2320,7 @@ def _verdict(findings, sections, ctx):
     tokens = [(circle, _plural(n, word)) for circle, n, word in counts if n]
     if ctx.get("harvest_failed") or ctx.get("harvest_pending"):
         tokens.append(("⚪", "harvest incomplete"))
-    sha = sc.at_sha(ctx["head_sha"])
+    sha = sc.provenance(ctx["head_sha"])
     if not tokens:
         return f"🟢 no problems found {sha}"
     circle = sc.worst(c for c, _ in tokens)
@@ -2359,7 +2359,8 @@ def _findings_only_report(findings, ctx, verdict):
     Hard-truncates them with a count, so the comment still posts rather than
     the whole POST failing with a 422. Keeps the full report's `verdict`."""
     head = _report_head(ctx, verdict)
-    tail = ["", sc.footer(current_run_url())]
+    hint = sc.footer_hint(verdict)
+    tail = ["", hint] if hint else []
     # 200 chars of headroom for the omitted-count line appended below.
     budget = max(0, sc.HARD_CAP - len("\n".join(head)) - len("\n".join(tail)) - 200)
     if findings:
@@ -2417,7 +2418,8 @@ def render_report(findings, annotations, ctx, status=()):
     if status:
         out += ["", CONFIG_HEADING, ""] + [_finding_row(lvl, text) for lvl, text in status]
     heading = ["", "#### warnings from this commit's workflow runs", ""]
-    tail = ["", sc.footer(current_run_url())]
+    hint = sc.footer_hint(verdict)
+    tail = ["", hint] if hint else []
     # The settings-probe section above is never truncated -- it is the part a
     # stale comment can't recover from the run logs -- so the harvest gets
     # whatever's left of sc.SIZE_BUDGET, not a fixed share.

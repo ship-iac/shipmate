@@ -36,6 +36,7 @@ section below names the SHA the release tags.
 - **Comments by bots or without `shipmate` start no comment-ops job.**
 - **`shipmate apply` and `shipmate unlock` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed.**
 - **Plan, apply and doctor comments share one shape: a header, a verdict line naming the commit, one line per cell or finding, and a run link; refusals, failures, notices and help share its header and footer.**
+- **A normal plan or apply comment links the commit and the run in its verdict and shows no help hint; the apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 
 ### Fixed
 

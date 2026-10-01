@@ -262,8 +262,8 @@ runs:
         # engine-pin-bump pull request carries no plan comment at all. The gate is written by a
         # later step regardless.
         # A run where doctor reported settings drift still posts: doctor's annotations carry no
-        # file/line and so render only on the run page, and the comment's footer is the only
-        # pull-request-visible pointer at `shipmate doctor`. Warnings (actionable
+        # file/line and so render only on the run page, and the comment's verdict links that run
+        # from the pull request. Warnings (actionable
         # misconfiguration) only -- a `::notice::` finding is informational and would put a
         # comment on every quiet run.
         # An existing comment is always kept current instead of suppressed, or a pull request

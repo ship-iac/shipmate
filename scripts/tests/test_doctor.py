@@ -67,10 +67,11 @@ def _plan_env_secret_token(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _run_context(monkeypatch):
-    """The runner defaults `current_run_url()` reads for the report's footer."""
+    """The runner defaults `provenance` reads for the verdict's commit and run links."""
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
     monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
     monkeypatch.setenv("GITHUB_RUN_ID", "77")
+    monkeypatch.setenv("GITHUB_RUN_NUMBER", "12")
 
 
 def test_mode_must_be_set(monkeypatch):
@@ -1714,10 +1715,10 @@ def test_report_all_clear():
     assert "no warnings" in body
 
 
-_FOOTER = (
-    "[run](https://github.com/o/r/actions/runs/77). "
-    "Comment `shipmate help` for the available commands."
-)
+_HINT = "Comment `shipmate help` for the available commands."
+_RUN = "in [run #12](https://github.com/o/r/actions/runs/77)"
+#: `provenance(_HEAD)` under `_run_context`, hand-written.
+_AT = f"at [fffffff](https://github.com/o/r/commit/{'f' * 40}) {_RUN}"
 _COVERED = (
     "- 🟢 no problems found by the settings probes. The environment probes covered only the "
     "environments of the stacks changed in this pull request: `dev-eu`."
@@ -1725,13 +1726,13 @@ _COVERED = (
 
 
 def test_report_with_no_findings_is_the_whole_all_clear_body():
-    """Mutation: render the verdict without `at_sha` -- `🟢 no problems found` alone. Mutation:
-    drop the footer from `render_report`'s tail."""
+    """Mutation: render the verdict without `provenance` -- `🟢 no problems found` alone.
+    Mutation: always show the footer hint in `render_report`'s tail."""
     assert doctor.render_report([], [], _ctx()) == (
         "<!-- shipmate:doctor -->\n"
         "### shipmate doctor\n"
         "\n"
-        "🟢 no problems found at fffffff\n"
+        f"🟢 no problems found {_AT}\n"
         "\n"
         "Cell summaries from plan run 1281.\n"
         "\n"
@@ -1741,9 +1742,7 @@ def test_report_with_no_findings_is_the_whole_all_clear_body():
         "\n"
         "#### warnings from this commit's workflow runs\n"
         "\n"
-        "🟢 no warnings on this commit's workflow runs.\n"
-        "\n"
-        f"{_FOOTER}"
+        "🟢 no warnings on this commit's workflow runs."
     )
 
 
@@ -1763,7 +1762,7 @@ def test_report_with_a_warning_a_notice_and_a_harvested_failure_is_the_whole_bod
         "<!-- shipmate:doctor -->\n"
         "### shipmate doctor\n"
         "\n"
-        "🔴 1 error, 2 warnings, 1 notice at fffffff\n"
+        f"🔴 1 error, 2 warnings, 1 notice {_AT}\n"
         "\n"
         "Cell summaries from plan run 1281.\n"
         "\n"
@@ -1778,7 +1777,7 @@ def test_report_with_a_warning_a_notice_and_a_harvested_failure_is_the_whole_bod
         "  - 🔴 plan failed: exit 1\n"
         "  - 🟠 provider: deprecated\n"
         "\n"
-        f"{_FOOTER}"
+        f"{_HINT}"
     )
 
 
@@ -1788,7 +1787,7 @@ def test_report_with_a_pending_harvest_and_no_findings_is_the_whole_body():
         "<!-- shipmate:doctor -->\n"
         "### shipmate doctor\n"
         "\n"
-        "⚪ harvest incomplete at fffffff\n"
+        f"⚪ harvest incomplete {_AT}\n"
         "\n"
         "Cell summaries from plan run 1281.\n"
         "\n"
@@ -1802,22 +1801,49 @@ def test_report_with_a_pending_harvest_and_no_findings_is_the_whole_body():
         "rendered: warnings they record later are not in this list. Comment `shipmate doctor` "
         "again once they have finished.\n"
         "\n"
-        f"{_FOOTER}"
+        f"{_HINT}"
+    )
+
+
+def test_report_with_one_warning_is_the_whole_body_with_the_hint():
+    """Mutation: show the footer hint only under 🔴: this 🟠 report loses its last line."""
+    assert doctor.render_report([(doctor.WARNING, "gate ruleset is missing")], [], _ctx()) == (
+        "<!-- shipmate:doctor -->\n"
+        "### shipmate doctor\n"
+        "\n"
+        f"🟠 1 warning {_AT}\n"
+        "\n"
+        "Cell summaries from plan run 1281.\n"
+        "\n"
+        "#### repository settings\n"
+        "\n"
+        "- 🟠 gate ruleset is missing\n"
+        "\n"
+        "#### warnings from this commit's workflow runs\n"
+        "\n"
+        "🟢 no warnings on this commit's workflow runs.\n"
+        "\n"
+        f"{_HINT}"
     )
 
 
 @pytest.mark.parametrize(
     ("findings", "levels", "over", "line"),
     [
-        ([(doctor.WARNING, "w")], [], {}, "🟠 1 warning at fffffff"),
-        ([(doctor.NOTICE, "n")], ["warning", "warning"], {}, "🟠 2 warnings, 1 notice at fffffff"),
+        ([(doctor.WARNING, "w")], [], {}, f"🟠 1 warning {_AT}"),
+        ([(doctor.NOTICE, "n")], ["warning", "warning"], {}, f"🟠 2 warnings, 1 notice {_AT}"),
         (
             [(doctor.NOTICE, "n")],
             [],
             {"harvest_failed": True},
-            "⚪ 1 notice, harvest incomplete at fffffff",
+            f"⚪ 1 notice, harvest incomplete {_AT}",
         ),
-        ([], ["failure", "failure"], {"head_sha": "unknown"}, "🔴 2 errors at an unknown commit"),
+        (
+            [],
+            ["failure", "failure"],
+            {"head_sha": "unknown"},
+            f"🔴 2 errors at an unknown commit {_RUN}",
+        ),
     ],
 )
 def test_the_verdict_counts_and_takes_the_worst_circle(findings, levels, over, line):
@@ -1832,16 +1858,17 @@ def test_the_verdict_counts_and_takes_the_worst_circle(findings, levels, over, l
 def test_the_environment_table_status_counts_toward_nothing_in_the_verdict():
     """Mutation: hand `_verdict` `findings + list(status)`: it reads `⚪ 1 notice`."""
     body = doctor.render_report([], [], _ctx(), [(doctor.NOTICE, doctor.CONFIG_VALID)])
-    assert body.splitlines()[3] == "🟢 no problems found at fffffff"
+    assert body.splitlines()[3] == f"🟢 no problems found {_AT}"
 
 
 def test_the_findings_only_fallback_keeps_the_verdict_and_the_footer():
-    """Mutation: give `_findings_only_report` an empty verdict. Mutation: drop its footer."""
+    """Mutation: give `_findings_only_report` an empty verdict. Mutation: drop its footer
+    hint."""
     findings = [(doctor.WARNING, "x" * 200) for _ in range(400)]
     lines = doctor.render_report(findings, [], _ctx()).splitlines()
     assert "#### warnings from this commit's workflow runs" not in lines  # The fallback fired.
-    assert lines[3] == "🟠 400 warnings at fffffff"
-    assert lines[-2:] == ["", _FOOTER]
+    assert lines[3] == f"🟠 400 warnings {_AT}"
+    assert lines[-2:] == ["", _HINT]
 
 
 def test_the_harvest_budget_leaves_room_for_the_footer():
@@ -1852,7 +1879,7 @@ def test_the_harvest_budget_leaves_room_for_the_footer():
     lines = doctor.render_report([], anns, _ctx()).splitlines()
     kept = [ln for ln in lines if not ln.startswith("- _") or "omitted" not in ln]
     assert len(kept) == len(lines) - 1
-    assert lines[-1] == _FOOTER
+    assert lines[-1] == _HINT
     assert len("\n".join(kept)) <= doctor.sc.SIZE_BUDGET
 
 

@@ -4,10 +4,11 @@
 Reads the run's jobs listing as JSON Lines on stdin (one object per line,
 keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 '.jobs[]'`), per-cell `apply-summary.*` artifacts from the $CELLS directory,
-the expected-cell set (waves JSON — targeted or per-env-level), the gate
-verdict, the head SHA, and the excluded/skipped/held/ungated envs (apply-all only),
+the expected-cell set (waves JSON — targeted or per-env-level), the head SHA,
+the excluded/skipped/held envs (apply-all only) and the ungated and no-review envs,
 and writes a fresh comment.md -- this comment is never upserted, unlike the plan
-sticky comment.
+sticky comment. The ungated and no-review envs go to stdout, the step log, as
+`notices` annotations, not into the comment.
 
 DO NOT refactor this and summary-comment into one renderer with a
 `mode=plan|apply` switch. The injection-critical primitives (fence escaping,
@@ -470,7 +471,7 @@ def _verdict(rows, failed_run, held, head_sha):
     """The line under the header. With rows: a count per status in `_STATUS` order, zero counts
     omitted, led by a bare `failed` when the run failed and no failed or blocked row shows
     it; the circle is the worst row's, or 🔴 for a failed run. Without rows: `🔴 failed`, the
-    held sentence, or `🟢 no pending applies`. Then `at_sha`.
+    held sentence, or `🟢 no pending applies`. Then `provenance`.
 
     The leading `failed` is suppressed by a `failed` or `blocked` row, each of which already
     names a cell that did not apply. An `unrecorded` row does not suppress it: it describes ONE
@@ -485,13 +486,13 @@ def _verdict(rows, failed_run, held, head_sha):
             text = "⚪ nothing applied, environments are held for review"
         else:
             text = "🟢 no pending applies"
-        return f"{text} {sc.at_sha(head_sha)}"
+        return f"{text} {sc.provenance(head_sha)}"
     n = collections.Counter(r["status"] for r in rows)
     tokens = [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
     if failed_run and not (n["failed"] or n["blocked"]):
         tokens.insert(0, "failed")
     circle = "🔴" if failed_run else sc.worst(_STATUS[s][0] for s in n)
-    return f"{circle} {', '.join(tokens)} {sc.at_sha(head_sha)}"
+    return f"{circle} {', '.join(tokens)} {sc.provenance(head_sha)}"
 
 
 _HELD_REMEDY = (
@@ -509,30 +510,51 @@ def _held_line(env, explicit):
     return f"{line}; once it clears, comment `shipmate apply {env}`" if explicit else line
 
 
-_NO_REVIEW = (
-    "the pull request's review state required no approving review, so `gated` had nothing to "
-    "enforce (docs/hardening.md #3-5)"
-)
 _UNGATED = (
-    "permitted to apply without an approving review (`gated = false` in `.github/shipmate.toml`)"
+    "ungated, permitted to apply without an approving review "
+    "(gated = false in .github/shipmate.toml)"
 )
+_NO_REVIEW = "no approving review was required, so gated had nothing to enforce"
 
 
-def _dispositions(excluded, skipped, env_name, held, applied_ungated, review_not_required):
-    """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
-    Explicit, skipped, held and ungated are all-environments concepts, empty in the targeted
-    form. A held env that is also explicit is listed under `held` only, and under `held_explicit`
-    for its command."""
+def notices(rows, env_name, applied_ungated, review_not_required):
+    """One `::notice::` workflow command per environment in `applied_ungated` (all-environments
+    form only, empty in the targeted one) and per environment in `review_not_required` that has
+    an applied, failed or unrecorded row, where infrastructure may have changed, so a run with
+    no rows names none. Env names are author-controlled, so `command_data`-escaped.
+
+    An ungated notice is the only audit trail an apply permitted by `gated = false` under a
+    REVIEW_REQUIRED decision leaves: `reviewDecision` is a live value with no history, so once
+    the review lands nothing in the run tells an apply that waited for it from one that did not.
+    It carries no completion verb for the named env -- detect derives the set from `runnable`,
+    before any wave runs, so a failed wave or a skipped env-level leaves an env named there that
+    never applied.
+
+    `review_not_required` names gated envs a null (`NONE`) decision authorized: the pull
+    request's review state required none, so `gated` enforced nothing. It is a different cause
+    from `applied_ungated`, so it gets its own text, which states the authorization fact and
+    never that nobody reviewed -- a code-owner review can still be required at count 0."""
     if env_name:
-        excluded = skipped = held = applied_ungated = ()
+        applied_ungated = ()
+    ran = {r["environment"] for r in rows if r["status"] in _SECTION_STATUSES}
+    lines = [f"::notice::{sc.command_data(e)}: {_UNGATED}" for e in applied_ungated]
+    return lines + [
+        f"::notice::{sc.command_data(e)}: {_NO_REVIEW}" for e in review_not_required if e in ran
+    ]
+
+
+def _dispositions(excluded, skipped, env_name, held):
+    """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
+    All are all-environments concepts, empty in the targeted form. A held env that is also
+    explicit is listed under `held` only, and under `held_explicit` for its command."""
+    if env_name:
+        excluded = skipped = held = ()
     excluded, held = _esc(excluded), _esc(held)
     return {
         "explicit": [e for e in excluded if e not in held],
         "skipped": _esc(skipped),
         "held": held,
         "held_explicit": [e for e in held if e in excluded],
-        "ungated": _esc(applied_ungated),
-        "no_review": _esc(review_not_required),
     }
 
 
@@ -546,8 +568,7 @@ def _per_env_lines(d):
     lines += [_held_line(e, e in d["held_explicit"]) for e in d["held"]]
     if d["held"]:
         lines.append(_HELD_REMEDY)
-    lines += [f"ungated: {e}, {_UNGATED}" for e in d["ungated"]]
-    return lines + [f"no review required: {e}, {_NO_REVIEW}" for e in d["no_review"]]
+    return lines
 
 
 def _grouped_lines(d):
@@ -569,29 +590,17 @@ def _grouped_lines(d):
                 f"; once the hold clears, comment `shipmate apply <env>` for {g['held_explicit']}"
             )
         lines += [line, _HELD_REMEDY]
-    if g["ungated"]:
-        lines.append(f"ungated: {g['ungated']}, {_UNGATED}")
-    if g["no_review"]:
-        lines.append(f"no review required: {g['no_review']}, {_NO_REVIEW}")
     return lines
 
 
-def _footer_parts(
-    gate,
-    excluded,
-    skipped,
-    env_name,
-    held=(),
-    applied_ungated=(),
-    review_not_required=(),
-    compact=False,
-):
-    """The lines above the footer: in the all-environments form, one line per environment for
-    each disposition this run produced (explicit left pending, skipped, held for review, applied
-    ungated) and a `held:` remedy line when any is held; in both forms, one no-review-required
-    line per environment; then the `gate:` line. Env names are author-controlled, so
-    `_md_escape`d. `compact` renders each disposition as one line naming its environments
-    comma-separated, with the same meanings, for the hard-cap fallback.
+def _footer_parts(excluded, skipped, env_name, held=(), compact=False):
+    """The lines above the footer, in the all-environments form only: one line per environment
+    for each disposition this run produced (explicit left pending, skipped, held for review) and
+    a `held:` remedy line when any is held. Env names are author-controlled, so `_md_escape`d.
+    `compact` renders each disposition as one line naming its environments comma-separated, with
+    the same meanings, for the hard-cap fallback. Applied-ungated and no-review environments are
+    not comment lines: `notices` reports them in the run log, and the `shipmate / gate` status
+    shows the gate's state.
 
     `excluded` can overlap `held`. A held env that is also in `excluded` is
     listed once, on its held line, with its `shipmate apply <env>` command: once
@@ -600,34 +609,9 @@ def _footer_parts(
     three decisions hold (REVIEW_REQUIRED on a gated env, CHANGES_REQUESTED,
     and an unknown or absent decision) and only the run's own detect notice
     carries which one, since the decision never reaches this renderer; the
-    `held:` line names every remedy and points there.
-
-    An empty `applied_ungated` renders NOTHING, and never "zero environments
-    applied" -- it is populated only under a REVIEW_REQUIRED decision with
-    an env's entry holding `gated = false`. That line is the only audit trail
-    such an apply leaves: `reviewDecision` is a live value with no history,
-    so once the review lands nothing in the run tells an apply that waited for
-    it from one that did not. It carries a label, not a circle, and no
-    completion verb for the named env -- detect derives the set from `runnable`,
-    before any wave runs, so a failed wave or a skipped env-level leaves an env
-    named there that never applied, and a 🟢 or "applied" would contradict the
-    cell lines above it.
-
-    `review_not_required` names gated envs a null (`NONE`) decision authorized:
-    the pull request's review state required none, so `gated` enforced nothing. It
-    is a different cause from `applied_ungated`, so it gets its own line, which
-    states the authorization fact and never that nobody reviewed -- a
-    code-owner review can still be required at count 0. `build_comment` narrows
-    it to envs with an applied, failed or unrecorded row, where infrastructure
-    may have changed, so a run with no rows never names one."""
-    d = _dispositions(excluded, skipped, env_name, held, applied_ungated, review_not_required)
-    lines = _grouped_lines(d) if compact else _per_env_lines(d)
-    lines.append(
-        "gate: complete"
-        if gate == "complete"
-        else "gate: pending until every environment is applied"
-    )
-    return lines
+    `held:` line names every remedy and points there."""
+    d = _dispositions(excluded, skipped, env_name, held)
+    return _grouped_lines(d) if compact else _per_env_lines(d)
 
 
 def _results_failed(results_csv):
@@ -645,13 +629,13 @@ def _results_failed(results_csv):
 _BLOCKED_NOTE = "blocked: each blocked cell's reason is in its logs."
 
 
-def _tail(notes, parts, run_url):
-    """The non-empty notes, then the footer lines, then the footer, a blank line between each."""
-    tail = "\n\n".join(p for p in ("\n".join(n for n in notes if n), "\n".join(parts)) if p)
-    return tail + "\n\n" + sc.footer(run_url)
+def _tail(notes, parts, hint):
+    """The non-empty notes, then the footer lines, then the footer `hint`, a blank line between
+    each; empty when all three are."""
+    return "\n\n".join(p for p in ("\n".join(n for n in notes if n), "\n".join(parts), hint) if p)
 
 
-def _compact(head, rows, urls, bares, notes, parts, run_url):
+def _compact(head, rows, urls, bares, notes, parts, hint):
     """The hard-cap fallback, tried only after the normal render overflows HARD_CAP: every row's
     bare line with a blocked row's state shortened to `blocked` and `_BLOCKED_NOTE` leading the
     notes when a row is blocked, above the grouped footer `parts`. A blocked reason is the one
@@ -667,50 +651,40 @@ def _compact(head, rows, urls, bares, notes, parts, run_url):
         else b
         for r, u, b in zip(rows, urls, bares, strict=True)
     ]
-    return "\n\n".join((head, "\n".join(lines), _tail(notes, parts, run_url)))
+    return "\n\n".join(p for p in (head, "\n".join(lines), _tail(notes, parts, hint)) if p)
 
 
 def build_comment(
     rows,
     jobs,
     run_url,
-    gate,
     excluded,
     skipped,
     env_name,
     results_csv="",
     held=(),
-    applied_ungated=(),
-    review_not_required=(),
     head_sha="",
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, every row in order (a fold-out
     for an applied, failed or unrecorded row with output, else its bare line), the notes, the
-    footer lines, the footer. With no rows it is header, verdict, footer lines and footer.
+    footer lines, and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it
+    is header, verdict, footer lines and footer.
 
     Every row is guaranteed its bare line: the space all remaining rows' bare lines need is
     reserved up front, together, so an early giant apply.txt cannot starve a later row. When
     even the bare lines overflow HARD_CAP, `_compact` renders them without the blocked reasons
     and with one footer line per disposition; past that a SystemExit names the cause."""
-    ran = {r["environment"] for r in rows if r["status"] in _SECTION_STATUSES}
-    head = f"{sc.header('apply', env_name)}\n\n"
-    head += _verdict(rows, _results_failed(results_csv), held, head_sha)
+    verdict = _verdict(rows, _results_failed(results_csv), held, head_sha)
+    head = f"{sc.header('apply', env_name)}\n\n{verdict}"
+    hint = sc.footer_hint(verdict)
     notes = (
         _lock_note(rows, env_name),
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
     )
-    dispositions = (
-        gate,
-        excluded,
-        skipped,
-        env_name,
-        held,
-        applied_ungated,
-        [e for e in review_not_required if e in ran],
-    )
+    dispositions = (excluded, skipped, env_name, held)
     parts = _footer_parts(*dispositions)
-    tail = _tail(notes, parts, run_url)
+    tail = _tail(notes, parts, hint)
     urls = [_job_url(r, jobs, run_url) for r in rows]
     bares = [_cell_line(r, u) for r, u in zip(rows, urls, strict=True)]
     used = len(head) + len(tail) + 4
@@ -729,7 +703,7 @@ def build_comment(
     # Past SIZE_BUDGET every row is already its bare line; only the compact form is smaller.
     if len(body) > sc.HARD_CAP:
         parts = _footer_parts(*dispositions, compact=True)
-        body = _compact(head, rows, urls, bares, notes, parts, run_url)
+        body = _compact(head, rows, urls, bares, notes, parts, hint)
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
     if len(body) > sc.HARD_CAP:
@@ -749,18 +723,24 @@ def main():
         os.environ.get("SHIPMATE_APP_ID", ""),
     )
     rows = apply_check_state(build_rows(expected, downloaded), present, done)
+    env_name = os.environ.get("SHIPMATE_ENVIRONMENT", "") or ""
+    # Printed before the render, so an over-cap SystemExit still leaves the audit trail.
+    for line in notices(
+        rows,
+        env_name,
+        json.loads(os.environ.get("SHIPMATE_APPLIED_UNGATED_ENVS") or "[]"),
+        json.loads(os.environ.get("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS") or "[]"),
+    ):
+        print(line)
     body = build_comment(
         rows,
         jobs,
         current_run_url(),
-        os.environ.get("SHIPMATE_GATE", ""),
         json.loads(os.environ.get("SHIPMATE_EXCLUDED_ENVS") or "[]"),
         json.loads(os.environ.get("SHIPMATE_SKIPPED_ENVS") or "[]"),
-        os.environ.get("SHIPMATE_ENVIRONMENT", "") or "",
+        env_name,
         os.environ.get("SHIPMATE_RESULTS", "") or "",
         json.loads(os.environ.get("SHIPMATE_REVIEW_HELD_ENVS") or "[]"),
-        json.loads(os.environ.get("SHIPMATE_APPLIED_UNGATED_ENVS") or "[]"),
-        json.loads(os.environ.get("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS") or "[]"),
         os.environ.get("SHIPMATE_HEAD_SHA", ""),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:

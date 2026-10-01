@@ -118,7 +118,6 @@ _RENDER_ENV = {
     "SHIPMATE_ENVLEVEL2_WAVES": "${{ inputs.envlevel2-waves }}",
     "SHIPMATE_ENVLEVEL3_WAVES": "${{ inputs.envlevel3-waves }}",
     "SHIPMATE_RESULTS": "${{ inputs.results }}",
-    "SHIPMATE_GATE": "${{ inputs.gate-verdict }}",
     "SHIPMATE_EXCLUDED_ENVS": "${{ inputs.excluded-envs }}",
     "SHIPMATE_SKIPPED_ENVS": "${{ inputs.skipped-envs }}",
     "SHIPMATE_REVIEW_HELD_ENVS": "${{ inputs.review-held-envs }}",
