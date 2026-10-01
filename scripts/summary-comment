@@ -117,15 +117,17 @@ def emoji(cell):
 
 
 def _md_escape(s):
-    """Neutralize table/summary-line structure characters in author-controlled
-    display names (a stack path is chosen by the pull request author). `<`/`>` are
-    escaped so a name like `x</summary><b>` cannot close the `<summary>` /
-    `<details>` HTML elements the table and section headers are built from.
-    `[`/`]` are escaped so a name like `[approve this deploy](https://evil)`
-    cannot form a live markdown link inside the trusted bot comment; the
-    entities render literally in both the table and `<summary>` contexts."""
+    """Neutralize structure characters in author-controlled display names (a stack path is
+    chosen by the pull request author) for the contexts they appear in: a bare cell line, a
+    fold-out's `<summary>`, and a doctor list row. `<`/`>` are escaped so a name like
+    `x</summary><b>` cannot close the `<summary>` / `<details>` elements a fold-out is built
+    from. `[`/`]` are escaped so a name like `[approve this deploy](https://evil)` cannot form a
+    live markdown link inside the trusted bot comment. Newlines become spaces so a name cannot
+    start a line of its own. `|` becomes `&#124;`, which cannot split a table cell and, unlike
+    `\\|`, reads as `|` inside `<summary>`, an HTML block where a backslash escape stays literal.
+    Every entity reads as its character in all three contexts."""
     return (
-        s.replace("|", "\\|")
+        s.replace("|", "&#124;")
         .replace("\r", " ")
         .replace("\n", " ")
         .replace("<", "&lt;")

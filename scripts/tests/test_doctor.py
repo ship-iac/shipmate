@@ -3548,18 +3548,17 @@ def test_review_rule_count_zero_names_at_most_ten_environments(monkeypatch):
     assert out == [_no_required_review(shown)]
 
 
-def test_review_rule_count_zero_escapes_an_environment_name_once(monkeypatch):
-    """The report row escapes the whole finding; a second escape of each name doubles the
-    backslash before a `|`.
+def test_review_rule_count_zero_escapes_an_environment_name(monkeypatch):
+    """The report row escapes the whole finding.
 
-    Mutation: wrap each name in `_md_escape` inside `_no_review_findings` -- the backslash doubles.
-    Mutation: drop `_md_escape` from `_finding_row` -- the `|` and `<` render raw."""
+    Mutation: drop `_md_escape` from `_finding_row` -- the `|` and `<` render raw.
+    Mutation: escape `|` as `\\|` in `_md_escape` -- red."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
     [(level, text)] = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE, {"a|b<c"})
     assert doctor._finding_row(level, text) == (
         f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} the `pull_request` rule on `{_BRANCH}` requires "
         "0 approving reviews, so these gated environments can apply without an approving "
-        "review: `a\\|b&lt;c`. One is held only where a code-owner review is required for the "
+        "review: `a&#124;b&lt;c`. One is held only where a code-owner review is required for the "
         "changed files. `gated` can only relax a review requirement the ruleset sets "
         "(docs/hardening.md #3 to #5); set `required_approving_review_count` to 1 or more, or set "
         "`gated = false` on the environments meant to apply unreviewed."
