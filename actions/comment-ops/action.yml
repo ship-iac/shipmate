@@ -556,10 +556,10 @@ runs:
         else
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > pr.json
         fi
-        # Review decision (ruleset-driven). A null decision means the ruleset requires no
-        # review; normalize it to the explicit NONE sentinel, because authorize fails closed
-        # on anything that is neither NONE nor a decision enum value, and an empty string must
-        # never be a pass value.
+        # Review decision (ruleset-driven). GitHub returns null when no rule requires a review,
+        # and also when code-owner review is required but no changed file has an owner. Normalize
+        # it to the explicit NONE sentinel: authorize fails closed on anything that is neither
+        # NONE nor a decision enum value, and an empty string must never be a pass value.
         # The $owner/$repo/$pr tokens are GraphQL query variables (bound via -F), not
         # shell variables — single quotes are intentional.
         # shellcheck disable=SC2016

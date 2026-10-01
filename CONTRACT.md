@@ -1286,8 +1286,9 @@ its own actionable rejection reason:
   with conflicts;
 - **mergeable**: the pull request is mergeable;
 - **reviewed**: the pull request satisfies the branch ruleset's review policy
-  — GitHub's `reviewDecision` is `APPROVED`, or is null (no review required by
-  the ruleset; normalized to the explicit `NONE` sentinel in transit). The
+  — GitHub's `reviewDecision` is `APPROVED`, or is null (no rule requires a
+  review, or code-owner review is required but no changed file has an owner;
+  normalized to the explicit `NONE` sentinel in transit). The
   ruleset (required approving reviews, CODEOWNERS, last-push approval) is the
   single source of review policy; shipmate imposes none of its own. A ruleset
   requiring zero approvals reports no decision even when an approval exists,

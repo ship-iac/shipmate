@@ -673,9 +673,9 @@ def test_apply_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_pa
 def test_main_names_a_gated_env_applied_with_no_review_required(
     monkeypatch, tmp_path, decision, table, expected
 ):
-    """A null decision authorizes a gated env only because no branch rule requires a review;
-    an ungated env's `gated = false` entry already declares it applies unreviewed, and an
-    approval needs no disclosure.
+    """A null decision authorizes a gated env without a review (no rule requires one, or
+    the code-owner rule owns none of the changed files); an ungated env's `gated = false`
+    entry already declares it applies unreviewed, and an approval needs no disclosure.
 
     Mutation: compare `review_decision != "NONE"` in `authorize._review_not_required` -- the
     NONE/gated and APPROVED cases swap and go red.
