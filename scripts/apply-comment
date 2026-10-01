@@ -43,10 +43,9 @@ MAX_ENV_LEVELS = 4
 
 CELL_KEYS = ("stack", "stack_path", "environment", "result", "reason")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
-# (circle, verdict word) per display status, in the verdict's token order. Display statuses
-# are a SUPERSET of cell.json's `result` enum: `unrecorded` is derived at render time (see
-# apply_check_state), never written by apply-cell, so _validate_cell keeps rejecting an
-# out-of-enum artifact value as pin skew.
+# (circle, verdict word) per display status, in verdict token order. A SUPERSET of cell.json's
+# `result` enum: `unrecorded` is derived at render time (apply_check_state), never written,
+# so _validate_cell still rejects an out-of-enum artifact value as pin skew.
 _STATUS = {
     "failed": ("🔴", "failed"),
     "unrecorded": ("🟠", "not recorded"),
@@ -99,7 +98,7 @@ def _unrecorded_note(rows):
     is precisely the run that needs the comment most. The cell lines still name
     every affected cell."""
     cells = [
-        f"**{sc._md_escape(r['stack_display'])} / {sc._md_escape(r['environment'])}**"
+        f"**{sc._md_escape(r['stack_display'])} ({sc._md_escape(r['environment'])})**"
         for r in rows
         if r["status"] == "unrecorded"
     ]
@@ -118,7 +117,7 @@ def _lock_cell(row, lock):
     value (unbounded runtime output), so the sentence stays grammatical."""
     held = f", held since **{sc._md_escape(lock['created'])}**" if lock["created"] else ""
     return (
-        f"**{sc._md_escape(row['stack_display'])} / {sc._md_escape(row['environment'])}** "
+        f"**{sc._md_escape(row['stack_display'])} ({sc._md_escape(row['environment'])})** "
         f"(lock **{sc._md_escape(lock['id'])}**{held})"
     )
 
@@ -165,10 +164,9 @@ def _lock_note(rows, env_name):
     )
 
 
-# Digits-only captures, so a look-alike line in author-controlled apply.txt cannot inject into
-# the cell line. Whole-line anchored (^...$, re.M) because tofu prints `Outputs:` AFTER
-# this line: an unanchored match would let an output value containing the literal win last.
-# tofu omits a zero import or forget count from the line.
+# Digits-only captures, so look-alike author text cannot inject into the cell line. Whole-line
+# anchored (^...$, re.M): tofu prints `Outputs:` after this line, and an output value holding
+# the literal would otherwise win last. tofu omits a zero import or forget count.
 _RESOURCES_RE = re.compile(
     r"^Apply complete! Resources: (?:(?P<import>\d+) imported, )?(?P<add>\d+) added, "
     r"(?P<change>\d+) changed, (?P<destroy>\d+) destroyed(?:, (?P<forget>\d+) forgotten)?\.?$",
@@ -471,11 +469,12 @@ def render_apply_section(row, text, url, limit):
 
 def _verdict(rows, failed_run, held, head_sha):
     """The line under the header. With rows: a count per status in `_STATUS` order, zero counts
-    omitted, led by a bare `failed` when the run failed and no row shows it; the circle is the
-    worst row's, or 🔴 for a failed run. Without rows: `🔴 failed`, the held sentence, or
-    `🟢 no pending applies`. Then `at_sha`.
+    omitted, led by a bare `failed` when the run failed and no failed or blocked row shows
+    it; the circle is the worst row's, or 🔴 for a failed run. Without rows: `🔴 failed`, the
+    held sentence, or `🟢 no pending applies`. Then `at_sha`.
 
-    The leading `failed` is suppressed by a `failed` row only. An `unrecorded` row describes ONE
+    The leading `failed` is suppressed by a `failed` or `blocked` row, each of which already
+    names a cell that did not apply. An `unrecorded` row does not suppress it: it describes ONE
     cell in ONE environment and says nothing about a different environment whose job died
     before any cell reported (a denied apply environment, a job-level cancel), whose rows read
     `not attempted`; suppressing on it would hide that environment's only failure signal."""
@@ -490,7 +489,7 @@ def _verdict(rows, failed_run, held, head_sha):
         return f"{text} {sc.at_sha(head_sha)}"
     n = collections.Counter(r["status"] for r in rows)
     tokens = [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
-    if failed_run and not n["failed"]:
+    if failed_run and not (n["failed"] or n["blocked"]):
         tokens.insert(0, "failed")
     circle = "🔴" if failed_run else sc.worst(_STATUS[s][0] for s in n)
     return f"{circle} {', '.join(tokens)} {sc.at_sha(head_sha)}"

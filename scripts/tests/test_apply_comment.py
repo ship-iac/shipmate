@@ -224,7 +224,7 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
         "</summary>\n\n```\nApply complete! Resources: 0 added, 2 changed, 0 destroyed.\n```\n"
         "</details>\n\n"
         '🟡 stacks/dns (prod): not attempted <a href="https://gh/run/1">logs</a>\n\n'
-        "not recorded: **app / prod**. The apply succeeded but its apply check is not recorded "
+        "not recorded: **app (prod)**. The apply succeeded but its apply check is not recorded "
         "as complete (it failed, was cancelled, or a newer plan re-created it), so "
         "`shipmate / gate` stays pending. Re-plan and re-apply.\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply`.\n\n"
@@ -266,13 +266,13 @@ def test_no_line_of_the_apply_comment_is_itself_a_shipmate_command():
     [
         (["not_attempted", "not_attempted"], "success,failure", "🔴 failed, 2 not attempted"),
         (
-            ["unrecorded", "not_attempted"],
+            [("unrecorded", "prod"), "not_attempted"],
             "success,failure",
             "🔴 failed, 1 not recorded, 1 not attempted",
         ),
         (["unrecorded"], "success,failure", "🔴 failed, 1 not recorded"),
         (["failed", "applied", "applied"], "success,failure", "🔴 1 failed, 2 applied"),
-        (["blocked"], "success,failure", "🔴 failed, 1 blocked"),
+        (["blocked"], "success,failure", "🔴 1 blocked"),
         (["applied"], "", "🔴 failed, 1 applied"),
         (["not_attempted"], "success,skipped", "🟡 1 not attempted"),
         (["applied", "blocked"], "success", "⚪ 1 blocked, 1 applied"),
@@ -284,13 +284,18 @@ def test_the_verdict_counts_rows_and_carries_a_failed_run(statuses, results, ver
     """A run that dies before any cell reports (a denied apply environment, a job-level cancel)
     leaves only `not attempted` rows, so the job results add a leading `failed` and the 🔴. A
     `not recorded` row in one environment says nothing about another, so it never suppresses
-    that token; only a `failed` row, which already says it, does. A blocked row does not: its ⚪
-    would leave the failed run unmarked.
+    that token. A `failed` or `blocked` row already names a cell that did not apply, so it
+    does; without that, a blocked-only run would carry a redundant `failed` token, while the
+    🔴 still marks the failed run.
 
     Mutation: suppress the token on an `unrecorded` row too -- red.
+    Mutation: suppress the token on a `failed` row only -- the blocked case, red.
     Mutation: take the circle from the rows alone -- red.
     Mutation: insert `failed` even when a row failed -- red."""
-    rows = [_row(status=s) for s in statuses]
+    rows = [
+        _row(status=s) if isinstance(s, str) else _row(status=s[0], environment=s[1])
+        for s in statuses
+    ]
     assert ac._verdict(rows, ac._results_failed(results), (), SHA) == f"{verdict} at 0123456"
 
 
@@ -459,30 +464,64 @@ def test_the_unrecorded_note_is_capped_and_summarizes_the_rest():
     push the render into the fail-loud SystemExit, on the run that needed it: the usual cause of
     `unrecorded` rows (an expired App key, a checks-API outage) strands a wide matrix.
 
-    Mutation: name every cell in `_named` -- red."""
+    Mutation: name every cell in `_named` -- red.
+    Mutation: name a cell `**<stack> / <env>**` in `_unrecorded_note` -- red."""
     rows = [
         _row(status="unrecorded", stack_display=f"s{i}", stack_path=f"stacks/s{i}")
         for i in range(7)
     ]
     assert ac._unrecorded_note(rows) == (
-        "not recorded: **s0 / dev-eu**, **s1 / dev-eu**, **s2 / dev-eu**, **s3 / dev-eu**, "
-        "**s4 / dev-eu**, and 2 more. The apply succeeded but its apply check is not recorded "
+        "not recorded: **s0 (dev-eu)**, **s1 (dev-eu)**, **s2 (dev-eu)**, **s3 (dev-eu)**, "
+        "**s4 (dev-eu)**, and 2 more. The apply succeeded but its apply check is not recorded "
         "as complete (it failed, was cancelled, or a newer plan re-created it), so "
         "`shipmate / gate` stays pending. Re-plan and re-apply."
     )
 
 
 def test_the_lock_note_names_the_cell_the_lock_and_the_release_command_whole():
-    """Mutation: drop `, then re-apply` from the note -- red."""
+    """Mutation: drop `, then re-apply` from the note -- red.
+    Mutation: name the cell `**<stack> / <env>**` in `_lock_cell` -- red."""
     rows = [_row(status="failed", apply_text=_fixture_text("lock_error_s3.txt"))]
     assert ac._lock_note(rows, "dev-eu") == (
-        "state lock held: **app / dev-eu** (lock **0f866bdc-d621-7230-876f-fa7398eff1f8**, held "
+        "state lock held: **app (dev-eu)** (lock **0f866bdc-d621-7230-876f-fa7398eff1f8**, held "
         "since **2026-08-20 19:53:19.7388258 +0000 UTC**). An earlier apply was cancelled or "
         "killed before releasing the lock, so nothing in these cells was applied. Per-cell "
         "concurrency admits one apply at a time, so the holder was that cell's most recent apply "
         "run. Release it with `shipmate unlock dev-eu`, then re-apply. Unlocking is not "
         "recovery: if the reviewed plan is now stale, re-plan."
     )
+
+
+def test_the_notes_read_lock_then_unrecorded_then_not_attempted():
+    """A held lock is why the run failed; a stranded applied cell needs a re-plan, a
+    not-attempted one only a retry. The more urgent statement reads first.
+
+    Mutation: swap the lock and unrecorded notes in `build_comment` -- red."""
+    rows = [
+        _row(status="failed", apply_text=_fixture_text("lock_error_s3.txt")),
+        _row(environment="prod", stack_display="db", stack_path="stacks/db", status="unrecorded"),
+        _row(
+            environment="prod",
+            stack_display="stacks/dns",
+            stack_path="stacks/dns",
+            status="not_attempted",
+            apply_text=None,
+        ),
+    ]
+    sections = _comment(rows, env="").split("\n\n")
+    assert sections[-3] == (
+        "state lock held: **app (dev-eu)** (lock **0f866bdc-d621-7230-876f-fa7398eff1f8**, held "
+        "since **2026-08-20 19:53:19.7388258 +0000 UTC**). An earlier apply was cancelled or "
+        "killed before releasing the lock, so nothing in these cells was applied. Per-cell "
+        "concurrency admits one apply at a time, so the holder was that cell's most recent apply "
+        "run. Release it with `shipmate unlock <env>`, then re-apply. Unlocking is not "
+        "recovery: if the reviewed plan is now stale, re-plan.\n"
+        "not recorded: **db (prod)**. The apply succeeded but its apply check is not recorded "
+        "as complete (it failed, was cancelled, or a newer plan re-created it), so "
+        "`shipmate / gate` stays pending. Re-plan and re-apply.\n"
+        "not attempted: the apply checks stay pending; retry with `shipmate apply`."
+    )
+    assert sections[-2:] == [PENDING, FOOT]
 
 
 def test_a_fold_out_holds_the_whole_output_in_a_plain_fence_under_an_escaped_summary():
@@ -1103,7 +1142,7 @@ def test_unrecorded_note_lists_every_affected_cell():
         _row(status="unrecorded", stack_display="auth", environment="prod"),
     ]
     note = ac._unrecorded_note(rows)
-    assert "**db / prod**" in note and "**auth / prod**" in note
+    assert "**db (prod)**" in note and "**auth (prod)**" in note
 
 
 def test_unrecorded_note_escapes_evil_stack_and_env_names():
@@ -1132,7 +1171,7 @@ def test_unrecorded_note_names_every_cell_when_under_the_cap():
     note = ac._unrecorded_note(rows)
     assert "more" not in note
     for i in range(ac._UNRECORDED_NAMED):
-        assert f"**s{i} / dev-eu**" in note
+        assert f"**s{i} (dev-eu)**" in note
 
 
 def test_build_comment_wide_unrecorded_run_still_produces_a_comment():
@@ -1279,7 +1318,7 @@ def test_lock_note_names_the_cell_the_lock_and_the_release_command():
         )
     ]
     note = ac._lock_note(rows, "dev-eu")
-    assert "app / dev-eu" in note
+    assert "**app (dev-eu)**" in note
     assert "0f866bdc-d621-7230-876f-fa7398eff1f8" in note
     assert "2026-08-20 19:53:19" in note
     assert "shipmate unlock dev-eu" in note
@@ -1448,7 +1487,7 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
     assert _main_body(tmp_path) == (
         "### shipmate apply dev-eu\n\n🟠 1 not recorded at 0123456\n\n"
         f'🟠 app (dev-eu): applied, not recorded <a href="{_MAIN_RUN}">logs</a>\n\n'
-        "not recorded: **app / dev-eu**. The apply succeeded but its apply check is not recorded "
+        "not recorded: **app (dev-eu)**. The apply succeeded but its apply check is not recorded "
         "as complete (it failed, was cancelled, or a newer plan re-created it), so "
         "`shipmate / gate` stays pending. Re-plan and re-apply.\n\n" + PENDING + "\n\n" + _MAIN_FOOT
     )
