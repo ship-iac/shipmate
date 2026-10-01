@@ -1,0 +1,40 @@
+
+OpenTofu used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+  . forget
+
+OpenTofu will perform the following actions:
+
+  # random_id.b will be removed from the OpenTofu state but will not be destroyed
+  . resource "random_id" "b" {
+    b64_std     = "VuT5JA=="
+    b64_url     = "VuT5JA"
+    byte_length = 4
+    dec         = "1457846564"
+    hex         = "56e4f924"
+    id          = "VuT5JA"
+}
+
+  # random_id.c will be imported
+  # (imported from "p-9hUg")
+    resource "random_id" "c" {
+        b64_std     = "p+9hUg=="
+        b64_url     = "p-9hUg"
+        byte_length = 4
+        dec         = "2817483090"
+        hex         = "a7ef6152"
+        id          = "p-9hUg"
+    }
+
+  # random_id.d will be created
+  + resource "random_id" "d" {
+      + b64_std     = (known after apply)
+      + b64_url     = (known after apply)
+      + byte_length = 4
+      + dec         = (known after apply)
+      + hex         = (known after apply)
+      + id          = (known after apply)
+    }
+
+Plan: 1 to import, 1 to add, 0 to change, 0 to destroy, 1 to forget.

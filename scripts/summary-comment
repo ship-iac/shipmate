@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the sticky plan comment: overview table + per-cell plan details.
+"""Build the sticky plan comment: a verdict line, then one line or fold-out per cell.
 
 Reads the plan matrix jobs' auto check-runs (named `shipmate / <stack> / <env>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
@@ -7,11 +7,14 @@ cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
 artifacts). Writes comment.md plus pending/count to GITHUB_OUTPUT.
 
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
-leaves headroom below that cap; each changed cell's details section degrades
-full plan -> truncated plan -> link-only, never dropping the check-run link.
+leaves headroom below that cap; each changed cell's fold-out degrades
+full plan -> truncated plan -> its bare line, never dropping the check-run link.
 Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
+
+The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `header`, `at_sha`,
+`footer`) lives here because apply-comment and doctor already load this module.
 
 `FOOTER_HINT` exists for discoverability and nothing more: doctor's findings
 surface as workflow annotations on the plan run, those carry no `file=`/`line=`
@@ -19,6 +22,8 @@ so they render only on the run page, and the comment commands would otherwise
 have no pull-request-visible surface at all.
 """
 
+import html
+import itertools
 import os
 import pathlib
 import re
@@ -107,7 +112,7 @@ def fence(text, f=None, lang="diff"):
 def emoji(cell):
     """🟢 no changes / 🟡 changes. Deliberately two-state: a destroy count
     also covers ordinary replacements, so red on it renders healthy plans as
-    broken. Magnitude is the row's own add/change/destroy counts."""
+    broken. Magnitude is the cell line's own counts."""
     return "🟡" if cell["changed"] else "🟢"
 
 
@@ -130,6 +135,49 @@ def _md_escape(s):
     )
 
 
+#: Every circle a comment uses, worst first.
+CIRCLES = ("🔴", "🟠", "🟡", "⚪", "🟢")
+_SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def worst(circles):
+    """The worst of `circles` by `CIRCLES` order, or 🟢 when there are none."""
+    return min(circles, key=CIRCLES.index, default=CIRCLES[-1])
+
+
+def link(url, text):
+    """`<a href="url">text</a>`. Raw HTML because a Markdown link renders literally inside
+    `<summary>`. `url` must come from the GitHub API or the run context, never from pull
+    request content; it is attribute-escaped all the same. `text` is a fixed word."""
+    return f'<a href="{html.escape(url, quote=True)}">{text}</a>'
+
+
+def cell_line(circle, stack, env, state, url=None, text=""):
+    """`<circle> <stack> (<env>): <state>`, then a space and `link(url, text)` unless `url` is
+    None. `stack` and `env` are `_md_escape`d here; `state` is the caller's and must already be
+    safe (a blocked reason is escaped by its caller)."""
+    line = f"{circle} {_md_escape(stack)} ({_md_escape(env)}): {state}"
+    return line if url is None else f"{line} {link(url, text)}"
+
+
+def header(verb, env=""):
+    """`### shipmate <verb> <env>`, `### shipmate <verb>` without `env`, `### shipmate` without
+    `verb` (a comment that did not parse). `env` is `_md_escape`d."""
+    return " ".join(["### shipmate", *(w for w in (verb, _md_escape(env)) if w)])
+
+
+def at_sha(sha):
+    """`at <first 7 chars>` for a 40-char lowercase hex SHA, `at an unknown commit` otherwise:
+    the verdict is display, so an unreadable SHA never costs the comment."""
+    return f"at {sha[:7]}" if _SHA.fullmatch(sha or "") else "at an unknown commit"
+
+
+def footer(run_url, hint=True):
+    """`[run](<run_url>)`, then `. ` and `FOOTER_HINT` when `hint` (off only for the help reply,
+    which is the command list)."""
+    return f"[run]({run_url}). {FOOTER_HINT}" if hint else f"[run]({run_url})"
+
+
 def check_url(cell, checks, run_url):
     """Link target for a cell: the latest `shipmate / <stack-path> / <env>` plan-job check run.
 
@@ -141,118 +189,122 @@ def check_url(cell, checks, run_url):
     return run["html_url"] if run and run.get("html_url") else run_url
 
 
-def build_table(cells, checks, run_url):
-    lines = [
-        "| | stack | env | + | ~ | - | check |",
-        "|---|---|---|--:|--:|--:|---|",
-    ]
-    for c in cells:
-        lines.append(
-            f"| {emoji(c)} | {_md_escape(c['stack'])} | {_md_escape(c['environment'])} "
-            f"| {c['add']} | {c['change']} | {c['destroy']} "
-            f"| [plan]({check_url(c, checks, run_url)}) |"
-        )
-    if not cells:
-        lines.append("| | _(no stacks changed)_ | | | | | |")
-    return "\n".join(lines)
+def state(cell):
+    """A plan cell's state text: `no changes` for an unchanged cell; for a changed one
+    `+a ~c -d`, then `, N import` and `, N forget` for a count above zero, or `+? ~? -?` when
+    `load_cells` could not derive the tally."""
+    if not cell["changed"]:
+        return "no changes"
+    if cell["add"] == "?":
+        return "+? ~? -?"
+    out = f"+{cell['add']} ~{cell['change']} -{cell['destroy']}"
+    for key in ("import", "forget"):
+        if cell[key]:
+            out += f", {cell[key]} {key}"
+    return out
 
 
-def _summary_line(cell):
-    return (
-        f"<summary>{emoji(cell)} {_md_escape(cell['stack'])} / "
-        f"{_md_escape(cell['environment'])} — "
-        f"+{cell['add']} ~{cell['change']} -{cell['destroy']}</summary>"
-    )
-
-
-def link_only(cell, url):
-    return (
-        f"<details>{_summary_line(cell)}\n\n"
-        f"_Plan too large for this comment — [full plan in the check run]({url})._\n"
-        f"</details>"
-    )
+def _plan_line(cell, url):
+    return cell_line(emoji(cell), cell["stack"], cell["environment"], state(cell), url, "plan")
 
 
 def render_section(cell, plan_text, url, limit):
-    """Largest details section that fits in `limit` characters:
-    full plan -> truncated plan (cut at a line boundary, check-run link
-    appended) -> link-only. The fence for the truncated body reuses the full
-    body's fence so a cut can never re-open the fence-escape hole."""
-    if plan_text is None:
-        return link_only(cell, url)
+    """Largest form of a cell that fits in `limit` characters: fold-out with the full plan ->
+    fold-out with a truncated plan (cut at a line boundary, check-run link appended) -> the
+    cell's bare line, which the caller has already reserved room for. The fence for the
+    truncated body reuses the full body's fence so a cut can never re-open the fence-escape
+    hole."""
+    line = _plan_line(cell, url)
+    # A limit under MIN_PLAN_CHARS means this cell's budget is spent, so link the check run
+    # rather than inline whatever small plan happens to fit.
+    if plan_text is None or limit < MIN_PLAN_CHARS:
+        return line
     body = diff_map(plan_text)
     f = _fence_of(body)
-    head = f"<details>{_summary_line(cell)}\n\n"
+    head = f"<details><summary>{line}</summary>\n\n"
     full = f"{head}{fence(body, f)}\n</details>"
-    # The `limit >= MIN_PLAN_CHARS` guard matters even when `full` already fits: a tiny limit —
-    # the per-cell slice left over in build_comment's extreme-fan-out case — means this cell's
-    # budget is exhausted, so link the check run rather than inline whatever small plan fits.
-    if len(full) <= limit and limit >= MIN_PLAN_CHARS:
+    if len(full) <= limit:
         return full
-    trailer = f"\n\n_Truncated — [full plan in the check run]({url})._\n</details>"
+    trailer = f"\n\n_Truncated, [full plan in the check run]({url})._\n</details>"
     room = limit - len(head) - len(fence("", f)) - len(trailer)
     if room >= MIN_PLAN_CHARS:
         sliced = body[:room]
         # Cut at the last full line inside `room`. When the first line alone already exceeds
-        # `room`, `rfind` returns -1 and the slice would be the whole (still mid-line)
-        # fragment, so degrade to link-only instead of violating "cut at a line boundary".
+        # `room`, `rfind` returns -1, so degrade to the bare line instead of cutting mid-line.
         cut = sliced[: sliced.rfind("\n")] if "\n" in sliced else ""
         if cut:
             return f"{head}{fence(cut, f)}{trailer}"
-    return link_only(cell, url)
+    return line
 
 
-def build_comment(cells, checks, run_url):
-    """Assemble the comment under SIZE_BUDGET. Every changed cell is
-    guaranteed at least a link-only section: the space all remaining cells'
-    link-only fallbacks need is reserved up front, so an early giant plan
-    cannot starve later cells of their links."""
+def verdict(cells, head_sha):
+    """The line under the header: `🟢 no changes at <sha>` when no cell changes (zero cells
+    included), else `🟡 N of M cells change at <sha>`. It reads the cells only: every failed
+    plan job holds the gate, and a held run posts no comment."""
+    circle = worst(emoji(c) for c in cells)
+    if circle == "🟢":
+        return f"🟢 no changes {at_sha(head_sha)}"
+    n = sum(1 for c in cells if c["changed"])
+    return f"{circle} {n} of {len(cells)} cells change {at_sha(head_sha)}"
+
+
+def _join(sections):
+    """One newline between consecutive bare lines, a blank line on both sides of a fold-out:
+    without the blank line after `</details>`, the next line stays inside the HTML block and
+    its link renders literally."""
+    out = sections[:1]
+    for prev, cur in itertools.pairwise(sections):
+        fold = prev.startswith("<details>") or cur.startswith("<details>")
+        out.append("\n\n" if fold else "\n")
+        out.append(cur)
+    return "".join(out)
+
+
+def build_comment(cells, checks, run_url, head_sha):
+    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, every cell in order
+    (a fold-out for a changed cell with plan text, else its bare line), footer. Every cell is
+    guaranteed its bare line: the space all remaining cells' bare lines need is reserved up
+    front, so an early giant plan cannot starve a later cell."""
     meta = [c for c, _ in cells]
-    header = f"{MARKER}\n### shipmate plan\n\n{build_table(meta, checks, run_url)}"
-    footer = f"\n\n[Logs & artifacts]({run_url})\n\n{FOOTER_HINT}"
-    changed = [(c, t) for c, t in cells if c["changed"]]
-    parts = [header]
-    used = len(header) + len(footer)
-    # Precomputed once per changed cell: both loops below need the URL and its link-only form.
-    enriched = []
-    for c, text in changed:
-        url = check_url(c, checks, run_url)
-        enriched.append((c, text, url, link_only(c, url)))
-    reserve = sum(len(lo) + 2 for *_, lo in enriched)
-    for c, text, url, lo in enriched:
-        reserve -= len(lo) + 2
-        section = render_section(c, text, url, SIZE_BUDGET - used - reserve - 2)
-        parts.append(section)
+    head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha)}"
+    tail = footer(run_url)
+    urls = [check_url(c, checks, run_url) for c in meta]
+    bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
+    used = len(head) + len(tail) + 4
+    reserve = sum(len(b) + 2 for b in bares)
+    sections = []
+    for (c, text), url, bare in zip(cells, urls, bares, strict=True):
+        reserve -= len(bare) + 2
+        section = bare
+        if c["changed"]:
+            section = render_section(c, text, url, SIZE_BUDGET - used - reserve - 2)
+        sections.append(section)
         used += len(section) + 2
-    body = "\n\n".join(parts) + footer
+    body = "\n\n".join(p for p in (head, _join(sections), tail) if p)
+    # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
+    # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
+    # the POST on an oversized body.
     if len(body) > HARD_CAP:
-        # Extreme fan-out: even link-only sections overflow. The table alone
-        # (<=256 rows) normally fits; each row keeps its check-run link.
-        fallback = "_Too many changed stacks for inline plans — use each row's check link._"
-        body = header + "\n\n" + fallback + footer
-        if len(body) > HARD_CAP:
-            # Stack/env display names are author-controlled (fork-PR input), so even the
-            # table-only fallback can exceed the hard cap at extreme fan-out. Fail loud
-            # rather than let GitHub 422 the POST on an oversized comment body.
-            raise SystemExit(
-                "::error::plan table alone exceeds the 65,536-char comment "
-                "cap — shorten stack/env display names"
-            )
+        raise SystemExit(
+            "::error::the plan comment's cell lines alone exceed the 65,536-char comment "
+            "cap, shorten stack/env display names"
+        )
     return body
 
 
 _STR_KEYS = ("stack", "stack_path", "environment")
 _TALLY = re.compile(
-    r"Plan: (?:\d+ to import, )?(\d+) to add, (\d+) to change, (\d+) to destroy"
-    r"(?:, \d+ to forget)?\."
+    r"Plan: (?:(?P<import>\d+) to import, )?(?P<add>\d+) to add, (?P<change>\d+) to change, "
+    r"(?P<destroy>\d+) to destroy(?:, (?P<forget>\d+) to forget)?\."
 )
 _ZERO_COUNT = ("No changes.", "You can apply this plan to save these new output values")
 
 
 def counts(path):
-    """(add, change, destroy) from the `tofu show` text at `path`: its one column-0 `Plan:`
-    tally line, or (0, 0, 0) when it has none and has a line starting with the no-changes or
-    outputs-only sentence. None for a missing file, no recognised line, or two tally lines.
+    """(add, change, destroy, import, forget) from the `tofu show` text at `path`: its one
+    column-0 `Plan:` tally line, where tofu omits a zero import or forget count (0 here), or all
+    zeros when it has none and has a line starting with the no-changes or outputs-only sentence.
+    None for a missing file, no recognised line, or two tally lines.
     Author text (heredoc bodies, multi-line outputs) renders indented, so only column 0 counts.
     The whole file is read: the tally sits at the end, past the SIZE_BUDGET cap on the rendered
     text."""
@@ -268,8 +320,8 @@ def counts(path):
                 hits.append(m)
             zero = zero or line.startswith(_ZERO_COUNT)
     if len(hits) == 1:
-        return tuple(int(g) for g in hits[0].groups())
-    return (0, 0, 0) if not hits and zero else None
+        return tuple(int(hits[0][k] or 0) for k in ("add", "change", "destroy", "import", "forget"))
+    return (0, 0, 0, 0, 0) if not hits and zero else None
 
 
 def _validate_cell(cell, path):
@@ -288,11 +340,12 @@ def load_cells(cells_dir):
     """(cell, plan_text) per downloaded cell-summary artifact, sorted by
     (environment, stack). A cell.json missing schema keys, or carrying the
     right keys with the wrong types, fails loud — that is plan-cell/summary
-    pin skew, not a state to render around. Each cell's `add`, `change` and
-    `destroy` are set here from `counts` over its `plan.txt`, whatever
-    cell.json holds; underivable counts become "?" each, with one warning."""
+    pin skew, not a state to render around. Each cell's `add`, `change`,
+    `destroy`, `import` and `forget` are set here from `counts` over its
+    `plan.txt`, whatever cell.json holds; underivable counts become "?" each,
+    with one warning."""
     out = []
-    skew = "— plan-cell and summary must be pinned at the same engine SHA"
+    skew = "(plan-cell and summary must be pinned at the same engine SHA)"
     for p, cell in cell_summaries(cells_dir, CELL_KEYS, skew):
         _validate_cell(cell, p)
         txt = pathlib.Path(p).with_name("plan.txt")
@@ -306,8 +359,8 @@ def load_cells(cells_dir):
                 f"::warning::plan text for {name} has no single OpenTofu tally line; "
                 "its counts render as ?"
             )
-            tally = ("?", "?", "?")
-        cell["add"], cell["change"], cell["destroy"] = tally
+            tally = ("?",) * 5
+        cell["add"], cell["change"], cell["destroy"], cell["import"], cell["forget"] = tally
         text = None
         if txt.exists():
             # Cap the read at SIZE_BUDGET: a body that long exceeds every section's limit
@@ -316,7 +369,7 @@ def load_cells(cells_dir):
             with open(txt, encoding="utf-8") as fh:
                 text = fh.read(SIZE_BUDGET)
         out.append((cell, text))
-    out.sort(key=lambda ct: (ct[0]["stack"], ct[0]["environment"]))
+    out.sort(key=lambda ct: (ct[0]["environment"], ct[0]["stack"]))
     return out
 
 
@@ -330,7 +383,7 @@ def main():
     # artifacts the footer and the per-cell fallback link promise.
     url = current_run_url()
     with open("comment.md", "w", encoding="utf-8") as fh:
-        fh.write(build_comment(cells, checks, url))
+        fh.write(build_comment(cells, checks, url, os.environ.get("HEAD_SHA", "")))
     pending = any(c["changed"] for c, _ in cells)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n")
