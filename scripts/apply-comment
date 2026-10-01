@@ -436,16 +436,15 @@ def _job_url(row, jobs, run_url):
     return url or run_url
 
 
-def render_apply_section(row, text, url, limit):
-    """Largest form of a row that fits in `limit` characters: fold-out with the full apply.txt
-    -> fold-out with a truncated one -> the row's bare line, which the caller has already
-    reserved room for.
+def render_apply_section(line, text, url, limit):
+    """Largest form of a row that fits in `limit` characters: fold-out of its bare `line` with
+    the full apply.txt `text` -> fold-out with a truncated one -> `line`, which the caller has
+    already reserved room for.
 
     Truncation keeps the TAIL, cutting the front, unlike the plan renderer:
     the line a reader opens this section for is always at the end. Cut at a
     line boundary, and the truncated body REUSES the full body's fence so a cut
     can never re-open the fence-escape hole."""
-    line = _cell_line(row, url)
     # A limit under MIN_PLAN_CHARS means this row's budget is spent; returning before
     # `_fence_of` also keeps a wide fan-out from regex-scanning every capped apply.txt.
     if text is None or limit < sc.MIN_PLAN_CHARS:
@@ -604,16 +603,17 @@ def _tail(notes, parts, run_url):
     return tail + "\n\n" + sc.footer(run_url)
 
 
-def _compact(head, rows, urls, notes, parts, run_url):
+def _compact(head, rows, urls, bares, notes, parts, run_url):
     """The hard-cap fallback, tried only after the normal render overflows HARD_CAP: every row's
     bare line with a blocked row's state shortened to `blocked`, and `_BLOCKED_NOTE` leading the
     notes. A blocked reason is the one free text a bare line carries, so a 256-cell run that is
     all blocked can overflow with the reasons and fit without them."""
+    circle, word = _STATUS["blocked"]
     lines = [
-        sc.cell_line("⚪", r["stack_display"], r["environment"], "blocked", u, "logs")
+        sc.cell_line(circle, r["stack_display"], r["environment"], word, u, "logs")
         if r["status"] == "blocked"
-        else _cell_line(r, u)
-        for r, u in zip(rows, urls, strict=True)
+        else b
+        for r, u, b in zip(rows, urls, bares, strict=True)
     ]
     return "\n\n".join((head, "\n".join(lines), _tail((_BLOCKED_NOTE, *notes), parts, run_url)))
 
@@ -668,14 +668,14 @@ def build_comment(
         section = bare
         if r["status"] in _SECTION_STATUSES:
             section = render_apply_section(
-                r, r["apply_text"], url, sc.SIZE_BUDGET - used - reserve - 2
+                bare, r["apply_text"], url, sc.SIZE_BUDGET - used - reserve - 2
             )
         sections.append(section)
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, sc._join(sections), tail) if p)
     # Past SIZE_BUDGET every row is already its bare line; only the compact form is smaller.
     if len(body) > sc.HARD_CAP and any(r["status"] == "blocked" for r in rows):
-        body = _compact(head, rows, urls, notes, parts, run_url)
+        body = _compact(head, rows, urls, bares, notes, parts, run_url)
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
     if len(body) > sc.HARD_CAP:

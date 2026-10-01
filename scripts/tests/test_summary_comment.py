@@ -226,7 +226,7 @@ _BARE_APP = '🟡 stacks/app (dev-eu): +1 ~0 -0 <a href="https://ck/app-eu">plan
 
 
 def test_render_section_full_plan_in_diff_fence():
-    s = sc.render_section(_cell(), "  + resource added", "https://ck/app-eu", 10_000)
+    s = sc.render_section(_BARE_APP, "  + resource added", "https://ck/app-eu", 10_000)
     assert s == (
         f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   resource added\n```\n</details>"
     )
@@ -234,7 +234,7 @@ def test_render_section_full_plan_in_diff_fence():
 
 def test_render_section_truncates_to_limit_with_check_link():
     plan = "\n".join(f"  + resource_{i}" for i in range(5_000))
-    s = sc.render_section(_cell(), plan, "https://ck/app-eu", 3_000)
+    s = sc.render_section(_BARE_APP, plan, "https://ck/app-eu", 3_000)
     assert len(s) <= 3_000
     assert s.startswith(f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   resource_0\n")
     assert s.endswith(
@@ -245,12 +245,12 @@ def test_render_section_truncates_to_limit_with_check_link():
 def test_render_section_degrades_to_the_bare_line_when_first_line_exceeds_room():
     # A single line longer than the truncated slice has no newline to cut at, so it degrades to
     # the bare line rather than emit a mid-line-truncated fence.
-    assert sc.render_section(_cell(), "x" * 5_000, "https://ck/app-eu", 3_000) == _BARE_APP
+    assert sc.render_section(_BARE_APP, "x" * 5_000, "https://ck/app-eu", 3_000) == _BARE_APP
 
 
 def test_render_section_bare_line_when_limit_tiny_or_plan_missing():
-    assert sc.render_section(_cell(), "  + x", "https://ck/app-eu", 250) == _BARE_APP
-    assert sc.render_section(_cell(), None, "https://ck/app-eu", 10_000) == _BARE_APP
+    assert sc.render_section(_BARE_APP, "  + x", "https://ck/app-eu", 250) == _BARE_APP
+    assert sc.render_section(_BARE_APP, None, "https://ck/app-eu", 10_000) == _BARE_APP
 
 
 def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():

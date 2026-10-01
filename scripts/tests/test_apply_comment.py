@@ -529,7 +529,7 @@ def test_a_fold_out_holds_the_whole_output_in_a_plain_fence_under_an_escaped_sum
 
     Mutation: fence with the default `diff` language -- red."""
     row = _row(stack_display="x</summary><b>evil")
-    assert ac.render_apply_section(row, "hello", RUN_URL, 10_000) == (
+    assert ac.render_apply_section(ac._cell_line(row, RUN_URL), "hello", RUN_URL, 10_000) == (
         "<details><summary>🟢 x&lt;/summary&gt;&lt;b&gt;evil (dev-eu): +1 ~0 -0 "
         '<a href="https://gh/run/1">logs</a></summary>\n\n```\nhello\n```\n</details>'
     )
@@ -538,7 +538,7 @@ def test_a_fold_out_holds_the_whole_output_in_a_plain_fence_under_an_escaped_sum
 def test_a_truncated_fold_out_keeps_the_tail_at_a_line_boundary():
     """Mutation: keep the head (`text[:room]`) -- the kept lines are not a suffix, red."""
     lines = [f"line {i}" for i in range(5_000)]
-    s = ac.render_apply_section(_row(), "\n".join(lines), RUN_URL, 3_000)
+    s = ac.render_apply_section(ac._cell_line(_row(), RUN_URL), "\n".join(lines), RUN_URL, 3_000)
     head = (
         '<details><summary>🟢 app (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">logs</a>'
         "</summary>\n\n```\n"
@@ -561,11 +561,13 @@ def test_a_row_degrades_to_its_bare_line():
     Mutation: drop the `limit < sc.MIN_PLAN_CHARS` guard -- the spent-budget case renders a
     fold-out, red."""
     bare = '🟢 app (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">logs</a>'
-    assert ac.render_apply_section(_row(apply_text=None), None, RUN_URL, 10_000) == (
+    unread = ac._cell_line(_row(apply_text=None), RUN_URL)
+    assert ac.render_apply_section(unread, None, RUN_URL, 10_000) == (
         '🟢 app (dev-eu): applied <a href="https://gh/run/1">logs</a>'
     )
-    assert ac.render_apply_section(_row(), "x" * 5_000, RUN_URL, 3_000) == bare
-    assert ac.render_apply_section(_row(), "short", RUN_URL, ac.sc.MIN_PLAN_CHARS - 1) == bare
+    line = ac._cell_line(_row(), RUN_URL)
+    assert ac.render_apply_section(line, "x" * 5_000, RUN_URL, 3_000) == bare
+    assert ac.render_apply_section(line, "short", RUN_URL, ac.sc.MIN_PLAN_CHARS - 1) == bare
 
 
 def _bare(i):
@@ -717,7 +719,7 @@ def test_fence_escape_attempt_cannot_break_out_of_fence():
     # while leaving the longest contiguous backtick run at 50 either way.
     evil = "````` " + "`" * 50 + "x\nrm -rf /\n" + "`" * 50 + "y"
     row = _row(apply_text=evil)
-    s = ac.render_apply_section(row, evil, RUN_URL, 10_000)
+    s = ac.render_apply_section(ac._cell_line(row, RUN_URL), evil, RUN_URL, 10_000)
     longest_run_in_evil = max(len(m) for m in re.findall(r"`+", evil))
     fence_lines = _fence_delimiter_lines(s)
     assert len(fence_lines) == 2
@@ -739,7 +741,7 @@ def test_fence_escape_attempt_truncated_path_reuses_full_bodys_fence():
     evil = "`" * 60 + "z\nbefore the backticks\n" + "\n".join(lines)
     longest_run_in_evil = max(len(m) for m in re.findall(r"`+", evil))
     row = _row(apply_text=evil)
-    s = ac.render_apply_section(row, evil, RUN_URL, 2_000)
+    s = ac.render_apply_section(ac._cell_line(row, RUN_URL), evil, RUN_URL, 2_000)
     assert "Truncated" in s
     fence_lines = _fence_delimiter_lines(s)
     assert len(fence_lines) == 2
@@ -869,7 +871,7 @@ def test_load_cells_preserves_trailing_error_in_huge_failed_apply(tmp_path):
     _, loaded_text = cells[0]
     assert "Error:" in loaded_text
     row = _row(status="failed", apply_text=loaded_text)
-    section = ac.render_apply_section(row, loaded_text, RUN_URL, 4_000)
+    section = ac.render_apply_section(ac._cell_line(row, RUN_URL), loaded_text, RUN_URL, 4_000)
     assert "Error:" in section
 
 
@@ -913,7 +915,7 @@ def test_load_cells_strips_ansi_from_realistic_apply_output(tmp_path):
     assert "\x1b" not in loaded_text
     assert "Initializing the backend..." in loaded_text
     row = _row(status="applied", apply_text=loaded_text)
-    section = ac.render_apply_section(row, loaded_text, RUN_URL, 10_000)
+    section = ac.render_apply_section(ac._cell_line(row, RUN_URL), loaded_text, RUN_URL, 10_000)
     assert "\x1b" not in section
 
 
@@ -939,7 +941,7 @@ def test_load_cells_ansi_strip_happens_before_fence_is_computed(tmp_path):
     longest_run = max(len(m) for m in re.findall(r"`+", loaded_text))
     assert longest_run == 100  # The merge actually happened.
     row = _row(status="applied", apply_text=loaded_text)
-    section = ac.render_apply_section(row, loaded_text, RUN_URL, 10_000)
+    section = ac.render_apply_section(ac._cell_line(row, RUN_URL), loaded_text, RUN_URL, 10_000)
     fence_lines = _fence_delimiter_lines(section)
     assert len(fence_lines) == 2
     assert fence_lines[0] == fence_lines[1]

@@ -218,13 +218,12 @@ def _plan_line(cell, url):
     return cell_line(emoji(cell), cell["stack"], cell["environment"], state(cell), url, "plan")
 
 
-def render_section(cell, plan_text, url, limit):
-    """Largest form of a cell that fits in `limit` characters: fold-out with the full plan ->
-    fold-out with a truncated plan (cut at a line boundary, check-run link appended) -> the
-    cell's bare line, which the caller has already reserved room for. The fence for the
+def render_section(line, plan_text, url, limit):
+    """Largest form of a cell that fits in `limit` characters: fold-out of its bare `line` with
+    the full plan -> fold-out with a truncated plan (cut at a line boundary, check-run link
+    appended) -> `line`, which the caller has already reserved room for. The fence for the
     truncated body reuses the full body's fence so a cut can never re-open the fence-escape
     hole."""
-    line = _plan_line(cell, url)
     # A limit under MIN_PLAN_CHARS means this cell's budget is spent, so link the check run
     # rather than inline whatever small plan happens to fit.
     if plan_text is None or limit < MIN_PLAN_CHARS:
@@ -287,7 +286,7 @@ def build_comment(cells, checks, run_url, head_sha):
         reserve -= len(bare) + 2
         section = bare
         if c["changed"]:
-            section = render_section(c, text, url, SIZE_BUDGET - used - reserve - 2)
+            section = render_section(bare, text, url, SIZE_BUDGET - used - reserve - 2)
         sections.append(section)
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, _join(sections), tail) if p)
