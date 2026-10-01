@@ -35,7 +35,7 @@ section below names the SHA the release tags.
 - **The control jobs that run no `tofu` run on `ubuntu-slim`.**
 - **Comments by bots or without `shipmate` start no comment-ops job.**
 - **`shipmate apply` and `shipmate unlock` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed.**
-- **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, under an apply or doctor verdict that is not 🟢, and on the plan comment of a run where doctor warned. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
+- **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 
 ### Fixed
 

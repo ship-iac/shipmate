@@ -332,17 +332,6 @@ def test_zero_cells_render_header_and_verdict_only():
     assert sc.build_comment([], {}, RUN_URL, SHA) == HEAD + f"🟢 no changes {AT}"
 
 
-def test_a_doctor_warned_plan_comment_ends_with_the_help_hint():
-    """The comment a run posts because doctor warned asks the reader to act, so it carries the
-    hint; without the flag the same comment has none.
-
-    Mutation: ignore `hint` in `build_comment` (`tail = ""`) -- red."""
-    assert sc.build_comment([], {}, RUN_URL, SHA, hint=True) == (
-        HEAD + f"🟢 no changes {AT}\n\n{HINT}"
-    )
-    assert sc.build_comment([], {}, RUN_URL, SHA, hint=False) == HEAD + f"🟢 no changes {AT}"
-
-
 def _bare(i):
     return f'🟡 s{i:03} (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">plan</a>'
 
@@ -790,13 +779,12 @@ _DOCTOR_RUN = [
 ]
 
 
-def test_doctor_runs_before_the_comment_is_built_and_records_warned_once():
-    """The comment build reads `warned` to show the help hint, and the upsert reads it to post a
-    comment with nothing planned, so the doctor step must run before both, under the id they
-    name.
+def test_doctor_runs_before_the_upsert_and_records_warned_once():
+    """The upsert reads `warned` to post a comment with nothing planned, so the doctor step must
+    run before it, under the id it names.
 
     Mutation: grep `^::notice` instead of `^::warning` -- red.
-    Mutation: move the doctor step after `Build comment + gate state` -- red.
+    Mutation: move the doctor step after `Upsert sticky comment` -- red.
     Mutation: rename the step's `id: doctor` -- red."""
     doctor = step_by(
         "summary", name="Doctor: settings-drift warnings (annotations only, never blocks)"
@@ -804,7 +792,7 @@ def test_doctor_runs_before_the_comment_is_built_and_records_warned_once():
     assert doctor["id"] == "doctor"
     assert run_lines(doctor) == _DOCTOR_RUN
     names = [s["name"] for s in action_steps("summary")]
-    assert names.index(doctor["name"]) < names.index("Build comment + gate state")
+    assert names.index(doctor["name"]) < names.index("Upsert sticky comment")
 
 
 def _run_main(tmp_path, monkeypatch, cells, stdin=""):
@@ -849,11 +837,11 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" < check-runs.jsonl' in (
         run_lines(build)
     )
-    # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`.
+    # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`. Mutation:
+    # binding `SHIPMATE_DOCTOR_WARNED` again -- a plan comment reads nothing from doctor.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
-        "SHIPMATE_DOCTOR_WARNED": "${{ steps.doctor.outputs.warned }}",
     }
 
 
@@ -886,22 +874,18 @@ def test_marker_round_trip_guard_summary_action_matches_script():
     assert sc.build_comment([], {}, "u", SHA).startswith(sc.MARKER)
 
 
-@pytest.mark.parametrize(("warned", "tail"), [("true", f"\n\n{HINT}"), ("false", ""), ("", "")])
-def test_main_shows_the_hint_only_when_doctor_warned(tmp_path, monkeypatch, warned, tail):
-    """`SHIPMATE_DOCTOR_WARNED` is the doctor step's `warned` output; only `true` adds the hint.
-
-    Mutation: ignore the flag in `main` (`warned = False`) -- the `true` case, red.
-    Mutation: treat any non-empty value as warned -- the `false` case, red."""
-    monkeypatch.setenv("SHIPMATE_DOCTOR_WARNED", warned)
-    _run_main(tmp_path, monkeypatch, [])
-    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
-    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + tail
-
-
-def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(tmp_path, monkeypatch):
+@pytest.mark.parametrize("warned", ["true", "false", ""])
+def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(
+    tmp_path, monkeypatch, warned
+):
     """The summary job runs inside the plan run, so this run holds the logs and the artifacts
-    the verdict's run link promises. Mutation: `main` passing `""` for the SHA renders `at an
-    unknown commit`."""
+    the verdict's run link promises. The comment ends at its last cell, with no footer and no
+    help hint, whatever `SHIPMATE_DOCTOR_WARNED` holds.
+
+    Mutation: `main` passing `""` for the SHA renders `at an unknown commit`.
+    Mutation: appending `FOOTER_HINT` when `SHIPMATE_DOCTOR_WARNED` is `true` -- the `true`
+    case, red."""
+    monkeypatch.setenv("SHIPMATE_DOCTOR_WARNED", warned)
     _run_main(tmp_path, monkeypatch, [_cell()])
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     run = "https://gh/o/r/actions/runs/1"
