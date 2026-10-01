@@ -10,8 +10,8 @@ plan came from before applying it. Review policy is delegated to the branch
 ruleset via GitHub's `reviewDecision`, not re-derived here: only the explicit
 pass values `NONE` (comment-ops' sentinel for a null
 decision, which GitHub returns when no rule requires a review and also when
-code-owner review is required but no changed file has an owner) and `APPROVED`
-authorize; any
+the only review rule is code-owner review and no changed file has an owner) and
+`APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
 `REVIEW_REQUIRED` also authorizes for an environment whose entry holds
 `gated = false`.
@@ -42,8 +42,8 @@ def parse_ungated_envs(raw):
 def _review_not_required(review_decision, environment, ungated_envs):
     """Whether a gated `environment` is authorized only by a `NONE` decision, with no
     `gated = false` entry for it. GitHub returns that null decision when no rule requires a
-    review and also when code-owner review is required but no changed file has an owner.
-    The apply comment names each such environment."""
+    review and also when the only review rule is code-owner review and no changed file has an
+    owner. The apply comment names each such environment."""
     return review_decision == "NONE" and environment.casefold() not in ungated_envs
 
 

@@ -49,7 +49,8 @@ jobs:
         run: |
           set -euo pipefail
           # NONE is the sentinel for a PR that exists with a null decision: no rule requires a
-          # review, or no changed file has a code owner. Nothing here has proved the PR exists -- comment-ops reads it over REST
+          # review, or the only review rule is code-owner review and no changed file has an
+          # owner. Nothing here has proved the PR exists -- comment-ops reads it over REST
           # first, this does not -- and a pr_number matching no pull request returns a null
           # `pullRequest` with no errors and exit 0, so MISSING_PR is its own value, which
           # apply-detect refuses and apply-all-detect's catch-all holds every env on.
