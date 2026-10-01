@@ -99,7 +99,7 @@ def from_app(check_runs, app_id):
     dropped too (fail-closed)."""
     if not app_id:
         raise SystemExit(
-            "::error::SHIPMATE_APP_ID is empty — set the SHIPMATE_APP_ID repo/org "
+            "::error::SHIPMATE_APP_ID is empty; set the SHIPMATE_APP_ID repo/org "
             "variable to the shipmate App id (see docs/github-app.md)."
         )
     want = int(app_id)

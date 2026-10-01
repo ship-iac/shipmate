@@ -69,10 +69,10 @@ runs:
         # refresh is untouched and no wording has to stay in sync. The only exit from a hold is a
         # fresh plan run, which rewrites the gate itself.
         if [ "$held" = "failure" ]; then
-          echo "::error::shipmate / gate is held for $HEAD_SHA because the plan run's evidence was incomplete — some planned stacks may carry no apply check. Re-plan this pull request; the gate cannot be greened from apply checks alone."
+          echo "::error::shipmate / gate is held for $HEAD_SHA because the plan run's evidence was incomplete: some planned stacks may carry no apply check. Re-plan this pull request; the gate cannot be greened from apply checks alone."
           exit 1
         fi
         # Commit status, not a check-run (see actions/summary for why).
         gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state=success \
-          -f context="shipmate / gate" -f description="all applies complete — nothing left to apply" \
+          -f context="shipmate / gate" -f description="all applies complete, nothing left to apply" \
           -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null

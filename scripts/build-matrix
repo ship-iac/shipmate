@@ -357,7 +357,7 @@ def fork_pr_error(repository, head_repo, no_pull_request: bool):
     head_repo = head_repo.strip()
     if not head_repo:
         return (
-            "::error::this run did not state its head repository — the `head-repo` input of "
+            "::error::this run did not state its head repository. The `head-repo` input of "
             "shipmate's `build-matrix` action must be the pull request's head repository full "
             "name (`owner/repo`), so this run can be checked against a fork head. See "
             "`docs/getting-started.md` for the wiring. A workflow with no pull request at all "
@@ -366,7 +366,7 @@ def fork_pr_error(repository, head_repo, no_pull_request: bool):
     if repository and head_repo == repository:
         return ""
     return (
-        f"::error::fork pull requests are not supported — this run's stated head repository "
+        f"::error::fork pull requests are not supported: this run's stated head repository "
         f"(`{head_repo}`) is not `{repository or 'this repository'}`. Planning it would run "
         "the pull request's own Terramate/OpenTofu code on your runners with your plan "
         "environment's variables, and no `shipmate / gate` status is ever written for a "
@@ -404,7 +404,7 @@ def head_checkout_error(head_sha, no_pull_request: bool):
     head_sha = head_sha.strip()
     if not head_sha:
         return (
-            "::error::this run did not state the commit it is planning — the `head-sha` input "
+            "::error::this run did not state the commit it is planning. The `head-sha` input "
             "of shipmate's `build-matrix` action must be the pull request's head commit, so "
             "this checkout can be checked against it. Wire it to the `head-sha` output of "
             "shipmate's `pr-facts` action; see `docs/getting-started.md`. A workflow with no "
@@ -415,7 +415,7 @@ def head_checkout_error(head_sha, no_pull_request: bool):
         return ""
     return (
         f"::error::this run checked out {checked_out}, which is not the commit it is planning "
-        f"({head_sha}) — `actions/checkout` takes the base branch under "
+        f"({head_sha}). `actions/checkout` takes the base branch under "
         "`pull_request_target` and the dispatch ref under `workflow_dispatch` unless its "
         "`ref:` names the head SHA. Add it to every checkout in "
         f"`{PLAN_WORKFLOW}`; without it planning diffs the wrong tree against the "
@@ -435,7 +435,7 @@ def plan_workflow_error(event_name, root="."):
     if os.path.isfile(os.path.join(root, PLAN_WORKFLOW)):
         return ""
     return (
-        f"::error::this repository has no `{PLAN_WORKFLOW}` — the one path `CONTRACT.md` "
+        f"::error::this repository has no `{PLAN_WORKFLOW}`, the one path `CONTRACT.md` "
         "lets the consumer's workflow file live at, and this refusal is what enforces it. "
         "That exact filename is matched literally by `shipmate doctor`, which keys its "
         "calling-job-name, dispatch-wiring and routing probes on it, and by "

@@ -4246,7 +4246,7 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
             "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. "
             "environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
             "gated = false, unquoted. "
-            "needs is cyclic: dev-eu -> dev-eu — each of those must fully apply before the "
+            "needs is cyclic: dev-eu -> dev-eu: each of those must fully apply before the "
             "next, so the ordering has no first environment and no apply path can sort it. "
             "Break the chain in .github/shipmate.toml. Merging it refuses every operation that "
             "reads the table. Execution still reads the default branch's copy, which this says "
@@ -4854,7 +4854,7 @@ needs = ["dev"]
 _CYCLIC_FINDING = (
     doctor.WARNING,
     "`.github/shipmate.toml` at the commit under examination is not valid: needs is "
-    "cyclic: dev -> prod -> dev — each of those must fully apply before the next, so the "
+    "cyclic: dev -> prod -> dev: each of those must fully apply before the next, so the "
     "ordering has no first environment and no apply path can sort it. Break the chain in "
     ".github/shipmate.toml. Merging it refuses every operation that reads the table. "
     "Execution still reads the default branch's copy, which this says nothing about.",

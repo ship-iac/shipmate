@@ -14,29 +14,29 @@ import os
 # that never ran reads 'skipped', not 'failure'. Matching 'failure' exactly means only
 # the fail-safe that actually tripped can claim the blocked reason.
 FAILSAFES = [
-    ("DOWNLOAD_OUTCOME", "reviewed plan artifact missing or expired — re-run plan"),
+    ("DOWNLOAD_OUTCOME", "reviewed plan artifact missing or expired; re-run plan"),
     (
         "PLANNED_HEAD_OUTCOME",
-        "reviewed plan records no commit or was produced from a different one — re-plan",
+        "reviewed plan records no commit or was produced from a different one; re-plan",
     ),
-    ("DECRYPT_OUTCOME", "plan artifact could not be decrypted — passphrase/config mismatch"),
+    ("DECRYPT_OUTCOME", "plan artifact could not be decrypted (passphrase/config mismatch)"),
     (
         "FINGERPRINT_OUTCOME",
-        "environment does not match the reviewed plan's fingerprint — re-plan",
+        "environment does not match the reviewed plan's fingerprint; re-plan",
     ),
     (
         "DIGEST_INPUT_OUTCOME",
-        "no plan-text digest reached this action — re-pin every engine reference to one commit",
+        "no plan-text digest reached this action; re-pin every engine reference to one commit",
     ),
-    ("INIT_OUTCOME", "tofu init failed — see the job log"),
+    ("INIT_OUTCOME", "tofu init failed; see the job log"),
     (
         "LOCATE_OUTCOME",
-        "shipmate cannot tell where this stack's local state lives — see the job log",
+        "shipmate cannot tell where this stack's local state lives; see the job log",
     ),
     ("RESTORE_OUTCOME", "state restore failed"),
     (
         "PLAN_DIGEST_OUTCOME",
-        "the stored plan does not render to the plan text that was reviewed — re-plan",
+        "the stored plan does not render to the plan text that was reviewed; re-plan",
     ),
 ]
 
@@ -59,7 +59,7 @@ def main():
             # first. Still blocked, but the reason must not name a fail-safe that
             # was never attempted.
             result = "blocked"
-            reason = "an earlier step failed before the apply ran — see the job log"
+            reason = "an earlier step failed before the apply ran; see the job log"
 
     # apply.txt needs no copy: `Apply the stored plan` already tee'd it to
     # $RUNNER_TEMP/apply.txt, so a blocked cell that never reached the apply never wrote

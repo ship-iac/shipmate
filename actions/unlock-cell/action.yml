@@ -15,7 +15,7 @@ inputs:
     required: false
     default: ""
   consumer-secrets:
-    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case — a consumer forwarding no secrets. Values are masked before anything is written.
+    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case (a consumer forwarding no secrets). Values are masked before anything is written.
     required: false
     default: ""
 runs:

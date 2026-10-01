@@ -104,7 +104,7 @@ def test_an_absent_record_aborts_and_says_to_re_plan(tmp_path):
     out = r.stdout + r.stderr
     assert out.strip() == (
         "::error::apply aborted for dev-eu/app: this reviewed plan records no planned "
-        "commit, so there is nothing to compare against this checkout — "
+        "commit, so there is nothing to compare against this checkout: "
         "a plan produced by an engine revision that records none. Re-plan this stack "
         "on its pull request and apply the fresh plan; if that pull request has already "
         "merged, a new pull request touching the stack plans and applies it afresh."

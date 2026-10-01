@@ -102,8 +102,8 @@ def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, _RUNS, {"apply / stacks/app / dev-eu": "a" * 64})
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan-text digest recorded for apply / stacks/dns / dev-eu "
-        "— the reviewed plan text cannot be checked against the plan that would be applied, so "
+        "::error::apply aborted: no plan-text digest recorded for apply / stacks/dns / dev-eu: "
+        "the reviewed plan text cannot be checked against the plan that would be applied, so "
         "this apply is refused rather than run unverified. The check was written before this "
         "engine version. Re-plan these stacks on their pull request, then apply again; if that "
         "pull request has already merged, a new pull request touching them plans and applies "
@@ -123,8 +123,8 @@ def test_a_cell_whose_check_names_no_plan_run_refuses():
             {"apply / stacks/app / dev-eu": "a" * 64},
         )
     assert str(exc_info.value) == (
-        "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu — the "
-        "apply check names no plan run to apply from — most likely a check written "
+        "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu: the "
+        "apply check names no plan run to apply from, most likely a check written "
         "before this engine version, and post-merge possibly no apply check for that "
         "cell at all. Re-plan these stacks on their pull request, then apply again; if "
         "that pull request has already merged, a new pull request touching them plans "
@@ -825,7 +825,7 @@ def test_unlock_empty_queue_warns_that_nothing_was_probed(monkeypatch, tmp_path,
     assert (
         "::warning::no cell in dev-eu has a pending apply check, so no lock was "
         "probed; a lock on a cell whose check already completed, or on a stack "
-        "applied out of band, is released out of band — see the state-lock "
+        "applied out of band, is released out of band; see the state-lock "
         "section of docs/troubleshooting.md." in capsys.readouterr().out.splitlines()
     )
 

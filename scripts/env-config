@@ -861,7 +861,7 @@ def _check_cycle(order):
     except graphlib.CycleError as exc:
         cycle = " -> ".join(exc.args[1])
         raise SystemExit(
-            f"::error::needs is cyclic: {cycle} — each of those must fully apply "
+            f"::error::needs is cyclic: {cycle}: each of those must fully apply "
             "before the next, so the ordering has no first environment and no apply path "
             f"can sort it. Break the chain in {CONFIG_PATH}."
         ) from exc
@@ -911,7 +911,7 @@ def _check_env_name(e, label, matched):
         if e.endswith(suffix):
             raise SystemExit(
                 f"::error::{label} carries the environment suffix "
-                f"{suffix!r}; {matched} is matched against the bare logical env name — "
+                f"{suffix!r}; {matched} is matched against the bare logical env name; "
                 f"write {e[: -len(suffix)]!r} instead."
             )
 

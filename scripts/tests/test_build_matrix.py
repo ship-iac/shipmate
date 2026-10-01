@@ -662,7 +662,7 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
     assert bm.plan_workflow_error("pull_request", str(tmp_path)) == (
-        "::error::this repository has no `.github/workflows/shipmate.yml` — the one path "
+        "::error::this repository has no `.github/workflows/shipmate.yml`, the one path "
         "`CONTRACT.md` lets the consumer's workflow file live at, and this refusal is what "
         "enforces it. That exact filename is matched literally by `shipmate doctor`, which "
         "keys its calling-job-name, dispatch-wiring and routing probes on it, and by "

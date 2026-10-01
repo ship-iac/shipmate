@@ -105,8 +105,8 @@ def with_plan_runs(cells, plan_runs, plan_hashes):
     missing = [_check_name(c["stack"], c["environment"]) for c, run, _ in named if not run]
     if missing:
         raise SystemExit(
-            f"::error::apply aborted: no plan run recorded for {', '.join(missing)} — the "
-            "apply check names no plan run to apply from — most likely a check written "
+            f"::error::apply aborted: no plan run recorded for {', '.join(missing)}: the "
+            "apply check names no plan run to apply from, most likely a check written "
             "before this engine version, and post-merge possibly no apply check for that "
             "cell at all. Re-plan these stacks on their pull request, then apply again; if "
             "that pull request has already merged, a new pull request touching them plans "
@@ -115,7 +115,7 @@ def with_plan_runs(cells, plan_runs, plan_hashes):
     unbound = [_check_name(c["stack"], c["environment"]) for c, _, digest in named if not digest]
     if unbound:
         raise SystemExit(
-            f"::error::apply aborted: no plan-text digest recorded for {', '.join(unbound)} — "
+            f"::error::apply aborted: no plan-text digest recorded for {', '.join(unbound)}: "
             "the reviewed plan text cannot be checked against the plan that would be applied, "
             "so this apply is refused rather than run unverified. The check was written before "
             "this engine version. Re-plan these stacks on their pull request, then apply "
@@ -312,7 +312,7 @@ def run_unlock(repo, env, head):
         print(
             f"::warning::no cell in {env} has a pending apply check, so no lock was "
             "probed; a lock on a cell whose check already completed, or on a stack "
-            "applied out of band, is released out of band — see the state-lock "
+            "applied out of band, is released out of band; see the state-lock "
             "section of docs/troubleshooting.md."
         )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:

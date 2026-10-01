@@ -146,7 +146,7 @@ jobs:
           done
           # Commit status, not a check-run (see actions/summary for why).
           gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$concl" \
-            -f context="shipmate / gate" -f description="$title — deploy env-level applies completed" \
+            -f context="shipmate / gate" -f description="$title (deploy env-level applies completed)" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
       - name: Slack on failed deploy (outranks drift)
         if: ${{ always() && (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) }}
@@ -156,7 +156,7 @@ jobs:
           set -euo pipefail
           # The `secrets` context is not available in a step's `if:`.
           [ -n "$SLACK" ] || exit 0
-          python3 -c "import json;open('p.json','w').write(json.dumps({'text':':rotating_light: shipmate deploy failed on main — a wave apply failed or was cancelled.'}))"
+          python3 -c "import json;open('p.json','w').write(json.dumps({'text':':rotating_light: shipmate deploy failed on main: a wave apply failed or was cancelled.'}))"
           curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @p.json "$SLACK"
       - name: Refuse a Slack webhook set as a variable
         if: ${{ always() && vars.SHIPMATE_SLACK_WEBHOOK != '' }}

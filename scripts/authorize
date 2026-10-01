@@ -70,7 +70,7 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     if review_decision == "CHANGES_REQUESTED":
         return (
             "not authorized: changes were requested on this PR; resolve them "
-            "and get a fresh approval — or dismiss the review — then re-run "
+            "and get a fresh approval (or dismiss the review), then re-run "
             "`shipmate apply`."
         )
     if review_decision not in ("NONE", "APPROVED"):
@@ -80,7 +80,7 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
         return (
             f"not authorized: could not determine the PR's review decision "
             f"(got {review_decision!r}); this indicates a comment-ops wiring "
-            f"problem — check the pinned engine version, then retry."
+            f"problem; check the pinned engine version, then retry."
         )
     return None
 
@@ -155,7 +155,7 @@ def decide(
         # most likely to be applied.
         return False, (
             "not authorized: this pull request is a draft. A draft can be planned but not "
-            "applied — mark it ready for review, then comment the apply again."
+            "applied. Mark it ready for review, then comment the apply again."
         )
     if not pr.get("mergeable"):
         state = pr.get("mergeable_state", "unknown")
@@ -175,7 +175,7 @@ def decide(
         return False, review_reason
     if not plan_runs:
         return False, (
-            "no reviewed plan for the current PR head — no apply check on it names a "
+            "no reviewed plan for the current PR head: no apply check on it names a "
             "plan run. Plan this head (push; a re-run alone will not clear a plan from "
             "before an engine re-pin), then `shipmate apply` again."
         )

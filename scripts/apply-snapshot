@@ -47,7 +47,7 @@ def snapshot(waves, check_runs, app_id):
             raise SystemExit(
                 f"::error::no App-authored apply check named '{name}' on the head "
                 "SHA before apply; this cell would apply with nothing to complete "
-                "afterwards, stranding its check pending — re-plan."
+                "afterwards, stranding its check pending. Re-plan."
             )
         out[_key(stack, env)] = ids
     return out

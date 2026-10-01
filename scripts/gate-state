@@ -29,7 +29,7 @@ _NOTHING = "nothing-changed"
 _DRAFT = "draft"
 
 DRAFT_DESCRIPTION = (
-    "the pull request was a draft when this run started, so nothing was planned — "
+    "the pull request was a draft when this run started, so nothing was planned; "
     "comment `shipmate plan`, or mark it ready"
 )
 
@@ -55,10 +55,10 @@ def _plan_gap(*, plan_result, planned):
     review and nothing to apply.
     """
     if plan_result == "skipped" and planned != 0:
-        return f"the plan job did not run for {planned} planned cell(s) — re-plan before merging"
+        return f"the plan job did not run for {planned} planned cell(s); re-plan before merging"
     if plan_result not in ("success", "skipped"):
         return (
-            f"plan incomplete (plan job: {plan_result}) — fix the failing "
+            f"plan incomplete (plan job: {plan_result}); fix the failing "
             "shipmate / <stack> / <env> plan check before merging"
         )
     return None
@@ -79,7 +79,7 @@ def _evidence_gap(*, cell_count, planned):
     """
     if cell_count != planned:
         return (
-            f"re-run this summary job — {planned} cell(s) planned but {cell_count} cell "
+            f"re-run this summary job: {planned} cell(s) planned but {cell_count} cell "
             "summary/summaries read; do not re-run the plan jobs (their uploads 409)"
         )
     return None
@@ -115,7 +115,7 @@ def decide(
     if detect_result != "success":
         return (
             "failure",
-            f"change detection did not succeed ({detect_result}) — fix the "
+            f"change detection did not succeed ({detect_result}); fix the "
             "shipmate / detect job before merging",
             _HOLD,
         )
@@ -126,7 +126,7 @@ def decide(
         return (
             "failure",
             "the planned cell count was not reported, so this run's evidence is "
-            "unknown — re-plan before merging",
+            "unknown; re-plan before merging",
             _HOLD,
         )
     # `or`, so the plan-job checks still run before the evidence check: a plan
@@ -140,8 +140,7 @@ def decide(
     if pending:
         return (
             "pending",
-            "one or more stacks are waiting to be applied — merge is blocked "
-            "until applies complete",
+            "one or more stacks are waiting to be applied; merge is blocked until applies complete",
             _POST,
         )
     if planned == 0:

@@ -413,14 +413,14 @@ _ORDERING = [
     (
         _needs(["dev-eu-plan"]),
         "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment suffix "
-        "'-plan'; environments.prod.needs is matched against the bare logical env name — "
+        "'-plan'; environments.prod.needs is matched against the bare logical env name; "
         "write 'dev-eu' instead.",
     ),
     (
         _needs(["dev-eu-apply"]),
         "::error::environments.prod.needs entry 'dev-eu-apply' carries the environment "
         "suffix '-apply'; environments.prod.needs is matched against the bare logical env "
-        "name — write 'dev-eu' instead.",
+        "name; write 'dev-eu' instead.",
     ),
     (
         _needs(["dev eu"]),
@@ -473,7 +473,7 @@ def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
 
 
 _CYCLE_TAIL = (
-    " — each of those must fully apply before the next, so the ordering has no first "
+    ": each of those must fully apply before the next, so the ordering has no first "
     "environment and no apply path can sort it. Break the chain in .github/shipmate.toml."
 )
 _CYCLES = [
@@ -567,7 +567,7 @@ _ENTRY_NAMES = [
     (
         "dev-plan",
         "::error::environments.dev-plan carries the environment suffix '-plan'; an entry "
-        "name is matched against the bare logical env name — write 'dev' instead.",
+        "name is matched against the bare logical env name; write 'dev' instead.",
     ),
 ]
 
@@ -767,7 +767,7 @@ def test_three_independent_errors_refuse_as_three_lines():
         "environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.\n"
         "::error::environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
         "gated = false, unquoted.\n"
-        "::error::needs is cyclic: dev-eu -> dev-eu — each of those must fully apply before "
+        "::error::needs is cyclic: dev-eu -> dev-eu: each of those must fully apply before "
         "the next, so the ordering has no first environment and no apply path can sort it. "
         "Break the chain in .github/shipmate.toml."
     )

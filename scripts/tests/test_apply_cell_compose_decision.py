@@ -91,40 +91,40 @@ _ALL_SUCCESS = {
     ("failed", "reason"),
     [
         pytest.param(
-            "download", "reviewed plan artifact missing or expired — re-run plan", id="download"
+            "download", "reviewed plan artifact missing or expired; re-run plan", id="download"
         ),
         pytest.param(
             "planned_head",
-            "reviewed plan records no commit or was produced from a different one — re-plan",
+            "reviewed plan records no commit or was produced from a different one; re-plan",
             id="planned_head",
         ),
         pytest.param(
             "decrypt",
-            "plan artifact could not be decrypted — passphrase/config mismatch",
+            "plan artifact could not be decrypted (passphrase/config mismatch)",
             id="decrypt",
         ),
         pytest.param(
             "fingerprint",
-            "environment does not match the reviewed plan's fingerprint — re-plan",
+            "environment does not match the reviewed plan's fingerprint; re-plan",
             id="fingerprint",
         ),
         pytest.param(
             "digest_input",
-            "no plan-text digest reached this action — re-pin every engine reference to one commit",
+            "no plan-text digest reached this action; re-pin every engine reference to one commit",
             id="digest_input",
         ),
         # A failed init once reported result="failed" with no reason, the bucket for a real apply
         # error that may have mutated infrastructure. Its own row keeps that gap from hiding.
-        pytest.param("init", "tofu init failed — see the job log", id="init"),
+        pytest.param("init", "tofu init failed; see the job log", id="init"),
         pytest.param(
             "locate",
-            "shipmate cannot tell where this stack's local state lives — see the job log",
+            "shipmate cannot tell where this stack's local state lives; see the job log",
             id="locate_state",
         ),
         pytest.param("restore", "state restore failed", id="restore_state"),
         pytest.param(
             "plan_digest",
-            "the stored plan does not render to the plan text that was reviewed — re-plan",
+            "the stored plan does not render to the plan text that was reviewed; re-plan",
             id="plan_digest",
         ),
     ],
@@ -178,7 +178,7 @@ def test_unrelated_step_failed_after_fingerprint_reads_as_generic_blocked(monkey
         apply="skipped",
     )
     assert cell["result"] == "blocked"
-    assert cell["reason"] == "an earlier step failed before the apply ran — see the job log"
+    assert cell["reason"] == "an earlier step failed before the apply ran; see the job log"
 
 
 def test_everything_skipped_still_reads_as_generic_blocked_not_a_named_failsafe(
@@ -189,7 +189,7 @@ def test_everything_skipped_still_reads_as_generic_blocked_not_a_named_failsafe(
     # let alone failed.
     cell = _run_compose(monkeypatch, tmp_path)  # every outcome defaults to 'skipped'
     assert cell["result"] == "blocked"
-    assert cell["reason"] == "an earlier step failed before the apply ran — see the job log"
+    assert cell["reason"] == "an earlier step failed before the apply ran; see the job log"
 
 
 def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monkeypatch, tmp_path):
@@ -197,7 +197,7 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
     # reason, never restore-state's: precedence is pipeline order, not severity or alphabetical.
     cell = _run_compose(monkeypatch, tmp_path, decrypt="failure", restore="failure")
     assert cell["result"] == "blocked"
-    assert cell["reason"] == "plan artifact could not be decrypted — passphrase/config mismatch"
+    assert cell["reason"] == "plan artifact could not be decrypted (passphrase/config mismatch)"
 
 
 @pytest.mark.parametrize(

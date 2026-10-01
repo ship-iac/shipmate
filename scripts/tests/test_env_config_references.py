@@ -81,7 +81,7 @@ _NEEDS_REF = 'layout = "folder"\n[environments.prod]\nneeds = [{ vars = "FIRST_E
             "dev-eu-plan",
             "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment "
             "suffix '-plan'; environments.prod.needs is matched against the bare logical env "
-            "name — write 'dev-eu' instead.",
+            "name; write 'dev-eu' instead.",
         ),
     ],
     ids=["uppercase", "suffix"],

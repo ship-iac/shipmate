@@ -62,7 +62,7 @@ VERBS = {
         "status": ACTIVE,
         "args": "",
         "desc": (
-            "Plan this pull request's changed stacks on demand — the same plan a push "
+            "Plan this pull request's changed stacks on demand: the same plan a push "
             "produces, including on a draft. Re-planning is safe and replaces the plan of "
             "record for the current head."
         ),
@@ -70,7 +70,7 @@ VERBS = {
     "destroy": {
         "status": RESERVED,
         "args": "[env]",
-        "desc": "Destroy an environment's stacks — not yet implemented.",
+        "desc": "Destroy an environment's stacks (not yet implemented).",
     },
     "unlock": {
         "status": ACTIVE,

@@ -1,5 +1,5 @@
 name: shipmate apply-cell
-description: Apply one stack x env from its reviewed .otplan artifact. Never re-plans. Holds no App key — a trusted trailing job completes the apply check afterwards. Reads the job's GITHUB_TOKEN, which needs actions:read to download the reviewed-plan artifact.
+description: Apply one stack x env from its reviewed .otplan artifact. Never re-plans. Holds no App key; a trusted trailing job completes the apply check afterwards. Reads the job's GITHUB_TOKEN, which needs actions:read to download the reviewed-plan artifact.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.
@@ -28,7 +28,7 @@ inputs:
     required: false
     default: ""
   consumer-secrets:
-    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case — a consumer forwarding no secrets. Values are masked before anything is written.
+    description: The consumer's SHIPMATE_SECRETS envelope. Empty is the normal case (a consumer forwarding no secrets). Values are masked before anything is written.
     required: false
     default: ""
 runs:
@@ -66,14 +66,14 @@ runs:
       run: |
         set -euo pipefail
         if [ -z "$RUN_ID" ]; then
-          echo "::error::apply aborted for $ENV/$STACK_NAME: the plan-run-id input reached this action empty. Each cell's plan run comes from its own apply check, and the detects refuse a cell whose check records none — so an empty value here is the matrix wiring dropping it rather than a missing plan, most likely an engine reference pinned at a different revision than the rest. Re-pin every engine reference to one commit."
+          echo "::error::apply aborted for $ENV/$STACK_NAME: the plan-run-id input reached this action empty. Each cell's plan run comes from its own apply check, and the detects refuse a cell whose check records none, so an empty value here is the matrix wiring dropping it rather than a missing plan, most likely an engine reference pinned at a different revision than the rest. Re-pin every engine reference to one commit."
           exit 1
         fi
         [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "::error::plan-run-id must be numeric (got: $RUN_ID)"; exit 1; }
         echo "::group::download reviewed plan: $ART"
         if ! gh run download "$RUN_ID" -n "$ART" -D . ; then
           echo "::endgroup::"
-          echo "::error::reviewed plan artifact '$ART' missing/expired — cannot apply $ENV/$STACK_NAME without re-planning (fail-safe). Re-run plan."
+          echo "::error::reviewed plan artifact '$ART' missing/expired; cannot apply $ENV/$STACK_NAME without re-planning (fail-safe). Re-run plan."
           exit 1
         fi
         echo "::endgroup::"
@@ -90,7 +90,7 @@ runs:
       run: |
         set -euo pipefail
         if [ ! -f planned-head.txt ]; then
-          echo "::error::apply aborted for $ENV/$STACK_NAME: this reviewed plan records no planned commit, so there is nothing to compare against this checkout — a plan produced by an engine revision that records none. Re-plan this stack on its pull request and apply the fresh plan; if that pull request has already merged, a new pull request touching the stack plans and applies it afresh."
+          echo "::error::apply aborted for $ENV/$STACK_NAME: this reviewed plan records no planned commit, so there is nothing to compare against this checkout: a plan produced by an engine revision that records none. Re-plan this stack on its pull request and apply the fresh plan; if that pull request has already merged, a new pull request touching the stack plans and applies it afresh."
           exit 1
         fi
         record="$RUNNER_TEMP/planned-head.txt"
@@ -98,7 +98,7 @@ runs:
         planned=$(cat "$record")
         observed=$(git rev-parse HEAD)
         if [ "$planned" != "$observed" ]; then
-          echo "::error::apply aborted for $ENV/$STACK_NAME: the reviewed plan was produced from $planned but this job has $observed checked out — re-plan."
+          echo "::error::apply aborted for $ENV/$STACK_NAME: the reviewed plan was produced from $planned but this job has $observed checked out. Re-plan."
           exit 1
         fi
 
@@ -127,7 +127,7 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --fingerprint-only
         if ! diff -q fingerprint.txt "$expected" >/dev/null; then
           names=$(python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" --keys)
-          echo "::error::apply aborted for $ENV/$STACK_NAME: current env does not match the reviewed plan's fingerprint. Current variable names: $names. Values differ or a variable was added/removed — re-plan."
+          echo "::error::apply aborted for $ENV/$STACK_NAME: current env does not match the reviewed plan's fingerprint. Current variable names: $names. Values differ or a variable was added/removed. Re-plan."
           exit 1
         fi
 

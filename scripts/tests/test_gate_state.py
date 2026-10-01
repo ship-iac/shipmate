@@ -32,7 +32,7 @@ def test_all_applied_greens_the_gate():
 
 
 _DETECT_SKIPPED_DESCRIPTION = (
-    "change detection did not succeed (skipped) — fix the shipmate / detect job before merging"
+    "change detection did not succeed (skipped); fix the shipmate / detect job before merging"
 )
 
 
@@ -63,7 +63,7 @@ def test_a_draft_whose_detect_ran_is_judged_on_its_evidence():
     got = d(is_draft=True)
     assert got == (
         "pending",
-        "one or more stacks are waiting to be applied — merge is blocked until applies complete",
+        "one or more stacks are waiting to be applied; merge is blocked until applies complete",
         "post",
     )
 
