@@ -125,7 +125,8 @@ def _md_escape(s):
     live markdown link inside the trusted bot comment. Newlines become spaces so a name cannot
     start a line of its own. `|` becomes `&#124;`, which cannot split a table cell and, unlike
     `\\|`, reads as `|` inside `<summary>`, an HTML block where a backslash escape stays literal.
-    Every entity reads as its character in all three contexts."""
+    Every entity reads as its character outside a code span; inside one (a doctor row's
+    backticked environment name) it shows as written."""
     return (
         s.replace("|", "&#124;")
         .replace("\r", " ")
