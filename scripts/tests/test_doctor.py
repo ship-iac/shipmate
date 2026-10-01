@@ -57,15 +57,6 @@ def _ctx(**over):
 
 
 @pytest.fixture(autouse=True)
-def _plan_env_secret_token(monkeypatch):
-    """The plan-env secret probe reads its own env-scoped token and reports the
-    check as not performed without one -- which would otherwise show up as an
-    extra WARNING in every test that goes through `warnings()`. The tests for
-    the absent-token behaviour delete it explicitly."""
-    monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
-
-
-@pytest.fixture(autouse=True)
 def _run_context(monkeypatch):
     """The runner defaults `provenance` reads for the verdict's commit and run links."""
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
@@ -4049,25 +4040,9 @@ def test_an_environments_listing_without_a_total_count_is_not_taken_as_complete(
         doctor._existing_env_names(_ctx())
 
 
-def test_no_env_token_is_a_warning_and_reads_nothing(monkeypatch):
-    """An unaccepted permission request must never read as an all-clear. `pytest.fail`,
-    not a raise: the probe catches `(Exception, SystemExit)` per environment, so a plain
-    exception would degrade to a NOTICE and this test would pass against the very mutation
-    it exists to catch."""
-    monkeypatch.delenv("SHIPMATE_ENV_TOKEN", raising=False)
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
-    found = doctor._plan_env_secret_warnings(_ctx())
-    assert [lvl for lvl, _ in found] == [doctor.WARNING]
-    assert found == [doctor._ENV_TOKEN_UNCHECKED]
-    assert "environments: read" in found[0][1]
-
-
 def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
     """A docs-only or pin-bump pull request declares no environment, so there
-    was nothing to read and no check went dark. The declared-env check must
-    therefore come *before* the token check -- with neither, this returns the
-    dark-check WARNING instead of nothing."""
-    monkeypatch.delenv("SHIPMATE_ENV_TOKEN", raising=False)
+    was nothing to read."""
     monkeypatch.setattr(doctor, "_gh_json", lambda path: pytest.fail(f"read {path}"))
     assert doctor._plan_env_secret_warnings(_ctx(envs=set())) == []
 
@@ -4191,46 +4166,15 @@ def test_a_long_secret_listing_names_ten_secrets_then_a_count(monkeypatch):
     )
 
 
-def test_secret_listing_uses_the_env_token_and_restores_gh_token(monkeypatch):
-    """The ambient GH_TOKEN is the App token minted without `environments: read`; only
-    the dedicated mint's token can list secrets. The probes after this one must still see
-    the token it started with."""
-    monkeypatch.setenv("GH_TOKEN", "apptok")
-    monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
-    seen = {}
-
-    def fake(path):
-        if path == _CONFIG_ON_DEFAULT:
-            return _wf_file(CANONICAL)
-        if path.endswith("/secrets?per_page=100"):
-            seen["secrets_call"] = os.environ.get("GH_TOKEN")
-            return _secrets()
-        seen["listing_call"] = os.environ.get("GH_TOKEN")
-        return _environments("dev-eu-plan")
-
-    monkeypatch.setattr(doctor, "_gh_json", fake)
-    assert doctor._plan_env_secret_warnings(_ctx()) == []
-    assert seen["secrets_call"] == "envtok"
-    assert seen["listing_call"] == "apptok"
-    assert os.environ["GH_TOKEN"] == "apptok"  # noqa: S105 - fixture value, not a real token
-
-
 def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
     """The restore must reproduce absence, not write an empty string: a later
     `gh api` call with GH_TOKEN="" authenticates as nobody instead of falling
-    back to the ambient credential. The default branch's table must be readable, or the
-    probe returns before it swaps the token at all.
+    back to the ambient credential.
 
     Mutation: restore GH_TOKEN as `""` instead of popping it -- this reddens."""
     monkeypatch.delenv("GH_TOKEN", raising=False)
-    monkeypatch.setenv("SHIPMATE_ENV_TOKEN", "envtok")
-    responses = {
-        _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
-        f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
-    }
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._plan_env_secret_warnings(_ctx()) == []
+    with doctor._gh_token("pubtok"):
+        assert os.environ["GH_TOKEN"] == "pubtok"  # noqa: S105 - fixture value, not a real token
     assert "GH_TOKEN" not in os.environ
 
 

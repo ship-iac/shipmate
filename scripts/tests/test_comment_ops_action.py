@@ -436,7 +436,7 @@ def test_every_doctor_route_step_is_gated_on_the_association():
     doctor's machinery under another condition, or none, is caught by
     test_every_step_that_touches_doctor_machinery_is_gated instead."""
     steps = _steps_conditioned_on("doctor")
-    assert len(steps) == 7, [n for n, _ in steps]
+    assert len(steps) == 6, [n for n, _ in steps]
     for name, cond in steps:
         assert _GATE in cond, name
     # Exactly one step runs when the gate is closed (the rejection); every
@@ -611,10 +611,35 @@ def test_both_doctor_token_mints_request_actions_read():
     every plan run, `comment-ops`' `doctortoken` drives `report` mode on demand, and a fix applied
     to only one leaves half the environment probes degraded."""
     assert _mint_with("comment-ops", "doctortoken").get("permission-actions") == "read"
-    # Selected by exact id, like the doctor mint above: `actions/summary` has a
-    # second create-github-app-token step (the environments-scoped one), so "the
-    # first mint in the file" would be positional rather than named.
     assert _mint_with("summary", "token").get("permission-actions") == "read"
+
+
+#: The permissions each doctor mint requests, hand-written. The plan-environment secret probe
+#: runs on these tokens, so both carry `environments: read`.
+_DOCTOR_MINT_PERMISSIONS = {
+    ("summary", "token"): {
+        "checks": "write",
+        "statuses": "write",
+        "pull-requests": "write",
+        "contents": "read",
+        "actions": "read",
+        "environments": "read",
+    },
+    ("comment-ops", "doctortoken"): {
+        "checks": "read",
+        "contents": "read",
+        "pull-requests": "write",
+        "actions": "read",
+        "environments": "read",
+    },
+}
+
+
+@pytest.mark.parametrize(("action", "step_id"), list(_DOCTOR_MINT_PERMISSIONS))
+def test_the_doctor_mints_request_exactly_their_permission_sets(action, step_id):
+    """Mutation: drop `permission-environments: read` from either mint -- its case reddens."""
+    requested = _requested_permissions(_mint_with(action, step_id))
+    assert requested == _DOCTOR_MINT_PERMISSIONS[(action, step_id)]
 
 
 def test_the_doctor_token_can_comment_on_a_pull_request():
@@ -1313,7 +1338,6 @@ _STEP_NAMES = [
     "Mint App token for doctor",
     "Doctor: App token unavailable",
     "Doctor: probe the manifest's full permission set",
-    "Doctor: mint an environments-scoped token for the plan-env secret probe",
     "Doctor: gather head SHA, declared environments, annotations",
     "Doctor: render and upsert the sticky comment",
     "Mint App token (checks:read)",

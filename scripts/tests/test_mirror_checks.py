@@ -195,7 +195,6 @@ def test_main_emits_one_json_body_per_mirrored_check(monkeypatch, capsys):
 EXPECTED_STEP_NAMES = [
     "Verify the App key arrived",
     "Mint App installation token",
-    "Mint an environments-scoped token for doctor's plan-env secret probe",
     "Create apply checks (pending / no-changes)",
     "Mirror this run's per-cell plan checks onto the head",
     "Doctor: settings-drift warnings (annotations only, never blocks)",

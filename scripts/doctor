@@ -576,18 +576,6 @@ def _engine_environment_warnings(ctx):
 # fires on a "SECRET" token in the binding name, and this is a secret's *name*.
 _APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 
-# Emitted when the env-scoped token is absent: the listing needs the `environments: read` permission
-# app/manifest.json declares, and no token carries it until the installation accepts the request. A
-# silent skip reads as "no plan environment holds a secret" — the one claim this probe exists for.
-_ENV_TOKEN_UNCHECKED = (
-    WARNING,
-    "plan-environment secrets were not checked: minting a token with the "
-    "`environments: read` permission `app/manifest.json` declares did not succeed, "
-    "which usually means the shipmate App installation has not accepted the "
-    "permission request yet. Accept it in the installation settings, then comment "
-    "`shipmate doctor` again.",
-)
-
 
 @contextlib.contextmanager
 def _gh_token(value):
@@ -617,16 +605,10 @@ def _env_secret_names(ctx, name):
     Published anyway because "holds 3 secret(s)" tells an operator nothing about
     which credential to move.
 
-    Read with SHIPMATE_ENV_TOKEN, restoring GH_TOKEN afterwards -- the ambient
-    App token is minted without `environments: read` and every other probe still
-    needs it. `total` comes from the payload, not the list length, because
-    `bm.gh_json` does not multi-page.
+    `total` comes from the payload, not the list length, because `bm.gh_json` does
+    not multi-page.
     """
-    # `.get`, never a subscript: SHIPMATE_ENV_TOKEN is optional by contract --
-    # absent, the probe reports the check as not performed
-    # (`_ENV_TOKEN_UNCHECKED`) rather than killing the report.
-    with _gh_token(os.environ.get("SHIPMATE_ENV_TOKEN")):
-        data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
+    data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
     names = [
         s.get("name")
         for s in (data.get("secrets") or [])
@@ -718,9 +700,8 @@ def _plan_env_secret_warnings(ctx):
     is unprotected -- that read belongs to `_env_protection_warnings`, and
     coupling them would let one probe's failure silence the other.
 
-    Order is load-bearing. The declared-env check comes first: a docs-only pull
-    request reads nothing, so the dark-check WARNING would be a false alarm
-    there. Existence then comes from `_existing_env_names`; see its docstring.
+    A docs-only pull request declares no environment and reads nothing.
+    Existence comes from `_existing_env_names`; see its docstring.
     Scope is the plan-side environment of each env -- `<env>-plan`, or the
     bare `<env>` when shared.
     Never `<env>-apply`: that is where control 7 *requires* credentials, and
@@ -729,8 +710,6 @@ def _plan_env_secret_warnings(ctx):
     # An interpreter refusal is `_environment_warnings`' finding (ENV_PROBES_INTERPRETER_REFUSED).
     if not ctx["envs"] or bm.ec.interpreter_refusal():
         return []
-    if not os.environ.get("SHIPMATE_ENV_TOKEN"):
-        return [_ENV_TOKEN_UNCHECKED]
     existing = _existing_env_names(ctx)
     bound = _bound_names(ctx)
     if bound is None:

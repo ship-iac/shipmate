@@ -1487,12 +1487,7 @@ The GitHub App carries this permission set: `actions: write`,
 `pull_requests: write`, `contents: read`, `checks: write`,
 `statuses: write`, `issues: write`, `environments: read` — the last for
 `shipmate doctor`'s plan-environment secret listing (names only; no GitHub REST
-path returns a secret's value, and this permission cannot write one), minted in
-its own non-fatal step, so a failed mint leaves the `shipmate / gate` status and
-the apply checks untouched and costs two warnings in the `shipmate doctor`
-report: that probe reporting itself as not performed, and the
-App-permission-drift probe, whose full-manifest mint asks for this permission
-too.
+path returns a secret's value, and this permission cannot write one).
 Beyond minting the `workflow_dispatch`
 token for comment-ops (events created with the default `GITHUB_TOKEN` never
 trigger other workflows, so a private App is the only way to kick off the

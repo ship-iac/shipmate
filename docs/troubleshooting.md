@@ -154,12 +154,10 @@ probe when it cannot tell which repository the engine is. An environment that
 exists but whose settings cannot be read is likewise a note naming it, rather
 than the silence a nonexistent environment gets — a nonexistent environment is
 the environment-existence probe's finding. The `shipmate-engine` probe degrades the
-same way. The plan-environment secret probe carries three degrade levels of its
-own: with no `environments: read` token it warns that the check was not
-performed, never that a plan environment is clean; an environment whose secret
-listing fails is a note naming it, so one unreadable environment does not
-silence the ones that could be read; and a listing too long to read whole warns
-that whether the environment holds `SHIPMATE_APP_PRIVATE_KEY` could not be
+same way. The plan-environment secret probe carries two degrade levels of its
+own: an environment whose secret listing fails is a note naming it, so one
+unreadable environment does not silence the ones that could be read; and a
+listing too long to read whole warns that whether the environment holds `SHIPMATE_APP_PRIVATE_KEY` could not be
 determined, rather than reading as a routine note about the names it did see.
 
 All three environment probes — existence, protection shape, and the

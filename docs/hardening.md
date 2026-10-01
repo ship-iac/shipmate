@@ -616,9 +616,7 @@ no split of its own.
   printed; the cap keeps one finding from spending the whole report's size
   budget. It warns if `SHIPMATE_APP_PRIVATE_KEY` is one of them, and says the
   key check could not be completed rather than staying silent when the listing
-  was too long to read whole. The report says the check was not performed,
-  rather than reporting it clean, when the App installation has not
-  accepted the `environments: read` permission the manifest declares.
+  was too long to read whole.
 - **Prefer OIDC to static cloud keys.** The engine wires it on every path.
   Condition the trust policy on the environment
   claim (`repo:<owner>/<repo>:environment:<env>-apply`) so a token minted from a
