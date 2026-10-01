@@ -123,13 +123,12 @@ def _md_escape(s):
     `x</summary><b>` cannot close the `<summary>` / `<details>` elements a fold-out is built
     from. `[`/`]` are escaped so a name like `[approve this deploy](https://evil)` cannot form a
     live markdown link inside the trusted bot comment. Newlines become spaces so a name cannot
-    start a line of its own. `|` becomes `&#124;`, which cannot split a table cell and, unlike
-    `\\|`, reads as `|` inside `<summary>`, an HTML block where a backslash escape stays literal.
-    Every entity reads as its character outside a code span; inside one (a doctor row's
-    backticked environment name) it shows as written."""
+    start a line of its own. `|` stays: no comment renders a name in a table, and a name cannot
+    form a table's delimiter row because every line it sits on starts with engine text. Every
+    entity reads as its character outside a code span; inside one (a doctor row's backticked
+    environment name) it shows as written."""
     return (
-        s.replace("|", "&#124;")
-        .replace("\r", " ")
+        s.replace("\r", " ")
         .replace("\n", " ")
         .replace("<", "&lt;")
         .replace(">", "&gt;")

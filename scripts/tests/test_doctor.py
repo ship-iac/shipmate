@@ -3185,6 +3185,29 @@ def test_the_routing_probe_reports_a_job_whose_if_was_edited(monkeypatch):
     assert doctor._routing_warnings(_ctx()) == [(doctor.WARNING, _EDITED_IF_TEXT)]
 
 
+def test_the_routing_finding_row_keeps_the_expected_if_intact(monkeypatch):
+    """The remedy names the whole expected `if:` inside a code span, where an entity shows as
+    written, so plan.yml's `||` must reach the report row unescaped.
+
+    Mutation: escape `|` as `&#124;` in `_md_escape` -- the row shows `&#124;&#124;`."""
+    text = _SHIPMATE_WF.replace(
+        "    if: github.event_name == 'pull_request_target' || (github.event_name == "
+        "'workflow_dispatch' && github.event.inputs.verb == 'plan')\n",
+        "",
+        1,
+    )
+    responses = _fork_responses({"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    [(level, finding)] = doctor._routing_warnings(_ctx())
+    assert doctor._finding_row(level, finding) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s job calling the engine's "
+        "`plan.yml` declares no `if:`, so it then runs on every one of this file's triggers, so "
+        "a `push` starts a plan and an `issue_comment` starts an apply. Add `if: "
+        "github.event_name == 'pull_request_target' || (github.event_name == "
+        "'workflow_dispatch' && github.event.inputs.verb == 'plan')` (docs/getting-started.md)."
+    )
+
+
 def test_the_routing_probe_reports_a_missing_job(monkeypatch):
     """A verb whose job is not in the file at all: the dispatch is accepted, every job is
     skipped, and the run is green.
@@ -3556,14 +3579,14 @@ def test_review_rule_count_zero_names_at_most_ten_environments(monkeypatch):
 def test_review_rule_count_zero_escapes_an_environment_name(monkeypatch):
     """The report row escapes the whole finding.
 
-    Mutation: drop `_md_escape` from `_finding_row` -- the `|` and `<` render raw.
-    Mutation: escape `|` as `\\|` in `_md_escape` -- red."""
+    Mutation: drop `_md_escape` from `_finding_row` -- the `<` renders raw.
+    Mutation: escape `|` as `&#124;` in `_md_escape` -- red."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
     [(level, text)] = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE, {"a|b<c"})
     assert doctor._finding_row(level, text) == (
         f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} the `pull_request` rule on `{_BRANCH}` requires "
         "0 approving reviews, so these gated environments can apply without an approving "
-        "review: `a&#124;b&lt;c`. One is held only where a code-owner review is required for the "
+        "review: `a|b&lt;c`. One is held only where a code-owner review is required for the "
         "changed files. `gated` can only relax a review requirement the ruleset sets "
         "(docs/hardening.md #3 to #5); set `required_approving_review_count` to 1 or more, or set "
         "`gated = false` on the environments meant to apply unreviewed."

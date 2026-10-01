@@ -229,8 +229,7 @@ def _no_review_findings(ctx, branch, code_owner):
 
     A NOTICE while code-owner review is on: a warning forces a plan comment on every no-op
     plan, which a sole maintainer cannot silence. A WARNING while it is off. The names are
-    not escaped here: `_finding_row` escapes the whole finding, and escaping twice doubles
-    the backslash it puts before a `|`.
+    not escaped here: `_finding_row` escapes the whole finding.
     """
     table = _default_branch_table(ctx)
     gated = []

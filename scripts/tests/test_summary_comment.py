@@ -106,9 +106,9 @@ def test_emoji_verdicts():
     assert sc.emoji(_cell()) == "🟡"
 
 
-def test_md_escape_neutralizes_pipes_and_newlines():
-    """Mutation: escape `|` as `\\|` -- red."""
-    assert sc._md_escape("a|b\nc") == "a&#124;b c"
+def test_md_escape_keeps_pipes_and_neutralizes_newlines():
+    """Mutation: escape `|` as `&#124;` -- red. Mutation: drop the `\\n` replace -- red."""
+    assert sc._md_escape("a|b\nc") == "a|b c"
 
 
 def test_md_escape_neutralizes_angle_brackets():
