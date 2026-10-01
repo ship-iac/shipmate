@@ -29,7 +29,7 @@ def check_run(**kw):
 
 def _record(plan_run, plan_sha256=PLAN_SHA):
     """An `external_id` record as pending-checks writes it. `plan_sha256=None` omits the
-    digest, which is what a check written before the engine recorded one looks like."""
+    digest."""
     record = {"fingerprint": "a" * 64, "plan_run": plan_run}
     if plan_sha256 is not None:
         record["plan_sha256"] = plan_sha256
