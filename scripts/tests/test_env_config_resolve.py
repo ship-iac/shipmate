@@ -466,3 +466,81 @@ def test_plan_and_apply_resolve_identical_tf_vars():
     expected = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
     assert env_config.resolve(table, "dev-eu", "plan", "")["tf_vars"] == expected
     assert env_config.resolve(table, "dev-eu", "apply", "")["tf_vars"] == expected
+
+
+# --- validation and resolution read one role ------------------------------------------
+
+#: One identity per role shape, each named by one environment.
+_SHAPES = {
+    "layout": "folder",
+    "identities": {
+        "named": {"aws": {"account": "111111111111", "plan": "ci-plan", "apply": "ci-apply"}},
+        "keyed": {
+            "aws": {
+                "account": {"core": "222222222222", "net": "333333333333"},
+                "plan": "{workload}-plan",
+                "apply": {"core": "core-apply", "net": "net-apply"},
+            }
+        },
+        "full": {
+            "aws": {
+                "plan": "arn:aws:iam::444444444444:role/full-plan",
+                "apply": "arn:aws:iam::444444444444:role/full-apply",
+            }
+        },
+        "shared": {"aws": {"apply": "arn:aws:iam::555555555555:role/shared"}},
+    },
+    "environments": {
+        "named": {"region": "eu-west-1", "identity": "named"},
+        "keyed": {"region": "eu-west-1", "identity": "keyed", "workloads": ["net", "core"]},
+        "full": {"region": "eu-west-1", "identity": "full"},
+        "sbx": {"region": "eu-west-1", "identity": "shared", "shared": True},
+    },
+}
+
+#: (env, path, workload) -> (the role validation checks, the ARN the cell assumes),
+#: hand-written. `None` is validation's every-cell workload, resolved here as untagged.
+_SHAPE_ROLES = {
+    ("named", "plan", None): ("ci-plan", "arn:aws:iam::111111111111:role/ci-plan"),
+    ("named", "apply", None): ("ci-apply", "arn:aws:iam::111111111111:role/ci-apply"),
+    ("keyed", "plan", "net"): ("net-plan", "arn:aws:iam::333333333333:role/net-plan"),
+    ("keyed", "apply", "net"): ("net-apply", "arn:aws:iam::333333333333:role/net-apply"),
+    ("keyed", "plan", "core"): ("core-plan", "arn:aws:iam::222222222222:role/core-plan"),
+    ("keyed", "apply", "core"): ("core-apply", "arn:aws:iam::222222222222:role/core-apply"),
+    ("full", "plan", None): (
+        "arn:aws:iam::444444444444:role/full-plan",
+        "arn:aws:iam::444444444444:role/full-plan",
+    ),
+    ("full", "apply", None): (
+        "arn:aws:iam::444444444444:role/full-apply",
+        "arn:aws:iam::444444444444:role/full-apply",
+    ),
+    ("sbx", "plan", None): (
+        "arn:aws:iam::555555555555:role/shared",
+        "arn:aws:iam::555555555555:role/shared",
+    ),
+    ("sbx", "apply", None): (
+        "arn:aws:iam::555555555555:role/shared",
+        "arn:aws:iam::555555555555:role/shared",
+    ),
+}
+
+
+@pytest.mark.parametrize(("cell", "roles"), _SHAPE_ROLES.items(), ids=str)
+def test_validation_and_resolution_read_the_same_role(cell, roles):
+    """The role rule is written twice: `_listed_roles` is what validation judges, `resolve`
+    what a cell assumes. Both read one validated table here, so a change to either side's
+    reading of a path, a workload map or `{workload}` reds.
+
+    Mutations: stop `_listed_roles` filling `{workload}`; have `_pick` read the map's first
+    entry instead of the workload's; have `_role` drop the account and return the bare name.
+    """
+    env, path, workload = cell
+    table = env_config.validate_structure(_SHAPES)
+    entry = table["environments"][env]
+    name = entry["identity"]
+    consulted = "apply" if entry.get("shared") else path
+    aws = table["identities"][name]["aws"]
+    listed = env_config._listed_roles(env, name, aws, (consulted,), workload)
+    resolved = env_config.resolve(table, env, path, workload or "")["role_arn"]
+    assert (listed, resolved) == ({consulted: roles[0]}, roles[1])
