@@ -36,7 +36,7 @@ sticky report, a fresh apply result comment on every apply run, and drift
 issues, each via a freshly minted installation token.
 
 Unlike the sticky plan comment, the apply result comment is never upserted:
-each run posts a new comment with a per-cell status table and the collapsed
+each run posts a new comment with one status line per cell and the collapsed
 full apply output for every attempted cell, so a failure-then-retry sequence
 stays visible as an audit trail.
 
@@ -94,7 +94,7 @@ repository is missing — that `shipmate / gate` is not required on the default
 branch, and that an apply environment has no approval rule. So the engine runs
 it only for a commenter GitHub classifies as `OWNER`, `MEMBER` or
 `COLLABORATOR`: organization members and repository collaborators. Anyone else
-gets a one-line refusal. No App token is minted and no probe runs. Adopting the
+gets a `🔴 refused:` reply. No App token is minted and no probe runs. Adopting the
 gate takes only a re-pin of the engine SHA — no new input, no new workflow
 permission.
 
@@ -193,7 +193,7 @@ produced them. See
   downloads this run's cell summaries and calls
   `actions/summary`, which creates the matching
   `apply / <stack> / <env>` check pending (or completed "no changes"), and
-  upserts one sticky PR comment (a stack × env table) and the aggregate
+  upserts one sticky PR comment (one line per stack × env) and the aggregate
   `shipmate / gate` commit status, which stays non-green while any apply is
   pending or any plan cell failed.
 

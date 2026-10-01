@@ -38,9 +38,9 @@ the verb.
 
 That job name is a contract element a consumer must match. `shipmate doctor`
 reports a plan-calling job carrying another name; until it is fixed,
-`summary-comment` — which resolves each comment row's plan link by an exact
+`summary-comment` — which resolves each cell line's plan link by an exact
 `shipmate / <stack> / <env>` lookup across every check run on the head SHA —
-finds no match and every `[plan]` link falls back to the workflow-run URL.
+finds no match and every `plan` link falls back to the workflow-run URL.
 
 The consumer's one workflow file gates seven jobs on the event (§Post-plan
 topology), so every run also carries one one-segment check-run per job that did
@@ -62,7 +62,7 @@ queue by the `apply / ` prefix, from ever picking up a plan check.
 This same forward-built string is also the apply-env-level job's own `name:`
 (so the job's display name and the apply check-run name coincide), which
 gives the apply check-run grammar a second consumer: `scripts/apply-comment`
-(see Apply result comment, below) resolves each row's per-cell log link by
+(see Apply result comment, below) resolves each cell line's log link by
 matching this name as a suffix of the run's job-name listing — never by
 reverse-parsing it. No match falls back to the workflow-run URL. The two sides
 are locked together by a source-derived test, because a rename of either would
@@ -846,7 +846,7 @@ green gate over infrastructure nothing recorded. So:
   and `!` or `*` as a pattern).
 - A failed init fails the cell before the derivation runs. A refused derivation
   blocks an apply cell with the reason `shipmate cannot tell where this stack's
-  local state lives — see the job log`.
+  local state lives; see the job log`.
 
 **Trust.** The path comes from the checked-out commit's backend configuration.
 `plan-cell` and `drift-cell` never save state, and `actions/cache` versions an
@@ -1029,8 +1029,22 @@ repository with no `.github/workflows/shipmate.yml`, or one that declares no
 dispatch time on that comment-handling run — for every verb alike, since they share the file. That
 run is not visible from the pull request, so every refusal in the dispatch step
 — an unwired verb, an unknown one, and a rejected API call alike — also posts a
-one-line comment there linking the run. The run holds the error; the comment
-never carries the API's answer.
+`🔴 failed:` reply there whose footer links the run. The run holds the error; the
+reply never carries the API's answer.
+
+Every reply comment-ops posts in place of running a command has one shape: the
+header `### shipmate <verb>` (with `<env>` when the command named one, and
+`### shipmate` alone when the comment did not parse or named no known verb), a
+blank line, one verdict line, a blank line, and the footer every shipmate pull
+request comment except the `shipmate help` list ends with:
+
+``[run](<run url>). Comment `shipmate help` for the available commands.``
+
+The verdict line is `🔴 refused: <reason>` when the engine decided not to run
+the command (grammar, authorization, an unresolvable `.github/shipmate.toml`),
+`🔴 failed: <reason>` when it could not (an App token mint, a workflow
+dispatch), and `⚪ <text>` for a notice. `scripts/reply-comment` renders all
+three.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -1047,7 +1061,7 @@ Re-issuing it re-plans rather than reporting the existing plan current: the new
 run's plan replaces the plan of record for the current head, and doing so is
 safe because a plan changes nothing but shipmate's own comment, checks and
 artifacts. A commenter without the standing the table above names gets a
-single-line refusal stating `plan`'s own reason — that it runs this
+`🔴 refused:` reply stating `plan`'s own reason — that it runs this
 repository's Terramate/OpenTofu on its runners — and nothing is dispatched:
 the standing is the same once-evaluated boolean the `doctor` gate below
 describes, and the plan route mints no App token of its own. A pull request
@@ -1073,12 +1087,20 @@ the HTML comment `<!-- shipmate:help -->`), and the reject-hint text, so the
 three cannot drift from each other. Unlike the `:summary` and `:doctor`
 markers below, `<!-- shipmate:help -->` is not an upsert key — nothing reads
 it back: `shipmate help` posts a fresh comment every time, and the marker
-only labels the output as shipmate's own.
+only labels the output as shipmate's own. The list sits under the header
+`### shipmate help`, carries no verdict line (it examines nothing), and ends with
+`[run](<run url>)` alone, without the help hint.
 
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct
 from the plan comment's `<!-- shipmate:summary -->`) and upserted in place the
-same way. It combines thirteen live settings probes (gate ruleset,
+same way. It opens with the header `### shipmate doctor` and a verdict line
+counting errors (🔴, harvested failure annotations), warnings (🟠) and notices
+(⚪), zero counts omitted, plus `harvest incomplete` (⚪) when the harvest failed
+or is still pending; the line takes the worst circle, reads `🟢 no problems found`
+when there is nothing to count, and ends `at <sha>` naming the commit examined.
+Each finding and harvested annotation carries the same circles, and the report
+ends with the shared footer. It combines thirteen live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
@@ -1086,7 +1108,7 @@ triggers in the consumer's workflow files other than `shipmate.yml`, which uses
 that trigger by design, engine action-pin freshness,
 the plan-calling job name in the consumer's `shipmate.yml`, which must be
 `shipmate` or the plan cell checks are not `shipmate / <stack> / <env>` and
-every `[plan]` link in the plan comment falls back to the workflow-run page,
+every `plan` link in the plan comment falls back to the workflow-run page,
 the dispatch wiring of the consumer's `shipmate.yml` — the `workflow_dispatch`
 trigger every commented verb dispatches, the four inputs that dispatch sends,
 and its call of the engine's plan workflow, without which the dispatch starts a
@@ -1135,8 +1157,8 @@ when either that or the commit under examination is unavailable it says pin
 freshness was not verified rather than falling back to a weaker read.
 
 Those warnings are not read from the sticky plan comment — a plan run writes the
-full plan comment (overview table, per-changed-cell details, and a one-line
-footer pointing at `shipmate help`, the only thing in that comment that mentions
+full plan comment (a verdict line, one line or fold-out per cell, and a footer
+pointing at `shipmate help`, the only thing in that comment that mentions
 the comment commands at all) but does not append doctor findings to it. A run
 with nothing planned writes no comment at all *unless* doctor emitted a warning,
 precisely so that footer never goes missing on a run that has something to point
@@ -1157,8 +1179,8 @@ but its own sticky comment
 and an `eyes` reaction on the triggering comment (`doctor`, `help` and `plan`
 all get that acknowledgement as soon as the command is accepted — `rocket`
 marks an authorized dispatch, whether `apply`, `unlock` or `plan`, instead; a
-reaction that cannot be posted is ignored), a one-line error comment when it
-cannot mint an App token, a one-line refusal when the commenter may not have
+reaction that cannot be posted is ignored), a `🔴 failed:` reply when it
+cannot mint an App token, a `🔴 refused:` reply when the commenter may not have
 the report (below), and a
 handful of untitled `::warning::` annotations on its own degrade paths — an
 unreadable PR head SHA, unreadable plan records on this commit's apply checks,
@@ -1182,7 +1204,7 @@ on the commenter's GitHub `author_association`.
 **What the engine enforces:** `doctor` runs only
 when `github.event.comment.author_association` is `OWNER`, `MEMBER` or
 `COLLABORATOR` — that is, only for organization members and repository
-collaborators. Any other commenter gets a single-line refusal saying so, and
+collaborators. Any other commenter gets a `🔴 refused:` reply saying so, and
 nothing else happens — no App token is minted, no probe runs, no report is
 composed. `CONTRIBUTOR` is deliberately excluded: its only signal is one merged
 pull request, which is no standing relationship to the repository.
@@ -1391,7 +1413,7 @@ travel: dropped before env-levels are built, its `apply / <stack> / <env>`
 checks left pending — so `shipmate / gate` stays pending and the merge
 stays blocked — and environments ordered after it are skipped. The apply result
 comment names both halves: which environments were held for review, and which
-applied under the exemption (§Apply result comment).
+were permitted to apply under the exemption (§Apply result comment).
 
 `gated` can only relax an existing review requirement, never create one. When
 no branch rule requires an approving review, the decision is `NONE` (unless a
@@ -1521,7 +1543,7 @@ the head as App-authored check-runs holding a fixed line and a link back to the
 original, whose step summary keeps the plan text. They exist so the pull request
 shows the cells, a failed one above all — and because the sticky comment
 resolves each
-row's plan link across the checks on the head, which is why the mirror runs
+cell line's plan link across the checks on the head, which is why the mirror runs
 before the comment is built. No gate or apply queue reads them: neither the
 cell names nor `shipmate / facts` / `shipmate / detect` fall inside the
 `apply / ` namespace those select on. `shipmate doctor`'s annotation harvest is
@@ -1579,7 +1601,7 @@ three carry no `name:` and display as their job id.
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 only a plan job named `shipmate` produces `shipmate / <stack> / <env>` plan
 cells and the `shipmate / summary`, `shipmate / facts` and `shipmate / detect`
-names beside them. `scripts/summary-comment` resolves each row's `[plan]` link
+names beside them. `scripts/summary-comment` resolves each cell line's `plan` link
 by that exact name. A job named anything else plans correctly and every such
 link falls back to the workflow-run page; `shipmate doctor` reports it.
 
@@ -1753,7 +1775,7 @@ The job has no draft clause, because skipping a draft is autoplan's economy
 rather than a trust decision. A draft's autoplan skips `detect` and `plan` and
 still reaches `summary`, which writes `shipmate / gate` pending with the
 description "the pull request was a draft when this run started, so nothing
-was planned — comment `shipmate plan`, or mark it ready". Nothing greens that
+was planned; comment `shipmate plan`, or mark it ready". Nothing greens that
 status: `gate-refresh` greens only over completed apply checks, and a draft run
 creates none. The draft status is written only on a head that carries no
 `shipmate / gate` status yet: an existing one is kept, and a failed read of it
@@ -1973,7 +1995,7 @@ identified by the HTML marker written verbatim as the comment's first line:
 
 - `<!-- shipmate:summary -->`
 
-A run whose cell count is zero writes the empty-table body only when that
+A run whose cell count is zero writes the no-changes body only when that
 zero means "no stacks changed" — `detect` reported a planned count of zero.
 Every other zero (a planned count that disagrees with the cell summaries
 actually read, a failed `detect`, plan cells that all failed
@@ -1984,7 +2006,7 @@ to a claim about a plan nobody read. Those runs all fail `shipmate / gate`, so
 the pull request still shows that something is wrong.
 
 Where the zero *does* mean no stacks changed, the suppression is create-only:
-an existing comment is always updated to the empty-table body, because a pull
+an existing comment is always updated to the no-changes body, because a pull
 request that planned changes and then pushed them away must not keep displaying
 applies that no longer exist. With no comment yet, none is posted — a docs-only
 or engine-pin-bump pull request carries no shipmate comment — with one
@@ -2000,25 +2022,43 @@ App name, which a consumer org may have had to slug differently than
 `shipmate[bot]`), so GitHub's comment revision history doubles as the audit
 trail of previous plans for the PR.
 
-Structure, in order: an overview table (one row per planned stack ×
-environment: verdict emoji — 🟢 no changes / 🟡 changes — add/change/destroy
-counts, and a link to that cell's `shipmate / <stack> / <env>` plan-job check
-run), then
-one `<details>` section per changed cell containing the rendered plan
-inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped
-to `!`). Cells with no changes get a table row only. The verdict is
-deliberately two-state: a destroy count also covers ordinary replacements, so
-impact is carried by the counts rather than by a severity colour. Check links
-are built forward from the cell's `(stack-path, environment)` pair using
-the check-name grammar above; when the check run cannot be resolved, the link
-degrades to the workflow-run URL.
+Structure, in order: the marker, the header `### shipmate plan`, a blank
+line, the verdict line, a blank line, one line or fold-out per planned stack ×
+environment, sorted by environment then stack, a blank line, and the footer
+``[run](<run url>). Comment `shipmate help` for the available commands.``
+
+- **Verdict line.** `🟢 no changes at <sha>` when no cell changes (zero cells
+  included), else `🟡 N of M cells change at <sha>`. `<sha>` is the first seven
+  characters of the planned head commit, or the line ends `at an unknown commit`
+  when that commit is not a 40-character hex SHA. The line reads the cells only:
+  every failed plan job holds the gate, and a held run posts no comment.
+- **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
+  The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
+  destroy count also covers ordinary replacements, so impact is carried by the
+  counts rather than by a severity colour. `<state>` is `no changes`, or for a
+  changed cell `+a ~c -d`, then `, N import` and `, N forget` when either count
+  is above zero, or `+? ~? -?` when the counts could not be derived. `<url>` is
+  the cell's `shipmate / <stack> / <env>` plan-job check run, built forward from
+  the cell's `(stack-path, environment)` pair using the check-name grammar
+  above; when the check run cannot be resolved, it is the workflow-run URL. The
+  link is raw HTML because a Markdown link renders literally inside
+  `<summary>`.
+- **Fold-out.** A changed cell with plan text renders as
+  `<details><summary>` + its cell line + `</summary>`, then the rendered plan
+  inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped
+  to `!`). An unchanged cell is its bare line only. Consecutive bare lines are
+  separated by one newline, and every fold-out has a blank line on both sides,
+  without which the next line stays inside the HTML block and its link renders
+  literally.
 
 GitHub caps issue-comment bodies at 65,536 characters. The comment is built
-to a smaller budget: each changed cell's section degrades, in order, full
+to a smaller budget: each changed cell's fold-out degrades, in order, full
 plan → truncated plan (cut at a line boundary, with a link to the check run
-carrying the full text) → link-only. The overview table is never dropped.
-If even the table alone cannot fit the cap, the summary fails loud rather
-than posting a truncated table. Plan text is emitted only inside a backtick
+carrying the full text) → the cell's bare line. The space every remaining
+cell's bare line needs is reserved up front, so an early giant plan cannot
+starve a later cell, and every cell keeps its line and its link. If even the
+bare lines alone cannot fit the cap, the summary fails loud rather than posting
+a truncated comment. Plan text is emitted only inside a backtick
 fence computed to be longer than any backtick run in the text —
 author-controlled plan output cannot escape the fence.
 
@@ -2031,11 +2071,11 @@ with the glob pattern `cell-summary.*`. It contains verbatim:
 - `cell.json` — keys `stack` (the stack path as displayed), `stack_path` (Terramate stack
   path, feeds the check-name construction), `environment`, `changed`
   (boolean), `fingerprint`; written by `plan-cell` at plan time. `changed`
-  comes from `scripts/plan-classify`; the comment's `+add ~change -destroy`
-  counts come from `plan.txt`'s single column-0 OpenTofu tally line, or are
-  zero when the text is a no-changes or outputs-only plan; a cell with no
-  `plan.txt`, no such line, or two tally lines renders `?` and gets one
-  warning.
+  comes from `scripts/plan-classify`; the cell line's add, change, destroy,
+  import and forget counts come from `plan.txt`'s single column-0 OpenTofu
+  tally line (tofu omits a zero import or forget count), or are zero when the
+  text is a no-changes or outputs-only plan; a cell with no `plan.txt`, no such
+  line, or two tally lines renders `+? ~? -?` and gets one warning.
 - `plan.txt` — the `tofu show -no-color` rendering of the reviewed plan. The
   `summary` job hashes these exact bytes and records the digest on the cell's
   apply check; the apply re-renders the stored plan and refuses a difference
@@ -2061,77 +2101,107 @@ not upserted against a marker: every run's comment is new, so a
 failure-then-retry sequence stays visible as separate comments rather than
 overwriting the evidence of the failure — an audit trail.
 
-Structure, in order: a header naming the targeted environment or "(all
-environments)"; directly beneath it, a job-level failure line — rendered
-only when the job-level `SHIPMATE_RESULTS` outcome signals a failure and no
-row already carries `failed`/`blocked` (the common case has its own ❌/🚫
-rows and needs no extra line), reusing the header's own wording with a ❌ so
-an apply run that dies before any cell reports (a missing/denied
-apply environment, a job-level cancel) still surfaces a failure
-signal; an overview table (one row per expected cell — status emoji
-✅ applied / ⚠️ applied but not recorded / ❌ failed /
-🚫 blocked / ⏭️ not attempted, stack, env, `+A ~C -D`
-resources parsed from the apply output's last `Apply complete!` line, and a
-per-cell log link); one `<details>` section per attempted (applied,
-failed, or applied-but-not-recorded) cell with the full apply output in a
-plain code fence; one
-no-fence line per blocked cell naming its `reason`. An expected cell
-whose artifact never arrived (its wave/env-level was skipped after an
-upstream failure, or the run was cancelled before upload) renders as
-not attempted unless its apply check is already done (see the derivation
-rules below) — a table row only; the comment also carries a single note,
-once, whenever any cell is not attempted, that those apply checks stay
-pending and can be retried — naming `shipmate apply <env>` for a targeted
-run, or the bare `shipmate apply` when the run covered all environments.
+Structure, in order, blank lines between the parts: the header, the verdict
+line, one line or fold-out per row, the notes, the footer lines, and the footer
+``[run](<run url>). Comment `shipmate help` for the available commands.`` A run
+with no rows to render is the header, the verdict line, the footer lines and
+the footer.
+
+- **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
+  apply` for a bare one; the verdict and footer lines name the environments.
+- **Verdict line.** With rows: one count per display status, in the order
+  `N failed`, `N not recorded`, `N not attempted`, `N blocked`, `N applied`,
+  zero counts omitted, joined by `, `. When the job-level `SHIPMATE_RESULTS`
+  outcome signals a failure and no row is failed or blocked, a bare `failed`
+  leads the counts, so an apply run that dies before any cell reports (a
+  missing/denied apply environment, a job-level cancel) still surfaces a
+  failure signal. A not-recorded row does not suppress it: it describes one
+  cell in one environment and says nothing about a different environment whose
+  job died before reporting. The circle is 🔴 for a failed run, else the worst
+  row's (🔴, 🟠, 🟡, ⚪, 🟢 in that order). With no rows: `🔴 failed`,
+  `⚪ nothing applied, environments are held for review`, or
+  `🟢 no pending applies`. The line ends `at <sha>`, the first seven characters
+  of the pull request head, or `at an unknown commit`.
+- **Row line.** `<circle> <stack> (<env>): <state> <a href="<url>">logs</a>`,
+  one per expected cell, sorted by environment then stack:
+
+  | Display status | Circle | `<state>` |
+  | --- | --- | --- |
+  | applied | 🟢 | `+a ~c -d`, then `, N import` and `, N forget` when above zero, from the apply output's last `Apply complete!` line; `applied` when there is none |
+  | not recorded | 🟠 | the applied state, then `, not recorded` |
+  | failed | 🔴 | `failed` |
+  | blocked | ⚪ | `blocked: <reason>` |
+  | not attempted | 🟡 | `not attempted` |
+
+  `<url>` is the cell's job, or the workflow-run URL when the job is not
+  listed. An applied, failed or not-recorded row with apply output renders as a
+  fold-out (`<details><summary>` + its line + `</summary>`, then the output in
+  a plain code fence); every other row is its bare line. An expected cell whose
+  artifact never arrived (its wave/env-level was skipped after an upstream
+  failure, or the run was cancelled before upload) is not attempted unless its
+  apply check is already done (see the derivation rules below).
+- **Notes**, each on its own line when it has content: `state lock held:`,
+  naming each cell whose apply could not acquire the lock, the lock id, when it
+  was taken, and the `shipmate unlock` command; `not recorded:`, naming the
+  not-recorded cells; and ``not attempted: the apply checks stay pending;
+  retry with `shipmate apply <env>`.`` (the bare `shipmate apply` when the run
+  covered all environments).
+- **Footer lines**, one per line: the bare-apply form's environment
+  dispositions, the no-review-required line in both forms, then
+  `gate: complete` or `gate: pending until every environment is applied`, from
+  the gate verdict.
+
 There is no separate "nothing pending" input: the expected cell set is the
 same waves JSON `apply-detect` / `apply-all-detect` already compute, and a
 cell counts as attempted when its artifact actually downloaded or its apply
 check is already done — the render can never claim nothing is pending while
-holding evidence that an apply ran. The footer carries the bare-apply form's
-environment-disposition sentences, the no-review-required sentence in both
-forms, a gate-completion sentence (complete
-or still-pending, from the gate verdict), and the run link.
+holding evidence that an apply ran.
 
-The disposition sentences are four, one per cause, and both render paths carry
-the same set: the footer above and the short form used when there is no table
-to render are fed by one shared function, and the size fallback keeps the
-footer whole — so the comment's most actionable warning cannot be lost on
-either path. Excluded environments name the
-`shipmate apply <env>` that applies them; skipped ones do not name a cause, since
-being skipped can mean either an unapplied explicit environment or a held
-one — the excluded and held sentences carry that distinction instead. The
-three review sentences (see §Comment-ops) are:
+The disposition lines are one per environment and cause, and both forms carry
+the same set: the rows form and the no-rows form are fed by one shared
+function, and the size budget never sheds a footer line — so the comment's most
+actionable warning cannot be lost on either path. Explicit, skipped and held
+lines carry a circle; the ungated and no-review-required lines carry a label
+instead, because their environments may have applied. In the order they
+render:
 
-- **held** — "the pull request's review state does not permit applying",
-  naming the environments and asking for an approving review, or for a
-  requested-changes review to be resolved or dismissed. A held environment
-  that is also explicit is listed once, here and not in the excluded sentence,
-  with its command: `` `prod` (explicit: once the hold clears, comment `shipmate
-  apply prod`) ``, since a bare apply would not pick it up even once the hold
-  clears. A held
-  environment that is not explicit names no command. The sentence is deliberately
-  cause-agnostic: three distinct decisions hold an environment
-  (`REVIEW_REQUIRED` on a gated env, `CHANGES_REQUESTED`, or an unknown or
-  absent decision), and only the run's own apply-all-detect notice carries
-  which one, since the decision never reaches this renderer;
-- **applied ungated** — the environments the run was permitted to apply
-  without an approving review, per `gated = false` on their entries. It is the only
-  audit trail such an apply leaves: `reviewDecision` is a live value
-  with no history, so once the review lands nothing else in a run
-  distinguishes an apply that waited for it from one that did not. It states a
-  permission, never an outcome — the set is derived before any wave runs, so
-  it points at the run for what actually applied and reserves "applied" for
-  the ✅ rows;
-- **no review required** — the gated environments a `NONE` decision
-  authorized: the pull request's review state required no approving review, so
-  `gated` had nothing to enforce. It has its own cause, so it has its own detect
-  output (`review_not_required_envs`, from both detects) rather than widening
-  applied ungated. It renders in the targeted and the all-environments form, and
-  names only environments with an applied, failed or unrecorded row — apply ran
-  there, so infrastructure may have changed — so the short form, which has no
-  rows, never carries it. It states the authorization fact and never that
-  nobody reviewed: a code-owner review can still be required at an approval
-  count of 0.
+- **explicit** — ``🟡 <env>: left pending (explicit), comment `shipmate apply <env>` ``.
+- **skipped** — `⚪ <env>: skipped, ordered after an environment not applying
+  this run`. It names no cause, since being skipped can mean either an
+  unapplied explicit environment or a held one — the explicit and held lines
+  carry that distinction instead.
+- **held** — `⚪ <env>: held, the review state does not permit applying`. A held
+  environment that is also explicit is listed once, here and not on an explicit
+  line, with its command: ``⚪ prod: held, the review state does not permit
+  applying; once it clears, comment `shipmate apply prod` ``, since a bare
+  apply would not pick it up even once the hold clears. A held environment that
+  is not explicit names no command. When any environment is held, one line
+  follows: `held: get an approving review, or resolve or dismiss a
+  requested-changes review. The run log's apply-all-detect notice names the
+  decision seen.` The held lines are deliberately cause-agnostic: three
+  distinct decisions hold an environment (`REVIEW_REQUIRED` on a gated env,
+  `CHANGES_REQUESTED`, or an unknown or absent decision), and only the run's
+  own apply-all-detect notice carries which one, since the decision never
+  reaches this renderer.
+- **ungated** — ``ungated: <env>, permitted to apply without an approving
+  review (`gated = false` in `.github/shipmate.toml`)``, one per environment
+  the run was permitted to apply without an approving review. It is the only
+  audit trail such an apply leaves: `reviewDecision` is a live value with no
+  history, so once the review lands nothing else in a run distinguishes an
+  apply that waited for it from one that did not. It states a permission, never
+  an outcome — the set is derived before any wave runs, so a failed wave or a
+  skipped env-level leaves an environment named here that never applied, and
+  the line carries no completion verb.
+- **no review required** — ``no review required: <env>, the pull request's
+  review state required no approving review, so `gated` had nothing to enforce
+  (docs/hardening.md #3-5)``, one per gated environment a `NONE` decision
+  authorized. It has its own cause, so it has its own detect output
+  (`review_not_required_envs`, from both detects) rather than widening
+  ungated. It renders in the targeted and the all-environments form, and names
+  only environments with an applied, failed or not-recorded row — apply ran
+  there, so infrastructure may have changed — so the no-rows form never
+  carries it. It states the authorization fact and never that nobody reviewed:
+  a code-owner review can still be required at an approval count of 0.
 
 Row status is derived from both the per-cell artifact and the real state of
 that cell's `apply / <stack> / <env>` check on the head SHA, which
@@ -2141,54 +2211,52 @@ same predicate the gate and both detects use). The pending apply checks are the
 work queue, so they outrank the artifact, which only records what a cell's own
 job believed before its check was completed:
 
-- ✅ **applied** — the apply succeeded and its check is recorded.
-- ⚠️ **applied but not recorded** — the apply succeeded but its check is still
+- 🟢 **applied** — the apply succeeded and its check is recorded.
+- 🟠 **not recorded** — the apply succeeded but its check is still
   pending, because `Save state`, the completion-token mint or `Complete the
   apply check` failed (or the job was cancelled) after the cell summary was
   already composed. `shipmate / gate` stays pending, and the stack needs a
   re-plan: state has advanced past the reviewed `.otplan`, so the saved plan is
-  stale. The comment carries one note naming the affected cells — capped, with
-  any remainder summarized as a count, since the note is part of the header
-  block the size fallback cannot shed and the usual cause strands a whole
-  matrix at once; the table above always carries a ⚠️ row for every one of
-  them. Each such cell keeps its full `<details>` output.
+  stale. The `not recorded:` note names the affected cells — capped, with
+  any remainder summarized as a count, since notes are part of the comment the
+  size fallback cannot shed and the usual cause strands a whole matrix at once;
+  the row lines always name every one of them. Each such cell keeps its full
+  fold-out output.
 - A cell whose check is done but whose artifact never arrived (the
-  cosmetic, `continue-on-error` upload dropped) renders ✅ with its output
-  unavailable — never ⏭️, and it does not drag the "apply check stays pending"
+  cosmetic, `continue-on-error` upload dropped) renders as a bare 🟢 `applied`
+  line — never 🟡 not attempted, and it does not drag the `not attempted:`
   note along with it.
-- ❌ **failed** / 🚫 **blocked** rows are never re-derived from check state. A
-  red row against a completed check means some other run applied that cell:
+- 🔴 **failed** / ⚪ **blocked** rows are never re-derived from check state. A
+  failed row against a completed check means some other run applied that cell:
   the row over-reports, nothing is stranded, and downgrading it would let an
   unrelated run's completed check hide a real failure in this one.
 
 If the check scan is unavailable — an API failure (warned, degraded to no
 data) or an empty `SHIPMATE_APP_ID` (warned) — every name reads as *absent*,
 which means *unknown*, and the comment falls back to artifact-only status.
-Absence never manufactures a ⚠️.
+Absence never manufactures a not-recorded row.
 
 `cell.json`'s `result` grammar is unchanged (`applied | failed | blocked`).
-⚠️ is a display status derived at render time, never a value `apply-cell`
-writes, so the fail-loud validator still rejects an out-of-enum artifact value
-as pin skew.
+Not recorded is a display status derived at render time, never a value
+`apply-cell` writes, so the fail-loud validator still rejects an out-of-enum
+artifact value as pin skew.
 
-The 65,536-character comment cap and the up-front link-only-space reserve
-work the same way as the plan comment's, above, but the truncation direction
-is the opposite. A plan diff is read top-down, so the plan comment's section
-keeps the head. Apply output is read for its END: a failing apply's fatal
-`Error:` line and a successful apply's closing `Apply complete! Resources:
-...` line are both the last thing tofu prints, so each attempted cell's
-section instead keeps the TAIL — full output → truncated (front cut at a
-line boundary, noting that earlier output was elided, with a link to the job
-log) → link-only. `apply.txt` itself is read from the end of the file
+The 65,536-character comment cap and the up-front reserve of every row's bare
+line work the same way as the plan comment's, above, but the truncation
+direction is the opposite. A plan diff is read top-down, so the plan comment's
+fold-out keeps the head. Apply output is read for its END: a failing apply's
+fatal `Error:` line and a successful apply's closing `Apply complete!
+Resources: ...` line are both the last thing tofu prints, so each attempted
+cell's fold-out instead keeps the TAIL — full output → truncated (front cut at
+a line boundary, noting that earlier output was elided, with a link to the job
+log) → the row's bare line. `apply.txt` itself is read from the end of the file
 (bounded — a fixed-size read near the tail, never the whole file) and
 decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
 character instead of aborting the render. Terminal escape sequences (colour
 codes and similar) are stripped from that text as it is read, since the apply
-output is tofu's own and is not required to be colour-free. Every
-remaining attempted cell's link-only space, and every blocked cell's
-one-line reason, are reserved up
-front, and the render fails loud rather than post a comment that would
-exceed GitHub's cap.
+output is tofu's own and is not required to be colour-free. Every remaining
+row's bare line is reserved up front, and the render fails loud rather than
+post a comment that would exceed GitHub's cap.
 
 The data feeding the comment ships in the per-cell artifact
 `apply-summary.<env>.<slug>` (see Apply summary artifacts, above); per-cell
@@ -2240,7 +2308,7 @@ A third record binds the plan *text* to the plan that executes. The trusted
 computed there, never copied from the cell — and writes it as the record's
 `plan_sha256` field, on the queued and the neutral check alike. The comment
 embeds at most the first 60 000 characters of that file and may truncate further or
-degrade to a link, so on a large plan the digest covers more than the comment
+show only the cell's line, so on a large plan the digest covers more than the comment
 shows; it binds the file, not the excerpt.
 `apply-cell` re-renders the stored plan with `tofu -chdir=<stack> show
 -no-color stack.otplan`, the command that produced the file, and refuses unless
