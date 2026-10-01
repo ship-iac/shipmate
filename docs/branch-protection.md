@@ -35,9 +35,9 @@ resolves to:
 
 `shipmate / gate` is a commit status, not a check-run (it is commit-scoped,
 so a commit that carries two plan runs — draft→ready, or a rapid re-push —
-cannot strand the gate in a stale check-suite). The required-check contract is
-unchanged: a ruleset `required_status_checks` entry matches a commit status by
-`context` exactly as it matches a check-run.
+cannot strand the gate in a stale check-suite). A ruleset
+`required_status_checks` entry matches a commit status by `context` exactly as
+it matches a check-run.
 
 ## Reproducible ruleset (GitHub Pro / Team / Enterprise, or a public repo)
 

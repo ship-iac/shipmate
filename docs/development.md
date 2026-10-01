@@ -4,7 +4,7 @@ Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 ## Repo structure
 
-- `actions/` — the composite actions consumers reference.
+- `actions/` — the composite actions the engine's reusable workflows call.
 - `scripts/` — the Python helpers behind those actions. They run as GitHub
   Actions steps, so they are executable and have no `.py` extension. The one
   exception is `_shipmate.py`, the loader the helpers import to reach each
@@ -41,7 +41,7 @@ uv run ty check              # type-check (beta, non-blocking)
 
 CI runs the same checks plus actionlint on the workflow files for every pull
 request. Fix lint findings rather than suppressing them; use `# noqa` only with
-a written rationale (see the one `S603` in `scripts/build-matrix`).
+a written rationale (see the `S603` in `scripts/plan-crypt`).
 
 ## Writing
 
@@ -73,7 +73,7 @@ Two traps when driving a sample repo:
 - **Bump `global.version` to get a real cycle in `repo-example-stacks`.** Then
   run `terramate generate` and `terramate fmt`. The version feeds the stacks'
   `app_version` variable and its `triggers_replace`, so bumping it moves every
-  stack. The consumer's `detect` job runs `terramate fmt --check` plus
+  stack. The engine's `detect` job runs `terramate fmt --check` plus
   `terramate generate --detailed-exit-code`. Both fail the run on bad
   formatting or stale codegen before any cell starts.
 
@@ -82,7 +82,7 @@ Two traps when driving a sample repo:
 Many tests here are guards: they pin an invariant in a workflow or action
 file rather than exercise a function. A guard that cannot fail is worse than no
 guard, because the next reader trusts it. Once, a four-way sabotage of the
-summary job, then in `.github/workflows/summary.yml` — all three trust guards
+summary job — all three trust guards
 inverted, `environment:` commented out, the draft-skip deleted — left the suite
 byte-identical to green.
 
@@ -97,7 +97,7 @@ byte-identical to green.
 - **Prove one break per promise the name and docstring make.** Mutation-proving
   only covers the mutation you thought of. A test here whose docstring claimed
   to guard prose in three files, with a body of `assert len(doctor.PROBES) == 9`
-  (since fixed), was mutation-proved against `PROBES` — the one thing it could
+  was mutation-proved against `PROBES` — the one thing it could
   detect — and shipped through three review passes; reverting any of the prose
   sites left it green. Read your test's name and docstring as a list of claims
   and break each one. A guard whose proof is narrower than its name is the
@@ -115,7 +115,7 @@ byte-identical to green.
   hand-written constant — as a net deletion of a helper, three tests and a
   denylist, after ten rounds in which every fix checked a part and reasoned
   about the rest.
-  `test_current_failsafe_set_is_exactly_the_five_known_ids` in
+  The exact-set test in
   `scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the shape. Its
   module docstring argues against hardcoded lists for the *structural* guards
   around it; this one is a deliberate tripwire.

@@ -69,7 +69,7 @@ once it reaches the apply path.
 
 ## GitHub OIDC
 
-Roles are named per identity, not per environment: an `[identities.<name>]`
+Roles are named per identity: an `[identities.<name>]`
 table names a plan and an apply role, and every environment whose entry carries
 `identity = "<name>"` assumes them, through GitHub's OIDC provider
 (`token.actions.githubusercontent.com`) — no long-lived access key anywhere. The
@@ -150,8 +150,7 @@ Beyond the schema:
 
 - **Give the two paths different roles, always.** The plan path is reachable
   from any branch, so an apply role in `aws.plan` hands it write access — see
-  [`hardening.md`](hardening.md) §7–9, which has the whole argument. The one-role
-  shorthand `aws.role` is refused.
+  [`hardening.md`](hardening.md) §7–9, which has the whole argument.
 - **A role is a role name or a full ARN.** A name needs `aws.account` and becomes
   `arn:aws:iam::<account>:role/<name>`; an ARN, as above, is used as written and
   must have no account beside it.

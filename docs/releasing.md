@@ -143,11 +143,7 @@ the release commit, from `repo-example-stacks-aws`:
    `scripts/tests/test_third_party_actions_consumers_must_allow.py` reddens when
    the engine's third-party set changes, so you find out while committing rather
    than from a consumer. When it does: add the pattern to `docs/hardening.md`'s
-   list — it is a setting the consumer has to change by hand before they re-pin.
-
-   Name each change a consumer makes by hand — a new third-party action to
-   allow-list, a changed `shipmate.yml` input contract — as a bullet in the
-   release's `CHANGELOG.md` section: what changed, not a procedure.
+   list — it is a setting the consumer has to change by hand.
 
 2. Drive the consumer's workflow file directly at that ref, with the body
    `actions/dispatch` would build — exactly those keys, and no others:
@@ -178,7 +174,7 @@ needs a consumer: the consumer file's `workflow_dispatch` input declarations
 meeting the body the engine sends. Either half of that pair is rejected right
 here, with no job started, and nothing in this repository can see it — an input
 the engine sends that the file does not declare is a 422 "Unexpected inputs
-provided", and a `required: true` input in that file the engine no longer sends
+provided", and a `required: true` input in that file that the engine does not send
 is a 422 "not provided". It also resolves and
 parses the engine reusable workflow at the new SHA, because that happens when the
 run graph is built.
@@ -227,8 +223,7 @@ gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
 ```
 
 **Push the tag first; `--target` does not work on this repository.**
-`gh release create v0.2.0 --target <sha>` was the documented form and it is
-rejected — `tag_name is not a valid tag` / `Release.target_commitish is invalid`,
+`gh release create v0.2.0 --target <sha>` is rejected on this repository — `tag_name is not a valid tag` / `Release.target_commitish is invalid`,
 with the release SHA verified as `main`'s tip through the API in the same breath.
 Observed on `v0.14.2`; the cause was not diagnosed, so treat only the two-step
 form above as known-good. `--verify-tag` is what keeps the second command from
@@ -242,9 +237,7 @@ Three constraints, each with a specific failure mode:
   SHA against each consumer pin; tagging any earlier commit instead reports
   correctly-pinned consumers as stale.
 - **Never mark a release as prerelease.** `repos/{slug}/releases/latest` returns
-  only the newest non-draft, non-prerelease release. While the repository had no
-  releases at all this failed quietly; now it fails loudly in the wrong
-  direction. A prerelease `v0.2.0` leaves `latest` pointing at `v0.1.0`, so every
+  only the newest non-draft, non-prerelease release. A prerelease `v0.2.0` leaves `latest` pointing at `v0.1.0`, so every
   consumer correctly pinned to `v0.2.0`'s SHA is told its pin differs from the
   latest release and is instructed to re-pin backwards.
 - **Releases are cut from `main` only.** A tag on a side branch names a commit
@@ -266,27 +259,19 @@ python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sh
 reachable from `origin/main` (exit 1), so it cannot re-pin a sample to a branch
 commit.
 
-**Keep the re-pin pull request pins-only when the release adds a fail-closed
-check on data a plan writes.** The usual advice is the opposite — bump
-`global.version` so the plan path fans out over real changes instead of greening
-on an empty matrix — and it is right for most releases. It is wrong for this
-class, because of where a plan run gets its workflow definition: under
-`pull_request_target` that comes from the **base** branch, which still carries
-the old pin. So a re-pin pull request's own plan always runs the *previous*
-engine, and every cell it plans records whatever that engine wrote. Merge it and
-the post-merge deploy — which does run the new engine, from `main` — refuses
-every one of those cells, on a head with no pull request left to push to.
-
-`v0.24.0` is the worked example: it refuses an apply whose plan carries no
-plan-text digest, and a version-bumping re-pin would have stranded eight cells
-that way. Land the re-pin with nothing pending, then bump the version in its own
-pull request — whose plan does run the new engine, and which is the first real
-exercise of the new behaviour.
+**A re-pin pull request is always pins-only.** Bump `global.version` in its own
+pull request afterwards, whose plan runs the new engine. Under
+`pull_request_target` a plan run takes its workflow definition from the **base**
+branch, which still carries the old pin, so a re-pin pull request's own plan runs
+the *previous* engine, and a fail-closed check the new engine adds on data a plan
+writes refuses every cell it planned after the merge, on a head with no pull
+request left to push to. `v0.24.0` is the worked example: it refuses an apply
+whose plan carries no plan-text digest, and a version-bumping re-pin would have
+stranded eight cells that way.
 
 The version line is `v0.x` while the action inputs, check names, and tag grammar
 are still declared unstable in `README.md`. `--generate-notes` diffs against the
-previous tag; the first release used hand-written notes because it had no
-predecessor.
+previous tag.
 
 If a release is skipped, the probe is the alarm — but only on
 `repo-example-stacks-aws`, and only once it moves past the release: its plan
@@ -295,47 +280,3 @@ three `@main` samples carry a standing branch-ref warning instead and never
 compare against a release. The state in between — engine merged, the sample not
 yet re-pinned, no release cut — is silent, so do not rely on the alarm to
 remember this step for you.
-
-### Prove the crossing when a release changes what reaches a cell's environment
-
-A release that changes how a cell's `TF_VAR_*` or `TF_WORKSPACE` are set has one
-property worth testing, and it can only be tested once: a plan taken on the
-**old** engine still applies on the **new** one. The apply-match fingerprint
-compares the plan-side variables against the apply-side ones, so any difference
-between the two routes fails the apply as stale — which is the result this
-ordering is built to observe, and which re-pinning first destroys. After that
-the new engine is only ever checked against itself.
-
-Run it after the tag on `repo-example-stacks-aws` when it carries the identity
-the release moved. On a `@main` sample the crossing happens when the engine
-pull request merges, so record step 1's plan there before that merge. In this
-order:
-
-1. **On the old pins, record a pending plan.** Open a pull request that bumps
-   `global.version` and runs `terramate generate` + `terramate fmt`, let it
-   plan, and leave it unapplied. A pins-only pull request plans zero cells —
-   change detection is `terramate list --changed` — and `detect` fails the run
-   on stale codegen or bad formatting before any cell starts.
-2. **Merge the pin bump**, waiting for the sample to go quiet first.
-   Commenting an apply while a plan is still running fails the next apply with
-   "saved plan is stale" for an unrelated reason, which reads as this test
-   failing. Merging is not optional: the comment-driven apply runs the **default
-   branch's** workflow, so a bump left on a branch is not the version under
-   test.
-3. **Apply each recorded plan.** Every one must succeed. This is the crossing —
-   plan on the old engine, apply on the new.
-
-**Do not push to a recorded pull request between step 1 and its apply.** "Update
-branch", a rebase and a merge from the default branch all push a new head, which
-fires `synchronize` and re-plans on the new engine: the recorded plan is
-replaced, the crossing disappears, and the apply then passes having proved
-nothing. If a ruleset demands an up-to-date branch before merging, update after
-the apply has run.
-
-This is the one case that overrides "land the re-pin with nothing pending"
-above. That rule exists for a release adding a fail-closed check on data a plan
-writes, where a cell planned by the old engine is refused after the merge; here
-a cell planned by the old engine is the measurement. The re-pin pull request
-itself still stays pins-only — the version bump is its own pull request, opened
-before it. A release in both classes wants both orderings at once, so split it
-into two releases.

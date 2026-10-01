@@ -95,9 +95,7 @@ repository is missing — that `shipmate / gate` is not required on the default
 branch, and that an apply environment has no approval rule. So the engine runs
 it only for a commenter GitHub classifies as `OWNER`, `MEMBER` or
 `COLLABORATOR`: organization members and repository collaborators. Anyone else
-gets a `🔴 refused:` reply. No App token is minted and no probe runs. Adopting the
-gate takes only a re-pin of the engine SHA — no new input, no new workflow
-permission.
+gets a `🔴 refused:` reply. No App token is minted and no probe runs.
 
 Three limits:
 
@@ -218,7 +216,7 @@ no stacks gets no plan comment at all — nothing is posted when there are no
 cells, no comment already on the pull request, and no `doctor` warning to
 point at — so docs-only and pin-bump changes stay quiet apart from their
 checks. An existing comment is still updated, so a plan that was pushed away
-never leaves a stale table behind. A run whose cell count is zero for any
+never leaves a stale plan comment behind. A run whose cell count is zero for any
 *other* reason (failed detect, all cells failed, cell artifacts
 undownloadable) writes nothing and leaves the previous plan standing rather
 than claiming "no stacks changed" — the gate fails those runs.
@@ -254,8 +252,9 @@ The consumer's `deploy` job calls the engine's reusable deploy workflow, and its
   lets empty middle waves pass through without blocking successors.
   `actions/apply-cell` downloads the reviewed `.otplan` from the plan run,
   verifies the fingerprint and the commit the plan was produced from, applies
-  that exact plan (never re-plans; stale state → fail-safe), and completes
-  the apply check. A stack already applied (pre-merge, or a no-change re-plan)
+  that exact plan (never re-plans; stale state → fail-safe). The env-level's
+  trailing `complete` job (`actions/apply-complete`) then completes the apply
+  check of every cell whose job succeeded. A stack already applied (pre-merge, or a no-change re-plan)
   has a completed check → deploy no-ops it.
 - **`drift`** (selected by the nightly `schedule`, engine reusable
   `.github/workflows/drift.yml`) fans out over all stacks × envs, or a
@@ -284,7 +283,7 @@ caps a called workflow's permissions at each `uses:` boundary. So every job of
 `shipmate.yml` but `comment-ops` must grant `id-token: write` —
 including consumers using no cloud credentials at all. The plan and drift cells
 run the same credentials step as the apply waves, resolving the identity's
-`aws.plan`, so whatever role it names is assumed while running branch-authored code —
+`aws.plan`, or its `aws.apply` for an environment holding `shared = true`, so whatever role it names is assumed while running branch-authored code —
 bounded by that role's trust policy and nothing in the engine.
 See [`CONTRACT.md`](../CONTRACT.md) §State backend and §AWS OIDC for the
 semantics, and [`hardening.md`](hardening.md) §7–9 for the exposure.

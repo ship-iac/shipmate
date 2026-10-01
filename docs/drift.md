@@ -74,9 +74,10 @@ all; no consumer file can set it, and no plan run carries it.
 The engine runs `aws-actions/configure-aws-credentials` inside the `drift` job,
 in the same position as on the plan path, gated on a role resolving non-empty.
 That role is the `aws.plan` of the identity the environment names in the table,
-per workload where that field varies by workload. An environment with no entry,
-or naming no identity, or whose identity sets no `aws.plan`, resolves no role and
-the step is skipped. A drift cell runs only
+or its `aws.apply` for an environment holding `shared = true`, per workload where
+that field varies by workload. An environment with no entry, or naming no
+identity, or whose identity sets no such role, resolves no role and the step is
+skipped. A drift cell runs only
 default-branch code, so what an over-scoped role costs here is write access
 where a read-only one belongs; the role's trust-policy claim condition is what
 refuses it. See
