@@ -13,12 +13,12 @@ import os
 import pathlib
 import sys
 
-from _shipmate import _load
-
-sc = _load("summary-comment")
-
 
 def step_line():
+    # Imported here so the fail-closed cell.json path imports nothing beyond the stdlib.
+    from _shipmate import _load
+
+    sc = _load("summary-comment")
     cell = {"changed": os.environ["CHANGED"] == "true"}
     # The same derivation as summary-comment's load_cells, so the step summary and the comment
     # name one state.
@@ -44,7 +44,10 @@ def main():
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--step-line"]:
+    args = sys.argv[1:]
+    if args == ["--step-line"]:
         print(step_line())
+    elif args:
+        raise SystemExit(f"::error::plan-cell-summary takes no argument or --step-line, got {args}")
     else:
         main()
