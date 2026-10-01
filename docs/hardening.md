@@ -538,9 +538,8 @@ no split of its own.
   different roles, always.** The plan path is reachable from any branch, so an
   apply role in `aws.plan` hands any-branch plan cells the apply role's
   permissions, which is the whole of what the paragraphs above exist to prevent.
-  The one-role shorthand `aws.role` is refused, naming `aws.plan` and
-  `aws.apply`; the same ARN written into both fields is not, and `shipmate
-  doctor` does not compare ARNs. Its roles lines print both paths' roles side
+  The same ARN written into both fields is not refused, and `shipmate doctor`
+  does not compare ARNs. Its roles lines print both paths' roles side
   by side, as the branch's table resolves them, so review is what catches it. A
   referenced role there shows the value comment-ops resolves: a
   `shipmate-engine` Environment variable of the same name wins in comment-ops,
@@ -594,7 +593,7 @@ no split of its own.
   readable by the same people for the same reason.
 
   The strongest version of this control is a plan environment with no secret in
-  it at all, and it is reachable today: name a read-only OIDC role in the
+  it at all, and it is reachable: name a read-only OIDC role in the
   `aws.plan` of the identity that environment names, which the engine's own
   `configure-aws-credentials` step in the plan cell assumes (`docs/aws.md`
   §Where the credentials step goes), with the role's trust policy conditioned on
@@ -620,8 +619,8 @@ no split of its own.
   was too long to read whole. The report says the check was not performed,
   rather than reporting it clean, when the App installation has not
   accepted the `environments: read` permission the manifest declares.
-- **Prefer OIDC to static cloud keys.** The engine wires it on every path, so
-  this is available today. Condition the trust policy on the environment
+- **Prefer OIDC to static cloud keys.** The engine wires it on every path.
+  Condition the trust policy on the environment
   claim (`repo:<owner>/<repo>:environment:<env>-apply`) so a token minted from a
   plan cell — or from a branch workflow — cannot assume the apply role. Do this
   on every role reachable from the repository, not only the apply role: see
@@ -701,12 +700,12 @@ Settings → Actions → General:
 
   The list must cover what the engine pulls in, not what your own workflows
   name. shipmate's composite actions execute inside your job, so their `uses:`
-  refs are resolved against your repository's list: a consumer whose own YAML
-  names only `actions/checkout` and `actions/download-artifact` still needs the
-  three third-party actions above, plus
-  `aws-actions/configure-aws-credentials` on every cell path — plan, drift,
-  apply and unlock — even when no cell ever resolves a role (the step is gated,
-  the `uses:` is not). Omit it and a plan run fails at "Set up job", not
+  refs are resolved against your repository's list: a consumer whose
+  `shipmate.yml` names no action at all still needs all four third-party
+  actions above — `astral-sh/setup-uv`, `opentofu/setup-opentofu`,
+  `terramate-io/terramate-action` and `aws-actions/configure-aws-credentials`,
+  the last on every cell path (plan, drift, apply and unlock) even when no cell
+  resolves a role (the step is gated, the `uses:` is not). Omit it and a plan run fails at "Set up job", not
   only an apply. Allowing
   GitHub-owned actions covers the engine's other transitive dependencies
   (`actions/cache`, `actions/create-github-app-token`,
@@ -1016,9 +1015,9 @@ default, and it is the outermost guard on this path: `shipmate doctor` warns on
 every occurrence of that input set to anything but `false`, including a `${{ }}`
 value, which is unknown rather than false. Second, and independently,
 `build-matrix`'s refusal in `detect` plus the `plan` job's `needs: detect`.
-shipmate's own guard is the layer that has to hold when a consumer sets that
-input, pins an older `actions/checkout`, or swaps the checkout step for
-something else — which is why the engine does not rely on the first one. It has
+shipmate's own guard has to hold where the checkout refusal does not apply
+(the dispatch leg below), which is why the engine does not rely on the first
+one. It has
 been seen to hold: against a real fork's pull request on the dispatch leg
 (2026-08-29), where the first guard does not apply, `build-matrix` failed
 `detect` with its fork refusal and the trusted `summary` job never started.
@@ -1083,7 +1082,7 @@ order matters here.** The `actions/checkout` refusal above was measured under
 key on, so on this leg the fork's head checks out and the inner refusal in
 `build-matrix` is the only one left — measured 2026-08-29: a dispatched plan
 naming a real fork's pull request checked that fork's head out and then failed
-in `build-matrix`. The reference `detect` therefore
+in `build-matrix`. Engine `plan.yml`'s `detect` therefore
 runs that step before `terramate fmt --check` and `terramate generate`, so a
 fork is turned away before either evaluates the tree it wrote. Keep that order:
 reversed, the two terramate steps evaluate (and generate from) fork-authored HCL
