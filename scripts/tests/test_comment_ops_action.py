@@ -883,15 +883,23 @@ def test_every_reply_step_names_its_header_outcome_and_text():
     assert got == _REPLIES
 
 
+#: The gate step's whole body: no later step keys on its outcome, so its `exit 1` is the only
+#: thing that stops an unresolvable gate configuration from reaching authorization.
+_GATE_UNREADABLE_RUN = _REPLY_RUN + (
+    "# The resolve's own failure, re-raised: `continue-on-error` above kept the job alive\n"
+    "# long enough to post this, and a green run over an unauthorized command is not a\n"
+    "# verdict this action may render.\n"
+    "exit 1\n"
+)
+
+
 def test_every_reply_step_posts_the_body_reply_comment_rendered():
-    """Mutation: post `-f body=":x: shipmate: $REASON"` in `Reject with reason` instead."""
+    """Mutations: post `-f body=":x: shipmate: $REASON"` in `Reject with reason` instead;
+    insert `exit 0` before the trailing comment of `Gate configuration unreadable`."""
     for name in _REPLIES:
         run = step_by("comment-ops", name=name)["run"]
-        if name == "Gate configuration unreadable":
-            assert run.startswith(_REPLY_RUN), run
-            assert run.rstrip().endswith("exit 1"), run
-        else:
-            assert run == _REPLY_RUN, name
+        want = _GATE_UNREADABLE_RUN if name == "Gate configuration unreadable" else _REPLY_RUN
+        assert run == want, name
 
 
 _EXPR = re.compile(r"\$\{\{ (.+?) \}\}")
