@@ -4778,6 +4778,12 @@ def test_a_heading_over_the_budget_shows_no_items_and_stops():
     )
 
 
+def test_the_contract_states_the_roles_budget_doctor_applies():
+    """Mutations: set `ROLE_LINES_BUDGET` to 9000; write `9,000-character` in `CONTRACT.md`."""
+    contract = " ".join((ENGINE / "CONTRACT.md").read_text(encoding="utf-8").split())
+    assert f"The notices share an {doctor.ROLE_LINES_BUDGET:,}-character budget," in contract
+
+
 def test_a_later_environment_over_the_budget_is_cut_against_what_is_left():
     """Only the first environment could be cut: a later one over the budget on its own was
     counted not shown although budget remained.
