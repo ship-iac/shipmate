@@ -14,6 +14,15 @@ wv = load_script("waves")
 RUN_URL = "https://gh/run/1"
 
 
+@pytest.fixture(autouse=True)
+def _run_context(monkeypatch):
+    """The runner defaults `provenance` reads for the verdict's commit and run links."""
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://gh")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    monkeypatch.setenv("GITHUB_RUN_NUMBER", "7")
+
+
 def _cell(**kw):
     base = {
         "stack": "app",
@@ -96,14 +105,18 @@ def test_build_rows_sorted_by_environment_then_stack():
 
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
-FOOT = "[run](https://gh/run/1). Comment `shipmate help` for the available commands."
-PENDING = "gate: pending until every environment is applied"
+HINT = "Comment `shipmate help` for the available commands."
+#: `provenance(SHA)` under `_run_context`, hand-written.
+AT = (
+    "at [0123456](https://gh/o/r/commit/0123456789abcdef0123456789abcdef01234567) "
+    "in [run #7](https://gh/run/1)"
+)
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 _APPLIED = "Apply complete! Resources: 1 added, 0 changed, 0 destroyed."
 
 
 def _comment(rows, env="dev-eu", results="success", **kw):
-    return ac.build_comment(rows, [], RUN_URL, "pending", [], [], env, results, head_sha=SHA, **kw)
+    return ac.build_comment(rows, [], RUN_URL, [], [], env, results, head_sha=SHA, **kw)
 
 
 def _capture(tmp_path, name):
@@ -121,12 +134,12 @@ def test_an_import_and_forget_capture_renders_its_whole_fold_out(tmp_path):
 
     Mutation: delete the `imported` group from `_RESOURCES_RE` -- the line no longer matches and
     the state reads `applied`, red.
-    Mutation: delete the `li.ANSI_RE.sub` in `load_cells` -- the fence holds ESC bytes, red."""
+    Mutation: delete the `li.ANSI_RE.sub` in `load_cells` -- the fence holds ESC bytes, red.
+    Mutation: return `FOOTER_HINT` from `footer_hint` under every verdict -- a 🟢 comment gains
+    the hint, red."""
     rows = _capture(tmp_path, "import-forget.apply.txt")
-    assert ac.build_comment(
-        rows, [], RUN_URL, "complete", [], [], "dev-eu", "success", head_sha=SHA
-    ) == (
-        "### shipmate apply dev-eu\n\n🟢 1 applied at 0123456\n\n"
+    assert ac.build_comment(rows, [], RUN_URL, [], [], "dev-eu", "success", head_sha=SHA) == (
+        f"### shipmate apply dev-eu\n\n🟢 1 applied {AT}\n\n"
         '<details><summary>🟢 app (dev-eu): +1 ~0 -0, 1 import, 1 forget <a href="https://gh/run/1">'
         "logs</a></summary>\n\n```\n"
         "random_id.c: Importing... [id=p-9hUg]\n"
@@ -135,7 +148,7 @@ def test_an_import_and_forget_capture_renders_its_whole_fold_out(tmp_path):
         "random_id.d: Creation complete after 0s [id=SOaBow]\n"
         "\n"
         "Apply complete! Resources: 1 imported, 1 added, 0 changed, 0 destroyed, 1 forgotten.\n"
-        "\n```\n</details>\n\ngate: complete\n\n" + FOOT
+        "\n```\n</details>"
     )
 
 
@@ -167,20 +180,22 @@ def test_a_blocked_reason_renders_escaped_on_its_bare_line():
     Mutation: drop `_md_escape` on the reason in `_state` -- the raw `<a href>` renders, red."""
     row = _row(status="blocked", reason='<a href="https://evil">x</a>', apply_text=None)
     assert _comment([row]) == (
-        "### shipmate apply dev-eu\n\n⚪ 1 blocked at 0123456\n\n"
+        f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n"
         '⚪ app (dev-eu): blocked: &lt;a href="https://evil"&gt;x&lt;/a&gt; '
-        '<a href="https://gh/run/1">logs</a>\n\n' + PENDING + "\n\n" + FOOT
+        '<a href="https://gh/run/1">logs</a>\n\n' + HINT
     )
 
 
 def test_a_mixed_run_renders_every_status_in_one_comment():
     """Every status across two environments, in `(environment, stack)` order: fold-outs for the
     rows with output, bare lines for the rest, a blank line on both sides of every fold-out, the
-    notes, the footer lines and the footer.
+    notes and the footer hint a 🔴 verdict carries.
 
     Mutation: render the unrecorded row's state without `, not recorded` -- red.
     Mutation: give `blocked` the 🟡 circle in `_STATUS` -- red.
-    Mutation: join the notes with a blank line -- red."""
+    Mutation: join the notes with a blank line -- red.
+    Mutation: append a `gate: pending until every environment is applied` line to
+    `_footer_parts` -- red."""
     jobs = [
         _job("wave0 / apply / stacks/app / dev-eu", "https://gh/job/app-eu"),
         _job("wave0 / apply / stacks/db / dev-eu", "https://gh/job/db-eu"),
@@ -208,12 +223,10 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
             apply_text=None,
         ),
     ]
-    body = ac.build_comment(
-        rows, jobs, RUN_URL, "pending", [], [], "", "success,failure", head_sha=SHA
-    )
+    body = ac.build_comment(rows, jobs, RUN_URL, [], [], "", "success,failure", head_sha=SHA)
     assert body == (
         "### shipmate apply\n\n"
-        "🔴 1 failed, 1 not recorded, 1 not attempted, 1 blocked, 1 applied at 0123456\n\n"
+        f"🔴 1 failed, 1 not recorded, 1 not attempted, 1 blocked, 1 applied {AT}\n\n"
         '<details><summary>🟢 app (dev-eu): +1 ~0 -0 <a href="https://gh/job/app-eu">logs</a>'
         "</summary>\n\n```\nApply complete! Resources: 1 added, 0 changed, 0 destroyed.\n```\n"
         "</details>\n\n"
@@ -227,10 +240,7 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
         "not recorded: **app (prod)**. The apply succeeded but its apply check is not recorded "
         "as complete (it failed, was cancelled, or a newer plan re-created it), so "
         "`shipmate / gate` stays pending. Re-plan and re-apply.\n"
-        "not attempted: the apply checks stay pending; retry with `shipmate apply`.\n\n"
-        + PENDING
-        + "\n\n"
-        + FOOT
+        "not attempted: the apply checks stay pending; retry with `shipmate apply`.\n\n" + HINT
     )
 
 
@@ -244,16 +254,7 @@ def test_no_line_of_the_apply_comment_is_itself_a_shipmate_command():
     rows = [_row(status="not_attempted", apply_text=None), _row(environment="prod")]
     bodies = [
         ac.build_comment(
-            rows,
-            [],
-            RUN_URL,
-            "pending",
-            ["dev", "sbx"],
-            ["stg"],
-            "",
-            "success",
-            ["prod", "sbx"],
-            ["qa"],
+            rows, [], RUN_URL, ["dev", "sbx"], ["stg"], "", "success", ["prod", "sbx"]
         ),
         _comment([], results="failure"),
     ]
@@ -296,7 +297,10 @@ def test_the_verdict_counts_rows_and_carries_a_failed_run(statuses, results, ver
         _row(status=s) if isinstance(s, str) else _row(status=s[0], environment=s[1])
         for s in statuses
     ]
-    assert ac._verdict(rows, ac._results_failed(results), (), SHA) == f"{verdict} at 0123456"
+    assert ac._verdict(rows, ac._results_failed(results), (), SHA, RUN_URL) == (
+        verdict.split(" ", 1)[0],
+        f"{verdict} {AT}",
+    )
 
 
 def test_a_run_that_died_before_any_cell_reported_renders_failed():
@@ -306,39 +310,31 @@ def test_a_run_that_died_before_any_cell_reported_renders_failed():
     Mutation: suppress the leading `failed` whenever every row is `not_attempted` -- red."""
     rows = ac.build_rows({("prod", "stacks/app"), ("prod", "stacks/db")}, [])
     assert _comment(rows, env="prod", results="success,failure") == (
-        "### shipmate apply prod\n\n🔴 failed, 2 not attempted at 0123456\n\n"
+        f"### shipmate apply prod\n\n🔴 failed, 2 not attempted {AT}\n\n"
         '🟡 stacks/app (prod): not attempted <a href="https://gh/run/1">logs</a>\n'
         '🟡 stacks/db (prod): not attempted <a href="https://gh/run/1">logs</a>\n\n'
-        "not attempted: the apply checks stay pending; retry with `shipmate apply prod`.\n\n"
-        + PENDING
-        + "\n\n"
-        + FOOT
+        "not attempted: the apply checks stay pending; retry with `shipmate apply prod`.\n\n" + HINT
     )
 
 
 def test_the_short_form_names_a_failed_run():
     """Mutation: test `held` before the job results in `_verdict` -- red with a held env."""
     assert _comment([], results="success,failure", held=["prod"]) == (
-        "### shipmate apply dev-eu\n\n🔴 failed at 0123456\n\n" + PENDING + "\n\n" + FOOT
+        f"### shipmate apply dev-eu\n\n🔴 failed {AT}\n\n" + HINT
     )
 
 
 def test_the_short_form_of_an_all_held_run_says_nothing_applied():
     """Work WAS pending and the engine refused it, so the verdict may claim neither success nor an
-    empty queue; the held lines and the audit line still render.
+    empty queue; the held lines still render, and the ⚪ verdict carries the hint.
 
     Mutation: delete the `elif held` branch in `_verdict` -- 🟢 no pending applies, red."""
-    body = ac.build_comment(
-        [], [], RUN_URL, "complete", [], [], "", "success,skipped", ["prod"], ["dev-eu"], [], SHA
-    )
+    body = ac.build_comment([], [], RUN_URL, [], [], "", "success,skipped", ["prod"], SHA)
     assert body == (
-        "### shipmate apply\n\n⚪ nothing applied, environments are held for review at 0123456\n\n"
+        f"### shipmate apply\n\n⚪ nothing applied, environments are held for review {AT}\n\n"
         "⚪ prod: held, the review state does not permit applying\n"
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
-        "The run log's apply-all-detect notice names the decision seen.\n"
-        "ungated: dev-eu, permitted to apply without an approving review "
-        "(`gated = false` in `.github/shipmate.toml`)\n"
-        "gate: complete\n\n" + FOOT
+        "The run log's apply-all-detect notice names the decision seen.\n\n" + HINT
     )
 
 
@@ -349,31 +345,25 @@ def test_the_short_form_of_an_empty_queue_keeps_the_explicit_and_skipped_lines()
 
     Mutation: render the footer lines only when there are rows -- red."""
     body = ac.build_comment(
-        [], [], RUN_URL, "complete", ["prod"], ["staging"], "", "success,skipped", head_sha=SHA
+        [], [], RUN_URL, ["prod"], ["staging"], "", "success,skipped", head_sha=SHA
     )
     assert body == (
-        "### shipmate apply\n\n🟢 no pending applies at 0123456\n\n"
+        f"### shipmate apply\n\n🟢 no pending applies {AT}\n\n"
         "🟡 prod: left pending (explicit), comment `shipmate apply prod`\n"
-        "⚪ staging: skipped, ordered after an environment not applying this run\n"
-        "gate: complete\n\n" + FOOT
+        "⚪ staging: skipped, ordered after an environment not applying this run"
     )
 
 
 def test_the_footer_lines_of_the_all_environments_form():
-    """One line per environment, in order: explicit, skipped, held, the `held:` remedy, ungated,
-    no review required, then `gate:`. A held explicit env is listed once, on its held line, with
-    the targeted command a bare apply never replaces; a held env that is not explicit names
-    none. The held line names no single cause (three decisions hold). The ungated line carries a
-    label, not a circle, and no completion verb: detect derives it before any wave runs. The
-    no-review line states the authorization fact and never that nobody reviewed.
+    """One line per environment, in order: explicit, skipped, held, then the `held:` remedy. A
+    held explicit env is listed once, on its held line, with the targeted command a bare apply
+    never replaces; a held env that is not explicit names none. The held line names no single
+    cause (three decisions hold). No gate line: the `shipmate / gate` status shows that.
 
-    Mutation: `applied without an approving review` in the ungated line -- red.
     Mutation: `needs an approving review` in the held line -- red.
-    Mutation: a 🟢 at the start of the ungated line -- red.
-    Mutation: list every `excluded` env on an explicit line -- `sbx` appears twice, red."""
-    assert ac._footer_parts(
-        "pending", ["prod", "sbx"], ["stg"], "", ["dev", "sbx"], ["dev-eu"], ["qa"]
-    ) == [
+    Mutation: list every `excluded` env on an explicit line -- `sbx` appears twice, red.
+    Mutation: append a `gate: pending until every environment is applied` line -- red."""
+    assert ac._footer_parts(["prod", "sbx"], ["stg"], "", ["dev", "sbx"]) == [
         "🟡 prod: left pending (explicit), comment `shipmate apply prod`",
         "⚪ stg: skipped, ordered after an environment not applying this run",
         "⚪ dev: held, the review state does not permit applying",
@@ -381,70 +371,74 @@ def test_the_footer_lines_of_the_all_environments_form():
         "`shipmate apply sbx`",
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
         "The run log's apply-all-detect notice names the decision seen.",
-        "ungated: dev-eu, permitted to apply without an approving review "
-        "(`gated = false` in `.github/shipmate.toml`)",
-        "no review required: qa, the pull request's review state required no approving review, "
-        "so `gated` had nothing to enforce (docs/hardening.md #3-5)",
-        PENDING,
     ]
 
 
-def test_the_targeted_form_keeps_only_the_no_review_and_gate_lines():
-    """Explicit, skipped, held and ungated are apply-all concepts; a targeted apply of a gated env
-    under a null decision is the case the no-review line exists for.
+def test_the_targeted_form_renders_no_footer_lines():
+    """Explicit, skipped and held are apply-all concepts.
 
-    Mutation: render the no-review lines only when `not env_name` -- red."""
-    assert ac._footer_parts(
-        "complete", ["prod"], ["stg"], "dev-eu", ["dev"], ["dev-eu"], ["dev-eu"]
-    ) == [
-        "no review required: dev-eu, the pull request's review state required no approving "
-        "review, so `gated` had nothing to enforce (docs/hardening.md #3-5)",
-        "gate: complete",
-    ]
+    Mutation: drop the `if env_name` reset in `_dispositions` -- red."""
+    assert ac._footer_parts(["prod"], ["stg"], "dev-eu", ["dev"]) == []
 
 
 def test_the_footer_lines_escape_every_env_name():
     """Env names are author-controlled. Mutation: `_dispositions` escapes `excluded` but not
     `held` -- red (both the held line and its command)."""
-    assert ac._footer_parts("pending", ["e<1"], ["s<2"], "", ["h<3", "e<1"], ["u<4"], ["r<5"]) == [
+    assert ac._footer_parts(["e<1"], ["s<2"], "", ["h<3", "e<1"]) == [
         "⚪ s&lt;2: skipped, ordered after an environment not applying this run",
         "⚪ h&lt;3: held, the review state does not permit applying",
         "⚪ e&lt;1: held, the review state does not permit applying; once it clears, comment "
         "`shipmate apply e&lt;1`",
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
         "The run log's apply-all-detect notice names the decision seen.",
-        "ungated: u&lt;4, permitted to apply without an approving review "
-        "(`gated = false` in `.github/shipmate.toml`)",
-        "no review required: r&lt;5, the pull request's review state required no approving "
-        "review, so `gated` had nothing to enforce (docs/hardening.md #3-5)",
-        PENDING,
     ]
 
 
-_NO_REVIEW_SBX = (
-    "no review required: sbx, the pull request's review state required no approving review, "
-    "so `gated` had nothing to enforce (docs/hardening.md #3-5)"
+_UNGATED_NOTICE = (
+    ": ungated, permitted to apply without an approving review "
+    "(gated = false in .github/shipmate.toml)"
 )
+_NO_REVIEW_NOTICE = ": no approving review was required, so gated had nothing to enforce"
 
 
-def test_no_review_required_line_skips_an_env_whose_apply_never_ran():
+def test_the_notices_name_ungated_then_no_review_envs():
+    """The ungated text carries no completion verb: detect derives the set before any wave runs.
+    The no-review text states the authorization fact and never that nobody reviewed.
+
+    Mutation: `applied without an approving review` in `_UNGATED` -- red.
+    Mutation: list the no-review envs first -- red."""
+    rows = [_row(environment="qa")]
+    assert ac.notices(rows, "", ["dev-eu"], ["qa"]) == [
+        "::notice::dev-eu" + _UNGATED_NOTICE,
+        "::notice::qa" + _NO_REVIEW_NOTICE,
+    ]
+
+
+def test_the_targeted_form_has_no_ungated_notice():
+    """Ungated is an apply-all concept; a targeted apply of a gated env under a null decision is
+    the case the no-review notice exists for.
+
+    Mutation: drop the `if env_name` reset in `notices` -- red."""
+    assert ac.notices([_row()], "dev-eu", ["dev-eu"], ["dev-eu"]) == [
+        "::notice::dev-eu" + _NO_REVIEW_NOTICE
+    ]
+
+
+def test_no_review_notice_skips_an_env_whose_apply_never_ran():
     """sbx's only row is blocked, so nothing in it applied and there is nothing to disclose.
 
-    Mutation: skip the row filter in build_comment -- the line renders, red."""
+    Mutation: skip the row filter in `notices` -- the notice prints, red."""
     rows = [_row(environment="sbx", status="blocked", reason="upstream failed", apply_text=None)]
-    body = _comment(rows, env="sbx", review_not_required=["sbx"])
-    assert _NO_REVIEW_SBX not in body.split("\n")
+    assert ac.notices(rows, "sbx", [], ["sbx"]) == []
 
 
 @pytest.mark.parametrize("status", ["applied", "failed", "unrecorded"])
-def test_no_review_required_line_names_an_env_whose_apply_ran(status):
+def test_no_review_notice_names_an_env_whose_apply_ran(status):
     """sbx's only row is `status`: apply ran there, so infrastructure may have changed.
 
-    Mutation: narrow the row filter in build_comment to `status == "applied"` -- red."""
-    body = _comment(
-        [_row(environment="sbx", status=status)], env="sbx", review_not_required=["sbx"]
-    )
-    assert _NO_REVIEW_SBX in body.split("\n")
+    Mutation: narrow the row filter in `notices` to `status == "applied"` -- red."""
+    rows = [_row(environment="sbx", status=status)]
+    assert ac.notices(rows, "sbx", [], ["sbx"]) == ["::notice::sbx" + _NO_REVIEW_NOTICE]
 
 
 def test_the_not_attempted_note_names_the_targeted_env_escaped():
@@ -509,7 +503,7 @@ def test_the_notes_read_lock_then_unrecorded_then_not_attempted():
         ),
     ]
     sections = _comment(rows, env="").split("\n\n")
-    assert sections[-3] == (
+    assert sections[-2] == (
         "state lock held: **app (dev-eu)** (lock **0f866bdc-d621-7230-876f-fa7398eff1f8**, held "
         "since **2026-08-20 19:53:19.7388258 +0000 UTC**). An earlier apply was cancelled or "
         "killed before releasing the lock, so nothing in these cells was applied. Per-cell "
@@ -521,7 +515,7 @@ def test_the_notes_read_lock_then_unrecorded_then_not_attempted():
         "`shipmate / gate` stays pending. Re-plan and re-apply.\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply`."
     )
-    assert sections[-2:] == [PENDING, FOOT]
+    assert sections[-1] == HINT
 
 
 def test_a_fold_out_holds_the_whole_output_in_a_plain_fence_under_an_escaped_summary():
@@ -602,11 +596,9 @@ def test_a_256_cell_fan_out_of_oversized_applies_keeps_every_cell_line():
     ]
     body = _comment(rows)
     assert len(body) <= ac.sc.SIZE_BUDGET
-    kept, rest = _first_fold_out(body, "🟢 256 applied at 0123456")
+    kept, rest = _first_fold_out(body, f"🟢 256 applied {AT}")
     assert set(kept[:-1]) == {"r"} and kept[-1] == _APPLIED
-    assert rest == "\n\n" + "\n".join(_bare(i) for i in range(1, 256)) + "\n\n" + PENDING + (
-        "\n\n" + FOOT
-    )
+    assert rest == "\n\n" + "\n".join(_bare(i) for i in range(1, 256))
 
 
 def test_an_early_giant_apply_cannot_drop_a_later_cells_line():
@@ -625,14 +617,11 @@ def test_an_early_giant_apply_cannot_drop_a_later_cells_line():
     ]
     body = _comment(rows)
     assert len(body) <= ac.sc.SIZE_BUDGET
-    kept, rest = _first_fold_out(body, "⚪ 1 blocked, 2 applied at 0123456")
+    kept, rest = _first_fold_out(body, f"⚪ 1 blocked, 2 applied {AT}")
     assert set(kept[:-1]) == {"r"} and kept[-1] == _APPLIED
     assert rest == (
         "\n\n" + _bare(1) + "\n"
-        '⚪ s002 (dev-eu): blocked: upstream failed <a href="https://gh/run/1">logs</a>\n\n'
-        + PENDING
-        + "\n\n"
-        + FOOT
+        '⚪ s002 (dev-eu): blocked: upstream failed <a href="https://gh/run/1">logs</a>\n\n' + HINT
     )
 
 
@@ -700,13 +689,13 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
             )
         )
         jobs.append(_job(f"wave0 / apply / {path} / {env}", _JOB_URL.format(23456789000 + i)))
-    body = ac.build_comment(rows, jobs, RUN_URL, "pending", [], [], env, "failure", head_sha=SHA)
+    body = ac.build_comment(rows, jobs, RUN_URL, [], [], env, "failure", head_sha=SHA)
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
     assert lines[:4] == [
         "### shipmate apply production-eu-west-1",
         "",
-        "🔴 256 blocked at 0123456",
+        f"🔴 256 blocked {AT}",
         "",
     ]
     assert lines[4] == (
@@ -728,20 +717,20 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
         "",
         "blocked: each blocked cell's reason is in its logs.",
         "",
-        PENDING,
-        "",
-        FOOT,
+        HINT,
     ]
 
 
 def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
-    """256 applied cells, one per environment, every environment under a null review decision: one
-    no-review line per environment pushes the body past HARD_CAP with no blocked row, and the
-    compact form names them all on one line.
+    """256 applied cells, one per environment, and 256 explicit environments left pending: one
+    explicit line per environment pushes the body past HARD_CAP with no blocked row, and the
+    compact form names them all on one line. The verdict is 🟢, so no hint follows.
 
     Mutation: restore `and any(r["status"] == "blocked" for r in rows)` on the `_compact` branch
-    in `build_comment` -- SystemExit, red."""
+    in `build_comment` -- SystemExit, red.
+    Mutation: append a `gate: complete` line to `_footer_parts` -- red."""
     envs = [f"env-{i}" for i in range(256)]
+    explicit = [f"explicit-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [
         _row(environment=e, stack_path="stacks/app", stack_display="stacks/app", apply_text=None)
         for e in envs
@@ -750,53 +739,30 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
         _job(f"wave0 / apply / stacks/app / {e}", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
     ]
-    body = ac.build_comment(
-        rows,
-        jobs,
-        RUN_URL,
-        "pending",
-        [],
-        [],
-        "",
-        "success",
-        review_not_required=envs,
-        head_sha=SHA,
-    )
+    body = ac.build_comment(rows, jobs, RUN_URL, explicit, [], "", "success", head_sha=SHA)
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
-    assert lines[:4] == ["### shipmate apply", "", "🟢 256 applied at 0123456", ""]
+    assert lines[:4] == ["### shipmate apply", "", f"🟢 256 applied {AT}", ""]
     assert lines[4:260] == [
         f'🟢 stacks/app (env-{i}): applied <a href="{_JOB_URL.format(23456789000 + i)}">logs</a>'
         for i in range(256)
     ]
     assert lines[260:] == [
         "",
-        "no review required: "
-        + ", ".join(f"env-{i}" for i in range(256))
-        + ", the pull request's review state required no approving review, so `gated` had "
-        "nothing to enforce (docs/hardening.md #3-5)",
-        PENDING,
-        "",
-        FOOT,
+        "🟡 left pending (explicit): "
+        + ", ".join(explicit)
+        + "; comment `shipmate apply <env>` for each",
     ]
 
 
 def test_the_compact_footer_lines_group_every_disposition():
     """One line per disposition, environments comma-separated, in the per-environment order; the
-    held line names no single cause and lists the explicit held envs for their command, the
-    ungated line carries no completion verb, the no-review line never says nobody reviewed.
+    held line names no single cause and lists the explicit held envs for their command.
 
-    Mutation: `ungated: {...}, applied, {_UNGATED}` in `_grouped_lines` -- red.
-    Mutation: delete the `held_explicit` clause in `_grouped_lines` -- red."""
+    Mutation: delete the `held_explicit` clause in `_grouped_lines` -- red.
+    Mutation: append a `gate: pending until every environment is applied` line -- red."""
     assert ac._footer_parts(
-        "pending",
-        ["prod", "prod-us", "sbx"],
-        ["stg", "uat"],
-        "",
-        ["dev", "sbx"],
-        ["dev-eu", "dev-us"],
-        ["qa", "qa-us"],
-        compact=True,
+        ["prod", "prod-us", "sbx"], ["stg", "uat"], "", ["dev", "sbx"], compact=True
     ) == [
         "🟡 left pending (explicit): prod, prod-us; comment `shipmate apply <env>` for each",
         "⚪ skipped, ordered after an environment not applying this run: stg, uat",
@@ -804,11 +770,6 @@ def test_the_compact_footer_lines_group_every_disposition():
         "comment `shipmate apply <env>` for sbx",
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
         "The run log's apply-all-detect notice names the decision seen.",
-        "ungated: dev-eu, dev-us, permitted to apply without an approving review "
-        "(`gated = false` in `.github/shipmate.toml`)",
-        "no review required: qa, qa-us, the pull request's review state required no approving "
-        "review, so `gated` had nothing to enforce (docs/hardening.md #3-5)",
-        PENDING,
     ]
 
 
@@ -1354,7 +1315,7 @@ def test_build_comment_wide_unrecorded_run_still_produces_a_comment():
         )
         for i in range(200)
     ]
-    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "prod")
+    body = ac.build_comment(rows, [], RUN_URL, [], [], "prod")
     assert len(body) <= ac.sc.HARD_CAP
     assert ac._unrecorded_note(rows) in body.split("\n\n")
 
@@ -1464,7 +1425,6 @@ def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     for i in range(ac.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
-    monkeypatch.setenv("SHIPMATE_GATE", "pending")
     monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
     monkeypatch.setenv("SHIPMATE_HEAD_SHA", SHA)
@@ -1607,7 +1567,7 @@ def test_lock_note_cannot_blow_the_comment_cap():
         )
         for i in range(3)
     ]
-    body = ac.build_comment(rows, [], RUN_URL, "pending", [], [], "dev-eu")
+    body = ac.build_comment(rows, [], RUN_URL, [], [], "dev-eu")
     assert len(body) <= ac.sc.HARD_CAP
     assert "state lock held" in body
 
@@ -1625,7 +1585,11 @@ def test_lock_note_bare_form_stays_bare():
 
 
 _MAIN_RUN = "https://github.com/acme/repo/actions/runs/42"
-_MAIN_FOOT = f"[run]({_MAIN_RUN}). Comment `shipmate help` for the available commands."
+#: `provenance(SHA)` under `_main_env`, hand-written.
+_MAIN_AT = (
+    "at [0123456](https://github.com/acme/repo/commit/0123456789abcdef0123456789abcdef01234567) "
+    f"in [run #7]({_MAIN_RUN})"
+)
 
 
 def _main_body(tmp_path):
@@ -1652,11 +1616,11 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
     _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
     assert _main_body(tmp_path) == (
-        "### shipmate apply dev-eu\n\n🟠 1 not recorded at 0123456\n\n"
+        f"### shipmate apply dev-eu\n\n🟠 1 not recorded {_MAIN_AT}\n\n"
         f'🟠 app (dev-eu): applied, not recorded <a href="{_MAIN_RUN}">logs</a>\n\n'
         "not recorded: **app (dev-eu)**. The apply succeeded but its apply check is not recorded "
         "as complete (it failed, was cancelled, or a newer plan re-created it), so "
-        "`shipmate / gate` stays pending. Re-plan and re-apply.\n\n" + PENDING + "\n\n" + _MAIN_FOOT
+        "`shipmate / gate` stays pending. Re-plan and re-apply.\n\n" + HINT
     )
 
 
@@ -1672,11 +1636,8 @@ def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_p
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
     _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
     assert _main_body(tmp_path) == (
-        "### shipmate apply dev-eu\n\n🟢 1 applied at 0123456\n\n"
-        f'🟢 stacks/app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>\n\n'
-        + PENDING
-        + "\n\n"
-        + _MAIN_FOOT
+        f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
+        f'🟢 stacks/app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>'
     )
 
 
@@ -1690,43 +1651,68 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
     _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
     assert _main_body(tmp_path) == (
-        "### shipmate apply dev-eu\n\n🟢 1 applied at 0123456\n\n"
-        f'🟢 app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>\n\n'
-        + PENDING
-        + "\n\n"
-        + _MAIN_FOOT
+        f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
+        f'🟢 app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>'
     )
 
 
-def test_main_reads_every_env_set_under_its_own_name(monkeypatch, tmp_path):
-    """Five inputs are JSON arrays of env names with one shape, so a crossed read in main renders
-    a plausible comment naming the wrong environments for the wrong reason.
-
-    Mutation: swap the `SHIPMATE_REVIEW_HELD_ENVS` and `SHIPMATE_APPLIED_UNGATED_ENVS` reads in
-    main -- red.
-    Mutation: read `SHIPMATE_REVIEW_NOT_REQUIRED_ENVS` under another name -- the qa line is
-    gone, red."""
+def _all_envs_main_env(monkeypatch, tmp_path, row_env, ungated, no_review):
+    """`_main_env` for the all-environments form with one applied `app` cell in `row_env`, an
+    empty (readable) checks file so stdout holds only what `main` prints, and the five env sets:
+    `sbx` explicit, `stg` skipped, `prod` held, then `ungated` and `no_review`."""
     cells = tmp_path / "cells"
-    _write_cell(cells, "qa", "stacks-app", _cell(environment="qa"))
-    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    _write_cell(cells, "x", "stacks-app", _cell(environment=row_env))
+    checks = tmp_path / "checks.jsonl"
+    checks.write_text("", encoding="utf-8")
+    _main_env(monkeypatch, tmp_path, cells, "", str(checks))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "")
     monkeypatch.setenv("SHIPMATE_EXCLUDED_ENVS", json.dumps(["sbx"]))
     monkeypatch.setenv("SHIPMATE_SKIPPED_ENVS", json.dumps(["stg"]))
     monkeypatch.setenv("SHIPMATE_REVIEW_HELD_ENVS", json.dumps(["prod"]))
-    monkeypatch.setenv("SHIPMATE_APPLIED_UNGATED_ENVS", json.dumps(["dev-eu"]))
-    monkeypatch.setenv("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS", json.dumps(["qa"]))
-    monkeypatch.setenv("SHIPMATE_GATE", "complete")
-    assert _main_body(tmp_path) == (
-        "### shipmate apply\n\n🟢 1 applied at 0123456\n\n"
-        f'🟢 app (qa): applied <a href="{_MAIN_RUN}">logs</a>\n\n'
+    monkeypatch.setenv("SHIPMATE_APPLIED_UNGATED_ENVS", json.dumps(ungated))
+    monkeypatch.setenv("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS", json.dumps(no_review))
+
+
+def _all_envs_body(row_env):
+    return (
+        f"### shipmate apply\n\n🟢 1 applied {_MAIN_AT}\n\n"
+        f'🟢 app ({row_env}): applied <a href="{_MAIN_RUN}">logs</a>\n\n'
         "🟡 sbx: left pending (explicit), comment `shipmate apply sbx`\n"
         "⚪ stg: skipped, ordered after an environment not applying this run\n"
         "⚪ prod: held, the review state does not permit applying\n"
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
-        "The run log's apply-all-detect notice names the decision seen.\n"
-        "ungated: dev-eu, permitted to apply without an approving review "
-        "(`gated = false` in `.github/shipmate.toml`)\n"
-        "no review required: qa, the pull request's review state required no approving review, "
-        "so `gated` had nothing to enforce (docs/hardening.md #3-5)\n"
-        "gate: complete\n\n" + _MAIN_FOOT
+        "The run log's apply-all-detect notice names the decision seen."
+    )
+
+
+def test_main_reads_every_env_set_under_its_own_name(monkeypatch, tmp_path, capsys):
+    """Five inputs are JSON arrays of env names with one shape, so a crossed read in main renders
+    a plausible comment, or notice, naming the wrong environments for the wrong reason.
+
+    Mutation: swap the `SHIPMATE_REVIEW_HELD_ENVS` and `SHIPMATE_APPLIED_UNGATED_ENVS` reads in
+    main -- red.
+    Mutation: read `SHIPMATE_REVIEW_NOT_REQUIRED_ENVS` under another name -- the qa notice is
+    gone, red."""
+    _all_envs_main_env(monkeypatch, tmp_path, "qa", ["dev-eu"], ["qa"])
+    assert _main_body(tmp_path) == _all_envs_body("qa")
+    assert capsys.readouterr().out == (
+        f"::notice::dev-eu{_UNGATED_NOTICE}\n::notice::qa{_NO_REVIEW_NOTICE}\n"
+    )
+
+
+def test_main_prints_the_audit_notices_escaped_and_the_comment_carries_neither(
+    monkeypatch, tmp_path, capsys
+):
+    """The ungated and no-review environments go to the step log as `::notice::` workflow
+    commands, not into the comment, and the comment carries no gate line either. Env names are
+    author-controlled, so a `%`, CR or LF in one is escaped as workflow-command data: raw, a
+    newline would start a second workflow command.
+
+    Mutation: drop `command_data` from the ungated notice in `notices` -- red.
+    Mutation: drop `command_data` from the no-review notice in `notices` -- red.
+    Mutation: append a `gate: complete` line to `_footer_parts` -- red."""
+    _all_envs_main_env(monkeypatch, tmp_path, "q%2\r", ["u%1\n::error::x"], ["q%2\r"])
+    assert _main_body(tmp_path) == _all_envs_body("q%2 ")
+    assert capsys.readouterr().out == (
+        f"::notice::u%251%0A::error::x{_UNGATED_NOTICE}\n::notice::q%252%0D{_NO_REVIEW_NOTICE}\n"
     )

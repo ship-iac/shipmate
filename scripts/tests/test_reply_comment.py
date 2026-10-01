@@ -30,7 +30,8 @@ def _main(**reply):
 
 
 def test_a_refusal_is_header_verdict_and_footer():
-    """Mutation: drop the blank line between the verdict and the footer."""
+    """Mutations: drop the blank line between the verdict and the footer; pass `hint=False`
+    for every outcome."""
     assert rc.body("unlock", "dev-eu", "refused", "no", _RUN_URL) == (
         f"### shipmate unlock dev-eu\n\n🔴 refused: no\n\n{_FOOTER}"
     )
@@ -43,10 +44,10 @@ def test_a_failure_says_failed_not_refused():
     )
 
 
-def test_a_notice_carries_the_white_circle():
-    """Mutation: give `notice` the 🔴 circle."""
+def test_a_notice_carries_the_white_circle_and_no_hint():
+    """Mutations: give `notice` the 🔴 circle; pass `hint=True` for every outcome."""
     assert rc.body("apply", "dev-eu", "notice", "dev-eu: ungated", _RUN_URL) == (
-        f"### shipmate apply dev-eu\n\n⚪ dev-eu: ungated\n\n{_FOOTER}"
+        f"### shipmate apply dev-eu\n\n⚪ dev-eu: ungated\n\n[run]({_RUN_URL})"
     )
 
 

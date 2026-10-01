@@ -1036,10 +1036,13 @@ Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
 header `### shipmate <verb>` (with `<env>` when the command named one, and
 `### shipmate` alone when the comment did not parse or named no known verb), a
-blank line, one verdict line, a blank line, and the footer every shipmate pull
-request comment except the `shipmate help` list ends with:
+blank line, one verdict line, a blank line, and a footer linking the run. A
+refusal or a failure asks the commenter to act, so its footer carries the help
+hint:
 
 ``[run](<run url>). Comment `shipmate help` for the available commands.``
+
+A notice asks nothing, so its footer is `[run](<run url>)` alone.
 
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate.toml`),
@@ -1099,9 +1102,13 @@ same way. It opens with the header `### shipmate doctor` and a verdict line
 counting errors (🔴, harvested failure annotations), warnings (🟠) and notices
 (⚪), zero counts omitted, plus `harvest incomplete` (⚪) when the harvest failed
 or is still pending; the line takes the worst circle, reads `🟢 no problems found`
-when there is nothing to count, and ends `at <sha>` naming the commit examined.
-Each finding and harvested annotation carries the same circles, and the report
-ends with the shared footer. It combines thirteen live settings probes (gate ruleset,
+when there is nothing to count, and ends
+`at [<sha7>](<commit url>) in [run #<n>](<run url>)`, linking the commit examined
+and this run (`at an unknown commit in [run #<n>](<run url>)` when the commit
+is not a 40-character lowercase hex SHA). Each finding and harvested annotation
+carries the same circles. Under any verdict but 🟢 the report ends with the help
+hint ``Comment `shipmate help` for the available commands.``; a 🟢 report has
+no footer. It combines thirteen live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
@@ -1158,12 +1165,11 @@ when either that or the commit under examination is unavailable it says pin
 freshness was not verified rather than falling back to a weaker read.
 
 Those warnings are not read from the sticky plan comment — a plan run writes the
-full plan comment (a verdict line, one line or fold-out per cell, and a footer
-pointing at `shipmate help`, the only thing in that comment that mentions
-the comment commands at all) but does not append doctor findings to it. A run
-with nothing planned writes no comment at all *unless* doctor emitted a warning,
-precisely so that footer never goes missing on a run that has something to point
-at (see §Plan comment). Instead, `actions/summary` runs
+full plan comment (a verdict line linking the run, and one line or fold-out
+per cell) but does not append doctor findings to it. A run with nothing planned
+writes no comment at all *unless* doctor emitted a warning, so the pull request
+still links the run whose page shows them, and that comment carries the help
+hint (see §Plan comment). Instead, `actions/summary` runs
 `scripts/doctor` on every plan run and emits its findings as
 workflow-command annotations, verbatim:
 
@@ -1412,14 +1418,15 @@ engine-owned scripts read it.
 A held environment travels the path explicit-environment exclusions already
 travel: dropped before env-levels are built, its `apply / <stack> / <env>`
 checks left pending — so `shipmate / gate` stays pending and the merge
-stays blocked — and environments ordered after it are skipped. The apply result
-comment names both halves: which environments were held for review, and which
-were permitted to apply under the exemption (§Apply result comment).
+stays blocked — and environments ordered after it are skipped. The apply run
+names both halves: its result comment names the environments held for review,
+and a notice annotation in its log names each environment permitted to apply
+under the exemption (§Apply result comment).
 
 `gated` can only relax an existing review requirement, never create one. When
 no branch rule requires an approving review, the decision is `NONE` (unless a
 requested-changes review stands, which still refuses), and both paths apply a
-gated environment without one. The apply result comment names
+gated environment without one. A notice annotation in the apply run's log names
 each gated environment that applied that way (§Apply result comment), and
 `shipmate doctor` names the gated environments when it can read the default
 branch's table: in a note while code-owner review is on, since they are still
@@ -2013,9 +2020,10 @@ applies that no longer exist. With no comment yet, none is posted — a docs-onl
 or engine-pin-bump pull request carries no shipmate comment — with one
 exception: a run where `doctor` emitted a warning still posts. Doctor's
 findings are annotations with no file/line, so they render only on the run page
-(see §Comment-ops/doctor), and this comment's footer is their only
-pull-request-visible pointer. `::notice::` findings do not trigger the
-exception: they are informational, and would put a comment on every quiet run.
+(see §Comment-ops/doctor), this comment's verdict links that run from the
+pull request, and the comment ends with the help hint (see below). `::notice::`
+findings do not trigger the exception: they are informational, and would put a
+comment on every quiet run.
 
 An existing comment is edited in place on every plan run (comment lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
@@ -2025,14 +2033,23 @@ trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, one line or fold-out per planned stack ×
-environment, sorted by environment then stack, a blank line, and the footer
-``[run](<run url>). Comment `shipmate help` for the available commands.``
+environment, sorted by environment then stack. When `doctor` emitted a warning on
+this run, a blank line and the help hint
+``Comment `shipmate help` for the available commands.`` follow, because the
+reader has settings drift to act on; otherwise there is no footer, since both
+verdicts are normal results and the verdict links the run. The doctor step runs
+before the comment is built and records that decision once, as its `warned`
+output, which both the comment build and the post-or-skip rule read.
 
-- **Verdict line.** `🟢 no changes at <sha>` when no cell changes (zero cells
-  included), else `🟡 N of M cells change at <sha>`. `<sha>` is the first seven
-  characters of the planned head commit, or the line ends `at an unknown commit`
-  when that commit is not a 40-character lowercase hex SHA. The line reads the cells only:
-  every failed plan job holds the gate, and a held run posts no comment.
+- **Verdict line.** `🟢 no changes` when no cell changes (zero cells
+  included), else `🟡 N of M cells change`, then
+  `at [<sha7>](<commit url>) in [run #<n>](<run url>)`. `<sha7>` is the first
+  seven characters of the planned head commit and `<commit url>` is
+  `<server>/<owner>/<repo>/commit/<sha>`; `<n>` is the run number and
+  `<run url>` the run's page. When that commit is not a 40-character lowercase
+  hex SHA the line ends `at an unknown commit in [run #<n>](<run url>)`. The
+  line reads the cells only: every failed plan job holds the gate, and a held
+  run posts no comment.
 - **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the
@@ -2103,14 +2120,16 @@ not upserted against a marker: every run's comment is new, so a
 failure-then-retry sequence stays visible as separate comments rather than
 overwriting the evidence of the failure — an audit trail.
 
-Structure, in order, blank lines between the parts: the header, the verdict
-line, one line or fold-out per row, the notes, the footer lines, and the footer
-``[run](<run url>). Comment `shipmate help` for the available commands.`` A run
-with no rows to render is the header, the verdict line, the footer lines and
-the footer.
+Structure, in order, blank lines between the parts, each part present only when
+it has content: the header, the verdict line, one line or fold-out per row, the
+notes, the footer lines, and, under any verdict but 🟢, the help hint
+``Comment `shipmate help` for the available commands.`` A 🟢 comment has no
+footer. A run with no rows to render is the header, the verdict line, the
+footer lines and, under any verdict but 🟢, the hint.
 
 - **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
-  apply` for a bare one; the verdict and footer lines name the environments.
+  apply` for a bare one; the row lines and the footer lines name the
+  environments.
 - **Verdict line.** With rows: one count per display status, in the order
   `N failed`, `N not recorded`, `N not attempted`, `N blocked`, `N applied`,
   zero counts omitted, joined by `, `. When the job-level `SHIPMATE_RESULTS`
@@ -2122,8 +2141,9 @@ the footer.
   job died before reporting. The circle is 🔴 for a failed run, else the worst
   row's (🔴, 🟠, 🟡, ⚪, 🟢 in that order). With no rows: `🔴 failed`,
   `⚪ nothing applied, environments are held for review`, or
-  `🟢 no pending applies`. The line ends `at <sha>`, the first seven characters
-  of the pull request head, or `at an unknown commit`.
+  `🟢 no pending applies`. The line ends
+  `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
+  head, as the plan comment's does.
 - **Row line.** `<circle> <stack> (<env>): <state> <a href="<url>">logs</a>`,
   one per expected cell, sorted by environment then stack:
 
@@ -2149,9 +2169,8 @@ the footer.
   retry with `shipmate apply <env>`.`` (the bare `shipmate apply` when the run
   covered all environments).
 - **Footer lines**, one per line: the bare-apply form's environment
-  dispositions, the no-review-required line in both forms, then
-  `gate: complete` or `gate: pending until every environment is applied`, from
-  the gate verdict.
+  dispositions. The comment states no gate line: the `shipmate / gate` status
+  shows the gate's state.
 
 There is no separate "nothing pending" input: the expected cell set is the
 same waves JSON `apply-detect` / `apply-all-detect` already compute, and a
@@ -2162,10 +2181,7 @@ holding evidence that an apply ran.
 The disposition lines are one per environment and cause, and both forms carry
 the same set: the rows form and the no-rows form are fed by one shared
 function, and the size budget never sheds a footer line — so the comment's most
-actionable warning cannot be lost on either path. Explicit, skipped and held
-lines carry a circle; the ungated and no-review-required lines carry a label
-instead, because their environments may have applied. In the order they
-render:
+actionable warning cannot be lost on either path. In the order they render:
 
 - **explicit** — ``🟡 <env>: left pending (explicit), comment `shipmate apply <env>` ``.
 - **skipped** — `⚪ <env>: skipped, ordered after an environment not applying
@@ -2185,24 +2201,31 @@ render:
   `CHANGES_REQUESTED`, or an unknown or absent decision), and only the run's
   own apply-all-detect notice carries which one, since the decision never
   reaches this renderer.
-- **ungated** — ``ungated: <env>, permitted to apply without an approving
-  review (`gated = false` in `.github/shipmate.toml`)``, one per environment
-  the run was permitted to apply without an approving review. It is the only
-  audit trail such an apply leaves: `reviewDecision` is a live value with no
-  history, so once the review lands nothing else in a run distinguishes an
-  apply that waited for it from one that did not. It states a permission, never
-  an outcome — the set is derived before any wave runs, so a failed wave or a
-  skipped env-level leaves an environment named here that never applied, and
-  the line carries no completion verb.
-- **no review required** — ``no review required: <env>, the pull request's
-  review state required no approving review, so `gated` had nothing to enforce
-  (docs/hardening.md #3-5)``, one per gated environment a `NONE` decision
+
+Two audit facts are not comment lines. The render step prints each as one
+`::notice::` workflow annotation in its own log, environment names escaped as
+workflow-command data. The notices live in the run log, so they last as long as
+the repository keeps its workflow logs. GitHub caps the annotations it renders
+per step, so the annotations view can show fewer than were printed; the step's
+log text holds every line:
+
+- **ungated** — `<env>: ungated, permitted to apply without an approving review
+  (gated = false in .github/shipmate.toml)`, one per environment the
+  all-environments run was permitted to apply without an approving review. It
+  is the audit trail such an apply leaves: `reviewDecision` is a live
+  value with no history, so once the review lands nothing else in a run
+  distinguishes an apply that waited for it from one that did not. It states a
+  permission, never an outcome — the set is derived before any wave runs, so a
+  failed wave or a skipped env-level leaves an environment named here that
+  never applied, and the text carries no completion verb.
+- **no review required** — `<env>: no approving review was required, so gated
+  had nothing to enforce`, one per gated environment a `NONE` decision
   authorized. It has its own cause, so it has its own detect output
   (`review_not_required_envs`, from both detects) rather than widening
-  ungated. It renders in the targeted and the all-environments form, and names
+  ungated. It prints in the targeted and the all-environments form, and names
   only environments with an applied, failed or not-recorded row — apply ran
-  there, so infrastructure may have changed — so the no-rows form never
-  carries it. It states the authorization fact and never that nobody reviewed:
+  there, so infrastructure may have changed — so a run with no rows never
+  prints it. It states the authorization fact and never that nobody reviewed:
   a code-owner review can still be required at an approval count of 0.
 
 Row status is derived from both the per-cell artifact and the real state of
@@ -2266,19 +2289,18 @@ when a row is blocked, one note follows the row lines:
 
 In the compact form each footer disposition is one line naming its
 environments comma-separated (`<envs>`), in the per-environment order; the
-`held:` remedy line and the `gate:` line are unchanged:
+`held:` remedy line is unchanged:
 
 - `` 🟡 left pending (explicit): <envs>; comment `shipmate apply <env>` for each ``
 - `⚪ skipped, ordered after an environment not applying this run: <envs>`
 - `⚪ held, the review state does not permit applying: <envs>`, followed by
   `` ; once the hold clears, comment `shipmate apply <env>` for <envs> `` naming
   the held environments that are also explicit, when there are any
-- `` ungated: <envs>, permitted to apply without an approving review (`gated = false` in `.github/shipmate.toml`) ``
-- `` no review required: <envs>, the pull request's review state required no approving review, so `gated` had nothing to enforce (docs/hardening.md #3-5) ``
 
 A 256-cell run needs this form when every cell is blocked, because a blocked
-reason is the one free text a bare line carries, and when its cells span 256
-environments, because each environment otherwise gets its own footer line.
+reason is the one free text a bare line carries, and when it names hundreds of
+environments in its dispositions, because each environment otherwise gets its
+own footer line.
 Past the compact form the render fails loud rather than post a comment that
 would exceed GitHub's cap.
 

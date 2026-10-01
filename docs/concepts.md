@@ -75,8 +75,10 @@ Five verbs are active (`destroy` is reserved for later):
   killed apply, so the environment's stacks can apply again. Does not
   re-apply, and does not recover a partial apply.
 
-The sticky plan comment's footer points at `shipmate help`, so the commands are
-discoverable from the pull request itself. `doctor`'s environment checks cover
+A refused or failed command's reply, an apply or doctor comment whose verdict
+is not 🟢, and the plan comment of a run where doctor warned end by pointing at
+`shipmate help`, so the commands are discoverable
+from the pull request itself. `doctor`'s environment checks cover
 the environments of the stacks a given pull request changed, and its report says
 which ones those were. It is a check on the settings that pull request touches,
 not a repository-wide audit.

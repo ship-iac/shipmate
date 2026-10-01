@@ -198,9 +198,9 @@ EXPECTED_STEP_NAMES = [
     "Mint an environments-scoped token for doctor's plan-env secret probe",
     "Create apply checks (pending / no-changes)",
     "Mirror this run's per-cell plan checks onto the head",
+    "Doctor: settings-drift warnings (annotations only, never blocks)",
     "Build comment + gate state",
     "Decide gate state and comment mode",
-    "Doctor: settings-drift warnings (annotations only, never blocks)",
     "Upsert sticky comment",
     "Create/refresh gate",
 ]

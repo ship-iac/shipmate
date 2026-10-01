@@ -125,7 +125,6 @@ jobs:
     permissions: { actions: read }
     steps:
       - name: Complete gate if every apply check is done
-        id: gate
         uses: $/actions/gate-refresh
         with:
           head-sha: ${{ inputs.ref }}
@@ -140,6 +139,5 @@ jobs:
           waves-json: ${{ needs.detect.outputs.waves }}
           review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           results: ${{ join(needs.*.result, ',') }}
-          gate-verdict: ${{ steps.gate.outputs.verdict }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

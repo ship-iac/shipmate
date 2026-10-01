@@ -526,6 +526,7 @@ def test_the_doctor_upsert_anchors_the_marker_at_the_body_start(monkeypatch):
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    monkeypatch.setenv("GITHUB_RUN_NUMBER", "1")
     assert doctor.render_report([], [], _report_ctx()).splitlines()[0] == doctor.DOCTOR_MARKER
 
 
@@ -1006,7 +1007,7 @@ def test_the_exemption_report_claims_permission_never_completion(tmp_path):
     """At comment time the dispatch has not run, so any verb about the outcome would be a claim
     this step cannot make. The whole body, hand-written.
 
-    Mutation: map the step's outcome to `refused`.
+    Mutations: map the step's outcome to `refused`; give a notice the footer hint.
     """
     body = _posted_body(
         tmp_path,
@@ -1018,7 +1019,7 @@ def test_the_exemption_report_claims_permission_never_completion(tmp_path):
         "⚪ dev-eu: ungated, permitted to apply without an approving review "
         "(`gated = false` in `.github/shipmate.toml`). The apply result comment shows what "
         "applied.\n\n"
-        f"{_FOOTER}"
+        f"[run]({_RUN_URL})"
     )
 
 

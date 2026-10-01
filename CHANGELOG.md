@@ -13,7 +13,7 @@ section below names the SHA the release tags.
 ### Added
 
 - **`shipmate doctor` names each gated environment at 0 required approvals: a note while code-owner review is on, a warning while it is off.**
-- **The apply comment says when a gated environment applied with no approving review required.**
+- **The apply run's log carries a notice annotation naming each gated environment applied with no approving review required.**
 - **A cell whose `tofu init` fails after restoring a provider cache entry names that entry's key in an error annotation.**
 - **`scripts/onboard`'s closing checklist names the stacks without a git-tracked `.terraform.lock.hcl`.**
 - **`shipmate doctor` lists the role each environment resolves, per path and workload.**
@@ -35,7 +35,7 @@ section below names the SHA the release tags.
 - **The control jobs that run no `tofu` run on `ubuntu-slim`.**
 - **Comments by bots or without `shipmate` start no comment-ops job.**
 - **`shipmate apply` and `shipmate unlock` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed.**
-- **Plan, apply and doctor comments share one shape: a header, a verdict line naming the commit, one line per cell or finding, and a run link; refusals, failures, notices and help share its header and footer.**
+- **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, under an apply or doctor verdict that is not 🟢, and on the plan comment of a run where doctor warned. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 
 ### Fixed
 
