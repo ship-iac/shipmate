@@ -1,19 +1,17 @@
 """No shipped string carries an em dash, an en dash or a middle dot.
 
 Scope: every Python string constant under `scripts/` that is not a module, class or
-function docstring (f-string parts included), and every YAML string in
-`actions/*/action.yml` and `.github/workflows/*.yml` outside lines that are shell
-comments. That covers what the engine prints, posts and writes as a status, and also
-action `description:` fields and step `name:`s: one rule over every shipped string is
-smaller than a classification of which strings reach a reader. Docstrings and comments
-are out of scope.
+function docstring (f-string parts included), and every line of every YAML string in
+`actions/*/action.yml` and `.github/workflows/*.yml`, shell comments in a `run:` body
+included. That covers what the engine prints, posts and writes as a status, and also
+action `description:` fields, step `name:`s and a markdown heading inside a heredoc: one
+rule over every shipped string is smaller than a classification of which strings reach a
+reader. Python docstrings and comments, and YAML comments outside a string, are out of
+scope.
 
 Threat model: accidental regression, a new message written with a dash. The helpers
 under `scripts/` carry no extension, so Python is recognised by a `python3` shebang or
 a `.py` suffix, and any other file there fails the scan rather than being skipped.
-
-Ceiling: a YAML line starting with `#` is skipped as a shell comment, so a markdown heading
-inside a `run:` heredoc is skipped too. No heredoc in the tree carries a `#` line today.
 """
 
 import ast
@@ -95,7 +93,7 @@ def _yaml_hits(path):
         elif isinstance(node, yaml.ScalarNode):
             block = 1 if node.style in ("|", ">") else 0
             for i, line in enumerate(node.value.splitlines()):
-                if _has(line) and not line.strip().startswith("#"):
+                if _has(line):
                     hits.append(node.start_mark.line + 1 + block + i)
     return [f"{path.relative_to(ENGINE).as_posix()}:{ln}" for ln in sorted(hits)]
 
@@ -120,8 +118,8 @@ def test_a_non_python_file_under_scripts_fails_the_scan(tmp_path):
 
 def test_no_shipped_string_carries_a_banned_dash():
     """Mutations, each red on its own: an em dash in an f-string in `scripts/apply-detect`;
-    in an `::error::` echo of an `actions/apply-cell` `run:` body; in a step `name:`. An em
-    dash in a docstring or on a shell-comment line of a `run:` body stays green.
+    in an `::error::` echo of an `actions/apply-cell` `run:` body; in a step `name:`; in a
+    `# heading` line inside a heredoc of a `run:` body. An em dash in a docstring stays green.
     """
     hits = [h for p, src in _python_sources(SCRIPTS).items() for h in _python_hits(p, src)]
     hits += [h for p in _yaml_files() for h in _yaml_hits(p)]

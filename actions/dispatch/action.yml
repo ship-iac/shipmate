@@ -40,7 +40,7 @@ runs:
     - name: workflow_dispatch apply
       shell: bash
       # All author-controlled values pass via env, and the JSON body is built in python, never
-      # a shell heredoc with interpolation — injection-safe.
+      # a shell heredoc with interpolation, so injection-safe.
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         REPO: ${{ github.repository }}
@@ -77,7 +77,7 @@ runs:
           exit 1
         fi
         # The verb picks a job, not a file. The case survives to refuse a verb `shipmate.yml`
-        # would accept — the input is declared — and then skip every job over, reading as a
+        # would accept (the input is declared) and then skip every job over, reading as a
         # successful run that did nothing.
         case "$VERB" in
           plan|apply|unlock) WORKFLOW=shipmate.yml ;;

@@ -33,7 +33,7 @@ runs:
     - name: Stack slug
       id: ids
       shell: bash
-      # Author-controlled $STACK via env (never interpolated) — injection-safe.
+      # Author-controlled $STACK via env (never interpolated), so injection-safe.
       env:
         STACK: ${{ inputs.stack }}
       run: |

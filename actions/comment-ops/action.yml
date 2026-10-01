@@ -576,7 +576,7 @@ runs:
         # it to the explicit NONE sentinel: authorize fails closed on anything that is neither
         # NONE nor a decision enum value, and an empty string must never be a pass value.
         # The $owner/$repo/$pr tokens are GraphQL query variables (bound via -F), not
-        # shell variables — single quotes are intentional.
+        # shell variables: single quotes are intentional.
         # shellcheck disable=SC2016
         rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
           -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
