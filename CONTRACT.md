@@ -1032,7 +1032,8 @@ run is not visible from the pull request, so every refusal in the dispatch step
 `🔴 failed:` reply there whose footer links the run. The run holds the error; the
 reply never carries the API's answer.
 
-Every reply comment-ops posts in place of running a command has one shape: the
+Every reply comment-ops posts (a refusal or failure in place of running a
+command, or a notice posted alongside the dispatch it reports) has one shape: the
 header `### shipmate <verb>` (with `<env>` when the command named one, and
 `### shipmate` alone when the comment did not parse or named no known verb), a
 blank line, one verdict line, a blank line, and the footer every shipmate pull
@@ -2030,7 +2031,7 @@ environment, sorted by environment then stack, a blank line, and the footer
 - **Verdict line.** `🟢 no changes at <sha>` when no cell changes (zero cells
   included), else `🟡 N of M cells change at <sha>`. `<sha>` is the first seven
   characters of the planned head commit, or the line ends `at an unknown commit`
-  when that commit is not a 40-character hex SHA. The line reads the cells only:
+  when that commit is not a 40-character lowercase hex SHA. The line reads the cells only:
   every failed plan job holds the gate, and a held run posts no comment.
 - **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
@@ -2075,7 +2076,8 @@ with the glob pattern `cell-summary.*`. It contains verbatim:
   import and forget counts come from `plan.txt`'s single column-0 OpenTofu
   tally line (tofu omits a zero import or forget count), or are zero when the
   text is a no-changes or outputs-only plan; a cell with no `plan.txt`, no such
-  line, or two tally lines renders `+? ~? -?` and gets one warning.
+  line, or two tally lines gets one warning, and renders `+? ~? -?` when it
+  changes (an unchanged cell still renders `no changes`).
 - `plan.txt` — the `tofu show -no-color` rendering of the reviewed plan. The
   `summary` job hashes these exact bytes and records the digest on the cell's
   apply check; the apply re-renders the stored plan and refuses a difference
@@ -2255,8 +2257,16 @@ decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
 character instead of aborting the render. Terminal escape sequences (colour
 codes and similar) are stripped from that text as it is read, since the apply
 output is tofu's own and is not required to be colour-free. Every remaining
-row's bare line is reserved up front, and the render fails loud rather than
-post a comment that would exceed GitHub's cap.
+row's bare line is reserved up front. When even the bare lines exceed the cap
+and a row is blocked, the comment falls back to a compact form: every row keeps
+its line and its `logs` link, a blocked row's state reads `blocked` without its
+reason, and one note follows the row lines:
+
+`blocked: each blocked cell's reason is in its logs.`
+
+A 256-cell run with every cell blocked needs this form, because a blocked
+reason is the one free text a bare line carries. Past the compact form the
+render fails loud rather than post a comment that would exceed GitHub's cap.
 
 The data feeding the comment ships in the per-cell artifact
 `apply-summary.<env>.<slug>` (see Apply summary artifacts, above); per-cell

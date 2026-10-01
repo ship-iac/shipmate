@@ -192,9 +192,9 @@ runs:
 
     - name: "Doctor: reject a commenter without a privileged association"
       # Silence would be indistinguishable from a broken engine, so say why. GITHUB_TOKEN, not
-      # the App: this must answer even where the App is not installed. One line, no probe
-      # results -- the point is to disclose nothing. The wording names GitHub's classification
-      # of the author, not the "write access" this gate does not verify.
+      # the App: this must answer even where the App is not installed. A refusal reply with no
+      # probe results -- the point is to disclose nothing. The wording names GitHub's
+      # classification of the author, not the "write access" this gate does not verify.
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association != 'true' }}
       shell: bash
       env:
