@@ -467,11 +467,13 @@ def render_apply_section(line, text, url, limit):
     return line
 
 
-def _verdict(rows, failed_run, held, head_sha):
-    """The line under the header. With rows: a count per status in `_STATUS` order, zero counts
-    omitted, led by a bare `failed` when the run failed and no failed or blocked row shows
-    it; the circle is the worst row's, or 🔴 for a failed run. Without rows: `🔴 failed`, the
-    held sentence, or `🟢 no pending applies`. Then `provenance`.
+def _verdict(rows, failed_run, held, head_sha, run_url):
+    """(circle, line): the line under the header and its circle. With rows: a count per
+    status in `_STATUS` order, zero counts omitted, led by a bare `failed` when the run failed
+    and no failed or blocked row shows it; the circle is the worst row's, or 🔴 for a failed
+    run. Without rows: `🔴 failed`, the held sentence, or `🟢 no pending applies`. Then
+    `provenance`. The circle is returned with the line so the footer decision reads it, never
+    the rendered text.
 
     The leading `failed` is suppressed by a `failed` or `blocked` row, each of which already
     names a cell that did not apply. An `unrecorded` row does not suppress it: it describes ONE
@@ -480,19 +482,20 @@ def _verdict(rows, failed_run, held, head_sha):
     `not attempted`; suppressing on it would hide that environment's only failure signal."""
     if not rows:
         if failed_run:
-            text = "🔴 failed"
+            circle, text = "🔴", "failed"
         elif held:
             # Work WAS pending and the engine refused it.
-            text = "⚪ nothing applied, environments are held for review"
+            circle, text = "⚪", "nothing applied, environments are held for review"
         else:
-            text = "🟢 no pending applies"
-        return f"{text} {sc.provenance(head_sha)}"
-    n = collections.Counter(r["status"] for r in rows)
-    tokens = [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
-    if failed_run and not (n["failed"] or n["blocked"]):
-        tokens.insert(0, "failed")
-    circle = "🔴" if failed_run else sc.worst(_STATUS[s][0] for s in n)
-    return f"{circle} {', '.join(tokens)} {sc.provenance(head_sha)}"
+            circle, text = "🟢", "no pending applies"
+    else:
+        n = collections.Counter(r["status"] for r in rows)
+        tokens = [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
+        if failed_run and not (n["failed"] or n["blocked"]):
+            tokens.insert(0, "failed")
+        circle = "🔴" if failed_run else sc.worst(_STATUS[s][0] for s in n)
+        text = ", ".join(tokens)
+    return circle, f"{circle} {text} {sc.provenance(head_sha, run_url)}"
 
 
 _HELD_REMEDY = (
@@ -523,7 +526,7 @@ def notices(rows, env_name, applied_ungated, review_not_required):
     an applied, failed or unrecorded row, where infrastructure may have changed, so a run with
     no rows names none. Env names are author-controlled, so `command_data`-escaped.
 
-    An ungated notice is the only audit trail an apply permitted by `gated = false` under a
+    An ungated notice is the audit trail an apply permitted by `gated = false` under a
     REVIEW_REQUIRED decision leaves: `reviewDecision` is a live value with no history, so once
     the review lands nothing in the run tells an apply that waited for it from one that did not.
     It carries no completion verb for the named env -- detect derives the set from `runnable`,
@@ -639,9 +642,9 @@ def _compact(head, rows, urls, bares, notes, parts, hint):
     """The hard-cap fallback, tried only after the normal render overflows HARD_CAP: every row's
     bare line with a blocked row's state shortened to `blocked` and `_BLOCKED_NOTE` leading the
     notes when a row is blocked, above the grouped footer `parts`. A blocked reason is the one
-    free text a bare line carries, and the footer lines grow with the environment count, so a
-    256-cell run that is all blocked, or spread over 256 environments, can overflow in the
-    normal form and fit in this one."""
+    free text a bare line carries, and the footer lines grow with the environments the
+    dispositions name, so a 256-cell run that is all blocked, or whose dispositions name hundreds
+    of environments, can overflow in the normal form and fit in this one."""
     if any(r["status"] == "blocked" for r in rows):
         notes = (_BLOCKED_NOTE, *notes)
     circle, word = _STATUS["blocked"]
@@ -674,9 +677,9 @@ def build_comment(
     reserved up front, together, so an early giant apply.txt cannot starve a later row. When
     even the bare lines overflow HARD_CAP, `_compact` renders them without the blocked reasons
     and with one footer line per disposition; past that a SystemExit names the cause."""
-    verdict = _verdict(rows, _results_failed(results_csv), held, head_sha)
+    circle, verdict = _verdict(rows, _results_failed(results_csv), held, head_sha, run_url)
     head = f"{sc.header('apply', env_name)}\n\n{verdict}"
-    hint = sc.footer_hint(verdict)
+    hint = sc.footer_hint(circle)
     notes = (
         _lock_note(rows, env_name),
         _unrecorded_note(rows),

@@ -52,7 +52,7 @@ import re
 import sys
 import urllib.parse
 
-from _shipmate import _load, utf8_output
+from _shipmate import _load, current_run_url, utf8_output
 
 bm = _load("build-matrix")
 _gh_json = bm.gh_json
@@ -2164,7 +2164,7 @@ def harvest_sections(annotations):
     return by_check
 
 
-def _provenance(ctx):
+def _plan_runs_line(ctx):
     """The report's preamble: what was examined, and NOTHING about what the
     probes did with it.
 
@@ -2178,7 +2178,7 @@ def _provenance(ctx):
     if runs:
         named = _one_line(", ".join(runs), 120)
         plural = "s" if len(runs) > 1 else ""
-        return f"Cell summaries from plan run{plural} {named}."
+        return f"Cell summaries from plan run ID{plural} {named}."
     return "No plan records on this commit's apply checks."
 
 
@@ -2300,12 +2300,12 @@ def _plural(n, word):
 
 
 def _verdict(findings, sections, ctx):
-    """The line under the header: `N errors` (harvested failure annotations), `N warnings`
-    (warning findings plus harvested warning annotations), `N notices` (notice findings), zero
-    counts omitted, then `harvest incomplete` when the harvest failed or is still pending. Errors
-    are 🔴, warnings 🟠, notices and `harvest incomplete` ⚪, and the line takes the worst;
-    `🟢 no problems found` when there is no token. Then `provenance`. `config_status` lines are
-    status and count toward nothing.
+    """(circle, line): the line under the header and its circle. The line: `N errors`
+    (harvested failure annotations), `N warnings` (warning findings plus harvested warning
+    annotations), `N notices` (notice findings), zero counts omitted, then `harvest incomplete`
+    when the harvest failed or is still pending. Errors are 🔴, warnings 🟠, notices and
+    `harvest incomplete` ⚪, and the line takes the worst; `🟢 no problems found` when there is
+    no token. Then `provenance`. `config_status` lines are status and count toward nothing.
 
     Harvested rows are counted from `harvest_sections`, after its filter, so a plan-path doctor
     annotation the live probes re-state is counted once, and a row the budget drops still counts.
@@ -2320,11 +2320,11 @@ def _verdict(findings, sections, ctx):
     tokens = [(circle, _plural(n, word)) for circle, n, word in counts if n]
     if ctx.get("harvest_failed") or ctx.get("harvest_pending"):
         tokens.append(("⚪", "harvest incomplete"))
-    sha = sc.provenance(ctx["head_sha"])
+    sha = sc.provenance(ctx["head_sha"], current_run_url())
     if not tokens:
-        return f"🟢 no problems found {sha}"
+        return "🟢", f"🟢 no problems found {sha}"
     circle = sc.worst(c for c, _ in tokens)
-    return f"{circle} {', '.join(t for _, t in tokens)} {sha}"
+    return circle, f"{circle} {', '.join(t for _, t in tokens)} {sha}"
 
 
 def _report_head(ctx, verdict):
@@ -2336,7 +2336,7 @@ def _report_head(ctx, verdict):
         "",
         verdict,
         "",
-        _provenance(ctx),
+        _plan_runs_line(ctx),
         "",
         "#### repository settings",
         "",
@@ -2353,13 +2353,13 @@ def _finding_row(lvl, text):
     return f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}"
 
 
-def _findings_only_report(findings, ctx, verdict):
+def _findings_only_report(findings, ctx, circle, verdict):
     """Last-ditch fallback: a body still over sc.HARD_CAP with the harvest
     already excluded means the findings themselves are unexpectedly large.
     Hard-truncates them with a count, so the comment still posts rather than
-    the whole POST failing with a 422. Keeps the full report's `verdict`."""
+    the whole POST failing with a 422. Keeps the full report's `circle` and `verdict`."""
     head = _report_head(ctx, verdict)
-    hint = sc.footer_hint(verdict)
+    hint = sc.footer_hint(circle)
     tail = ["", hint] if hint else []
     # 200 chars of headroom for the omitted-count line appended below.
     budget = max(0, sc.HARD_CAP - len("\n".join(head)) - len("\n".join(tail)) - 200)
@@ -2409,7 +2409,7 @@ CONFIG_HEADING = "#### the environment table at this commit"
 
 def render_report(findings, annotations, ctx, status=()):
     sections = harvest_sections(annotations)
-    verdict = _verdict(findings, sections, ctx)
+    circle, verdict = _verdict(findings, sections, ctx)
     out = _report_head(ctx, verdict)
     if findings:
         out += [_finding_row(lvl, text) for lvl, text in findings]
@@ -2418,7 +2418,7 @@ def render_report(findings, annotations, ctx, status=()):
     if status:
         out += ["", CONFIG_HEADING, ""] + [_finding_row(lvl, text) for lvl, text in status]
     heading = ["", "#### warnings from this commit's workflow runs", ""]
-    hint = sc.footer_hint(verdict)
+    hint = sc.footer_hint(circle)
     tail = ["", hint] if hint else []
     # The settings-probe section above is never truncated -- it is the part a
     # stale comment can't recover from the run logs -- so the harvest gets
@@ -2437,7 +2437,7 @@ def render_report(findings, annotations, ctx, status=()):
         # The harvest section is already budgeted against sc.SIZE_BUDGET above, so overflow this
         # large can only come from the settings-probe findings themselves — degrade those too
         # rather than let the comment-ops render step's `gh api ... -F body=@doctor.md` 422.
-        body = _findings_only_report(findings, ctx, verdict)
+        body = _findings_only_report(findings, ctx, circle, verdict)
     return body
 
 

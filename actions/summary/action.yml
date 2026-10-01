@@ -135,12 +135,53 @@ runs:
           fi
         done < mirror.jsonl
 
+    - name: "Doctor: settings-drift warnings (annotations only, never blocks)"
+      id: doctor
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        # Empty when the `envtoken` mint failed; doctor then says the plan-env secret check
+        # did not run rather than reporting it clean.
+        SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
+        SHIPMATE_DOCTOR_MODE: annotate
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # The commit the pin probe reads the consumer's workflow files at. Without it the
+        # contents API falls back to the default branch, where a pin bump on this pull request
+        # is not visible yet, and doctor reports the pin stale on the run that fixes it.
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        # For the engine-pin probe's cross-repo release read: the App installation token is
+        # scoped to the consumer repo and may not read the engine repo; the workflow token
+        # can, the engine repo being public. `github.token` resolves inside a composite
+        # action, so this needs no new consumer input.
+        SHIPMATE_PUBLIC_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        # Findings surface as workflow annotations on this run, not in the sticky comment:
+        # `shipmate doctor` harvests them back onto the pull request on demand. doctor writes
+        # fully-formed ::warning::/::notice:: lines, catted through unmodified so no shell
+        # reconstruction can mangle them.
+        if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.txt; then
+          cat doctor.txt
+        else
+          echo "::warning::doctor probes errored; settings-drift check skipped"
+        fi
+        # Warnings (actionable misconfiguration) only: a `::notice::` finding is informational.
+        # The one reading of doctor's result: the comment build and the upsert both take `warned`.
+        warned=false
+        if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then
+          warned=true
+        fi
+        echo "warned=$warned" >> "$GITHUB_OUTPUT"
+
     - name: Build comment + gate state
       id: build
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_DOCTOR_WARNED: ${{ steps.doctor.outputs.warned }}
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
@@ -174,38 +215,6 @@ runs:
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state" > gate.json
 
-    - name: "Doctor: settings-drift warnings (annotations only, never blocks)"
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        # Empty when the `envtoken` mint failed; doctor then says the plan-env secret check
-        # did not run rather than reporting it clean.
-        SHIPMATE_ENV_TOKEN: ${{ steps.envtoken.outputs.token }}
-        SHIPMATE_DOCTOR_MODE: annotate
-        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
-        SHIPMATE_APP_ID: ${{ inputs.app-id }}
-        SHIPMATE_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        # The commit the pin probe reads the consumer's workflow files at. Without it the
-        # contents API falls back to the default branch, where a pin bump on this pull request
-        # is not visible yet, and doctor reports the pin stale on the run that fixes it.
-        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
-        # For the engine-pin probe's cross-repo release read: the App installation token is
-        # scoped to the consumer repo and may not read the engine repo; the workflow token
-        # can, the engine repo being public. `github.token` resolves inside a composite
-        # action, so this needs no new consumer input.
-        SHIPMATE_PUBLIC_TOKEN: ${{ github.token }}
-      run: |
-        set -euo pipefail
-        # Findings surface as workflow annotations on this run, not in the sticky comment:
-        # `shipmate doctor` harvests them back onto the pull request on demand. doctor writes
-        # fully-formed ::warning::/::notice:: lines, catted through unmodified so no shell
-        # reconstruction can mangle them.
-        if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.txt; then
-          cat doctor.txt
-        else
-          echo "::warning::doctor probes errored; settings-drift check skipped"
-        fi
-
     - name: Upsert sticky comment
       shell: bash
       env:
@@ -213,6 +222,7 @@ runs:
         PR: ${{ inputs.pr-number }}
         MODE: ${{ steps.gate.outputs.comment_mode }}
         PLAN_RESULT: ${{ inputs.plan-result }}
+        DOCTOR_WARNED: ${{ steps.doctor.outputs.warned }}
       run: |
         set -euo pipefail
         # A draft autoplan planned nothing, so an existing comment still describes a head
@@ -261,19 +271,12 @@ runs:
         # Nothing changed and no comment to keep current: post nothing, so a docs-only or
         # engine-pin-bump pull request carries no plan comment at all. The gate is written by a
         # later step regardless.
-        # A run where doctor reported settings drift still posts: doctor's annotations carry no
-        # file/line and so render only on the run page, and the comment's verdict links that run
-        # from the pull request. Warnings (actionable
-        # misconfiguration) only -- a `::notice::` finding is informational and would put a
-        # comment on every quiet run.
+        # A run where doctor warned still posts: doctor's annotations render only on the run
+        # page, which the verdict links, and that comment carries the help hint.
         # An existing comment is always kept current instead of suppressed, or a pull request
         # that planned changes and then pushed them away would keep displaying applies that no
         # longer exist.
-        doctor_warned=false
-        if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then
-          doctor_warned=true
-        fi
-        if [ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$doctor_warned" = "false" ]; then
+        if [ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$DOCTOR_WARNED" != "true" ]; then
           echo "nothing changed, no existing plan comment, no doctor findings; nothing to post"
           exit 0
         fi

@@ -1168,7 +1168,8 @@ Those warnings are not read from the sticky plan comment — a plan run writes t
 full plan comment (a verdict line linking the run, and one line or fold-out
 per cell) but does not append doctor findings to it. A run with nothing planned
 writes no comment at all *unless* doctor emitted a warning, so the pull request
-still links the run whose page shows them (see §Plan comment). Instead, `actions/summary` runs
+still links the run whose page shows them, and that comment carries the help
+hint (see §Plan comment). Instead, `actions/summary` runs
 `scripts/doctor` on every plan run and emits its findings as
 workflow-command annotations, verbatim:
 
@@ -2019,9 +2020,10 @@ applies that no longer exist. With no comment yet, none is posted — a docs-onl
 or engine-pin-bump pull request carries no shipmate comment — with one
 exception: a run where `doctor` emitted a warning still posts. Doctor's
 findings are annotations with no file/line, so they render only on the run page
-(see §Comment-ops/doctor), and this comment's verdict links that run from the
-pull request. `::notice::` findings do not trigger the
-exception: they are informational, and would put a comment on every quiet run.
+(see §Comment-ops/doctor), this comment's verdict links that run from the
+pull request, and the comment ends with the help hint (see below). `::notice::`
+findings do not trigger the exception: they are informational, and would put a
+comment on every quiet run.
 
 An existing comment is edited in place on every plan run (comment lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
@@ -2031,9 +2033,13 @@ trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, one line or fold-out per planned stack ×
-environment, sorted by environment then stack. There is no footer: both verdicts
-are normal results, so the comment carries no help hint, and the verdict links
-the run.
+environment, sorted by environment then stack. When `doctor` emitted a warning on
+this run, a blank line and the help hint
+``Comment `shipmate help` for the available commands.`` follow, because the
+reader has settings drift to act on; otherwise there is no footer, since both
+verdicts are normal results and the verdict links the run. The doctor step runs
+before the comment is built and records that decision once, as its `warned`
+output, which both the comment build and the post-or-skip rule read.
 
 - **Verdict line.** `🟢 no changes` when no cell changes (zero cells
   included), else `🟡 N of M cells change`, then
@@ -2119,7 +2125,7 @@ it has content: the header, the verdict line, one line or fold-out per row, the
 notes, the footer lines, and, under any verdict but 🟢, the help hint
 ``Comment `shipmate help` for the available commands.`` A 🟢 comment has no
 footer. A run with no rows to render is the header, the verdict line, the
-footer lines and the hint.
+footer lines and, under any verdict but 🟢, the hint.
 
 - **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
   apply` for a bare one; the row lines and the footer lines name the
@@ -2198,12 +2204,15 @@ actionable warning cannot be lost on either path. In the order they render:
 
 Two audit facts are not comment lines. The render step prints each as one
 `::notice::` workflow annotation in its own log, environment names escaped as
-workflow-command data:
+workflow-command data. The notices live in the run log, so they last as long as
+the repository keeps its workflow logs. GitHub caps the annotations it renders
+per step, so the annotations view can show fewer than were printed; the step's
+log text holds every line:
 
 - **ungated** — `<env>: ungated, permitted to apply without an approving review
   (gated = false in .github/shipmate.toml)`, one per environment the
   all-environments run was permitted to apply without an approving review. It
-  is the only audit trail such an apply leaves: `reviewDecision` is a live
+  is the audit trail such an apply leaves: `reviewDecision` is a live
   value with no history, so once the review lands nothing else in a run
   distinguishes an apply that waited for it from one that did not. It states a
   permission, never an outcome — the set is derived before any wave runs, so a

@@ -4,7 +4,7 @@ import pathlib
 
 import pytest
 from _loader import ENGINE as _ENGINE
-from _loader import load_script, run_lines, step_by
+from _loader import action_steps, load_script, run_lines, step_by
 
 sc = load_script("summary-comment")
 
@@ -170,6 +170,11 @@ FOOT = f"[run](https://gh/run/1). {HINT}"
 #: `provenance(SHA)` under `_run_context`, hand-written.
 AT = (
     "at [0123456](https://gh/o/r/commit/0123456789abcdef0123456789abcdef01234567) "
+    "in [run #7](https://gh/run/1)"
+)
+#: `provenance(SHA, current_run_url())` under `_run_context`, which is what `main` renders.
+MAIN_AT = (
+    "at [0123456](https://gh/o/r/commit/0123456789abcdef0123456789abcdef01234567) "
     "in [run #7](https://gh/o/r/actions/runs/1)"
 )
 HEAD = "<!-- shipmate:summary -->\n### shipmate plan\n\n"
@@ -219,18 +224,20 @@ def test_header_forms():
 def test_provenance_links_a_valid_sha_and_names_anything_else_unknown():
     """Mutations: `sha[:8]` reddens the valid case; replacing the hex check with `if sha`
     reddens the uppercase case; dropping the run link from the unknown form reddens both
-    unknown cases."""
-    unknown = "at an unknown commit in [run #7](https://gh/o/r/actions/runs/1)"
-    assert sc.provenance(SHA) == AT
-    assert sc.provenance("") == unknown
-    assert sc.provenance(SHA.upper()) == unknown
+    unknown cases; reading the run link from the environment instead of `run_url` reddens
+    every case."""
+    unknown = "at an unknown commit in [run #7](https://gh/run/1)"
+    assert sc.provenance(SHA, RUN_URL) == AT
+    assert sc.provenance("", RUN_URL) == unknown
+    assert sc.provenance(SHA.upper(), RUN_URL) == unknown
 
 
-def test_footer_hint_shows_under_every_verdict_but_green():
-    """Mutation: returning `FOOTER_HINT` unconditionally reddens the 🟢 case."""
-    assert sc.footer_hint("🟢 1 applied " + AT) == ""
+def test_footer_hint_shows_under_every_circle_but_green():
+    """Mutations: returning `FOOTER_HINT` unconditionally reddens the 🟢 case; inverting the
+    circle test (`!=`) reddens every case."""
+    assert sc.footer_hint("🟢") == ""
     for circle in ("🔴", "🟠", "🟡", "⚪"):
-        assert sc.footer_hint(f"{circle} x {AT}") == HINT
+        assert sc.footer_hint(circle) == HINT
 
 
 def test_footer_with_and_without_the_help_hint():
@@ -241,10 +248,12 @@ def test_footer_with_and_without_the_help_hint():
 def test_verdict_reads_the_cells_only():
     """Mutation: counting every cell as changing (`n = len(cells)`) renders `3 of 3`."""
     unchanged = _cell(changed=False)
-    assert sc.verdict([], SHA) == f"🟢 no changes {AT}"
-    assert sc.verdict([unchanged, unchanged], SHA) == f"🟢 no changes {AT}"
-    assert sc.verdict([unchanged, _cell(), unchanged], SHA) == f"🟡 1 of 3 cells change {AT}"
-    assert sc.verdict([_cell()], SHA) == f"🟡 1 of 1 cells change {AT}"
+    assert sc.verdict([], SHA, RUN_URL) == f"🟢 no changes {AT}"
+    assert sc.verdict([unchanged, unchanged], SHA, RUN_URL) == f"🟢 no changes {AT}"
+    assert (
+        sc.verdict([unchanged, _cell(), unchanged], SHA, RUN_URL) == f"🟡 1 of 3 cells change {AT}"
+    )
+    assert sc.verdict([_cell()], SHA, RUN_URL) == f"🟡 1 of 1 cells change {AT}"
 
 
 _BARE_APP = '🟡 stacks/app (dev-eu): +1 ~0 -0 <a href="https://ck/app-eu">plan</a>'
@@ -321,6 +330,17 @@ def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
 def test_zero_cells_render_header_and_verdict_only():
     """Mutation: appending `footer(run_url)` reddens it."""
     assert sc.build_comment([], {}, RUN_URL, SHA) == HEAD + f"🟢 no changes {AT}"
+
+
+def test_a_doctor_warned_plan_comment_ends_with_the_help_hint():
+    """The comment a run posts because doctor warned asks the reader to act, so it carries the
+    hint; without the flag the same comment has none.
+
+    Mutation: ignore `hint` in `build_comment` (`tail = ""`) -- red."""
+    assert sc.build_comment([], {}, RUN_URL, SHA, hint=True) == (
+        HEAD + f"🟢 no changes {AT}\n\n{HINT}"
+    )
+    assert sc.build_comment([], {}, RUN_URL, SHA, hint=False) == HEAD + f"🟢 no changes {AT}"
 
 
 def _bare(i):
@@ -733,30 +753,58 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     gate-state's `nothing_changed` derivation, not a raw cell count -- because an existing
     comment must still be updated to the no-planned-cells body, or a pull request that planned
     changes and then pushed them away keeps displaying the stale plan table. It also yields to
-    doctor: findings render only as run-page annotations, so the comment footer is their one
-    pull-request-visible pointer and a run with findings still posts. Behaviour lives in the
-    action's shell, so this is source-derived."""
+    doctor's `warned` output: findings render only as run-page annotations, so a run with a
+    warning still posts. Behaviour lives in the action's shell, so this is source-derived.
+
+    Mutation: test `"$DOCTOR_WARNED" = "true"` in the skip condition -- red.
+    Mutation: bind `DOCTOR_WARNED` to another step's output -- red."""
     bodies = _guard_bodies()
-    warned = next(c for c in bodies if "doctor.txt" in c)
-    assert "grep -q '^::warning' doctor.txt" in warned  # Warnings, not notices.
-    assert bodies[warned] == ["doctor_warned=true"]
     quiet = next(
         c
         for c in bodies
         if '"$nothing_changed" = "true"' in c
         and '-z "$id"' in c
-        and 'doctor_warned" = "false"' in c
+        and '"$DOCTOR_WARNED" != "true"' in c
     )
     assert "exit 0" in bodies[quiet]
     assert not any("gh api" in line for line in bodies[quiet])
-    # The step it yields to must still run before this one, or doctor.txt is either absent or
-    # a leftover from nothing.
-    src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
-    names = [ln.strip() for ln in src.splitlines()]
-    doctor = next(i for i, n in enumerate(names) if n.startswith('- name: "Doctor:'))
-    upsert = next(i for i, n in enumerate(names) if n == "- name: Upsert sticky comment")
-    assert doctor < upsert
-    assert "> doctor.txt" in src
+    assert step_by("summary", name="Upsert sticky comment")["env"]["DOCTOR_WARNED"] == (
+        "${{ steps.doctor.outputs.warned }}"
+    )
+
+
+#: The doctor step's whole shell body, hand-written: doctor's result is read here once, as the
+#: `warned` output, and warnings count while notices do not.
+_DOCTOR_RUN = [
+    "set -euo pipefail",
+    'if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.txt; then',
+    "cat doctor.txt",
+    "else",
+    'echo "::warning::doctor probes errored; settings-drift check skipped"',
+    "fi",
+    "warned=false",
+    "if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then",
+    "warned=true",
+    "fi",
+    'echo "warned=$warned" >> "$GITHUB_OUTPUT"',
+]
+
+
+def test_doctor_runs_before_the_comment_is_built_and_records_warned_once():
+    """The comment build reads `warned` to show the help hint, and the upsert reads it to post a
+    comment with nothing planned, so the doctor step must run before both, under the id they
+    name.
+
+    Mutation: grep `^::notice` instead of `^::warning` -- red.
+    Mutation: move the doctor step after `Build comment + gate state` -- red.
+    Mutation: rename the step's `id: doctor` -- red."""
+    doctor = step_by(
+        "summary", name="Doctor: settings-drift warnings (annotations only, never blocks)"
+    )
+    assert doctor["id"] == "doctor"
+    assert run_lines(doctor) == _DOCTOR_RUN
+    names = [s["name"] for s in action_steps("summary")]
+    assert names.index(doctor["name"]) < names.index("Build comment + gate state")
 
 
 def _run_main(tmp_path, monkeypatch, cells, stdin=""):
@@ -805,6 +853,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
+        "SHIPMATE_DOCTOR_WARNED": "${{ steps.doctor.outputs.warned }}",
     }
 
 
@@ -837,6 +886,18 @@ def test_marker_round_trip_guard_summary_action_matches_script():
     assert sc.build_comment([], {}, "u", SHA).startswith(sc.MARKER)
 
 
+@pytest.mark.parametrize(("warned", "tail"), [("true", f"\n\n{HINT}"), ("false", ""), ("", "")])
+def test_main_shows_the_hint_only_when_doctor_warned(tmp_path, monkeypatch, warned, tail):
+    """`SHIPMATE_DOCTOR_WARNED` is the doctor step's `warned` output; only `true` adds the hint.
+
+    Mutation: ignore the flag in `main` (`warned = False`) -- the `true` case, red.
+    Mutation: treat any non-empty value as warned -- the `false` case, red."""
+    monkeypatch.setenv("SHIPMATE_DOCTOR_WARNED", warned)
+    _run_main(tmp_path, monkeypatch, [])
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + tail
+
+
 def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(tmp_path, monkeypatch):
     """The summary job runs inside the plan run, so this run holds the logs and the artifacts
     the verdict's run link promises. Mutation: `main` passing `""` for the SHA renders `at an
@@ -845,7 +906,7 @@ def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(tmp_path
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     run = "https://gh/o/r/actions/runs/1"
     assert body == (
-        HEAD + f"🟡 1 of 1 cells change {AT}\n\n"
+        HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n"
         f"<details><summary>{_bare_app(run)}</summary>\n\n```diff\n+   resource added\n\n"
         "Plan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>"
     )

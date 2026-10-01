@@ -109,7 +109,7 @@ HINT = "Comment `shipmate help` for the available commands."
 #: `provenance(SHA)` under `_run_context`, hand-written.
 AT = (
     "at [0123456](https://gh/o/r/commit/0123456789abcdef0123456789abcdef01234567) "
-    "in [run #7](https://gh/o/r/actions/runs/1)"
+    "in [run #7](https://gh/run/1)"
 )
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 _APPLIED = "Apply complete! Resources: 1 added, 0 changed, 0 destroyed."
@@ -297,7 +297,10 @@ def test_the_verdict_counts_rows_and_carries_a_failed_run(statuses, results, ver
         _row(status=s) if isinstance(s, str) else _row(status=s[0], environment=s[1])
         for s in statuses
     ]
-    assert ac._verdict(rows, ac._results_failed(results), (), SHA) == f"{verdict} {AT}"
+    assert ac._verdict(rows, ac._results_failed(results), (), SHA, RUN_URL) == (
+        verdict.split(" ", 1)[0],
+        f"{verdict} {AT}",
+    )
 
 
 def test_a_run_that_died_before_any_cell_reported_renders_failed():

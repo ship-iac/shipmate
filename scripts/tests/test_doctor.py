@@ -1734,7 +1734,7 @@ def test_report_with_no_findings_is_the_whole_all_clear_body():
         "\n"
         f"🟢 no problems found {_AT}\n"
         "\n"
-        "Cell summaries from plan run 1281.\n"
+        "Cell summaries from plan run ID 1281.\n"
         "\n"
         "#### repository settings\n"
         "\n"
@@ -1764,7 +1764,7 @@ def test_report_with_a_warning_a_notice_and_a_harvested_failure_is_the_whole_bod
         "\n"
         f"🔴 1 error, 2 warnings, 1 notice {_AT}\n"
         "\n"
-        "Cell summaries from plan run 1281.\n"
+        "Cell summaries from plan run ID 1281.\n"
         "\n"
         "#### repository settings\n"
         "\n"
@@ -1789,7 +1789,7 @@ def test_report_with_a_pending_harvest_and_no_findings_is_the_whole_body():
         "\n"
         f"⚪ harvest incomplete {_AT}\n"
         "\n"
-        "Cell summaries from plan run 1281.\n"
+        "Cell summaries from plan run ID 1281.\n"
         "\n"
         "#### repository settings\n"
         "\n"
@@ -1813,7 +1813,7 @@ def test_report_with_one_warning_is_the_whole_body_with_the_hint():
         "\n"
         f"🟠 1 warning {_AT}\n"
         "\n"
-        "Cell summaries from plan run 1281.\n"
+        "Cell summaries from plan run ID 1281.\n"
         "\n"
         "#### repository settings\n"
         "\n"
@@ -1928,7 +1928,7 @@ def test_all_clear_names_ten_environments_then_a_count():
 def test_findings_only_fallback_uses_the_same_all_clear_line():
     # Two renderers emit the all-clear; the scope statement must not live in
     # only one of them.
-    body = doctor._findings_only_report([], _ctx(envs={"dev-eu"}), "🟢 no problems found")
+    body = doctor._findings_only_report([], _ctx(envs={"dev-eu"}), "🟢", "🟢 no problems found")
     assert "`dev-eu`" in body
     assert "changed in this pull request" in body
 
@@ -2097,7 +2097,7 @@ def test_skipped_environment_probes_are_stated_exactly_once(monkeypatch):
     assert body.count("environment probes were skipped") == 1
 
 
-def test_provenance_and_probe_coverage_can_disagree_without_contradicting(monkeypatch):
+def test_plan_runs_line_and_probe_coverage_can_disagree_without_contradicting(monkeypatch):
     """The id set is written from the plan records on the head's apply checks whether or
     not those runs' cell summaries could be downloaded, so a non-empty set with no
     declared environments is a live state. The preamble still names the runs read, and its
@@ -2105,7 +2105,7 @@ def test_provenance_and_probe_coverage_can_disagree_without_contradicting(monkey
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan", "dev-eu-apply"))
     findings = doctor._environment_warnings(_ctx(envs=set()))
     body = doctor.render_report(findings, [], _ctx(plan_run_ids=["1281"]))
-    assert "Cell summaries from plan run 1281." in body
+    assert "Cell summaries from plan run ID 1281." in body
     assert "environment probes were skipped" in body
 
 
@@ -2131,37 +2131,37 @@ def test_findings_only_fallback_escapes_a_hostile_settings_finding():
     assert "<!-- shipmate:summary -->" not in body
 
 
-def test_provenance_names_every_run_the_head_recorded():
+def test_plan_runs_line_names_every_run_the_head_recorded():
     """One head's cells can be planned across several runs -- a cell replanned
     after a push is recorded by its own newest apply check -- so the preamble
     names the whole set. Naming only the first would attribute the report to a
     plan run half of it did not come from."""
-    text = doctor._provenance(_ctx(plan_run_ids=["1281", "1290"]))
-    assert text == "Cell summaries from plan runs 1281, 1290."
+    text = doctor._plan_runs_line(_ctx(plan_run_ids=["1281", "1290"]))
+    assert text == "Cell summaries from plan run IDs 1281, 1290."
 
 
-def test_provenance_states_the_run_without_a_coverage_claim():
+def test_plan_runs_line_states_the_run_without_a_coverage_claim():
     """The run branch must name what was read and claim nothing about what the probes did
     with it: that claim belongs to `_environment_warnings`' NOTICE, keyed on
     `envs`. Wording that implies the declared environment set came from these
     runs, or that mentions the probes at all, fails here."""
-    text = doctor._provenance(_ctx(plan_run_ids=["1281"]))
-    assert text == "Cell summaries from plan run 1281."
+    text = doctor._plan_runs_line(_ctx(plan_run_ids=["1281"]))
+    assert text == "Cell summaries from plan run ID 1281."
 
 
-def test_provenance_says_so_when_the_head_recorded_no_plan_run():
+def test_plan_runs_line_says_so_when_the_head_recorded_no_plan_run():
     """No apply check on this head carries a plan record -- nothing was planned
     yet, or every record is from an older engine version. Naming the absence is
     the whole degrade path: doctor still reports its settings probes."""
-    text = doctor._provenance(_ctx(plan_run_ids=[]))
+    text = doctor._plan_runs_line(_ctx(plan_run_ids=[]))
     assert text == "No plan records on this commit's apply checks."
 
 
-def test_provenance_one_lines_an_overlong_plan_run_id():
+def test_plan_runs_line_one_lines_an_overlong_plan_run_id():
     # The ids are interpolated verbatim otherwise -- an unbounded value there
     # would make the preamble itself unbounded, defeating the whole report's
     # size budget regardless of the harvest/findings truncation.
-    text = doctor._provenance(_ctx(plan_run_ids=["9" * 200]))
+    text = doctor._plan_runs_line(_ctx(plan_run_ids=["9" * 200]))
     assert ("9" * 119 + "…") in text
     assert ("9" * 120) not in text
 
