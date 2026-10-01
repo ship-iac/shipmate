@@ -1,0 +1,3 @@
+[0m[1m[32m
+Apply complete! Resources: 0 added, 0 changed, 0 destroyed, 1 forgotten.
+[0m

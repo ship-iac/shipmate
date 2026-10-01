@@ -126,6 +126,7 @@ _RENDER_ENV = {
     "SHIPMATE_REVIEW_NOT_REQUIRED_ENVS": "${{ inputs.review-not-required-envs }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+    "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
 }
 
 
@@ -136,7 +137,10 @@ def test_render_step_env_block_matches_the_expected_mapping():
     and every SHIPMATE_*_ENVS input is a JSON array of env names -- a swap type-checks, renders,
     and names the wrong environments under the wrong sentence, "held" naming what applied
     unreviewed and the reverse. A second selector for two of the keys would relocate the hole
-    rather than close it."""
+    rather than close it.
+
+    Mutation: drop `SHIPMATE_HEAD_SHA` from the render step, so every verdict reads `at an
+    unknown commit` -- red."""
     render_step = _find_step(
         action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
     )

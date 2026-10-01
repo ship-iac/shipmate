@@ -14,7 +14,7 @@ any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
 The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `header`, `at_sha`,
-`footer`) lives here because apply-comment and doctor already load this module.
+`footer`, `tally`, `_join`) lives here because apply-comment and doctor already load this module.
 
 `FOOTER_HINT` exists for discoverability and nothing more: doctor's findings
 surface as workflow annotations on the plan run, those carry no `file=`/`line=`
@@ -189,19 +189,24 @@ def check_url(cell, checks, run_url):
     return run["html_url"] if run and run.get("html_url") else run_url
 
 
+def tally(add, change, destroy, imported=0, forgotten=0):
+    """`+a ~c -d`, then `, N import` and `, N forget` for a count above zero: the counts text of
+    a plan and an apply cell line. Every count is an int."""
+    out = f"+{add} ~{change} -{destroy}"
+    for n, word in ((imported, "import"), (forgotten, "forget")):
+        if n:
+            out += f", {n} {word}"
+    return out
+
+
 def state(cell):
-    """A plan cell's state text: `no changes` for an unchanged cell; for a changed one
-    `+a ~c -d`, then `, N import` and `, N forget` for a count above zero, or `+? ~? -?` when
-    `load_cells` could not derive the tally."""
+    """A plan cell's state text: `no changes` for an unchanged cell; for a changed one its
+    `tally`, or `+? ~? -?` when `load_cells` could not derive the counts."""
     if not cell["changed"]:
         return "no changes"
     if cell["add"] == "?":
         return "+? ~? -?"
-    out = f"+{cell['add']} ~{cell['change']} -{cell['destroy']}"
-    for key in ("import", "forget"):
-        if cell[key]:
-            out += f", {cell[key]} {key}"
-    return out
+    return tally(*(cell[k] for k in ("add", "change", "destroy", "import", "forget")))
 
 
 def _plan_line(cell, url):
