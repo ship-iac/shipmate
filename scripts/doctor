@@ -1550,7 +1550,10 @@ ROUTING_IFS = {
         "github.event_name == 'pull_request_target' || "
         "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')"
     ),
-    "comment-ops.yml": "github.event_name == 'issue_comment'",
+    "comment-ops.yml": (
+        "github.event_name == 'issue_comment' && "
+        "!endsWith(github.event.comment.user.login, '[bot]')"
+    ),
     "deploy.yml": "github.event_name == 'push'",
     "drift.yml": (
         "github.event_name == 'schedule' || "
