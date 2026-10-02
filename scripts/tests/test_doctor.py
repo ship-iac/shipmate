@@ -4174,14 +4174,19 @@ def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
-#: The refusal the misplaced control earns, whole: the probe's own framing plus
-#: `_check_environment`'s message with the `::error::` prefix stripped. Hand-written, not
-#: read back from the module, so a probe that reported a different refusal -- or reported
-#: this one as a skipped probe -- reddens here.
+#: The refusal the misplaced control earns, whole: the probe's own framing plus the
+#: missing-layout and `_check_environment` messages with the `::error::` prefix stripped.
+#: Hand-written, not read back from the module, so a probe that reported a different
+#: refusal -- or reported this one as a skipped probe -- reddens here.
 _MISPLACED_FINDING = (
     doctor.WARNING,
     "`.github/shipmate.toml` at the commit under examination is not valid: "
-    "environment prod: schema_version is not a key this engine implements. An environment "
+    ".github/shipmate.toml declares no layout, so no cell can resolve its environment "
+    'identity. Declare layout = "tf_vars", "workspace" or "folder" on the default branch, '
+    "which is where this table is read from. A scalar written below a [table] header lands "
+    "inside that table rather than at the top level, so layout must come before the first "
+    "header. "
+    "environment prod: layout is not a key this engine implements. An environment "
     "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. Merging it "
     "refuses every "
     "operation that reads the table. Execution still reads the default branch's copy, which "
@@ -4278,7 +4283,7 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     unknown = (
         "{} is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, identities, environments."
+        "layout, identities, environments."
     )
     shown = " ".join(unknown.format(f"k{n:02}") for n in range(1, 11))
     assert doctor._config_warnings(_ctx()) == [
@@ -4389,7 +4394,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         (
             doctor.NOTICE,
             "`.github/shipmate.toml` at the commit under examination parses, and passes "
-            "every check a file can be judged on by itself: its top-level keys, `schema_version`, "
+            "every check a file can be judged on by itself: its top-level keys, "
             "`layout`, the identities and the environment entries. Not checked here, for want "
             "of a plan matrix and a whole-tree environment scan: `tf_vars`-layout coverage of "
             "the planned environments, entries "

@@ -914,7 +914,6 @@ _TABLE_TEMPLATE = [
     "paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key",
     "from this checkout's file, so re-run it after adding or dropping one.",
     "",
-    "  schema_version = 1",
     '  layout = "tf_vars"',
     "",
     "  [identities.dev]",

@@ -299,7 +299,7 @@ _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 _RESERVED_WORKLOADS = ("vars", "role", "region")
 
 #: Everything the file may declare at its top level.
-_TOP_KEYS = ("schema_version", "layout", "identities", "environments")
+_TOP_KEYS = ("layout", "identities", "environments")
 
 #: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
 #: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Lowercase
@@ -884,20 +884,6 @@ def _check_env_name(e, label, matched):
             )
 
 
-def _check_version(table):
-    """Refuse a file declaring a schema version this engine does not implement.
-
-    A bool is excluded explicitly: `True == 1` in Python, so a plain comparison reads
-    `schema_version = true` as version 1.
-    """
-    found = table["schema_version"]
-    if not (isinstance(found, int) and not isinstance(found, bool) and found == 1):
-        raise SystemExit(
-            f"::error::schema_version is {found!r}; this engine implements version 1 of "
-            f"{CONFIG_PATH}."
-        )
-
-
 def _check_entries(environments, errors, identities):
     """Every entry name, then every entry, then each `needs` list, then the order they
     declare -- the cycle check only when every list passed. A non-mapping entry's `needs`
@@ -947,9 +933,6 @@ def validate_structure(table):
         for key in sorted(table)
         if key not in _TOP_KEYS
     ]
-    if "schema_version" in table:
-        with _gather(errors):
-            _check_version(table)
     # Key presence, not a truthy value: an empty layout is a declared layout holding a value
     # no layout may hold, and must say so rather than read as undeclared.
     if "layout" not in table:

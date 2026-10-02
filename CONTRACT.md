@@ -390,9 +390,9 @@ nothing for its cells to run as. The two absences refuse at the same site,
 `scripts/env-config` (§Refusals) — a file absent from the default branch, and a
 file that parses but declares no `layout`.
 
-The file holds four top-level settings and no others: `schema_version`,
-`layout`, `identities`, `environments`. Any other top-level key refuses,
-naming the offending key and the four that are allowed. An engine refuses a key
+The file holds three top-level settings and no others: `layout`,
+`identities`, `environments`. Any other top-level key refuses, naming the
+offending key and the three that are allowed. An engine refuses a key
 it does not implement, so a repository moves its pin before it adds a key a newer
 release introduces.
 
@@ -439,7 +439,6 @@ separate `[identities.dev.aws]` header parses to exactly the same mapping, but
 mixing the two notations for one identity is a parse error (§TOML placement).
 
 ```toml
-schema_version = 1
 layout = "tf_vars"                # tf_vars | workspace | folder
 
 [identities.dev]
@@ -546,18 +545,6 @@ only the environments that name it. The cost is that one edit to an identity
 retargets every environment naming it; `shipmate doctor`'s roles lines list what
 each environment resolves (§Resolution).
 
-### The schema version
-
-`schema_version` is optional and, when written, must be the integer `1`. An
-absent `schema_version` reads as 1.
-`schema_version = true` is refused explicitly: Python compares `True == 1`, and
-a bool left to a plain comparison would read as version 1.
-
-The key exists so that a future incompatible schema can be told from this one by
-a file that has not yet been migrated. It is not a pin and it grants nothing: an
-engine still refuses every key it does not implement, whatever `schema_version`
-says.
-
 ### TOML placement
 
 Two properties of the format decide how a mistake presents, and both fail
@@ -568,9 +555,9 @@ closed.
   `[identities.dev]` becomes `identities.dev.layout`. One mistake therefore
   refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
-  refusal, which checks before anything reads `environments`; a misplaced
-  `schema_version` refuses as an unimplemented environment key, identity key or
-  identity field, depending on the header it fell under.
+  refusal, which checks before anything reads `environments`, and also refuses
+  as an unimplemented environment key, identity key or identity field, depending
+  on the header it fell under.
   `docs/troubleshooting.md` has the message for each position.
 - **Declaring one table twice is a parse error.** A dotted `aws.plan` under
   `[identities.dev]` plus a later `[identities.dev.aws]` header refuses with
@@ -632,7 +619,7 @@ tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
   bind `shipmate-engine`, so a variable of the same name on that Environment
   shadows the repository value in those two jobs, and nowhere else.
 - **Values.** A resolved value is always a string, so `shared`, `explicit`,
-  `gated` and `schema_version` refuse a reference through their own type checks. The name is
+  and `gated` refuse a reference through their own type checks. The name is
   uppercase (`[A-Z_][A-Z0-9_]*`), as GitHub stores it.
 - **Variables only, never secrets.** A resolved value is not hidden: it lands in
   job outputs, the detect `matrix` among them, and in step logs, and
@@ -696,12 +683,11 @@ variable rows depend on the run as well as the file, so they are not structural.
 | An empty string or an empty map in an identity field | that resolves to a skipped credentials step, not to a credential |
 | `aws.account` that is not a 12-digit string | a TOML integer drops a leading `0` |
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
-| A top-level key other than `schema_version`, `layout`, `identities`, `environments` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
+| A top-level key other than `layout`, `identities`, `environments` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 | A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
 | A file holding a reference, read by a step whose variables input is absent or empty | the engine did not pass `github-vars` to that step, or the repository reaches no variables at all; named as such rather than blamed on one variable |
-| `schema_version` other than the integer `1` | this engine implements version 1; a bool is refused explicitly, since `True == 1` would otherwise read `schema_version = true` as it |
 
 ### Resolution
 

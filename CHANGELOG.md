@@ -42,6 +42,7 @@ section below names the SHA the release tags.
 ### Removed
 
 - **`build-matrix` no longer refuses a stack at path `apply` or `shipmate`.**
+- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting.**
 
 ### Fixed
 

@@ -1692,7 +1692,7 @@ CONFIG_NO_COMMIT = (
 # bill over the rest of the rules.
 CONFIG_VALID = (
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
-    "file can be judged on by itself: its top-level keys, `schema_version`, `layout`, the "
+    "file can be judged on by itself: its top-level keys, `layout`, the "
     "identities and the environment entries. Not checked here, for want of a plan matrix "
     "and a whole-tree environment scan: `tf_vars`-layout coverage of the planned "
     "environments, entries that no stack tags, workload tags outside an environment's "

@@ -2373,7 +2373,6 @@ todo          `.github/shipmate.toml`
     paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
     from this checkout's file, so re-run it after adding or dropping one.
 
-      schema_version = 1
       layout = "tf_vars"
 
       [identities.dev]
@@ -2496,7 +2495,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
     (tmp_path / ".github" / "shipmate.toml").write_text(
-        'schema_version = 1\nlayout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n',
+        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n',
         encoding="utf-8",
         newline="\n",
     )
@@ -2917,9 +2916,9 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     onboard._checklist(ctx(root=tmp_path))
     lines = capsys.readouterr().out.splitlines()
     snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("      ")))
-    # An extraction that finds nothing parses and validates cleanly, so it is green over an
-    # unchecked example.
-    assert snippet.startswith("schema_version = 1"), (
+    # An extraction that finds nothing refuses as a missing layout, which reads as a defect
+    # in the template rather than in the extraction.
+    assert snippet.startswith('layout = "tf_vars"'), (
         f"no TOML example found in the block: {snippet!r}"
     )
     assert snippet.count('aws.account = "<account>"') == 1
