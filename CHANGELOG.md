@@ -40,6 +40,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
+- **`shipmate plan` and `shipmate unlock` runs cannot save an Actions-cache entry: `plan.yml` and `unlock.yml` declare `cache-mode: read`.**
 - **The Terramate download retries transient errors three times, and a failed install names the release URL and the status it answers.**
 - **`shipmate / gate`'s hold is read from every page of the head's status contexts, so a head carrying many no longer lets an apply green a held gate.**
 - **`scripts/onboard` and `scripts/register-app` write UTF-8 on a Windows console, and the docs run them with `python`.**

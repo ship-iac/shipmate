@@ -14,6 +14,9 @@ on:
 # Floor, not a default to inherit from: every job here declares its own block, so a job that
 # loses its block gets nothing rather than everything the caller granted.
 permissions: {}
+# A dispatched run holds the default branch's cache scope while it runs the pull request's HCL,
+# and nothing in this file saves an Actions-cache entry.
+cache-mode: read
 jobs:
   # One producer for every pull-request fact below, and its own job rather than `detect`'s first
   # step: `detect` can fail on a fmt check or stale codegen, and `summary` must still be told which

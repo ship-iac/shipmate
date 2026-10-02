@@ -2675,11 +2675,14 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   versions share one entry, and each still verifies the packages against its
   own lock. A lock with no `provider` block restores nothing.
 - `drift-cell` and `apply-cell` save it; `plan-cell` never does, because a plan
-  cell runs unreviewed pull-request HCL without the apply role. An apply cell
-  already holds the environment's apply role, so its save reaches nothing a
-  pull request's applied HCL could not. Each saves after a restore that missed,
-  and only when `init` left a file in the cache; `apply-cell` saves only after
-  a successful apply, and a failed save does not fail the cell.
+  cell runs unreviewed pull-request HCL without the apply role. `plan.yml` and
+  `unlock.yml` declare `cache-mode: read`, so the token in those runs cannot
+  save an entry whatever the cell's HCL runs. Apply cells still save with a
+  cache write while running the pull request's HCL, and the key carries no
+  environment, so an entry one environment's apply saves is restored by any
+  environment's cells. Each saves after a restore that missed, and only when
+  `init` left a file in the cache; `apply-cell` saves only after a successful
+  apply, and a failed save does not fail the cell.
 - An entry is keyed on its path, which lives under `RUNNER_TEMP`: a cell on a
   runner image whose `RUNNER_TEMP` differs from the saving runner's misses and
   downloads.
