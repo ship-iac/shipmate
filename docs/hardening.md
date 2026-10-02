@@ -421,6 +421,9 @@ costs, so the choice is made with the price visible:
   secret with extra steps. Row 17's deployment branch policy narrows that to
   jobs running at the default branch, which is a real bound and not a reviewer
   gate: no human sees the deployment before its secrets are released.
+- Its apply can plant a cache entry that the gated environments' cells in the
+  same repository restore ("A cache entry planted by an unreviewed apply" under
+  "What none of this fixes").
 - **Shared mode is the strongest form of ungated.** A logical env holding
   `shared = true` binds one bare `<env>` for plan and apply, and a
   reviewer on it stalls every plan cell and the nightly drift run — so the gate
@@ -1141,6 +1144,21 @@ for exactly the exposure control 1 exists to limit.
   consumer's control, not the engine's: point the calling job's `runs_on:` at a
   self-hosted runner behind an egress allowlist, or at GitHub-hosted runners
   attached to a private network you filter.
+- **A cache entry planted by an unreviewed apply.** An apply cell runs the pull
+  request's configuration in a job that can write the default branch's Actions
+  cache, because it saves state (`CONTRACT.md` §State backend) and providers
+  (§Terramate safeguards). Where an environment applies without an approving
+  review (`gated = false`, or a gated environment under a ruleset that requires
+  none), code in that apply can save a provider or state entry that other plan,
+  drift and apply cells restore, in every environment and on every later pull
+  request. Nothing verifies a restored archive: the lock file verifies provider
+  packages, not the archive around them, and nothing verifies restored state.
+  Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
+  write access and such an environment, or the App private key, which can
+  approve a pull request and so opens any environment gated only by an approval
+  count (see "The gate is an assertion, not a proof"). The cache is per
+  repository: put an ungated tier in its own repository to keep it from
+  reaching your gated environments' cells.
 - **Unconditional OIDC minting in every cell-running job.** GHA's `permissions:`
   cannot be an expression, so `id-token: write` on the wave, unlock, plan and
   drift jobs is not gated on a role resolving — every consumer, cloud or not, runs
