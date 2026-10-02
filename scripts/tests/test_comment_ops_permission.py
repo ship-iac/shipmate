@@ -1,9 +1,9 @@
 """Run comment-ops' repository-permission read over what the API can answer.
 
-`permission` is the first input `scripts/authorize` weighs before a `shipmate apply` or
-`shipmate unlock` dispatches, and bash in the action writes it rather than an importable
-script. The read must fail closed: a failed call or an unexpected shape writes an empty value,
-which authorize refuses as unreadable.
+One read serves the four gated verbs, `plan`, `doctor`, `apply` and `unlock`, and feeds
+the `access` step, where `scripts/authorize --permission` decides it. Bash in the action
+writes it rather than an importable script. The read must fail closed: a failed call or an
+unexpected shape writes an empty value, which authorize refuses as unreadable.
 """
 
 import re
@@ -85,8 +85,7 @@ def test_the_two_line_stub_really_emits_two_lines(tmp_path):
         ("printf '%s\\n' admin", 0, "permission=admin"),
         ("printf '%s\\n' read", 0, "permission=read"),
         ("printf '%s\\n' none", 0, "permission=none"),
-        # A login that is no user. The step still has the review decision and the plan runs to
-        # gather, so it writes an empty value and carries on.
+        # A login that is no user: an empty value, which `access` refuses as unreadable.
         (f"printf '%s\\n' {_NOT_A_USER}", 1, "permission="),
         # A clean value with a failed exit is still a failed read.
         ("printf '%s\\n' admin", 1, "permission="),

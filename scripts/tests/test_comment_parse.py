@@ -301,9 +301,7 @@ _HELP = (
     "plan for the current head commit, and a pull request that is not a draft. Unlocking "
     "requires write access to this repository, but no review, no plan and no such readiness. "
     "`doctor` and `help` are read-only, and `plan` changes no infrastructure. `help` answers "
-    "anyone; `doctor` reports this repository's own settings, and it and `plan` answer only "
-    "organization members and repository collaborators: GitHub's classification of the "
-    "comment's author, not a check of write access.\n"
+    "anyone; `doctor` and `plan` require write access to this repository.\n"
     "\n"
     "[run](https://github.com/org/repo/actions/runs/7777)"
 )

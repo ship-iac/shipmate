@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (the commenter's write access to this repository; `apply` additionally requires that the PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists, while `unlock` needs write access only; `plan` needs no App token and sits at `doctor`'s tier), and react or reject. Outputs feed actions/dispatch. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
+description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
@@ -41,14 +41,11 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Ignore bot-authored comments, classify the commenter
+    - name: Ignore bot-authored comments
       id: guard
       shell: bash
       env:
         COMMENT_USER: ${{ inputs.comment-user }}
-        # Author-controlled only in the sense that GitHub classifies the author. Reaches
-        # bash through env: like COMMENT_USER, never interpolated into the shell.
-        COMMENT_ASSOCIATION: ${{ github.event.comment.author_association }}
       run: |
         set -euo pipefail
         # Loop guard: shipmate's own comments (help output, apply results) can
@@ -60,24 +57,6 @@ runs:
         else
           echo "skip=false" >> "$GITHUB_OUTPUT"
         fi
-        # Access gate for the `doctor` and `plan` routes, computed once here and consumed by
-        # every step on both. doctor's report maps the guardrails a repository is missing, and
-        # a plan spends this repository's runners on its own code, so on a repository with
-        # public pull requests neither may answer an arbitrary account. The allowlist is
-        # written exactly once: repeating it per-step in every route's `if:` is precisely how
-        # such a gate drifts open, and narrowing or widening it for one of the two routes
-        # moves the other's gate with it.
-        # This is GitHub's own classification of the author's relationship to the repository,
-        # NOT a permission check, and the output name says so: a collaborator holding only the
-        # Read role, and an organization member whose base repository permission is None, both
-        # pass this gate. What it buys is that an account with no declared relationship to the
-        # repository does not. CONTRIBUTOR, whose only signal is one merged pull request, is
-        # deliberately excluded. Fails closed: the default branch covers an absent `comment`
-        # context (empty string) as well as every association not listed.
-        case "$COMMENT_ASSOCIATION" in
-          OWNER|MEMBER|COLLABORATOR) echo "privileged_association=true" >> "$GITHUB_OUTPUT" ;;
-          *) echo "privileged_association=false" >> "$GITHUB_OUTPUT" ;;
-        esac
 
     - name: Parse command
       id: parse
@@ -140,25 +119,63 @@ runs:
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
           -f content=eyes >/dev/null || true
 
-    - name: Authorize plan
-      id: planauthz
-      # The plan verb sits at `doctor`'s tier: the same collaborator standing, classified
-      # once in the `guard` step. No App token, no review, no plan lookup: a plan applies
-      # nothing, and the commenter chooses only WHEN it runs. WHAT gets planned comes from
-      # the pull request itself, never from this comment.
-      if: ${{ steps.parse.outputs.route == 'plan' }}
+    - name: Read the commenter's repository permission
+      id: permission
+      if: ${{ steps.parse.outputs.route == 'plan' || steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
       shell: bash
       env:
-        PRIVILEGED: ${{ steps.guard.outputs.privileged_association }}
+        GH_TOKEN: ${{ github.token }}
+        USER: ${{ inputs.comment-user }}
+      run: |
+        set -euo pipefail
+        # The commenter's repository permission is read with the workflow token, into a variable
+        # because a pipe under pipefail turns SIGPIPE into a failure. A failed read or a value
+        # outside [a-z]+ is written empty, which authorize refuses, and stderr stays in the log.
+        if ! perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$USER/permission" --jq '.permission'); then
+          perm=""
+        fi
+        [[ "$perm" =~ ^[a-z]+$ ]] || perm=""
+        echo "permission=$perm" >> "$GITHUB_OUTPUT"
+
+    - name: Authorize the commenter's permission
+      id: access
+      # Every later step on these routes runs only when this authorized. The verdict step never
+      # reads it, so a permitted doctor dispatches nothing.
+      if: ${{ steps.parse.outputs.route == 'plan' || steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
+      shell: bash
+      env:
+        PERMISSION: ${{ steps.permission.outputs.permission }}
+        SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize" --permission
+
+    - name: Reject a commenter without write access
+      # GITHUB_TOKEN, not the App: this must answer even where the App is not installed.
+      if: ${{ (steps.parse.outputs.route == 'plan' || steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized != 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ steps.parse.outputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_REPLY_OUTCOME: refused
+        SHIPMATE_REPLY_TEXT: ${{ steps.access.outputs.reason }}
+      run: |
+        set -euo pipefail
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+
+    - name: Authorize plan
+      id: planauthz
+      # Holds the fork check. No App token, no review, no plan lookup: a plan applies nothing,
+      # and the commenter chooses only WHEN it runs. WHAT gets planned comes from the pull
+      # request itself, never from this comment.
+      if: ${{ steps.parse.outputs.route == 'plan' && steps.access.outputs.authorized == 'true' }}
+      shell: bash
+      env:
         GH_TOKEN: ${{ github.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
-        if [ "${PRIVILEGED:-}" != "true" ]; then
-          echo "authorized=false" >> "$GITHUB_OUTPUT"
-          echo "reason=\`plan\` runs this repository's Terramate/OpenTofu on its runners, so it answers only organization members and repository collaborators." >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
         # Not a second gate: build-matrix refuses a fork head inside the dispatched run, on
         # checks that land on the dispatch ref where the pull request cannot see them. A head
         # this cannot read falls through to that refusal rather than replacing it.
@@ -175,9 +192,8 @@ runs:
 
     - name: Reject an unauthorized plan
       # GITHUB_TOKEN, not the App: the plan route mints nothing, so this must answer wherever
-      # the route itself can run. The reason is plan's own, not doctor's -- a plan discloses no
-      # settings; it spends this repository's runners on this repository's code.
-      if: ${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}
+      # the route itself can run. The only reason left here is the fork head's.
+      if: ${{ steps.parse.outputs.route == 'plan' && steps.access.outputs.authorized == 'true' && steps.planauthz.outputs.authorized != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -190,27 +206,9 @@ runs:
         body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
-    - name: "Doctor: reject a commenter without a privileged association"
-      # Silence would be indistinguishable from a broken engine, so say why. GITHUB_TOKEN, not
-      # the App: this must answer even where the App is not installed. A refusal reply with no
-      # probe results -- the point is to disclose nothing. The wording names GitHub's
-      # classification of the author, not the "write access" this gate does not verify.
-      if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association != 'true' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        PR_NUMBER: ${{ inputs.pr-number }}
-        SHIPMATE_REPLY_VERB: doctor
-        SHIPMATE_REPLY_OUTCOME: refused
-        SHIPMATE_REPLY_TEXT: "`doctor` reports this repository's settings, so it answers only organization members and repository collaborators."
-      run: |
-        set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
-
     - name: Mint App token for doctor
       id: doctortoken
-      if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' }}
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' }}
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
@@ -234,7 +232,7 @@ runs:
         permission-environments: read
 
     - name: "Doctor: App token unavailable"
-      if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome != 'success' }}
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' && steps.doctortoken.outcome != 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -249,7 +247,7 @@ runs:
 
     - name: "Doctor: probe the manifest's full permission set"
       id: fullmint
-      if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' && steps.doctortoken.outcome == 'success' }}
       # A mint requesting every permission app/manifest.json declares fails when the
       # installation is missing one, which is typical after a manifest bump nobody
       # re-approved. The failure IS the probe result, so it is never fatal.
@@ -270,7 +268,7 @@ runs:
 
     - name: "Doctor: gather head SHA, declared environments, annotations"
       id: gatherdoc
-      if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' && steps.doctortoken.outcome == 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -356,7 +354,7 @@ runs:
         echo "plan_run_ids=$(printf '%s' "$run_ids" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
 
     - name: "Doctor: render and upsert the sticky comment"
-      if: ${{ steps.parse.outputs.route == 'doctor' && steps.guard.outputs.privileged_association == 'true' && steps.doctortoken.outcome == 'success' }}
+      if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' && steps.doctortoken.outcome == 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.doctortoken.outputs.token }}
@@ -443,7 +441,7 @@ runs:
 
     - name: Mint App token (checks:read)
       id: apptoken
-      if: ${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
+      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized == 'true' }}
       # A failed mint -- the App not being installed on this repository, for instance -- must
       # not hard-fail the job: `App token unavailable (App not installed?)` reports it to the
       # commenter.
@@ -460,7 +458,7 @@ runs:
         permission-checks: read
 
     - name: App token unavailable (App not installed?)
-      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome != 'success' }}
+      if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized == 'true' && steps.apptoken.outcome != 'success' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -519,27 +517,11 @@ runs:
         GH_TOKEN: ${{ github.token }}
         APP_TOKEN: ${{ steps.apptoken.outputs.token }}
         OWNER: ${{ github.repository_owner }}
-        USER: ${{ inputs.comment-user }}
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |
         set -euo pipefail
-        # The commenter's repository permission is read with the workflow token, into a variable
-        # because a pipe under pipefail turns SIGPIPE into a failure. A failed read or a value
-        # outside [a-z]+ is written empty, which authorize refuses, and stderr stays in the log.
-        if ! perm=$(gh api "repos/$GITHUB_REPOSITORY/collaborators/$USER/permission" --jq '.permission'); then
-          perm=""
-        fi
-        [[ "$perm" =~ ^[a-z]+$ ]] || perm=""
-        echo "permission=$perm" >> "$GITHUB_OUTPUT"
-        # authorize refuses on the permission before it reads anything else, so a commenter
-        # without write access costs none of the reads below.
-        if [ "$perm" != write ] && [ "$perm" != admin ]; then
-          echo '{}' > pr.json
-          echo '{}' > plan_run.json
-          exit 0
-        fi
         # Retry until `mergeable` is computed; GitHub computes it asynchronously. Not for
         # unlock, which ignores `mergeable`: a merged pull request reports it null forever --
         # exactly the stranded-lock case unlock exists for -- so the retries would cost 15s
@@ -589,7 +571,7 @@ runs:
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
       shell: bash
       env:
-        PERMISSION: ${{ steps.gather.outputs.permission }}
+        PERMISSION: ${{ steps.permission.outputs.permission }}
         REVIEW_DECISION: ${{ steps.gather.outputs.review_decision }}
         PR_JSON: pr.json
         PLAN_RUN_JSON: plan_run.json

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Decide whether a `shipmate apply` or `shipmate unlock` comment is authorized to dispatch.
+"""Decide whether a gated shipmate comment verb is authorized.
+
+`--permission` decides the commenter's repository permission alone, for `apply`,
+`unlock`, `plan` and `doctor`, and writes `authorized` and `reason`. Without it,
+the script makes the full `apply`/`unlock` decision below.
 
 Pure decision from already-fetched GitHub API JSON. Checks run in fail-fast
 order and each returns a DISTINCT, actionable reason (the reject comment). The
@@ -27,6 +31,7 @@ applies nothing, so it must never carry this record).
 import json
 import os
 import re
+import sys
 
 
 def parse_ungated_envs(raw):
@@ -194,7 +199,22 @@ def _read_json(var, default):
         return json.load(fh)
 
 
+def _main_permission():
+    verb = os.environ.get("SHIPMATE_VERB", "")
+    if verb not in ("apply", "unlock", "plan", "doctor"):
+        raise SystemExit(f"::error::unknown verb {verb!r}")
+    reason = _permission_reason(os.environ.get("PERMISSION", ""), verb) or ""
+    ok = not reason
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        fh.write(f"authorized={'true' if ok else 'false'}\n")
+        fh.write(f"reason={reason}\n")
+    print(f"::notice title=authorize::authorized={ok} reason={reason or 'ok'}")
+
+
 def main():
+    if "--permission" in sys.argv:
+        _main_permission()
+        return
     pr = _read_json("PR_JSON", {})
     # {check name: plan run id} for the head's App-authored apply checks. Read
     # from that head's own check-runs, so no entry can be for another head and

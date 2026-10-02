@@ -184,6 +184,63 @@ def test_main_reads_review_decision_env(tmp_path, monkeypatch):
     assert "authorized=false" in text and "changes were requested" in text
 
 
+def _run_permission_mode(tmp_path, monkeypatch, permission, verb):
+    out = tmp_path / "out.txt"
+    out.touch()
+    for key in ("PR_JSON", "PLAN_RUN_JSON", "REVIEW_DECISION", "SHIPMATE_ENV"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr("sys.argv", ["authorize", "--permission"])
+    for key, value in {
+        "PERMISSION": permission,
+        "SHIPMATE_VERB": verb,
+        "GITHUB_OUTPUT": str(out),
+    }.items():
+        monkeypatch.setenv(key, value)
+    az.main()
+    return out.read_text(encoding="utf-8")
+
+
+#: (permission, verb) -> the whole `GITHUB_OUTPUT` of `--permission` mode, hand-written.
+_PERMISSION_MODE_TABLE = [
+    (p, verb, f"authorized={authorized}\nreason={reason}\n")
+    for verb in ("apply", "unlock", "plan", "doctor")
+    for p, authorized, reason in (
+        ("admin", "true", ""),
+        ("write", "true", ""),
+        ("read", "false", _a1(verb, "read")),
+        ("none", "false", _a1(verb, "none")),
+        ("", "false", _a2(verb)),
+        ("WRITE", "false", _a2(verb)),
+        ("wr ite", "false", _a2(verb)),
+        ("write\n", "false", _a2(verb)),
+        ("maintain", "false", _a3(verb, "maintain")),
+        ("triage", "false", _a3(verb, "triage")),
+        ("null", "false", _a3(verb, "null")),
+    )
+]
+
+
+@pytest.mark.parametrize(("permission", "verb", "expected"), _PERMISSION_MODE_TABLE)
+def test_permission_mode_decides_the_permission_alone(
+    tmp_path, monkeypatch, permission, verb, expected
+):
+    """`--permission` decides every gated verb from `PERMISSION` alone: no pull request, review
+    decision or plan record is read, and the reason names the verb.
+
+    Mutations: drop `"doctor"` from the permission-mode allowlist (the doctor rows exit
+    `unknown verb`); return None from `_permission_reason` for `read` (the read rows
+    authorize); write `authorized=true` unconditionally in permission mode (every refusal row
+    reads `authorized=true`)."""
+    assert _run_permission_mode(tmp_path, monkeypatch, permission, verb) == expected
+
+
+@pytest.mark.parametrize("verb", ["help", ""])
+def test_permission_mode_refuses_a_verb_it_does_not_gate(tmp_path, monkeypatch, verb):
+    """Mutation: drop the verb check from permission mode (`help` gets a permission verdict)."""
+    with pytest.raises(SystemExit, match="unknown verb"):
+        _run_permission_mode(tmp_path, monkeypatch, "write", verb)
+
+
 def test_action_wires_review_decision():
     # Pins the action.yml side of the coupling: gather emits the review_decision output,
     # NONE-normalized, and authz maps it to the REVIEW_DECISION env var main() reads.
