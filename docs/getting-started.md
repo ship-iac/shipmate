@@ -468,13 +468,9 @@ jobs:
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
   comment-ops:
     name: shipmate
-    # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter.
-    # A bot's comment is skipped here: a started job joins the concurrency group and would
-    # cancel a command still waiting in it.
-    if: github.event_name == 'issue_comment' && !endsWith(github.event.comment.user.login, '[bot]')
-    concurrency:
-      group: comment-ops-${{ github.event.issue.number }}
-      cancel-in-progress: false
+    # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
+    # this one only has to select the event.
+    if: github.event_name == 'issue_comment'
     uses: ship-iac/shipmate/.github/workflows/comment-ops.yml@<engine-sha>  # see the latest release
     permissions:
       contents: read
