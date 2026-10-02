@@ -177,8 +177,8 @@ Grant repository write only to people you would let apply to production
 unreviewed, because that is what it amounts to. This is the only control that
 closes the branch-authored-workflow path outright; everything else narrows it.
 
-Write access is also the grant that applies and unlocks by comment, so review
-the list as you would the apply role.
+Write access is also the grant that runs every comment verb but `help`: apply,
+unlock, plan and doctor. So review the list as you would the apply role.
 
 ## 2. Restrict pushes that touch executable paths
 
@@ -1070,8 +1070,8 @@ cannot lie about its own head repository, and a number naming a fork's pull
 request resolves to that fork, which the `build-matrix` step refuses in `detect`
 exactly as it refuses one on the autoplan leg. What the dispatch leg does add is
 `pull-requests: read` on the one job that looks the pull request up, and an
-authorization step ahead of it: only a comment from an `OWNER`, `MEMBER` or
-`COLLABORATOR` is dispatched at all
+authorization step ahead of it: only a comment from a commenter whose permission
+on the repository is `write` or `admin` is dispatched at all
 ([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops).
 
 **The outer of the two fork guards does not reach this leg, which is why step
@@ -1086,11 +1086,12 @@ fork is turned away before either evaluates the tree it wrote. Keep that order:
 reversed, the two terramate steps evaluate (and generate from) fork-authored HCL
 first. What the reversed order would cost is bounded — `detect` holds
 `contents: read` and no App key, binds no environment, runs no `tofu`, and only
-an `OWNER`, `MEMBER` or `COLLABORATOR` can start the run at all — but the outer
-guard reaching one step less far is exactly the kind of difference worth not
-having. The two legs are not identical, and that is the measured shape: on
-the autoplan leg `actions/checkout` refused and `build-matrix` never ran; on the
-dispatch leg the checkout succeeded and `build-matrix` did the refusing.
+a commenter with `write` or `admin` permission can start the run at all — but
+the outer guard reaching one step less far is exactly the kind of difference
+worth not having. The two legs are not identical, and that is the measured
+shape: on the autoplan leg `actions/checkout` refused and `build-matrix` never
+ran; on the dispatch leg the checkout succeeded and `build-matrix` did the
+refusing.
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job

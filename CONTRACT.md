@@ -1011,11 +1011,18 @@ body contains `shipmate` in any case; every other comment starts no runner.
 | verb | status | args | authorization |
 |---|---|---|---|
 | `shipmate apply [env]` | active | optional env | apply requirements, below |
-| `shipmate doctor` | active | none | read-only, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) |
+| `shipmate doctor` | active | none | write access (below); read-only |
 | `shipmate help` | active | none | none — read-only, open to any commenter |
-| `shipmate plan` | active | none | changes no infrastructure, but the commenter's `author_association` must be `OWNER`, `MEMBER` or `COLLABORATOR` (a classification, not a permission check) — the same tier as `doctor` |
+| `shipmate plan` | active | none | write access (below); changes no infrastructure |
 | `shipmate unlock <env>` | active | required env | write access plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
 | `shipmate destroy` | reserved | — | — |
+
+`plan`, `doctor`, `apply` and `unlock` require the commenter's write access
+(the "write access" apply requirement below defines it), read and decided once
+per comment before any step that mints a token, reads the pull request or
+dispatches; the 👀 acknowledgement on `plan` and `doctor` comes first. A refused
+commenter gets one `🔴 refused:` reply naming the verb and the permission read,
+or saying the permission could not be read. `help` answers anyone.
 
 Every dispatching verb dispatches the same file,
 `.github/workflows/shipmate.yml`, and the `verb` input in the dispatch body
@@ -1048,8 +1055,8 @@ A notice asks nothing, so its footer is `[run](<run url>)` alone.
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate.toml`),
 `🔴 failed: <reason>` when it could not (an App token mint, a workflow
-dispatch), and `⚪ <text>` for a notice. `scripts/reply-comment` renders all
-three.
+dispatch, an errored read or decision of the commenter's permission), and
+`⚪ <text>` for a notice. `scripts/reply-comment` renders all three.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -1065,11 +1072,8 @@ refuse a draft.
 Re-issuing it re-plans rather than reporting the existing plan current: the new
 run's plan replaces the plan of record for the current head, and doing so is
 safe because a plan changes nothing but shipmate's own comment, checks and
-artifacts. A commenter without the standing the table above names gets a
-`🔴 refused:` reply stating `plan`'s own reason — that it runs this
-repository's Terramate/OpenTofu on its runners — and nothing is dispatched:
-the standing is the same once-evaluated boolean the `doctor` gate below
-describes, and the plan route mints no App token of its own. A pull request
+artifacts. A commenter without write access is refused as above and nothing
+is dispatched; the plan route mints no App token of its own. A pull request
 whose head is in another repository is refused in its own words and likewise
 not dispatched: the run's own fork refusal (§Post-plan topology) lands on
 checks attached to the dispatch ref, where the pull request cannot see it. That
@@ -1187,7 +1191,8 @@ and an `eyes` reaction on the triggering comment (`doctor`, `help` and `plan`
 all get that acknowledgement as soon as the command is accepted — `rocket`
 marks an authorized dispatch, whether `apply`, `unlock` or `plan`, instead; a
 reaction that cannot be posted is ignored), a `🔴 failed:` reply when it
-cannot mint an App token, a `🔴 refused:` reply when the commenter may not have
+cannot mint an App token or when reading or deciding the commenter's permission
+errors, a `🔴 refused:` reply when the commenter may not have
 the report (below), and a
 handful of untitled `::warning::` annotations on its own degrade paths — an
 unreadable PR head SHA, unreadable plan records on this commit's apply checks,
@@ -1205,41 +1210,13 @@ never affects `shipmate / gate`.
 
 Because the report enumerates the guardrails a repository is *missing* — an
 ungated default branch, an apply environment with no approval rule, an App
-installation short of the manifest's permissions — the `doctor` route is gated
-on the commenter's GitHub `author_association`.
-
-**What the engine enforces:** `doctor` runs only
-when `github.event.comment.author_association` is `OWNER`, `MEMBER` or
-`COLLABORATOR` — that is, only for organization members and repository
-collaborators. Any other commenter gets a `🔴 refused:` reply saying so, and
-nothing else happens — no App token is minted, no probe runs, no report is
-composed. `CONTRIBUTOR` is deliberately excluded: its only signal is one merged
-pull request, which is no standing relationship to the repository.
-The allowlist is evaluated once, in the same step as the bot loop guard, and
-every step on the route keys off that one boolean; it fails closed, so an
-association the engine does not recognize — or an event carrying no comment
-context at all — counts as no access. It needs no action input and no workflow
-`permissions:` entry, since the association arrives on the event payload.
-
-**What the engine does not enforce:** it does not check write access, and must
-not be described as doing so. `author_association` is GitHub's own
-classification of the author's relationship to the repository, not a permission
-lookup, and it is wrong in both directions: a collaborator invited with only the
-Read role, and an organization member whose base repository permission is
-None, are both classified `COLLABORATOR`/`MEMBER` and are therefore admitted
-to the report even though neither can write to the repository; conversely an
-organization member whose membership is private is reported as `NONE` and
-will be refused unless they are also a direct collaborator. What the gate does
-buy is that an account with no declared relationship to the repository is
-refused. Nor is `shipmate help` gated — it renders the verb list and discloses
-nothing about the repository. And the report is an ordinary pull
-request comment, so once someone with access asks for it, everyone who can read
-the pull request can read it. On a repository with public pull requests you
-may additionally restrict who can trigger the comment-ops workflow (for example
-the same `github.event.comment.author_association` condition on the
-`issue_comment` job, or keeping the repository private) — belt and braces over
-the engine's own gate, not the only thing standing between an arbitrary account
-and the report. `app/manifest.json` declares
+installation short of the manifest's permissions — the `doctor` route requires
+the commenter's write access (above). A refused commenter gets the refusal
+reply and nothing else happens — no App token is minted, no probe runs, no
+report is composed. `shipmate help` is not gated — it renders the verb list
+and discloses nothing about the repository. The report is an ordinary pull
+request comment, so once someone with write access asks for it, everyone who
+can read the pull request can read it. `app/manifest.json` declares
 `"public": false` for a related reason: the App is registered per organization
 and intended for repositories the installing organization controls.
 

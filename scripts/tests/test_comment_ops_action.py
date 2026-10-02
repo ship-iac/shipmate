@@ -31,18 +31,12 @@ _MANIFEST_PERMISSIONS = json.loads((ENGINE / "app" / "manifest.json").read_text(
     "default_permissions"
 ]
 
-# The `doctor` route's access gate. The allowlist literal lives in exactly one place in the
-# action (the `guard` step's `case`); every doctor step keys off the boolean output it writes,
-# named for what GitHub tells us -- an association, not the write access it does not verify.
-_ALLOWLIST = "OWNER|MEMBER|COLLABORATOR"
-_GATE = "steps.guard.outputs.privileged_association"
-# The one phrase the refused commenter, the shipped help footer and the docs all
-# use for what the gate checks. Deliberately not "write access": a Read-role
-# collaborator and an org member with no repository access both pass this gate.
-_CLAIM = "organization members and repository collaborators"
-# The doctor rejection's own sentence. `_CLAIM` alone no longer selects it: the
-# plan rejection makes the same promise, in its own words, about its own gate.
-_DOCTOR_REASON = "`doctor` reports this repository's settings"
+# The verdict of the one permission decision, `access`, which every gated route keys on.
+_GATE = "steps.access.outputs.authorized"
+#: Every valid command but `help`, hand-written: `permission` and `access` run on exactly these.
+#: The route is empty for a non-command, an invalid command and a bot's comment, and a verb added
+#: later is gated by default: `access` exits `unknown verb` on it, which fails closed.
+_GATED_ROUTES_IF = "steps.parse.outputs.route != '' && steps.parse.outputs.route != 'help'"
 # Markers of a step that handles doctor's machinery or performs one of its
 # disclosure-bearing settings reads, regardless of how the step is conditioned.
 _DOCTOR_TOUCHES = (
@@ -360,11 +354,11 @@ def test_harvest_flag_is_set_inside_the_loop_and_written_once_after_it():
 
 
 def _steps_conditioned_on(route):
-    """(name, if-expression) for every step whose `if:` names exactly this route -- derived from the
-    file, so a doctor step added later is covered without anyone extending a hardcoded list here.
-    Steps shared with another route (the `eyes` acknowledgement) are excluded: they are not on "the
-    doctor route" in the sense the access gate applies to."""
-    other = {"doctor", "help", "apply"} - {route}
+    """(name, if-expression) for every step whose `if:` names this route and no other -- derived
+    from the file, so a step added later is covered without anyone extending a hardcoded list
+    here. Steps shared with another route (the `eyes` acknowledgement, the permission read and
+    decision) are excluded, so a shared step is never counted as one route's."""
+    other = {"doctor", "help", "apply", "plan", "unlock"} - {route}
     out = []
     for step in action_steps("comment-ops"):
         cond = step.get("if") or ""
@@ -376,85 +370,113 @@ def _steps_conditioned_on(route):
     return out
 
 
-def _guard_case_block():
-    """The body of the `guard` step's `case "$COMMENT_ASSOCIATION" in … esac`.
-
-    Sliced out rather than pattern-matched over the whole file: a shell `case` pattern may contain
-    glob metacharacters, so a widening branch such as `[A-Z]*OR)` -- which admits CONTRIBUTOR and
-    FIRST_TIME_CONTRIBUTOR -- is invisible to any regex enumerating `[A-Z_|]+` tokens. Counting `;;`
-    and the gate-opening assignment inside the sliced block sees it however the pattern is spelled
-    or laid out."""
-    guard = _step("privileged_association=false")
-    assert guard.count('case "$COMMENT_ASSOCIATION" in') == 1, guard
-    return guard.split('case "$COMMENT_ASSOCIATION" in', 1)[1].split("esac", 1)[0]
+#: The whole `env:` of the permission read and of its decision, hand-written. The read runs on
+#: the workflow token; the decision reads only the read's value and the parsed route.
+_PERMISSION_ENV = {"GH_TOKEN": "${{ github.token }}", "USER": "${{ inputs.comment-user }}"}
+_ACCESS_ENV = {
+    "PERMISSION": "${{ steps.permission.outputs.permission }}",
+    "SHIPMATE_VERB": "${{ steps.parse.outputs.route }}",
+}
+_ACCESS_RUN = 'python3 "$GITHUB_ACTION_PATH/../../scripts/authorize" --permission'
 
 
-def test_the_doctor_access_allowlist_is_written_exactly_once():
-    """`doctor`'s report enumerates the guardrails a repository is missing, so the route is
-    gated on the commenter's association. Five copies of the allowlist in five `if:`
-    conditions is how such a gate drifts open, so it is computed once in the `guard` step.
+def test_the_permission_is_read_and_decided_exactly_once():
+    """One read and one decision serve `plan`, `doctor`, `apply` and `unlock`; a second copy is
+    how the four routes' rules drift apart, and `help` makes no call at all.
 
-    Two layers of counting, because either alone leaves a hole:
-
-    * File-wide, the gate-opening assignment `privileged_association=true` occurs exactly
-      once, so nothing in the action -- a second `case`, an `if` after `esac`, an alias
-      variable -- can set the gate true for another association. (Duplicate `GITHUB_OUTPUT`
-      keys are last-write-wins, so a later write really would decide the gate.)
-    * Within the one `case`: exactly two branches, exactly one opening the gate, the
-      allowlist first and the fail-closed default last, so a widening branch is caught
-      whether spelled literally (`CONTRIBUTOR)`), with glob metacharacters (`[A-Z]*OR)`,
-      `!(NONE)`), or appended to an existing line.
-
-    The block assertions alone would miss a widening written outside the slice; the file-wide
-    count alone would miss a reordering inside it, deny branch first and allowlist
-    unreachable."""
-    assert _ACTION.count(_ALLOWLIST) == 1, _ACTION.count(_ALLOWLIST)
-    assert _ACTION.count("privileged_association=true") == 1, _ACTION.count(
-        "privileged_association=true"
-    )
-    block = _guard_case_block()
-    assert block.count(";;") == 2, block
-    assert block.count("privileged_association=true") == 1, block
-    assert block.count("privileged_association=false") == 1, block
-    branches = [ln.strip() for ln in block.strip().splitlines() if ln.strip()]
-    assert len(branches) == 2, branches
-    assert branches[0].startswith(f'{_ALLOWLIST}) echo "privileged_association=true"'), branches
-    # Fails closed on an absent `comment` context (empty string) and on every
-    # association not named above -- the default must be the deny branch.
-    assert branches[-1].startswith('*) echo "privileged_association=false"'), branches
-    # The association reaches bash through env:, like every other author-derived
-    # value (test_no_template_expr_in_run enforces the second half globally).
-    assert "COMMENT_ASSOCIATION: ${{ github.event.comment.author_association }}" in _step(
-        "privileged_association=false"
-    )
+    Mutations: copy the read into `gather` (`collaborators/` appears twice); change
+    `!= 'help'` to `!= 'doctor'` in either `if:`; drop `steps.parse.outputs.route != '' && `
+    from `permission`'s `if:`; set `access`'s `SHIPMATE_VERB` to `apply`."""
+    assert _ACTION.count("collaborators/") == 1, _ACTION.count("collaborators/")
+    permission = step_by("comment-ops", id="permission")
+    access = step_by("comment-ops", id="access")
+    assert permission["if"] == f"${{{{ {_GATED_ROUTES_IF} }}}}"
+    assert access["if"] == f"${{{{ {_GATED_ROUTES_IF} }}}}"
+    assert permission["env"] == _PERMISSION_ENV
+    assert access["env"] == _ACCESS_ENV
+    assert access["run"] == _ACCESS_RUN
+    others = [
+        s.get("name")
+        for s in action_steps("comment-ops")
+        if s.get("id") != "access" and "--permission" in (s.get("run") or "")
+    ]
+    assert others == [], others
 
 
-def test_every_doctor_route_step_is_gated_on_the_association():
+def test_every_doctor_route_step_is_gated_on_write_access():
     """Derived from the action, not from a list of step names: a new step gated on the doctor route
     that forgets the gate fails here. The count is asserted too, so a derivation that silently stops
     matching cannot read as coverage. It covers only steps conditioned on the route; a step touching
     doctor's machinery under another condition, or none, is caught by
-    test_every_step_that_touches_doctor_machinery_is_gated instead."""
+    test_every_step_that_touches_doctor_machinery_is_gated instead.
+
+    Each step's whole `if:` is compared against `_DOCTOR_ROUTE_IFS`.
+
+    Mutations: drop the gate from `fullmint`; invert one `== 'true'` to `!= 'true'`; make
+    `fullmint`'s `if:` `... && (steps.access.outputs.authorized == 'true' ||
+    steps.doctortoken.outcome == 'success')`."""
     steps = _steps_conditioned_on("doctor")
-    assert len(steps) == 6, [n for n, _ in steps]
-    for name, cond in steps:
-        assert _GATE in cond, name
-    # Exactly one step runs when the gate is closed (the rejection); every
-    # other doctor step demands it open. An inverted condition on a probe step
-    # would satisfy a bare "references the gate" assertion.
-    rejects = [n for n, c in steps if f"{_GATE} != 'true'" in c]
-    assert len(rejects) == 1, rejects
-    for name, cond in steps:
-        if name not in rejects:
-            assert f"{_GATE} == 'true'" in cond, name
+    assert len(steps) == 5, [n for n, _ in steps]
+    assert dict(steps) == _DOCTOR_ROUTE_IFS
+
+
+_DOCTOR_GATED = "steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true'"
+_DOCTOR_MINTED = f"${{{{ {_DOCTOR_GATED} && steps.doctortoken.outcome == 'success' }}}}"
+#: The whole `if:` of every doctor-only step, hand-written.
+_DOCTOR_ROUTE_IFS = {
+    "Mint App token for doctor": f"${{{{ {_DOCTOR_GATED} }}}}",
+    "Doctor: App token unavailable": (
+        f"${{{{ {_DOCTOR_GATED} && steps.doctortoken.outcome != 'success' }}}}"
+    ),
+    "Doctor: probe the manifest's full permission set": _DOCTOR_MINTED,
+    "Doctor: gather head SHA, declared environments, annotations": _DOCTOR_MINTED,
+    "Doctor: render and upsert the sticky comment": _DOCTOR_MINTED,
+}
+
+
+#: The whole `if:` of the two apply/unlock steps that run before any App token exists,
+#: hand-written: neither may run for a commenter `access` refused.
+_APP_MINT_IF = (
+    "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+    " && steps.access.outputs.authorized == 'true' }}"
+)
+_APP_UNAVAILABLE_IF = (
+    "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
+    " && steps.access.outputs.authorized == 'true' && steps.apptoken.outcome != 'success' }}"
+)
+
+
+def test_every_apply_and_unlock_step_after_the_decision_is_gated():
+    """A commenter without write access costs no App mint and no read: every apply/unlock step
+    after the refusal requires `access`'s verdict, or a mint that only a permitted commenter
+    reaches. The refusal step itself requires `!= 'true'` and is pinned whole by
+    test_a_commenter_without_write_access_is_refused_on_every_gated_route.
+
+    The derived set is compared whole against `_SHARED_ROUTE_IFS`, so a new step naming either
+    route fails here until it is added there.
+
+    Mutations: drop the gate from the mint (the "App token unavailable" step would then answer a
+    read-only commenter); drop it from "App token unavailable" (it fires on a skipped mint)."""
+    steps = action_steps("comment-ops")
+    names = [s.get("name") for s in steps]
+    after = steps[names.index("Reject a commenter without write access") + 1 :]
+    gated = {
+        s.get("name"): s.get("if")
+        for s in after
+        if any(f"outputs.route == '{r}'" in (s.get("if") or "") for r in ("apply", "unlock"))
+    }
+    assert len(gated) == 7, list(gated)
+    assert gated == _SHARED_ROUTE_IFS
 
 
 def test_every_step_that_touches_doctor_machinery_is_gated():
     """Keyed on what a step does, not on how it is conditioned -- the complement to
-    test_every_doctor_route_step_is_gated_on_the_association, which by construction cannot see a
+    test_every_doctor_route_step_is_gated_on_write_access, which by construction cannot see a
     step with no `if:` at all, or one gated only on `steps.doctortoken.outcome`. Either shape would
     still mint or use the App token, run `scripts/doctor`, or read the settings the report
-    discloses."""
+    discloses.
+
+    Mutation: delete the gate from the render step."""
     steps = _ACTION.split("\n    - name:")
     hits = [s for s in steps if any(m in s for m in _DOCTOR_TOUCHES)]
     # Sanity floor: gatherdoc and the render step both qualify today, so an
@@ -465,38 +487,48 @@ def test_every_step_that_touches_doctor_machinery_is_gated():
         assert _GATE in s, s.splitlines()[0]
 
 
-def test_a_rejected_doctor_commenter_is_told_with_the_workflow_token():
-    """Silence is indistinguishable from a broken engine. The rejection must also not depend on the
-    App (which may not be installed) and must disclose no probe results."""
-    block = _step(_DOCTOR_REASON)
-    assert _CLAIM in block
-    assert "GH_TOKEN: ${{ github.token }}" in block
-    assert f"{_GATE} != 'true'" in block
-    assert "app-id" not in block
-    # The malformed/reserved rejection is a different step with a different
-    # condition -- this one must not have absorbed it.
-    assert "is_command" not in block
+#: The refusal step's whole `if:`, hand-written.
+_WRITE_ACCESS_REFUSAL_IF = (
+    f"${{{{ {_GATED_ROUTES_IF} && steps.access.outputs.authorized != 'true' }}}}"
+)
+
+
+def test_a_commenter_without_write_access_is_refused_on_every_gated_route():
+    """Silence is indistinguishable from a broken engine, so every route `access` refuses says
+    why, on the workflow token (the App may not be installed) and with no probe results. Its env
+    and body are pinned through `_REPLIES`.
+
+    Mutations: change `!= 'help'` to `!= 'doctor'`; invert the last `!=` to `==`."""
+    refusal = step_by("comment-ops", name="Reject a commenter without write access")
+    assert refusal["if"] == _WRITE_ACCESS_REFUSAL_IF
 
 
 def test_the_shipped_help_text_matches_the_gate_it_describes():
     """`help_markdown()`'s footer ships inside the help comment every commenter can request, and it
-    asserts that `doctor` is restricted. Nothing else couples that shipped claim to the action, so a
-    later relaxation of the gate would leave the engine telling commenters something untrue. The
-    three user-visible statements of the rule are pinned together: the help footer, the refusal
-    comment, and the allowlist that enforces it."""
+    asserts that `doctor` and `plan` require write access. Nothing else couples that shipped claim
+    to the action, so a later relaxation of the gate would leave the engine telling commenters
+    something untrue. `_GATED_ROUTES_IF` excludes `help` alone, so it gates both.
+
+    Mutation: change `!= 'help'` to `!= 'plan'` in `access`'s `if:`."""
     footer = cp.help_markdown(_RUN_URL).split("\n\n")[-2]
-    assert _CLAIM in footer, footer
-    assert _CLAIM in _ACTION
-    assert _ALLOWLIST in _ACTION
+    last = footer.rsplit(";", 1)[1]
+    for word in ("`doctor`", "`plan`", "write access"):
+        assert word in last, last
+    assert step_by("comment-ops", id="access")["if"] == f"${{{{ {_GATED_ROUTES_IF} }}}}"
 
 
-def test_help_is_not_gated_on_the_association():
+def test_help_is_not_gated_on_write_access():
     """`help` discloses nothing about the repository, and is most needed by someone whose setup is
-    broken -- gating it would be a regression."""
+    broken -- gating it would be a regression, and reading the permission for it is a wasted call.
+
+    Mutations: add `&& steps.access.outputs.authorized == 'true'` to `Post help`'s `if:`; drop
+    `&& steps.parse.outputs.route != 'help'` from `permission`'s `if:`."""
     steps = _steps_conditioned_on("help")
     assert steps, "no help-only step found"
     for name, cond in steps:
         assert _GATE not in cond, name
+    for step_id in ("permission", "access"):
+        assert step_by("comment-ops", id=step_id)["if"] == f"${{{{ {_GATED_ROUTES_IF} }}}}"
 
 
 def _code(block):
@@ -763,21 +795,20 @@ def test_the_authorize_step_reads_the_files_the_gather_step_writes(tmp_path, mon
 
 
 #: The whole `env:` of `Gather authorization inputs`, hand-written. `GH_TOKEN` is the workflow
-#: token, which the permission read inherits; `APP_TOKEN` serves only the check-runs read.
+#: token for the pull request and review reads; `APP_TOKEN` serves only the check-runs read.
 _GATHER_ENV = {
     "GH_TOKEN": "${{ github.token }}",
     "APP_TOKEN": "${{ steps.apptoken.outputs.token }}",
     "OWNER": "${{ github.repository_owner }}",
-    "USER": "${{ inputs.comment-user }}",
     "PR_NUMBER": "${{ inputs.pr-number }}",
     "SHIPMATE_VERB": "${{ steps.parse.outputs.route }}",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
 }
 
-#: The whole `env:` of `Authorize`, hand-written. `PERMISSION` is the hop from gather's
-#: `permission` output; a wrong name reads as empty and refuses every commenter.
+#: The whole `env:` of `Authorize`, hand-written. `PERMISSION` is the hop from the `permission`
+#: step's output; a wrong name reads as empty and refuses every commenter.
 _AUTHORIZE_ENV = {
-    "PERMISSION": "${{ steps.gather.outputs.permission }}",
+    "PERMISSION": "${{ steps.permission.outputs.permission }}",
     "REVIEW_DECISION": "${{ steps.gather.outputs.review_decision }}",
     "PR_JSON": "pr.json",
     "PLAN_RUN_JSON": "plan_run.json",
@@ -788,27 +819,23 @@ _AUTHORIZE_ENV = {
 
 
 def test_the_gather_step_binds_exactly_this_env():
-    """Mutation: set `GH_TOKEN` to `${{ steps.apptoken.outputs.token }}`, and the permission
-    read runs on the App token."""
+    """Mutation: set `GH_TOKEN` to `${{ steps.apptoken.outputs.token }}`, and the pull request
+    and review reads run on the App token."""
     assert _gather_step()["env"] == _GATHER_ENV
 
 
 def test_the_authorize_step_binds_exactly_this_env():
-    """Mutation: bind `PERMISSION` to `steps.gather.outputs.permissions`, which no step
+    """Mutation: bind `PERMISSION` to `steps.permission.outputs.permissions`, which no step
     writes."""
     assert _authorize_step()["env"] == _AUTHORIZE_ENV
 
 
 #: A `gh` that logs the endpoint each call reads and answers it as the API does after `--jq`.
-#: `PERM_ANSWER=FAIL` fails the permission read, as a 404 does.
 _GATHER_GH = """#!/bin/bash
 for a in "$@"; do
   if [[ "$a" == repos/* || "$a" == graphql ]]; then echo "$a" >> endpoints.txt; break; fi
 done
-if [[ "$*" == *collaborators* ]]; then
-  if [ "$PERM_ANSWER" = FAIL ]; then exit 1; fi
-  echo "$PERM_ANSWER"
-elif [[ "$*" == *pulls/* ]]; then
+if [[ "$*" == *pulls/* ]]; then
   echo '{"mergeable": true, "mergeable_state": "clean", "head": {"sha": "abc"}}'
 elif [[ "$*" == *graphql* ]]; then
   echo APPROVED
@@ -816,7 +843,7 @@ fi
 """
 
 
-def _run_gather(tmp_path, perm_answer):
+def _run_gather(tmp_path):
     """Run the gather step's shipped body; return (outputs, endpoints read in order)."""
     for tool, text in (
         ("gh", _GATHER_GH),
@@ -838,7 +865,6 @@ def _run_gather(tmp_path, perm_answer):
         "SHIPMATE_VERB": "apply",
         "SHIPMATE_APP_ID": "1",
         "APP_TOKEN": "app_token",
-        "PERM_ANSWER": perm_answer,
     }
     result = run_step(tmp_path, _gather_step()["run"], env)
     assert result.returncode == 0, result.stderr
@@ -846,69 +872,21 @@ def _run_gather(tmp_path, perm_answer):
     return outputs, (tmp_path / "endpoints.txt").read_text().splitlines()
 
 
-_PERMISSION_READ = "repos/org/repo/collaborators/alice/permission"
-
-
 @bash_only
-@pytest.mark.parametrize(
-    ("answer", "permission"), [("read", "read"), ("none", "none"), ("FAIL", "")]
-)
-def test_the_gather_step_reads_nothing_more_for_a_commenter_without_write(
-    tmp_path, answer, permission
-):
-    """The permission is read first, and a commenter without write access stops the step there:
-    authorize refuses on the permission before any other input, with the same reason the
-    skipped reads would have reached.
+def test_the_gather_step_reads_no_permission(tmp_path):
+    """`gather` runs only after `access` authorized, so the permission is read once, before it,
+    and a commenter without write access costs none of these reads (pinned by
+    test_every_apply_and_unlock_step_after_the_decision_is_gated).
 
-    Mutations: remove the early `exit 0` -- the pull request, review and check-runs reads run;
-    have `decide` refuse an unmergeable pull request before the permission -- the empty
-    `pr.json` changes the reason.
-    """
-    outputs, endpoints = _run_gather(tmp_path, answer)
-    assert endpoints == [_PERMISSION_READ]
-    assert outputs == {"permission": permission}
-    assert (tmp_path / "pr.json").read_text() == "{}\n"
-    assert (tmp_path / "plan_run.json").read_text() == "{}\n"
-    az = load_script("authorize")
-    full = {
-        "review_decision": "APPROVED",
-        "pr": {"mergeable": True, "mergeable_state": "clean"},
-        "plan_runs": {"apply / stacks/app / dev-eu": "555"},
-    }
-    skipped = {"review_decision": "", "pr": {}, "plan_runs": {}}
-    for verb in ("apply", "unlock"):
-        refused = az.decide(permission=permission, verb=verb, **skipped)
-        assert not refused[0]
-        assert refused == az.decide(permission=permission, verb=verb, **full)
-
-
-@bash_only
-@pytest.mark.parametrize("permission", ["admin", "write", "maintain", "triage", "read", "none"])
-def test_the_gather_step_stops_exactly_where_authorize_refuses_the_permission(tmp_path, permission):
-    """The early exit spells authorize's permission pass set a second time. A value authorize
-    admits but the gather step stops on reaches authorize with an empty `pr.json` and is
-    refused as an uncomputed mergeability.
-
-    Mutations: admit `maintain` in `authorize._permission_reason` -- the gather step still
-    stops for it; drop `admin` from the early exit -- it stops for an admin.
-    """
-    _, endpoints = _run_gather(tmp_path, permission)
-    admitted = load_script("authorize")._permission_reason(permission, "apply") is None
-    assert (endpoints != [_PERMISSION_READ]) == admitted
-
-
-@bash_only
-def test_the_gather_step_reads_the_permission_before_the_pull_request(tmp_path):
-    """Mutation: move the permission read back below the review-decision read -- it is read
-    third."""
-    outputs, endpoints = _run_gather(tmp_path, "write")
+    Mutation: put the permission read back into gather -- the endpoints gain
+    `collaborators/alice/permission`."""
+    outputs, endpoints = _run_gather(tmp_path)
     assert endpoints == [
-        _PERMISSION_READ,
         "repos/org/repo/pulls/42",
         "graphql",
         "repos/org/repo/commits/abc/check-runs?filter=all&per_page=100",
     ]
-    assert outputs == {"permission": "write", "review_decision": "APPROVED"}
+    assert outputs == {"review_decision": "APPROVED"}
 
 
 def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs():
@@ -969,18 +947,25 @@ _REPLIES = {
         "SHIPMATE_REPLY_OUTCOME": "refused",
         "SHIPMATE_REPLY_TEXT": "${{ steps.parse.outputs.error }}",
     },
+    "Reject a commenter without write access": {
+        "SHIPMATE_REPLY_VERB": _PARSED_VERB,
+        "SHIPMATE_REPLY_ENV": _PARSED_ENV,
+        "SHIPMATE_REPLY_OUTCOME": "refused",
+        "SHIPMATE_REPLY_TEXT": "${{ steps.access.outputs.reason }}",
+    },
+    "Permission check failed": {
+        "SHIPMATE_REPLY_VERB": _PARSED_VERB,
+        "SHIPMATE_REPLY_ENV": _PARSED_ENV,
+        "SHIPMATE_REPLY_OUTCOME": "failed",
+        "SHIPMATE_REPLY_TEXT": (
+            "could not decide the commenter's permission on this repository, so this command "
+            "was not run. This run's log has the error; comment again."
+        ),
+    },
     "Reject an unauthorized plan": {
         "SHIPMATE_REPLY_VERB": "plan",
         "SHIPMATE_REPLY_OUTCOME": "refused",
         "SHIPMATE_REPLY_TEXT": "${{ steps.planauthz.outputs.reason }}",
-    },
-    "Doctor: reject a commenter without a privileged association": {
-        "SHIPMATE_REPLY_VERB": "doctor",
-        "SHIPMATE_REPLY_OUTCOME": "refused",
-        "SHIPMATE_REPLY_TEXT": (
-            "`doctor` reports this repository's settings, so it answers only organization "
-            "members and repository collaborators."
-        ),
     },
     "Doctor: App token unavailable": {
         "SHIPMATE_REPLY_VERB": "doctor",
@@ -1085,13 +1070,42 @@ _GATE_UNREADABLE_RUN = _REPLY_RUN + (
 )
 
 
+#: The permission failure reply's whole body. The job has already failed by the time it runs;
+#: the `exit 1` keeps the step itself from reading as a handled command.
+_PERMISSION_FAILED_RUN = _REPLY_RUN + "exit 1\n"
+_FAILING_REPLY_RUNS = {
+    "Gate configuration unreadable": _GATE_UNREADABLE_RUN,
+    "Permission check failed": _PERMISSION_FAILED_RUN,
+}
+
+
 def test_every_reply_step_posts_the_body_reply_comment_rendered():
     """Mutations: post `-f body=":x: shipmate: $REASON"` in `Reject with reason` instead;
-    insert `exit 0` before the trailing comment of `Gate configuration unreadable`."""
+    insert `exit 0` before the trailing comment of `Gate configuration unreadable`; drop
+    `exit 1` from `Permission check failed`."""
     for name in _REPLIES:
         run = step_by("comment-ops", name=name)["run"]
-        want = _GATE_UNREADABLE_RUN if name == "Gate configuration unreadable" else _REPLY_RUN
-        assert run == want, name
+        assert run == _FAILING_REPLY_RUNS.get(name, _REPLY_RUN), name
+
+
+#: The permission failure reply's whole `if:`, hand-written.
+_PERMISSION_FAILED_IF = (
+    "${{ failure() && (steps.permission.outcome == 'failure'"
+    " || steps.access.outcome == 'failure') }}"
+)
+
+
+def test_an_errored_permission_read_or_decision_is_answered():
+    """`permission` and `access` carry no `continue-on-error`, so an error in either fails
+    the job and skips every `success()`-gated step after it, the write-access refusal included.
+    Without this reply the commenter sees the eyes reaction on `plan` or `doctor` and nothing
+    else. Its env is pinned through `_REPLIES`, its body and `exit 1` through
+    `_FAILING_REPLY_RUNS`, its place through `_STEP_NAMES`.
+
+    Mutation: drop `failure() && ` (the implied `success()` then never runs it after the failure
+    it reports); change `steps.access.outcome` to `steps.planauthz.outcome`."""
+    step = step_by("comment-ops", name="Permission check failed")
+    assert step["if"] == _PERMISSION_FAILED_IF
 
 
 _EXPR = re.compile(r"\$\{\{ (.+?) \}\}")
@@ -1105,10 +1119,10 @@ _BODY_GH = (
 )
 
 
-def _posted_body(tmp_path, name, context):
-    """Run step `name`'s shipped body under its own `env:`, each `${{ X }}` in it replaced by
-    `context[X]`, against a `gh` that saves the comment body; return that body."""
-    step = step_by("comment-ops", name=name)
+def _run_as_wired(tmp_path, step, context):
+    """Run `step`'s shipped body under its own `env:`, each `${{ X }}` in it replaced by
+    `context[X]`, against a `gh` that saves the comment body, with `GITHUB_OUTPUT` at
+    `github_output`; return the process result."""
     for tool, text in (
         ("gh", _BODY_GH),
         ("python3", f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'),
@@ -1123,12 +1137,53 @@ def _posted_body(tmp_path, name, context):
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_RUN_ID": "7777",
+        "GITHUB_OUTPUT": str(tmp_path / "github_output"),
     }
     for key, value in step["env"].items():
         env[key] = _EXPR.sub(lambda m: context[m[1]], str(value))
-    result = run_step(tmp_path, step["run"], env)
+    return run_step(tmp_path, step["run"], env)
+
+
+def _posted_body(tmp_path, name, context):
+    """Run step `name` as wired (`_run_as_wired`); return the comment body it posted."""
+    result = _run_as_wired(tmp_path, step_by("comment-ops", name=name), context)
     assert result.returncode == 0, result.stderr
     return (tmp_path / "body.txt").read_text(encoding="utf-8")
+
+
+def _access_reason(route, permission):
+    if permission == "":
+        return (
+            "not authorized: could not read the commenter's permission on this repository, so "
+            f"`shipmate {route}` was not run. This run's log has the API response; comment again."
+        )
+    return (
+        f"not authorized: `shipmate {route}` needs write access to this repository, and the "
+        f"commenter's permission is `{permission}`."
+    )
+
+
+@bash_only
+@pytest.mark.parametrize("permission", ["admin", "read", ""])
+@pytest.mark.parametrize("route", ["plan", "doctor", "apply"])
+def test_the_access_step_as_wired_decides_the_permission_for_its_route(tmp_path, route, permission):
+    """Mutations: set the step's `SHIPMATE_VERB` to `apply` (the `plan` and `doctor` reasons
+    name `apply`); drop `--permission` from `run` (the full decision runs, and `plan` exits
+    `unknown verb`)."""
+    result = _run_as_wired(
+        tmp_path,
+        step_by("comment-ops", id="access"),
+        {
+            "steps.parse.outputs.route": route,
+            "steps.permission.outputs.permission": permission,
+        },
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    if permission == "admin":
+        expected = "authorized=true\nreason=\n"
+    else:
+        expected = f"authorized=false\nreason={_access_reason(route, permission)}\n"
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == expected
 
 
 @bash_only
@@ -1207,13 +1262,8 @@ def test_authorize_step_supplies_every_env_var_authorize_reads():
 #: the two routes: narrow one back and an unlock parses, authorizes and then
 #: silently does nothing.
 _SHARED_ROUTE_IFS = {
-    "Mint App token (checks:read)": (
-        "${{ steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}"
-    ),
-    "App token unavailable (App not installed?)": (
-        "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
-        " && steps.apptoken.outcome != 'success' }}"
-    ),
+    "Mint App token (checks:read)": _APP_MINT_IF,
+    "App token unavailable (App not installed?)": _APP_UNAVAILABLE_IF,
     "Resolve gate configuration": (
         "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
         " && steps.apptoken.outcome == 'success' }}"
@@ -1329,14 +1379,17 @@ def test_the_contract_verb_table_carries_every_active_verb():
 #: step inserted, dropped or reordered fails here rather than in whichever positional guard
 #: happened to care.
 _STEP_NAMES = [
-    "Ignore bot-authored comments, classify the commenter",
+    "Ignore bot-authored comments",
     "Parse command",
     "Reject malformed / reserved command",
     "Post help",
     "Acknowledge a command that changes no infrastructure",
+    "Read the commenter's repository permission",
+    "Authorize the commenter's permission",
+    "Reject a commenter without write access",
+    "Permission check failed",
     "Authorize plan",
     "Reject an unauthorized plan",
-    "Doctor: reject a commenter without a privileged association",
     "Mint App token for doctor",
     "Doctor: App token unavailable",
     "Doctor: probe the manifest's full permission set",
@@ -1365,13 +1418,9 @@ def _by_id(step_id):
     return step
 
 
-#: The two verdicts `planauthz` can write, hand-written whole. The step is
-#: exercised rather than string-matched, so what a mutation has to survive is the
-#: rendered value a commenter reads, not the source line that produced it.
-_PLAN_ASSOCIATION_REASON = (
-    "`plan` runs this repository's Terramate/OpenTofu on its runners, so it answers only "
-    "organization members and repository collaborators."
-)
+#: The fork refusal `planauthz` can write, hand-written whole. The step is exercised rather
+#: than string-matched, so what a mutation has to survive is the rendered value a commenter
+#: reads, not the source line that produced it.
 _PLAN_FORK_REASON = (
     "this pull request's head is in `someone/fork`, and shipmate plans only branches of this "
     "repository: a fork's plan would execute the pull request's own Terramate/OpenTofu code "
@@ -1379,7 +1428,7 @@ _PLAN_FORK_REASON = (
 )
 
 
-def _run_planauthz(tmp_path, *, privileged, head_repo="org/repo"):
+def _run_planauthz(tmp_path, *, head_repo="org/repo"):
     """Run `planauthz`'s shipped body against a stub `gh`; returns (result, outputs, gh argv).
 
     `head_repo=None` stubs a `gh` that fails, which is the head this step cannot read.
@@ -1394,7 +1443,6 @@ def _run_planauthz(tmp_path, *, privileged, head_repo="org/repo"):
 
     env = os.environ.copy()
     env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
-    env["PRIVILEGED"] = "true" if privileged else "false"
     env["GH_TOKEN"] = "test_token"  # noqa: S105
     env["PR_NUMBER"] = "42"
     env["GITHUB_REPOSITORY"] = "org/repo"
@@ -1410,48 +1458,26 @@ def _run_planauthz(tmp_path, *, privileged, head_repo="org/repo"):
     return result, outputs, (argv_file.read_text() if argv_file.exists() else "")
 
 
-def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
-    """The shipped help footer tells every commenter that `plan` answers only organization
-    members and repository collaborators. Three claims, coupled here so none can drift:
+def test_the_plan_fork_check_runs_only_for_a_permitted_commenter():
+    """`planauthz` holds the fork check and nothing else: the commenter's write access is decided
+    once, by `access`, and both plan steps run only when it authorized. The whole `env:` pins
+    every input-borne source the step reads, so no second permission source can enter it.
 
-    * the footer says it, of `plan` specifically;
-    * `plan`'s own authorization step keys on the guard step's single classification of the
-      author and on nothing else -- not repository permission, not the commenter's login, and not a
-      second `case` of its own. The whole `env:` vector pins every *input-borne* source of
-      standing, which is what this action's steps read; the runner's own context
-      (`$GITHUB_EVENT_PATH` and friends) is outside it, and passing values through `env:` is
-      the idiom that keeps it that way;
-    * a commenter without that standing is told so, in plan's own words.
-
-    Without the second claim the footer's promise is enforced by nothing: the phrase alone is
-    already in the action, in doctor's refusal, so a plan route wired with no gate at all
-    leaves every phrase-level assertion green.
-
-    The third claim is executed by
-    test_a_commenter_without_standing_is_refused_in_plans_own_words.
-
-    Mutations: add a login or permission lookup to the `env:` vector; drop the reject step's
-    `authorized != 'true'` condition.
-    """
-    footer = cp.help_markdown(_RUN_URL).split("\n\n")[-2]
-    promise = next(s for s in footer.split(";") if _CLAIM in s)
-    assert "`plan`" in promise, promise
-    assert _CLAIM in _PLAN_ASSOCIATION_REASON
-
+    Mutation: delete `&& steps.access.outputs.authorized == 'true'` from `planauthz`."""
     planauthz = _by_id("planauthz")
-    assert planauthz["if"] == "${{ steps.parse.outputs.route == 'plan' }}"
+    assert planauthz["if"] == (
+        "${{ steps.parse.outputs.route == 'plan' && steps.access.outputs.authorized == 'true' }}"
+    )
     assert planauthz["env"] == {
-        "PRIVILEGED": "${{ " + _GATE + " }}",
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
 
     reject = step_by("comment-ops", name="Reject an unauthorized plan")
     assert reject["if"] == (
-        "${{ steps.parse.outputs.route == 'plan' && steps.planauthz.outputs.authorized != 'true' }}"
+        "${{ steps.parse.outputs.route == 'plan' && steps.access.outputs.authorized == 'true'"
+        " && steps.planauthz.outputs.authorized != 'true' }}"
     )
-    # The reply renders whichever reason `planauthz` wrote; a text that hard-codes one of them
-    # again tells a fork's commenter to go and get a collaborator role.
     assert reject["env"] == {
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
@@ -1461,23 +1487,13 @@ def test_the_plan_route_is_gated_on_the_association_the_help_footer_promises():
 
 
 @bash_only
-def test_a_commenter_without_standing_is_refused_in_plans_own_words(tmp_path):
-    """The third claim above, executed. Mutations: invert the `!= "true"` test; reword either
-    half of the reason."""
-    result, outputs, argv = _run_planauthz(tmp_path, privileged=False)
-    assert result.returncode == 0, result.stderr
-    assert outputs == {"authorized": "false", "reason": _PLAN_ASSOCIATION_REASON}
-    assert argv == "", f"an unauthorized commenter must cost no API call: {argv!r}"
-
-
-@bash_only
-def test_a_privileged_commenter_planning_this_repositorys_own_head_is_authorized(tmp_path):
-    """The path that must stay open: standing plus a head in this repository dispatches.
+def test_a_plan_of_this_repositorys_own_head_is_authorized(tmp_path):
+    """The path that must stay open: a head in this repository dispatches.
 
     Mutation: compare `$HEAD_REPO` to anything but `$GITHUB_REPOSITORY`, and this repository's
     own pull requests stop planning.
     """
-    result, outputs, argv = _run_planauthz(tmp_path, privileged=True, head_repo="org/repo")
+    result, outputs, argv = _run_planauthz(tmp_path, head_repo="org/repo")
     assert result.returncode == 0, result.stderr
     assert outputs == {"authorized": "true"}
     assert "-X" not in argv, f"the authorization step writes nothing, it reads: {argv!r}"
@@ -1490,13 +1506,12 @@ def test_a_forks_head_is_refused_here_rather_than_in_a_run_the_pull_request_cann
     dispatch ref -- so a fork's `shipmate plan` shows the pull request nothing at all. The
     refusal is stated here, in its own words, before the dispatch it would have wasted.
 
-    Mutations: invert the `$HEAD_REPO` comparison to `=`; reuse the association reason for this
-    branch, which tells a fork's commenter to go and get a collaborator role. Deleting the
-    comparison instead leaves this green -- the `-n` arm alone still refuses a fork -- which is
-    why test_a_privileged_commenter_planning_this_repositorys_own_head_is_authorized is the
-    other half of the pair.
+    Mutations: invert the `$HEAD_REPO` comparison to `=`; drop `$HEAD_REPO` from the reason.
+    Deleting the comparison instead leaves this green -- the `-n` arm alone still refuses a
+    fork -- which is why test_a_plan_of_this_repositorys_own_head_is_authorized is the other half
+    of the pair.
     """
-    result, outputs, _ = _run_planauthz(tmp_path, privileged=True, head_repo="someone/fork")
+    result, outputs, _ = _run_planauthz(tmp_path, head_repo="someone/fork")
     assert result.returncode == 0, result.stderr
     assert outputs == {"authorized": "false", "reason": _PLAN_FORK_REASON}
 
@@ -1516,7 +1531,7 @@ def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(tm
     refusing pull requests of this repository's own branches; drop the notice, and the
     fall-through goes silent.
     """
-    result, outputs, _ = _run_planauthz(tmp_path, privileged=True, head_repo=head_repo)
+    result, outputs, _ = _run_planauthz(tmp_path, head_repo=head_repo)
     assert result.returncode == 0, result.stderr
     assert outputs == {"authorized": "true"}
     assert "could not read this pull request's head repository" in result.stdout, (
@@ -1526,14 +1541,24 @@ def test_a_head_this_step_cannot_read_leaves_the_refusal_where_it_is_enforced(tm
 
 def test_no_step_on_the_plan_route_touches_the_app_key():
     """A plan needs no App token: the caller's own dispatch step mints for the dispatch, and the
-    route runs no permission or check-runs lookup. A plan step that quietly acquired one would widen
-    the private key's blast radius to a route nothing else about this action watches. Parsed steps,
-    so a commented-out mint reads as absent, as it does at runtime; every step naming the route, so
-    the shared acknowledgement is included rather than excused."""
+    plan route reads the commenter's permission on the workflow token, never the App key. A plan
+    step that quietly acquired one would widen the private key's blast radius to a route nothing
+    else about this action watches. Parsed steps, so a commented-out mint reads as absent, as it
+    does at runtime; every step naming the route, so the shared steps are included rather than
+    excused: those name no route, so they are selected by the gated-route clause and, for the
+    failure reply, by the decision's outcome.
+
+    Mutations: put `GH_TOKEN: ${{ steps.apptoken.outputs.token }}` on `access`; the same on
+    `Permission check failed`."""
     on_plan = [
-        s for s in action_steps("comment-ops") if "outputs.route == 'plan'" in (s.get("if") or "")
+        s
+        for s in action_steps("comment-ops")
+        if any(
+            m in (s.get("if") or "")
+            for m in ("outputs.route == 'plan'", _GATED_ROUTES_IF, "steps.access.outcome")
+        )
     ]
-    assert len(on_plan) == 3, [s.get("name") for s in on_plan]
+    assert len(on_plan) == 7, [s.get("name") for s in on_plan]
     for step in on_plan:
         text = json.dumps(step)
         assert "inputs.private-key" not in text, step.get("name")
@@ -1561,7 +1586,12 @@ def test_one_verdict_answers_for_every_route_and_is_never_skipped():
     """Two readers of two different authorization steps is how one policy diverges, so the reaction
     and the composite's `authorized` output read a single combined step. It carries no `if:` on
     purpose: a skipped step writes no output, so any condition at all leaves some route with no
-    verdict -- and an empty output is falsy, reading as "not authorized" for a command that was."""
+    verdict -- and an empty output is falsy, reading as "not authorized" for a command that was.
+    `access` writes `authorized=true` for every permitted commenter, so the verdict reading it
+    would dispatch a doctor; `_VERDICT_ENV` excludes it.
+
+    Mutation: add `ACCESS_AUTHORIZED: ${{ steps.access.outputs.authorized }}` to the verdict
+    env."""
     verdict = _by_id("verdict")
     assert "if" not in verdict, verdict.get("if")
     assert verdict["env"] == _VERDICT_ENV
