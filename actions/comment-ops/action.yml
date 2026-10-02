@@ -121,7 +121,7 @@ runs:
 
     - name: Read the commenter's repository permission
       id: permission
-      if: ${{ steps.parse.outputs.route == 'plan' || steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
+      if: ${{ steps.parse.outputs.route != '' && steps.parse.outputs.route != 'help' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -139,9 +139,10 @@ runs:
 
     - name: Authorize the commenter's permission
       id: access
-      # Every later step on these routes but the refusal below runs only when this authorized.
-      # The verdict step never reads it, so a permitted doctor dispatches nothing.
-      if: ${{ steps.parse.outputs.route == 'plan' || steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
+      # Every later step that mints, reads or posts on these routes, except the two
+      # refusal/failure replies below, runs only when this authorized. The verdict step
+      # never reads it, so a permitted doctor dispatches nothing.
+      if: ${{ steps.parse.outputs.route != '' && steps.parse.outputs.route != 'help' }}
       shell: bash
       env:
         PERMISSION: ${{ steps.permission.outputs.permission }}
@@ -150,7 +151,7 @@ runs:
 
     - name: Reject a commenter without write access
       # GITHUB_TOKEN, not the App: this must answer even where the App is not installed.
-      if: ${{ (steps.parse.outputs.route == 'plan' || steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized != 'true' }}
+      if: ${{ steps.parse.outputs.route != '' && steps.parse.outputs.route != 'help' && steps.access.outputs.authorized != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
@@ -163,6 +164,24 @@ runs:
         set -euo pipefail
         body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+
+    - name: Permission check failed
+      # A failed step skips every later `success()`-gated step, so without `failure()` here
+      # an errored read or decision would refuse in silence.
+      if: ${{ failure() && (steps.permission.outcome == 'failure' || steps.access.outcome == 'failure') }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ inputs.pr-number }}
+        SHIPMATE_REPLY_VERB: ${{ steps.parse.outputs.verb }}
+        SHIPMATE_REPLY_ENV: ${{ steps.parse.outputs.env }}
+        SHIPMATE_REPLY_OUTCOME: failed
+        SHIPMATE_REPLY_TEXT: "could not decide the commenter's permission on this repository, so this command was not run. This run's log has the error; comment again."
+      run: |
+        set -euo pipefail
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
+        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        exit 1
 
     - name: Authorize plan
       id: planauthz
@@ -583,8 +602,8 @@ runs:
     - name: Combine the route verdicts
       id: verdict
       # One value for every route, so the reaction, the caller's dispatch condition and this
-      # action's `authorized` output cannot disagree. Exactly one of `authz` and `planauthz` runs --
-      # their `if:`s name disjoint routes -- and the other's output is empty. No `if:` here: a
+      # action's `authorized` output cannot disagree. At most one of `authz` and `planauthz` runs --
+      # their `if:`s name disjoint routes -- and an empty output reads as false. No `if:` here: a
       # skipped step writes no output, and then no route has a verdict at all. Routes that
       # dispatch nothing (help, doctor, a non-command) land on false.
       shell: bash

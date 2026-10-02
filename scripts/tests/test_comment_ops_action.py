@@ -33,11 +33,10 @@ _MANIFEST_PERMISSIONS = json.loads((ENGINE / "app" / "manifest.json").read_text(
 
 # The verdict of the one permission decision, `access`, which every gated route keys on.
 _GATE = "steps.access.outputs.authorized"
-#: The four gated routes, hand-written: `permission` and `access` run on exactly these.
-_GATED_ROUTES_IF = (
-    "steps.parse.outputs.route == 'plan' || steps.parse.outputs.route == 'doctor' || "
-    "steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock'"
-)
+#: Every valid command but `help`, hand-written: `permission` and `access` run on exactly these.
+#: The route is empty for a non-command, an invalid command and a bot's comment, and a verb added
+#: later is gated by default: `access` exits `unknown verb` on it, which fails closed.
+_GATED_ROUTES_IF = "steps.parse.outputs.route != '' && steps.parse.outputs.route != 'help'"
 # Markers of a step that handles doctor's machinery or performs one of its
 # disclosure-bearing settings reads, regardless of how the step is conditioned.
 _DOCTOR_TOUCHES = (
@@ -385,9 +384,9 @@ def test_the_permission_is_read_and_decided_exactly_once():
     """One read and one decision serve `plan`, `doctor`, `apply` and `unlock`; a second copy is
     how the four routes' rules drift apart, and `help` makes no call at all.
 
-    Mutations: copy the read into `gather` (`collaborators/` appears twice); add
-    `|| steps.parse.outputs.route == 'help'` to either `if:`; drop `unlock` from
-    `permission`'s `if:`; set `access`'s `SHIPMATE_VERB` to `apply`."""
+    Mutations: copy the read into `gather` (`collaborators/` appears twice); change
+    `!= 'help'` to `!= 'doctor'` in either `if:`; drop `steps.parse.outputs.route != '' && `
+    from `permission`'s `if:`; set `access`'s `SHIPMATE_VERB` to `apply`."""
     assert _ACTION.count("collaborators/") == 1, _ACTION.count("collaborators/")
     permission = step_by("comment-ops", id="permission")
     access = step_by("comment-ops", id="access")
@@ -411,11 +410,28 @@ def test_every_doctor_route_step_is_gated_on_write_access():
     doctor's machinery under another condition, or none, is caught by
     test_every_step_that_touches_doctor_machinery_is_gated instead.
 
-    Mutations: drop the gate from `fullmint`; invert one `== 'true'` to `!= 'true'`."""
+    Each step's whole `if:` is compared against `_DOCTOR_ROUTE_IFS`.
+
+    Mutations: drop the gate from `fullmint`; invert one `== 'true'` to `!= 'true'`; make
+    `fullmint`'s `if:` `... && (steps.access.outputs.authorized == 'true' ||
+    steps.doctortoken.outcome == 'success')`."""
     steps = _steps_conditioned_on("doctor")
     assert len(steps) == 5, [n for n, _ in steps]
-    for name, cond in steps:
-        assert f"{_GATE} == 'true'" in cond, name
+    assert dict(steps) == _DOCTOR_ROUTE_IFS
+
+
+_DOCTOR_GATED = "steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true'"
+_DOCTOR_MINTED = f"${{{{ {_DOCTOR_GATED} && steps.doctortoken.outcome == 'success' }}}}"
+#: The whole `if:` of every doctor-only step, hand-written.
+_DOCTOR_ROUTE_IFS = {
+    "Mint App token for doctor": f"${{{{ {_DOCTOR_GATED} }}}}",
+    "Doctor: App token unavailable": (
+        f"${{{{ {_DOCTOR_GATED} && steps.doctortoken.outcome != 'success' }}}}"
+    ),
+    "Doctor: probe the manifest's full permission set": _DOCTOR_MINTED,
+    "Doctor: gather head SHA, declared environments, annotations": _DOCTOR_MINTED,
+    "Doctor: render and upsert the sticky comment": _DOCTOR_MINTED,
+}
 
 
 #: The whole `if:` of the two apply/unlock steps that run before any App token exists,
@@ -436,27 +452,21 @@ def test_every_apply_and_unlock_step_after_the_decision_is_gated():
     reaches. The refusal step itself requires `!= 'true'` and is pinned whole by
     test_a_commenter_without_write_access_is_refused_on_every_gated_route.
 
+    The derived set is compared whole against `_SHARED_ROUTE_IFS`, so a new step naming either
+    route fails here until it is added there.
+
     Mutations: drop the gate from the mint (the "App token unavailable" step would then answer a
     read-only commenter); drop it from "App token unavailable" (it fires on a skipped mint)."""
     steps = action_steps("comment-ops")
     names = [s.get("name") for s in steps]
     after = steps[names.index("Reject a commenter without write access") + 1 :]
-    gated = [
-        s
+    gated = {
+        s.get("name"): s.get("if")
         for s in after
         if any(f"outputs.route == '{r}'" in (s.get("if") or "") for r in ("apply", "unlock"))
-    ]
-    assert len(gated) == 7, [s.get("name") for s in gated]
-    for step in gated:
-        cond = step["if"]
-        assert f"{_GATE} == 'true'" in cond or "steps.apptoken.outcome == 'success'" in cond, (
-            step.get("name")
-        )
-    assert step_by("comment-ops", id="apptoken")["if"] == _APP_MINT_IF
-    assert (
-        step_by("comment-ops", name="App token unavailable (App not installed?)")["if"]
-        == _APP_UNAVAILABLE_IF
-    )
+    }
+    assert len(gated) == 7, list(gated)
+    assert gated == _SHARED_ROUTE_IFS
 
 
 def test_every_step_that_touches_doctor_machinery_is_gated():
@@ -479,7 +489,7 @@ def test_every_step_that_touches_doctor_machinery_is_gated():
 
 #: The refusal step's whole `if:`, hand-written.
 _WRITE_ACCESS_REFUSAL_IF = (
-    f"${{{{ ({_GATED_ROUTES_IF}) && steps.access.outputs.authorized != 'true' }}}}"
+    f"${{{{ {_GATED_ROUTES_IF} && steps.access.outputs.authorized != 'true' }}}}"
 )
 
 
@@ -488,7 +498,7 @@ def test_a_commenter_without_write_access_is_refused_on_every_gated_route():
     why, on the workflow token (the App may not be installed) and with no probe results. Its env
     and body are pinned through `_REPLIES`.
 
-    Mutations: delete `|| steps.parse.outputs.route == 'doctor'`; invert `!=` to `==`."""
+    Mutations: change `!= 'help'` to `!= 'doctor'`; invert the last `!=` to `==`."""
     refusal = step_by("comment-ops", name="Reject a commenter without write access")
     assert refusal["if"] == _WRITE_ACCESS_REFUSAL_IF
 
@@ -497,31 +507,28 @@ def test_the_shipped_help_text_matches_the_gate_it_describes():
     """`help_markdown()`'s footer ships inside the help comment every commenter can request, and it
     asserts that `doctor` and `plan` require write access. Nothing else couples that shipped claim
     to the action, so a later relaxation of the gate would leave the engine telling commenters
-    something untrue.
+    something untrue. `_GATED_ROUTES_IF` excludes `help` alone, so it gates both.
 
-    Mutation: drop `plan` from `access`'s `if:`."""
+    Mutation: change `!= 'help'` to `!= 'plan'` in `access`'s `if:`."""
     footer = cp.help_markdown(_RUN_URL).split("\n\n")[-2]
     last = footer.rsplit(";", 1)[1]
     for word in ("`doctor`", "`plan`", "write access"):
         assert word in last, last
-    cond = step_by("comment-ops", id="access")["if"]
-    for route in ("doctor", "plan"):
-        assert f"steps.parse.outputs.route == '{route}'" in cond, cond
+    assert step_by("comment-ops", id="access")["if"] == f"${{{{ {_GATED_ROUTES_IF} }}}}"
 
 
 def test_help_is_not_gated_on_write_access():
     """`help` discloses nothing about the repository, and is most needed by someone whose setup is
     broken -- gating it would be a regression, and reading the permission for it is a wasted call.
 
-    Mutations: add `&& steps.access.outputs.authorized == 'true'` to `Post help`'s `if:`; add
-    `|| steps.parse.outputs.route == 'help'` to `permission`'s `if:`."""
+    Mutations: add `&& steps.access.outputs.authorized == 'true'` to `Post help`'s `if:`; drop
+    `&& steps.parse.outputs.route != 'help'` from `permission`'s `if:`."""
     steps = _steps_conditioned_on("help")
     assert steps, "no help-only step found"
     for name, cond in steps:
         assert _GATE not in cond, name
     for step_id in ("permission", "access"):
-        cond = step_by("comment-ops", id=step_id)["if"]
-        assert "'help'" not in cond, (step_id, cond)
+        assert step_by("comment-ops", id=step_id)["if"] == f"${{{{ {_GATED_ROUTES_IF} }}}}"
 
 
 def _code(block):
@@ -946,6 +953,15 @@ _REPLIES = {
         "SHIPMATE_REPLY_OUTCOME": "refused",
         "SHIPMATE_REPLY_TEXT": "${{ steps.access.outputs.reason }}",
     },
+    "Permission check failed": {
+        "SHIPMATE_REPLY_VERB": _PARSED_VERB,
+        "SHIPMATE_REPLY_ENV": _PARSED_ENV,
+        "SHIPMATE_REPLY_OUTCOME": "failed",
+        "SHIPMATE_REPLY_TEXT": (
+            "could not decide the commenter's permission on this repository, so this command "
+            "was not run. This run's log has the error; comment again."
+        ),
+    },
     "Reject an unauthorized plan": {
         "SHIPMATE_REPLY_VERB": "plan",
         "SHIPMATE_REPLY_OUTCOME": "refused",
@@ -1054,13 +1070,42 @@ _GATE_UNREADABLE_RUN = _REPLY_RUN + (
 )
 
 
+#: The permission failure reply's whole body. The job has already failed by the time it runs;
+#: the `exit 1` keeps the step itself from reading as a handled command.
+_PERMISSION_FAILED_RUN = _REPLY_RUN + "exit 1\n"
+_FAILING_REPLY_RUNS = {
+    "Gate configuration unreadable": _GATE_UNREADABLE_RUN,
+    "Permission check failed": _PERMISSION_FAILED_RUN,
+}
+
+
 def test_every_reply_step_posts_the_body_reply_comment_rendered():
     """Mutations: post `-f body=":x: shipmate: $REASON"` in `Reject with reason` instead;
-    insert `exit 0` before the trailing comment of `Gate configuration unreadable`."""
+    insert `exit 0` before the trailing comment of `Gate configuration unreadable`; drop
+    `exit 1` from `Permission check failed`."""
     for name in _REPLIES:
         run = step_by("comment-ops", name=name)["run"]
-        want = _GATE_UNREADABLE_RUN if name == "Gate configuration unreadable" else _REPLY_RUN
-        assert run == want, name
+        assert run == _FAILING_REPLY_RUNS.get(name, _REPLY_RUN), name
+
+
+#: The permission failure reply's whole `if:`, hand-written.
+_PERMISSION_FAILED_IF = (
+    "${{ failure() && (steps.permission.outcome == 'failure'"
+    " || steps.access.outcome == 'failure') }}"
+)
+
+
+def test_an_errored_permission_read_or_decision_is_answered():
+    """`permission` and `access` carry no `continue-on-error`, so an error in either fails
+    the job and skips every `success()`-gated step after it, the write-access refusal included.
+    Without this reply the commenter sees the eyes reaction on `plan` or `doctor` and nothing
+    else. Its env is pinned through `_REPLIES`, its body and `exit 1` through
+    `_FAILING_REPLY_RUNS`, its place through `_STEP_NAMES`.
+
+    Mutation: drop `failure() && ` (the implied `success()` then never runs it after the failure
+    it reports); change `steps.access.outcome` to `steps.planauthz.outcome`."""
+    step = step_by("comment-ops", name="Permission check failed")
+    assert step["if"] == _PERMISSION_FAILED_IF
 
 
 _EXPR = re.compile(r"\$\{\{ (.+?) \}\}")
@@ -1342,6 +1387,7 @@ _STEP_NAMES = [
     "Read the commenter's repository permission",
     "Authorize the commenter's permission",
     "Reject a commenter without write access",
+    "Permission check failed",
     "Authorize plan",
     "Reject an unauthorized plan",
     "Mint App token for doctor",
@@ -1499,13 +1545,20 @@ def test_no_step_on_the_plan_route_touches_the_app_key():
     step that quietly acquired one would widen the private key's blast radius to a route nothing
     else about this action watches. Parsed steps, so a commented-out mint reads as absent, as it
     does at runtime; every step naming the route, so the shared steps are included rather than
-    excused.
+    excused: those name no route, so they are selected by the gated-route clause and, for the
+    failure reply, by the decision's outcome.
 
-    Mutation: put `GH_TOKEN: ${{ steps.apptoken.outputs.token }}` on `access`."""
+    Mutations: put `GH_TOKEN: ${{ steps.apptoken.outputs.token }}` on `access`; the same on
+    `Permission check failed`."""
     on_plan = [
-        s for s in action_steps("comment-ops") if "outputs.route == 'plan'" in (s.get("if") or "")
+        s
+        for s in action_steps("comment-ops")
+        if any(
+            m in (s.get("if") or "")
+            for m in ("outputs.route == 'plan'", _GATED_ROUTES_IF, "steps.access.outcome")
+        )
     ]
-    assert len(on_plan) == 6, [s.get("name") for s in on_plan]
+    assert len(on_plan) == 7, [s.get("name") for s in on_plan]
     for step in on_plan:
         text = json.dumps(step)
         assert "inputs.private-key" not in text, step.get("name")
