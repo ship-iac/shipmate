@@ -1141,6 +1141,17 @@ for exactly the exposure control 1 exists to limit.
   consumer's control, not the engine's: point the calling job's `runs_on:` at a
   self-hosted runner behind an egress allowlist, or at GitHub-hosted runners
   attached to a private network you filter.
+- **A cache entry planted by an unreviewed apply.** An apply cell runs the pull
+  request's configuration in a job that can write the default branch's Actions
+  cache, because it saves state and providers (`CONTRACT.md` §Terramate
+  safeguards). Where an environment applies without an approving review
+  (`gated = false`, or a gated environment under a ruleset that requires none),
+  code in that apply can save a cache entry that other environments' drift and
+  apply cells restore under their own roles. Nothing verifies a restored
+  archive; the lock file verifies provider packages, not the archive around
+  them. Plan and unlock runs cannot save (`cache-mode: read`). Reaching this
+  takes write access and such an environment. The cache is per repository, so
+  an ungated tier in its own repository cannot reach another repository's cells.
 - **Unconditional OIDC minting in every cell-running job.** GHA's `permissions:`
   cannot be an expression, so `id-token: write` on the wave, unlock, plan and
   drift jobs is not gated on a role resolving — every consumer, cloud or not, runs
