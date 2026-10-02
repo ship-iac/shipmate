@@ -31,24 +31,6 @@ MATRIX_LIMIT = 256
 #: under this name. No plan-run lookup does — each reads a cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
-#: Stack paths a reader would take for an engine artifact. Neither can collide any more: a plan
-#: check is `shipmate / <stack> / <env>`, so a stack named `apply` yields `shipmate / apply /
-#: <env>`, which fails apply-gate's `apply / ` prefix filter, and a stack named `shipmate` yields
-#: three segments against `shipmate / gate`'s two. The older two-segment grammar DID collide,
-#: which is why these were reserved; they stay reserved because `apply` is the engine's verb and
-#: `shipmate / ` its namespace, and a stack so named is unreadable in a check list either way.
-RESERVED_STACK_PATHS = {
-    "apply": (
-        "::error::a stack path may not be exactly 'apply': 'apply' is the engine's own "
-        "verb, and its checks are named 'apply / <stack> / <env>'. Rename or nest the stack."
-    ),
-    "shipmate": (
-        "::error::a stack path may not be exactly 'shipmate': 'shipmate / ' is the engine's "
-        "own check namespace (e.g. 'shipmate / gate', 'shipmate / summary'). Rename or nest "
-        "the stack."
-    ),
-}
-
 
 def workload_of(tags, stack):
     """The `workload/<name>` tag name of `stack`, or "" when it carries none.
@@ -162,9 +144,6 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
         {**c, "workload": workload_of(tags_by_stack.get(c["stack"], []), c["stack"])}
         for c in filter_cells(cells, tags_by_stack, tags)
     ]
-    for reserved, message in RESERVED_STACK_PATHS.items():
-        if any(c["stack"] == reserved for c in cells):
-            raise SystemExit(message)
     guard_slug_collisions(cells)
     if len(cells) > MATRIX_LIMIT:
         raise SystemExit(

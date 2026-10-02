@@ -129,15 +129,6 @@ a dispatched run) — a run title GitHub renders and nothing matches on, where i
 says which event or verb this run serves. The workflow's own `name:` is plain
 `shipmate`.
 
-`build-matrix` rejects a stack path of exactly `apply` or exactly `shipmate`.
-Neither can be mistaken for an engine surface by the engine itself: a stack
-`apply` yields `shipmate / apply / <env>`, which fails `apply-gate`'s
-`apply / ` prefix filter, and a stack `shipmate` yields three segments against
-`shipmate / gate`'s two. They stay reserved for the human reader — `apply` is
-the engine's own verb and `shipmate / ` is its own namespace, so a stack so
-named reads as an engine artifact in every check list someone scans. Nest or
-rename the stack.
-
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
 arbitrary suite when a commit carries more than one plan run (a draft→ready

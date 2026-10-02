@@ -56,51 +56,20 @@ def test_raises_above_256_cells():
     )
 
 
-def test_rejects_stack_path_exactly_apply():
-    """A stack path of exactly `apply` is refused, with the whole message pinned.
+def test_stack_at_engine_reserved_word_paths_plans():
+    """Stacks at paths exactly `apply` and `shipmate` each build a cell row.
 
-    Reddens on dropping `"apply"` from `RESERVED_STACK_PATHS` (no SystemExit), and on any
-    edit to its message -- the comparison is against a hand-written constant, so a reason
-    rewritten back into the retired collision claim fails here.
+    Reddens on re-adding a refusal of either path (SystemExit).
     """
-    with pytest.raises(SystemExit) as exc_info:
-        bm.build_matrix(["dev-eu"], {"dev-eu": ["apply"]}, {"apply": ["env/dev-eu"]})
-    assert exc_info.value.code == (
-        "::error::a stack path may not be exactly 'apply': 'apply' is the engine's own "
-        "verb, and its checks are named 'apply / <stack> / <env>'. Rename or nest the stack."
-    )
-
-
-def test_nested_apply_stack_is_allowed():
-    # Only an exact top-level `apply` is reserved; `infra/apply` reads as a stack, not as
-    # the engine's verb.
     cells = bm.build_matrix(
-        ["dev-eu"], {"dev-eu": ["infra/apply"]}, {"infra/apply": ["env/dev-eu"]}
+        ["dev"],
+        {"dev": ["apply", "shipmate"]},
+        {"apply": ["env/dev"], "shipmate": ["env/dev"]},
     )
-    assert cells == [{"stack": "infra/apply", "environment": "dev-eu", "workload": ""}]
-
-
-def test_rejects_stack_path_exactly_shipmate():
-    """A stack path of exactly `shipmate` is refused, with the whole message pinned.
-
-    Reddens on dropping `"shipmate"` from `RESERVED_STACK_PATHS` (no SystemExit), and on any
-    edit to its message -- the comparison is against a hand-written constant, so a reason
-    rewritten back into the retired collision claim fails here.
-    """
-    with pytest.raises(SystemExit) as exc_info:
-        bm.build_matrix(["dev-eu"], {"dev-eu": ["shipmate"]}, {"shipmate": ["env/dev-eu"]})
-    assert exc_info.value.code == (
-        "::error::a stack path may not be exactly 'shipmate': 'shipmate / ' is the engine's "
-        "own check namespace (e.g. 'shipmate / gate', 'shipmate / summary'). Rename or nest "
-        "the stack."
-    )
-
-
-def test_nested_shipmate_stack_is_allowed():
-    cells = bm.build_matrix(
-        ["dev-eu"], {"dev-eu": ["infra/shipmate"]}, {"infra/shipmate": ["env/dev-eu"]}
-    )
-    assert cells == [{"stack": "infra/shipmate", "environment": "dev-eu", "workload": ""}]
+    assert cells == [
+        {"stack": "apply", "environment": "dev", "workload": ""},
+        {"stack": "shipmate", "environment": "dev", "workload": ""},
+    ]
 
 
 _TWO_WORKLOADS_ERROR = (
@@ -1019,24 +988,6 @@ def test_slug_collision_among_filtered_out_cells_does_not_abort():
         tags="workload/keep",
     )
     assert [c["stack"] for c in cells] == ["a/b"]
-
-
-def test_reserved_stack_path_among_filtered_out_cells_does_not_abort():
-    """A stack path of exactly `apply` aborts only if it is in the run.
-
-    Fails when the filter runs after the reserved loop: a scoped sweep that
-    never covers that stack aborts on it.
-    """
-    cells = bm.build_matrix(
-        ["dev-eu"],
-        {"dev-eu": ["apply", "stacks/a"]},
-        {
-            "apply": ["env/dev-eu", "workload/drop"],
-            "stacks/a": ["env/dev-eu", "workload/keep"],
-        },
-        tags="workload/keep",
-    )
-    assert [c["stack"] for c in cells] == ["stacks/a"]
 
 
 def test_existing_build_matrix_callers_pass_no_tags():

@@ -730,7 +730,7 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
     called with.
 
     Only the walk is stubbed. The real `build_matrix` turns its output into cells, so the
-    matrix-limit and reserved-path guards it carries stay on the unlock path instead of being
+    matrix-limit and slug-collision guards it carries stay on the unlock path instead of being
     stubbed out of it.
 
     `checks` are stubbed as the raw JSONL `gh` emits, not as a set of names, so the queue's
