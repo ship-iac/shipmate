@@ -235,8 +235,8 @@ The consumer's `deploy` job calls the engine's reusable deploy workflow, and its
   check of every cell whose job succeeded. A stack already applied (pre-merge, or a no-change re-plan)
   has a completed check → deploy no-ops it.
 - **`drift`** (selected by the nightly `schedule`, engine reusable
-  `.github/workflows/drift.yml`) fans out over all stacks × envs, or a
-  slice of them, and plans each with `actions/drift-cell`, which holds no App
+  `.github/workflows/drift.yml`) fans out over all stacks × envs and plans
+  each with `actions/drift-cell`, which holds no App
   credential and only uploads a drift-summary artifact. A separate `issues` job,
   bound to `shipmate-engine`, downloads those artifacts and opens one labeled
   GitHub Issue per drifted stack × env via `actions/drift-issues` — auto-closed

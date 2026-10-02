@@ -509,9 +509,6 @@ jobs:
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
       # Same `shipmate-engine` webhook as `deploy`; delete this line and drift sends no Slack message.
       SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
-    with:
-      # Empty covers every cell. Split the sweep by adding more files, one tag query each.
-      tags: ""
   targeted:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' && inputs.environment != ''
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
@@ -890,15 +887,15 @@ and what masking does and does not cover.
 
 ### Drift detection
 
-The `drift` job plans every stack × environment nightly — or a slice of them —
-against real state, then opens, updates and closes drift Issues from what those
-cells report. The engine jobs behind it that hold a credential run only at the
-default-branch ref; it needs the `shipmate-engine` environment from the plan
+The `drift` job plans every stack × environment nightly against real state,
+then opens, updates and closes drift Issues from what those cells report. The
+engine jobs behind it that hold a credential run only at the default-branch
+ref; it needs the `shipmate-engine` environment from the plan
 tier. It is part of the `shipmate.yml` above, so a repository `scripts/onboard`
 reconciled already has it — delete the job and the file's `schedule:` trigger if
 you do not want a nightly run, and the reconciler then reports the file as
-`differs` rather than overwriting your edit. What it costs, and how to narrow one
-sweep to a slice, are in [`drift.md`](drift.md).
+`differs` rather than overwriting your edit. What it costs is in
+[`drift.md`](drift.md).
 
 ### Recipe: automerge after apply
 

@@ -29,16 +29,6 @@ inputs:
       set it in a plan wrapper.
     required: false
     default: "false"
-  tags:
-    description: >-
-      Terramate tag query narrowing the cells this run covers, in the on-disk tag
-      form: ',' is OR and ':' is AND, so 'env/dev-eu,env/dev-us' is either environment and
-      'env/dev-eu:workload/app' is both. Empty (the default) covers every cell. Allowed only
-      alongside no-pull-request (nightly drift), because narrowing a plan run would leave
-      changed stacks with no plan cell and no apply check. A term no stack carries, and a
-      query matching no cell, both fail the run.
-    required: false
-    default: ""
   github-vars:
     description: >-
       The caller's reachable GitHub variables, serialised with toJSON. Read only when the
@@ -70,6 +60,5 @@ runs:
         SHIPMATE_HEAD_REPO: ${{ inputs.head-repo }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_NO_PULL_REQUEST: ${{ inputs.no-pull-request }}
-        SHIPMATE_TAGS: ${{ inputs.tags }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"

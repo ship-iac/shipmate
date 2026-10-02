@@ -944,8 +944,8 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
 A stack carries at most one `workload/<name>` tag; a stack carrying two
-is refused at detect when a run builds its cell. A stack a drift `tags` filter
-or the unlock queue leaves out does not refuse the run, and targeted and bare
+is refused at detect when a run builds its cell. A stack the unlock queue
+leaves out does not refuse the run, and targeted and bare
 `shipmate apply` build cells only for stacks with an apply check.
 
 Terramate refuses an uppercase letter in a tag, so an environment name is
@@ -967,11 +967,6 @@ deliberate too: a silently skipped stack plans and applies nothing while the
 gate goes green over it, which is the one failure this contract will not trade
 for convenience. The failure names every untagged stack it found, so they are
 tagged from that list rather than found one re-run per stack.
-
-The drift path's optional `tags` filter does not retire that backstop: it
-narrows the cells a run covers, not the set of stacks it inspects, and the
-`env/<name>` requirement is enforced over every stack before any filtering.
-`docs/drift.md` §Scoping a sweep has the query grammar.
 
 ## Comment-ops
 
@@ -1891,11 +1886,7 @@ in `build-matrix`, at matrix construction — before any artifact exists, so the
 plan run refuses up front rather than an apply discovering the clash afterwards
 (rename so the path→`-` slug is unique). Every path that builds a matrix
 carries it: the plan and deploy paths over their changed set, the drift path
-over the whole tree, and `shipmate unlock` over the target environment. Unlike
-the `env/<name>` backstop, this one is not repo-wide under a `tags` filter: the
-guard runs over the cells the run will produce, so two stacks that slug alike
-but fall in different slices are caught by no scoped sweep. An unscoped drift
-run stays the whole-tree check for that.
+over the whole tree, and `shipmate unlock` over the target environment.
 
 The name spans the plan and apply paths:
 `plan-cell` (the uploader) and `apply-cell` (the downloader) each run as
