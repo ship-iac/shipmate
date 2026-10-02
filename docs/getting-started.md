@@ -471,9 +471,6 @@ jobs:
     # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
     # this one only has to select the event.
     if: github.event_name == 'issue_comment'
-    concurrency:
-      group: comment-ops-${{ github.event.issue.number }}
-      cancel-in-progress: false
     uses: ship-iac/shipmate/.github/workflows/comment-ops.yml@<engine-sha>  # see the latest release
     permissions:
       contents: read

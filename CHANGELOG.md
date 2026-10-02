@@ -34,7 +34,8 @@ section below names the SHA the release tags.
 - **Plan cells render the text and JSON plans concurrently.**
 - **The control jobs that run no `tofu` run on `ubuntu-slim`.**
 - **The plan summary's and `shipmate doctor`'s App tokens request `environments: read`; the plan-environment secret probe has no token of its own and no not-checked warning.**
-- **Comments by bots or without `shipmate` start no comment-ops job.**
+- **Comments by bots or without `shipmate` start no engine `ops` job.**
+- **The workflow file's `comment-ops` job has no concurrency group, so a later comment no longer cancels a command still waiting to run; delete the `concurrency:` block from that job.**
 - **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed.**
 - **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 
