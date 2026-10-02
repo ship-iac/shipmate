@@ -201,14 +201,15 @@ minted and no probe runs.
 `shipmate help` stays open to every commenter (it lists the verbs and discloses
 nothing about the repository, and a newcomer whose setup is broken still needs
 it), and the report is an ordinary pull request comment, so once someone with
-write access asks for it, everyone who can read the pull request can read it. The same rendered report is also written to the run's job summary, so
-that a GitHub API outage which loses the comment does not discard the probes.
-That surface needs repository read access too, so it admits no one the comment
-did not — but it is not as retractable. The comment is a single sticky one
-you can edit or delete, and the next `shipmate doctor` overwrites it; a job
-summary cannot be edited or redacted at all, and every past run keeps its own
-copy for the repository's Actions retention window (90 days by default). So if a
-report disclosed something you did not want recorded, deleting the comment is not
+write access asks for it, everyone who can read the pull request can read it.
+The same rendered report is also written to the run's job summary, so that a
+GitHub API outage which loses the comment does not discard the probes. That
+surface needs repository read access too, so it admits no one the comment did
+not — but it is not as retractable. The comment is a single sticky one you can
+edit or delete, and the next `shipmate doctor` overwrites it; a job summary
+cannot be edited or redacted at all, and every past run keeps its own copy for
+the repository's Actions retention window (90 days by default). So if a report
+disclosed something you did not want recorded, deleting the comment is not
 enough — delete the workflow runs that produced it, or shorten the retention
 window.
 

@@ -1019,9 +1019,10 @@ body contains `shipmate` in any case; every other comment starts no runner.
 
 `plan`, `doctor`, `apply` and `unlock` require the commenter's write access
 (the "write access" apply requirement below defines it), read and decided once
-per comment before anything else on the route runs. A refused commenter gets
-one `🔴 refused:` reply naming the verb and the permission read, or saying the
-permission could not be read. `help` answers anyone.
+per comment before any step that mints a token, reads the pull request or
+dispatches; the 👀 acknowledgement on `plan` and `doctor` comes first. A refused
+commenter gets one `🔴 refused:` reply naming the verb and the permission read,
+or saying the permission could not be read. `help` answers anyone.
 
 Every dispatching verb dispatches the same file,
 `.github/workflows/shipmate.yml`, and the `verb` input in the dispatch body
