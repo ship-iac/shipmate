@@ -1364,8 +1364,8 @@ def _input_block(on_text, input_name):
     One input at a time, because the trigger's keys are not interchangeable: `verb` is the
     only required input and the only one carrying an `options:` list, so a scan of the whole
     trigger would read its `required: true` as every other input's and its `options:` as an
-    earlier input's. A consumer may declare inputs of their own — `docs/drift.md` invites one
-    — and one written above `verb` would otherwise become the thing both findings judge.
+    earlier input's. A consumer may declare inputs of their own, and one written above `verb`
+    would otherwise become the thing both findings judge.
 
     KNOWN GAP: a wholly inline `on:` mapping puts every input on one line, so an input's block
     runs to the end of that line and takes the inputs after it in. The published file writes
@@ -1404,9 +1404,9 @@ def _required_inputs(on_text):
     """Every input the `on:` block declares other than `verb` that it also declares `required:
     true`, block-style or in a flow mapping on the key's own line.
 
-    Not only `_DISPATCH_INPUTS`: `docs/drift.md` invites a consumer to declare a fifth input
-    for an ad-hoc sweep, and a required one of those refuses every commented verb the same way
-    the retired plan-run input did.
+    Not only `_DISPATCH_INPUTS`: a consumer may declare inputs of its own, and a `required:
+    true` one answers HTTP 422 to every commented verb the same way the retired plan-run input
+    did.
     """
     names = dict.fromkeys([*_declared_inputs(on_text), *_DISPATCH_INPUTS[1:]])
     return [

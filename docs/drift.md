@@ -125,7 +125,7 @@ minutes scale with the full matrix, not the changed set. Each cell is a
 and provider API traffic on that schedule. The knobs are the cron expression and
 how many environments you tag stacks into. A sweep is one matrix, held to the
 same 256-cell limit as a plan run: above it `detect` refuses the sweep before
-any cell starts.
+any cell starts. A repository above the limit gets no drift sweep and cannot split one.
 
 ## Every sweep covers every cell
 

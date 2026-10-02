@@ -2894,12 +2894,12 @@ _WF_REQUIRED_REF = _SHIPMATE_WF.replace(
     "      ref:\n        description: PR head SHA\n        required: true\n",
     1,
 )
-# A consumer input of the shape `docs/drift.md` invites, above `verb` as that page writes it,
-# and required -- which refuses every commented verb, not just the drift sweep it was added for.
+# A consumer input of its own, above `verb` and required -- which refuses every commented verb
+# with HTTP 422, since no dispatch body carries a value for it.
 _WF_REQUIRED_TAGS = _SHIPMATE_WF.replace(
     "      verb:\n",
     "      tags:\n"
-    "        description: Tag query for an ad-hoc sweep\n"
+    "        description: An input of the consumer's own\n"
     "        required: true\n"
     "      verb:\n",
     1,
@@ -3002,12 +3002,11 @@ def test_the_dispatch_probe_reports_a_required_input_other_than_verb(monkeypatch
 
 def test_the_dispatch_probe_reports_a_required_input_the_consumer_declared(monkeypatch):
     """Requiredness is judged over every input the `on:` block declares, not the four
-    `actions/dispatch` names: `docs/drift.md` invites a consumer to add a `tags` input for an
-    ad-hoc sweep, and no dispatch body carries a value for it, so a required one answers HTTP
-    422 to every commented verb — the page says this probe reports it.
+    `actions/dispatch` names: a consumer may declare inputs of its own, and no dispatch body
+    carries a value for one, so a required one answers HTTP 422 to every commented verb.
 
-    Mutation: iterate `_DISPATCH_INPUTS[1:]` in `_required_inputs` again, and the input the
-    page warns about is the one shape the probe cannot see."""
+    Mutation: iterate `_DISPATCH_INPUTS[1:]` in `_required_inputs` again, and a consumer's
+    own input is the one shape the probe cannot see."""
     responses = _fork_responses({"shipmate.yml": _WF_REQUIRED_TAGS})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._dispatch_wiring_warnings(_ctx()) == [(doctor.WARNING, _REQUIRED_TAGS_TEXT)]
@@ -3061,8 +3060,8 @@ def test_a_dispatchable_workflow_file_is_silent(monkeypatch):
 
 
 def test_an_input_of_the_consumers_own_is_not_read_as_the_verbs(monkeypatch):
-    """A consumer may declare inputs beside the four -- `docs/drift.md` invites one -- and one
-    written above `verb` carries its own `options:`. The verb list is read from `verb`'s own
+    """A consumer may declare inputs beside the four, and one written above `verb` carries
+    its own `options:`. The verb list is read from `verb`'s own
     block, so this file is healthy.
 
     Mutation: read the first `options:` in the `on:` block, and the consumer's list is what
@@ -3070,7 +3069,7 @@ def test_an_input_of_the_consumers_own_is_not_read_as_the_verbs(monkeypatch):
     text = _SHIPMATE_WF.replace(
         "      verb:\n",
         "      tags:\n"
-        "        description: Tag query for an ad-hoc sweep\n"
+        "        description: An input of the consumer's own\n"
         "        type: choice\n"
         "        options: [app, platform]\n"
         "        required: false\n"

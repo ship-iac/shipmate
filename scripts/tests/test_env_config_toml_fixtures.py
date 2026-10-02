@@ -15,7 +15,7 @@ from _loader import load_script
 
 ec = load_script("env-config")
 
-#: Every top-level key but `gate`, and every entry key but `shared`.
+#: Every top-level key, and every entry key but `shared`.
 CANONICAL = """\
 layout         = "tf_vars"         # "tf_vars" | "workspace" | "folder", required
 
@@ -57,7 +57,7 @@ layout = "folder"             # intended as a top-level setting
 
 
 def test_the_canonical_file_validates():
-    """Every top-level key but `gate`, a string and a map role field, a workload list, an
+    """Every top-level key, a string and a map role field, a workload list, an
     ordering and both entry flags.
 
     Mutation: remove any of the three names from the allowed top-level set, or `"identity"`,

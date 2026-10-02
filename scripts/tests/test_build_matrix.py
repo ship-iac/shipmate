@@ -56,6 +56,24 @@ def test_raises_above_256_cells():
     )
 
 
+def test_whole_tree_sweep_above_256_cells_names_no_split(monkeypatch):
+    """A whole-tree run (drift) cannot be split across pull requests.
+
+    Reddens when the `all_stacks` branch is dropped, or `compute_cells` stops forwarding
+    `all_stacks`, and the changed-set message returns.
+    """
+    stacks = [f"stacks/s{i}" for i in range(257)]
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
+    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
+    with pytest.raises(SystemExit) as exc_info:
+        bm.compute_cells(all_stacks=True)
+    assert str(exc_info.value) == (
+        "::error::257 plan cells exceeds the GitHub Actions matrix limit of 256. "
+        "A whole-tree sweep covers every stack and environment cell and cannot be split; "
+        "the only lever is fewer environments or fewer env-tagged stacks."
+    )
+
+
 def test_stack_at_engine_reserved_word_paths_plans():
     """Stacks at paths exactly `apply` and `shipmate` each build a cell row.
 

@@ -1848,7 +1848,9 @@ trigger alone closes two paths a trigger check alone would not:
   smaller matrix. Splitting cannot help when the fan-out comes from a one-line
   edit to a shared local module — that correctly marks every dependent stack
   changed and is one atomic change by nature — and there the only lever is to
-  reduce the number of environments in play. A targeted `shipmate apply <env>`
+  reduce the number of environments in play. A drift sweep enumerates the whole
+  tree, covers every stack and environment cell and cannot be split; its only
+  lever is fewer environments or fewer env-tagged stacks. A targeted `shipmate apply <env>`
   is not a way past it: the ceiling is enforced in the plan fan-out, so a run
   that trips it produces no reviewed plan artifact for any apply path to use.
 - Plans fan out flat: all applicable plan units for a pull request run

@@ -1448,7 +1448,7 @@ def test_the_organization_read_is_paginated_and_slurped(monkeypatch):
         "OTHER_VARIABLE": "ops",
         "SHIPMATE_APP_ID": "1",
     }
-    assert fake.calls == [["gh", "api", ORG_VARS, "--paginate", "--slurp"]]
+    assert fake.calls == [ORG_VARS_READ]
 
 
 def test_missing_gate_rule_creates_the_ruleset(monkeypatch):

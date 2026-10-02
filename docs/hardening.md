@@ -785,10 +785,8 @@ trust to all of them.
   domain; `scripts/onboard` refuses a repository variable that disagrees with
   `--app-id`.
 - Set the key as a `shipmate-engine` environment secret, per repository
-  (`docs/github-app.md` steps 5–6) — never at repository or org level, and
-  never shared the way the `SHIPMATE_APP_ID` variable (not a secret)
-  may be across one trust domain: environment
-  secrets are scoped to one repository's environment, so each consumer repo
+  (`docs/github-app.md` steps 5–6) — never at repository or org level:
+  environment secrets are scoped to one repository's environment, so each consumer repo
   needs its own `shipmate-engine` environment and its own copy of the key.
 - Rotate the key whenever push access is revoked — the runbook is
   `docs/github-app.md` §7. Anyone who had push access could have copied the
