@@ -152,22 +152,16 @@ def test_an_empty_map_at_a_field_refuses(aws):
     )
 
 
-def test_a_map_value_that_is_not_a_string_refuses():
-    """Mutation: drop the map-value type check -- the integer reaches the empty check and
-    raises raw."""
-    assert _refusal(_identity({"apply": {"core": 3}})) == (
-        "::error::identities.dev.aws.apply.core must be a string, got int."
-    )
-
-
-def test_a_map_value_that_is_a_map_refuses():
-    """`aws.apply.workloads.net = "…"` parses as a map value under key `workloads`.
-
-    Mutation: drop the map-value type check -- the dict raises raw.
-    """
-    assert _refusal(_identity({"apply": {"workloads": {"net": _ARN}}})) == (
-        "::error::identities.dev.aws.apply.workloads must be a string, got dict."
-    )
+@pytest.mark.parametrize(
+    ("value", "kind"),
+    [
+        ({"core": 3}, "core must be a string, got int"),
+        ({"workloads": {"net": _ARN}}, "workloads must be a string, got dict"),
+    ],
+)
+def test_a_map_value_that_is_not_a_string_refuses(value, kind):
+    """Mutation: drop the map-value type check -- the value raises raw."""
+    assert _refusal(_identity({"apply": value})) == f"::error::identities.dev.aws.apply.{kind}."
 
 
 @pytest.mark.parametrize("field", ["plan", "account"])

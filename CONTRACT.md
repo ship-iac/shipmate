@@ -401,7 +401,9 @@ file that parses but declares no `layout`.
 
 The file holds four top-level settings and no others: `schema_version`,
 `layout`, `identities`, `environments`. Any other top-level key refuses,
-naming the offending key and the four that are allowed.
+naming the offending key and the four that are allowed. An engine refuses a key
+it does not implement, so a repository moves its pin before it adds a key a newer
+release introduces.
 
 Reading it needs Python 3.11, because `tomllib` arrived there. That is the floor
 §Runner prerequisites already states; nothing in the engine installs or pins a
@@ -1365,6 +1367,9 @@ Opting in takes two things, and the setting alone is not enough:
    `.github/workflows/apply.yml@` (the `targeted` job) and
    `.github/workflows/apply-all.yml@` (the `all` job) — to the same commit as
    its `comment-ops.yml` reference, as §Consumption's one-change rule requires.
+   `comment-ops.yml` authorizes an apply under the exemption that `apply.yml` and
+   `apply-all.yml` enforce; pinned at different commits, an apply authorized under
+   one engine's rule is enforced by another's, or by none.
 
 **One source, three readers.** `actions/comment-ops` resolves the ungated set
 before it authorizes, and each apply path's detect resolves it again before it

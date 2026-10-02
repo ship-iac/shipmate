@@ -241,7 +241,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_REPLY_VERB: doctor
         SHIPMATE_REPLY_OUTCOME: failed
-        SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository? Ask an org admin to install it, then re-run `shipmate doctor`."
+        SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository, with every permission it requests accepted? Ask an org admin to install it or accept its pending permission request, then re-run `shipmate doctor`."
       run: |
         set -euo pipefail
         body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")

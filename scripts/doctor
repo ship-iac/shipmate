@@ -694,7 +694,8 @@ def _plan_env_secret_warnings(ctx):
 
     NOTICE, not WARNING: control 8 permits read-only, blast-radius-free
     credentials here, and doctor's WARNING means misconfiguration.
-    `SHIPMATE_APP_PRIVATE_KEY` is the exception, matched by exact name.
+    `SHIPMATE_APP_PRIVATE_KEY` is the exception, matched by exact name. An environment
+    whose secrets cannot be listed is a WARNING too: that exception was not checked.
 
     The finding states control 8's rule NORMATIVELY, never that this environment
     is unprotected -- that read belongs to `_env_protection_warnings`, and
@@ -725,7 +726,7 @@ def _plan_env_secret_warnings(ctx):
         except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
             out.append(
                 (
-                    NOTICE,
+                    WARNING,
                     f"GitHub Environment `{name}`'s secrets could not be listed "
                     f"({_degrade_reason(e)}), so whether this {_env_noun(role)} holds "
                     "credentials reachable by plan-time code was not checked.",

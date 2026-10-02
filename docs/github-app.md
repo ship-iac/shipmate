@@ -358,7 +358,11 @@ Open the installation, review the pending permission request, and Accept
 it. Until that happens, API calls using the new scopes (e.g. the App's
 `statuses: write` gate POST) fail with a permission error even though the
 manifest and the installed App's token both look correct. The gap is the
-un-approved request, not a code or config bug.
+un-approved request, not a code or config bug. A mint that requests the new
+scope fails outright: the plan run's summary token requests every scope the gate
+path and doctor use, so until the request is accepted no plan run writes apply
+checks or a `shipmate / gate` status, and `shipmate doctor` replies that it could
+not mint a token.
 
 ## Key-exposure boundary
 

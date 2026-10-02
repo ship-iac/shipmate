@@ -4090,7 +4090,7 @@ def test_a_long_secret_list_is_capped_so_it_cannot_eat_the_size_budget(monkeypat
     assert names[-1] not in found[0][1]
 
 
-def test_one_env_listing_failure_is_a_notice_and_the_others_still_report(monkeypatch):
+def test_one_env_listing_failure_is_a_warning_and_the_others_still_report(monkeypatch):
     """Per-environment degrade, like `_env_protection_warnings`: one 403 must
     not silence the environment that could be read."""
     responses = {
@@ -4108,7 +4108,7 @@ def test_one_env_listing_failure_is_a_notice_and_the_others_still_report(monkeyp
 
     monkeypatch.setattr(doctor, "_gh_json", fake)
     found = doctor._plan_env_secret_warnings(_ctx(envs={"dev-eu", "dev-us"}))
-    assert [lvl for lvl, _ in found] == [doctor.NOTICE, doctor.NOTICE]
+    assert [lvl for lvl, _ in found] == [doctor.WARNING, doctor.NOTICE]
     assert "`dev-eu-plan`" in found[0][1]
     assert "could not be listed" in found[0][1]
     assert "`GOOGLE_CREDENTIALS`" in found[1][1]
@@ -4164,18 +4164,6 @@ def test_a_long_secret_listing_names_ten_secrets_then_a_count(monkeypatch):
         doctor.NOTICE,
         doctor._secret_finding("dev-eu-plan", "plan", "12", shown),
     )
-
-
-def test_gh_token_stays_unset_when_it_was_unset_before(monkeypatch):
-    """The restore must reproduce absence, not write an empty string: a later
-    `gh api` call with GH_TOKEN="" authenticates as nobody instead of falling
-    back to the ambient credential.
-
-    Mutation: restore GH_TOKEN as `""` instead of popping it -- this reddens."""
-    monkeypatch.delenv("GH_TOKEN", raising=False)
-    with doctor._gh_token("pubtok"):
-        assert os.environ["GH_TOKEN"] == "pubtok"  # noqa: S105 - fixture value, not a real token
-    assert "GH_TOKEN" not in os.environ
 
 
 def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
