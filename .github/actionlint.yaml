@@ -14,3 +14,6 @@ paths:
       # `job` context without it. The two doctor steps are pinned whole by
       # test_engine_self_reference.py.
       - 'property "workflow_repository" is not defined in object type'
+      # actionlint 1.7.12 has no `cache-mode` key (GitHub, 2026-09-10). Remove when a release
+      # parses it.
+      - 'unexpected key "cache-mode" for "workflow" section'

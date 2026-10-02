@@ -31,6 +31,7 @@ section below names the SHA the release tags.
 - **`scripts/onboard --key` is needed only while `shipmate-engine` holds no App private key.**
 - **`scripts/onboard`'s closing checklist marks each item `ok`, `todo` or `cannot check` from what the run read.**
 - **The provider cache serves only stacks with a committed `.terraform.lock.hcl`, keyed on the lock's provider addresses and versions, and drift and apply cells save it; plan cells never do.**
+- **The plan and unlock workflows run with `cache-mode: read`, so pull-request HCL cannot save an Actions-cache entry that a drift or apply job restores.**
 - **Plan cells render the text and JSON plans concurrently.**
 - **The control jobs that run no `tofu` run on `ubuntu-slim`.**
 - **The plan summary's and `shipmate doctor`'s App tokens request `environments: read`; the plan-environment secret probe has no token of its own and no not-checked warning.**
