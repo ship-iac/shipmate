@@ -139,8 +139,8 @@ runs:
 
     - name: Authorize the commenter's permission
       id: access
-      # Every later step on these routes runs only when this authorized. The verdict step never
-      # reads it, so a permitted doctor dispatches nothing.
+      # Every later step on these routes but the refusal below runs only when this authorized.
+      # The verdict step never reads it, so a permitted doctor dispatches nothing.
       if: ${{ steps.parse.outputs.route == 'plan' || steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
       shell: bash
       env:
@@ -192,7 +192,7 @@ runs:
 
     - name: Reject an unauthorized plan
       # GITHUB_TOKEN, not the App: the plan route mints nothing, so this must answer wherever
-      # the route itself can run. The only reason left here is the fork head's.
+      # the route itself can run. Its one reason is the fork head's.
       if: ${{ steps.parse.outputs.route == 'plan' && steps.access.outputs.authorized == 'true' && steps.planauthz.outputs.authorized != 'true' }}
       shell: bash
       env:
@@ -583,7 +583,7 @@ runs:
     - name: Combine the route verdicts
       id: verdict
       # One value for every route, so the reaction, the caller's dispatch condition and this
-      # action's `authorized` output cannot disagree. Exactly one authorization step runs --
+      # action's `authorized` output cannot disagree. Exactly one of `authz` and `planauthz` runs --
       # their `if:`s name disjoint routes -- and the other's output is empty. No `if:` here: a
       # skipped step writes no output, and then no route has a verdict at all. Routes that
       # dispatch nothing (help, doctor, a non-command) land on false.
