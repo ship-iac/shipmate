@@ -3,7 +3,7 @@
 
     python <engine>/scripts/onboard --app-id <id> \
         [--key shipmate-app.private-key.pem] \
-        [--vars-at-org SHIPMATE_APP_ID] [--dry-run]
+        [--dry-run]
 
 Hand-run from inside the consumer checkout, with `gh` authenticated against that
 repository. It reads what is already there and
@@ -17,11 +17,6 @@ Flags:
                   is what gets stored). Needed only while `shipmate-engine`
                   holds no SHIPMATE_APP_PRIVATE_KEY; without it such a run
                   refuses before its first write.
-  --vars-at-org   SHIPMATE_APP_ID, the one name it accepts, when that variable
-                  is already set at organization level, so no repository copy
-                  is written. The name is verified against the organization
-                  variables that reach this repository, and a leftover
-                  repository copy is reported.
   --dry-run       report `would <verb>` for every change and run no write.
 
 Exit codes: 0 clean, 2 at least one item differs, 1 a refusal or a failed
@@ -49,7 +44,7 @@ ec = _load("env-config")
 
 ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
-#: The one repository variable this script writes, and the one name `--vars-at-org` accepts.
+#: The one repository variable this script writes.
 APP_ID_VAR = "SHIPMATE_APP_ID"
 REPORT = []
 _DRY = False
@@ -223,19 +218,6 @@ def _read_key(path):
     if not pem.strip():
         raise SystemExit(f"--key: {path} is empty.")
     return pem
-
-
-def _at_org(raw):
-    """True when `--vars-at-org` asserts APP_ID_VAR is set at organization level.
-
-    Any other value is refused: it would filter nothing and still report success. The
-    refusal quotes the value as received, so `SHIPMATE_APP_ID,` reads as different from the
-    accepted name. Compared uppercased because the API uppercases variable names.
-    """
-    name = raw.strip().upper()
-    if name not in ("", APP_ID_VAR):
-        raise SystemExit(f"--vars-at-org accepts {APP_ID_VAR} only, not {raw!r}.")
-    return bool(name)
 
 
 def _resolve_shared(root, envs, repo, variables):
@@ -508,72 +490,6 @@ def _reconcile_envs(ctx):
             _reconcile_env(ctx, name, role)
 
 
-def _report_org_leftovers(ctx):
-    """Report a repository variable that still exists under --vars-at-org.
-
-    Repository resolution beats organization, so a leftover copy silently
-    overrides the organization value. It is reported and never deleted: removing
-    a value this script did not write exceeds the reconciler's mandate.
-    """
-    if not ctx["at_org"]:
-        return
-    current = ctx["variables"].get(APP_ID_VAR)
-    if current is None:
-        report("ok", APP_ID_VAR, "asserted at organization level")
-    else:
-        report(
-            "differs",
-            APP_ID_VAR,
-            f"repository has {current}, asserted at organization level; delete it with "
-            f"`gh variable delete {APP_ID_VAR}` or drop --vars-at-org",
-        )
-
-
-def _org_plan(owner):
-    """The organization's plan name, or "" when the token cannot see it.
-
-    `plan` is present in `GET /orgs/{org}` only for an organization owner, so a
-    token without owner rights reads "". A 404 is not that case: it means `owner` is a
-    personal account, where no organization variable can exist at all, and the raw
-    `gh` failure would leave the operator reading a 404 for an endpoint they never named.
-    """
-    facts = _gh_json_or_none(f"orgs/{owner}")
-    if facts is None:
-        raise SystemExit(
-            f"{owner} is a personal account, not an organization, so no organization "
-            f"variable can reach this repository and {APP_ID_VAR} would resolve to "
-            "empty. Drop --vars-at-org."
-        )
-    return (facts.get("plan") or {}).get("name", "")
-
-
-def _refuse_unreachable_org_variables(ctx):
-    """Refuse when no organization variable can reach this repository at all.
-
-    GitHub Free excludes private repositories from organization variables
-    outright, whatever each variable's visibility policy says -- so this bounds
-    the name `--vars-at-org` asserts. It runs before the endpoint read so the
-    refusal names the tier rather than reporting the name as unshared.
-
-    Deny-list, not allow-list: "free" is the documented exclusion, and an
-    unreadable plan is refused because it cannot be told from it. An allow-list
-    of ("team", "enterprise") would refuse the legacy "business" plans, which
-    GitHub does not exclude.
-    """
-    owner = ctx["repo"].split("/", 1)[0]
-    plan = ctx["org_plan"]
-    if not ctx["at_org"] or not ctx["is_private"] or plan not in ("", "free"):
-        return
-    raise SystemExit(
-        f"{ctx['repo']} is private and {owner}'s plan reads {plan or 'unknown'}. "
-        "Organization variables do not reach private repositories on GitHub Free, so "
-        f"{APP_ID_VAR} would resolve to empty and every run would fail. Upgrade the "
-        "organization, keep it as a repository variable (drop --vars-at-org), or -- if "
-        "the plan reads 'unknown' -- re-run as an "
-        "organization owner, because `gh api orgs/<org>` reports no plan to anyone else."
-    )
-
-
 def _reaching_variables(repo, remedy):
     """{NAME: value} for the organization variables that reach `repo`.
 
@@ -610,48 +526,12 @@ def _reaching_variables(repo, remedy):
     }
 
 
-def _refuse_org_assertion_mismatch(ctx):
-    """Refuse when a name asserted at organization level is not there, or differs.
-
-    Checked against the value this run would otherwise have written: `--vars-at-org X`
-    asserts X is already set correctly, so a value that is not that one means the
-    assertion is wrong. A repository-level copy is deliberately not consulted -- it
-    shadows the organization value today and `_report_org_leftovers` already tells the
-    operator to delete it, at which point a disagreeing organization value breaks the
-    repository.
-    """
-    if not ctx["at_org"]:
-        return
-    reaching = _reaching_variables(ctx["repo"], "Drop --vars-at-org to skip this check.")
-    wanted = ctx["app_id"]
-    if APP_ID_VAR not in reaching:
-        raise SystemExit(
-            f"--vars-at-org names {APP_ID_VAR}, but no organization variable of that name "
-            f"reaches {ctx['repo']} -- it is unset, or its visibility excludes this "
-            "repository, so it would resolve to empty and every run would fail. Set it "
-            f"with `gh variable set {APP_ID_VAR} --org {ctx['repo'].split('/', 1)[0]} "
-            f"--body {wanted} --visibility all`, add this repository to its selected list, "
-            "or drop --vars-at-org."
-        )
-    if reaching[APP_ID_VAR] != wanted:
-        raise SystemExit(
-            f"{APP_ID_VAR} reaches {ctx['repo']} as {reaching[APP_ID_VAR]}, but "
-            f"--app-id says {wanted}. The workflows read the resolved value, so this run "
-            "would configure one thing and every later run would use another. Re-run with "
-            "--app-id matching, correct the organization variable first, or drop "
-            "--vars-at-org."
-        )
-
-
 def _reconcile_variables(ctx):
-    """Set APP_ID_VAR, the repository variable the workflows read, unless it is
-    asserted at organization level.
+    """Set APP_ID_VAR, the repository variable the workflows read.
 
     An existing value always equals --app-id here: `_refuse_diverging_app_id` refuses any
     other before the first reconciler.
     """
-    if ctx["at_org"]:
-        return
     value = ctx["app_id"]
     if APP_ID_VAR in ctx["variables"]:
         report("ok", APP_ID_VAR, value)
@@ -1170,17 +1050,10 @@ def main(argv=None):
         default=None,
         help="path to the App's PEM private key; needed only while shipmate-engine holds none",
     )
-    ap.add_argument(
-        "--vars-at-org",
-        default="",
-        help=f"{APP_ID_VAR}, when it is already set at organization level; "
-        "it is then not written here",
-    )
     ap.add_argument("--dry-run", action="store_true", help="report changes, write nothing")
     args = ap.parse_args(argv)
     if not _APP_ID_RE.fullmatch(args.app_id):
         raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
-    at_org = _at_org(args.vars_at_org)
     _DRY = args.dry_run
 
     # The local reads first: a bad key path or an unreadable engine pin must fail in under
@@ -1210,22 +1083,14 @@ def main(argv=None):
         "variables": variables,
         "sha": sha,
         "version": version,
-        "at_org": at_org,
         "is_private": is_private,
-        # The tier is decided before the endpoint read, so a Free private repository gets the
-        # tier message rather than "not shared". `orgs/<owner>` needs a permission no other
-        # run needs, so only a private repository asserting the name pays the read.
-        "org_plan": _org_plan(repo.split("/", 1)[0]) if at_org and is_private else "",
         # Read before the first write: a token without Contents read answers 403 here.
         "shim_on_default": _shim_on_default(repo, default_branch),
         "ruleset_deferred": False,
         "apply_envs": {},
         "review_count": 0,
     }
-    _refuse_unreachable_org_variables(ctx)
-    _refuse_org_assertion_mismatch(ctx)
-    # Read before the first write, so `_refuse_missing_key` refuses while nothing exists, and
-    # after the organization refusals, which a token without Secrets read would otherwise miss.
+    # Read before the first write, so `_refuse_missing_key` refuses while nothing exists.
     ctx["engine_secrets"] = _engine_secrets(repo)
     ctx["repo_secrets"] = _repo_secrets()
     _refuse_missing_key(ctx)
@@ -1238,7 +1103,6 @@ def main(argv=None):
     _reconcile_key(ctx)
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
-    _report_org_leftovers(ctx)
     _reconcile_ruleset(ctx)
     _reconcile_shim(ctx)
     _checklist(ctx)

@@ -145,9 +145,7 @@ It writes:
   whose pull request targets any other branch, and `shipmate doctor` says so
   afterwards. Set `shared = true` only where every pull request targets the
   default branch ([`hardening.md`](hardening.md) rows 8 and 17);
-- the `SHIPMATE_APP_ID` repository variable. It may instead be set once at the
-  organization level and named in `--vars-at-org`, which skips writing it here
-  ([`github-app.md`](github-app.md) §6);
+- the `SHIPMATE_APP_ID` repository variable;
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App, once
   `.github/workflows/shipmate.yml` is on the default branch. Until then it reports
   `deferred gate ruleset`: the first pull request, carrying that file, merges
@@ -166,10 +164,7 @@ Some disagreements are not reported but refused, before the first write and
 with exit 1 rather than a `differs` line. A `SHIPMATE_APP_ID` repository variable
 that differs from `--app-id` stops the run, because `--app-id` also pins the gate
 ruleset to an App and a ruleset pinned to one the workflows do not use blocks the
-default branch. A name passed to `--vars-at-org` that does not reach this
-repository as an organization variable, or reaches it holding another value,
-stops it too — the assertion is verified rather than trusted
-([`github-app.md`](github-app.md) §6). So does a run without `--key` while
+default branch. So does a run without `--key` while
 `shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
 It then prints a checklist of what it cannot set, because those values are

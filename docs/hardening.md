@@ -782,9 +782,8 @@ trust to all of them.
 
 - Register one App per trust domain. Repositories with wide push access get
   their own App and their own key. `SHIPMATE_APP_ID` then differs per trust
-  domain: a repository outside the domain of the organization-level id keeps its
-  own `SHIPMATE_APP_ID` variable and leaves that name out of `--vars-at-org`,
-  which refuses an id that disagrees with `--app-id`.
+  domain; `scripts/onboard` refuses a repository variable that disagrees with
+  `--app-id`.
 - Set the key as a `shipmate-engine` environment secret, per repository
   (`docs/github-app.md` steps 5–6) — never at repository or org level, and
   never shared the way the `SHIPMATE_APP_ID` variable (not a secret)

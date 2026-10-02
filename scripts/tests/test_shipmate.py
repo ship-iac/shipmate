@@ -27,8 +27,8 @@ def test_utf8_output_switches_both_streams_from_cp1252_to_utf8(monkeypatch):
     [
         (
             "onboard",
-            ["--app-id", "1", "--vars-at-org", "é"],
-            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'é'.\n",
+            ["--app-id", "é"],
+            "--app-id must be all digits: 'é'\n",
         ),
         (
             "register-app",
