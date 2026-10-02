@@ -1055,8 +1055,8 @@ A notice asks nothing, so its footer is `[run](<run url>)` alone.
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate.toml`),
 `🔴 failed: <reason>` when it could not (an App token mint, a workflow
-dispatch), and `⚪ <text>` for a notice. `scripts/reply-comment` renders all
-three.
+dispatch, an errored read or decision of the commenter's permission), and
+`⚪ <text>` for a notice. `scripts/reply-comment` renders all three.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -1191,7 +1191,8 @@ and an `eyes` reaction on the triggering comment (`doctor`, `help` and `plan`
 all get that acknowledgement as soon as the command is accepted — `rocket`
 marks an authorized dispatch, whether `apply`, `unlock` or `plan`, instead; a
 reaction that cannot be posted is ignored), a `🔴 failed:` reply when it
-cannot mint an App token, a `🔴 refused:` reply when the commenter may not have
+cannot mint an App token or when reading or deciding the commenter's permission
+errors, a `🔴 refused:` reply when the commenter may not have
 the report (below), and a
 handful of untitled `::warning::` annotations on its own degrade paths — an
 unreadable PR head SHA, unreadable plan records on this commit's apply checks,
