@@ -260,7 +260,6 @@ def test_a_failing_gh_refuses(monkeypatch):
 #: part a transformation applied by one reader and not the other shows up in.
 _SHARED_TEXT = (
     'layout = "tf_vars"\n'
-    "schema_version = 1\n"
     "\n"
     "[environments.dev-eu]\n"
     'region = "eu-west-1"\n'
@@ -276,7 +275,6 @@ _SHARED_TEXT = (
 #: whatever the parser did.
 _SHARED_TABLE = {
     "layout": "tf_vars",
-    "schema_version": 1,
     "environments": {
         "dev-eu": {"region": "eu-west-1", "note": "  indented\n"},
         "prod": {"needs": ["dev-eu"]},

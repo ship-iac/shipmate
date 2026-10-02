@@ -145,9 +145,7 @@ It writes:
   whose pull request targets any other branch, and `shipmate doctor` says so
   afterwards. Set `shared = true` only where every pull request targets the
   default branch ([`hardening.md`](hardening.md) rows 8 and 17);
-- the `SHIPMATE_APP_ID` repository variable. It may instead be set once at the
-  organization level and named in `--vars-at-org`, which skips writing it here
-  ([`github-app.md`](github-app.md) §6);
+- the `SHIPMATE_APP_ID` repository variable;
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App, once
   `.github/workflows/shipmate.yml` is on the default branch. Until then it reports
   `deferred gate ruleset`: the first pull request, carrying that file, merges
@@ -166,10 +164,7 @@ Some disagreements are not reported but refused, before the first write and
 with exit 1 rather than a `differs` line. A `SHIPMATE_APP_ID` repository variable
 that differs from `--app-id` stops the run, because `--app-id` also pins the gate
 ruleset to an App and a ruleset pinned to one the workflows do not use blocks the
-default branch. A name passed to `--vars-at-org` that does not reach this
-repository as an organization variable, or reaches it holding another value,
-stops it too — the assertion is verified rather than trusted
-([`github-app.md`](github-app.md) §6). So does a run without `--key` while
+default branch. So does a run without `--key` while
 `shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
 It then prints a checklist of what it cannot set, because those values are
@@ -509,9 +504,6 @@ jobs:
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
       # Same `shipmate-engine` webhook as `deploy`; delete this line and drift sends no Slack message.
       SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
-    with:
-      # Empty covers every cell. Split the sweep by adding more files, one tag query each.
-      tags: ""
   targeted:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' && inputs.environment != ''
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
@@ -890,15 +882,15 @@ and what masking does and does not cover.
 
 ### Drift detection
 
-The `drift` job plans every stack × environment nightly — or a slice of them —
-against real state, then opens, updates and closes drift Issues from what those
-cells report. The engine jobs behind it that hold a credential run only at the
-default-branch ref; it needs the `shipmate-engine` environment from the plan
+The `drift` job plans every stack × environment nightly against real state,
+then opens, updates and closes drift Issues from what those cells report. The
+engine jobs behind it that hold a credential run only at the default-branch
+ref; it needs the `shipmate-engine` environment from the plan
 tier. It is part of the `shipmate.yml` above, so a repository `scripts/onboard`
 reconciled already has it — delete the job and the file's `schedule:` trigger if
 you do not want a nightly run, and the reconciler then reports the file as
-`differs` rather than overwriting your edit. What it costs, and how to narrow one
-sweep to a slice, are in [`drift.md`](drift.md).
+`differs` rather than overwriting your edit. What it costs is in
+[`drift.md`](drift.md).
 
 ### Recipe: automerge after apply
 

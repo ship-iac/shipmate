@@ -233,9 +233,9 @@ prefix.
 
 ## Runner choice
 
-Only the `plan` and `drift` jobs accept `runs_on:`. The documented fences in
-[`getting-started.md`](getting-started.md) and [`drift.md`](drift.md) pass
-none, so those jobs run on the `ubuntu-latest` default. Outside them the
+Only the `plan` and `drift` jobs accept `runs_on:`. The documented fence in
+[`getting-started.md`](getting-started.md) passes none, so those jobs run on
+the `ubuntu-latest` default. Outside them the
 runner is fixed:
 
 - `ubuntu-slim`: the control jobs, which run neither `tofu` nor `terramate`.

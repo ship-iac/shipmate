@@ -358,22 +358,21 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments."
+        ".github/shipmate.toml holds layout, identities, environments."
     )
 
 
 def test_every_allowed_top_level_key_is_accepted():
-    """The other half of the strict-key rule: the four names are the whole allowed set, so a
-    table using all four must validate. Compared against a hand-written table, never against
+    """The other half of the strict-key rule: the three names are the whole allowed set, so a
+    table using all three must validate. Compared against a hand-written table, never against
     the module's own constant.
 
-    Mutation: remove a name from the allowed set -- one of these four then refuses.
+    Mutation: remove a name from the allowed set -- one of these three then refuses.
     """
     table = {
         "layout": "folder",
         "identities": {},
         "environments": {},
-        "schema_version": 1,
     }
     assert env_config.validate(table, ()) == table
 
@@ -385,7 +384,7 @@ def test_the_old_explicit_envs_list_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "explicit_envs": ["prod"]}) == (
         "::error::explicit_envs is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments."
+        ".github/shipmate.toml holds layout, identities, environments."
     )
 
 
@@ -547,7 +546,7 @@ def test_the_old_env_order_table_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "env_order": {"prod": ["dev"]}}) == (
         "::error::env_order is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments."
+        ".github/shipmate.toml holds layout, identities, environments."
     )
 
 
@@ -586,43 +585,14 @@ def test_an_entry_name_no_environment_can_take_refuses(name, message):
     )
 
 
-# --- 11: schema_version -----------------------------------------------------------------
+# --- 11: retired top-level keys ----------------------------------------------------------
 
 
-def test_a_declared_schema_version_1_is_accepted():
-    """Mutation: remove `"schema_version"` from `_TOP_KEYS` -- the strict top-level loop then
-    refuses a file declaring the version this engine implements."""
-    table = {"layout": "folder", "schema_version": 1}
-    assert env_config.validate(table, ()) == table
-
-
-def test_an_absent_schema_version_is_accepted():
-    """`schema_version` is optional: absent reads as version 1.
-
-    Mutation: make the version check unconditional -- `table["schema_version"]` then raises
-    on every file that omits it.
-    """
-    table = {"layout": "folder"}
-    assert env_config.validate(table, ()) == table
-
-
-def test_a_future_schema_version_refuses_naming_the_one_implemented():
-    """Mutation: compare against 2 rather than 1 -- a file this engine cannot read
-    validates. Or read `table["version"]` in `_check_version` -- this raises `KeyError`."""
-    assert _refusal({"layout": "folder", "schema_version": 2}) == (
-        "::error::schema_version is 2; this engine implements version 1 of .github/shipmate.toml."
-    )
-
-
-def test_a_boolean_schema_version_refuses():
-    """`True == 1` in Python, so a bare equality accepts `schema_version = true` as version 1
-    and the file passes with a value no schema version can be.
-
-    Mutation: drop the `isinstance(v, bool)` exclusion from `_check_version`.
-    """
-    assert _refusal({"layout": "folder", "schema_version": True}) == (
-        "::error::schema_version is True; this engine implements version 1 of "
-        ".github/shipmate.toml."
+def test_a_schema_version_refuses_as_unknown():
+    """Mutation: put `"schema_version"` back into `_TOP_KEYS` -- the file then validates."""
+    assert _refusal({"layout": "folder", "schema_version": 1}) == (
+        "::error::schema_version is not a setting this engine implements. "
+        ".github/shipmate.toml holds layout, identities, environments."
     )
 
 
@@ -633,17 +603,17 @@ def test_the_old_version_key_refuses_as_unknown():
     """
     assert _refusal({"layout": "folder", "version": 1}) == (
         "::error::version is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments."
+        ".github/shipmate.toml holds layout, identities, environments."
     )
 
 
 def test_a_leftover_gate_table_refuses_as_an_unknown_setting():
     """Mutation: keep `"gate"` in `_TOP_KEYS` -- the file then validates."""
     with pytest.raises(SystemExit) as exc:
-        env_config.validate_structure({"schema_version": 1, "layout": "tf_vars", "gate": {}})
+        env_config.validate_structure({"layout": "tf_vars", "gate": {}})
     assert str(exc.value) == (
         "::error::gate is not a setting this engine implements. "
-        ".github/shipmate.toml holds schema_version, layout, identities, environments."
+        ".github/shipmate.toml holds layout, identities, environments."
     )
 
 
@@ -783,9 +753,9 @@ def test_the_lines_come_in_check_order():
     table = {"colour": 1, "lyout": "folder", "environments": {"dev": {"regoin": "eu-west-1"}}}
     assert _structural(table) == (
         "::error::colour is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, identities, environments.\n"
+        "layout, identities, environments.\n"
         "::error::lyout is not a setting this engine implements. .github/shipmate.toml holds "
-        "schema_version, layout, identities, environments.\n" + NO_LAYOUT + "\n"
+        "layout, identities, environments.\n" + NO_LAYOUT + "\n"
         "::error::environment dev: regoin is not a key this engine implements. An environment "
         "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )

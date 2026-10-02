@@ -31,24 +31,6 @@ MATRIX_LIMIT = 256
 #: under this name. No plan-run lookup does — each reads a cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
-#: Stack paths a reader would take for an engine artifact. Neither can collide any more: a plan
-#: check is `shipmate / <stack> / <env>`, so a stack named `apply` yields `shipmate / apply /
-#: <env>`, which fails apply-gate's `apply / ` prefix filter, and a stack named `shipmate` yields
-#: three segments against `shipmate / gate`'s two. The older two-segment grammar DID collide,
-#: which is why these were reserved; they stay reserved because `apply` is the engine's verb and
-#: `shipmate / ` its namespace, and a stack so named is unreadable in a check list either way.
-RESERVED_STACK_PATHS = {
-    "apply": (
-        "::error::a stack path may not be exactly 'apply': 'apply' is the engine's own "
-        "verb, and its checks are named 'apply / <stack> / <env>'. Rename or nest the stack."
-    ),
-    "shipmate": (
-        "::error::a stack path may not be exactly 'shipmate': 'shipmate / ' is the engine's "
-        "own check namespace (e.g. 'shipmate / gate', 'shipmate / summary'). Rename or nest "
-        "the stack."
-    ),
-}
-
 
 def workload_of(tags, stack):
     """The `workload/<name>` tag name of `stack`, or "" when it carries none.
@@ -88,68 +70,25 @@ def guard_slug_collisions(cells):
                 )
 
 
-def _parse_tag_query(query):
-    """`a:b,c` -> [{'a', 'b'}, {'c'}]: comma-separated OR-clauses, each an
-    AND of colon-separated terms. Terramate forbids ':' inside a tag value, so
-    a ':' here can only be the operator.
-
-    An empty term is refused rather than dropped: a trailing comma or a doubled
-    separator is a typo, and both silent readings of it -- matches everything,
-    matches nothing -- are wrong in a direction the consumer cannot see."""
-    clauses = []
-    for clause in query.split(","):
-        terms = {t.strip() for t in clause.split(":")}
-        if "" in terms:
-            raise SystemExit(
-                f"::error::the `tags` filter has an empty term: '{query}'. Terms are separated "
-                "by ',' (OR) and ':' (AND), and each must be a tag in its on-disk form -- "
-                "'env/dev-eu,env/dev-us' or 'env/dev-eu:workload/app'."
-            )
-        clauses.append(terms)
-    return clauses
-
-
-def _cell_tags(cell, tags_by_stack):
-    """The tag set a `tags` filter matches this cell against: the stack's tags
-    with every `env/*` tag other than this cell's own removed.
-
-    A stack carrying several env tags becomes one cell per env, so matching the
-    raw stack tags would keep the `prod-eu` cell of a `dev-eu`-filtered run."""
-    own = "env/" + cell["environment"]
-    return {t for t in tags_by_stack.get(cell["stack"], []) if not t.startswith("env/") or t == own}
-
-
-def filter_cells(cells, tags_by_stack, query):
-    """`cells` narrowed to those matching `query`, or all of them when it is
-    empty. Fails loud three ways rather than returning nothing: an empty term,
-    a term no stack carries, and a query that matches no cell. A drift sweep
-    that silently covered nothing would skip the drift and issues jobs and look
-    exactly like a healthy quiet night, every night."""
-    if not query.strip():
-        return cells
-    clauses = _parse_tag_query(query)
-    observed = {t for tags in tags_by_stack.values() for t in tags}
-    unknown = sorted({t for clause in clauses for t in clause} - observed)
-    if unknown:
-        raise SystemExit(
-            f"::error::the `tags` filter names tag(s) no stack carries: {', '.join(unknown)}. "
-            "Tags are matched in their ON-DISK form -- 'env/dev-eu', not 'env:dev-eu', because "
-            "Terramate forbids ':' in a tag value and ':' in this filter means AND. A typo that "
-            "quietly matched nothing would disable that slice's drift for good."
+def _matrix_limit_error(count, all_stacks):
+    head = (
+        f"::error::{count} plan cells exceeds the GitHub Actions matrix limit of {MATRIX_LIMIT}. "
+    )
+    if all_stacks:
+        return head + (
+            "A whole-tree sweep covers every stack and environment cell and cannot be split; "
+            "the only lever is fewer environments or fewer env-tagged stacks."
         )
-    kept = [c for c in cells if any(clause <= _cell_tags(c, tags_by_stack) for clause in clauses)]
-    if not kept:
-        raise SystemExit(
-            f"::error::the `tags` filter '{query}' matched no stack x environment cell. Every "
-            "term is a tag some stack carries, so this is a conjunction that co-occurs nowhere "
-            "(':' means AND, ',' means OR)."
-        )
-    return kept
+    return head + (
+        "Split the change across several pull requests -- the matrix is "
+        "built over `terramate list --changed`. A one-line edit to a shared local module "
+        "correctly marks every dependent stack changed and is one atomic change by nature; "
+        "there the only lever is to reduce the number of environments in play."
+    )
 
 
-def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
-    """The sorted cells of `envs`, narrowed by the `tags` filter. The workload is read after
-    the filter, so a stack the filter drops cannot refuse the run (`workload_of`)."""
+def build_matrix(envs, stacks_by_env, tags_by_stack, all_stacks=False):
+    """The sorted cells of `envs`, each stamped with its `workload_of`."""
     cells = sorted(
         (
             {"stack": stack, "environment": env}
@@ -159,21 +98,11 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, tags=""):
         key=lambda c: (c["environment"], c["stack"]),
     )
     cells = [
-        {**c, "workload": workload_of(tags_by_stack.get(c["stack"], []), c["stack"])}
-        for c in filter_cells(cells, tags_by_stack, tags)
+        {**c, "workload": workload_of(tags_by_stack.get(c["stack"], []), c["stack"])} for c in cells
     ]
-    for reserved, message in RESERVED_STACK_PATHS.items():
-        if any(c["stack"] == reserved for c in cells):
-            raise SystemExit(message)
     guard_slug_collisions(cells)
     if len(cells) > MATRIX_LIMIT:
-        raise SystemExit(
-            f"::error::{len(cells)} plan cells exceeds the GitHub Actions matrix limit of "
-            f"{MATRIX_LIMIT}. Split the change across several pull requests -- the matrix is "
-            "built over `terramate list --changed`. A one-line edit to a shared local module "
-            "correctly marks every dependent stack changed and is one atomic change by nature; "
-            "there the only lever is to reduce the number of environments in play."
-        )
+        raise SystemExit(_matrix_limit_error(len(cells), all_stacks))
     return cells
 
 
@@ -229,9 +158,7 @@ def tagged_workloads(stacks_by_env, tags_by_stack):
     """`{env: frozenset of the names its stacks' workload/<name> tags carry}`, every env of
     `stacks_by_env` included.
 
-    Read from the tags, not the cells: a `tags` filter narrows the cells, and a workload on a
-    filtered-out stack is still tagged. Not through `workload_of` either: its two-tag refusal
-    is scoped to the cells a run runs."""
+    Not through `workload_of`: its two-tag refusal is scoped to the cells a run runs."""
     return {
         env: frozenset(
             t[len("workload/") :]
@@ -243,12 +170,12 @@ def tagged_workloads(stacks_by_env, tags_by_stack):
     }
 
 
-def compute_cells(all_stacks=False, base="", require_env_tag=True, tags=""):
+def compute_cells(all_stacks=False, base="", require_env_tag=True):
     """(`tagged_workloads` of the scan, cells). The map is returned beside the cells because a
     caller that scanned the whole tree feeds it to `env_config` as `tagged`, and re-scanning
     would be a second source that can disagree with this one."""
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base, require_env_tag)
-    cells = build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, tags)
+    cells = build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, all_stacks)
     return tagged_workloads(stacks_by_env, tags_by_stack), cells
 
 
@@ -446,36 +373,10 @@ def plan_workflow_error(event_name, root="."):
     )
 
 
-def tag_filter_error(tags, no_pull_request: bool):
-    """The `::error::` line refusing a `tags` filter outside a run with no pull
-    request, or "" when it may be honoured.
-
-    Keyed on `no-pull-request` alone, and NOT exempted by `all-stacks`: a plan
-    job that sets both would drop changed stacks from the matrix, and a
-    dropped stack gets no plan cell, so no apply check is created, `count` and
-    the summary's cell count still agree, the gate greens, and the reviewed
-    change merges and never applies. `all-stacks` on its own only over-plans,
-    which is the safe direction; combined with a filter it stops being safe.
-    One marker, one meaning -- `no-pull-request` is the input already documented
-    as never belonging in a plan job."""
-    if not tags.strip():
-        return ""
-    if no_pull_request is True:
-        return ""
-    return (
-        "::error::the `tags` filter is only for a workflow with no pull request at all "
-        "(nightly drift), and this run did not pass `no-pull-request: true`. In a plan "
-        "job it would drop changed stacks from the matrix: a dropped stack gets no plan "
-        "cell and no apply check, `shipmate / gate` greens over it, and the change merges "
-        "and never applies. Remove the input from the plan job."
-    )
-
-
 def main():
     all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-    tags = os.environ.get("SHIPMATE_TAGS", "")
     # Case- and whitespace-insensitive: a `no-pull-request: True` would otherwise
     # redden a nightly for a YAML capitalisation, and honouring it is no fork
     # exposure -- only this repository's default-branch workflow can set it.
@@ -490,11 +391,10 @@ def main():
         )
         or head_checkout_error(os.environ.get("SHIPMATE_HEAD_SHA", ""), no_pull_request)
         or plan_workflow_error(event_name)
-        or tag_filter_error(tags, no_pull_request)
     )
     if rejection:
         raise SystemExit(rejection)
-    tagged, cells = compute_cells(all_stacks, base, tags=tags)
+    tagged, cells = compute_cells(all_stacks, base)
     # One call serves plan and drift, and only drift scans the whole tree. Under
     # `all_stacks=False` the map covers the CHANGED stacks alone, so passing it would
     # report every unchanged environment as an unused table entry on every plan.

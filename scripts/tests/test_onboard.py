@@ -96,9 +96,7 @@ def ctx(**over):
         "variables": {},
         "sha": "a" * 40,
         "version": "v0.26.0",
-        "at_org": False,
         "is_private": False,
-        "org_plan": "",
         "shim_on_default": False,
         "engine_secrets": set(),
         "repo_secrets": set(),
@@ -303,11 +301,12 @@ def test_repo_facts_refuses_a_missing_default_branch(monkeypatch):
 
 
 def test_repo_facts_reports_a_private_repository_and_asks_gh_for_the_field(monkeypatch):
-    """`is_private` decides whether the GitHub Free refusal runs at all, and nothing else reads
-    `_repo_facts`'s third element -- every other test either refuses before the return or stubs the
-    function. Both halves are needed: the tuple compared whole catches a wrong key, and the argv
-    compared whole catches `isPrivate` dropping out of the `--json` list, which the payload alone
-    cannot, because a recording fake answers the same JSON whatever it is asked for.
+    """`is_private` decides what the reviewer checklist item tells the operator, and nothing
+    else reads `_repo_facts`'s third element -- every other test either refuses before the
+    return or stubs the function. Both halves are needed: the tuple compared whole catches a
+    wrong key, and the argv compared whole catches `isPrivate` dropping out of the `--json`
+    list, which the payload alone cannot, because a recording fake answers the same JSON
+    whatever it is asked for.
 
     A recording lambda, not `make_gh`: `gh repo view` matches neither of its read branches, so it
     falls through to the write branch and returns "", which `json.loads` rejects.
@@ -504,18 +503,10 @@ def test_main_calls_every_stage_in_order():
     `_repo_root()` back to `pathlib.Path.cwd()`; delete
     `_refuse_diverging_app_id(args.app_id, variables)`, which is the only guard against a
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
-    swap two reconcilers; delete `_report_org_leftovers(ctx)`; delete the
-    `at_org = _at_org(args.vars_at_org)` line; move that line below `_read_key(args.key)`,
-    which pays a filesystem read before a pure string check can refuse; replace the
-    `"org_plan"` entry's `_org_plan(...)` call with `""`; delete
-    `_refuse_unreachable_org_variables(ctx)`, which leaves a private Free repository
-    onboarded with names that resolve to empty; delete
-    `_refuse_org_assertion_mismatch(ctx)`, which leaves the `--vars-at-org` name filtered
-    with nothing verifying the assertion behind it; move the `"shim_on_default"` read into
+    swap two reconcilers; move the `"shim_on_default"` read into
     `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run; move
     the `_engine_secrets` and `_repo_secrets` reads below `_reconcile_env(ctx, ENGINE_ENV,
-    "apply")`, after the first write; move them back into the `ctx` literal, ahead of the
-    organization refusals, where a token without Secrets read fails with a raw 403; delete
+    "apply")`, after the first write; delete
     `_refuse_missing_key(ctx)`, which lets a run with no key create environments before
     `_reconcile_key` finds nothing to set. `_read_key` sits in a conditional expression,
     whose call `_calls_in_order` still lists.
@@ -525,7 +516,6 @@ def test_main_calls_every_stage_in_order():
     stages = [c for c in _calls_in_order(main) if c.startswith("_") or c.startswith("sys.exit")]
     assert stages == [
         "_APP_ID_RE.fullmatch(args.app_id)",
-        "_at_org(args.vars_at_org)",
         "_read_key(args.key)",
         "_engine_pin(engine)",
         "_repo_root()",
@@ -535,10 +525,7 @@ def test_main_calls_every_stage_in_order():
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
         "_resolve_shared(root, envs, repo, variables)",
-        "_org_plan(repo.split('/', 1)[0])",
         "_shim_on_default(repo, default_branch)",
-        "_refuse_unreachable_org_variables(ctx)",
-        "_refuse_org_assertion_mismatch(ctx)",
         "_engine_secrets(repo)",
         "_repo_secrets()",
         "_refuse_missing_key(ctx)",
@@ -546,7 +533,6 @@ def test_main_calls_every_stage_in_order():
         "_reconcile_key(ctx)",
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
-        "_report_org_leftovers(ctx)",
         "_reconcile_ruleset(ctx)",
         "_reconcile_shim(ctx)",
         "_checklist(ctx)",
@@ -1139,116 +1125,10 @@ def test_variable_names_are_matched_uppercased(monkeypatch):
     assert onboard.REPORT == [("ok", "SHIPMATE_APP_ID", "1")]
 
 
-def test_at_org_uppercases_the_name_it_accepts():
-    """The API uppercases variable names and every lookup here is on an uppercased key, so
-    an operator typing the lowercase name must still reach the same entry.
-
-    Mutation: drop the `.upper()` in `_at_org` -- `shipmate_app_id` then exits with the
-    unrecognised-name refusal.
-    """
-    assert onboard._at_org("shipmate_app_id") is True
-
-
-@pytest.mark.parametrize(
-    ("raw", "message"),
-    [
-        pytest.param(
-            "not_a_shipmate_variable",
-            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'not_a_shipmate_variable'.",
-            id="unrecognised",
-        ),
-        pytest.param(
-            "TERRAMATE_VERSION",
-            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'TERRAMATE_VERSION'.",
-            id="version-pin",
-        ),
-        pytest.param(
-            "SHIPMATE_APP_ID,",
-            "--vars-at-org accepts SHIPMATE_APP_ID only, not 'SHIPMATE_APP_ID,'.",
-            id="trailing-comma",
-        ),
-    ],
-)
-def test_at_org_refuses_a_name_it_does_not_accept(raw, message):
-    """A name the flag does not accept filters nothing: the repository copy keeps being
-    written and the run still reports success. The whole message is compared, because it is
-    the only thing that tells the operator which name was wrong.
-
-    `version-pin` is a variable nothing writes or reads any more: the release's own VERSIONS
-    file decides it. `trailing-comma` is the old list form; the quoted value is what tells it
-    apart from the accepted name.
-
-    Mutations: skip the comparison, so every non-empty value returns True (reddens every
-    row); accept the row's name beside SHIPMATE_APP_ID (reddens that row alone); print the
-    value unquoted (reddens every row).
-    """
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._at_org(raw)
-    assert str(excinfo.value) == message
-
-
-def test_a_repository_copy_of_an_org_variable_is_reported_and_never_written(monkeypatch):
-    """Repository resolution beats organization, so a leftover repository copy silently
-    overrides the organization value the operator asserted. It is reported as drift and
-    never deleted -- removing a value this script did not write exceeds its mandate.
-
-    Mutation: report `"ok"` instead of `"differs"` -- the exit code drops to 0 while the
-    message still reads as informative.
-    """
-    fake = make_gh({})
-    monkeypatch.setattr(onboard, "_run", fake)
-    onboard._report_org_leftovers(ctx(at_org=True, variables={"SHIPMATE_APP_ID": "123"}))
-    assert fake.calls == []
-    assert onboard.REPORT == [
-        (
-            "differs",
-            "SHIPMATE_APP_ID",
-            "repository has 123, asserted at organization level; delete it with "
-            "`gh variable delete SHIPMATE_APP_ID` or drop --vars-at-org",
-        )
-    ]
-    assert onboard._exit_code() == 2
-
-
-def test_a_repository_variable_is_no_leftover_without_the_flag():
-    """Without `--vars-at-org` the repository copy is the configuration itself: reporting it
-    as a leftover would exit 2 on every configured repository.
-
-    Mutation: drop the `if not ctx["at_org"]: return` in `_report_org_leftovers`.
-    """
-    onboard._report_org_leftovers(ctx(variables={"SHIPMATE_APP_ID": "1"}))
-    assert onboard.REPORT == []
-
-
 ORG_VARS = "repos/o/r/actions/organization-variables"
 ORG_VARS_READ = ["gh", "api", ORG_VARS, "--paginate", "--slurp"]
-ORG_PLAN_READ = ["gh", "api", "orgs/o"]
 ABSENT = SystemExit("gh: Not Found (HTTP 404)")
 NO_ORG_VARS = [{"variables": [], "total_count": 0}]
-ORG_APP_ID_MATCHES = [{"variables": [{"name": "SHIPMATE_APP_ID", "value": "1"}], "total_count": 1}]
-# Hand-written, and compared whole wherever these refusals are asserted: the message is the
-# only thing that tells the operator which of the two fixes applies.
-UNREACHED_APP_ID = (
-    "--vars-at-org names SHIPMATE_APP_ID, but no organization variable of that name "
-    "reaches o/r -- it is unset, or its visibility excludes this repository, so it "
-    "would resolve to empty and every run would fail. Set it with `gh variable set "
-    "SHIPMATE_APP_ID --org o --body 1 --visibility all`, add this repository to its "
-    "selected list, or drop --vars-at-org."
-)
-FREE_APP_ID = (
-    "o/r is private and o's plan reads free. Organization variables do not reach private "
-    "repositories on GitHub Free, so SHIPMATE_APP_ID would resolve to empty and every run "
-    "would fail. Upgrade the organization, keep it as a repository variable (drop "
-    "--vars-at-org), or -- if the plan reads 'unknown' -- re-run as an organization "
-    "owner, because `gh api orgs/<org>` reports no plan to anyone else."
-)
-UNKNOWN_APP_ID = (
-    "o/r is private and o's plan reads unknown. Organization variables do not reach private "
-    "repositories on GitHub Free, so SHIPMATE_APP_ID would resolve to empty and every run "
-    "would fail. Upgrade the organization, keep it as a repository variable (drop "
-    "--vars-at-org), or -- if the plan reads 'unknown' -- re-run as an organization "
-    "owner, because `gh api orgs/<org>` reports no plan to anyone else."
-)
 
 FRESH_ROUTES = {
     ENGINE_PATH: ABSENT,
@@ -1269,21 +1149,19 @@ FRESH_ROUTES = {
 ONE_STACK = ({"dev-eu": ["stacks/app"]}, {"stacks/app": ["env/dev-eu"]})
 
 
-def run_main(
-    monkeypatch, tmp_path, extra_routes, argv, is_private=False, key=True, membership=ONE_STACK
-):
+def run_main(monkeypatch, tmp_path, extra_routes, argv, key=True, membership=ONE_STACK):
     """Drive `main()` over `FRESH_ROUTES` plus `extra_routes`, returning (fake, SystemExit).
 
     Only the reads `main` does before its first reconciler are stubbed -- the git, terramate
     and `gh repo view` reads, each with its own test. Everything below them runs for real
-    against the fake, which is what makes the order of the organization checks observable.
+    against the fake, which is what makes the order of the reads and writes observable.
     `key=False` passes no `--key`. The run starts in `tmp_path`, the checkout root.
     """
     fake = make_gh({**FRESH_ROUTES, **extra_routes})
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_engine_pin", lambda engine: ("a" * 40, "v0.26.0"))
     monkeypatch.setattr(onboard, "_repo_root", lambda: tmp_path)
-    monkeypatch.setattr(onboard, "_repo_facts", lambda: ("o/r", "main", is_private))
+    monkeypatch.setattr(onboard, "_repo_facts", lambda: ("o/r", "main", False))
     monkeypatch.setattr(onboard, "_env_membership", lambda: membership)
     monkeypatch.chdir(tmp_path)
     pem = tmp_path / "key.pem"
@@ -1466,8 +1344,8 @@ def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp
 
 
 def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_path):
-    """From the table path the operator may have passed no `--vars-at-org`, so that flag's
-    remedy would be false here. Mutation: pass the `--vars-at-org` remedy from
+    """The failed read names the table reference that caused it, so the operator knows why
+    onboard read organization variables at all. Mutation: pass a different remedy from
     `_resolve_shared`."""
     monkeypatch.setattr(
         onboard, "_run", make_gh({ORG_VARS: SystemExit("gh: Forbidden (HTTP 403)")})
@@ -1515,239 +1393,40 @@ def test_the_shared_flag_is_gone(monkeypatch, tmp_path, capsys):
     assert "unrecognized arguments: --shared dev-eu" in capsys.readouterr().err
 
 
-def test_an_asserted_name_the_organization_does_not_reach_refuses(monkeypatch):
-    """`--vars-at-org X` stops X being written here, so an X that is unset at organization
-    level -- or set with a visibility excluding this repository -- leaves every workflow
-    resolving it to empty.
+def test_an_organization_app_id_still_gets_a_repository_copy(monkeypatch, tmp_path):
+    """An organization-level SHIPMATE_APP_ID equal to --app-id is not consulted: with no
+    repository copy, the run writes one. The organization route is never read.
 
-    Mutation: delete the `raise`.
-    """
-    fake = make_gh({ORG_VARS: NO_ORG_VARS})
-    monkeypatch.setattr(onboard, "_run", fake)
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org=True))
-    assert str(excinfo.value) == UNREACHED_APP_ID
-
-
-def test_an_organization_value_disagreeing_with_this_run_refuses_naming_both(monkeypatch):
-    """The assertion is that the name is already set *correctly*: a value that is not the one
-    this run would have written means this run configures one thing and every later run
-    resolves another.
-
-    Mutations: delete the `raise`; compare against the wrong side of the pair.
-    """
-    fake = make_gh(
-        {ORG_VARS: [{"variables": [{"name": "SHIPMATE_APP_ID", "value": "222"}], "total_count": 1}]}
-    )
-    monkeypatch.setattr(onboard, "_run", fake)
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org=True, app_id="111"))
-    assert str(excinfo.value) == (
-        "SHIPMATE_APP_ID reaches o/r as 222, but --app-id says 111. The workflows read the "
-        "resolved value, so this run would configure one thing and every later run would use "
-        "another. Re-run with --app-id matching, correct the organization variable first, "
-        "or drop --vars-at-org."
-    )
-
-
-def test_a_repository_copy_does_not_rescue_a_disagreeing_organization_value(monkeypatch):
-    """A repository copy agreeing with --app-id is what runs today, so this looks like a
-    working configuration; it breaks the moment the leftover is deleted, which is what
-    `_report_org_leftovers` tells the operator to do.
-
-    Mutation: resolve the effective value as `ctx["variables"].get(name, org_value)` -- the
-    precedence-aware reading -- which makes this fixture pass.
-    """
-    fake = make_gh(
-        {ORG_VARS: [{"variables": [{"name": "SHIPMATE_APP_ID", "value": "222"}], "total_count": 1}]}
-    )
-    monkeypatch.setattr(onboard, "_run", fake)
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(
-            ctx(at_org=True, app_id="111", variables={"SHIPMATE_APP_ID": "111"})
-        )
-    assert str(excinfo.value) == (
-        "SHIPMATE_APP_ID reaches o/r as 222, but --app-id says 111. The workflows read the "
-        "resolved value, so this run would configure one thing and every later run would use "
-        "another. Re-run with --app-id matching, correct the organization variable first, "
-        "or drop --vars-at-org."
-    )
-
-
-def test_matching_organization_values_pass_and_write_no_variable(monkeypatch, tmp_path):
-    """The whole recorded call list is compared against a hand-written constant: an assertion
-    that SHIPMATE_APP_ID was not set is satisfied by a run that set nothing at all, and a
-    variable write that should have been filtered cannot hide in a membership check. The one
-    name this script writes is asserted at organization level, so no variable is written.
-
-    The workflow file is on the remote default branch, so the run reaches the ruleset POST
-    and the list covers every reconciler's writes.
-
-    Mutation: refuse unconditionally, which reds this while the two refusal properties stay
-    green.
+    Mutation: return early from `_reconcile_variables`, which writes no variable.
     """
     fake, exit_ = run_main(
         monkeypatch,
         tmp_path,
-        {
-            ORG_VARS: ORG_APP_ID_MATCHES,
-            REMOTE_SHIM: {"type": "file"},
-        },
-        ["--vars-at-org", "SHIPMATE_APP_ID"],
+        {ORG_VARS: [{"variables": [{"name": "SHIPMATE_APP_ID", "value": "1"}]}]},
+        [],
     )
     assert exit_.code == 0
-    assert fake.calls == [
-        ["gh", "variable", "list", "--json", "name,value"],
-        ["gh", "api", REMOTE_SHIM],
-        ["gh", "api", "repos/o/r/actions/organization-variables", "--paginate", "--slurp"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/secrets?per_page=100"],
-        ["gh", "secret", "list", "--json", "name"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine"],
-        ["gh", "api", "-X", "PUT", "repos/o/r/environments/shipmate-engine", "--input", "-"],
-        ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
-        [
-            "gh",
-            "api",
-            "-X",
-            "POST",
-            "repos/o/r/environments/shipmate-engine/deployment-branch-policies",
-            "-f",
-            "name=main",
-        ],
-        ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--env", "shipmate-engine"],
-        ["gh", "api", "repos/o/r/environments/dev-eu"],
-        ["gh", "api", "repos/o/r/environments/dev-eu-plan"],
-        ["gh", "api", "-X", "PUT", "repos/o/r/environments/dev-eu-plan", "--input", "-"],
-        ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
-        ["gh", "api", "-X", "PUT", "repos/o/r/environments/dev-eu-apply", "--input", "-"],
-        ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
-        [
-            "gh",
-            "api",
-            "-X",
-            "POST",
-            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies",
-            "-f",
-            "name=main",
-        ],
-        ["gh", "api", RULES],
-        ["gh", "api", "-X", "POST", "repos/o/r/rulesets", "--input", "-"],
-        ["git", "ls-files", "-z", "--", ":(top)*.terraform.lock.hcl"],
-    ]
+    assert _variable_sets(fake) == [["gh", "variable", "set", "SHIPMATE_APP_ID", "--body", "1"]]
+    assert [c for c in fake.calls if ORG_VARS in c] == []
 
 
-def test_a_private_repository_on_free_refuses_every_asserted_name(monkeypatch, tmp_path):
-    """GitHub Free excludes private repositories from organization variables outright, so the
-    tier bounds the name rather than the value behind it. The first fixture carries a
-    *matching* organization value, so only the plan check can produce a refusal; the second
-    carries none, which is the realistic Free shape and the only one that can tell the two
-    refusals apart when they are reordered. Its endpoint route is dead under the correct
-    order, and exists so that reordering reds on the message rather than on an unrouted read.
+def test_a_diverging_repository_app_id_refuses_before_any_write(monkeypatch, tmp_path):
+    """A repository SHIPMATE_APP_ID differing from --app-id would pin the gate ruleset to an
+    App the workflows do not mint from. The whole call list is compared, so any write ahead
+    of the refusal reddens it.
 
-    Mutations: delete the `raise`; order the plan check after the endpoint read, which makes
-    the second fixture refuse with "no organization variable of that name reaches".
+    Mutation: delete the `_refuse_diverging_app_id(args.app_id, variables)` call in `main`.
     """
-    for name, org_vars, expected in (
-        ("SHIPMATE_APP_ID", ORG_APP_ID_MATCHES, FREE_APP_ID),
-        ("SHIPMATE_APP_ID", NO_ORG_VARS, FREE_APP_ID),
-    ):
-        _fake, exit_ = run_main(
-            monkeypatch,
-            tmp_path,
-            {"orgs/o": {"plan": {"name": "free"}}, ORG_VARS: org_vars},
-            ["--vars-at-org", name],
-            is_private=True,
-        )
-        assert str(exit_) == expected
-
-
-def test_an_unreadable_organization_plan_is_refused_like_free(monkeypatch, tmp_path):
-    """`plan` is absent from `GET /orgs/{org}` for anyone but an organization owner, and an
-    unreadable plan cannot be told from Free. Refusing it is the fail-safe direction.
-
-    Mutation: pass an unknown plan instead of refusing it.
-    """
-    _fake, exit_ = run_main(
-        monkeypatch,
-        tmp_path,
-        {"orgs/o": {}, ORG_VARS: ORG_APP_ID_MATCHES},
-        ["--vars-at-org", "SHIPMATE_APP_ID"],
-        is_private=True,
+    fake, exc = run_main(
+        monkeypatch, tmp_path, {VARIABLE_LIST: [{"name": "SHIPMATE_APP_ID", "value": "2"}]}, []
     )
-    assert str(exit_) == UNKNOWN_APP_ID
-
-
-def test_a_personal_account_is_refused_by_name(monkeypatch, tmp_path):
-    """`gh api orgs/<owner>` answers 404 for a personal account, which is not an unreadable
-    plan: no organization variable can exist there at all. Compared whole, because the raw
-    `command failed (1): gh api orgs/o` this replaces names an endpoint the operator never
-    typed and no fix at all.
-
-    Mutation: read the plan with `json.loads(_run([...]))` again, which reds on gh's message.
-    """
-    _fake, exit_ = run_main(
-        monkeypatch,
-        tmp_path,
-        {"orgs/o": ABSENT, ORG_VARS: ORG_APP_ID_MATCHES},
-        ["--vars-at-org", "SHIPMATE_APP_ID"],
-        is_private=True,
+    assert str(exc) == (
+        "the SHIPMATE_APP_ID repository variable is 2 and --app-id is 1. The workflows mint "
+        "their token from the variable, so a gate ruleset pinned to 1 could never be satisfied "
+        "and the default branch would be blocked. Re-run with --app-id 2, or change the "
+        "variable first."
     )
-    assert str(exit_) == (
-        "o is a personal account, not an organization, so no organization variable can "
-        "reach this repository and SHIPMATE_APP_ID would resolve to empty. Drop "
-        "--vars-at-org."
-    )
-
-
-def test_a_legacy_business_plan_is_not_refused(monkeypatch, tmp_path):
-    """The check is a deny-list on "free" plus the unreadable case: an allow-list of
-    ("team", "enterprise") would refuse the legacy `business` plans, which GitHub does not
-    exclude from organization variables.
-
-    Mutation: turn the deny-list into that allow-list.
-    """
-    _fake, exit_ = run_main(
-        monkeypatch,
-        tmp_path,
-        {"orgs/o": {"plan": {"name": "business"}}, ORG_VARS: ORG_APP_ID_MATCHES},
-        ["--vars-at-org", "SHIPMATE_APP_ID"],
-        is_private=True,
-    )
-    assert exit_.code == 0
-
-
-def test_a_public_repository_never_reads_the_organization_plan(monkeypatch, tmp_path):
-    """`plan` is owner-only, so reading it on every run would make an owner-scoped permission
-    part of the common path for a check that only bounds private repositories.
-
-    Mutation: read the plan unconditionally -- `orgs/o` is unrouted here, so the fake raises
-    as well.
-    """
-    fake, exit_ = run_main(
-        monkeypatch,
-        tmp_path,
-        {ORG_VARS: ORG_APP_ID_MATCHES},
-        ["--vars-at-org", "SHIPMATE_APP_ID"],
-    )
-    assert exit_.code == 0
-    assert [c for c in fake.calls if c == ORG_PLAN_READ] == []
-
-
-def test_a_private_repository_without_the_flag_reads_no_organization_plan(monkeypatch, tmp_path):
-    """Without `--vars-at-org` there is nothing for the tier check to bound -- it returns on its
-    first condition -- so the owner-only read buys nothing and its failure would abort the run
-    before the first reconciler, over an organization fact this run never uses. `orgs/<owner>` is
-    the only org-scoped call `onboard` makes, so a private repository owned by a personal account
-    fails on it.
-
-    Driven through `main()` on purpose: the same property at function level is what missed this,
-    because a second endpoint on the common path is invisible to a check scoped to the first.
-
-    Mutation: gate the `"org_plan"` ternary on `is_private` alone, which reads the plan here.
-    """
-    fake, exit_ = run_main(monkeypatch, tmp_path, {}, [], is_private=True)
-    assert exit_.code == 0
-    assert [c for c in fake.calls if c == ORG_PLAN_READ] == []
+    assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
 
 
 def test_the_organization_read_is_paginated_and_slurped(monkeypatch):
@@ -1757,7 +1436,7 @@ def test_the_organization_read_is_paginated_and_slurped(monkeypatch):
 
     Mutations, three: drop `--paginate`; drop `--slurp` -- both red the argv assertion and
     leave the two-page resolution green, which is why that assertion exists; and read
-    `pages[0]` alone, which reds the second-page fixture while the absent one stays green.
+    `pages[0]` alone, which reds the second-page fixture.
     """
     two_pages = [
         {"variables": [{"name": "OTHER_VARIABLE", "value": "ops"}], "total_count": 1},
@@ -1765,45 +1444,11 @@ def test_the_organization_read_is_paginated_and_slurped(monkeypatch):
     ]
     fake = make_gh({ORG_VARS: two_pages})
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._refuse_org_assertion_mismatch(ctx(at_org=True))
+    assert onboard._reaching_variables("o/r", "") == {
+        "OTHER_VARIABLE": "ops",
+        "SHIPMATE_APP_ID": "1",
+    }
     assert fake.calls == [ORG_VARS_READ]
-    fake = make_gh({ORG_VARS: [NO_ORG_VARS[0], NO_ORG_VARS[0]]})
-    monkeypatch.setattr(onboard, "_run", fake)
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org=True))
-    assert str(excinfo.value) == UNREACHED_APP_ID
-
-
-def test_a_failed_organization_read_names_its_two_causes(monkeypatch):
-    """A token without the repository Variables permission reads a 403, which is not absence:
-    reporting it as "no such variable" would send the operator to set a variable that is
-    already there. An old `gh` without `--slurp` is the other documented cause, so the hint
-    names both. gh's stderr rides along, so a third cause still shows through it.
-
-    Mutation: replace the `raise` with a print and return {}, which turns every failed read
-    into "unset at organization level".
-    """
-    fake = make_gh({ORG_VARS: SystemExit("gh: Forbidden (HTTP 403)")})
-    monkeypatch.setattr(onboard, "_run", fake)
-    with pytest.raises(SystemExit) as excinfo:
-        onboard._refuse_org_assertion_mismatch(ctx(at_org=True))
-    assert str(excinfo.value) == (
-        "could not read the organization variables reaching o/r: gh: Forbidden (HTTP 403)\n"
-        "A fine-grained token needs this repository's Variables read permission, and "
-        "`--slurp` needs a recent `gh`. Drop --vars-at-org to skip this check."
-    )
-
-
-def test_no_organization_read_happens_without_the_flag(monkeypatch):
-    """Without `--vars-at-org`, `onboard` must behave exactly as it did before this check
-    existed -- no extra call, no extra permission. Zero recorded calls is the assertion.
-
-    Mutation: run the read unconditionally, which makes every run pay it.
-    """
-    fake = make_gh({})
-    monkeypatch.setattr(onboard, "_run", fake)
-    onboard._refuse_org_assertion_mismatch(ctx())
-    assert fake.calls == []
 
 
 def test_missing_gate_rule_creates_the_ruleset(monkeypatch):
@@ -2373,7 +2018,6 @@ todo          `.github/shipmate.toml`
     paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
     from this checkout's file, so re-run it after adding or dropping one.
 
-      schema_version = 1
       layout = "tf_vars"
 
       [identities.dev]
@@ -2496,7 +2140,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
     (tmp_path / ".github").mkdir()
     (tmp_path / ".github" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
     (tmp_path / ".github" / "shipmate.toml").write_text(
-        'schema_version = 1\nlayout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n',
+        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n',
         encoding="utf-8",
         newline="\n",
     )
@@ -2917,9 +2561,9 @@ def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(ca
     onboard._checklist(ctx(root=tmp_path))
     lines = capsys.readouterr().out.splitlines()
     snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("      ")))
-    # An extraction that finds nothing parses and validates cleanly, so it is green over an
-    # unchecked example.
-    assert snippet.startswith("schema_version = 1"), (
+    # An extraction that finds nothing refuses as a missing layout, which reads as a defect
+    # in the template rather than in the extraction.
+    assert snippet.startswith('layout = "tf_vars"'), (
         f"no TOML example found in the block: {snippet!r}"
     )
     assert snippet.count('aws.account = "<account>"') == 1

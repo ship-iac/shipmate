@@ -5,8 +5,7 @@ you want to know that real infrastructure has moved away from the code, and read
 [What it costs](#what-it-costs) before you do.
 
 A nightly cron fans out over all stacks × environments — not the changed set
-— and plans each one, or over a slice of them when the run states a `tags`
-filter ([Scoping a sweep](#scoping-a-sweep)). A separate `issues` job then turns
+— and plans each one. A separate `issues` job then turns
 those results into GitHub Issues: one labelled `drift` Issue per drifted stack ×
 environment, titled `drift: <env> / <stack>`, updated in place while the drift
 persists and closed with a "Drift resolved" comment on the next clean run that
@@ -19,7 +18,7 @@ leaving any open Issue for it untouched rather than auto-closing it.
 
 ## The workflow
 
-The unscoped nightly sweep is the `drift` job of `.github/workflows/shipmate.yml`
+The nightly sweep is the `drift` job of `.github/workflows/shipmate.yml`
 ([`getting-started.md`](getting-started.md) §The workflow file), which
 `scripts/onboard` writes pinned. Two things reach it: that file's `schedule`
 trigger, and a `workflow_dispatch` carrying `verb: drift`.
@@ -98,10 +97,9 @@ the plan path sees only the changed set
 
 Store the webhook as the secret `SHIPMATE_SLACK_WEBHOOK` on the
 `shipmate-engine` environment that the engine's `issues` job binds. The `deploy`
-and `drift` jobs of the workflow file in [`getting-started.md`](getting-started.md),
-and each slice file's own `secrets:` block ([§Spreading a sweep across the
-week](#spreading-a-sweep-across-the-week)), map it by name. Without that line the
-environment's value never arrives at that job. It is a secret, not a variable,
+and `drift` jobs of the workflow file in [`getting-started.md`](getting-started.md)
+map it by name. Without that line the environment's value never arrives at that
+job. It is a secret, not a variable,
 because every plan cell receives the repository's variables and a step's inputs
 print in its log; a cell refuses a variable of that name, and so do `deploy.yml`'s
 `summary` and `drift.yml`'s `issues` jobs, which also see one set on
@@ -124,138 +122,19 @@ cells.
 matrix is every stack × environment in the repository, every night — runner
 minutes scale with the full matrix, not the changed set. Each cell is a
 `tofu init` plus a `tofu plan` against real state, which also means real backend
-and provider API traffic on that schedule. The knobs are the cron expression,
-how many environments you tag stacks into, and the `tags` filter, which narrows
-one run to a slice of the matrix — [Scoping a sweep](#scoping-a-sweep).
+and provider API traffic on that schedule. The knobs are the cron expression and
+how many environments you tag stacks into. A sweep is one matrix, held to the
+same 256-cell limit as a plan run: above it `detect` refuses the sweep before
+any cell starts. A repository above the limit gets no drift sweep and cannot split one.
 
-## Scoping a sweep
+## Every sweep covers every cell
 
-The engine's drift workflow takes an optional `tags` query that narrows the
-cells one run covers. Empty — what the `drift` job passes — covers every cell.
+Every stack is listed and has to carry an `env/*` tag, so a sweep fails on an
+untagged stack anywhere in the tree — the repo-wide backstop
+([`../CONTRACT.md`](../CONTRACT.md) §Tag grammar).
 
-Tags are matched in their on-disk form: `env/dev-eu`, not `env:dev-eu`.
-Terramate forbids `:` inside a tag value, which is what frees `:` to be an
-operator here. `,` is OR, `:` is AND, and `:` binds tighter, so
-`env/dev-eu:workload/app,env/dev-us` is *(dev-eu AND app) OR dev-us*.
-
-A cell is matched against its stack's tags with every `env/*` tag other than
-its own removed. `env/dev-eu` therefore selects the dev-eu cells: a stack
-tagged both `env/dev-eu` and `env/prod-eu` contributes its dev-eu cell to an
-`env/dev-eu` sweep, not both of them.
-
-**The query narrows cells, not the stacks that are inspected.** Every stack is
-still listed and still has to carry an `env/*` tag. A scoped sweep fails on an
-untagged stack exactly as an unscoped one does, so the repo-wide backstop
-([`../CONTRACT.md`](../CONTRACT.md) §Tag grammar) survives being scoped.
-
-**Three things fail the run rather than quietly narrowing it:**
-
-- an empty term — a trailing comma or a doubled separator;
-- a term no stack carries;
-- a query that matches no cell.
-
-A sweep that silently covered nothing would skip the `drift` and `issues` jobs
-and look exactly like a healthy quiet night — every night, for as long as the
-typo lives.
-
-**Only the drift path can carry the filter.** `build-matrix` refuses a `tags`
-query outside a `no-pull-request: "true"` run, whatever `all-stacks` says, and
-engine `drift.yml` is the one workflow that passes it: engine `plan.yml` neither
-takes a `tags` input nor states that it has no pull request. A filter on the plan
-path would drop changed stacks from the matrix — a dropped stack gets no plan
-cell and so no apply check, `shipmate / gate` greens over it, and the change
-merges and never applies.
-
-**Issues close per cell, on the run that covers that cell.** `drift-issues` acts
-only on the cells this run produced and never sweeps open `drift` Issues for
-absence, so an Issue belonging to a cell outside this run's slice is left
-untouched. Under a spread sweep, resolved drift is closed by the slice that owns
-it, on that slice's next run.
-
-### Spreading a sweep across the week
-
-One workflow file per slice — `drift-<slice>.yml` — each a copy of the fence
-below. It differs from `shipmate.yml`'s `drift` job in three places:
-
-- a top-level `name:` and `schedule:` of its own;
-- a literal `tags:` value. A repository variable cannot differ per file, which
-  is why `tags` is an input rather than one;
-- **no `if:`**. The job's `if:` tests `github.event.inputs.verb`, which a slice
-  file's bare `workflow_dispatch:` never sets, so copying it across makes a
-  manual re-run skip the job with no error.
-
-The calling job's own `name: shipmate` is the check-name contract literal and
-stays as it is.
-
-```yaml
-name: shipmate · drift · dev-eu
-on:
-  schedule:
-    - cron: "17 3 * * 1"
-  workflow_dispatch:
-permissions:
-  contents: read
-jobs:
-  shipmate:
-    name: shipmate
-    uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
-    permissions:
-      contents: read
-      id-token: write
-      actions: read
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-      # Without this mapping, this slice sends no Slack.
-      SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
-    with:
-      tags: "env/dev-eu"
-```
-
-One cron and one literal query per file: the run's own workflow name is then its
-slice — in the Actions list, in a re-run, and in a notification.
-
-**Do not design the spread around the minute a cron names.** GitHub Actions
-delays `schedule` triggers under load, by hours rather than minutes: in
-shipmate's own sample repository a `17 3 * * *` nightly has started at 04:05Z,
-09:18Z, 10:11Z, 14:18Z and 15:28Z on different days. Spread slices across
-*days*, and assume neither that two crons an hour apart produce runs an hour
-apart nor that one slice has finished before the next is due.
-
-**A fully spread schedule retires the whole-tree slug check.** `build-matrix`
-refuses two stack paths in one environment that slug alike (`net/edge` and
-`net-edge` both render `plan.<env>.net-edge`) over the cells a run produces. The
-unscoped nightly is what makes that check repo-wide
-([`../CONTRACT.md`](../CONTRACT.md) §Plan artifacts). Slices alone catch such a
-pair in no sweep at all: the first plan run that changes both still refuses, so
-nothing applies under the wrong plan, but the warning arrives in a pull request
-instead of a nightly. Keep `shipmate.yml`'s own `schedule` on a weekly cron to
-keep it.
-
-### An ad-hoc scoped sweep
-
-This shape is for `shipmate.yml`'s own `drift` job. Add a fifth input under the
-file's `workflow_dispatch.inputs`, and forward it from that job's `with:` block.
-The input's default is empty, so a dispatch that leaves it blank sweeps every
-cell:
-
-```yaml
-      tags:
-        description: "Optional tag query, e.g. env/dev-eu:workload/app"
-        required: false
-        default: ""
-```
-
-```yaml
-    with:
-      tags: ${{ inputs.tags }}
-```
-
-**A fifth input must be `required: false`.** Every verb dispatches this one file,
-and none of the bodies `actions/dispatch` sends carries a `tags` value: GitHub
-reads an omitted value for a `required: true` input as not provided and answers
-HTTP 422, so a required fifth input breaks every commented verb, not just drift.
-`shipmate doctor` reports one that is not.
-
-A `drift-<slice>.yml` keeps its literal `tags:` value instead — its scope is the
-slice it is named for, and its manual trigger re-runs that slice.
+`build-matrix` refuses two stack paths in one environment that slug alike
+(`net/edge` and `net-edge` both render `plan.<env>.net-edge`) over the cells a
+run produces, so the nightly sweep is what makes that check repo-wide
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifacts). A plan run catches such a
+pair only when it changes both.

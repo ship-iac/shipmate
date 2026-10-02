@@ -129,15 +129,6 @@ a dispatched run) — a run title GitHub renders and nothing matches on, where i
 says which event or verb this run serves. The workflow's own `name:` is plain
 `shipmate`.
 
-`build-matrix` rejects a stack path of exactly `apply` or exactly `shipmate`.
-Neither can be mistaken for an engine surface by the engine itself: a stack
-`apply` yields `shipmate / apply / <env>`, which fails `apply-gate`'s
-`apply / ` prefix filter, and a stack `shipmate` yields three segments against
-`shipmate / gate`'s two. They stay reserved for the human reader — `apply` is
-the engine's own verb and `shipmate / ` is its own namespace, so a stack so
-named reads as an engine artifact in every check list someone scans. Nest or
-rename the stack.
-
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
 arbitrary suite when a commit carries more than one plan run (a draft→ready
@@ -399,9 +390,9 @@ nothing for its cells to run as. The two absences refuse at the same site,
 `scripts/env-config` (§Refusals) — a file absent from the default branch, and a
 file that parses but declares no `layout`.
 
-The file holds four top-level settings and no others: `schema_version`,
-`layout`, `identities`, `environments`. Any other top-level key refuses,
-naming the offending key and the four that are allowed. An engine refuses a key
+The file holds three top-level settings and no others: `layout`,
+`identities`, `environments`. Any other top-level key refuses, naming the
+offending key and the three that are allowed. An engine refuses a key
 it does not implement, so a repository moves its pin before it adds a key a newer
 release introduces.
 
@@ -448,7 +439,6 @@ separate `[identities.dev.aws]` header parses to exactly the same mapping, but
 mixing the two notations for one identity is a parse error (§TOML placement).
 
 ```toml
-schema_version = 1
 layout = "tf_vars"                # tf_vars | workspace | folder
 
 [identities.dev]
@@ -555,18 +545,6 @@ only the environments that name it. The cost is that one edit to an identity
 retargets every environment naming it; `shipmate doctor`'s roles lines list what
 each environment resolves (§Resolution).
 
-### The schema version
-
-`schema_version` is optional and, when written, must be the integer `1`. An
-absent `schema_version` reads as 1.
-`schema_version = true` is refused explicitly: Python compares `True == 1`, and
-a bool left to a plain comparison would read as version 1.
-
-The key exists so that a future incompatible schema can be told from this one by
-a file that has not yet been migrated. It is not a pin and it grants nothing: an
-engine still refuses every key it does not implement, whatever `schema_version`
-says.
-
 ### TOML placement
 
 Two properties of the format decide how a mistake presents, and both fail
@@ -577,9 +555,9 @@ closed.
   `[identities.dev]` becomes `identities.dev.layout`. One mistake therefore
   refuses in
   several places. A misplaced `layout` always reaches the missing-`layout`
-  refusal, which checks before anything reads `environments`; a misplaced
-  `schema_version` refuses as an unimplemented environment key, identity key or
-  identity field, depending on the header it fell under.
+  refusal, which checks before anything reads `environments`, and also refuses
+  as an unimplemented environment key, identity key or identity field, depending
+  on the header it fell under.
   `docs/troubleshooting.md` has the message for each position.
 - **Declaring one table twice is a parse error.** A dotted `aws.plan` under
   `[identities.dev]` plus a later `[identities.dev.aws]` header refuses with
@@ -641,7 +619,7 @@ tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
   bind `shipmate-engine`, so a variable of the same name on that Environment
   shadows the repository value in those two jobs, and nowhere else.
 - **Values.** A resolved value is always a string, so `shared`, `explicit`,
-  `gated` and `schema_version` refuse a reference through their own type checks. The name is
+  and `gated` refuse a reference through their own type checks. The name is
   uppercase (`[A-Z_][A-Z0-9_]*`), as GitHub stores it.
 - **Variables only, never secrets.** A resolved value is not hidden: it lands in
   job outputs, the detect `matrix` among them, and in step logs, and
@@ -705,12 +683,11 @@ variable rows depend on the run as well as the file, so they are not structural.
 | An empty string or an empty map in an identity field | that resolves to a skipped credentials step, not to a credential |
 | `aws.account` that is not a 12-digit string | a TOML integer drops a leading `0` |
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
-| A top-level key other than `schema_version`, `layout`, `identities`, `environments` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
+| A top-level key other than `layout`, `identities`, `environments` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 | A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
 | A file holding a reference, read by a step whose variables input is absent or empty | the engine did not pass `github-vars` to that step, or the repository reaches no variables at all; named as such rather than blamed on one variable |
-| `schema_version` other than the integer `1` | this engine implements version 1; a bool is refused explicitly, since `True == 1` would otherwise read `schema_version = true` as it |
 
 ### Resolution
 
@@ -967,8 +944,8 @@ must appear in Terramate stack tag lists is the `env/<name>` /
 example, a shared stack tagged both `env/staging` and `env/production`)
 when the same stack participates in more than one environment.
 A stack carries at most one `workload/<name>` tag; a stack carrying two
-is refused at detect when a run builds its cell. A stack a drift `tags` filter
-or the unlock queue leaves out does not refuse the run, and targeted and bare
+is refused at detect when a run builds its cell. A stack the unlock queue
+leaves out does not refuse the run, and targeted and bare
 `shipmate apply` build cells only for stacks with an apply check.
 
 Terramate refuses an uppercase letter in a tag, so an environment name is
@@ -990,11 +967,6 @@ deliberate too: a silently skipped stack plans and applies nothing while the
 gate goes green over it, which is the one failure this contract will not trade
 for convenience. The failure names every untagged stack it found, so they are
 tagged from that list rather than found one re-run per stack.
-
-The drift path's optional `tags` filter does not retire that backstop: it
-narrows the cells a run covers, not the set of stacks it inspects, and the
-`env/<name>` requirement is enforced over every stack before any filtering.
-`docs/drift.md` §Scoping a sweep has the query grammar.
 
 ## Comment-ops
 
@@ -1876,7 +1848,9 @@ trigger alone closes two paths a trigger check alone would not:
   smaller matrix. Splitting cannot help when the fan-out comes from a one-line
   edit to a shared local module — that correctly marks every dependent stack
   changed and is one atomic change by nature — and there the only lever is to
-  reduce the number of environments in play. A targeted `shipmate apply <env>`
+  reduce the number of environments in play. A drift sweep enumerates the whole
+  tree, covers every stack and environment cell and cannot be split; its only
+  lever is fewer environments or fewer env-tagged stacks. A targeted `shipmate apply <env>`
   is not a way past it: the ceiling is enforced in the plan fan-out, so a run
   that trips it produces no reviewed plan artifact for any apply path to use.
 - Plans fan out flat: all applicable plan units for a pull request run
@@ -1914,11 +1888,7 @@ in `build-matrix`, at matrix construction — before any artifact exists, so the
 plan run refuses up front rather than an apply discovering the clash afterwards
 (rename so the path→`-` slug is unique). Every path that builds a matrix
 carries it: the plan and deploy paths over their changed set, the drift path
-over the whole tree, and `shipmate unlock` over the target environment. Unlike
-the `env/<name>` backstop, this one is not repo-wide under a `tags` filter: the
-guard runs over the cells the run will produce, so two stacks that slug alike
-but fall in different slices are caught by no scoped sweep. An unscoped drift
-run stays the whole-tree check for that.
+over the whole tree, and `shipmate unlock` over the target environment.
 
 The name spans the plan and apply paths:
 `plan-cell` (the uploader) and `apply-cell` (the downloader) each run as

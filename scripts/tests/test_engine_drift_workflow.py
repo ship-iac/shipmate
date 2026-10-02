@@ -41,7 +41,6 @@ def _step(job_id, needle):
 def test_the_workflow_call_inputs_are_exactly_these():
     assert workflow_yaml(WF)[True]["workflow_call"]["inputs"] == {
         "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
-        "tags": {"required": False, "default": "", "type": "string"},
     }
 
 
@@ -107,7 +106,6 @@ def test_the_sweep_states_no_pull_request_and_no_head():
     assert step["with"] == {
         "base-sha": "",
         "all-stacks": "true",
-        "tags": "${{ inputs.tags }}",
         "no-pull-request": "true",
         "github-vars": "${{ toJSON(vars) }}",
     }

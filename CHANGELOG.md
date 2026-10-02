@@ -38,6 +38,13 @@ section below names the SHA the release tags.
 - **The workflow file's `comment-ops` job has no concurrency group, so a later comment no longer cancels a command still waiting to run; delete the `concurrency:` block from that job.**
 - **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed.**
 - **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
+- **A stack at path `apply` or `shipmate` plans; `build-matrix` no longer refuses either.**
+
+### Removed
+
+- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting.**
+- **The drift workflow and `actions/build-matrix` take no `tags` input; every sweep covers every cell.**
+- **`scripts/onboard` takes no `--vars-at-org`; it always writes the repository `SHIPMATE_APP_ID`.**
 
 ### Fixed
 

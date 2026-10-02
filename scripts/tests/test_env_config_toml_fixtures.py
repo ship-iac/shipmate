@@ -15,9 +15,8 @@ from _loader import load_script
 
 ec = load_script("env-config")
 
-#: Every top-level key but `gate`, and every entry key but `shared`.
+#: Every top-level key, and every entry key but `shared`.
 CANONICAL = """\
-schema_version = 1                 # optional
 layout         = "tf_vars"         # "tf_vars" | "workspace" | "folder", required
 
 [identities.dev]
@@ -51,19 +50,17 @@ tf_vars.TF_VAR_tier = "core"       # optional, merged over the derived TF_VAR_*
 
 #: A top-level setting written below a header, where TOML puts it inside that table.
 MISPLACED_CONTROL = """\
-layout = "folder"
-
 [environments.prod]
 region = "eu-west-1"
-schema_version = 1            # intended as a top-level setting
+layout = "folder"             # intended as a top-level setting
 """
 
 
 def test_the_canonical_file_validates():
-    """Every top-level key but `gate`, a string and a map role field, a workload list, an
+    """Every top-level key, a string and a map role field, a workload list, an
     ordering and both entry flags.
 
-    Mutation: remove any of the four names from the allowed top-level set, or `"identity"`,
+    Mutation: remove any of the three names from the allowed top-level set, or `"identity"`,
     `"workloads"`, `"needs"`, `"explicit"` or `"gated"` from the allowed entry keys.
     """
     table = ec.parse_table(CANONICAL)
@@ -72,21 +69,23 @@ def test_the_canonical_file_validates():
 
 
 def test_the_misplaced_control_refuses():
-    """`schema_version` written below `[environments.prod]` parses as a key of that entry.
-    The file is well-formed TOML, and the strict entry-key check is the only thing that
-    refuses it.
+    """`layout` written below `[environments.prod]` parses as a key of that entry. The file
+    is well-formed TOML; the strict entry-key check names the misplaced key, and the file
+    declares no top-level layout.
 
-    Mutation: add `"schema_version"` to `_ENV_KEYS` -- the file validates.
+    Mutation: add `"layout"` to `_ENV_KEYS` -- the entry-key line drops out of the message.
     """
     table = ec.parse_table(MISPLACED_CONTROL)
-    assert table == {
-        "layout": "folder",
-        "environments": {"prod": {"region": "eu-west-1", "schema_version": 1}},
-    }
+    assert table == {"environments": {"prod": {"region": "eu-west-1", "layout": "folder"}}}
     with pytest.raises(SystemExit) as exc:
         ec.validate(table, ())
     assert str(exc.value) == (
-        "::error::environment prod: schema_version is not a key this engine implements. "
+        "::error::.github/shipmate.toml declares no layout, so no cell can resolve its "
+        'environment identity. Declare layout = "tf_vars", "workspace" or "folder" on the '
+        "default branch, which is where this table is read from. A scalar written below "
+        "a [table] header lands inside that table rather than at the top level, so "
+        "layout must come before the first header.\n"
+        "::error::environment prod: layout is not a key this engine implements. "
         "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, "
         "gated."
     )

@@ -124,10 +124,6 @@ def test_the_wrapper_snippets_are_still_being_found():
         for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
     )
     assert found == [
-        # One: the `drift-<slice>.yml` copy under "Spreading a sweep across the week",
-        # which carries a literal `tags:` value. The unscoped sweep is the `drift` job of
-        # `shipmate.yml` and is published in getting-started.md with the other six.
-        ("docs/drift.md", "drift.yml"),
         ("docs/getting-started.md", "apply-all.yml"),
         ("docs/getting-started.md", "apply.yml"),
         ("docs/getting-started.md", "comment-ops.yml"),

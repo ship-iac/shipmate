@@ -112,7 +112,7 @@ live probes.
   substituted by it, so a malformed or misplaced setting is reported on the pull
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
-  on by itself run here — the top-level keys, `schema_version`, `layout` and the
+  on by itself run here — the top-level keys, `layout` and the
   environment entries; `tf_vars`-layout coverage and unused entries need a plan
   matrix or a whole-tree environment scan, and the verdict names them as
   unchecked. A valid file also gets its `needs` and `explicit` values read back,
@@ -243,7 +243,6 @@ mandate. Each one names what to do.
 | `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
 | `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop `shared = true` from `[environments.<env>]`. |
 | `<env>` — the naming the engine does not bind is also present | the naming `shared = true` in `[environments.<env>]` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Nothing binds the unused naming, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one by setting or dropping `shared = true` in its entry of the checkout's `.github/shipmate.toml`. |
-| `SHIPMATE_APP_ID` — repository has one value, asserted at organization level | `--vars-at-org` named it, and a repository-level copy is still there. Repository resolution beats organization, so that copy is what the workflows read and the organization value contributes nothing. It is never deleted for you — `onboard` did not write it. Delete it with `gh variable delete SHIPMATE_APP_ID`, or drop `--vars-at-org` ([`github-app.md`](github-app.md) §6). |
 | `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
@@ -265,7 +264,7 @@ its `todo` items.
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.
 
-Three come without `--vars-at-org`. The first is the `SHIPMATE_APP_ID` repository variable
+There are three. The first is the `SHIPMATE_APP_ID` repository variable
 differing from `--app-id`. `--app-id` does not only set that variable: it pins
 the gate ruleset's `integration_id` and selects whose private key is stored on
 `shipmate-engine`. Reconciling the two separately would require a
@@ -277,19 +276,6 @@ holds no `SHIPMATE_APP_PRIVATE_KEY`, or does not exist yet: there is no key to
 place. Re-run with `--key <path to the App's PEM private key>`. The third is a
 `shared = true` entry naming an environment no stack's `env/<name>` tag
 declares: it would bind nothing. Tag the stacks or drop the entry.
-
-The others come with `--vars-at-org`, which accepts `SHIPMATE_APP_ID` and no
-other name: an asserted name that no organization variable reaching
-this repository carries, and one whose organization value differs from the
-value this run would have written. Both mean the assertion is wrong and the
-workflows would read an empty or an unexpected value. A private repository
-whose organization is on GitHub Free is refused ahead of both, because
-organization variables do not reach a private repository on that tier at all.
-So is one whose plan the token cannot read: `gh api orgs/<org>` reports the plan
-only to an organization owner, so the tier cannot be told either way — re-run as
-an owner. Each refusal names what fixes it; the procedure
-behind the flag, including why a `private` visibility reaches no public
-repository, is [`github-app.md`](github-app.md) §6.
 
 ## Common failures
 
@@ -521,14 +507,13 @@ branch's** copy of the file — that is the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `identities` and `environments` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities` and `environments` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
 | `environments.<env>.<key> must be a boolean` | `shared`, `explicit` and `gated` are TOML booleans: write `explicit = true`, unquoted. A quoted `"true"` or `"false"`, a number, or a variable reference would otherwise resolve to the default |
 | `environment <env>: identity names no [identities.<name>] table` | the entry names an identity the file does not declare; the message lists the ones it does. A misspelled name lands here |
 | `environment <env> names identity <name>, whose roles vary by workload, and lists no workloads` | the identity's roles depend on the workload tag, so the entry must list the workloads it admits: `workloads = ["…"]` |
 | `environment <env> lists workload <w>, and identities.<name>.aws.<field> has no <w> entry` | a listed workload has no role (or, for a role name, no account) in that map. Add the entry, or remove the workload from the list |
 | `<n> cell(s) carry a workload tag their environment's workloads list does not name` | each named stack's `workload/<name>` tag is outside its environment's `workloads`. Retag the stack, or add the workload to the list on the default branch in a pull request of its own first; the plan reads the default branch's table, so the same pull request cannot fix it |
 | `environments.<env>.workloads lists <w>, which no stack in <env> tags` | a warning, on the paths that scan the whole tree. The workload was listed ahead of the branch that tags it, or its last tag was dropped: tag a stack with it, or remove it from the list once the branch dropping its last tag has merged. An environment no stack tags at all gets the unused-entry warning instead |
-| `schema_version is <value>; this engine implements version 1` | `schema_version` is optional and, written, must be the integer `1`. `schema_version = true` is refused by name rather than read as 1 |
 | `environments.<name> is not an environment name` or `environments.<name> carries the environment suffix` | an `[environments.<name>]` header whose name no stack tag can carry: Terramate refuses an uppercase letter in a tag, and the name is the bare logical env name, never `<env>-plan` or `<env>-apply`. Rename the entry to the name in the stacks' `env/<name>` tags |
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
 | `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
@@ -539,8 +524,8 @@ branch's** copy of the file — that is the only copy execution reads.
 
 **Trap 1: a top-level setting written below a `[table]` header.** TOML puts a
 scalar into whatever table header precedes it, so the line is well-formed and
-lands in the wrong place. Which message you get depends on *which* setting moved
-and *which* header it landed under.
+lands in the wrong place. Which message you get depends on *which* header it
+landed under.
 
 A misplaced `layout` reports `declares no layout`, whose message names the
 placement rule, plus a second line naming the table the key fell under. The
@@ -551,14 +536,6 @@ second line is the diagnosis:
 | after `[environments.dev-eu]` | `environment dev-eu: layout is not a key this engine implements. An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.` |
 | after `[identities.dev]` | `identities.dev.layout is not a key this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
 | after `[identities.dev.aws]` | `identities.dev.aws.layout is not a field this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
-
-A misplaced `schema_version` reports differently in each position:
-
-| Where it landed | What `detect` says |
-| --- | --- |
-| after `[environments.dev-eu]` | `environment dev-eu: schema_version is not a key this engine implements. An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.` |
-| after `[identities.dev]` | `identities.dev.schema_version is not a key this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
-| after `[identities.dev.aws]` | `identities.dev.aws.schema_version is not a field this engine implements. An identity holds aws.account, aws.plan and aws.apply.` |
 
 The fix in every case is the same: put the top-level settings above the first
 `[table]` header.
