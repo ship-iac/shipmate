@@ -181,10 +181,9 @@ deprecation warning from a pinned action reads the same as a shipmate warning.
 That is intended — a known-noise denylist would eventually swallow a real
 warning — so treat an unfamiliar line as upstream's until you have checked.
 
-`shipmate doctor` never blocks the gate, and it needs no write access, review
-or reviewed plan, unlike `shipmate apply` — but because it reports this
-repository's own settings, the engine limits it to organization members and
-repository collaborators (§Who can ask for the report, and who can see it).
+`shipmate doctor` never blocks the gate. It needs write access to the
+repository, but no review or reviewed plan, unlike `shipmate apply`
+(§Who can ask for the report, and who can see it).
 
 ## Who can ask for the report, and who can see it
 
@@ -194,36 +193,15 @@ approval rule so pre-merge applies to it are unreviewed, and whether the App
 installation is missing permissions the manifest declares.
 
 **What the engine enforces.** `shipmate doctor` runs only for a commenter
-GitHub classifies as `OWNER`, `MEMBER` or `COLLABORATOR` in
-`github.event.comment.author_association` — organization members and repository
-collaborators. Any other commenter gets a `🔴 refused:` reply saying exactly
-that; no App token is minted and no probe runs. `CONTRIBUTOR` is deliberately
-excluded — its only signal is one merged pull request, not a standing
-relationship to the repository. The gate fails closed: an association the engine
-does not recognize, or an event carrying no comment context at all, counts as no
-access.
+whose permission on the repository is `write` or `admin`, the same rule as
+`plan`, `apply` and `unlock`. Any other commenter, and a commenter whose
+permission could not be read, gets one `🔴 refused:` reply; no App token is
+minted and no probe runs.
 
-**What the engine does not enforce.** It does not check write access.
-`author_association` is GitHub's own classification of the author's relationship
-to the repository, not a permission lookup, and it is wrong in both directions:
-
-- a collaborator invited with only the Read role is classified `COLLABORATOR`,
-  and an organization member whose base repository permission is None is
-  classified `MEMBER` — both are admitted to the report despite having no write
-  access. If that matters for your repository, add the workflow-level layer
-  below, or do not grant read-only collaborator access to people who should not
-  see the settings inventory;
-- conversely, an organization member whose membership is private is reported
-  as `NONE` and will be refused unless they are also a direct collaborator; make
-  the membership public or add the person as a collaborator.
-
-What the gate does buy is that an account with no declared relationship to the
-repository — a drive-by fork author on a public repository — cannot obtain the
-report. Beyond that: `shipmate help` stays open to every commenter (it lists the
-verbs and discloses nothing about the repository, and a newcomer whose setup is
-broken still needs it), and the report is an ordinary pull request comment, so
-once someone with access asks for it, everyone who can read the pull request can
-read it. The same rendered report is also written to the run's job summary, so
+`shipmate help` stays open to every commenter (it lists the verbs and discloses
+nothing about the repository, and a newcomer whose setup is broken still needs
+it), and the report is an ordinary pull request comment, so once someone with
+write access asks for it, everyone who can read the pull request can read it. The same rendered report is also written to the run's job summary, so
 that a GitHub API outage which loses the comment does not discard the probes.
 That surface needs repository read access too, so it admits no one the comment
 did not — but it is not as retractable. The comment is a single sticky one
@@ -234,13 +212,9 @@ report disclosed something you did not want recorded, deleting the comment is no
 enough — delete the workflow runs that produced it, or shorten the retention
 window.
 
-On a repository whose pull requests are public you can add a second layer
-by gating the `issue_comment` job itself on the same
-`github.event.comment.author_association` values, or by keeping the repository
-private. That is belt and braces over the engine's own gate, not the primary
-mitigation. `app/manifest.json` declares
-`"public": false`: the shipmate App is registered per organization and intended
-for repositories the installing organization controls.
+`app/manifest.json` declares `"public": false`: the shipmate App is registered
+per organization and intended for repositories the installing organization
+controls.
 
 ## What `scripts/onboard` reports
 
@@ -838,10 +812,11 @@ silently inert:
 
 **`shipmate apply` answers “could not resolve the gate settings” and carries no
 🚀 reaction.** A malformed entry, or any other refusal of the file, is raised
-while comment-ops resolves the gate settings, which is before both the 🚀
-reaction and the authorization refusal. So a repository-wide breakage of
-`shipmate apply` and `shipmate unlock` (every command, every environment,
-however well-formed) arrives as that one comment, whatever the command said, and
+while comment-ops resolves the gate settings, which is after the write-access
+check but before both the 🚀 reaction and the rest of the authorization. So for
+a commenter with write access, a repository-wide breakage of `shipmate apply`
+and `shipmate unlock` (every command, every environment, however well-formed)
+arrives as that one comment, whatever the command said, and
 the comment-ops run then fails. Which cause it was is the `::error::` annotation
 on that run; open it from the Actions tab. A targeted
 apply that was genuinely refused comments its own authorization reason instead,

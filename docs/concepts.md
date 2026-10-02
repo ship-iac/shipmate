@@ -82,40 +82,18 @@ the environments of the stacks a given pull request changed, and its report says
 which ones those were. It is a check on the settings that pull request touches,
 not a repository-wide audit.
 
-`help` and `doctor` are read-only. `plan` changes no infrastructure, but is open
-to the same commenters `doctor` is. `apply` and `unlock` are authorized. `apply`
-carries the full check: write or admin permission on the repository, a
-non-draft, mergeable and reviewed PR, and a reviewed plan for the current head
-(see Comment-ops above). `unlock` carries a narrower one — that permission and
-the `<env>-apply` environment, but no draft check, no review and no plan —
-because it releases a lock rather than changing infrastructure.
-
-`help` answers any commenter. `doctor` does not: it names the guardrails this
+`help` answers any commenter. `plan`, `doctor`, `apply` and `unlock` require
+write or admin permission on the repository, and a commenter without it gets a
+`🔴 refused:` reply. `apply` then carries the rest of its check: a non-draft,
+mergeable and reviewed PR, and a reviewed plan for the current head (see
+Comment-ops above). `unlock` adds only the `<env>-apply` environment — no draft
+check, no review and no plan — because it releases a lock rather than changing
+infrastructure. `doctor` is read-only, but it names the guardrails this
 repository is missing — that `shipmate / gate` is not required on the default
-branch, and that an apply environment has no approval rule. So the engine runs
-it only for a commenter GitHub classifies as `OWNER`, `MEMBER` or
-`COLLABORATOR`: organization members and repository collaborators. Anyone else
-gets a `🔴 refused:` reply. No App token is minted and no probe runs.
-
-Three limits:
-
-- `author_association` is GitHub's own classification of the author, not a check
-  for write access, and it errs both ways. A collaborator invited with only the
-  Read role and an organization member whose base repository permission is None
-  are still admitted to the report. An organization member whose membership is
-  private is reported as `NONE`, and is refused unless they are also a direct
-  collaborator. What the gate does buy is that an account with no declared
-  relationship to the repository is refused.
-- `shipmate help` is not gated at all.
-- The report is an ordinary comment. Once someone with access asks for it,
-  everyone who can read the pull request can read it.
-
-On a public repository you can add a second layer by restricting who can trigger
-the comment-ops workflow — a `github.event.comment.author_association` condition
-on the `issue_comment` job, or keeping the repository private — belt and braces
-over the engine's gate rather than a substitute for it. The App manifest is
-`"public": false`: the shipmate App is meant for repositories the installing
-organization controls.
+branch, and that an apply environment has no approval rule — and its report is
+an ordinary comment: once someone asks for it, everyone who can read the pull
+request can read it. The App manifest is `"public": false`: the shipmate App is
+meant for repositories the installing organization controls.
 
 ## Dynamic environments
 

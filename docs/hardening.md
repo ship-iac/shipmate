@@ -177,8 +177,8 @@ Grant repository write only to people you would let apply to production
 unreviewed, because that is what it amounts to. This is the only control that
 closes the branch-authored-workflow path outright; everything else narrows it.
 
-Write access is also the grant that applies and unlocks by comment, so review
-the list as you would the apply role.
+Write access is also the grant that runs every comment verb but `help`: apply,
+unlock, plan and doctor. So review the list as you would the apply role.
 
 ## 2. Restrict pushes that touch executable paths
 
