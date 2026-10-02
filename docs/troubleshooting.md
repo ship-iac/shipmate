@@ -55,13 +55,13 @@ live probes.
   the names. A crowded environment's later names are not printed, so that one
   finding cannot spend the whole report's size budget.
   `SHIPMATE_APP_PRIVATE_KEY` among them is a warning. A `SHIPMATE_SECRETS`
-  holding the read key is the configuration the tier table asks for, so seeing it
+  holding the read key is the configuration
+  [`../CONTRACT.md`](../CONTRACT.md) §Which environment supplies which key asks
+  for, so seeing it
   named in this note is expected.
 - **Whether the `shipmate-engine` environment exists, and whether its deployment
   branch policy actually names the default branch.** See `hardening.md` #16 and
-  `github-app.md` §Key-exposure boundary. This is the probe that catches a
-  re-pin that never (re-)creates that environment, which would otherwise leave
-  the App key a repository secret again with nothing else to notice.
+  `github-app.md` §Key-exposure boundary.
 - **A workflow file other than `shipmate.yml` declares the `pull_request_target`
   trigger.** It runs at the base ref with the repository's secrets, and a
   workflow that also acts on content the pull request author controls from a job
@@ -154,12 +154,10 @@ probe when it cannot tell which repository the engine is. An environment that
 exists but whose settings cannot be read is likewise a note naming it, rather
 than the silence a nonexistent environment gets — a nonexistent environment is
 the environment-existence probe's finding. The `shipmate-engine` probe degrades the
-same way. The plan-environment secret probe carries three degrade levels of its
-own: with no `environments: read` token it warns that the check was not
-performed, never that a plan environment is clean; an environment whose secret
-listing fails is a note naming it, so one unreadable environment does not
-silence the ones that could be read; and a listing too long to read whole warns
-that whether the environment holds `SHIPMATE_APP_PRIVATE_KEY` could not be
+same way. The plan-environment secret probe carries two degrade levels of its
+own: an environment whose secret listing fails is a note naming it, so one
+unreadable environment does not silence the ones that could be read; and a
+listing too long to read whole warns that whether the environment holds `SHIPMATE_APP_PRIVATE_KEY` could not be
 determined, rather than reading as a routine note about the names it did see.
 
 All three environment probes — existence, protection shape, and the
@@ -203,8 +201,7 @@ that; no App token is minted and no probe runs. `CONTRIBUTOR` is deliberately
 excluded — its only signal is one merged pull request, not a standing
 relationship to the repository. The gate fails closed: an association the engine
 does not recognize, or an event carrying no comment context at all, counts as no
-access. Nothing is required of you to adopt it beyond re-pinning the engine
-SHA — it adds no action input and no workflow `permissions:` entry.
+access.
 
 **What the engine does not enforce.** It does not check write access.
 `author_association` is GitHub's own classification of the author's relationship
@@ -276,6 +273,7 @@ mandate. Each one names what to do.
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
 | `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
+| `gate ruleset` — `shipmate / gate` is already required, but `.github/workflows/shipmate.yml` is not on `<branch>` yet | the gate is required while the workflow file is not on the default branch, or this token cannot read it and GitHub answered 404. `pull_request_target` runs the default branch's copy, so the pull request adding the file cannot produce the gate. Disable the gate rule until that pull request merges, or merge it through a bypass actor. |
 | `<file>.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `dev/repin_consumer.py` cannot move. Delete the file and run the script again. |
 | `<file>.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
 
@@ -292,7 +290,7 @@ its `todo` items.
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.
 
-Two come without `--vars-at-org`. The first is the `SHIPMATE_APP_ID` repository variable
+Three come without `--vars-at-org`. The first is the `SHIPMATE_APP_ID` repository variable
 differing from `--app-id`. `--app-id` does not only set that variable: it pins
 the gate ruleset's `integration_id` and selects whose private key is stored on
 `shipmate-engine`. Reconciling the two separately would require a
@@ -301,7 +299,9 @@ variable — can never post, and the default branch would stay blocked until an
 admin deleted the ruleset. Re-run with the variable's value, or change the
 variable first. The second is a run without `--key` while `shipmate-engine`
 holds no `SHIPMATE_APP_PRIVATE_KEY`, or does not exist yet: there is no key to
-place. Re-run with `--key <path to the App's PEM private key>`.
+place. Re-run with `--key <path to the App's PEM private key>`. The third is a
+`shared = true` entry naming an environment no stack's `env/<name>` tag
+declares: it would bind nothing. Tag the stacks or drop the entry.
 
 The others come with `--vars-at-org`, which accepts `SHIPMATE_APP_ID` and no
 other name: an asserted name that no organization variable reaching
@@ -354,7 +354,9 @@ acquiring it. See §A state lock is held.
 error normally means the state moved rather than that the wrong plan was chosen.
 Both dispatched apply workflows refuse in their `guard` job any dispatch whose
 actor is not a `[bot]` — a hand-run one fails with `apply must be dispatched by
-the shipmate App via comment-ops, not by a direct workflow_dispatch` — and
+the shipmate App via comment-ops, not by a direct workflow_dispatch`, or from
+`apply-all.yml` with `apply-all must be dispatched by the shipmate App via
+comment-ops, not by a direct workflow_dispatch` — and
 comment-ops reads the plan run each `apply / <stack> / <env>` check on the pull
 request's current head records, refusing the command when that head names none.
 These fail-safes are defence in depth behind that control, not the only thing
@@ -438,17 +440,10 @@ remedy differs:
   plan describes a tree this job does not have, so it is refused rather than
   applied or silently re-planned — as with a stale plan, there is no force. The
   fix is a re-plan and an apply of the fresh plan.
-- **There is no record at all.** There is nothing to compare, so the absent
-  record is refused rather than tolerated. The plan came from an engine revision
-  that records none, and the remedy is a re-plan.
-  A push does not always fix this one. Pre-merge it does: push to the pull
-  request and the fresh plan carries a record — a *re-run* of the old plan run
-  does not, because a re-run replays the workflow file of the commit that
-  triggered it, and with it that commit's engine pin. But the post-merge deploy
-  path can meet a record-less artifact for a cell that was still pending when a
-  re-pin merged, and there is no pull request left to push to — the remedy there
-  is a follow-up pull request touching those stacks. The way to avoid meeting it
-  at all is to land a re-pin with nothing pending.
+- **There is no record at all.** There is nothing to compare against the
+  checkout, so the apply is refused. Re-plan the stack on its pull request and
+  apply the fresh plan; post-merge, a new pull request touching the stack plans and
+  applies it.
 
 This check is per cell and additive: the apply path's plan-run binding — each
 cell's plan run read from an App-authored apply check on that same head — still
@@ -471,13 +466,11 @@ job records the digest of the `plan.txt` it publishes in the comment
 ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match fingerprint), and the applying
 cell re-renders the stored plan with the command that wrote it and compares.
 
-- **No digest is recorded.** The apply check was written by an engine revision
-  that records none. Nothing is compared, so it is refused rather than applied
-  unverified. Pre-merge the fix is a push and an apply of the fresh plan; a
-  *re-run* of the old plan run does not help, because it replays the workflow
-  file of the commit that triggered it. Post-merge, a follow-up pull request
-  touching those stacks plans and applies them afresh. This is the same shape as
-  the absent planned-commit record above, and the same remedy.
+- **No digest is recorded.** Nothing is compared, so the apply is refused
+  rather than run unverified. Re-plan the stacks on their pull request and apply
+  again; post-merge, a new pull request touching those stacks plans and applies them.
+  This is the same shape as the absent planned-commit record above, and the
+  same remedy.
 - **The render disagrees with the digest.** The error names both digests. Either
   the plan text published for review does not describe the plan that would run,
   or the tooling moved underneath the artifact. A pin bump that moves the tofu
@@ -553,9 +546,8 @@ branch's** copy of the file — that is the only copy execution reads.
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `identities` and `environments` are accepted — the message lists them. A *newer* engine's key lands here too, which is why a pin moves before a key does |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `schema_version`, `layout`, `identities` and `environments` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
 | `environments.<env>.<key> must be a boolean` | `shared`, `explicit` and `gated` are TOML booleans: write `explicit = true`, unquoted. A quoted `"true"` or `"false"`, a number, or a variable reference would otherwise resolve to the default |
-| `environment <env>: aws is retired` | credentials moved out of the environment entry. Write them as `[identities.<name>]` with `aws.account`, `aws.plan` and `aws.apply`, and name it from the entry with `identity = "<name>"`. Inside an identity, `aws.role`, `aws.region` and a `plan` or `apply` map key `role` or `region` (the retired `aws.<path>.role` and `aws.<path>.region`) refuse too, each naming its replacement |
 | `environment <env>: identity names no [identities.<name>] table` | the entry names an identity the file does not declare; the message lists the ones it does. A misspelled name lands here |
 | `environment <env> names identity <name>, whose roles vary by workload, and lists no workloads` | the identity's roles depend on the workload tag, so the entry must list the workloads it admits: `workloads = ["…"]` |
 | `environment <env> lists workload <w>, and identities.<name>.aws.<field> has no <w> entry` | a listed workload has no role (or, for a role name, no account) in that map. Add the entry, or remove the workload from the list |
@@ -765,9 +757,8 @@ recover.
 only when every shipmate-App-authored check on that commit whose name begins
 `apply / ` has a latest run completed as `success` or `neutral`, and the apply
 paths complete only the names the current plan run produced. A leftover pending
-check under a name no current cell reconstructs — one from another engine
-revision's check-name grammar, a renamed or deleted stack — therefore holds the
-gate indefinitely. GitHub has no way to delete a check run, so the recovery is a
+check under a name no current cell reconstructs (a renamed or deleted stack)
+therefore holds the gate indefinitely. GitHub has no way to delete a check run, so the recovery is a
 new head SHA: push a commit, and the plan run re-creates only the checks that
 exist now.
 

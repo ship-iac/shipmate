@@ -293,8 +293,9 @@ _ROLE_FIELDS = ("plan", "apply")
 _PLACEHOLDER = "{workload}"
 _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 
-#: `vars` because a one-key `{ vars = "…" }` is a reference; `role` and `region` because the
-#: retired `aws.plan.role = "…"` and `aws.plan.region = "…"` parse as maps keyed by them.
+#: `vars` because a one-key `{ vars = "…" }` is a reference; `role` and `region` because
+#: `aws.plan.role = "…"` and `aws.plan.region = "…"` parse as maps keyed by them, which would
+#: otherwise validate as a role for a workload of that name.
 _RESERVED_WORKLOADS = ("vars", "role", "region")
 
 #: Everything the file may declare at its top level.
@@ -429,13 +430,7 @@ def _check_environment(entry, env, errors, identities):
     if not shape.ok:
         return
     for key in sorted(entry):
-        if key == "aws":
-            errors.append(
-                f"::error::environment {env}: aws is retired. Credentials live in "
-                "[identities.<name>] (aws.account, aws.plan, aws.apply), and the environment "
-                'names one with identity = "<name>".'
-            )
-        elif key not in _ENV_KEYS:
+        if key not in _ENV_KEYS:
             errors.append(
                 f"::error::environment {env}: {key} is not a key this engine implements. "
                 f"An environment holds {', '.join(_ENV_KEYS)}."
@@ -497,32 +492,13 @@ def _check_value(name, where, field, value):
 
 
 def _check_map_value(name, field, key, value):
-    """One `key = value` of a field written as a map keyed by workload. The retired spellings
-    were per path, so under `account` a `role` or `region` key is only not a workload name."""
+    """One `key = value` of a field written as a map keyed by workload."""
     where = f"identities.{name}.aws.{field}.{key}"
-    retired_path = field != "account"
-    if key == "role" and retired_path:
-        raise SystemExit(
-            f"::error::{where}: role is not a workload name. The retired "
-            f'aws.{field}.role = "…" is written aws.{field} = "…".'
-        )
-    if key == "region" and retired_path:
-        raise SystemExit(
-            f"::error::{where}: region is not a workload name. The retired "
-            f"aws.{field}.region is gone: the credentials step uses the environment's region."
-        )
     if not _is_workload(key):
         raise _not_a_workload(where)
     if field == "account" and _is_integer(value):
         raise _not_an_account(name, f"aws.{field}.{key}")
-    if not isinstance(value, str):
-        retired = (
-            f" The retired aws.{field}.workloads.<name>.role is written "
-            f'aws.{field} = {{ <name> = "…" }}.'
-            if key == "workloads" and retired_path
-            else ""
-        )
-        raise SystemExit(f"::error::{where} must be a string, got {type(value).__name__}.{retired}")
+    _string(value, where)
     _check_value(name, f"aws.{field}.{key}", field, value)
 
 
@@ -548,17 +524,9 @@ def _check_field(name, field, value, errors):
 
 
 def _aws_key_error(name, key):
-    where = f"::error::identities.{name}.aws.{key}"
-    if key == "role":
-        return (
-            f"{where} is retired: one role on both paths hands any-branch plan cells the "
-            "apply role's permissions. Write aws.plan and aws.apply."
-        )
-    if key == "region":
-        return f"{where} is retired: the credentials step uses the environment's region."
     return (
-        f"{where} is not a field this engine implements. An identity holds aws.account, "
-        "aws.plan and aws.apply."
+        f"::error::identities.{name}.aws.{key} is not a field this engine implements. An "
+        "identity holds aws.account, aws.plan and aws.apply."
     )
 
 

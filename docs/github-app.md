@@ -150,15 +150,15 @@ The guard matters, and it has to come before the `PUT`: a typo'd name or a
 repository you cannot read leaves `DEFAULT_BRANCH` empty, and without it the
 `PUT` has already created the environment with `custom_branch_policies: true`
 while the `POST` writes a policy named `""` (or 422s). Either way the environment
-admits no ref and fails closed, discovered only when that repository's first
-apply check never completes. Re-running this against an already-onboarded
+admits no ref and fails closed: every job binding `shipmate-engine` is refused,
+starting with the plan run's `summary`, so no `shipmate / gate` status or apply
+check is written and comment commands go unanswered. Re-running this against an already-onboarded
 repository makes the `POST` fail with "name has already been taken", which is
 harmless — the policy is already there.
 
 Reading the default branch rather than hardcoding `main` is the point: the
 policy must name that repository's own default branch, and a policy naming a
-branch that does not exist fails closed — the apply-completion job is denied the
-key and apply checks never complete.
+branch that does not exist fails closed the same way.
 
 No reviewers on this environment — it exists to scope a secret to a ref, not
 to gate a human decision (`docs/hardening.md` #16). `shipmate doctor` checks
@@ -252,10 +252,10 @@ correct for this repository: one in a second App's trust domain keeps its own
 value is not the one this run would write is refused, and the repository copy
 does not satisfy the assertion.
 
-**Every asserted name is verified, not trusted.** `onboard` reads
+**The asserted name is verified, not trusted.** `onboard` reads
 `GET /repos/{owner}/{repo}/actions/organization-variables`, which returns
 only the organization variables whose visibility reaches this repository, and
-refuses before its first write when an asserted name is missing from that list
+refuses before its first write when the asserted name is missing from that list
 or carries a value other than the one this run would have written. A name left
 on the default `private` visibility for a public consumer is caught here rather
 than at the first run. The read needs no token scope beyond the `repo` access
@@ -280,17 +280,12 @@ nobody else.
 A repository-level copy of an asserted name still overrides the organization
 value, because repository resolution wins. `onboard` reports one as a `differs`
 line and exits 2, and never deletes it — removing a value it did not write is
-outside what it reconciles. A repository already onboarded per repository starts
-in exactly that state, so migrating one is: set the organization variables,
-delete each repository copy with `gh variable delete <NAME>` in the consumer
-repo, and run `onboard` again with the flag. A `SHIPMATE_APP_ID` copy holding a
-value other than `--app-id` is refused outright before any of this, as it is
-without the flag.
+outside what it reconciles. A `SHIPMATE_APP_ID` copy holding a value other than
+`--app-id` is refused outright, with or without the flag.
 
-`SHIPMATE_APP_PRIVATE_KEY` cannot move to the organization with them:
-environment secrets are scoped to one repository's environment, so it has to be
-set per-repo as above. That is one more reason step 5 (creating the environment) has to happen in
-every consumer repo, not once for the org.
+`SHIPMATE_APP_PRIVATE_KEY` cannot be set at organization level: environment
+secrets are scoped to one repository's environment, so it is set per repository
+as above, and step 5 runs in every consumer repository.
 
 ## 7. Rotate the private key (on suspicion of compromise)
 
@@ -332,12 +327,6 @@ every consumer repo, not once for the org.
   `checks: write`, `statuses: write`, `issues: write`, `environments: read`
   (doctor's plan-environment secret listing — names only; no GitHub API returns
   a secret's value, and this permission cannot write one).
-  Minted in its own non-fatal step, so an installation that has not accepted
-  the request leaves the `shipmate / gate` status and the apply checks
-  untouched; it costs two warnings in the `shipmate doctor` report — that probe
-  reporting itself as not performed, and the App-permission-drift probe, whose
-  full-manifest mint asks for this permission too and so fails until Accept.
-  Both clear on Accept — see §Re-approve after permission changes.
 - The App mints a fresh installation token per job and authors every
   `apply / <stack> / <env>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
@@ -357,8 +346,7 @@ every consumer repo, not once for the org.
 
 ## Re-approve after permission changes
 
-Expanding `default_permissions` in `app/manifest.json` (as this project did
-to add `checks`/`statuses`/`issues`, and later `environments`) does not take
+Expanding `default_permissions` in `app/manifest.json` does not take
 effect immediately for an already-installed App. GitHub puts the wider grant in
 a pending request that an org owner must approve:
 
@@ -370,7 +358,11 @@ Open the installation, review the pending permission request, and Accept
 it. Until that happens, API calls using the new scopes (e.g. the App's
 `statuses: write` gate POST) fail with a permission error even though the
 manifest and the installed App's token both look correct. The gap is the
-un-approved request, not a code or config bug.
+un-approved request, not a code or config bug. A mint that requests the new
+scope fails outright: the plan run's summary token requests every scope the gate
+path and doctor use, so until the request is accepted no plan run writes apply
+checks or a `shipmate / gate` status, and `shipmate doctor` replies that it could
+not mint a token.
 
 ## Key-exposure boundary
 
@@ -446,7 +438,7 @@ actual work here:
   artifact decrypted, which would put `SHIPMATE_PLAN_PASSPHRASE` in the job that
   holds the App key.
 - The *token* minted from the key is still readable in plaintext by any step
-  in the job that mints it, same as before the key moved — the environment
+  in the job that mints it — the environment
   boundary controls which jobs can mint one, not what a job does with it
   once minted. The `integration_id`-pinned gate ruleset
   (`docs/branch-protection.md`) is what defends against a token minted inside

@@ -779,7 +779,8 @@ cross-organization consumers.
 `SHIPMATE_PLAN_PASSPHRASE` is the exception, and it is not affected by the
 boundary. The wave jobs bind the env's apply environment, not `shipmate-engine`,
 so `shipmate-engine` cannot supply that secret: it travels down the call chain as
-a repository or organization secret you pass by name.
+a repository or organization secret you pass by name, or is set as the same
+value on both `<env>-plan` and `<env>-apply`.
 
 ## Required — enforce the gate
 
@@ -964,16 +965,11 @@ on your **default branch** — so an edit takes effect when it merges, and a pul
 request cannot exempt itself. Set it on no entry and every environment keeps
 the ruleset's requirement.
 
-The second part is a pin. An apply is authorized by the engine
-`comment-ops.yml` the `comment-ops` job calls and enforced by the engine
-`apply.yml` and `apply-all.yml` the `targeted` and `all` jobs call, so those
-three pins must sit at the same commit. An apply authorized under a newer pin
-than the engine that enforces it is enforced by nothing, so the `comment-ops`,
-`targeted` and `all` jobs keep one pin. One file carrying all seven pins is what
-makes that automatic: `dev/repin_consumer.py` moves them together.
-
-Both edges need an entry declaring `gated = false` — the exemption is opt-in and
-there is no consumer-written input that could authorize a dispatch without it.
+The `comment-ops`, `targeted` and `all` jobs must pin one engine commit:
+`comment-ops.yml` authorizes an apply that `apply.yml` and `apply-all.yml`
+enforce, so at different commits an apply authorized under one engine's rule is
+enforced by another's, or by none. `dev/repin_consumer.py` moves all seven pins
+together.
 
 What this does and does not do: an ungated environment may be applied without an
 approving review; every other apply requirement still decides, including

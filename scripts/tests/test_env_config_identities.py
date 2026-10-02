@@ -31,85 +31,18 @@ def _named(aws, **entry):
     return _identity(aws, **{"dev-eu": {"region": "eu-west-1", "identity": "dev", **entry}})
 
 
-# --- the environment's retired aws block ---------------------------------------------------
+# --- an environment entry holds no credentials --------------------------------------------
 
 
-def test_an_environment_aws_block_names_its_replacement():
-    """Mutation: drop the `aws` case from the entry key loop -- the generic unknown-key text
-    appears instead."""
+def test_an_environment_aws_key_is_an_unknown_key():
+    """Mutation: drop the unknown-key refusal from the entry key loop -- the table validates."""
     table = {
         "layout": "folder",
-        "environments": {"dev-eu": {"region": "eu-west-1", "aws": {"apply": {"role": _ARN}}}},
+        "environments": {"dev-eu": {"region": "eu-west-1", "aws": {"apply": _ARN}}},
     }
     assert _refusal(table) == (
-        "::error::environment dev-eu: aws is retired. Credentials live in [identities.<name>] "
-        "(aws.account, aws.plan, aws.apply), and the environment names one with "
-        'identity = "<name>".'
-    )
-
-
-#: An excerpt of `repo-example-stacks-aws/.github/shipmate.toml` as shipped for v0.41.0,
-#: omitting its `gate` table: its `schema_version`, `layout` and environment entries, verbatim.
-_STACKS_AWS_V0_41_0 = """\
-schema_version = 1
-
-# Dynamic backend: the layout derives `TF_VAR_env` from each environment's own name
-# and `TF_VAR_region` from its `region`. Under `tf_vars` every environment in the matrix
-# needs an entry with a non-empty region, or the run refuses at detect.
-layout = "tf_vars"
-
-# The environment's own `region` inherits into the provider block, so the credentials
-# step gets the same region the stack does. `plan` and `apply` are separate roles: the
-# plan role is read-only and reachable from any branch, the apply role is not. Do not
-# collapse them into one block-level `aws.role` -- that hands any-branch plan cells the
-# apply role's permissions.
-# Each role is a repository variable, resolved at detect, so a rename is a variable edit
-# rather than a pull request. The ARNs stay public in the credentials step's log.
-[environments.dev-eu]
-region = "eu-west-1"
-aws.plan.role = { vars = "DEV_PLAN_ROLE" }
-aws.apply.role = { vars = "DEV_APPLY_ROLE" }
-
-# dev-eu fully applies first. dev-us is a dev environment, so a targeted apply there
-# needs no approving review; dev-eu's still does.
-[environments.dev-us]
-region = "us-east-1"
-needs = ["dev-eu"]
-gated = false
-aws.plan.role = { vars = "DEV_PLAN_ROLE" }
-aws.apply.role = { vars = "DEV_APPLY_ROLE" }
-
-[environments.sbx]
-region = "eu-west-1"
-aws.plan.role = { vars = "SBX_PLAN_ROLE" }
-aws.apply.role = { vars = "SBX_APPLY_ROLE" }
-"""
-
-_STACKS_AWS_VARIABLES = {
-    "DEV_PLAN_ROLE": "arn:aws:iam::222222222222:role/shipmate-dev-plan",
-    "DEV_APPLY_ROLE": "arn:aws:iam::222222222222:role/shipmate-dev-apply",
-    "SBX_PLAN_ROLE": "arn:aws:iam::333333333333:role/shipmate-sbx-plan",
-    "SBX_APPLY_ROLE": "arn:aws:iam::333333333333:role/shipmate-sbx-apply",
-}
-
-
-def test_the_v0_41_0_sample_table_refuses_once_per_environment():
-    """An excerpt of the last released sample table, as shipped for v0.41.0 but omitting its
-    `gate` table, fed through the real parser, refuses all at once, and each line names
-    `identity` as the replacement.
-
-    Mutation: drop the `aws` case from the entry key loop -- each line becomes the generic
-    unknown-key text.
-    """
-    table = ec.parse_table(_STACKS_AWS_V0_41_0, _STACKS_AWS_VARIABLES)
-    retired = (
-        "aws is retired. Credentials live in [identities.<name>] (aws.account, aws.plan, "
-        'aws.apply), and the environment names one with identity = "<name>".'
-    )
-    assert _refusal(table) == (
-        f"::error::environment dev-eu: {retired}\n"
-        f"::error::environment dev-us: {retired}\n"
-        f"::error::environment sbx: {retired}"
+        "::error::environment dev-eu: aws is not a key this engine implements. An environment "
+        "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )
 
 
@@ -150,30 +83,13 @@ def test_an_identity_key_other_than_aws_refuses():
     )
 
 
-_RETIRED_FIELDS = [
-    (
-        "role",
-        "::error::identities.dev.aws.role is retired: one role on both paths hands any-branch "
-        "plan cells the apply role's permissions. Write aws.plan and aws.apply.",
-    ),
-    (
-        "region",
-        "::error::identities.dev.aws.region is retired: the credentials step uses the "
-        "environment's region.",
-    ),
-    (
-        "client_id",
-        "::error::identities.dev.aws.client_id is not a field this engine implements. An "
-        "identity holds aws.account, aws.plan and aws.apply.",
-    ),
-]
-
-
-@pytest.mark.parametrize(("key", "message"), _RETIRED_FIELDS, ids=[k for k, _ in _RETIRED_FIELDS])
-def test_an_aws_field_the_identity_does_not_hold_refuses(key, message):
-    """Mutations: drop the `role` case -- its line becomes the generic one; drop the `region`
-    case -- likewise; drop the unknown-field refusal -- the `client_id` case validates."""
-    assert _refusal(_identity({"apply": _ARN, key: "x"})) == message
+@pytest.mark.parametrize("key", ["role", "region", "client_id"])
+def test_an_aws_field_the_identity_does_not_hold_refuses(key):
+    """Mutation: drop the unknown-field refusal -- every case validates."""
+    assert _refusal(_identity({"apply": _ARN, key: "x"})) == (
+        f"::error::identities.dev.aws.{key} is not a field this engine implements. An "
+        "identity holds aws.account, aws.plan and aws.apply."
+    )
 
 
 @pytest.mark.parametrize("aws", [{"account": _ACCOUNT}, {}], ids=["account-only", "empty"])
@@ -236,68 +152,30 @@ def test_an_empty_map_at_a_field_refuses(aws):
     )
 
 
-def test_a_map_value_that_is_not_a_string_refuses():
-    """Mutation: drop the map-value type check -- the integer reaches the empty check and
-    raises raw."""
-    assert _refusal(_identity({"apply": {"core": 3}})) == (
-        "::error::identities.dev.aws.apply.core must be a string, got int."
-    )
+@pytest.mark.parametrize(
+    ("value", "kind"),
+    [
+        ({"core": 3}, "core must be a string, got int"),
+        ({"workloads": {"net": _ARN}}, "workloads must be a string, got dict"),
+    ],
+)
+def test_a_map_value_that_is_not_a_string_refuses(value, kind):
+    """Mutation: drop the map-value type check -- the value raises raw."""
+    assert _refusal(_identity({"apply": value})) == f"::error::identities.dev.aws.apply.{kind}."
 
 
-def test_the_retired_workload_tier_names_the_map_spelling():
-    """`aws.apply.workloads.net.role = "…"` parses as a map value under key `workloads`.
-
-    Mutation: drop the `workloads` suffix -- the line ends after `got dict.`
-    """
-    assert _refusal(_identity({"apply": {"workloads": {"net": {"role": _ARN}}}})) == (
-        "::error::identities.dev.aws.apply.workloads must be a string, got dict. The retired "
-        'aws.apply.workloads.<name>.role is written aws.apply = { <name> = "…" }.'
-    )
-
-
-def test_the_retired_role_key_names_the_string_spelling():
-    """`aws.plan.role = "…"` parses as a map with key `role`.
-
-    Mutation: drop the `role` map-key case -- the line becomes the charset refusal.
-    """
-    assert _refusal(_identity({"plan": {"role": _ARN}})) == (
-        "::error::identities.dev.aws.plan.role: role is not a workload name. The retired "
-        'aws.plan.role = "…" is written aws.plan = "…".'
-    )
-
-
-def test_the_retired_region_key_names_the_environment_region():
-    """`aws.plan.region = "…"` parses as a map with key `region`.
-
-    Mutation: drop the `region` map-key case -- the line becomes the charset refusal.
-    """
-    assert _refusal(_identity({"apply": _ARN, "plan": {"region": "eu-west-1"}})) == (
-        "::error::identities.dev.aws.plan.region: region is not a workload name. The retired "
-        "aws.plan.region is gone: the credentials step uses the environment's region."
-    )
-
-
+@pytest.mark.parametrize("field", ["plan", "account"])
 @pytest.mark.parametrize("key", ["role", "region"])
-def test_under_account_a_retired_key_is_only_not_a_workload_name(key):
-    """`aws.account.role` and `aws.account.region` never existed, so no retired spelling is
-    named.
+def test_role_and_region_are_not_workload_names(field, key):
+    """`aws.plan.role = "…"` parses as a map keyed `role`, which would otherwise validate as
+    the role of a workload named `role`.
 
-    Mutations: drop the `account` exemption -- each line names the retired
-    `aws.account.<key>` spelling instead; or drop `region` from the reserved names -- the
-    `region` case validates.
+    Mutation: drop `role` or `region` from the reserved names -- its cases validate.
     """
-    assert _refusal(_identity({"apply": _ARN, "account": {key: _ACCOUNT}})) == (
-        f"::error::identities.dev.aws.account.{key} is not a workload name: lowercase letters, "
+    value = _ACCOUNT if field == "account" else _ARN
+    assert _refusal(_identity({"apply": _ARN, field: {key: value}})) == (
+        f"::error::identities.dev.aws.{field}.{key} is not a workload name: lowercase letters, "
         "digits, '-' and '_', starting with a letter or digit, and not vars, role or region."
-    )
-
-
-def test_under_account_a_workloads_map_names_no_retired_spelling():
-    """Mutation: drop the `account` exemption -- the line gains the retired
-    `aws.account.workloads.<name>.role` sentence."""
-    table = _identity({"apply": _ARN, "account": {"workloads": {"net": _ACCOUNT}}})
-    assert _refusal(table) == (
-        "::error::identities.dev.aws.account.workloads must be a string, got dict."
     )
 
 
@@ -630,8 +508,8 @@ def test_an_environment_naming_a_refused_identity_skips_its_role_checks():
     """
     table = _named({"plan": "shipmate-plan", "role": "x"})
     assert _refusal(table) == (
-        "::error::identities.dev.aws.role is retired: one role on both paths hands any-branch "
-        "plan cells the apply role's permissions. Write aws.plan and aws.apply."
+        "::error::identities.dev.aws.role is not a field this engine implements. An "
+        "identity holds aws.account, aws.plan and aws.apply."
     )
 
 

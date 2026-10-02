@@ -104,10 +104,9 @@ def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan-text digest recorded for apply / stacks/dns / dev-eu: "
         "the reviewed plan text cannot be checked against the plan that would be applied, so "
-        "this apply is refused rather than run unverified. The check was written before this "
-        "engine version. Re-plan these stacks on their pull request, then apply again; if that "
-        "pull request has already merged, a new pull request touching them plans and applies "
-        "them afresh."
+        "this apply is refused rather than run unverified. Re-plan these stacks on their pull "
+        "request, then apply again; if that pull request has already merged, a new pull "
+        "request touching them plans and applies them afresh."
     )
 
 
@@ -124,11 +123,10 @@ def test_a_cell_whose_check_names_no_plan_run_refuses():
         )
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu: the "
-        "apply check names no plan run to apply from, most likely a check written "
-        "before this engine version, and post-merge possibly no apply check for that "
-        "cell at all. Re-plan these stacks on their pull request, then apply again; if "
-        "that pull request has already merged, a new pull request touching them plans "
-        "and applies them afresh."
+        "apply check names no plan run to apply from (post-merge, the cell may have no apply "
+        "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
+        "then apply again; if that pull request has already merged, a new pull request "
+        "touching them plans and applies them afresh."
     )
 
 
@@ -296,10 +294,8 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_
 
 
 def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_path):
-    """The upgrade shape: `stacks/dns` was applied by an older engine version, so its completed
-    check carries a legacy bare-hex record naming no plan run. Only cells still to be applied
-    need one -- refusing over an already-applied cell would strand every pull request open
-    across the upgrade."""
+    """`stacks/dns` is applied and its completed check carries a bare-hex record naming no plan
+    run. Only cells still to be applied need one, so it does not block the rest."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,

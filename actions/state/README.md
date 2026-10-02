@@ -25,6 +25,6 @@ or `save` before anything else, so a typo cannot silently skip both steps.
 **State loss is acceptable**: this is a cache, not a source of truth, and
 GitHub cache entries can be evicted at any time. Sample-repo stacks use
 `null_resource`/`random_pet`, which re-create on a cache miss. The small window
-for concurrent read/modify/write races is closed later by a per-env
-`concurrency` group that serializes applies; `actions/state` itself makes no
+for concurrent read/modify/write races is closed by the per-stack x environment
+`concurrency` group that serializes applies and unlocks; `actions/state` itself makes no
 locking guarantees.

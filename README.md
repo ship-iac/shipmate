@@ -12,7 +12,7 @@ and writing state through GitHub's own primitives (Environments, caches, checks,
 PR comments) and the Terramate/OpenTofu CLIs. When the workflow run ends,
 shipmate's job ends with it.
 
-Consuming repositories pin every shipmate action by commit SHA, never by a tag
+Consuming repositories pin every shipmate reusable workflow by commit SHA, never by a tag
 or branch name: a commit SHA is immutable, so a consumer's workflow behavior
 cannot change underneath it without an explicit, reviewed bump. shipmate
 publishes a GitHub Release per release SHA, which lets Dependabot's
