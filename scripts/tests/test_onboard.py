@@ -1812,14 +1812,14 @@ def test_every_shim_is_pinned_at_every_site():
     """One file, seven pins, and a file shipped still carrying `@<engine-sha>` resolves to
     nothing.
 
-    Nothing else can see a missed rewrite. `_callees` splits before the `@`, and the
-    byte-identity guard is blind by construction, because a surviving placeholder is not a
-    40-hex pin on either side. Two live triggers make that silence expensive: `_DOC_PIN`
-    requires the trailing `#` comment, so a docs edit dropping `# see the latest release`
-    from one line stops that pin being rewritten; and it is anchored on `ship-iac`, so
-    normalising an owner in the docs to `<owner>` would unpin all seven. `_DOC_PIN` stays
-    anchored deliberately -- the docs/releasing.md re-pin is anchored the same way and the
-    two writers must agree -- and this vector is what makes either edit loud.
+    Nothing else can see a missed rewrite: `_callees` splits before the `@`, so a surviving
+    placeholder reads as a callee like any other. Two live triggers make that silence
+    expensive: `_DOC_PIN` requires the trailing `#` comment, so a docs edit dropping
+    `# see the latest release` from one line stops that pin being rewritten; and it is
+    anchored on `ship-iac`, so normalising an owner in the docs to `<owner>` would unpin all
+    seven. `_DOC_PIN` stays anchored deliberately -- the docs/releasing.md re-pin is anchored
+    the same way and the two writers must agree -- and this vector is what makes either edit
+    loud.
 
     Hand-written, never derived from the docs.
 

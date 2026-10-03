@@ -18,21 +18,23 @@ merges a Dependabot pull request that bumps one line alone.
 
 `<release-sha>` is the release's full 40-hex commit (`git rev-list -n1 vX.Y.Z` once tagged),
 never a short SHA. `<consumer>` is the consumer repository's checkout. Use GNU sed: `-b`
-keeps a CRLF file's line endings under Git Bash.
+keeps a CRLF file's line endings under Git Bash. On macOS, install GNU sed and run it as
+`gsed`, because BSD sed rejects `-b`.
 
-1. From the engine clone, check that `<release-sha>` is on `origin/main` and rewrite every
-   engine ref. The check is `&&`-chained, so a SHA not on `origin/main` rewrites nothing: a
-   commit reachable only from a branch stops resolving once that branch is force-pushed or
-   deleted.
+1. From the engine clone, check that `<release-sha>` is 40 hex and on `origin/main`, then
+   rewrite every engine ref. The checks are `&&`-chained, so a bad SHA rewrites nothing. A
+   short SHA or a tag would be written into every pin, and step 2 compares against the same
+   value, so it would pass. A commit reachable only from a branch stops resolving once that
+   branch is force-pushed or deleted.
 
    ```bash
-   git fetch origin main && git merge-base --is-ancestor <release-sha> origin/main && \
+   [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && git fetch origin main && git merge-base --is-ancestor <release-sha> origin/main && \
      sed -b -i -E 's|(ship-iac/shipmate/[^@[:space:]"]+)@[0-9a-f]{40}("?)([[:space:]]+# v[^[:space:]]*)?|\1@<release-sha>\2 # vX.Y.Z|' <consumer>/.github/workflows/*.yml
    ```
 
 2. List the engine refs the rewrite left behind. It must print nothing, because every engine
    ref moves in one commit. A printed line is a ref the `sed` does not handle (`@main`, a
-   single-quoted ref, a comment that is not `# vX.Y.Z`): fix it by hand and run step 2 again.
+   single-quoted ref, a comment after the label): fix it by hand and run step 2 again.
 
    ```bash
    grep -nE 'ship-iac/shipmate/[^@[:space:]"]+@' <consumer>/.github/workflows/*.yml | grep -vE '@<release-sha>"? # vX\.Y\.Z'$'\r''?$'

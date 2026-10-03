@@ -12,8 +12,9 @@ package = false
 [tool.pytest.ini_options]
 # scripts/tests/ is listed so `from _loader import load_script` resolves
 # without a sys.path hack in every test module. Prepend import mode happens to
-# put a test's own directory on sys.path already, so this is currently redundant — but that is pytest's default
-# behaviour rather than a declared invariant, and it stops holding the moment
+# put a test's own directory on sys.path already, so this is currently
+# redundant — but that is pytest's default behaviour rather than a declared
+# invariant, and it stops holding the moment
 # anyone adds an __init__.py or passes --import-mode=importlib. Declaring it
 # keeps 20 test modules from failing collection on a config change elsewhere.
 # scripts/ holds the shared loader that the scripts and the test loader import.
