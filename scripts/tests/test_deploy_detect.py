@@ -141,7 +141,7 @@ def _run_main(
     }.items():
         monkeypatch.setenv(k, v)
     monkeypatch.delenv("SHIPMATE_BASE_SHA", raising=False)
-    stub_read_table(monkeypatch, (dd.bm.ec, dd.eo.ec), table, order, reads=reads)
+    stub_read_table(monkeypatch, (dd.bm.ec,), table, order, reads=reads)
     jsonl = "\n".join(json.dumps(c) for c in checks)
 
     def _run(args):

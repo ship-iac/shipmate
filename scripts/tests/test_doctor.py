@@ -4889,7 +4889,7 @@ needs = ["prod"]
 needs = ["dev"]
 """
 #: Hand-written whole, like `_MISPLACED_FINDING`: the probe's framing plus
-#: `validate_env_order`'s cycle message with the `::error::` prefix stripped.
+#: `_check_cycle`'s message, via `validate_structure`, with the `::error::` prefix stripped.
 _CYCLIC_FINDING = (
     doctor.WARNING,
     "`.github/shipmate.toml` at the commit under examination is not valid: needs is "

@@ -797,18 +797,3 @@ def test_one_error_is_todays_message_byte_for_byte():
     assert _structural({"layout": "drys"}) == (
         "::error::layout is 'drys'; it must be one of tf_vars, workspace, folder."
     )
-
-
-def test_validate_env_order_alone_still_refuses_at_its_first_error():
-    """`env-order` calls it outside the structural pass, where the first refusal is the
-    contract.
-
-    Mutation: wrap each `validate_env_name_list` call in `validate_env_order` in a gatherer
-    and raise the joined messages -- the second line appears.
-    """
-    with pytest.raises(SystemExit) as excinfo:
-        env_config.validate_env_order({"a": "dev", "b": "prod"})
-    assert str(excinfo.value) == (
-        "::error::environments.a.needs must be a list of env-name strings, got str ('dev'); "
-        "did you mean ['dev']?"
-    )

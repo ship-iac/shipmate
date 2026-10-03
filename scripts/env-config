@@ -799,25 +799,6 @@ def env_order(table):
     }
 
 
-def validate_env_order(order):
-    """`order`, or `SystemExit` unless it maps env -> list of env-name strings.
-
-    Guards a bare string predecessor, which would otherwise be iterated character by
-    character into an ordering nobody wrote, a non-mapping value, which reaches the graph
-    builder as a raw `AttributeError`, and a cycle, which has no topological order at all.
-    No caller reaches the graph builder with an unchecked order.
-    """
-    if not isinstance(order, dict):
-        raise SystemExit(
-            "::error::the needs order must be a mapping of env -> [predecessor envs], "
-            f"got {type(order).__name__} ({order!r})"
-        )
-    for env, preds in order.items():
-        validate_env_name_list(preds, f"environments.{env}.needs")
-    _check_cycle(order)
-    return order
-
-
 def _check_cycle(order):
     """`SystemExit` when `order`, already a mapping of env-name lists, is cyclic.
 

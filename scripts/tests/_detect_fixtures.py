@@ -74,9 +74,8 @@ def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), re
     readers: a double there answers whatever the test asked for even when the caller has
     stopped passing the mapping at all. One entry is appended to `reads` per call, which is
     how the one-parse-per-operation count is taken -- and the count needs every instance,
-    because `_load` re-executes a module per caller, so a detect and the `env-order` it loads
-    hold two `env-config` objects and a stub on one of them cannot see a read through the
-    other.
+    because `_load` re-executes a module per caller, so a stub on one `env-config` object
+    cannot see a read through another.
     """
     # Annotated: the table's values are mixed by design -- a string layout, a mapping of
     # entries -- and `MINIMAL_TABLE` alone infers `dict[str, str]`.

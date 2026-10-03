@@ -247,7 +247,7 @@ def _run_main(
     monkeypatch.setattr(aad.ad, "run_graph_deps", lambda: deps)
     monkeypatch.setattr(aad.ad.bm, "_run", _run)
     monkeypatch.setattr(aad.bm, "env_membership", lambda **kw: (tree, tags or {"stacks/app": []}))
-    stub_read_table(monkeypatch, (aad.bm.ec, aad.eo.ec), table, order, explicit, reads)
+    stub_read_table(monkeypatch, (aad.bm.ec,), table, order, explicit, reads)
     aad.main()
     return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
 
