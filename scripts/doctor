@@ -359,18 +359,18 @@ def _environment_warnings(ctx):
 
 
 def _probed_bindings(ctx):
-    """The `_bound_names` rows whose environment exists, or `None` when the probe is skipped.
+    """The `_bound_names` rows whose environment exists; `[]` when the probe is skipped.
     Each skip and each absent environment is `_environment_warnings`' finding.
 
     With no declared env nothing is read: listing the environments anyway would let a
     repository whose token cannot list them collect a "could not verify" degrade for a probe
     that had no work to do. Existence comes from `_existing_env_names`."""
     if not ctx["envs"] or bm.ec.interpreter_refusal():
-        return None
+        return []
     existing = _existing_env_names(ctx)
     bound = _bound_names(ctx)
     if bound is None:
-        return None
+        return []
     return [(env, name, role) for env, name, role in bound if name in existing]
 
 
@@ -465,7 +465,7 @@ def _env_protection_warnings(ctx):
     rule is the mirror problem: pre-merge applies to it are unreviewed. A SHARED
     env is both at once, so it can have neither."""
     out = []
-    for env, name, role in _probed_bindings(ctx) or []:
+    for env, name, role in _probed_bindings(ctx):
         try:
             data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
         except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
@@ -711,7 +711,7 @@ def _plan_env_secret_warnings(ctx):
     `shipmate-engine` holds the App key by design.
     """
     out = []
-    for _env, name, role in _probed_bindings(ctx) or []:
+    for _env, name, role in _probed_bindings(ctx):
         if role not in ("plan", "shared"):
             continue
         try:

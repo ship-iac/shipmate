@@ -51,11 +51,22 @@ def test_empty_order_all_level_zero():
 
 
 def test_waves_by_env_level_places_an_env_at_the_last_level_within_the_cap():
-    """Mutation: `lv >= MAX_ENV_LEVELS - 1` in `waves_by_env_level`'s cap check -- the
-    deepest permitted level refuses."""
+    """Mutations: `lv >= MAX_ENV_LEVELS - 1` in `waves_by_env_level`'s cap check -- the
+    deepest permitted level refuses; bucketing the cell into level 0 as well -- level 0's
+    `wave0` is no longer empty."""
     cell = {"stack": "stacks/app", "environment": "prod"}
     out = eo.waves_by_env_level([cell], {"stacks/app": set()}, {"prod": eo.MAX_ENV_LEVELS - 1})
-    assert out[eo.MAX_ENV_LEVELS - 1]["wave0"] == [cell]
+    empty = {
+        "wave0": [],
+        "wave1": [],
+        "wave2": [],
+        "wave3": [],
+        "wave4": [],
+        "wave5": [],
+        "wave6": [],
+        "wave7": [],
+    }
+    assert out == [empty, empty, empty, {**empty, "wave0": [cell]}]
 
 
 def test_waves_by_env_level_refuses_an_env_beyond_the_cap():

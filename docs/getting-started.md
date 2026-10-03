@@ -208,7 +208,8 @@ and set `shared = true` in its `[environments.<env>]` entry of
 `.github/shipmate.toml`. It costs the reviewer gate and the OIDC subject split
 for that env. Those are not recoverable without splitting the environment again. Read
 [`hardening.md`](hardening.md) §6 and §7–9 for the full price before choosing
-it.
+it. Re-run `scripts/onboard` after adding or removing `shared = true`: onboard
+creates the bare `<env>` only for the entries it reads.
 
 The key is the whole configuration: detect reads it from the default branch's
 table and stamps the binding on each cell, so a repository may share some envs

@@ -388,3 +388,23 @@ def test_deploy_passes_no_workload_map(tmp_path, monkeypatch):
         tmp_path, monkeypatch, cells=[_cell("stacks/app")], checks=[_apply_check("stacks/app")]
     )
     assert seen == [None]
+
+
+def test_main_refuses_a_cyclic_needs_before_sorting_env_levels(tmp_path, monkeypatch):
+    """`env_levels` sorts with `levels` directly, so the only cycle refusal on this path is
+    `validate`'s. Mutation: return the table unvalidated from `build-matrix`'s `env_config`
+    -- `env_levels` raises a raw `CycleError`, not this `SystemExit`.
+    """
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[_cell("stacks/app", "a"), _cell("stacks/app", "b")],
+            checks=[_apply_check("stacks/app", "a"), _apply_check("stacks/app", "b")],
+            order={"a": ["b"], "b": ["a"]},
+        )
+    assert str(exc.value) == (
+        "::error::needs is cyclic: a -> b -> a: each of those must fully apply before the "
+        "next, so the ordering has no first environment and no apply path can sort it. Break "
+        "the chain in .github/shipmate.toml."
+    )

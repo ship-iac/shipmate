@@ -54,9 +54,8 @@ def run(args, secrets=(), stdin=None):
     Nothing else prints, so a caller that discards the exception discards the
     noise too.
     """
-    # args is built by the caller, shell=False, and every value interpolated into it
-    # passed a regex at the caller's entry point: onboard's app id, slug, branch and
-    # environment names; register-app's --repo and manifest code.
+    # args is a list run with shell=False, so no value in it is shell-parsed. Values
+    # bound into a path are validated where they enter the script.
     p = subprocess.run(  # noqa: S603
         args,
         capture_output=True,
