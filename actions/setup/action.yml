@@ -52,10 +52,13 @@ runs:
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$dir"
         # curl's --retry covers 408/429/5xx; --retry-all-errors adds resets, TLS errors and stalls.
-        # It goes in a config file: curl < 7.71 warns on an unknown option there, but exits 2 in argv.
-        printf 'retry-all-errors\n' > "$dir/curl.cfg"
+        # --retry-all-errors is curl 7.71+; an older curl exits 2 on it on the command line or in
+        # a -K file, so it is added only when supported.
+        IFS=. read -r maj min _ <<<"$(curl -V | awk 'NR==1{print $2}')"
+        retry_all=()
+        if [ "$maj" -gt 7 ] || { [ "$maj" -eq 7 ] && [ "$min" -ge 71 ]; }; then retry_all=(--retry-all-errors); fi
         rc=0
-        code="$(curl -K "$dir/curl.cfg" -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
+        code="$(curl "${retry_all[@]}" -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
           -o "$dir/terramate.tar.gz" -w '%{http_code}' "$url")" || rc=$?
         # Fail-closed: every later step runs terramate.
         fail() { echo "::error title=Terramate install failed::Terramate ${v} did not install: $1"; exit 1; }
