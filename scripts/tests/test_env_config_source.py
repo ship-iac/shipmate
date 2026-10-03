@@ -95,6 +95,22 @@ def test_an_absent_file_refuses(monkeypatch, capsys):
     )
 
 
+def test_a_missing_gh_refuses_with_its_reason_on_stderr(monkeypatch, capsys):
+    """A fetch failing with something other than `SystemExit` still writes its reason.
+    Reddens on narrowing `_reporting_fetch`'s `except` to `SystemExit`: `contents_text`
+    then swallows the `FileNotFoundError` and the refusal arrives with no reason."""
+    _env(monkeypatch)
+
+    def run(args):
+        raise FileNotFoundError(2, "No such file or directory", "gh")
+
+    monkeypatch.setattr(ec, "_run", run)
+    with pytest.raises(SystemExit) as exc:
+        ec.read_table()
+    assert str(exc.value) == _UNREADABLE
+    assert capsys.readouterr().err == "[Errno 2] No such file or directory: 'gh'\n"
+
+
 def test_a_non_base64_table_refuses(monkeypatch):
     """A file over 1 MB answers with `encoding: "none"` and empty content. Reddens on
     `contents_text` accepting any encoding: the empty content then parses as an empty table."""

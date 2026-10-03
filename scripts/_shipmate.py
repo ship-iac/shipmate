@@ -41,9 +41,11 @@ def gate_check(rules, gate):
     """(the `gate` entry, its rule's parameters) from a `rules/branches` response, or
     (None, None) when no `required_status_checks` rule requires `gate`."""
     for rule in rules:
+        if rule.get("type") != "required_status_checks":
+            continue
         params = rule.get("parameters") or {}
         for chk in params.get("required_status_checks") or []:
-            if rule.get("type") == "required_status_checks" and chk.get("context") == gate:
+            if chk.get("context") == gate:
                 return chk, params
     return None, None
 

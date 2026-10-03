@@ -197,14 +197,15 @@ _UNREADABLE = (
 
 
 def _reporting_fetch(path):
-    """`gh_json`, writing a failed call's message to stderr before re-raising it.
+    """`gh_json`, writing a failed call's reason to stderr before re-raising it.
 
-    `contents_text` swallows the exception, so this is the only place the 404 or 403 is
-    seen. The `::error::` prefix is cut so the refusal stays the step's one annotation.
+    `contents_text` swallows every exception, so this is the only place a 404, a 403, a
+    missing `gh` or a non-JSON answer is seen. The `::error::` prefix is cut so the
+    refusal stays the step's one annotation.
     """
     try:
         return gh_json(path)
-    except SystemExit as e:
+    except (Exception, SystemExit) as e:
         sys.stderr.write(f"{str(e).removeprefix('::error::')}\n")
         raise
 

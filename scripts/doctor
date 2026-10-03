@@ -48,7 +48,6 @@ import os
 import pathlib
 import re
 import sys
-import urllib.parse
 
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
 from _shipmate import ENGINE_ENV as _ENGINE_ENV
@@ -1570,6 +1569,9 @@ def _shipmate_yml_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, SHIPMATE_YML_UNREADABLE)
 
 
+_shipmate_yml_warnings.label = "`shipmate.yml`"
+
+
 def _one_line(s, limit=200):
     flat = " ".join(s.split())
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
@@ -1577,12 +1579,13 @@ def _one_line(s, limit=200):
 
 def _fit_items(items, sep, limit):
     """Whole `items` joined by `sep` within `limit` characters, then ` … and N more` for the
-    rest. No item is cut inside: a first item over `limit` shows only the count."""
+    rest. No item is cut inside: a first item over `limit` shows only `… and N more`, with
+    no leading space."""
     shown = len(items)
     text = sep.join(items)
     while len(text) > limit and shown:
         shown -= 1
-        text = sep.join(items[:shown]) + f" … and {len(items) - shown} more"
+        text = (sep.join(items[:shown]) + " " if shown else "") + f"… and {len(items) - shown} more"
     return text
 
 
@@ -1794,11 +1797,13 @@ def _default_branch_table(ctx):
     pull request that edits the table every run until merge still follows the default
     branch's. `_bound_names` passes it to `env-config`, which may only see a validated table.
 
+    The read names no ref, which GitHub answers from the default branch: the same request
+    `env-config`'s `read_table` makes, so doctor judges exactly the copy execution reads.
+
     Read once per run and kept on `ctx`, so every probe judges the same copy.
     """
     if "default_branch_table" not in ctx:
-        ref = urllib.parse.quote(ctx["default_branch"], safe="")
-        text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}?ref={ref}")
+        text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}")
         table = None
         if text is not None:
             with contextlib.suppress(SystemExit):
@@ -1844,10 +1849,12 @@ PROBES = (
 
 
 def _probe_label(probe):
-    """Reader-facing name of a probe, from its function name: `_pin_warnings`
-    -> "pin". Used by the degrade note below so a reader learns which probe was
-    skipped instead of being shown the `gh api` call that failed."""
-    return probe.__name__.strip("_").removesuffix("_warnings").replace("_", " ")
+    """Reader-facing name of a probe: its `label` attribute when set, else from its function
+    name: `_pin_warnings` -> "pin". Used by the degrade note below so a reader learns which
+    probe was skipped instead of being shown the `gh api` call that failed."""
+    return getattr(probe, "label", None) or (
+        probe.__name__.strip("_").removesuffix("_warnings").replace("_", " ")
+    )
 
 
 def _degrade_reason(e):

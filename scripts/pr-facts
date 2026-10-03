@@ -28,9 +28,7 @@ from _shipmate import _load
 
 bm = _load("build-matrix")
 
-# The one `gh api` definition, aliased rather than copied: a private
-# `json.loads(_run(...))` here would swallow gh's stderr differently from every
-# other caller.
+# The one `gh api` definition, aliased rather than copied.
 _gh_json = bm.gh_json
 
 #: A pull-request number as GitHub numbers them. Bounded and anchored: this

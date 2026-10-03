@@ -245,8 +245,9 @@ def _quiet_new_probes():
 
 #: The config probe's read. `_quiet_new_probes` says why a sound table is silent here.
 _CONFIG_READ = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}{_REF}"
-#: The environment probes' read: execution binds from the default branch's copy.
-_CONFIG_ON_DEFAULT = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={_BRANCH}"
+#: The environment probes' read: no ref, the request `read_table` makes, which GitHub
+#: answers from the default branch. Hand-written so a re-added `?ref=` reddens.
+_CONFIG_ON_DEFAULT = "repos/o/r/contents/.github/shipmate.toml"
 
 
 def test_healthy_repo_emits_nothing(monkeypatch):
@@ -514,19 +515,20 @@ def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("at_head", "branch", "ref"),
-    [(CANONICAL, "main", "main"), (_UNSHARED_TABLE, "release/v1", "release%2Fv1")],
-    ids=["key-absent-at-head", "shared-false-at-head-slashed-branch"],
+    "at_head",
+    [CANONICAL, _UNSHARED_TABLE],
+    ids=["key-absent-at-head", "shared-false-at-head"],
 )
-def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at_head, branch, ref):
+def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at_head):
     """Execution binds from the default branch's table, so on a pull request that removes
     `shared = true` every run until merge still binds the bare `dev-eu`: that is the
-    environment the probes inspect. The branch name is URL-quoted into `?ref=`.
+    environment the probes inspect. The table is read with no ref, as `read_table` reads it,
+    whatever the event payload names as the default branch.
 
     Mutation: read the table at `_contents_ref(ctx)` instead of the default branch -- the
-    probes inspect `dev-eu-plan`/`dev-eu-apply`; or interpolate the branch unquoted --
-    the second case reads `?ref=release/v1`."""
-    on_default = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={ref}"
+    probes inspect `dev-eu-plan`/`dev-eu-apply`; or re-add `?ref=<default branch>` to the
+    read -- the whole path differs."""
+    on_default = _CONFIG_ON_DEFAULT
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
         _CONFIG_READ: _wf_file(at_head),
@@ -541,7 +543,7 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    ctx = _ctx(default_branch=branch)
+    ctx = _ctx(default_branch="release/v1")
     found = (
         doctor._environment_warnings(ctx)
         + doctor._env_protection_warnings(ctx)
@@ -951,10 +953,10 @@ def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypat
 
 
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
-    """`ec.gh_json`'s exception carries no status code, so a 403 or 5xx on an environment
-    that IS in the listing is indistinguishable from a 404; swallowing it lets the report
-    say the settings probes found no problems. Listing first separates the two:
-    present-but-unreadable is a note that names the environment."""
+    """`ec.gh_json`'s exception carries `gh`'s stderr as free text doctor never parses, so a
+    403 or 5xx on an environment that IS in the listing is indistinguishable from a 404;
+    swallowing it lets the report say the settings probes found no problems. Listing first
+    separates the two: present-but-unreadable is a note that names the environment."""
     responses = _protection(_env("dev-eu-plan"), listed=["dev-eu-plan", "dev-eu-apply"])
 
     def gh(path):
@@ -1008,8 +1010,9 @@ def _engine_env_responses(env=None, policies=None, listed=True):
 
 def test_missing_engine_environment_warns(monkeypatch):
     """The headline case: `shipmate-engine` absent from the environments listing itself,
-    never a per-environment-read failure standing in for absence -- `ec.gh_json` cannot
-    tell that apart from a 403 or a 5xx on an environment that does exist."""
+    never a per-environment-read failure standing in for absence -- `ec.gh_json`'s
+    exception carries `gh`'s stderr as free text doctor never parses, so doctor cannot tell
+    that apart from a 403 or a 5xx on an environment that does exist."""
     monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(listed=False))
     out = doctor._engine_environment_warnings(_ctx())
     assert len(out) == 1
@@ -3067,7 +3070,7 @@ def test_a_workflow_dispatch_line_under_jobs_does_not_satisfy_the_trigger():
     assert out == [(doctor.WARNING, _NO_TRIGGER_TEXT)]
 
 
-def test_the_filename_filter_lives_in_the_dispatch_wiring_dispatcher(monkeypatch):
+def test_the_filename_filter_lives_in_the_shipmate_yml_probe(monkeypatch):
     """A direct call of the finding function reports whatever file it is handed:
     the caller bypassed the exemption, and silence there reads as a false
     positive that is not one. Only the probe skips another file's name.
@@ -3079,6 +3082,24 @@ def test_the_filename_filter_lives_in_the_dispatch_wiring_dispatcher(monkeypatch
     responses = _fork_responses({"drift.yml": _WF_NO_TRIGGER})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shipmate_yml_warnings(_ctx()) == []
+
+
+def test_a_failing_shipmate_yml_probe_degrades_naming_the_file(monkeypatch):
+    """Mutation: drop the probe's `label` -- the note names "the shipmate yml settings"."""
+
+    def boom(text, name):
+        raise RuntimeError("boom")
+
+    responses = _fork_responses({"shipmate.yml": _WF_NO_TRIGGER})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    monkeypatch.setattr(doctor, "_routing_finding", boom)
+    monkeypatch.setattr(doctor, "PROBES", (doctor._shipmate_yml_warnings,))
+    assert doctor.warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "doctor could not verify the `shipmate.yml` settings (boom): probe skipped.",
+        )
+    ]
 
 
 # The routing findings, hand-written and whole, never derived from `scripts/doctor` or from
@@ -3930,9 +3951,9 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
 
 def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
     """Existence comes from the environments *listing*, never from the per-environment
-    read's exception: `ec.gh_json` raises without a status code, so a 404 for a
-    declared-but-absent environment is indistinguishable from a 403, and the degrade note
-    would claim it exists. Asserted on the paths requested, since a probe that read the
+    read's exception: it carries `gh`'s stderr as free text doctor never parses, so a 404
+    for a declared-but-absent environment is indistinguishable from a 403, and the degrade
+    note would claim it exists. Asserted on the paths requested, since a probe that read the
     absent environment and swallowed the error also returns []."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
@@ -4450,7 +4471,19 @@ def test_a_first_item_over_the_limit_shows_only_the_count():
     """Mutation: stop trimming at one item (`while ... and shown > 1`) -- the first item
     shows, over the limit."""
     item = "a after " + ", ".join(f"predecessor-{i:02d}" for i in range(30))
-    assert doctor._fit_items([item, "b after a"], "; ", 400) == " … and 2 more"
+    assert doctor._fit_items([item, "b after a"], "; ", 400) == "… and 2 more"
+
+
+def test_a_defaults_notice_showing_only_the_count_has_one_space_before_it():
+    """Mutation: keep the leading space of ` … and N more` when no item is shown -- the
+    notice reads "orders  … and 1 more"."""
+    preds = [f"predecessor-{i:02d}" for i in range(30)]
+    table = {"environments": {"a": {"needs": preds}, **{p: {} for p in preds}}}
+    assert doctor._config_defaults(table)[0] == (
+        doctor.NOTICE,
+        "`needs` orders … and 1 more: a bare `shipmate apply` applies one env-level fully "
+        "before it starts the next.",
+    )
 
 
 def test_a_limit_shorter_than_the_count_shows_the_count_and_stops():
@@ -4461,7 +4494,7 @@ def test_a_limit_shorter_than_the_count_shows_the_count_and_stops():
     hanging.
     """
     rows = _SliceBudget(["plan every cell: no role", "apply every cell: no role"])
-    assert doctor._fit_items(rows, "; ", -1) == " … and 2 more"
+    assert doctor._fit_items(rows, "; ", -1) == "… and 2 more"
 
 
 def test_a_list_that_fits_the_limit_exactly_has_no_tail():
@@ -4469,6 +4502,13 @@ def test_a_list_that_fits_the_limit_exactly_has_no_tail():
     a ` … and 1 more` tail."""
     items = ["a" * 198, "b" * 200]
     assert doctor._fit_items(items, "; ", 400) == "a" * 198 + "; " + "b" * 200
+
+
+def test_rows_that_fill_the_budget_exactly_all_fit():
+    """Mutation: fit a row only while `used + len(row) + 1 < budget` -- the second row, which
+    ends exactly at the budget, is dropped."""
+    lines = []
+    assert (doctor._fit(lines, ["ab", "cd"], 0, 6), lines) == ((6, 2, 0), ["ab", "cd"])
 
 
 #: A varying identity with two workloads listed out of alphabetical order, an apply-only

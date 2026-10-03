@@ -1316,12 +1316,13 @@ enforces —
 `scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
 three reading `.github/shipmate.toml` on the **default branch** through the same
 `env-config` reader. The comment-ops job checks out no consumer content, and
-that reader needs none: it reads the file through the contents API. What keeps the three from disagreeing is not a
-shared spelling but a shared reader: the strict top-level key check refuses a
-misspelled setting outright, and the boolean and entry-name checks refuse a value
-that would match nothing, so there is no value a consumer can write that one reader
-honours and another ignores. A pull request cannot grant itself the exemption,
-because its own edit to the file is not read until it merges.
+that reader needs none: it reads the file through the contents API. What keeps
+the three from disagreeing is not a shared spelling but a shared reader: the
+strict top-level key check refuses a misspelled setting outright, and the
+boolean and entry-name checks refuse a value that would match nothing, so there
+is no value a consumer can write that one reader honours and another ignores. A
+pull request cannot grant itself the exemption, because its own edit to the file
+is not read until it merges.
 `scripts/tests/test_engine_comment_ops_workflow.py` pins the whole `with:` block
 of the step that resolves it, so a second source cannot be threaded back in as an
 input without failing there.
