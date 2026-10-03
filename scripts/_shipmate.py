@@ -7,8 +7,9 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 
 Also holds the subprocess runner, which ``env-config`` wraps for the CI scripts, the secret
 scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
-switch for their console output. It also reads the
-per-cell ``cell.json`` summaries and builds this run's page link.
+switch for their console output. It also holds the ruleset and environment readers and the
+names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json`` summaries and builds
+this run's page link.
 """
 
 import glob
@@ -30,6 +31,35 @@ REDACTED = "***"
 #: start alphanumeric, as GitHub logins and repository names do: that forecloses '.' and '..',
 #: and a value beginning with '-' reads to a CLI as a flag.
 REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+ENGINE_ENV = "shipmate-engine"
+# Named `APP_KEY_NAME`, not `..._SECRET`: ruff's S105 hardcoded-password rule fires on a
+# "SECRET" token in the binding name, and this is a secret's *name*.
+APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
+
+
+def gate_check(rules, gate):
+    """(the `gate` entry, its rule's parameters) from a `rules/branches` response, or
+    (None, None) when no `required_status_checks` rule requires `gate`."""
+    for rule in rules:
+        params = rule.get("parameters") or {}
+        for chk in params.get("required_status_checks") or []:
+            if rule.get("type") == "required_status_checks" and chk.get("context") == gate:
+                return chk, params
+    return None, None
+
+
+def review_count(rules):
+    """The highest `required_approving_review_count` over the `pull_request` rules, 0 if none."""
+    pull = [r.get("parameters") or {} for r in rules if r.get("type") == "pull_request"]
+    return max((p.get("required_approving_review_count") or 0 for p in pull), default=0)
+
+
+def approval_rules(env):
+    """The sorted, distinct protection-rule types in an environment payload that stop a job
+    from starting. GitHub synthesizes a `branch_policy` rule for any deployment branch policy;
+    that is the policy itself, not a review, and it stalls nothing."""
+    types = {r.get("type") for r in env.get("protection_rules") or []}
+    return sorted(types - {None, "", "branch_policy"})
 
 
 def scrub(text, secrets):

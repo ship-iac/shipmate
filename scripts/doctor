@@ -50,7 +50,9 @@ import re
 import sys
 import urllib.parse
 
-from _shipmate import _load, current_run_url, utf8_output
+from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
+from _shipmate import ENGINE_ENV as _ENGINE_ENV
+from _shipmate import _load, approval_rules, current_run_url, gate_check, review_count, utf8_output
 
 ec = _load("env-config")
 _gh_json = ec.gh_json
@@ -126,39 +128,34 @@ HARVEST_PENDING = (
 def _gate_rule_warnings(ctx):
     repo, default_branch = ctx["repo"], ctx["default_branch"]
     rules = _gh_json(f"repos/{repo}/rules/branches/{default_branch}?per_page=100")
-    for rule in rules:
-        if rule.get("type") != "required_status_checks":
-            continue
-        params = rule.get("parameters", {})
-        for chk in params.get("required_status_checks", []):
-            if chk.get("context") != GATE:
-                continue
-            out = []
-            if chk.get("integration_id") != int(ctx["app_id"]):
-                out.append(
-                    (
-                        WARNING,
-                        f"gate ruleset does not pin `integration_id` to the shipmate App "
-                        f"(found {chk.get('integration_id')!r}), so a forged `{GATE}` status "
-                        "from another identity would satisfy the required check.",
-                    )
-                )
-            if not params.get("strict_required_status_checks_policy"):
-                out.append(
-                    (
-                        WARNING,
-                        "gate ruleset does not require branches to be up to date "
-                        "(strict), so plans can go stale against the base before merge.",
-                    )
-                )
-            return out
-    return [
-        (
-            WARNING,
-            f"no active ruleset requires `{GATE}` on `{default_branch}`, so "
-            "merges are not gated (see docs/branch-protection.md).",
+    chk, params = gate_check(rules, GATE)
+    if chk is None:
+        return [
+            (
+                WARNING,
+                f"no active ruleset requires `{GATE}` on `{default_branch}`, so "
+                "merges are not gated (see docs/branch-protection.md).",
+            )
+        ]
+    out = []
+    if chk.get("integration_id") != int(ctx["app_id"]):
+        out.append(
+            (
+                WARNING,
+                f"gate ruleset does not pin `integration_id` to the shipmate App "
+                f"(found {chk.get('integration_id')!r}), so a forged `{GATE}` status "
+                "from another identity would satisfy the required check.",
+            )
         )
-    ]
+    if not params.get("strict_required_status_checks_policy"):
+        out.append(
+            (
+                WARNING,
+                "gate ruleset does not require branches to be up to date "
+                "(strict), so plans can go stale against the base before merge.",
+            )
+        )
+    return out
 
 
 def _review_rule_warnings(ctx):
@@ -195,7 +192,6 @@ def _review_rule_warnings(ctx):
     branch = ctx["default_branch"]
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
     found = readable = code_owner = False
-    count = 0
     for rule in rules:
         if rule.get("type") != "pull_request":
             continue
@@ -205,13 +201,12 @@ def _review_rule_warnings(ctx):
             continue
         readable = True
         code_owner = code_owner or bool(params.get("require_code_owner_review"))
-        count = max(count, params.get("required_approving_review_count") or 0)
     if not found:
         return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
     if not readable:
         return [(NOTICE, _REVIEW_RULE_UNREADABLE.format(branch=branch))]
     out = [] if code_owner else [(WARNING, _CODE_OWNER_REVIEW_OFF.format(branch=branch))]
-    return out if count else out + _no_review_findings(ctx, branch, code_owner)
+    return out if review_count(rules) else out + _no_review_findings(ctx, branch, code_owner)
 
 
 def _no_review_findings(ctx, branch, code_owner):
@@ -369,11 +364,7 @@ def _env_shape_findings(name, env, data, role):
     """One environment's protection-shape findings, from its already-read
     "Get an environment" payload."""
     out = []
-    rules = sorted({r.get("type") for r in data.get("protection_rules", []) if r.get("type")})
-    # GitHub reports "branch_policy" whenever deployment_branch_policy is set. Excluded both
-    # ways: it refuses a plan job outright rather than delaying it (handled below), and it is
-    # not a review, so an apply env carrying nothing else is still entirely unreviewed.
-    approval = [r for r in rules if r != "branch_policy"]
+    approval = approval_rules(data)
     policy = data.get("deployment_branch_policy")
     if role == "plan" and approval:
         out.append(
@@ -473,9 +464,6 @@ def _env_protection_warnings(ctx):
     return out
 
 
-_ENGINE_ENV = "shipmate-engine"
-
-
 def _engine_environment_warnings(ctx):
     """The App private key lives in the `shipmate-engine` GitHub Environment,
     not a repository secret — a deployment branch policy scoped to the
@@ -563,11 +551,6 @@ def _engine_environment_warnings(ctx):
             )
         ]
     return []
-
-
-# Named `_APP_KEY_NAME`, not `..._SECRET`: ruff's S105 hardcoded-password rule
-# fires on a "SECRET" token in the binding name, and this is a secret's *name*.
-_APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 
 
 @contextlib.contextmanager
