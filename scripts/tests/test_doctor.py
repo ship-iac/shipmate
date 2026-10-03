@@ -263,10 +263,10 @@ def test_healthy_repo_emits_nothing(monkeypatch):
 
 def test_one_run_reads_the_default_branch_table_once(monkeypatch):
     """Every probe that needs the default branch's table judges one read of it: the review
-    count-0 path and the three environment probes behind `_shared_envs`.
+    count-0 path and the three environment probes behind `_bound_names`.
 
-    Mutation: have `_default_branch_table` call `_read_default_branch_table` without the
-    `ctx` memo -- the file is read four times.
+    Mutation: have `_default_branch_table` read the file without the `ctx` memo -- the file
+    is read four times.
     """
     rules = [_gate_rule()[0], _pull_request_rule(count=0)]
     responses = {
@@ -409,9 +409,9 @@ def test_an_invalid_default_table_skips_the_environment_probes(monkeypatch):
     environment probes say they were skipped, once, beside the config probe's own finding
     about the examined commit's copy.
 
-    Mutation: have `_shared_envs` call `shared_envs` on the unvalidated `parse_table`
-    result -- the non-table entry raises inside every environment probe and `warnings()`
-    degrades them."""
+    Mutation: have `_default_branch_table` keep the unvalidated `parse_table` result, so
+    `_bound_names` calls `shared_envs` on it -- the non-table entry raises inside every
+    environment probe and `warnings()` degrades them."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
@@ -436,8 +436,8 @@ def test_an_unreadable_default_table_is_not_read_as_split(monkeypatch):
     """No naming is guessed when the default branch's table cannot be read: a split guess
     reports `dev-eu-plan`/`dev-eu-apply` missing on a repository whose runs bind `dev-eu`.
 
-    Mutation: have `_shared_envs` return `set()` when the read fails -- the split
-    existence findings replace the NOTICE."""
+    Mutation: have `_bound_names` take `set()` as the shared envs when the read fails -- the
+    split existence findings replace the NOTICE."""
 
     def gh(path):
         if path == _CONFIG_ON_DEFAULT:

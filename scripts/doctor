@@ -273,10 +273,15 @@ def _existing_env_names(ctx):
 
 def _bound_names(ctx):
     """[(env, environment name, role)] the default branch's table binds for each declared
-    env, or `None` when `_shared_envs` cannot tell."""
-    shared = _shared_envs(ctx)
-    if shared is None:
+    env, or `None` when `_default_branch_table` has no table.
+
+    `None` is never read as "shares none": guessing split mode would probe environments no
+    job binds.
+    """
+    table = _default_branch_table(ctx)
+    if table is None:
         return None
+    shared = ec.shared_envs(table)
     return [
         (env, name, role) for env in sorted(ctx["envs"]) for name, role in ec.env_names(env, shared)
     ]
@@ -1792,30 +1797,14 @@ def _default_branch_table(ctx):
     Read once per run and kept on `ctx`, so every probe judges the same copy.
     """
     if "default_branch_table" not in ctx:
-        ctx["default_branch_table"] = _read_default_branch_table(ctx)
+        ref = urllib.parse.quote(ctx["default_branch"], safe="")
+        text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}?ref={ref}")
+        table = None
+        if text is not None:
+            with contextlib.suppress(SystemExit):
+                table = ec.validate_structure(ec.parse_table(text))
+        ctx["default_branch_table"] = table
     return ctx["default_branch_table"]
-
-
-def _read_default_branch_table(ctx):
-    ref = urllib.parse.quote(ctx["default_branch"], safe="")
-    text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}?ref={ref}")
-    if text is None:
-        return None
-    try:
-        return ec.validate_structure(ec.parse_table(text))
-    except SystemExit:
-        return None
-
-
-def _shared_envs(ctx):
-    """The environments the default branch's file shares, or `None` when
-    `_default_branch_table` has no table.
-
-    `None` is never read as "shares none": guessing split mode would probe environments no
-    job binds.
-    """
-    table = _default_branch_table(ctx)
-    return None if table is None else ec.shared_envs(table)
 
 
 def _app_permission_warnings(ctx):
