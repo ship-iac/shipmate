@@ -58,15 +58,6 @@ def env_levels(order, envs):
     return {e: level[e] for e in envs}
 
 
-def guard_max_env_levels(levels):
-    over = [e for e, lv in levels.items() if lv >= MAX_ENV_LEVELS]
-    if over:
-        raise SystemExit(
-            f"::error::env order spans more than {MAX_ENV_LEVELS} levels "
-            f"({sorted(over)}); flatten the env dependency chain."
-        )
-
-
 def waves_by_env_level(pending, deps, levels):
     """Return a list of MAX_ENV_LEVELS dicts, each {wave0..wave7: [cells]}.
 
@@ -79,7 +70,12 @@ def waves_by_env_level(pending, deps, levels):
     Refuses an env beyond MAX_ENV_LEVELS before bucketing: the loop below keys on
     `range(MAX_ENV_LEVELS)`, so an over-deep env falls out of every level and its
     cells apply nothing under a run that still reports success."""
-    guard_max_env_levels(levels)
+    over = [e for e, lv in levels.items() if lv >= MAX_ENV_LEVELS]
+    if over:
+        raise SystemExit(
+            f"::error::env order spans more than {MAX_ENV_LEVELS} levels "
+            f"({sorted(over)}); flatten the env dependency chain."
+        )
     stack_levels = wv.stack_levels(deps)
     out = []
     for lvl in range(MAX_ENV_LEVELS):

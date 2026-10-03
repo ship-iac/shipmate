@@ -1,6 +1,7 @@
 import http.client
 import http.server
 import stat
+import subprocess
 import sys
 import threading
 
@@ -14,7 +15,7 @@ def _stub_run(monkeypatch):
     """Record every `gh` argv; answer the conversion call with a fixed App."""
     calls = []
 
-    def fake_run(args, **kw):
+    def fake_run(args, secrets=(), stdin=None):
         calls.append(args)
         if "conversions" in args[-1]:
             return '{"id": 42, "pem": "PRIVATE_KEY", "slug": "shipmate-acme"}'
@@ -217,18 +218,20 @@ def test_the_listener_captures_the_code_and_refuses_a_request_without_one():
 
 
 def _failing_gh(monkeypatch, stderr):
-    class _P:
-        returncode = 1
-        stdout = ""
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda args, **kw: subprocess.CompletedProcess(args, 1, b"", stderr.encode("utf-8")),
+    )
 
-    _P.stderr = stderr
-    monkeypatch.setattr(ra.subprocess, "run", lambda *a, **kw: _P())
 
+def test_run_error_scrubs_the_secret_out_of_the_argv(monkeypatch, capsys):
+    """The argv carries the App private key, and the key fails exactly when it has been
+    minted but not yet stored, so the failure message must carry it scrubbed. Enforced only
+    here, because the real failure needs a broken gh.
 
-def test_run_error_never_echoes_the_argv(monkeypatch, capsys):
-    # The argv carries the App private key and the one-time manifest code, so a failure must name
-    # the subcommand and nothing else. Enforced only here, because the real failure needs a
-    # broken gh.
+    Mutation: drop the `scrub(...)` around the argv in `_shipmate.run`'s message.
+    """
     _failing_gh(monkeypatch, "gh: HTTP 403\n")
 
     with pytest.raises(SystemExit) as exc:
@@ -236,25 +239,29 @@ def test_run_error_never_echoes_the_argv(monkeypatch, capsys):
             ["gh", "secret", "set", "SHIPMATE_APP_PRIVATE_KEY", "--body", "SECRET_PEM"],
             secrets=("SECRET_PEM",),
         )
-    message = str(exc.value)
 
-    assert "SECRET_PEM" not in message
-    assert "SECRET_PEM" not in capsys.readouterr().err
-    assert "gh secret" in message
+    assert str(exc.value) == (
+        "command failed (1): gh secret set SHIPMATE_APP_PRIVATE_KEY --body ***\ngh: HTTP 403"
+    )
+    assert capsys.readouterr() == ("", "")
 
 
 def test_run_error_scrubs_secrets_out_of_ghs_own_stderr(monkeypatch, capsys):
-    # gh quotes the URL it called, and the one-time manifest code is in that URL, so suppressing
-    # the tool's own argv is not enough. Anything the caller declares as a secret must be
-    # scrubbed from gh's message too.
+    """gh quotes the URL it called, and the one-time manifest code is in that URL, so
+    scrubbing the argv is not enough: anything the caller declares as a secret must be
+    scrubbed from gh's message too, and the diagnosis itself survives.
+
+    Mutation: drop the `scrub(...)` around the stderr in `_shipmate.run`'s message.
+    """
     _failing_gh(monkeypatch, "gh: HTTP 404 (POST app-manifests/CODE123/conversions)\n")
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as exc:
         ra._run(
             ["gh", "api", "-X", "POST", "app-manifests/CODE123/conversions"], secrets=("CODE123",)
         )
 
-    err = capsys.readouterr().err
-    assert "CODE123" not in err
-    assert "***" in err
-    assert "HTTP 404" in err  # the diagnosis itself survives
+    assert str(exc.value) == (
+        "command failed (1): gh api -X POST app-manifests/***/conversions\n"
+        "gh: HTTP 404 (POST app-manifests/***/conversions)"
+    )
+    assert capsys.readouterr() == ("", "")

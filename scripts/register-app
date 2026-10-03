@@ -28,14 +28,13 @@ import os
 import pathlib
 import re
 import secrets
-import subprocess
-import sys
 import tempfile
 import threading
 import urllib.parse
 import webbrowser
 
-from _shipmate import REPO_RE, scrub, utf8_output
+from _shipmate import REPO_RE, utf8_output
+from _shipmate import run as _run
 
 #: `code` is interpolated into the `app-manifests/<code>/conversions` API path and arrives over
 #: a loopback socket; a '/' or '..' in it retargets that request at another endpoint.
@@ -53,28 +52,6 @@ DONE_PAGE = b"""<!doctype html><meta charset=utf-8>
 <p>The code was captured locally. Return to the terminal &mdash; it is storing the
 credentials now.</p>
 """
-
-
-def _run(args, secrets=(), **kw):
-    """Run a `gh` invocation, returning stdout; raise on a nonzero exit.
-
-    `secrets` are the live credential values this call carries, scrubbed from
-    everything the failure path prints. Both are unrotatable at the moment they
-    would leak: the manifest `code` is one-time and sits in the conversions URL,
-    and the private key fails exactly when it has been minted but not yet
-    stored. Neither shipmate's own message (which names the subcommand only) nor
-    gh's stderr (which quotes the URL it called) may carry them into shell
-    scrollback or a CI log.
-    """
-    # args is a `gh` invocation built here, shell=False, and the two values
-    # interpolated into it -- `--repo` and the manifest `code`, which lands in an
-    # API *path* -- passed REPO_RE / _CODE_RE at their entry point in main().
-    p = subprocess.run(args, capture_output=True, text=True, **kw)  # noqa: S603
-    if p.returncode != 0:
-        # gh's stderr is the only diagnosis a hand-run bootstrap gets.
-        sys.stderr.write(scrub(p.stderr, secrets))
-        raise SystemExit(f"command failed ({p.returncode}): {' '.join(args[:2])}")
-    return p.stdout
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):

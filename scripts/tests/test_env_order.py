@@ -62,21 +62,20 @@ def test_cycle_raises():
         eo.env_levels({"a": ["b"], "b": ["a"]}, ["a", "b"])
 
 
-def test_guard_max_env_levels_ok():
-    eo.guard_max_env_levels({"a": 0, "b": 3})  # 4 levels 0..3, within cap
-
-
-def test_guard_max_env_levels_exceeded():
-    with pytest.raises(SystemExit):
-        eo.guard_max_env_levels({"a": 4})
+def test_waves_by_env_level_places_an_env_at_the_last_level_within_the_cap():
+    """Mutation: `lv >= MAX_ENV_LEVELS - 1` in `waves_by_env_level`'s cap check -- the
+    deepest permitted level refuses."""
+    cell = {"stack": "stacks/app", "environment": "prod"}
+    out = eo.waves_by_env_level([cell], {"stacks/app": set()}, {"prod": eo.MAX_ENV_LEVELS - 1})
+    assert out[eo.MAX_ENV_LEVELS - 1]["wave0"] == [cell]
 
 
 def test_waves_by_env_level_refuses_an_env_beyond_the_cap():
     """The guard is inside the shared function, so no caller can omit it and drop an
     over-deep env's cells out of every `range(MAX_ENV_LEVELS)` bucket.
 
-    Mutation: delete `guard_max_env_levels(levels)` from `waves_by_env_level` -- the call
-    returns MAX_ENV_LEVELS empty wave dicts instead of raising.
+    Mutation: delete the `if over:` refusal from `waves_by_env_level` -- the call returns
+    MAX_ENV_LEVELS empty wave dicts instead of raising.
     """
     with pytest.raises(SystemExit, match="env order spans"):
         eo.waves_by_env_level(

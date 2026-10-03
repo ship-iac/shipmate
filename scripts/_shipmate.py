@@ -5,9 +5,9 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``sys.modules``: every call returns a fresh module, so a test that monkeypatches one sibling's
 ``bm._run`` cannot leak the patch into every other holder of ``build_matrix``.
 
-Also holds the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
-share, and the UTF-8 switch for their console output. It also reads the per-cell
-``cell.json`` summaries and builds this run's page link.
+Also holds the subprocess runner, secret scrubber and repository-slug check that ``onboard``
+and ``register-app`` share, and the UTF-8 switch for their console output. It also reads the
+per-cell ``cell.json`` summaries and builds this run's page link.
 """
 
 import glob
@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
 
@@ -35,6 +36,40 @@ def scrub(text, secrets):
         if secret:
             text = text.replace(secret, REDACTED)
     return text
+
+
+def run(args, secrets=(), stdin=None):
+    r"""Run a `gh` or `git` invocation, returning stdout; raise on a nonzero exit.
+
+    `stdin` is sent as UTF-8 bytes rather than through `text=True`, which wraps
+    the child's stdin in a `TextIOWrapper` and rewrites every \n to
+    `os.linesep`. The App private key goes through here on its way to
+    `gh secret set`, and a CRLF-mangled PEM is not the key that was read.
+
+    `secrets` are the live credential values this call carries, scrubbed from
+    the argv and the child's stderr in the failure message: the manifest `code`
+    sits in the conversions URL gh quotes, and the private key fails exactly
+    when it has been minted but not yet stored. The stderr goes in the message
+    so that `onboard`'s `_gh_json_or_none` can swallow a 404 without printing it.
+    Nothing else prints, so a caller that discards the exception discards the
+    noise too.
+    """
+    # args is built by the caller, shell=False, and every value interpolated into it
+    # passed a regex at the caller's entry point: onboard's app id, slug, branch and
+    # environment names; register-app's --repo and manifest code.
+    p = subprocess.run(  # noqa: S603
+        args,
+        capture_output=True,
+        input=None if stdin is None else stdin.encode("utf-8"),
+    )
+    if p.returncode != 0:
+        # gh's stderr is the only diagnosis a hand-run script gets.
+        stderr = p.stderr.decode("utf-8", "replace").strip()
+        raise SystemExit(
+            f"command failed ({p.returncode}): {scrub(' '.join(args), secrets)}"
+            + (f"\n{scrub(stderr, secrets)}" if stderr else "")
+        )
+    return p.stdout.decode("utf-8", "replace")
 
 
 def utf8_output():
