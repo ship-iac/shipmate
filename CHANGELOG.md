@@ -22,7 +22,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **Credentials live only in `[identities.<name>]`: in the re-pin commit, move each environment's `aws` block into an `[identities.<name>]` table that the environment names with `identity`, and list the workloads it admits with `workloads`.**
+- **Credentials live only in `[identities.<name>]`: rewrite each environment's `aws` block as an `[identities.<name>]` table (`CONTRACT.md` §Environment table) in the re-pin commit.**
 - **A stack carrying two `workload/*` tags is refused at detect.**
 - **A workload tag outside the environment's `workloads` list is refused at detect, naming every such cell.**
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
@@ -37,7 +37,7 @@ section below names the SHA the release tags.
 - **The plan summary's and `shipmate doctor`'s App tokens request `environments: read`; the plan-environment secret probe has no token of its own and no not-checked warning.**
 - **Comments by bots or without `shipmate` start no engine `ops` job.**
 - **The workflow file's `comment-ops` job has no concurrency group, so a later comment no longer cancels a command still waiting to run; delete the `concurrency:` block from that job.**
-- **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed; delete `[gate]` on the default branch before re-pinning.**
+- **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed; delete `[gate]` in the re-pin commit.**
 - **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 - **A stack at path `apply` or `shipmate` plans; `build-matrix` no longer refuses either.**
 - **`actions/setup` downloads Terramate with curl instead of `terramate-io/terramate-action`, which consumers may drop from their allowed-actions list; a self-hosted runner's own curl config applies.**
@@ -45,7 +45,7 @@ section below names the SHA the release tags.
 
 ### Removed
 
-- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting, so delete it on the default branch before re-pinning: the engine reads the table from there, and a re-pin with the key still present refuses every run.**
+- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting, so delete it in the re-pin commit.**
 - **The drift workflow and `actions/build-matrix` take no `tags` input; every sweep covers every cell. In the re-pin commit, delete `tags:` from the drift job's `with:`, because an undeclared input fails the whole workflow file at load.**
 - **`scripts/onboard` takes no `--vars-at-org`; it always writes the repository `SHIPMATE_APP_ID`.**
 

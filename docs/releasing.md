@@ -17,11 +17,10 @@ merges a Dependabot pull request that bumps one line alone.
 ### Re-pin a consumer
 
 `<release-sha>` is the release's full 40-hex commit (`git rev-list -n1 vX.Y.Z` once tagged),
-never a short SHA. `<consumer>` is the consumer repository's checkout. Before re-pinning, read
-the release's CHANGELOG `### Removed` and `### Changed` lines for consumer-file and table
-edits. A table edit the pinned engine already accepts, such as deleting a key it allows to be
-absent, lands on the default branch first. A table edit the pinned engine refuses lands in the
-re-pin commit, with the consumer-file edits.
+never a short SHA. `<consumer>` is the consumer repository's checkout. Make every table and
+consumer-file edit the release's CHANGELOG `### Removed` and `### Changed` lines name in the
+re-pin commit itself. The re-pin pull request's runs use the default branch's old pin and
+table, so the edits take effect together at merge.
 Use GNU sed: `-b` keeps a CRLF file's line endings under Git Bash. On macOS, install GNU sed
 and run it as `gsed`, because BSD sed rejects `-b`.
 
