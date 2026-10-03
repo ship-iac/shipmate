@@ -3,8 +3,8 @@
 Drift reaches the world only as a `drift-summary.*` artifact consumed by the trailing `issues`
 job; no in-job step upserts or closes the Issue. `scripts/drift-issues` globs whatever was
 downloaded, so a cell whose artifact never arrived is not missing -- it is invisible. One
-transient upload failure would mean a green matrix job, a green `issues` job, no Issue, no Slack,
-and real drift unreported until someone notices by hand.
+transient upload failure would mean a green matrix job, a green `issues` job, no Issue, and
+real drift unreported until someone notices by hand.
 
 So neither the compose step nor the upload may be `continue-on-error`, unlike apply-cell's
 namesakes, whose artifact carries only comment data. Asserted on the parsed action YAML:

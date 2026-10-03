@@ -11,7 +11,6 @@ on:
       # step earlier, in that job's `Verify the App key arrived`.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
-      SHIPMATE_SLACK_WEBHOOK: { required: false }
 jobs:
   detect:
     runs-on: ubuntu-latest
@@ -143,18 +142,3 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$concl" \
             -f context="shipmate / gate" -f description="$title (deploy env-level applies completed)" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
-      - name: Slack on failed deploy (outranks drift)
-        if: ${{ always() && (contains(join(needs.*.result, ','), 'failure') || contains(join(needs.*.result, ','), 'cancelled')) }}
-        env:
-          SLACK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
-        run: |
-          set -euo pipefail
-          # The `secrets` context is not available in a step's `if:`.
-          [ -n "$SLACK" ] || exit 0
-          python3 -c "import json;open('p.json','w').write(json.dumps({'text':':rotating_light: shipmate deploy failed on main: a wave apply failed or was cancelled.'}))"
-          curl -sS --fail-with-body -X POST -H 'Content-Type: application/json' --data @p.json "$SLACK"
-      - name: Refuse a Slack webhook set as a variable
-        if: ${{ always() && vars.SHIPMATE_SLACK_WEBHOOK != '' }}
-        run: |
-          echo "::error::SHIPMATE_SLACK_WEBHOOK is set as a GitHub variable, and it must be a secret on the shipmate-engine environment. Its value is readable by anyone who can see the repository. Delete the variable, rotate the webhook, and run gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine."
-          exit 1

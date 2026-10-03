@@ -240,7 +240,7 @@ The consumer's `deploy` job calls the engine's reusable deploy workflow, and its
   credential and only uploads a drift-summary artifact. A separate `issues` job,
   bound to `shipmate-engine`, downloads those artifacts and opens one labeled
   GitHub Issue per drifted stack × env via `actions/drift-issues` — auto-closed
-  on the next clean run that covers it. Optional Slack. Setup is in
+  on the next clean run that covers it. Setup is in
   [drift.md](drift.md).
 - **Generalization:** deploy + drift run unchanged across all three layouts
   (`repo-example-{stacks,folders,workspaces}`) — same engine, referenced at

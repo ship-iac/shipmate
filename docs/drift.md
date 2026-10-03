@@ -11,6 +11,9 @@ environment, titled `drift: <env> / <stack>`, updated in place while the drift
 persists and closed with a "Drift resolved" comment on the next clean run that
 covers it. The lookup is over open Issues only, so drift that returns later
 opens a fresh Issue rather than reopening the closed one.
+To reach Slack, subscribe GitHub's Slack app
+(`/github subscribe <owner>/<repo> issues workflows`): it posts Issue opens and
+closes and workflow runs, not an update to an Issue that stays open.
 
 A cell whose plan attempt did not succeed is not treated as clean: `drift-cell`
 records `plan_ok: false`, and `actions/drift-issues` skips that cell entirely,
@@ -55,8 +58,8 @@ compromised drift cell cannot open, edit or close an Issue.
 That split makes the artifact the only channel by which a cell's drift
 becomes visible. `drift-cell`'s compose and upload steps run `if: always()` and
 are deliberately not `continue-on-error`: were the artifact allowed to go
-missing, `drift-issues` would not see the cell — no Issue, no Slack, and
-a green nightly run over real drift. Both gated jobs also refuse to run off the
+missing, `drift-issues` would not see the cell — no Issue and a
+green nightly run over real drift. Both gated jobs also refuse to run off the
 default branch, resolved from the API by `detect` rather than read from the
 `schedule` event payload.
 
@@ -92,29 +95,6 @@ names a workload an environment's `workloads` lists and no stack in that
 environment tags. A pull request introducing that typo says nothing about it:
 the plan path sees only the changed set
 ([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
-
-## Slack (optional)
-
-Store the webhook as the secret `SHIPMATE_SLACK_WEBHOOK` on the
-`shipmate-engine` environment that the engine's `issues` job binds. The `deploy`
-and `drift` jobs of the workflow file in [`getting-started.md`](getting-started.md)
-map it by name. Without that line the environment's value never arrives at that
-job. It is a secret, not a variable,
-because every plan cell receives the repository's variables and a step's inputs
-print in its log; a cell refuses a variable of that name, and so do `deploy.yml`'s
-`summary` and `drift.yml`'s `issues` jobs, which also see one set on
-`shipmate-engine`. It belongs on the
-environment, not in a repository secret: any workflow on any branch reads a
-repository secret. Unset, the input is empty and no notification is attempted. The `deploy` job's
-mapping feeds the deploy failure notice.
-
-When it is set, `drift-issues` POSTs one message per cell that is drifted on this
-run (the same cells whose Issue it created or updated), a single-line
-`:ocean: drift detected: <env> / <stack>`. A rejected or timed-out webhook is not
-a warning. The cell is recorded as failed and the job exits nonzero at the end,
-naming it, so a revoked or rotated URL cannot leave every nightly run green while
-no notification reaches anyone. Per-cell failures do not abort the remaining
-cells.
 
 ## What it costs
 

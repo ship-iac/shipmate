@@ -168,7 +168,7 @@ default branch. So does a run without `--key` while
 `shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
 It then prints a checklist of what it cannot set, because those values are
-yours: `SHIPMATE_PLAN_PASSPHRASE`, `SHIPMATE_SLACK_WEBHOOK`, the table with the
+yours: `SHIPMATE_PLAN_PASSPHRASE`, the table with the
 cloud role, region and env identity your layout injects,
 adding the repository to the App installation, an approving review before apply,
 a `CODEOWNERS` entry, a git-tracked `.terraform.lock.hcl` in each stack, and
@@ -187,8 +187,7 @@ what you are getting, and to configure a repository by hand instead.
 
 Every logical environment needs a GitHub Environment pair (`<env>-plan`,
 `<env>-apply`), plus the one fixed `shipmate-engine` environment that holds the
-App key ([`github-app.md`](github-app.md)) and the optional Slack webhook
-([`drift.md`](drift.md)); with no webhook set, no Slack message is sent.
+App key ([`github-app.md`](github-app.md)).
 Neither half of a pair is ever named in workflow YAML: the logical env comes
 from Terramate stack tags at runtime, and detect adds the suffix when it stamps
 the cell's binding.
@@ -488,9 +487,6 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-      # The webhook lives on `shipmate-engine`; this mapping is what makes it reachable.
-      # Delete it and no Slack message arrives.
-      SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
   drift:
     name: shipmate
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')
@@ -502,8 +498,6 @@ jobs:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-      # Same `shipmate-engine` webhook as `deploy`; delete this line and drift sends no Slack message.
-      SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
   apply:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
@@ -714,7 +708,7 @@ Every snippet above that passes secrets at all passes them by name, and none use
 `secrets: inherit`.
 Two reasons, and the second one is a hard failure:
 
-- `inherit` hands the engine every secret your repository can see, not the four
+- `inherit` hands the engine every secret your repository can see, not the three
   it names ([`hardening.md`](hardening.md) §What the engine receives).
 - **`inherit` works only within one organization or enterprise.** Called from a
   repository outside the engine's organization it delivers nothing. It does
@@ -733,8 +727,7 @@ artifact, and runs no cell. `plan.yml`, `apply.yml` and
 or reads an encrypted plan artifact. Every callee that runs a cell —
 `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml` and `unlock.yml` — also declares
 `SHIPMATE_SECRETS`, which is why `unlock.yml` declares neither engine secret and
-still takes a `secrets:` block. `deploy.yml` and `drift.yml` also declare
-`SHIPMATE_SLACK_WEBHOOK`, because their `shipmate-engine` jobs post to Slack.
+still takes a `secrets:` block.
 Naming a secret the callee does not declare is a load-time error that kills the
 run with no job and no log.
 
@@ -829,10 +822,10 @@ the channel — the other five carry the same line without a comment.
 `SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
 value is readable by anyone who can see the repository and nothing in it reaches
 a cell; the run fails telling you to rotate what it held. A
-`SHIPMATE_SLACK_WEBHOOK`, `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE`
-variable is refused too, each with its own message: rotate the webhook or the key
-and set it as a secret on `shipmate-engine`; choose a new passphrase and set it as
-a repository or organization secret. The other direction cannot be
+`SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE` variable is refused too,
+each with its own message: rotate the key and set it as a secret on
+`shipmate-engine`; choose a new passphrase and set it as a repository or
+organization secret. The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 
