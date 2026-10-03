@@ -354,9 +354,10 @@ def main():
     pending = with_plan_runs(filter_pending(cells, completed), lines, app_id)
     bm.refuse_workload_gaps(pending, table)
 
+    # Before the padding, whose over-depth refusal is where this line helps most.
+    print(dag_shape_notice(deps))
     per_level = eo.waves_by_env_level(pending, deps, {})
     w0 = per_level[0]
-    print(dag_shape_notice(deps))
     print(
         f"::notice title=apply-detect::env={env} head={head} "
         f"cells={len(cells)} completed={len(completed)} pending={len(pending)} "

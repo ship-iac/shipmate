@@ -6,7 +6,7 @@ inputs:
     required: false
     default: ""
   mode:
-    description: apply (default) or unlock. Anything else takes the apply path, which is the stricter of the two.
+    description: apply (default) or unlock. Anything else takes the apply path, which is the stricter of the two; with an empty environment, only apply runs the bare form.
     required: false
     default: apply
   head-sha:
@@ -56,8 +56,9 @@ runs:
         SHIPMATE_MODE: ${{ inputs.mode }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
       run: |
-        # An empty environment is the bare form, which only apply mode has. Any other mode, absent
-        # or garbled included, reaches apply-detect, which refuses an empty environment.
+        # An empty environment is the bare form, which only apply mode has; an omitted mode input
+        # means apply. Unlock, or an explicitly empty or unknown mode, reaches apply-detect, which
+        # refuses an empty environment.
         if [ -z "$SHIPMATE_ENV" ] && [ "$SHIPMATE_MODE" = apply ]; then
           exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-all-detect"
         fi

@@ -372,13 +372,14 @@ def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path)
     )
 
 
-def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path):
+def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, capsys):
     """`main` reaches `waves_by_env_level`'s padding, so a chain too deep for the pre-declared
     wave jobs refuses before any output instead of emitting wave0..wave7 with the deepest cells
-    dropped.
+    dropped. The DAG-shape notice still prints first: it is the line that explains the depth.
 
     Mutation: bucket the cells in `main` without `waves_by_env_level` (`wv.assign_waves` and
     unpadded waves into `write_env_level_waves`) -- the run writes the waves and exits 0.
+    Mutation: print the DAG-shape notice after `waves_by_env_level` -- the notice is missing.
     """
     depth = ad.wv.MAX_WAVES + 1
     stacks = [f"stacks/s{i}" for i in range(depth)]
@@ -391,6 +392,9 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path):
         ad.main()
 
     assert "envlevel0_waves=" not in out.read_text(encoding="utf-8")
+    assert capsys.readouterr().out.splitlines() == [
+        "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
+    ]
 
 
 def test_validate_head_sha_rejects_short():
@@ -425,9 +429,10 @@ def test_validate_env_rejects_dot():
 
 
 def test_validate_env_rejects_empty():
-    # An empty env reads as a bare apply inside _review_reason, which exempts it whenever
-    # SHIPMATE_UNGATED_ENVS names anything -- a bypassed refusal on a gate path. This workflow
-    # has no bare form.
+    # An empty env reads as a bare apply inside _review_reason, which exempts it whenever any
+    # table entry holds `gated = false` -- a bypassed refusal on a gate path. The action routes
+    # only an empty environment in apply mode to apply-all-detect, so an empty one arriving here
+    # is an unlock or an explicitly empty or unknown mode.
     with pytest.raises(SystemExit):
         ad.validate_env("")
 

@@ -85,7 +85,8 @@ def cell_summaries(cells_dir, keys, skew):
     """Yield ``(path, cell)`` for every ``cell.json`` under ``cells_dir``, sorted by path.
 
     A cell missing any of ``keys`` raises ``SystemExit`` naming it; ``skew`` ends that message
-    with the producer and reader that must share one engine SHA.
+    with the producer and reader that must share one engine SHA. Recursive because
+    ``actions/download-artifact`` drops the per-artifact subdirectory when one artifact matches.
     """
     for p in sorted(glob.glob(os.path.join(cells_dir, "**", "cell.json"), recursive=True)):
         with open(p, encoding="utf-8") as fh:

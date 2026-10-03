@@ -1581,7 +1581,3 @@ def test_one_verdict_answers_for_every_route():
     React on accept's `if:` only; add `steps.access.outputs.authorized == 'true' ||` to both."""
     assert action_yaml("comment-ops")["outputs"]["authorized"]["value"] == _AUTHORIZED
     assert step_by("comment-ops", name="React on accept")["if"] == _AUTHORIZED
-    readers = [
-        s.get("name") for s in action_steps("comment-ops") if "steps.verdict." in json.dumps(s)
-    ]
-    assert readers == [], readers

@@ -122,8 +122,9 @@ def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(act
 
 #: The whole `run:` of `apply-detect`'s script step.
 _APPLY_DETECT_RUN = """\
-# An empty environment is the bare form, which only apply mode has. Any other mode, absent
-# or garbled included, reaches apply-detect, which refuses an empty environment.
+# An empty environment is the bare form, which only apply mode has; an omitted mode input
+# means apply. Unlock, or an explicitly empty or unknown mode, reaches apply-detect, which
+# refuses an empty environment.
 if [ -z "$SHIPMATE_ENV" ] && [ "$SHIPMATE_MODE" = apply ]; then
   exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-all-detect"
 fi
@@ -138,6 +139,20 @@ def _script_step(action):
 def test_the_apply_detect_step_runs_exactly_this_script():
     """Mutation: `-z` -> `-n` in the script step's `if`."""
     assert _script_step("apply-detect")["run"] == _APPLY_DETECT_RUN
+
+
+def test_the_apply_detect_mode_defaults_to_apply():
+    """`apply.yml` passes no `mode:`, so its bare form rests on this default.
+
+    Mutation: `default: apply` -> `default: ""`."""
+    assert action_yaml("apply-detect")["inputs"]["mode"] == {
+        "description": (
+            "apply (default) or unlock. Anything else takes the apply path, which is the "
+            "stricter of the two; with an empty environment, only apply runs the bare form."
+        ),
+        "required": False,
+        "default": "apply",
+    }
 
 
 @bash_only
@@ -155,8 +170,9 @@ def test_the_apply_detect_step_runs_exactly_this_script():
 def test_the_apply_detect_action_picks_the_script_by_environment_and_mode(
     tmp_path, environment, mode, argv
 ):
-    """Only an empty environment in apply mode reaches `apply-all-detect`; an unlock, absent or
-    garbled mode reaches `apply-detect`, whose `validate_env` refuses an empty environment.
+    """Only an empty environment in apply mode reaches `apply-all-detect`; an unlock, or an
+    explicitly empty or unknown mode, reaches `apply-detect`, whose `validate_env` refuses an
+    empty environment. An omitted `mode:` input arrives as `apply`, its default.
 
     Mutation: `-z` -> `-n`.
     Mutation: delete `&& [ "$SHIPMATE_MODE" = apply ]` -- the `("", "unlock")` row reddens.

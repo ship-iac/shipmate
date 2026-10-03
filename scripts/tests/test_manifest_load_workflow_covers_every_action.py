@@ -8,13 +8,13 @@ discriminating power also rests on two details a reader is likely to tidy away:
     only read when the step executes, so under `if: false` it is never parsed at all -- measured
     2026-08-22, a comma-split local manifest under `if: false` passes.
   * `if: false` must stay. Without it every action actually runs, which is what made the smoke run
-    look expensive: 19 actions, 83 required inputs between them, App tokens, a live pull request,
+    look expensive: every action's required inputs, App tokens, a live pull request,
     terramate/tofu.
 
 So compare the whole step list to one built here, rather than checking a part. The trigger is
 compared the same way: `@main` is only the right tree on a push to `main`, so a workflow
 retriggered anywhere else -- a pull request, where the ref is stale -- or nowhere at all would
-leave 19 correct steps that never run.
+leave correct steps that never run.
 """
 
 from _loader import ACTIONS, workflow_yaml

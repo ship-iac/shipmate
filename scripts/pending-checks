@@ -36,9 +36,6 @@ def bodies(cells_dir, head_sha):
             "never find the reviewed plan."
         )
     out = []
-    # Recursive, not `cell-summary.*/cell.json`: `actions/download-artifact` drops the
-    # per-artifact subdirectory when exactly one artifact matches the pattern, so a one-cell
-    # plan lands at `<cells>/cell.json`, where the nested-only glob matched nothing.
     for cj, cell in cell_summaries(
         cells_dir,
         ("stack_path", "environment", "changed", "fingerprint"),

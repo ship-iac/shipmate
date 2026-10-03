@@ -51,7 +51,7 @@ _CALLER = {
 #: because that job proves the pull request exists first -- turns a pr_number matching no pull
 #: request into the value that applies everything. Compared whole, because a check for
 #: `MISSING_PR` alone passes an expression that also defaults a null decision to something
-#: `review_held` lets through.
+#: `_review_reason` lets through.
 _REVIEW_JQ = (
     '--jq \'.data.repository.pullRequest | if type == "object" '
     'then (.reviewDecision // "NONE") else "MISSING_PR" end\''
