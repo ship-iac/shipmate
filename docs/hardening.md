@@ -1010,8 +1010,9 @@ nothing keeping a fork out of a plan cell depends on it.
 it, so a plan cell reached by a fork would read the plan environment's
 variables *and its secrets* (engine `plan.yml` passes `secrets.SHIPMATE_SECRETS`
 and `secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`), and would hold
-the plan role's cloud credentials (the `plan` job's `configure-aws-credentials`
-step assumes `matrix.role_arn` when the environment names one), while executing
+the cell's resolved role's cloud credentials — `aws.plan`, or `aws.apply` in a
+shared environment (the `plan` job's `configure-aws-credentials` step assumes
+`matrix.role_arn` when the environment names one) — while executing
 the pull request's own Terramate/OpenTofu code. GitHub withholds secrets from a
 fork under `pull_request`, not `pull_request_target`, so that layer does not
 exist here. Keep both of the layers that do —

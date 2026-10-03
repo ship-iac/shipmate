@@ -32,18 +32,18 @@ The pull request is already the unit of review, so the commands, their replies
 and their results stay in it, with an auditable history of who asked for what
 and when.
 
-A comment cannot start a workflow on its own: events created with the default
-`GITHUB_TOKEN` never trigger other workflows. So a private GitHub App mints the
-short-lived token that dispatches the apply workflow from a comment. The same
-App authors every check, status, comment and issue that crosses a workflow-run
+A comment starts the comment-handling workflow, and the apply it authorizes is
+dispatched with a short-lived token minted by a private GitHub App. The same App
+authors every check, status, comment and issue that crosses a workflow-run
 boundary: the apply checks (a check run can be completed only by the App that
 created it), `shipmate / gate`, the sticky plan and `doctor` comments, the
 apply result comments and the drift issues.
 
-An apply runs only for a commenter with write or admin permission, on a pull
-request that is not a draft, is mergeable and satisfies the branch ruleset's
-review policy, and only against a reviewed plan for the pull request's current
-head.
+A comment-triggered apply runs only for a commenter with write or admin
+permission, on a pull request that is not a draft, is mergeable and satisfies
+the branch ruleset's review policy, and only against a reviewed plan for the
+pull request's current head. An environment whose entry holds `gated = false`
+is exempt from the review requirement and from nothing else.
 
 [`CONTRACT.md`](../CONTRACT.md) §Comment-ops holds the grammar, what each verb
 may do, who may run it, and the apply requirements, with the full list of

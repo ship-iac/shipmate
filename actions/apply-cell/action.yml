@@ -244,9 +244,10 @@ runs:
         exit "$status"
 
     - name: Save state
-      # always(), not !cancelled(): a failed or cancelled apply still mutated state, and dropping
-      # that delta orphans resources. Safe because actions/cache commits only a completed upload:
-      # a torn save loses the delta but never clobbers last-good state. Skips unrestored state.
+      # always(): a failed or cancelled apply still mutated state; dropping it orphans resources.
+      # Each run_id-run_attempt key is fresh and commits only whole: a torn save loses the delta,
+      # never last-good state. Cancelled, the check stays pending (CONTRACT.md §Apply result
+      # comment). Skips unrestored state.
       if: ${{ always() && steps.restore-state.outcome == 'success' }}
       uses: $/actions/state
       with:

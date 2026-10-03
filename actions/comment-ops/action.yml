@@ -308,9 +308,10 @@ runs:
           exit 0
         fi
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
-        # Harvest degrades to empty, never fails the command. harvest_failed is written once, after
-        # every fallible step could flip it: an empty "ann/<id>.json" fallback is byte-identical to
-        # "no annotations", so a failed annotations fetch must not read as a complete harvest.
+        # Harvest: latest shipmate-authored check run per name (check-ids mode filters on app
+        # slug/id), then its annotations; degrades to empty, never fails the command. harvest_failed
+        # is written once, after every fallible step could flip it: an empty "ann/<id>.json"
+        # fallback is byte-identical to "no annotations", so a failed fetch must not look complete.
         mkdir -p ann
         : > check-ids.tsv
         harvest_failed=false
@@ -527,7 +528,8 @@ runs:
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > pr.json
         fi
         # reviewDecision is null when no rule requires a review, or code-owner review owns no
-        # changed file. NONE makes that explicit: authorize fails closed outside NONE and the enum.
+        # changed file. NONE makes that explicit, since an empty string must never be a pass value:
+        # authorize fails closed outside NONE and the enum.
         # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
         rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
           -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
