@@ -40,7 +40,7 @@ def _gate_writing_run_blocks(text):
     blocks = []
     current = []
     in_run = False
-    run_indent = None
+    run_indent = 0
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("run:") or stripped == "run: |":

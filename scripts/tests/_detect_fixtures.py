@@ -7,6 +7,7 @@ keeps passing against output `gh` no longer produces.
 """
 
 import json
+from typing import Any
 
 HEAD = "0" * 40
 APP_ID = "999"
@@ -63,7 +64,7 @@ def completed_names(apply_detect, monkeypatch, checks, app_id=APP_ID):
 
 #: What a detect reads when a test names no table. `layout` is required, and `folder` derives
 #: no identity variables, so a row carries only the stamp and the tier.
-MINIMAL_TABLE = {"layout": "folder"}
+MINIMAL_TABLE: dict[str, Any] = {"layout": "folder"}
 
 
 def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), reads=None):
@@ -77,9 +78,7 @@ def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), re
     because `_load` re-executes a module per caller, so a stub on one `env-config` object
     cannot see a read through another.
     """
-    # Annotated: the table's values are mixed by design -- a string layout, a mapping of
-    # entries -- and `MINIMAL_TABLE` alone infers `dict[str, str]`.
-    cfg: dict[str, object] = dict(base or MINIMAL_TABLE)
+    cfg = dict(base or MINIMAL_TABLE)
     if order is not None or explicit:
         entries = {env: dict(entry) for env, entry in dict(cfg.get("environments", {})).items()}
         for env, preds in (order or {}).items():
