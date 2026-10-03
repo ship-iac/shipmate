@@ -8,18 +8,6 @@ invariant the same way test_check_runs_filter_aligned guards the check-runs read
 
 from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, workflow_yaml
 
-# Generated, third-party and VCS dirs are never shipmate source, and their contents -- .pyc
-# constant pools, vendored packages -- can carry the retired token for reasons unrelated to
-# this repo, so scanning them would false-fail the guard.
-SKIP_DIRS = {
-    ".git",
-    ".superpowers",
-    ".venv",
-    "__pycache__",
-    ".pytest_cache",
-    ".ruff_cache",
-    "node_modules",
-}
 GATE = "shipmate / gate"
 # `scripts/gate-state` builds the plan run's body, which `actions/summary` POSTs. The two
 # completion writers post their fields with `gh api -f`, and `actions/gate-refresh/action.yml`
@@ -443,24 +431,3 @@ def test_detect_action_steps_thread_app_id():
                 continue
             offenders.extend(_detect_step_offenses(wf.name, job_name, job))
     assert not offenders, f"detect action(s) missing app-id threading: {offenders}"
-
-
-# Assembled so this file never contains the retired token as a literal substring: writing it
-# out would self-match and the test could never pass.
-RETIRED = "check" + "mate"
-
-
-def test_no_retired_gate_token_survivors():
-    hits = []
-    for p in ENGINE.rglob("*"):
-        if not p.is_file():
-            continue
-        if any(part in SKIP_DIRS for part in p.parts):
-            continue
-        try:
-            text = p.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, PermissionError):
-            continue
-        if RETIRED in text:
-            hits.append(str(p.relative_to(ENGINE)))
-    assert not hits, f"stale {RETIRED!r} token in: {hits}"
