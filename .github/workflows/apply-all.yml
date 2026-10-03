@@ -5,21 +5,12 @@ on:
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
     secrets:
-      # `required: false` is load-bearing -- apply.yml's `secrets:` note has the argument. A caller
-      # that binds no environment holds no value to pass, and a required declaration kills the run
-      # at the first callee job that binds none (`guard`).
+      # `required: false` is load-bearing -- apply.yml's `secrets:` note has the argument.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
-  # `gh workflow run apply-all.yml` by a human with write access would otherwise skip every
-  # requirement in scripts/authorize. A human cannot make github.actor a bot login, so this rejects
-  # any human dispatch -- though it admits any bot actor with actions:write, not only this App.
-  #
-  # Its own job, not a first step of `detect`: `summary` must refuse a rejected dispatch -- it mints
-  # the App key and comments on the dispatcher-supplied PR number -- while still posting the failure
-  # comment and refreshing the gate when `detect` genuinely fails. `needs.guard.result == 'success'`
-  # is false only for an unauthorised dispatch. No secrets, no environment, no checkout.
+  # Rejects a human dispatch, in its own job: see the guard job in apply.yml.
   guard:
     runs-on: ubuntu-slim
     permissions: {}
@@ -39,8 +30,7 @@ jobs:
     permissions: {}
     with:
       pr_number: ${{ inputs.pr_number }}
-    # Named, never `inherit`: the callee's `shipmate-engine` binding supplies the key only when
-    # the name is mapped here, even to an empty value.
+    # Named, never inherit: see the review job in apply.yml.
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
@@ -95,14 +85,9 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-    # Named, never `inherit`: these two files sit in one organization but the RUN belongs to the
-    # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
-    # `complete` job would hold no key, its applies would execute, and their apply checks would
-    # strand pending forever.
+    # Named, never inherit: see the apply job in apply.yml.
     secrets: &envlevel-secrets
-      # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
-      # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
-      # load-time error, unlike an undeclared action input, which is silently ignored.
+      # Declare a new secret in apply-env-level.yml first: see the apply job in apply.yml.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
@@ -146,10 +131,8 @@ jobs:
     # stays pending -- while `summary` still runs on `guard`'s success, so without the entry the
     # comment renders the non-failure form over a run that died.
     needs: [guard, review, detect, envlevel0, envlevel1, envlevel2, envlevel3]
-    # `always()` alone would still run this job, and mint the App key, when the bot-actor rejection
-    # failed; `needs.guard.result == 'success'` closes that. Keyed on `guard`, not `detect`, since
-    # `always()` must still post the comment and refresh the gate when an envlevel failed or was
-    # cancelled, and when `detect` itself failed: a `needs` cycle, a cell recording no plan run.
+    # Keyed on `guard`, not `detect`: see the summary job in apply.yml. Here `detect` can also fail
+    # on a `needs` cycle.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-slim
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as

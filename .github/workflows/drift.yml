@@ -7,8 +7,7 @@ on:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
       SHIPMATE_SLACK_WEBHOOK: { required: false }
-# Floor, not a default to inherit from: every job here declares its own block, so a job that
-# loses its block gets nothing rather than everything the caller granted.
+# Floor, not a default to inherit from: see plan.yml.
 permissions: {}
 jobs:
   # Resolves the default branch from the API, not from github.event.repository.default_branch,

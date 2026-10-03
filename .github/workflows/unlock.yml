@@ -9,16 +9,13 @@ on:
     # whose backend configuration reads a plain TF_VAR_* needs the envelope here too.
     secrets:
       SHIPMATE_SECRETS: { required: false }
-# Floor, not a default to inherit from: every job here declares its own block, so a job that
-# loses its block gets nothing rather than everything the caller granted, id-token: write included.
+# Floor, not a default to inherit from: see plan.yml. A lost block here would inherit id-token: write.
 permissions: {}
 # A dispatched run holds the default branch's cache scope while it runs the pull request's HCL,
 # and nothing in this file saves an Actions-cache entry.
 cache-mode: read
 jobs:
-  # `gh workflow run unlock.yml` by a human with write access would otherwise skip every
-  # requirement in scripts/authorize. A human cannot make github.actor a bot login, so this rejects
-  # any human dispatch -- though it admits any bot actor with actions:write, not only this App.
+  # Rejects a human dispatch: see the guard job in apply.yml.
   guard:
     runs-on: ubuntu-slim
     permissions: {}
