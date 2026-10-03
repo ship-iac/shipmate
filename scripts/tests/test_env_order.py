@@ -115,6 +115,16 @@ def test_waves_by_env_level_buckets_and_orders():
     assert out[1]["wave1"] == []
 
 
+def test_env_level_waves_levels_the_cells_by_the_env_order():
+    """Mutation: pass `{}` as the levels inside `env_level_waves` -- dev-us lands at level 0
+    beside dev-eu, red."""
+    eu = {"stack": "stacks/app", "environment": "dev-eu"}
+    us = {"stack": "stacks/app", "environment": "dev-us"}
+    empty = {f"wave{i}": [] for i in range(8)}
+    out = eo.env_level_waves([eu, us], {"dev-us": ["dev-eu"]}, {"stacks/app": set()})
+    assert out == [{**empty, "wave0": [eu]}, {**empty, "wave0": [us]}, empty, empty]
+
+
 def test_waves_by_env_level_backward_compat_single_level():
     pending = [
         {"stack": "stacks/dns", "environment": "dev-eu"},

@@ -69,16 +69,21 @@ _TWO_CELLS = [
 ]
 
 
-_RUNS = {"apply / stacks/app / dev-eu": "111", "apply / stacks/dns / dev-eu": "222"}
-_HASHES = {"apply / stacks/app / dev-eu": "a" * 64, "apply / stacks/dns / dev-eu": "b" * 64}
+def _lines(*checks):
+    return [json.dumps(c) for c in checks]
+
+
+_APP_CHECK = _apply_check("stacks/app", plan_run="111", plan_sha256="a" * 64)
 
 
 def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
     # The recovery shape: one cell re-planned by a later run while its sibling is still named
     # by the first. Each must apply from the run that planned it, and each must be bound to
     # the plan text reviewed for IT -- one shared digest would let a sibling's text vouch for
-    # this cell's plan.
-    out = ad.with_plan_runs(_TWO_CELLS, _RUNS, _HASHES)
+    # this cell's plan. Mutation: read `plan_hashes` from `plan_runs_by_name` inside
+    # `with_plan_runs` -- the digests become run ids, red.
+    lines = _lines(_APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256="b" * 64))
+    out = ad.with_plan_runs(_TWO_CELLS, lines, APP_ID)
     assert out == [
         {
             "stack": "stacks/app",
@@ -100,7 +105,11 @@ def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
     refusals name different causes and different remedies, and a reader told "no plan run"
     would go looking for a check that exists."""
     with pytest.raises(SystemExit) as exc_info:
-        ad.with_plan_runs(_TWO_CELLS, _RUNS, {"apply / stacks/app / dev-eu": "a" * 64})
+        ad.with_plan_runs(
+            _TWO_CELLS,
+            _lines(_APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256=None)),
+            APP_ID,
+        )
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan-text digest recorded for apply / stacks/dns / dev-eu: "
         "the reviewed plan text cannot be checked against the plan that would be applied, so "
@@ -113,14 +122,10 @@ def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
 def test_a_cell_whose_check_names_no_plan_run_refuses():
     # Not skipped and not defaulted: falling back to a run lookup keyed on a plan run's
     # head_sha is the platform dependency this path exists to drop, and a silent default
-    # applies a cell from nowhere. `stacks/dns` is in neither mapping, and the message is the
+    # applies a cell from nowhere. `stacks/dns` carries no check, and the message is the
     # missing-run one: a cell with no check at all is not a cell whose digest went missing.
     with pytest.raises(SystemExit) as exc_info:
-        ad.with_plan_runs(
-            _TWO_CELLS,
-            {"apply / stacks/app / dev-eu": "111"},
-            {"apply / stacks/app / dev-eu": "a" * 64},
-        )
+        ad.with_plan_runs(_TWO_CELLS, _lines(_APP_CHECK), APP_ID)
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu: the "
         "apply check names no plan run to apply from (post-merge, the cell may have no apply "

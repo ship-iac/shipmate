@@ -69,7 +69,8 @@ def waves_by_env_level(pending, deps, levels):
     with no predecessors), then stack-wave-ordered within it. Env-levels apply
     fully in order: level 0 entirely before level 1, and so on. No env-order
     global -> every env is level 0 -> a single populated level. Shared by
-    deploy-detect (merge path) and apply-all-detect (bare `shipmate apply`).
+    deploy-detect (merge path) and apply-all-detect (bare `shipmate apply`)
+    through `env_level_waves`.
 
     Refuses an env beyond MAX_ENV_LEVELS before bucketing: the loop below keys on
     `range(MAX_ENV_LEVELS)`, so an over-deep env falls out of every level and its
@@ -87,6 +88,12 @@ def waves_by_env_level(pending, deps, levels):
         waves = wv.assign_waves(stack_levels, cells)
         out.append(wv.pad_waves(waves))
     return out
+
+
+def env_level_waves(cells, order, deps):
+    """MAX_ENV_LEVELS wave dicts: `cells` bucketed by `order`'s env-levels, each level
+    stack-wave-ordered (`waves_by_env_level`). The deploy and bare-apply tail."""
+    return waves_by_env_level(cells, deps, env_levels(order, {c["environment"] for c in cells}))
 
 
 def write_env_level_waves(fh, per_level):

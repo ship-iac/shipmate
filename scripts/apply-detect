@@ -66,11 +66,14 @@ def cells_for_env(env, paths, tags_by_stack):
     ]
 
 
-def with_plan_runs(cells, plan_runs, plan_hashes):
+def with_plan_runs(cells, check_run_lines, app_id):
     """Each cell gains the plan run id and the plan-text digest ITS OWN check
-    records, so a cell recovered by a re-run plan job downloads from the run that
-    re-planned it, and is bound to the plan text reviewed for it, while its
-    siblings stay on the original.
+    records in `check_run_lines`, so a cell recovered by a re-run plan job downloads
+    from the run that re-planned it, and is bound to the plan text reviewed for it,
+    while its siblings stay on the original.
+
+    Both are read only from records App `app_id` wrote. That App authorship is what
+    binds a run id to the plan workflow; there is no workflow-path check to re-add.
 
     A cell whose newest check records no usable run refuses. The alternative —
     falling back to a lookup keyed on a plan run's head_sha — is the platform
@@ -89,6 +92,8 @@ def with_plan_runs(cells, plan_runs, plan_hashes):
     request is already merged — a remedy phrased as "re-plan on this pull
     request" would send a post-merge operator to a pull request that no longer
     accepts commits."""
+    plan_runs = ag.plan_runs_by_name(check_run_lines, app_id)
+    plan_hashes = ag.plan_hashes_by_name(check_run_lines, app_id)
     named = [
         (
             c,
@@ -342,11 +347,6 @@ def main():
     # completing mid-run cannot make the three disagree.
     lines = _check_run_lines(repo, head)
     names = apply_check_names(lines, app_id)
-    # The run ids are read only from records our App wrote (plan_runs_by_name's
-    # from_app filter). That App authorship is what binds a run id to the plan
-    # workflow; there is no workflow-path check to re-add here.
-    plan_runs = ag.plan_runs_by_name(lines, app_id)
-    plan_hashes = ag.plan_hashes_by_name(lines, app_id)
     completed = ag.app_done_names(lines, app_id)
 
     # Tags only for the workset: this path reconstructs its cells from the head's
@@ -357,7 +357,7 @@ def main():
     table = bm.env_config(cells, table=table)
     cells = bm.stamp_rows(cells, table, "apply")
 
-    pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
+    pending = with_plan_runs(filter_pending(cells, completed), lines, app_id)
     bm.refuse_workload_gaps(pending, table)
 
     waves = wv.assign_waves(wv.stack_levels(deps), pending)
