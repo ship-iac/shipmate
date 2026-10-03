@@ -59,9 +59,11 @@ def review_count(rules):
 def approval_rules(env):
     """The sorted, distinct protection-rule types in an environment payload that stop a job
     from starting. GitHub synthesizes a `branch_policy` rule for any deployment branch policy;
-    that is the policy itself, not a review, and it stalls nothing."""
-    types = {r.get("type") for r in env.get("protection_rules") or []}
-    return sorted(types - {None, "", "branch_policy"})
+    that is the policy itself, not a review, and it stalls nothing. A rule with no type is
+    listed as `?`: it still stalls a job, but it confirms no reviewer or wait timer, so a
+    caller asking whether an environment is reviewed must ignore it."""
+    types = {r.get("type") or "?" for r in env.get("protection_rules") or []}
+    return sorted(types - {"branch_policy"})
 
 
 def scrub(text, secrets):

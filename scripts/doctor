@@ -390,10 +390,10 @@ def _env_shape_findings(name, env, data, role):
                 "must allow all branches.",
             )
         )
-    if role == "apply" and not approval:
-        # NOTICE, not WARNING: legitimate for dev-tier envs. Worded on
-        # `approval`, not on the raw rule list: a deployment branch policy may
-        # be present, so claiming "no protection rules" would be false.
+    if role == "apply" and not set(approval) - {"?"}:
+        # NOTICE, not WARNING: legitimate for dev-tier envs. A typeless `?` rule
+        # confirms no review; "approval", not "protection", rules because a
+        # deployment branch policy may be present.
         out.append(
             (
                 NOTICE,
@@ -455,6 +455,7 @@ def _env_protection_warnings(ctx):
         try:
             data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
         except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
+            ec.log_failure(e, f"environment {name}")
             out.append(
                 (
                     NOTICE,
@@ -496,6 +497,7 @@ def _engine_environment_warnings(ctx):
     try:
         env = _gh_json(f"repos/{repo}/environments/{_ENGINE_ENV}")
     except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings()
+        ec.log_failure(e, f"environment {_ENGINE_ENV}")
         return [
             (
                 NOTICE,
@@ -528,6 +530,7 @@ def _engine_environment_warnings(ctx):
     try:
         policies = _gh_json(f"repos/{repo}/environments/{_ENGINE_ENV}/deployment-branch-policies")
     except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see warnings()
+        ec.log_failure(e, f"environment {_ENGINE_ENV} branch policies")
         return [
             (
                 NOTICE,
@@ -695,6 +698,7 @@ def _plan_env_secret_warnings(ctx):
         try:
             names, total = _env_secret_names(ctx, name)
         except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
+            ec.log_failure(e, f"environment {name} secrets")
             out.append(
                 (
                     WARNING,
@@ -1861,7 +1865,8 @@ def _degrade_reason(e):
     """The failure reason, safe in a comment body or an annotation. Strips
     `ec.gh_json`'s `::error::...: gh api <path>` wrapper -- the workflow-command
     prefix would nest inside `::warning ...::` in annotate mode, and the
-    endpoint is an internal detail no reader can act on."""
+    endpoint is an internal detail no reader can act on. Every caller also passes `e`
+    to `ec.log_failure`, because the cut drops the HTTP status that says why."""
     return _one_line(str(e).removeprefix("::error::").split(": gh api ")[0], 120)
 
 
@@ -1874,6 +1879,7 @@ def warnings(ctx):
         # SystemExit, not a plain Exception, so both are caught -- but never
         # bare BaseException, so KeyboardInterrupt still propagates.
         except (Exception, SystemExit) as e:  # noqa: BLE001
+            ec.log_failure(e, f"{_probe_label(probe)} probe")
             out.append(
                 (
                     WARNING,

@@ -108,7 +108,24 @@ def test_a_missing_gh_refuses_with_its_reason_on_stderr(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         ec.read_table()
     assert str(exc.value) == _UNREADABLE
-    assert capsys.readouterr().err == "[Errno 2] No such file or directory: 'gh'\n"
+    assert capsys.readouterr().err == (
+        "FileNotFoundError: [Errno 2] No such file or directory: 'gh'\n"
+    )
+
+
+def test_a_logged_failure_starts_no_line_with_a_workflow_command(capsys):
+    """gh's stderr rides in the message, so any line may start with `::`. Mutation: drop
+    the `re.sub` in `log_failure` -- the second line stays `::error::...` and the runner
+    would read it as a command."""
+    ec.log_failure(SystemExit("::error::command failed (1): gh api x\n::error::injected"))
+    assert capsys.readouterr().err == "command failed (1): gh api x\n: :error::injected\n"
+
+
+def test_a_logged_failure_names_a_non_systemexit_type(capsys):
+    """A `KeyError`'s message is only the key. Mutation: drop the type prefix in
+    `log_failure` -- stderr reads `doctor: 'name'`, naming no failure."""
+    ec.log_failure(KeyError("name"), "doctor")
+    assert capsys.readouterr().err == "doctor: KeyError: 'name'\n"
 
 
 def test_a_non_base64_table_refuses(monkeypatch):
