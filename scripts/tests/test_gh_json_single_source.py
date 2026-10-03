@@ -6,8 +6,8 @@ bm = load_script("build-matrix")
 
 
 def test_gh_json_lives_in_env_config():
-    # gh_json lives once, next to _run, in the module that `_load`s nothing; build-matrix
-    # aliases it the same way, so its own callers cannot fork a second copy.
+    # gh_json lives once, beside `_run` in env-config; build-matrix aliases both, so its
+    # own callers cannot fork a second copy.
     # Mutation: give build-matrix its own `def gh_json`.
     assert bm.gh_json is bm.ec.gh_json
 

@@ -255,8 +255,9 @@ def _existing_env_names(ctx):
     """The repository's GitHub Environment names.
 
     THE LISTING IS THE ONLY EXISTENCE ORACLE. `bm.gh_json`'s exception carries
-    no status code, so a per-environment read cannot tell a 404 (absence, which
-    is `_environment_warnings`' finding) from a 403 or a 5xx. Every probe below
+    `gh`'s stderr as free text, which doctor never parses, so a per-environment
+    read cannot tell a 404 (absence, which is `_environment_warnings`' finding)
+    from a 403 or a 5xx. Every probe below
     that needs existence decides it from here, then treats a failed
     per-environment read as "not checked" — inferring absence from that read
     would let a token lacking `environments` access produce loud findings about
@@ -1772,8 +1773,8 @@ def _config_table(ctx):
     Reports only. Nothing read here is passed to `read_table` or `resolve`: execution reads
     the default branch, and a branch's file must never become a value a run uses.
 
-    Reads through the contents API at `_contents_ref`, like the pin probe and for the
-    second reason that comment-ops has no consumer checkout for `git show`. Structural checks
+    Reads through the contents API at `_contents_ref`, like the pin probe and like
+    `read_table`, which reads the same file with no ref. Structural checks
     alone — `validate_structure`, not `validate` — because the rest need run context;
     CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
     """

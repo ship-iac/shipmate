@@ -87,7 +87,7 @@ def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), re
             entries.setdefault(env, {})["explicit"] = True
         cfg["environments"] = entries
 
-    def read_table(run=None):
+    def read_table():
         if reads is not None:
             reads.append(cfg)
         return dict(cfg)

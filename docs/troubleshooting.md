@@ -501,7 +501,7 @@ branch's** copy of the file — that is the only copy execution reads.
 
 | What `detect` says | What it means |
 | --- | --- |
-| `could not be read from the default branch` | the file is not on the default branch yet, or the ref is unfetched. A pull request that only *adds* the file is refused: merge it first ([`../CONTRACT.md`](../CONTRACT.md) §Environment table, "The file must reach the default branch before the first plan run") |
+| `could not be read from the default branch` | the file is not on the default branch yet, or the workflow token cannot read repository contents. A pull request that only *adds* the file is refused: merge it first ([`../CONTRACT.md`](../CONTRACT.md) §Environment table, "The file must reach the default branch before the first plan run") |
 | `is not valid TOML: <message>` | `tomllib`'s own message, with the line and column. See the two parse traps below |
 | `is read with tomllib, which needs Python 3.11 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `declares no layout` | either the key is genuinely absent, or it is written below a `[table]` header — see the placement trap below |

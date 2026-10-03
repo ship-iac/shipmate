@@ -80,7 +80,7 @@ def test_the_resolve_step_and_gather_share_one_condition():
 
 def _resolve(monkeypatch, tmp_path, table):
     gc = load_script("gate-config")
-    monkeypatch.setattr(gc.ec, "read_table_at_default_branch", lambda *a, **k: table)
+    monkeypatch.setattr(gc.ec, "read_table", lambda: table)
     out = tmp_path / "out.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     gc.main()
@@ -121,7 +121,7 @@ def test_the_table_is_validated_before_it_is_resolved(monkeypatch, tmp_path):
     `gated = "false"` reads as ungated to a person and resolves as gated -- invisible unless
     the run refuses it.
 
-    Mutation: resolve the table straight from `read_table_at_default_branch` without
+    Mutation: resolve the table straight from `read_table` without
     validating it; this test then writes an empty exemption instead of refusing.
     """
     table = {"layout": "folder", "environments": {"dev-eu": {"gated": "false"}}}

@@ -4792,7 +4792,7 @@ def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
 
 def test_a_byte_order_mark_is_reported_the_way_a_run_sees_it(monkeypatch):
     """`tomllib` refuses a leading U+FEFF, and the execution reader hands it the bytes
-    `git show` printed. Stripping the BOM here would report a table valid that every run
+    the contents API returned. Stripping the BOM here would report a table valid that every run
     reading it refuses -- two readers of one file disagreeing, which is the class this
     check exists to remove.
 

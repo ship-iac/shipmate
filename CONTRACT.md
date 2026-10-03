@@ -400,17 +400,14 @@ Python, so `scripts/env-config` checks `sys.version_info` before the import and
 refuses with the required version, the version found and the contract clause.
 
 **The engine reads the file from the repository's default branch, never from the
-branch under test.** `scripts/env-config` runs `git show
-origin/<default-branch>:.github/shipmate.toml` and resolves each cell's
-environment identity and credential from what that returns. A pull request cannot change which role
+branch under test.** `scripts/env-config` reads `.github/shipmate.toml` through
+the contents API with no ref, which GitHub answers from the default branch, and
+resolves each cell's environment identity and credential from what that returns.
+A pull request cannot change which role
 its own plan assumes, which region it authenticates against, or which workspace
-it plans; changing any of those takes a merge to the default branch. `origin` is
-the base repository on every path — no checkout passes `repository:` — and a fork
-pull request is refused in `detect` before it plans.
-A job that checks out no consumer content reads the same file over the contents
-API instead — comment-ops, resolving the `gated = false` exemptions before it
-authorizes — with the same branch and the same refusal wording, so a consumer
-never gets two accounts of one problem depending on which job read it.
+it plans; changing any of those takes a merge to the default branch. The read
+names `GITHUB_REPOSITORY`, which is the base repository under both pull-request
+events, and a fork pull request is still refused in `detect` before it plans.
 
 **`needs`, `explicit` and `gated` come from the default branch too.**
 They are read from the same parsed mapping as the environment table, and a branch
@@ -422,9 +419,9 @@ request that only *adds* it is refused, because the branch its plan is compared
 against still has none. For a new consumer the file lands in the same commit as
 the workflow file, on the default branch.
 
-Every failure to read it refuses the run: unreachable `origin/<default>`, a
-failed `gh api` for the default-branch name, the file absent on the default
-branch, and a body that is not valid TOML — `tomllib`'s message, which carries a
+Every failure to read it refuses the run: a failed contents read (the file
+absent on the default branch, or a token without contents read), a file over
+1 MB, and a body that is not valid TOML — `tomllib`'s message, which carries a
 line number, is surfaced as the refusal. "This repository has no file" and "the
 file could not be read" cannot be told apart without reading it, so treating a
 read failure as absence would hand the decision back to branch content.
@@ -562,10 +559,9 @@ closed.
   *"Cannot declare ('identities', 'dev', 'aws') twice"*. Pick one notation per
   identity. Duplicate keys refuse the same way.
 
-A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and both read
-mechanisms — the cell paths' `git show`, and the contents-API read that
-`shipmate doctor` and comment-ops' gate resolve share — deliver those bytes and
-reach the same verdict rather than one of them stripping it.
+A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and the one
+read mechanism — the contents-API read that detect, comment-ops' gate resolve and
+`shipmate doctor` share — delivers those bytes rather than stripping them.
 
 **An identity is optional.** An environment naming none runs no credentials
 step — which is how the three credential-free sample repositories work. A file
@@ -1321,9 +1317,8 @@ before it authorizes, and each apply form's detect resolves it again before it
 enforces —
 `scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
 three reading `.github/shipmate.toml` on the **default branch** through the same
-`env-config` reader. The comment-ops job checks out no consumer content, so it
-reads the file through the contents API rather than `git show`; same file, same
-branch, same refusal wording. What keeps the three from disagreeing is not a
+`env-config` reader. The comment-ops job checks out no consumer content, and
+that reader needs none: it reads the file through the contents API. What keeps the three from disagreeing is not a
 shared spelling but a shared reader: the strict top-level key check refuses a
 misspelled setting outright, and the boolean and entry-name checks refuse a value
 that would match nothing, so there is no value a consumer can write that one reader

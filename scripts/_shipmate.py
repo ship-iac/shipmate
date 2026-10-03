@@ -5,8 +5,9 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``sys.modules``: every call returns a fresh module, so a test that monkeypatches one sibling's
 ``bm._run`` cannot leak the patch into every other holder of ``build_matrix``.
 
-Also holds the subprocess runner, secret scrubber and repository-slug check that ``onboard``
-and ``register-app`` share, and the UTF-8 switch for their console output. It also reads the
+Also holds the subprocess runner, which ``env-config`` wraps for the CI scripts, the secret
+scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
+switch for their console output. It also reads the
 per-cell ``cell.json`` summaries and builds this run's page link.
 """
 
@@ -39,7 +40,7 @@ def scrub(text, secrets):
 
 
 def run(args, secrets=(), stdin=None):
-    r"""Run a `gh` or `git` invocation, returning stdout; raise on a nonzero exit.
+    r"""Run a `gh`, `git` or `terramate` invocation, returning stdout; raise on a nonzero exit.
 
     `stdin` is sent as UTF-8 bytes rather than through `text=True`, which wraps
     the child's stdin in a `TextIOWrapper` and rewrites every \n to
@@ -54,8 +55,8 @@ def run(args, secrets=(), stdin=None):
     Nothing else prints, so a caller that discards the exception discards the
     noise too.
     """
-    # args is a list run with shell=False, so no value in it is shell-parsed. Values
-    # bound into a path are validated where they enter the script.
+    # args is a code-controlled gh/git/terramate argv run with shell=False, so no value in
+    # it is shell-parsed. Values bound into a path are validated where they enter the script.
     p = subprocess.run(  # noqa: S603
         args,
         capture_output=True,

@@ -1,21 +1,16 @@
 """`env-config` reads the environment table from the default branch, never from the checkout.
 
 The security property of the whole feature: values a pull request must not control are read
-from `origin/<default>`, so the branch's own content cannot rewrite them. The ref-source test
-runs real git against a real repository -- a mocked git passes with either ref -- and asserts
-the marker in the table it parsed. If those are the default branch's bytes, everything
-downstream can only see them.
+from the default branch, so the branch's own content cannot rewrite them. `read_table` takes no
+parameter and reads the contents API with no `?ref=`, which GitHub answers from the default
+branch. The whole-argv test below pins that request against a hand-written constant; GitHub's
+answer to it was probed live and cannot be exercised by a unit test.
 
-The remaining tests fake the subprocess seam, and two of them compare the whole command
-sequence against a hand-written constant: a partial check leaves the ref spelling open.
-
-The no-checkout reader is here for the same reason: it reads the same file over the same
-ref by a different mechanism, so the divergence guard below drives both over one fixture.
+The remaining tests fake `_run`, the one subprocess seam, with its real signature.
 """
 
 import base64
 import json
-import os
 import subprocess
 import sys
 import types
@@ -25,137 +20,29 @@ from _loader import load_script
 
 ec = load_script("env-config")
 
-#: Four tables, one per ref the fixture holds, so any read of the wrong one is visible.
-#: Each carries an ordering of its own as well as its marker: ordering is read off this
-#: same mapping, so the ref that wins has to be visible in the ordering too.
-_TABLE_A = 'marker = "default-branch"\n[environments.prod]\nneeds = ["dev-eu"]\n'
-_TABLE_B = 'marker = "branch-head"\n[environments.dev-eu]\nneeds = ["prod"]\n'
-_TABLE_C = 'marker = "working-tree"\n[environments.prod]\nneeds = []\n'
-_TABLE_D = 'marker = "other-remote"\n[environments.prod]\nneeds = ["sbx"]\n'
-
-_TABLE_FILE = ec.CONFIG_PATH
+#: The whole refusal, hand-written rather than read off the module.
+_UNREADABLE = (
+    "::error::.github/shipmate.toml could not be read from the default branch. The engine "
+    "reads the environment table from the default branch, never from this branch, so the "
+    "file must be merged there before the first plan."
+)
 
 
-def _git_env(tmp_path):
-    """Git's environment with the machine's own config out of the way.
-
-    A global `commit.gpgsign`, `core.hooksPath` or identity would otherwise decide whether
-    the fixture's commits happen at all.
-    """
-    cfg = tmp_path / "gitconfig"
-    cfg.write_text("", encoding="utf-8")
-    return dict(
-        os.environ,
-        GIT_CONFIG_NOSYSTEM="1",
-        GIT_CONFIG_GLOBAL=str(cfg),
-        GIT_AUTHOR_NAME="shipmate tests",
-        GIT_AUTHOR_EMAIL="tests@example.invalid",
-        GIT_COMMITTER_NAME="shipmate tests",
-        GIT_COMMITTER_EMAIL="tests@example.invalid",
-    )
+def _blob(text, encoding="base64"):
+    content = "" if text is None else base64.b64encode(text.encode("utf-8")).decode("ascii")
+    return {"encoding": encoding, "content": content}
 
 
-def _git(cwd, env, *args):
-    return subprocess.run(
-        ["git", *args], cwd=str(cwd), env=env, check=True, capture_output=True, text=True
-    ).stdout
+def _fake_run(monkeypatch, text="layout = 'tf_vars'\n", recorder=None, encoding="base64"):
+    """Replace `ec._run` with a double answering the contents API with `text` as a blob.
+    `gh api` output is text, so the blob is handed back as JSON."""
 
-
-def _write_table(repo, table):
-    path = repo / _TABLE_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(table, encoding="utf-8")
-
-
-def _commit_table(repo, env, table, message):
-    _write_table(repo, table)
-    _git(repo, env, "add", "-A")
-    _git(repo, env, "commit", "-m", message)
-
-
-def _init(root, env, table):
-    root.mkdir()
-    _git(root, env, "init", "-b", "main")
-    _git(root, env, "config", "core.autocrlf", "false")
-    _commit_table(root, env, table, "table")
-    return root
-
-
-def _show(repo, env, ref):
-    return _git(repo, env, "show", ref)
-
-
-@pytest.fixture
-def repo(tmp_path):
-    """A clone whose `origin/main` carries table A, whose `HEAD` carries table B, whose
-    working tree carries table C, and which has a second remote `other` carrying table D."""
-    env = _git_env(tmp_path)
-    origin = _init(tmp_path / "origin", env, _TABLE_A)
-    other = _init(tmp_path / "other", env, _TABLE_D)
-    work = tmp_path / "work"
-    _git(tmp_path, env, "clone", str(origin), str(work))
-    _git(work, env, "config", "core.autocrlf", "false")
-    _commit_table(work, env, _TABLE_B, "branch head")
-    _write_table(work, _TABLE_C)
-    _git(work, env, "remote", "add", "other", str(other))
-    _git(work, env, "fetch", "other")
-    return work, env
-
-
-def test_the_fixture_distinguishes_its_refs(repo):
-    """Without this the fixture could degrade to one table on every ref, and the ref-source
-    guard below would pass whichever ref `read_table()` read. Reddens on a fixture that
-    commits the same table twice."""
-    work, env = repo
-    assert _show(work, env, f"origin/main:{_TABLE_FILE}") == _TABLE_A
-    assert _show(work, env, f"HEAD:{_TABLE_FILE}") == _TABLE_B
-    assert _show(work, env, f"other/main:{_TABLE_FILE}") == _TABLE_D
-    assert (work / _TABLE_FILE).read_text(encoding="utf-8") == _TABLE_C
-    assert len({_TABLE_A, _TABLE_B, _TABLE_C, _TABLE_D}) == 4
-
-
-def test_read_table_reads_the_default_branch_not_the_checkout(repo, monkeypatch):
-    """Real git, so the ref spelling is exercised rather than asserted. Reddens on reading the
-    working-tree path, on `HEAD` in place of `origin/<branch>`, and on a ref spelled against a
-    second remote -- each of those parses a different marker."""
-    work, _ = repo
-    monkeypatch.chdir(work)
-    monkeypatch.setattr(ec, "_default_branch", lambda run: "main")
-    assert ec.read_table()["marker"] == "default-branch"
-
-
-def test_the_apply_ordering_comes_from_the_default_branch_table(repo, monkeypatch):
-    """The behaviour change this loader makes: the ordering now comes from the default branch,
-    so a pull request cannot reorder its own apply waves. Real git, and every ref in the
-    fixture carries a different ordering -- the branch head inverts it -- so a read of the
-    checkout returns {"dev-eu": ["prod"]} here rather than an empty map that an
-    "it did not raise" assertion would accept.
-
-    Mutation: spell `read_table`'s ref `HEAD:` instead of `origin/<branch>:`.
-    """
-    work, _ = repo
-    monkeypatch.chdir(work)
-    monkeypatch.setattr(ec, "_default_branch", lambda run: "main")
-    assert ec.env_order(ec.read_table()) == {"prod": ["dev-eu"]}
-
-
-def _fake_run(recorder=None, git=None):
-    """A `run` seam recording `(args, check)`, answering `gh` with a branch name and `git`
-    with a CompletedProcess-shaped result.
-
-    The branch is `trunk`, not `main`: the ref assertions below would otherwise be satisfied
-    by a `read_table` that hardcoded `origin/main` and left `_default_branch` dangling. The
-    real-git fixture keeps `main`, which is the branch git actually creates there, and the two
-    disagreeing is what makes such a hardcode visible in whichever guard sees it.
-    """
-    result = git or types.SimpleNamespace(returncode=0, stdout="layout = 'tf_vars'\n", stderr="")
-
-    def run(args, check=True):
+    def run(args):
         if recorder is not None:
-            recorder.append((list(args), check))
-        return "trunk\n" if args[0] == "gh" else result
+            recorder.append(list(args))
+        return json.dumps(_blob(text, encoding))
 
-    return run
+    monkeypatch.setattr(ec, "_run", run)
 
 
 def _env(monkeypatch):
@@ -164,47 +51,58 @@ def _env(monkeypatch):
 
 def test_read_table_runs_the_whole_command_sequence(monkeypatch):
     """The whole argv of every call, in order, against a hand-written constant -- never a
-    substring, and never derived from the module. Reddens on any change to the ref or the
-    path, on a dropped or reordered call, and on `check=True` for the tolerated `git show`,
-    whose failure this module reports itself."""
+    substring, and never derived from the module. Reddens on appending `?ref=HEAD` to the
+    path, and on a `gh api repos/{repo} --jq .default_branch` call re-added before the read."""
     _env(monkeypatch)
     calls = []
-    ec.read_table(run=_fake_run(calls))
-    assert calls == [
-        (["gh", "api", "repos/an-org/a-repo", "--jq", ".default_branch"], True),
-        (["git", "show", "origin/trunk:.github/shipmate.toml"], False),
-    ]
+    _fake_run(monkeypatch, recorder=calls)
+    ec.read_table()
+    assert calls == [["gh", "api", "repos/an-org/a-repo/contents/.github/shipmate.toml"]]
 
 
 def test_the_table_is_returned_as_parsed(monkeypatch):
     """Reddens on returning the raw stdout rather than the mapping `tomllib` parsed from it.
     The whole mapping is compared, so a partial parse reddens here too."""
     _env(monkeypatch)
-    text = 'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n'
-    git = types.SimpleNamespace(returncode=0, stdout=text, stderr="")
-    assert ec.read_table(run=_fake_run(git=git)) == {
+    _fake_run(monkeypatch, 'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n')
+    assert ec.read_table() == {
         "layout": "tf_vars",
         "environments": {"dev-eu": {"region": "eu-west-1"}},
     }
 
 
 def test_an_absent_file_refuses(monkeypatch, capsys):
-    """`git show` exits nonzero when the path is not on the default branch. Reddens on
-    returning an empty mapping, which would read as a repository that declares no table and
-    reach `validate` as a missing-layout message naming the wrong cause."""
+    """A failed contents read refuses with the fixed refusal, and `gh`'s own reason reaches
+    stderr without its `::error::` prefix. Reddens on dropping the stderr write, and on
+    `read_table` returning `{}` when `contents_text` gives `None`: an absent file would then
+    read as an empty table and reach `validate` as a missing-layout message naming the wrong
+    cause."""
     _env(monkeypatch)
-    git = types.SimpleNamespace(
-        returncode=128, stdout="", stderr="fatal: path does not exist in 'origin/trunk'\n"
-    )
+
+    def run(args):
+        raise SystemExit(
+            "::error::command failed (1): gh api repos/an-org/a-repo/contents/.github/"
+            "shipmate.toml\ngh: Not Found (HTTP 404)"
+        )
+
+    monkeypatch.setattr(ec, "_run", run)
     with pytest.raises(SystemExit) as exc:
-        ec.read_table(run=_fake_run(git=git))
-    message = str(exc.value)
-    assert message.startswith("::error::")
-    assert ".github/shipmate.toml" in message
-    assert "default branch" in message
-    assert "origin/trunk:.github/shipmate.toml" in message
-    # git's own reason, or CI shows only the engine's guess at it.
-    assert "fatal: path does not exist" in capsys.readouterr().err
+        ec.read_table()
+    assert str(exc.value) == _UNREADABLE
+    assert capsys.readouterr().err == (
+        "command failed (1): gh api repos/an-org/a-repo/contents/.github/shipmate.toml\n"
+        "gh: Not Found (HTTP 404)\n"
+    )
+
+
+def test_a_non_base64_table_refuses(monkeypatch):
+    """A file over 1 MB answers with `encoding: "none"` and empty content. Reddens on
+    `contents_text` accepting any encoding: the empty content then parses as an empty table."""
+    _env(monkeypatch)
+    _fake_run(monkeypatch, None, encoding="none")
+    with pytest.raises(SystemExit) as exc:
+        ec.read_table()
+    assert str(exc.value) == _UNREADABLE
 
 
 def test_invalid_toml_refuses_with_the_decoder_line_number(monkeypatch):
@@ -212,9 +110,9 @@ def test_invalid_toml_refuses_with_the_decoder_line_number(monkeypatch):
     drops the decoder's own text: the line number is the only thing that locates the typo in a
     file the runner never shows."""
     _env(monkeypatch)
-    git = types.SimpleNamespace(returncode=0, stdout='layout = "tf_vars"\nregion =\n', stderr="")
+    _fake_run(monkeypatch, 'layout = "tf_vars"\nregion =\n')
     with pytest.raises(SystemExit) as exc:
-        ec.read_table(run=_fake_run(git=git))
+        ec.read_table()
     message = str(exc.value)
     assert message.startswith("::error::.github/shipmate.toml is not valid TOML")
     assert "line 2" in message
@@ -237,27 +135,39 @@ def test_an_interpreter_below_the_floor_refuses_before_the_import(monkeypatch):
 
 
 def test_a_failing_gh_refuses(monkeypatch):
-    """`_run` itself, which every other test in this module replaces with a fake. Reddens on a
-    `_run` that warns and returns `stdout` instead of raising: a failed `gh api` still prints a
-    usable-looking branch name, so the run would carry on against a ref resolved from a guess.
-    `CONTRACT.md` lists a failed `gh api` as a refusal."""
+    """The real `_run` over `_shipmate.run`, with `subprocess.run` failing. The failed call
+    still prints a valid table on stdout, so a runner that stopped checking the exit code
+    would parse it. Reddens on `_shipmate.run` returning stdout regardless of the exit code.
+    `CONTRACT.md` lists a failed contents read as a refusal."""
     _env(monkeypatch)
+    stdout = json.dumps(_blob('layout = "tf_vars"\n')).encode()
 
-    def fake_subprocess_run(args, capture_output=False, text=False, env=None):
-        if args[0] == "gh":
-            return types.SimpleNamespace(returncode=1, stdout="trunk\n", stderr="gh: boom\n")
-        # Valid TOML, so a `_run` that stopped refusing would produce a table here rather than
-        # redden this test for an unrelated reason.
-        return types.SimpleNamespace(returncode=0, stdout='layout = "tf_vars"\n', stderr="")
+    def fake_subprocess_run(args, capture_output=False, input=None):
+        return types.SimpleNamespace(returncode=1, stdout=stdout, stderr=b"gh: boom\n")
 
-    monkeypatch.setattr(ec.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
     with pytest.raises(SystemExit) as exc:
         ec.read_table()
-    assert str(exc.value).startswith("::error::")
+    assert str(exc.value) == _UNREADABLE
 
 
-#: One fixture both readers are driven over. The multi-line string's indentation is the
-#: part a transformation applied by one reader and not the other shows up in.
+def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
+    """`_run` re-raises `_shipmate.run`'s failure with `::error::` prepended and prints
+    nothing itself: the stderr rides in the message. Reddens on returning `run(args)` with no
+    `except` (the prefix is gone), and on writing stderr before raising."""
+
+    def fake_subprocess_run(args, capture_output=False, input=None):
+        return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"gh: boom\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+    with pytest.raises(SystemExit) as exc:
+        ec._run(["gh", "api", "repos/an-org/a-repo"])
+    assert str(exc.value) == "::error::command failed (1): gh api repos/an-org/a-repo\ngh: boom"
+    assert capsys.readouterr().err == ""
+
+
+#: The multi-line string's indentation is what a transformation of the decoded text
+#: shows up in.
 _SHARED_TEXT = (
     'layout = "tf_vars"\n'
     "\n"
@@ -270,42 +180,6 @@ _SHARED_TEXT = (
     "[environments.prod]\n"
     'needs = ["dev-eu"]\n'
 )
-
-#: Hand-written, never derived from `_SHARED_TEXT`: a derived expectation agrees with
-#: whatever the parser did.
-_SHARED_TABLE = {
-    "layout": "tf_vars",
-    "environments": {
-        "dev-eu": {"region": "eu-west-1", "note": "  indented\n"},
-        "prod": {"needs": ["dev-eu"]},
-    },
-}
-
-#: The one explanation both refusals owe a consumer, spelled out here rather than read off
-#: either reader.
-_REFUSAL_STORY = (
-    "The engine reads the environment table from the default branch, never from this "
-    "branch, so the file must be merged there before the first plan."
-)
-
-
-def _blob(text, encoding="base64"):
-    content = "" if text is None else base64.b64encode(text.encode("utf-8")).decode("ascii")
-    return {"encoding": encoding, "content": content}
-
-
-def _contents_run(text, recorder=None, encoding="base64"):
-    """A `run` seam answering the default-branch query with `trunk` and the contents API
-    with `text` as a blob. `gh api` output is text, so the blob is handed back as JSON."""
-
-    def run(args, check=True):
-        if recorder is not None:
-            recorder.append((list(args), check))
-        if "--jq" in args:
-            return "trunk\n"
-        return json.dumps(_blob(text, encoding))
-
-    return run
 
 
 def test_a_non_base64_answer_is_unreadable_not_empty():
@@ -324,54 +198,9 @@ def test_contents_text_decodes_the_blob_to_its_exact_text():
 
 
 def test_contents_text_leaves_a_leading_byte_order_mark_in_place():
-    """`tomllib` refuses a U+FEFF and `git show` delivers one, so this reader must too, or
-    two readers reach different verdicts on one file. Reddens on adding the
+    """`tomllib` refuses a U+FEFF and the contents API delivers one, so the file refuses
+    rather than parsing differently for one reader. Reddens on adding the
     U+FEFF `removeprefix` that `_workflow_text` needs and this must not have."""
     text = "﻿" + _SHARED_TEXT
     blob = _blob(text)
     assert ec.contents_text("p", fetch=lambda _path: blob) == text
-
-
-def test_read_table_at_default_branch_runs_the_whole_command_sequence(monkeypatch):
-    """The whole argv of every call, in order, against a hand-written constant. Reddens on
-    any change to the ref, which is the point: a later change making the ref a parameter a
-    caller can point at a feature branch would let branch content decide its own
-    authorization."""
-    _env(monkeypatch)
-    calls = []
-    ec.read_table_at_default_branch(run=_contents_run(_SHARED_TEXT, calls))
-    assert calls == [
-        (["gh", "api", "repos/an-org/a-repo", "--jq", ".default_branch"], True),
-        (["gh", "api", "repos/an-org/a-repo/contents/.github/shipmate.toml?ref=trunk"], True),
-    ]
-
-
-def test_an_unreadable_file_refuses_with_read_tables_own_story(monkeypatch):
-    """Reddens on returning `None` for an unreadable file: a caller then proceeds against a
-    table nobody read. The explanation is asserted against `read_table`'s too -- one file,
-    one story, whichever job hit the wall."""
-    _env(monkeypatch)
-    with pytest.raises(SystemExit) as exc:
-        ec.read_table_at_default_branch(run=_contents_run(None, encoding="none"))
-    message = str(exc.value)
-    assert message.startswith("::error::.github/shipmate.toml could not be read from the ")
-    assert "default branch (trunk)" in message
-    assert _REFUSAL_STORY in " ".join(message.split())
-
-    git = types.SimpleNamespace(returncode=128, stdout="", stderr="fatal: no such path\n")
-    with pytest.raises(SystemExit) as show_exc:
-        ec.read_table(run=_fake_run(git=git))
-    assert _REFUSAL_STORY in " ".join(str(show_exc.value).split())
-
-
-def test_both_readers_return_the_same_table_for_the_same_bytes(monkeypatch):
-    """The divergence guard. One fixture, two mechanisms, and the WHOLE parsed table
-    compared to a hand-written constant on each side -- not a subset, not a key count.
-
-    Reddens on any transformation one reader applies and the other does not: strip each
-    line of the decoded text in `contents_text` and `note` loses its indentation here.
-    """
-    _env(monkeypatch)
-    git = types.SimpleNamespace(returncode=0, stdout=_SHARED_TEXT, stderr="")
-    assert ec.read_table(run=_fake_run(git=git)) == _SHARED_TABLE
-    assert ec.read_table_at_default_branch(run=_contents_run(_SHARED_TEXT)) == _SHARED_TABLE

@@ -11,7 +11,7 @@ bm = load_script("build-matrix")
 _MINIMAL_TABLE = {"layout": "folder"}
 
 
-def _no_read(run=None):
+def _no_read():
     """A supplied table must reach validation without a second read of the file."""
     raise AssertionError("env_config read the table although one was supplied")
 
@@ -359,7 +359,7 @@ def _run_main(
     else:
         monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
         monkeypatch.setattr(bm, "_tags", lambda s: stacks[s])
-    monkeypatch.setattr(bm.ec, "read_table", lambda run=None: dict(table or _MINIMAL_TABLE))
+    monkeypatch.setattr(bm.ec, "read_table", lambda: dict(table or _MINIMAL_TABLE))
     bm.main()
     parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
     return parsed, called
@@ -631,13 +631,14 @@ def test_main_refuses_a_dispatched_run_that_states_no_head(monkeypatch, tmp_path
     assert called == []
 
 
-def test_plan_workflow_at_the_contract_path_is_planned(tmp_path):
+def test_plan_workflow_at_the_contract_path_is_planned(monkeypatch, tmp_path):
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate.yml").write_text("", encoding="utf-8")
-    assert bm.plan_workflow_error("pull_request_target", str(tmp_path)) == ""
+    monkeypatch.chdir(tmp_path)
+    assert bm.plan_workflow_error("pull_request_target") == ""
 
 
-def test_a_renamed_plan_workflow_is_refused(tmp_path):
+def test_a_renamed_plan_workflow_is_refused(monkeypatch, tmp_path):
     """This refusal makes the path load-bearing: no plan-run lookup matches it literally any
     more, so a rename would merge green while doctor's filename-keyed probes went quiet. The
     whole message is hand-written, and names only consequences still true now that the plan
@@ -645,7 +646,8 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
     a clause about plan-run discovery coming back here would be a falsehood."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
-    assert bm.plan_workflow_error("pull_request", str(tmp_path)) == (
+    monkeypatch.chdir(tmp_path)
+    assert bm.plan_workflow_error("pull_request") == (
         "::error::this repository has no `.github/workflows/shipmate.yml`, the one path "
         "`CONTRACT.md` lets the consumer's workflow file live at, and this refusal is what "
         "enforces it. That exact filename is matched literally by `shipmate doctor`, which "
@@ -657,9 +659,10 @@ def test_a_renamed_plan_workflow_is_refused(tmp_path):
     )
 
 
-def test_plan_workflow_check_is_skipped_off_a_pull_request(tmp_path):
+def test_plan_workflow_check_is_skipped_off_a_pull_request(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
     for event in ("schedule", "workflow_dispatch", "push", ""):
-        assert bm.plan_workflow_error(event, str(tmp_path)) == ""
+        assert bm.plan_workflow_error(event) == ""
 
 
 def test_main_refuses_a_base_checkout(monkeypatch, tmp_path):

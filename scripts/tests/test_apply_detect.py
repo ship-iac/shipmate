@@ -225,7 +225,7 @@ def _stub_read_table(monkeypatch, table, reads):
     real read shells out to gh, git and terramate, none of which CI has. One entry is appended
     to `reads` per call, which is how the one-parse-per-operation count is taken."""
 
-    def read_table(run=None):
+    def read_table():
         if reads is not None:
             reads.append(1)
         return dict(table or _MINIMAL_TABLE)
@@ -1044,7 +1044,7 @@ def test_apply_mode_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsy
 def _stub_one_pending_check(monkeypatch):
     """One pending App-authored check, for `stacks/app / dev-eu`, as the raw JSONL `gh` emits."""
     line = json.dumps(_check(name="apply / stacks/app / dev-eu", status="queued", conclusion=None))
-    monkeypatch.setattr(ad.bm, "_run", lambda args, check=True: line)
+    monkeypatch.setattr(ad.bm, "_run", lambda args: line)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
 
 

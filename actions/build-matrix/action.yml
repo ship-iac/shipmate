@@ -52,8 +52,8 @@ runs:
       id: build
       shell: bash
       env:
-        # The environment table is read from the default branch, which needs an API call
-        # for its name; no permission beyond the job's own contents: read.
+        # The environment table is read from the default branch through the contents
+        # API; no permission beyond the job's own contents: read.
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
         SHIPMATE_ALL_STACKS: ${{ inputs.all-stacks }}
