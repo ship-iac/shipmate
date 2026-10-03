@@ -206,9 +206,9 @@ runs:
         PLAN_SHA256: ${{ inputs.plan-sha256 }}
       run: |
         set -euo pipefail
-        # Binds the reviewed plan text to the plan about to run. `tofu show` is byte-identical across
-        # runners at one tofu version (a version change refuses the plan file), so a difference is
-        # a content mismatch. Needs the providers `init` installs, so it runs after init.
+        # Binds the reviewed plan text to the plan about to run. `tofu show` is byte-identical
+        # across runners at one tofu version (a version or provider change refuses the plan file),
+        # so a difference is a content mismatch. Needs the providers `init` installs: runs after it.
         rendered="$RUNNER_TEMP/rendered-plan.txt"
         tofu -chdir="$STACK" show -no-color stack.otplan > "$rendered"
         # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
@@ -245,8 +245,8 @@ runs:
 
     - name: Save state
       # always(), not !cancelled(): a failed or cancelled apply still mutated state, and dropping
-      # that delta orphans resources. Safe because actions/cache commits only a completed upload,
-      # so a torn save never clobbers the last-good state. Never saves unrestored state.
+      # that delta orphans resources. Safe because actions/cache commits only a completed upload:
+      # a torn save loses the delta but never clobbers last-good state. Skips unrestored state.
       if: ${{ always() && steps.restore-state.outcome == 'success' }}
       uses: $/actions/state
       with:

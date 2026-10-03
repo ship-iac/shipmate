@@ -42,8 +42,8 @@ apply result comments and the drift issues.
 
 An apply runs only for a commenter with write or admin permission, on a pull
 request that is not a draft, is mergeable and satisfies the branch ruleset's
-review policy, and
-only against a reviewed plan for the pull request's current head.
+review policy, and only against a reviewed plan for the pull request's current
+head.
 
 [`CONTRACT.md`](../CONTRACT.md) §Comment-ops holds the grammar, what each verb
 may do, who may run it, and the apply requirements, with the full list of
@@ -74,13 +74,14 @@ its CI configuration.
 
 ## The plan path
 
-A push to a pull request that is not a draft, or a `shipmate plan` comment,
-plans the changed stacks, one cell per stack × environment, and each cell is its own `shipmate / <stack> / <env>` check. The
-shape is the same across repo layouts and across repositories. What differs per
-layout is which identity variables a cell's job environment carries
-(`TF_VAR_env` and `TF_VAR_region`, `TF_WORKSPACE`, or nothing) and whether a
-role is named for that environment at all. Both come from the repository's
-environment table on the default branch.
+Opening, reopening, updating or marking ready a pull request that is not a
+draft, or a `shipmate plan` comment, plans the changed stacks, one cell per
+stack × environment, and each cell is its own `shipmate / <stack> / <env>`
+check. The shape is the same across repo layouts and across repositories.
+What differs per layout is which identity variables a cell's job environment
+carries (`TF_VAR_env` and `TF_VAR_region`, `TF_WORKSPACE`, or nothing) and
+whether a role is named for that environment at all. Both come from the
+repository's environment table on the default branch.
 
 A plan cell runs branch-authored code, so it holds no App credential. One
 trusted job per run, bound to the `shipmate-engine` GitHub Environment and

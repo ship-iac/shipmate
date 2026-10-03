@@ -141,8 +141,8 @@ It writes:
   repository-level copy of that key deleted. An environment whose entry in the
   checkout's `.github/shipmate.toml` holds `shared = true` gets one bare `<env>`
   instead, under the same default-branch policy, so set it only where every
-  pull request targets the default branch ([`hardening.md`](hardening.md) rows 8
-  and 17, §7–9);
+  pull request targets the default branch (plan cells for any other base are
+  refused; [`hardening.md`](hardening.md) rows 8 and 17, §7–9);
 - the `SHIPMATE_APP_ID` repository variable;
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App, once
   `.github/workflows/shipmate.yml` is on the default branch. Until then it reports

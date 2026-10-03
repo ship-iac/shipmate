@@ -49,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           # NONE: a null decision (no review rule, or code-owner review owns no changed file). A PR
-          # number matching none returns a null `pullRequest` with exit 0, hence MISSING_PR.
+          # number matching none gets a null `pullRequest`: MISSING_PR, which apply-detect refuses.
           # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
           rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
             -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \

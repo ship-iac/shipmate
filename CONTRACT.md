@@ -858,8 +858,9 @@ every path is wired the same way: the wave jobs of `apply-env-level.yml`,
 job each request `id-token: write` and run
 `aws-actions/configure-aws-credentials`, gated on a role resolving non-empty,
 before the cell step. The step reads the row, which the detect resolved from the
-identity's `aws.apply` on the first two and its `aws.plan` on the other two. The
-`snapshot` and `complete` jobs deliberately get no token.
+identity's `aws.apply` on the first two and its `aws.plan` on the other two,
+except that a shared environment (`shared = true`) resolves `aws.apply` on
+every path. The `snapshot` and `complete` jobs deliberately get no token.
 
 On the apply path the engine passes through whatever role the environment
 resolves, and nothing more: which role that is — and whether two environments'
@@ -1108,7 +1109,7 @@ live probes already re-state fresh against current settings — this is
 machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it dispatches nothing and changes no setting, and writes nothing
-but its own sticky comment
+but its own sticky comment, a copy of its report in the job summary
 and an `eyes` reaction on the triggering comment (`doctor`, `help` and `plan`
 all get that acknowledgement as soon as the command is accepted — `rocket`
 marks an authorized dispatch, whether `apply`, `unlock` or `plan`, instead; a

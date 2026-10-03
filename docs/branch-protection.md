@@ -198,7 +198,8 @@ fails closed rather than proceeding unreviewed.)
   that environment without an approving review while the merge still needs one
   ([`getting-started.md`](getting-started.md) §"Applying chosen environments
   without an approving review"). What it exempts and what still blocks an apply
-  is in `../CONTRACT.md` §Comment-ops.
+  is in `../CONTRACT.md` §Comment-ops, and what it costs against the
+  deployment-side gate in `hardening.md` §3–5.
 - **Per-environment approval** — which environments require a human is your
   policy to set, per environment (production only, every apply environment, or
   anything between; `hardening.md` #6 states the trade-off). Configure it with

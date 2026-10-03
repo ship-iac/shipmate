@@ -640,7 +640,7 @@ def test_plan_workflow_at_the_contract_path_is_planned(monkeypatch, tmp_path):
 
 def test_a_renamed_plan_workflow_is_refused(monkeypatch, tmp_path):
     """This refusal makes the path load-bearing: no plan-run lookup matches it literally any
-    more, so a rename would merge green while doctor's filename-keyed probes went quiet. The
+    more, so a rename would merge green while doctor's `shipmate.yml` probe went quiet. The
     whole message is hand-written, and names only consequences still true now that the plan
     run id rides on each apply check and `actions/dispatch` aims every verb at this one file;
     a clause about plan-run discovery coming back here would be a falsehood."""

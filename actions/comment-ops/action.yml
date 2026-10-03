@@ -534,8 +534,8 @@ runs:
           --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
         echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
         # Each App-authored apply check on the head records its plan run, so these records are for
-        # this head by construction. An empty mapping means nothing planned it, which authorize
-        # refuses. Unlock consumes no plan, so its file stays {}.
+        # this head by construction; an empty mapping means nothing planned it (authorize refuses).
+        # Unlock consumes no plan and authorize ignores the file for it, so it stays {}.
         if [ "$SHIPMATE_VERB" != unlock ]; then
           head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
           GH_TOKEN="$APP_TOKEN" gh api --paginate \

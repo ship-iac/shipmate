@@ -10,10 +10,11 @@ A branch may carry its own workflow files. GitHub runs them, with whatever
 secrets that job's own environment bindings grant, on push — before a pull
 request exists, before review, and before `CODEOWNERS` applies.
 `SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way, so a branch-pushed
-workflow mints no App token and writes no gate status, App review, apply-check
-completion or apply dispatch (row 16; `docs/github-app.md` §Key-exposure
-boundary) — but the gate's verdict is still computed from artifacts the
-branch's own plan run produced (see "What none of this fixes").
+workflow mints no App token, writes no gate status, submits no App review,
+completes no apply check and sends no apply dispatch (row 16;
+`docs/github-app.md` §Key-exposure boundary) — but the gate's verdict is still
+computed from artifacts the branch's own plan run produced (see "What none of
+this fixes").
 
 Two things a branch-pushed workflow *can* still do, absent the rest of this
 checklist:
@@ -297,12 +298,12 @@ the other:
 
 Two things to know before relying on it:
 
-- **What bounds the exemption is the default branch.**
-  All three readers resolve the
-  file there (`CONTRACT.md` §Comment-ops names them), so the pull request that benefits from an exemption cannot also
-  grant it: adding an entry is a commit, under whatever your ruleset requires of
-  one, and a reviewer reads it as code. Anyone who can push a branch can still
-  *propose* the entry, so this bounds when it takes effect, not who may ask.
+- **What bounds the exemption is the default branch.** All three readers
+  resolve the file there (`CONTRACT.md` §Comment-ops names them), so the pull
+  request that benefits from an exemption cannot also grant it: adding an entry
+  is a commit, under whatever your ruleset requires of one, and a reviewer reads
+  it as code. Anyone who can push a branch can still *propose* the entry, so
+  this bounds when it takes effect, not who may ask.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
   environment is already ungated there, so `gated = false` on some narrows nothing. It
   can only relax an existing requirement, never create one: every environment
