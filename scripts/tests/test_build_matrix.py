@@ -345,7 +345,7 @@ def _run_main(
         monkeypatch.setenv(k, v)
     called = [] if called is None else called
 
-    def fake_compute(all_stacks=False, base="", require_env_tag=True):
+    def fake_compute(all_stacks=False, base=""):
         called.append((all_stacks, base))
         # The whole row `build_matrix` emits, `workload` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.

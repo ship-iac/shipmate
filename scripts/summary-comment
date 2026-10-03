@@ -100,12 +100,10 @@ def _fence_of(text):
     return "`" * max(3, longest + 1)
 
 
-def fence(text, f=None, lang="diff"):
-    """Wrap `text` in a backtick fence of length `f` (or a computed minimum
-    length). `lang` is the fence's language token (`diff` by default, for the
-    plan-diff coloring below); pass `lang=""` for a plain, language-less
-    fence."""
-    f = f or _fence_of(text)
+def fence(text, f, lang="diff"):
+    """Wrap `text` in the backtick fence `f`, which the caller sizes with `_fence_of`.
+    `lang` is the fence's language token (`diff` by default, for the plan-diff coloring
+    below); pass `lang=""` for a plain, language-less fence."""
     return f"{f}{lang}\n{text}\n{f}"
 
 

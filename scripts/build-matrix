@@ -170,11 +170,11 @@ def tagged_workloads(stacks_by_env, tags_by_stack):
     }
 
 
-def compute_cells(all_stacks=False, base="", require_env_tag=True):
+def compute_cells(all_stacks=False, base=""):
     """(`tagged_workloads` of the scan, cells). The map is returned beside the cells because a
     caller that scanned the whole tree feeds it to `env_config` as `tagged`, and re-scanning
     would be a second source that can disagree with this one."""
-    stacks_by_env, tags_by_stack = env_membership(all_stacks, base, require_env_tag)
+    stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
     cells = build_matrix(sorted(stacks_by_env), stacks_by_env, tags_by_stack, all_stacks)
     return tagged_workloads(stacks_by_env, tags_by_stack), cells
 

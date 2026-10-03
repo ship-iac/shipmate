@@ -59,7 +59,7 @@ def main():
     # reported first.
     ag.from_app([], app_id)
     waves = json.loads(os.environ["SHIPMATE_WAVES_JSON"])
-    check_runs = [json.loads(line) for line in sys.stdin if line.strip()]
+    check_runs = ag.parse_jsonl(sys.stdin)
     json.dump(snapshot(waves, check_runs, app_id), sys.stdout)
 
 

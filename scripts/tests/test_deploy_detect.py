@@ -158,7 +158,7 @@ def _run_main(
     monkeypatch.setattr(
         dd.bm,
         "compute_cells",
-        lambda all_stacks=False, base="", require_env_tag=True: (
+        lambda all_stacks=False, base="": (
             {c["environment"]: frozenset({c["workload"]} - {""}) for c in cells},
             cells,
         ),

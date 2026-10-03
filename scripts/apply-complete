@@ -49,6 +49,10 @@ import json
 import os
 import sys
 
+from _shipmate import _load
+
+ag = _load("apply-gate")
+
 SEP = "\x00"
 UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
 # The one channel that says "ask me again, and here is why". The caller greps this prefix out
@@ -81,7 +85,7 @@ def to_complete(snapshot, jobs):
 
 def main():
     snapshot = json.loads(os.environ["SHIPMATE_SNAPSHOT_JSON"])
-    jobs = [json.loads(line) for line in sys.stdin if line.strip()]
+    jobs = ag.parse_jsonl(sys.stdin)
     ids, unresolved, unmatched, unsuccessful = to_complete(snapshot, jobs)
     for cid in ids:
         print(cid)
