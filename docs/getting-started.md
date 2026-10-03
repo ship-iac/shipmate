@@ -140,11 +140,9 @@ It writes:
   the default branch, with the App key on `shipmate-engine` and any
   repository-level copy of that key deleted. An environment whose entry in the
   checkout's `.github/shipmate.toml` holds `shared = true` gets one bare `<env>`
-  instead. A shared environment is an apply environment, so it gets the same
-  default-branch policy — on a bare `<env>` that policy also refuses plan cells
-  whose pull request targets any other branch, and `shipmate doctor` says so
-  afterwards. Set `shared = true` only where every pull request targets the
-  default branch ([`hardening.md`](hardening.md) rows 8 and 17);
+  instead, under the same default-branch policy, so set it only where every
+  pull request targets the default branch ([`hardening.md`](hardening.md) rows 8
+  and 17, §7–9);
 - the `SHIPMATE_APP_ID` repository variable;
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App, once
   `.github/workflows/shipmate.yml` is on the default branch. Until then it reports
@@ -201,14 +199,13 @@ pair that does not exist, so tier 1 with only `<env>-plan` annotates every pull
 request with "GitHub Environment `<env>-apply` does not exist" until the apply
 tier is done.
 
-**One environment instead of two.** A logical env may share a single bare
-`<env>` between plan and apply: create `<env>` alone (no `-plan`, no `-apply`),
-and set `shared = true` in its `[environments.<env>]` entry of
-`.github/shipmate.toml`. It costs the reviewer gate and the OIDC subject split
-for that env. Those are not recoverable without splitting the environment again. Read
-[`hardening.md`](hardening.md) §6 and §7–9 for the full price before choosing
-it. Re-run `scripts/onboard` after adding or removing `shared = true`: onboard
-creates the bare `<env>` only for the entries it reads.
+**One environment instead of two.** To share a single bare `<env>` between
+plan and apply, set `shared = true` in its `[environments.<env>]` entry of
+`.github/shipmate.toml`, create `<env>` alone (no `-plan`, no `-apply`), and
+re-run `scripts/onboard` after adding or removing the key: onboard creates the
+bare `<env>` only for the entries it reads. It costs that env's reviewer gate
+and OIDC subject split until the environment is split again
+([`hardening.md`](hardening.md) §6 and §7–9).
 
 The key is the whole configuration: detect reads it from the default branch's
 table and stamps the binding on each cell, so a repository may share some envs
@@ -267,32 +264,18 @@ creates all of them, including `shipmate-engine` and its branch policy:
   identity = "dev"
   ```
 
-  Credentials live in `[identities.<name>]`, and an environment names one with
-  `identity`. Dotted keys are the canonical spelling: one header per identity
-  and per environment, the fields written as `aws.plan` inside it. Give the plan
-  and apply paths separate roles — the plan path is reachable from any branch
-  ([`hardening.md`](hardening.md) §7–9).
-  Top-level settings go above the first header: a scalar written below one lands
-  inside that table instead, which TOML accepts and the engine then refuses.
-  A repository that needs no cloud role at all declares `layout` and nothing
-  else.
+  Give the plan and apply paths separate roles: the plan path is reachable from
+  any branch ([`hardening.md`](hardening.md) §7–9).
+  [`../CONTRACT.md`](../CONTRACT.md) §Environment table has the schema,
+  including identities, per-workload roles, `workloads` and the order in which
+  to add one, and [`aws.md`](aws.md) §"The environment table" has a
+  per-workload example.
 
-  A role can vary by workload: an identity field written as a map keyed by
-  workload, or a role carrying `{workload}`, gives each stack the role of its
-  `workload/<name>` tag, matched exactly as written ([`aws.md`](aws.md) §"The
-  environment table" has the example). An environment naming such an identity
-  lists the workloads it admits in `workloads`; a tag outside the list is
-  refused at detect, and an untagged stack runs with no credentials. An
-  identity that does not vary gives every stack its role, and a `workloads`
-  list there only refuses tags outside it. An environment naming no identity
-  runs every stack credential-free, and its workload tags are inert. Merge a new
-  workload into `workloads` before the branch that tags the stack, and remove
-  one after the branch that drops the last tag. The OIDC subject names only the
-  environment (`environment:<env>-apply`, or the bare `<env>` when shared),
-  never the workload, so every workload role whose trust policy accepts that subject is
-  reachable from every apply cell of that environment, and for a shared
-  environment from every plan cell too. Choose how finely to
-  split environments before writing those trust policies
+  The OIDC subject names only the environment (`environment:<env>-apply`, or
+  the bare `<env>` when shared), never the workload, so every workload role
+  whose trust policy accepts that subject is reachable from every apply cell of
+  that environment, and for a shared environment from every plan cell too.
+  Choose how finely to split environments before writing those trust policies
   ([`hardening.md`](hardening.md) §7–9).
 
   An environment applies without an approving review through `gated = false`
@@ -300,19 +283,15 @@ creates all of them, including `shipmate-engine` and its branch policy:
   without an approving review").
 
   **A value can come from a GitHub variable.** Write `{ vars = "NAME" }` in
-  place of any string, list items included, and every run reads that
-  repository or organization variable instead:
-  `aws.apply = { vars = "PROD_APPLY_ROLE" }`. Changing the variable changes
-  the value with no pull request. Define the name as a repository or
-  organization variable; no cell's Environment is read. Never define it on
-  `shipmate-engine`: comment-ops and the plan summary bind that Environment, so
-  a variable of the same name there shadows the repository value in those two
-  jobs only. A resolved value is printed in job
-  outputs and logs, so reference variables only, never secrets. Run
-  `shipmate doctor` on the pull request that adds a reference; its own plan
-  reads the default branch's file and cannot catch an unset name.
-  [`../CONTRACT.md`](../CONTRACT.md) §Variable references has the rest,
-  including what a changed value does to a pending apply.
+  place of any string, list items included
+  (`aws.apply = { vars = "PROD_APPLY_ROLE" }`), and define the name as a
+  repository or organization variable. A resolved value is printed in job
+  outputs and logs, so reference variables only, never secrets. Never define it
+  on `shipmate-engine`: comment-ops and the plan summary bind that Environment,
+  so a variable of the same name there shadows the repository value in those
+  two jobs only. Run `shipmate doctor` on the pull request that adds a
+  reference. [`../CONTRACT.md`](../CONTRACT.md) §Variable references has the
+  scope, the shadowing rule and what a changed value does to a pending apply.
 
   **The table has to be on the default branch before your first plan run.** The
   engine reads it from the default branch, so a pull request that only adds the

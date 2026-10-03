@@ -100,17 +100,16 @@ default split naming (`<env>-plan` + `<env>-apply`). A logical env whose
 both paths instead (CONTRACT.md §Env model). On such an environment:
 
 - **Row 6 is forfeited.** A protection rule gates every job that binds the
-  environment, with no per-job filter, so a required reviewer or a wait timer
-  stalls the plan cells and the nightly drift run. The reviewer gate is not
-  relocated, it is gone, and rows 7 and 18 then place credentials on an
+  environment, with no per-job filter, so a wait timer stalls the plan cells
+  and the nightly drift run just as a reviewer does (§6). The reviewer gate is
+  not relocated, it is gone, and rows 7 and 18 then place credentials on an
   environment plan-time code reaches.
-- **Row 17 still works, conditionally.** A deployment branch policy naming the
-  default branch admits plan cells (they evaluate at the pull request's *base*
-  ref), the scheduled drift run and the apply, while still refusing a
-  branch-authored workflow that names the environment — the control row 17 exists
-  for. It holds only while every pull request targets a branch the policy names.
-  A repository using release branches must open the policy up, and then row 17 is
-  forfeited too.
+- **Row 17 still works, conditionally (§6).** A deployment branch policy naming
+  the default branch admits plan cells (they evaluate at the pull request's
+  *base* ref), the scheduled drift run and the apply, while still refusing a
+  branch-authored workflow that names the environment — the control row 17
+  exists for. A repository using release branches must open the policy up, and
+  then row 17 is forfeited too.
 
 ### Plan prerequisites
 
