@@ -10,7 +10,6 @@ import json
 import pathlib
 import subprocess
 import sys
-import textwrap
 
 import pytest
 import yaml
@@ -397,7 +396,7 @@ def test_run_passes_stdin_as_bytes_with_text_mode_off(monkeypatch):
     bytes a child observes: the translation only happens where `os.linesep` is
     `\r\n`, so an observed-bytes assertion is inert on the Linux runner CI uses.
 
-    Mutation: add `text=True` back to `_run`'s `subprocess.run` call.
+    Mutation: add `text=True` back to `_shipmate.run`'s `subprocess.run` call.
     """
     seen = {}
 
@@ -406,7 +405,7 @@ def test_run_passes_stdin_as_bytes_with_text_mode_off(monkeypatch):
         seen["kwargs"] = kwargs
         return subprocess.CompletedProcess(args, 0, b"out", b"")
 
-    monkeypatch.setattr(onboard.subprocess, "run", fake)
+    monkeypatch.setattr(subprocess, "run", fake)
     assert onboard._run(["gh", "secret", "set", "X"], stdin="-----BEGIN-----\nabc\n") == "out"
     assert seen["args"] == (["gh", "secret", "set", "X"],)
     assert seen["kwargs"] == {
@@ -1182,7 +1181,7 @@ def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path)
     rather than the absence of one name: a write added under any other name reddens here.
     `key.pem` is this harness's own input, not something the run created.
 
-    Mutation: write the checklist's table to `.github/shipmate.toml` from `_checklist`.
+    Mutation: write a `.github/shipmate.toml` from `_checklist`.
     """
     run_main(monkeypatch, tmp_path, {}, [])
     assert sorted(
@@ -2007,32 +2006,7 @@ todo          SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
     gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine
 
 todo          `.github/shipmate.toml`
-    A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`
-    table for every environment that needs a region or a cloud role. Under `layout
-    = "tf_vars"` every environment needs one, carrying a region, or the run refuses.
-    Tables are keyed by the logical environment name (`dev-eu`), never by its
-    `-plan` / `-apply` half. Top-level settings go above the first table header: a
-    scalar written below one lands inside that table instead.
-
-    `shared = true` in a table binds that environment as one bare `<name>` on both
-    paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key
-    from this checkout's file, so re-run it after adding or dropping one.
-
-      layout = "tf_vars"
-
-      [identities.dev]
-      aws.account = "<account>"
-      aws.plan    = "shipmate-plan"
-      aws.apply   = "shipmate-apply"
-
-      [environments.dev-eu]
-      region   = "eu-west-1"
-      identity = "dev"
-
-    Give the plan and apply paths separate roles: the plan role is reachable from any
-    branch (docs/hardening.md). Each cell reads its environment and credentials from
-    that file on the default branch, and a repository without one refuses (CONTRACT.md
-    §Environment table).
+    Add one: copy the example in docs/getting-started.md §Environments for this tier.
 
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
@@ -2542,33 +2516,6 @@ def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, caps
             "  b",
         ],
     )
-
-
-def test_the_checklist_toml_example_is_a_configuration_a_consumer_could_merge(capsys, tmp_path):
-    """The table item prints the first `.github/shipmate.toml` a new consumer writes, and
-    it is not a ```toml fence, so `test_docs_toml_parses.py` cannot see it. `docs/hardening.md`
-    shipped an example declaring `[environments.prod]` twice through a full documentation
-    sweep and a green suite, so the class is live.
-
-    The example is read back out of the printed block rather than retyped: a copy here would
-    be a second selector, free to drift from the thing it claims to check.
-
-    Mutations: print a second `[environments.dev-eu]` header in the template, the duplicate
-    form that shipped -- `tomllib` refuses it as `Cannot declare ... twice`; or write the
-    one-role `aws.plan.role = "shipmate-plan"` -- `validate_structure` refuses `role` as a
-    workload name.
-    """
-    onboard._checklist(ctx(root=tmp_path))
-    lines = capsys.readouterr().out.splitlines()
-    snippet = textwrap.dedent("\n".join(ln for ln in lines if ln.startswith("      ")))
-    # An extraction that finds nothing refuses as a missing layout, which reads as a defect
-    # in the template rather than in the extraction.
-    assert snippet.startswith('layout = "tf_vars"'), (
-        f"no TOML example found in the block: {snippet!r}"
-    )
-    assert snippet.count('aws.account = "<account>"') == 1
-    filled = snippet.replace("<account>", "111111111111")
-    ec.validate_structure(ec.parse_table(filled))
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):

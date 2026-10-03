@@ -33,12 +33,12 @@ import argparse
 import json
 import pathlib
 import re
-import subprocess
 import sys
 import textwrap
 import urllib.parse
 
-from _shipmate import REPO_RE, _load, scrub, utf8_output
+from _shipmate import REPO_RE, _load, utf8_output
+from _shipmate import run as _run
 
 ec = _load("env-config")
 
@@ -59,39 +59,8 @@ _APP_ID_RE = re.compile(r"[0-9]+")
 _BRANCH_RE = re.compile(r"[A-Za-z][A-Za-z0-9._/-]*")
 
 
-def _run(args, secrets=(), stdin=None):
-    r"""Run a `gh` or `git` invocation, returning stdout; raise on a nonzero exit.
-
-    `stdin` is sent as UTF-8 bytes rather than through `text=True`, which wraps
-    the child's stdin in a `TextIOWrapper` and rewrites every \n to
-    `os.linesep`. The App private key goes through here on its way to
-    `gh secret set`, and a CRLF-mangled PEM is not the key that was read.
-
-    `secrets` are the live credential values this call carries, scrubbed from
-    the failure message -- which carries the child's stderr, so that
-    `_gh_json_or_none` can swallow a 404 without printing it. Nothing else
-    prints, so a caller that discards the exception discards the noise too.
-    """
-    # args is built here, shell=False. The values interpolated into it passed a
-    # regex first: the app id in main(), the repository slug in
-    # _repo_facts() with the default branch, environment names in _derive_envs().
-    p = subprocess.run(  # noqa: S603
-        args,
-        capture_output=True,
-        input=None if stdin is None else stdin.encode("utf-8"),
-    )
-    if p.returncode != 0:
-        # gh's stderr is the only diagnosis a hand-run reconciler gets.
-        stderr = p.stderr.decode("utf-8", "replace").strip()
-        raise SystemExit(
-            f"command failed ({p.returncode}): {scrub(' '.join(args), secrets)}"
-            + (f"\n{scrub(stderr, secrets)}" if stderr else "")
-        )
-    return p.stdout.decode("utf-8", "replace")
-
-
 def _gh_json(path):
-    return json.loads(_run(["gh", "api", path]))
+    return ec.gh_json(path, _run)
 
 
 def _gh_json_or_none(path):
@@ -780,37 +749,6 @@ def _reconcile_shim(ctx):
         report("differs", filename, "differs beyond its pin, not overwritten")
 
 
-#: The table template a run with no `.github/shipmate.toml` prints. Every `<value>` is a
-#: placeholder to substitute, so no line carrying one runs as printed.
-_TABLE_TEMPLATE = [
-    "A `.github/shipmate.toml` declaring `layout`, plus an `[environments.<name>]`",
-    "table for every environment that needs a region or a cloud role. Under `layout",
-    '= "tf_vars"` every environment needs one, carrying a region, or the run refuses.',
-    "Tables are keyed by the logical environment name (`dev-eu`), never by its",
-    "`-plan` / `-apply` half. Top-level settings go above the first table header: a",
-    "scalar written below one lands inside that table instead.",
-    "",
-    "`shared = true` in a table binds that environment as one bare `<name>` on both",
-    "paths instead of the `<name>-plan` / `<name>-apply` pair. This script reads the key",
-    "from this checkout's file, so re-run it after adding or dropping one.",
-    "",
-    '  layout = "tf_vars"',
-    "",
-    "  [identities.dev]",
-    '  aws.account = "<account>"',
-    '  aws.plan    = "shipmate-plan"',
-    '  aws.apply   = "shipmate-apply"',
-    "",
-    "  [environments.dev-eu]",
-    '  region   = "eu-west-1"',
-    '  identity = "dev"',
-    "",
-    "Give the plan and apply paths separate roles: the plan role is reachable from any",
-    "branch (docs/hardening.md). Each cell reads its environment and credentials from",
-    "that file on the default branch, and a repository without one refuses (CONTRACT.md",
-    "§Environment table).",
-]
-
 #: GitHub's own search order for the file.
 _CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 
@@ -839,7 +777,11 @@ def _webhook_item(ctx):
 def _table_item(ctx):
     item = f"`{ec.CONFIG_PATH}`"
     if ctx["table"] is None:
-        return "todo", item, _TABLE_TEMPLATE
+        return (
+            "todo",
+            item,
+            ["Add one: copy the example in docs/getting-started.md §Environments for this tier."],
+        )
     try:
         ec.validate(ctx["table"], ctx["envs"])
     except SystemExit as e:

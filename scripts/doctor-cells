@@ -10,13 +10,17 @@ because dropping it would narrow the declared set silently.
 import json
 import pathlib
 
+from _shipmate import _load
+
+ag = _load("apply-gate")
+
 
 def main():
     runs = json.loads(pathlib.Path("plan_runs.json").read_text(encoding="utf-8"))
     for cj in pathlib.Path("doctor-cells").glob("*/**/cell.json"):
         try:
             cell = json.loads(cj.read_text(encoding="utf-8"))
-            name = f"apply / {cell['stack_path']} / {cell['environment']}"
+            name = ag.check_name(cell["stack_path"], cell["environment"])
         except (OSError, ValueError, KeyError, TypeError):
             continue
         if name not in runs:

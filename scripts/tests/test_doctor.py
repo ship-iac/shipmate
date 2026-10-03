@@ -35,11 +35,9 @@ _REF = f"?ref={_HEAD}"
 def _ctx(**over):
     ctx = {
         "repo": _REPO,
-        "owner": "o",
         "app_id": _APP_ID,
         "default_branch": _BRANCH,
         "envs": set(_ENVS),
-        "app_permissions_checked": False,
         "app_permission_error": "",
         "head_sha": _HEAD,
         "plan_run_ids": ["1281"],
@@ -1368,18 +1366,6 @@ def test_current_sha_pin_silent(monkeypatch):
     assert doctor._pin_warnings(_ctx()) == []
 
 
-def test_self_referencing_pin_ignored(monkeypatch):
-    # The engine repository is also a consumer of its own actions, whose E2E workflows
-    # call them by local path or by slug. With `engine_repo == repo` the self-pin
-    # exclusion is load-bearing rather than shadowed by the engine-slug filter.
-    responses = {
-        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
-        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: {_REPO}/actions/setup@{_SHA}\n"),
-    }
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._pin_warnings(_ctx(engine_repo=_REPO)) == []
-
-
 def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
     """Findings worded about the engine ("a moving ref lets the engine change under your deploy
     credentials", "re-pin to pick up fixes") are true only of shipmate's own repository. Another
@@ -1615,18 +1601,13 @@ def test_one_line_flattens_and_pins_the_truncation_boundary():
     assert len(doctor._one_line("é" * 300, limit=120)) == 120  # Code points, not bytes.
 
 
-def test_app_permission_probe_skipped_when_not_attempted():
-    assert doctor._app_permission_warnings(_ctx(app_permissions_checked=False)) == []
-
-
 def test_app_permission_ok_silent():
-    ctx = _ctx(app_permissions_checked=True, app_permission_error="")
+    ctx = _ctx(app_permission_error="")
     assert doctor._app_permission_warnings(ctx) == []
 
 
 def test_app_permission_failure_warned():
     ctx = _ctx(
-        app_permissions_checked=True,
         app_permission_error="422 permissions requested are not granted\nsecond line",
     )
     out = doctor._app_permission_warnings(ctx)
@@ -2308,16 +2289,6 @@ def test_harvest_never_emits_a_dangling_section_header():
     assert lines == [header_fits, row_fits]
     assert dropped == 1
     assert not any("zzz-toolong" in line for line in lines)
-
-
-def test_emit_section_guards_against_an_empty_row_list():
-    # harvest_sections never produces an empty group (setdefault+append), but
-    # _emit_section indexes rendered[0] -- a latent IndexError for any future
-    # caller that does pass one. Never raises; adds nothing, drops nothing.
-    lines = []
-    used, added, dropped = doctor._emit_section(lines, "empty-check", [], 0, 1000)
-    assert (used, added, dropped) == (0, 0, 0)
-    assert lines == []
 
 
 def test_doctor_marker_matches_action_upsert():
@@ -4918,7 +4889,7 @@ needs = ["prod"]
 needs = ["dev"]
 """
 #: Hand-written whole, like `_MISPLACED_FINDING`: the probe's framing plus
-#: `validate_env_order`'s cycle message with the `::error::` prefix stripped.
+#: `_check_cycle`'s message, via `validate_structure`, with the `::error::` prefix stripped.
 _CYCLIC_FINDING = (
     doctor.WARNING,
     "`.github/shipmate.toml` at the commit under examination is not valid: needs is "

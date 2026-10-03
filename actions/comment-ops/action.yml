@@ -385,8 +385,6 @@ runs:
         SHIPMATE_CELLS_DIR: doctor-cells
         SHIPMATE_HEAD_SHA: ${{ steps.gatherdoc.outputs.head_sha }}
         SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}
-        SHIPMATE_ANNOTATIONS_DIR: ann
-        SHIPMATE_CHECK_IDS: check-ids.tsv
         # `|| 'true'`: this step's `if:` does not key on gatherdoc's outcome, so a red or
         # skipped gatherdoc leaves the output unset. An empty string is falsy here, so the
         # fallback fires and the harvest reads as failed rather than as false. A real 'false'
@@ -396,7 +394,6 @@ runs:
         # no harvest at all and SHIPMATE_HARVEST_FAILED already says so, and adding "some runs
         # may still be going" on top of that would be noise.
         SHIPMATE_HARVEST_PENDING: ${{ steps.gatherdoc.outputs.harvest_pending }}
-        SHIPMATE_APP_PERMISSIONS_CHECKED: 'true'
         # Workflow token for the pin probe's cross-repo release read: the App token is
         # scoped to the consumer repo.
         SHIPMATE_PUBLIC_TOKEN: ${{ github.token }}

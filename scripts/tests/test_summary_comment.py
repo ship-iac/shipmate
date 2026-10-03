@@ -95,18 +95,18 @@ def test_diff_map_resumes_sign_mapping_after_heredoc_terminator():
 
 def test_fence_grows_past_backtick_runs_in_plan_text():
     text = "x = ```code```"
-    fenced = sc.fence(text)
+    fenced = sc.fence(text, sc._fence_of(text))
     assert fenced.startswith("````diff\n")
     assert fenced.endswith("\n````")
 
 
 def test_fence_minimum_three_backticks():
-    assert sc.fence("no ticks").startswith("```diff\n")
+    assert sc.fence("no ticks", sc._fence_of("no ticks")).startswith("```diff\n")
 
 
 def test_fence_lang_param_plain_vs_default_diff():
-    assert sc.fence("x") == "```diff\nx\n```"
-    assert sc.fence("x", lang="") == "```\nx\n```"
+    assert sc.fence("x", sc._fence_of("x")) == "```diff\nx\n```"
+    assert sc.fence("x", sc._fence_of("x"), lang="") == "```\nx\n```"
 
 
 def test_emoji_verdicts():

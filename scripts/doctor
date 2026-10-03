@@ -44,6 +44,7 @@ Probes:
 - GitHub App installation permission drift.
 """
 
+import collections
 import contextlib
 import json
 import os
@@ -357,6 +358,22 @@ def _environment_warnings(ctx):
     return [(WARNING, _missing(n, env, r)) for env, n, r in bound if n not in names]
 
 
+def _probed_bindings(ctx):
+    """The `_bound_names` rows whose environment exists; `[]` when the probe is skipped.
+    Each skip and each absent environment is `_environment_warnings`' finding.
+
+    With no declared env nothing is read: listing the environments anyway would let a
+    repository whose token cannot list them collect a "could not verify" degrade for a probe
+    that had no work to do. Existence comes from `_existing_env_names`."""
+    if not ctx["envs"] or bm.ec.interpreter_refusal():
+        return []
+    existing = _existing_env_names(ctx)
+    bound = _bound_names(ctx)
+    if bound is None:
+        return []
+    return [(env, name, role) for env, name, role in bound if name in existing]
+
+
 def _env_shape_findings(name, env, data, role):
     """One environment's protection-shape findings, from its already-read
     "Get an environment" payload."""
@@ -441,29 +458,14 @@ def _env_shape_findings(name, env, data, role):
 
 def _env_protection_warnings(ctx):
     """Protection shape per environment, checked live, with the role each
-    environment plays taken from `_bound_names`. An approval-type protection rule on
+    environment plays taken from `_probed_bindings`. An approval-type protection rule on
     a PLAN env — a required reviewer, or a wait timer — stops plan jobs from
     starting when they should: no error, only a stalled matrix — the hardest
     shipmate misconfiguration to diagnose. An APPLY env with no approval
     rule is the mirror problem: pre-merge applies to it are unreviewed. A SHARED
-    env is both at once, so it can have neither.
-
-    Existence comes from `_existing_env_names`; see its docstring."""
+    env is both at once, so it can have neither."""
     out = []
-    if not ctx["envs"]:
-        # Nothing to probe, so nothing to read: listing the environments anyway would let a
-        # repository whose token cannot list them collect a "could not verify" degrade for a probe
-        # that had no work to do. The skipped-probe statement lives in `_environment_warnings`.
-        return out
-    if bm.ec.interpreter_refusal():
-        return out  # ENV_PROBES_INTERPRETER_REFUSED is `_environment_warnings`' finding
-    existing = _existing_env_names(ctx)
-    bound = _bound_names(ctx)
-    if bound is None:
-        return out  # DEFAULT_TABLE_UNREADABLE is `_environment_warnings`' finding
-    for env, name, role in bound:
-        if name not in existing:
-            continue  # existence is _environment_warnings' finding
+    for env, name, role in _probed_bindings(ctx):
         try:
             data = _gh_json(f"repos/{ctx['repo']}/environments/{name}")
         except (Exception, SystemExit) as e:  # noqa: BLE001 - degrade, see docstring
@@ -496,7 +498,7 @@ def _engine_environment_warnings(ctx):
     declare -- so its warnings say what was seen and leave the repository
     secret conditional.
 
-    Existence comes from `_existing_env_names`; see its docstring."""
+    Existence comes from `_existing_env_names`."""
     repo, default_branch = ctx["repo"], ctx["default_branch"]
     if _ENGINE_ENV not in _existing_env_names(ctx):
         return [
@@ -702,24 +704,15 @@ def _plan_env_secret_warnings(ctx):
     coupling them would let one probe's failure silence the other.
 
     A docs-only pull request declares no environment and reads nothing.
-    Existence comes from `_existing_env_names`; see its docstring.
+    Rows come from `_probed_bindings`.
     Scope is the plan-side environment of each env -- `<env>-plan`, or the
     bare `<env>` when shared.
     Never `<env>-apply`: that is where control 7 *requires* credentials, and
     `shipmate-engine` holds the App key by design.
     """
-    # An interpreter refusal is `_environment_warnings`' finding (ENV_PROBES_INTERPRETER_REFUSED).
-    if not ctx["envs"] or bm.ec.interpreter_refusal():
-        return []
-    existing = _existing_env_names(ctx)
-    bound = _bound_names(ctx)
-    if bound is None:
-        return []  # DEFAULT_TABLE_UNREADABLE is `_environment_warnings`' finding
     out = []
-    for _env, name, role in bound:
-        # Plan-side only: `<env>-apply` is where control 7 requires credentials. A missing
-        # environment is `_environment_warnings`' finding.
-        if role not in ("plan", "shared") or name not in existing:
+    for _env, name, role in _probed_bindings(ctx):
+        if role not in ("plan", "shared"):
             continue
         try:
             names, total = _env_secret_names(ctx, name)
@@ -884,11 +877,9 @@ def _pins_in_text(text, fname, ctx, seen):
     none of that is true of, say, another org's shared lint action, which holds
     no deploy credentials and has its own release cadence."""
     out = []
-    repo, engine = ctx["repo"], ctx["engine_repo"]
+    engine = ctx["engine_repo"]
     for m in _PIN.finditer(text):
         slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
-        if slug == repo:
-            continue  # a repo pinning its own actions is not an engine pin
         if slug != engine:
             continue  # a third party's action is not shipmate's to report on
         if not _SHA40.fullmatch(ref):
@@ -1026,6 +1017,10 @@ def _on_block(text):
     return None, []
 
 
+def _indent(line):
+    return len(line) - len(line.lstrip())
+
+
 def _event_lines(inline, block):
     """The lines of an `on:` value that can name an event: the inline remainder,
     plus — for a block mapping or sequence — only its shallowest children.
@@ -1035,11 +1030,11 @@ def _event_lines(inline, block):
     content = [ln for ln in [inline, *block] if ln.strip()]
     if content and content[0].lstrip()[:1] in ("[", "{"):
         return content
-    indents = [len(ln) - len(ln.lstrip()) for ln in block if ln.strip()]
+    indents = [_indent(ln) for ln in block if ln.strip()]
     if not indents:
         return [inline]
     top = min(indents)
-    return [inline] + [ln for ln in block if ln.strip() and len(ln) - len(ln.lstrip()) == top]
+    return [inline] + [ln for ln in block if ln.strip() and _indent(ln) == top]
 
 
 def declares_pull_request_target(text):
@@ -1127,9 +1122,9 @@ def _fork_trigger_warnings(ctx):
     that does not run binds no environment and is handed no token. `_routing_warnings` is
     what watches those seven `if:` expressions.
 
-    Reads the consumer's workflow files at the commit under examination, the
-    same way and for the same reason as the pin probe (`_contents_ref`): a pull
-    request that *removes* the trigger must not still be reported for it."""
+    Reads the consumer's workflow files at the commit under examination
+    (`_contents_ref`): a pull request that *removes* the trigger must not still
+    be reported for it."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [FORK_TRIGGER_NO_COMMIT]
@@ -1189,18 +1184,14 @@ def _call_region(text, pattern):
     for i, line in enumerate(lines):
         if not pattern.search(line):
             continue
-        depth = len(line) - len(line.lstrip())
+        depth = _indent(line)
         start = next(
-            (
-                j
-                for j in range(i - 1, -1, -1)
-                if lines[j].strip() and len(lines[j]) - len(lines[j].lstrip()) < depth
-            ),
+            (j for j in range(i - 1, -1, -1) if lines[j].strip() and _indent(lines[j]) < depth),
             i,
         )
         region = [lines[start]]
         for nxt in lines[start + 1 :]:
-            if nxt.strip() and len(nxt) - len(nxt.lstrip()) < depth:
+            if nxt.strip() and _indent(nxt) < depth:
                 break
             region.append(nxt)
         return "\n".join(region)
@@ -1219,11 +1210,11 @@ def _job_key(region, key):
     broken one, which is the safe direction, and the published file writes one line."""
     lines = region.splitlines()
     body = [ln for ln in lines[1:] if ln.strip()]
-    depth = min((len(ln) - len(ln.lstrip()) for ln in body), default=0)
+    depth = min((_indent(ln) for ln in body), default=0)
     values = [
         m.group("value").strip()
         for ln in body
-        if len(ln) - len(ln.lstrip()) == depth
+        if _indent(ln) == depth
         for m in [_JOB_KEY.match(ln)]
         if m and m.group("key") == key
     ]
@@ -1259,10 +1250,9 @@ def _shim_job_name_warnings(ctx):
     miss — so the failure is a silently degraded comment, not an error anyone
     sees.
 
-    Reads the consumer's workflow files at the commit under examination, the
-    same way and for the same reason as the pin, fork-trigger and dispatch
-    probes (`_contents_ref`): a pull request that renames the job must not still
-    be reported for the old name."""
+    Reads the consumer's workflow files at the commit under examination
+    (`_contents_ref`): a pull request that renames the job must not still be
+    reported for the old name."""
     return _shipmate_yml_warnings(
         ctx, _shim_job_name_finding, SHIM_JOB_NO_COMMIT, SHIM_JOB_UNREADABLE
     )
@@ -1321,9 +1311,6 @@ def _input_key(name):
 #: omits is `Required input not provided` (HTTP 422, no run) — which is why every input the
 #: file declares beside `verb`, a consumer's own included, must be optional.
 _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
-# One selector per input from one template: two spellings of "is this input declared" disagree
-# eventually.
-_INPUT_KEYS = {name: _input_key(name) for name in _DISPATCH_INPUTS}
 #: The whole option list `actions/dispatch` and the `drift` job between them can send, compared
 #: in order and as parsed options: a list missing `unlock` refuses that verb, one carrying an
 #: extra offers a verb no `if:` selects, and a text comparison would report
@@ -1348,10 +1335,9 @@ def _dispatch_wiring_warnings(ctx):
     """Every commented verb dispatches the consumer's own `shipmate.yml`, and every way
     that file can be unready for it is invisible until someone comments.
 
-    Reads the consumer's workflow files at the commit under examination, the
-    same way and for the same reason as the pin, fork-trigger and shim-job-name
-    probes (`_contents_ref`): a pull request that *adds* the trigger must not
-    still be reported for lacking it."""
+    Reads the consumer's workflow files at the commit under examination
+    (`_contents_ref`): a pull request that *adds* the trigger must not still be
+    reported for lacking it."""
     return _shipmate_yml_warnings(
         ctx, _dispatch_wiring_finding, DISPATCH_WIRING_NO_COMMIT, DISPATCH_WIRING_UNREADABLE
     )
@@ -1375,10 +1361,10 @@ def _input_block(on_text, input_name):
         m = _input_key(input_name).search(line)
         if not m:
             continue
-        depth = len(line) - len(line.lstrip())
+        depth = _indent(line)
         body = [line[m.end() :]]
         for nxt in lines[i + 1 :]:
-            if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= depth:
+            if nxt.strip() and _indent(nxt) <= depth:
                 break
             body.append(nxt)
         return body
@@ -1395,7 +1381,7 @@ def _declared_inputs(on_text):
     four back by name.
     """
     body = _input_block(on_text, "inputs") or []
-    keys = [(len(b) - len(b.lstrip()), m) for b in body[1:] if (m := _INPUT_NAME.match(b))]
+    keys = [(_indent(b), m) for b in body[1:] if (m := _INPUT_NAME.match(b))]
     depth = min((d for d, _ in keys), default=0)
     return [m.group(1) for d, m in keys if d == depth]
 
@@ -1422,7 +1408,7 @@ def _dispatch_input_findings(on_text, name):
     `scripts/dispatch-body` names that the file does not declare, a `verb` offering the wrong
     option list, and an input other than `verb` declared required."""
     out = []
-    missing = [n for n in _DISPATCH_INPUTS if not _INPUT_KEYS[n].search(on_text)]
+    missing = [n for n in _DISPATCH_INPUTS if not _input_key(n).search(on_text)]
     if missing:
         out.append(
             (
@@ -1498,7 +1484,7 @@ def _dispatch_wiring_finding(text, name):
     The three input findings are examined only where the trigger itself is there: without it
     nothing is dispatched at all, and three further remedies below that one bury it.
 
-    `_DISPATCH_TRIGGER` and the `_INPUT_KEYS` are unanchored because ABSENCE is
+    `_DISPATCH_TRIGGER` and `_input_key` are unanchored because ABSENCE is
     the finding here: a shape an anchor misses would report a correctly wired
     file as declaring no trigger at all.
     `on: { workflow_dispatch: { inputs: { pr_number: … } } }` is legal YAML, and
@@ -1641,9 +1627,8 @@ def _routing_warnings(ctx):
     Nothing else observes this. `actions/dispatch` sees an accepted dispatch; the run page
     shows six skipped jobs beside the one that ran, which is what a healthy run also shows.
 
-    Reads the consumer's workflow files at the commit under examination, the same way and for
-    the same reason as the pin, fork-trigger, shim-job-name and dispatch probes
-    (`_contents_ref`): a pull request that FIXES an expression must not still be reported."""
+    Reads the consumer's workflow files at the commit under examination (`_contents_ref`): a
+    pull request that FIXES an expression must not still be reported."""
     return _shipmate_yml_warnings(ctx, _routing_finding, ROUTING_NO_COMMIT, ROUTING_UNREADABLE)
 
 
@@ -1712,15 +1697,11 @@ def _roles_notice(env, rows, budget):
     """One environment's roles notice, its items cut to fit `budget` and counted when it
     alone exceeds it."""
     head = f"`{env}` resolves these roles at the commit under examination: "
-    text = head + "; ".join(rows) + "."
-    if len(text) <= budget:
-        return text
-    shown = len(rows)
-    while (
-        shown and len(head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more.") > budget
-    ):
+    text, shown = head + "; ".join(rows) + ".", len(rows)
+    while len(text) > budget and shown:
         shown -= 1
-    return head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more."
+        text = head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more."
+    return text
 
 
 def _config_roles(table):
@@ -1925,7 +1906,7 @@ def _app_permission_warnings(ctx):
     error or rate limit produces the exact same failed-mint outcome, so the
     finding is worded as a hedge rather than a claim. Skipped where no such
     attempt was made."""
-    if not ctx["app_permissions_checked"] or not ctx["app_permission_error"]:
+    if not ctx["app_permission_error"]:
         return []
     return [
         (
@@ -1989,13 +1970,8 @@ def warnings(ctx):
     return out
 
 
-def _gha_escape(s):
-    """GHA workflow-command data escaping (percent first, or it double-escapes)."""
-    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-
-
 def render_annotations(findings):
-    return [f"::{lvl} title={DOCTOR_TITLE}::{_gha_escape(text)}" for lvl, text in findings]
+    return [f"::{lvl} title={DOCTOR_TITLE}::{sc.command_data(text)}" for lvl, text in findings]
 
 
 def _declared_envs(cells_dir):
@@ -2024,11 +2000,9 @@ def ctx_from_env():
     envs = _declared_envs(cells)
     return {
         "repo": repo,
-        "owner": repo.split("/")[0],
         "app_id": os.environ["SHIPMATE_APP_ID"],
         "default_branch": os.environ["SHIPMATE_DEFAULT_BRANCH"],
         "envs": envs,
-        "app_permissions_checked": os.environ.get("SHIPMATE_APP_PERMISSIONS_CHECKED") == "true",
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
         "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
         # The engine's own slug, passed in by the calling step from
@@ -2038,8 +2012,8 @@ def ctx_from_env():
         # A set, not one id: each cell's plan run comes from that cell's own
         # apply check, so one head's cells can come from several plan runs.
         "plan_run_ids": os.environ.get("SHIPMATE_PLAN_RUN_IDS", "").split(),
-        "annotations_dir": os.environ.get("SHIPMATE_ANNOTATIONS_DIR", "ann"),
-        "check_ids_path": os.environ.get("SHIPMATE_CHECK_IDS", "check-ids.tsv"),
+        "annotations_dir": "ann",
+        "check_ids_path": "check-ids.tsv",
         "harvest_failed": os.environ.get("SHIPMATE_HARVEST_FAILED") == "true",
         "harvest_pending": os.environ.get("SHIPMATE_HARVEST_PENDING") == "true",
     }
@@ -2218,13 +2192,11 @@ def _truncated_checks(annotations):
     here rather than on the already-filtered harvest_sections output, since
     dropping notices and DOCTOR_TITLE rows first would both under- and
     over-count the real GitHub-side truncation."""
-    counts = {}
-    for a in annotations:
-        level = a.get("annotation_level")
-        if level not in HARVEST_LEVELS:
-            continue
-        key = (a.get("check_name") or "(unnamed check)", level)
-        counts[key] = counts.get(key, 0) + 1
+    counts = collections.Counter(
+        (a.get("check_name") or "(unnamed check)", a.get("annotation_level"))
+        for a in annotations
+        if a.get("annotation_level") in HARVEST_LEVELS
+    )
     return {name for (name, _level), n in counts.items() if n >= ANNOTATION_CAP}
 
 
@@ -2238,10 +2210,9 @@ def _render_annotation_row(a):
 def _emit_section(lines, name, rows, used, budget):
     """Append one check's header + as many of its rows as fit in the
     remaining budget. The header is emitted only when at least its first row
-    also fits -- otherwise it would dangle with no children.
+    also fits -- otherwise it would dangle with no children. `rows` is never
+    empty: `harvest_sections` creates a group only by appending to it.
     Returns (new_used, rows_added, rows_dropped)."""
-    if not rows:
-        return used, 0, 0  # rendered[0] below would IndexError
     header = f"- **{_md_escape(_one_line(name, 120))}**"
     rendered = [_render_annotation_row(a) for a in rows]
     if used + len(header) + 1 + len(rendered[0]) + 1 > budget:
@@ -2263,13 +2234,9 @@ def _harvest_lines(sections, annotations, budget):
     """Render harvest rows within `budget` chars. Truncatable, unlike the
     settings-probe section: dropped rows stay recoverable from the run logs.
     Returns (lines, dropped_count)."""
-    truncated_checks = _truncated_checks(annotations)
     lines, used, dropped, over = [], 0, 0, False
-    any_truncated = False
     for name in sorted(sections):
         rows = sections[name]
-        if name in truncated_checks:
-            any_truncated = True
         if over:
             dropped += len(rows)
             continue
@@ -2277,7 +2244,7 @@ def _harvest_lines(sections, annotations, budget):
         if added == 0 or section_dropped:
             over = True
         dropped += section_dropped
-    if any_truncated:
+    if _truncated_checks(annotations) & sections.keys():
         lines.append(
             "- _GitHub keeps at most 10 annotations per level per step, so this list "
             "may be truncated. See the run logs for the full set._"
@@ -2471,4 +2438,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    sys.exit(0)

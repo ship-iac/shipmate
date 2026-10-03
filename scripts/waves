@@ -56,8 +56,8 @@ def stack_levels(deps):
     """`levels` over the stack run-graph, or `SystemExit` naming the cycle.
 
     Every stack-graph sort goes through here, so no detect reaches a raw
-    `CycleError`. The env graph sorts with `levels` directly, after
-    `env-config.validate_env_order` has refused its cycles with its own message."""
+    `CycleError`. The env graph sorts with `levels` directly: `env-config.validate` has
+    already refused its cycles with its own message."""
     try:
         return levels(deps)
     except CycleError as e:

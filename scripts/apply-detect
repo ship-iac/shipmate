@@ -34,10 +34,6 @@ ag = _load("apply-gate")
 az = _load("authorize")
 
 
-def _check_name(stack, env):
-    return f"apply / {stack} / {env}"
-
-
 def paths_with_checks(env, candidate_paths, check_names):
     """The candidates whose `apply / <path> / <env>` check is on the head.
 
@@ -48,7 +44,7 @@ def paths_with_checks(env, candidate_paths, check_names):
     from the stack PATH, so the exact path is what comes back; nothing here
     resolves a slug, which is what let two paths slugging alike apply each
     other's plan."""
-    return [p for p in candidate_paths if _check_name(p, env) in check_names]
+    return [p for p in candidate_paths if ag.check_name(p, env) in check_names]
 
 
 def cells_for_env(env, paths, tags_by_stack):
@@ -96,12 +92,12 @@ def with_plan_runs(cells, plan_runs, plan_hashes):
     named = [
         (
             c,
-            plan_runs.get(_check_name(c["stack"], c["environment"])),
-            plan_hashes.get(_check_name(c["stack"], c["environment"])),
+            plan_runs.get(ag.check_name(c["stack"], c["environment"])),
+            plan_hashes.get(ag.check_name(c["stack"], c["environment"])),
         )
         for c in cells
     ]
-    missing = [_check_name(c["stack"], c["environment"]) for c, run, _ in named if not run]
+    missing = [ag.check_name(c["stack"], c["environment"]) for c, run, _ in named if not run]
     if missing:
         raise SystemExit(
             f"::error::apply aborted: no plan run recorded for {', '.join(missing)}: the "
@@ -110,7 +106,7 @@ def with_plan_runs(cells, plan_runs, plan_hashes):
             "request, then apply again; if that pull request has already merged, a new pull "
             "request touching them plans and applies them afresh."
         )
-    unbound = [_check_name(c["stack"], c["environment"]) for c, _, digest in named if not digest]
+    unbound = [ag.check_name(c["stack"], c["environment"]) for c, _, digest in named if not digest]
     if unbound:
         raise SystemExit(
             f"::error::apply aborted: no plan-text digest recorded for {', '.join(unbound)}: "
@@ -123,7 +119,7 @@ def with_plan_runs(cells, plan_runs, plan_hashes):
 
 
 def filter_pending(cells, completed_names):
-    return [c for c in cells if _check_name(c["stack"], c["environment"]) not in completed_names]
+    return [c for c in cells if ag.check_name(c["stack"], c["environment"]) not in completed_names]
 
 
 def _check_run_lines(repo, head_sha):
@@ -150,7 +146,7 @@ def apply_check_names(check_run_lines, app_id):
     Not `pending_apply_names`: a completed run with a failing conclusion is not
     pending, but its cell must stay re-appliable, so the done cells are dropped
     by `filter_pending` (apply-gate's success/neutral predicate) instead."""
-    return set(ag.latest_by_name(ag.from_app(ag.parse_jsonl(check_run_lines), app_id)))
+    return set(ag.latest_by_name(ag.app_runs(check_run_lines, app_id)))
 
 
 def pending_apply_names(repo, head_sha):
@@ -163,9 +159,7 @@ def pending_apply_names(repo, head_sha):
     done being run whatever its verdict. Both would otherwise enrol a cell nobody
     asked about into a force-unlock. Built on the same apply-gate primitives so
     "newest run per name" and "authored by our App" have one definition each."""
-    runs = ag.from_app(
-        ag.parse_jsonl(_check_run_lines(repo, head_sha)), os.environ["SHIPMATE_APP_ID"]
-    )
+    runs = ag.app_runs(_check_run_lines(repo, head_sha), os.environ["SHIPMATE_APP_ID"])
     return {n for n, r in ag.latest_by_name(runs).items() if r["status"] != "completed"}
 
 
@@ -296,7 +290,7 @@ def run_unlock(repo, env, head):
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
     names = pending_apply_names(repo, head)
     in_env = stacks_by_env.get(env, [])
-    queued = [s for s in in_env if _check_name(s, env) in names]
+    queued = [s for s in in_env if ag.check_name(s, env) in names]
     pending = bm.build_matrix([env], {env: queued}, tags_by_stack)
     table = bm.env_config(pending, bm.tagged_workloads(stacks_by_env, tags_by_stack))
     pending = bm.stamp_rows(pending, table, "apply")

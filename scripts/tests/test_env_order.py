@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 from _loader import load_script
 
@@ -10,13 +12,14 @@ def _boom(*args, **kwargs):
 
 def test_the_level_computation_reads_nothing(monkeypatch):
     """env-order's own Terramate evaluation is gone: the ordering map arrives as an argument
-    from the mapping the operation already loaded. The shared `_run` wrapper raises -- the
-    realistic regression is this module fetching its own order through it, not a
-    hand-rolled `subprocess` call in a module that imports no such thing.
+    from the mapping the operation already loaded. `subprocess.run` raises, which every
+    reader in the engine reaches through env-config's `_run` wrapper; the repository is set
+    so a reader gets as far as its first subprocess instead of a `KeyError`.
 
-    Mutation: add `ec.read_table()` to `env_levels` -- `_boom` fires.
+    Mutation: add `_load("env-config").read_table()` to `env_levels` -- `_boom` fires.
     """
-    monkeypatch.setattr(eo.ec, "_run", _boom)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setattr(subprocess, "run", _boom)
     assert eo.env_levels({"prod": ["dev-eu"]}, ["dev-eu", "prod"]) == {"dev-eu": 0, "prod": 1}
 
 
@@ -47,36 +50,31 @@ def test_empty_order_all_level_zero():
     assert lv == {"dev-eu": 0, "dev-us": 0}
 
 
-def test_cycle_raises():
-    """A cyclic order has no levels, and `env_levels` refuses it — now through
-    `validate_env_order`, which reaches the same `graphlib` verdict one layer earlier so
-    `validate_structure` (and so `shipmate doctor`) reports it before the file merges.
-
-    The refusal is matched on its message, not on `SystemExit` alone: `env_levels` also
-    exits on a malformed order shape, and that is a different property.
-
-    Mutation: delete the `TopologicalSorter` block from `_check_cycle` -- `wv.levels`
-    then raises `CycleError`, which is a `ValueError` and not a `SystemExit`.
-    """
-    with pytest.raises(SystemExit, match="needs is cyclic: a -> b -> a"):
-        eo.env_levels({"a": ["b"], "b": ["a"]}, ["a", "b"])
-
-
-def test_guard_max_env_levels_ok():
-    eo.guard_max_env_levels({"a": 0, "b": 3})  # 4 levels 0..3, within cap
-
-
-def test_guard_max_env_levels_exceeded():
-    with pytest.raises(SystemExit):
-        eo.guard_max_env_levels({"a": 4})
+def test_waves_by_env_level_places_an_env_at_the_last_level_within_the_cap():
+    """Mutations: `lv >= MAX_ENV_LEVELS - 1` in `waves_by_env_level`'s cap check -- the
+    deepest permitted level refuses; bucketing the cell into level 0 as well -- level 0's
+    `wave0` is no longer empty."""
+    cell = {"stack": "stacks/app", "environment": "prod"}
+    out = eo.waves_by_env_level([cell], {"stacks/app": set()}, {"prod": eo.MAX_ENV_LEVELS - 1})
+    empty = {
+        "wave0": [],
+        "wave1": [],
+        "wave2": [],
+        "wave3": [],
+        "wave4": [],
+        "wave5": [],
+        "wave6": [],
+        "wave7": [],
+    }
+    assert out == [empty, empty, empty, {**empty, "wave0": [cell]}]
 
 
 def test_waves_by_env_level_refuses_an_env_beyond_the_cap():
     """The guard is inside the shared function, so no caller can omit it and drop an
     over-deep env's cells out of every `range(MAX_ENV_LEVELS)` bucket.
 
-    Mutation: delete `guard_max_env_levels(levels)` from `waves_by_env_level` -- the call
-    returns MAX_ENV_LEVELS empty wave dicts instead of raising.
+    Mutation: delete the `if over:` refusal from `waves_by_env_level` -- the call returns
+    MAX_ENV_LEVELS empty wave dicts instead of raising.
     """
     with pytest.raises(SystemExit, match="env order spans"):
         eo.waves_by_env_level(
@@ -98,23 +96,6 @@ def test_waves_by_env_level_refuses_a_cyclic_stack_graph():
             {"prod": 0},
         )
     assert str(exc.value).startswith("::error::dependency cycle in the Terramate stack run-graph")
-
-
-def test_env_levels_rejects_string_predecessor():
-    # HCL author typo, "dev-eu" instead of ["dev-eu"]: it must not silently iterate the string
-    # character by character.
-    with pytest.raises(SystemExit):
-        eo.env_levels({"dev-us": "dev-eu"}, ["dev-eu", "dev-us"])
-
-
-def test_env_levels_rejects_non_dict_order():
-    with pytest.raises(SystemExit):
-        eo.env_levels(["dev-us", "dev-eu"], ["dev-eu", "dev-us"])
-
-
-def test_env_levels_rejects_non_str_predecessor_element():
-    with pytest.raises(SystemExit):
-        eo.env_levels({"dev-us": ["dev-eu", 123]}, ["dev-eu", "dev-us"])
 
 
 def test_waves_by_env_level_buckets_and_orders():
@@ -183,8 +164,3 @@ def test_blocked_envs_unrelated_env_not_blocked():
 
 def test_blocked_envs_nothing_unavailable():
     assert eo.blocked_envs({"prod": ["stage"]}, set(), {"stage", "prod"}) == set()
-
-
-def test_blocked_envs_validates_order_shape():
-    with pytest.raises(SystemExit):
-        eo.blocked_envs({"prod": "stage"}, {"stage"}, {"prod"})

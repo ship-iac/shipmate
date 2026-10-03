@@ -1351,22 +1351,19 @@ def test_load_check_maps_drops_records_with_no_app_silently(tmp_path, capsys):
 
 
 def test_check_name_grammar_matches_apply_cells_construction():
-    """Coupling: apply-snapshot builds the apply check's name, to look up the pre-existing check
-    ids before any wave runs -- apply-cell holds no App key and builds none -- and apply-comment
-    forward-builds the same string to look it up. A divergence is silent: every lookup misses,
+    """Coupling: apply-snapshot looks up the pre-existing apply check ids by name before any wave
+    runs -- apply-cell holds no App key and builds none -- and apply-comment forward-builds the
+    same name to look the check up. A divergence is silent: every lookup misses,
     `apply_check_state` reads every check as unknown, and the comment reverts to the
-    artifact-only rendering this corrects. Same posture as
-    test_cell_schema_guard_apply_cell_writes_every_required_key."""
-    src = (_ENGINE / "scripts" / "apply-snapshot").read_text(encoding="utf-8")
-    expected = 'f"apply / {stack} / {env}"'
-    assert expected in src, (
-        "apply-snapshot no longer builds the apply check name as "
-        "'apply / <stack path> / <env>' -- scripts/apply-comment's _check_name "
-        "and _job_url forward-build that exact grammar to look the check up, "
-        "and a mismatch makes every lookup miss silently"
-    )
-    # And the reader's half, exercised rather than restated: the name `_check_name`
-    # builds for a known row must be that same string.
+    artifact-only rendering this corrects. Both halves are exercised against one hand-written
+    name.
+
+    Mutation: make apply-gate's `check_name` return `f"{APPLY_PREFIX}{env} / {stack}"`, or
+    apply-snapshot or apply-comment build the name by hand in that order -- red."""
+    snap = load_script("apply-snapshot")
+    waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]}
+    run = {"id": 7, "name": "apply / stacks/app / dev-eu", "app": {"id": int(APP_ID)}}
+    assert snap.snapshot(waves, [run], APP_ID) == {"stacks/app\x00dev-eu": [7]}
     row = _row(environment="dev-eu", stack_path="stacks/app")
     assert ac._check_name(row) == "apply / stacks/app / dev-eu"
 

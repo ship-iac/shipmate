@@ -743,8 +743,8 @@ def _report_unused(table, tagged):
     The table is read from the default branch and the tags from the feature branch, so
     adding or removing an environment takes two pull requests; refusing an unused entry
     would deadlock both. Names are matched exactly, as `resolve`, `_check_dry_coverage` and
-    `partition_envs` match them. An uppercase entry name never gets here: `_check_env_name`
-    refuses it, so an unused entry is a lowercase one no stack tags.
+    apply-all-detect's exclusions match them. An uppercase entry name never gets here:
+    `_check_env_name` refuses it, so an unused entry is a lowercase one no stack tags.
 
     A `needs` predecessor no stack tags gets its own warning, because the key is fail-open: it
     reads as ordering something while the run orders nothing. The charset rule catches only
@@ -797,25 +797,6 @@ def env_order(table):
         for env, entry in sorted(table.get("environments", {}).items())
         if "needs" in entry
     }
-
-
-def validate_env_order(order):
-    """`order`, or `SystemExit` unless it maps env -> list of env-name strings.
-
-    Guards a bare string predecessor, which would otherwise be iterated character by
-    character into an ordering nobody wrote, a non-mapping value, which reaches the graph
-    builder as a raw `AttributeError`, and a cycle, which has no topological order at all.
-    No caller reaches the graph builder with an unchecked order.
-    """
-    if not isinstance(order, dict):
-        raise SystemExit(
-            "::error::the needs order must be a mapping of env -> [predecessor envs], "
-            f"got {type(order).__name__} ({order!r})"
-        )
-    for env, preds in order.items():
-        validate_env_name_list(preds, f"environments.{env}.needs")
-    _check_cycle(order)
-    return order
 
 
 def _check_cycle(order):
