@@ -9,7 +9,8 @@ on:
     # whose backend configuration reads a plain TF_VAR_* needs the envelope here too.
     secrets:
       SHIPMATE_SECRETS: { required: false }
-# Floor, not a default to inherit from: see plan.yml. A lost block here would inherit id-token: write.
+# Floor, not a default to inherit from: see plan.yml. Without it, a lost block would inherit
+# id-token: write.
 permissions: {}
 # A dispatched run holds the default branch's cache scope while it runs the pull request's HCL,
 # and nothing in this file saves an Actions-cache entry.

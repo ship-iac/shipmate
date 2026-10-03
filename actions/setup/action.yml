@@ -51,19 +51,24 @@ runs:
         url="https://github.com/terramate-io/terramate/releases/download/v${v}/terramate_${v}_${system}_${arch}.tar.gz"
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$dir"
-        # curl's --retry covers 408/429/5xx; --retry-all-errors adds resets and TLS errors (curl >= 7.71).
+        # curl's --retry covers 408/429/5xx; --retry-all-errors adds resets, TLS errors and stalls.
+        # It goes in a config file: curl < 7.71 warns on an unknown option there, but exits 2 in argv.
+        printf 'retry-all-errors\n' > "$dir/curl.cfg"
         rc=0
-        code="$(curl -sSL --retry 3 --retry-all-errors -o "$dir/terramate.tar.gz" -w '%{http_code}' "$url")" || rc=$?
+        code="$(curl -K "$dir/curl.cfg" -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
+          -o "$dir/terramate.tar.gz" -w '%{http_code}' "$url")" || rc=$?
         # Fail-closed: every later step runs terramate.
+        fail() { echo "::error title=Terramate install failed::Terramate ${v} did not install: $1"; exit 1; }
         if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
-          echo "::error title=Terramate install failed::Terramate ${v} did not install: ${url} answered HTTP ${code:-000} (curl exit ${rc}); re-run the failed job."
-          exit 1
+          if [ "${code:-000}" = 404 ]; then
+            fail "${url} answered HTTP 404 (curl exit ${rc}); check VERSIONS and the runner's OS and architecture."
+          fi
+          fail "${url} answered HTTP ${code:-000} (curl exit ${rc}); re-run the failed job."
         fi
-        tar -xzf "$dir/terramate.tar.gz" -C "$dir" terramate
-        got="$("$dir/terramate" --version)"
+        tar -xzf "$dir/terramate.tar.gz" -C "$dir" terramate || fail "tar could not extract terramate from ${url}."
+        got="$("$dir/terramate" --version)" || fail "the binary from ${url} failed to run terramate --version."
         if [ "$got" != "$v" ]; then
-          echo "::error title=Terramate install failed::Terramate ${v} did not install: ${url} delivered version ${got}; check VERSIONS and the release asset."
-          exit 1
+          fail "${url} delivered version ${got}; check VERSIONS and the release asset."
         fi
         echo "$dir" >> "$GITHUB_PATH"
     - name: Provider plugin cache

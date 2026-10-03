@@ -11,7 +11,8 @@ on:
         required: false
       SHIPMATE_SECRETS:
         required: false
-# Floor, not a default to inherit from: see plan.yml. A lost block here would inherit id-token: write.
+# Floor, not a default to inherit from: see plan.yml. Without it, a lost block would inherit
+# id-token: write.
 permissions: {}
 jobs:
   # Pre-flight, before any wave runs: verify that the environments the waves will bind exist,

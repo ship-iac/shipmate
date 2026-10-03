@@ -32,18 +32,19 @@ keeps a CRLF file's line endings under Git Bash. On macOS, install GNU sed and r
      sed -b -i -E 's|(ship-iac/shipmate/[^@[:space:]"]+)@[0-9a-f]{40}("?)([[:space:]]+# v[^[:space:]]*)?|\1@<release-sha>\2 # vX.Y.Z|' <consumer>/.github/workflows/*.yml
    ```
 
-2. List the engine refs the rewrite left behind. It must print nothing, because every engine
-   ref moves in one commit. A printed line is a ref the `sed` does not handle (`@main`, a
-   single-quoted ref, a comment after the label): fix it by hand and run step 2 again.
+2. List the engine refs the rewrite left behind, in every file under the workflows
+   directory. It must print nothing, because every engine ref moves in one commit. A printed
+   line is a ref the `sed` does not handle (`@main`, a single-quoted ref, a comment after the
+   `# vX.Y.Z` label, a `.yaml` file): fix it by hand and run step 2 again.
 
    ```bash
-   grep -nE 'ship-iac/shipmate/[^@[:space:]"]+@' <consumer>/.github/workflows/*.yml | grep -vE '@<release-sha>"? # vX\.Y\.Z'$'\r''?$'
+   grep -rnE 'ship-iac/shipmate/[^@[:space:]"]+@' <consumer>/.github/workflows/ | grep -vE '@<release-sha>"? # vX\.Y\.Z'$'\r''?$'
    ```
 
 3. Commit the rewrite as one commit.
 
-The `sed` reads `.yml` files only. Every consumer file this engine renders is `.yml`; rename a
-`.yaml` workflow that calls the engine, or re-pin it by hand.
+The `sed` reads `.yml` files only. Every consumer file this engine renders is `.yml`; step 2
+reports the engine refs it leaves in a `.yaml` workflow: rename that file or re-pin it by hand.
 
 ## Manifest load
 
