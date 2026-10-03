@@ -2041,8 +2041,8 @@ def latest_check_ids(lines, app_id=""):
     annotations to harvest, so ranking it BELOW a completed run is wanted.
 
     Carries the consumer file's skipped router jobs too — they are
-    `github-actions`-authored, so about five rows per report cost an annotation
-    fetch that returns nothing."""
+    `github-actions`-authored, so four rows per report (shipmate, post-merge, apply,
+    unlock) cost an annotation fetch that returns nothing."""
     newest = {}
     for line in lines:
         run = _parse_check_run(line, app_id)

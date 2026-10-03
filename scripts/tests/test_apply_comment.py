@@ -1409,6 +1409,8 @@ def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves_json)
     for i in range(1, ac.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
+    for kind in ("EXCLUDED", "SKIPPED", "REVIEW_HELD", "APPLIED_UNGATED", "REVIEW_NOT_REQUIRED"):
+        monkeypatch.setenv(f"SHIPMATE_{kind}_ENVS", "")
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
     monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)

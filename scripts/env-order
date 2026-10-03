@@ -11,9 +11,14 @@ loaded for the operation, which comes from the default branch. A pull request
 therefore cannot reorder its own apply waves or drop its own exclusion.
 
 `MAX_ENV_LEVELS` is fixed because GHA declares no jobs or outputs dynamically.
-Bumping it needs matching `envlevelN_waves`/`_empty` output slots in
-actions/deploy-detect/action.yml and actions/apply-all-detect/action.yml, one
-envlevelN job in each of the engine's apply.yml and deploy.yml.
+Bumping it needs, per new level N:
+- `envlevelN_waves`/`_empty` outputs in actions/deploy-detect/action.yml and
+  actions/apply-all-detect/action.yml;
+- the same two slots in the `detect` job `outputs:` of .github/workflows/apply.yml
+  and .github/workflows/deploy.yml, and an `envlevelN` job in each;
+- an `envlevelN-waves` input on apply.yml's `summary` step and on
+  actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line;
+- scripts/apply-comment's own `MAX_ENV_LEVELS`.
 """
 
 import json

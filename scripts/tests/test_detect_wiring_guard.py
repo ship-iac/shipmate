@@ -95,7 +95,6 @@ _DETECT_STEPS = {
 #: The whole `outputs:` of `apply.yml`'s `detect`. A skipped step's outputs read as '', so each
 #: two-sourced value is whichever step ran. Levels 1-3 read 'true' from the input on a targeted
 #: apply: `apply-detect` writes none, and a missing `_empty` must run its level red, never skip.
-#: The four disposition sets read `d` alone, so a targeted apply's comment renders none of them.
 _APPLY_DETECT_OUTPUTS = {
     "envlevel0_waves": "${{ steps.t.outputs.waves || steps.d.outputs.envlevel0_waves }}",
     "envlevel1_waves": "${{ steps.d.outputs.envlevel1_waves }}",
@@ -176,7 +175,10 @@ def test_the_detect_step_is_exactly_this_step(workflow, uses):
 
 
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
-    """Mutation: drop `&& 'true'` from `envlevel1_empty`'s targeted arm."""
+    """The four disposition sets read `d` alone, so a targeted apply's comment renders none.
+
+    Mutation: drop `&& 'true'` from `envlevel1_empty`'s targeted arm.
+    Mutation: give `review_held_envs` a `steps.t.outputs.review_held_envs ||` arm."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 

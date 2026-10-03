@@ -522,10 +522,11 @@ _NO_REVIEW = "no approving review was required, so gated had nothing to enforce"
 
 
 def notices(rows, applied_ungated, review_not_required):
-    """One `::notice::` workflow command per environment in `applied_ungated` (all-environments
-    form only, empty in the targeted one) and per environment in `review_not_required` that has
-    an applied, failed or unrecorded row, where infrastructure may have changed, so a run with
-    no rows names none. Env names are author-controlled, so `command_data`-escaped.
+    """One `::notice::` workflow command per environment in `applied_ungated` (an all-environments
+    set: the caller passes it empty in the targeted form, as apply.yml reads it from the
+    bare-apply detector only) and per environment in `review_not_required` that has an applied,
+    failed or unrecorded row, where infrastructure may have changed, so a run with no rows
+    names none. Env names are author-controlled, so `command_data`-escaped.
 
     An ungated notice is the audit trail an apply permitted by `gated = false` under a
     REVIEW_REQUIRED decision leaves: `reviewDecision` is a live value with no history, so once
@@ -547,8 +548,9 @@ def notices(rows, applied_ungated, review_not_required):
 
 def _dispositions(excluded, skipped, held):
     """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
-    All are all-environments concepts, empty in the targeted form. A held env that is also
-    explicit is listed under `held` only, and under `held_explicit` for its command."""
+    All are all-environments sets; the caller passes them empty in the targeted form, because
+    apply.yml reads them from the bare-apply detector only. A held env that is also explicit
+    is listed under `held` only, and under `held_explicit` for its command."""
     excluded, held = _esc(excluded), _esc(held)
     return {
         "explicit": [e for e in excluded if e not in held],
@@ -594,7 +596,8 @@ def _grouped_lines(d):
 
 
 def _footer_parts(excluded, skipped, held=(), compact=False):
-    """The lines above the footer, in the all-environments form only: one line per environment
+    """The lines above the footer, produced only when the caller passes the all-environments
+    sets, which apply.yml reads from the bare-apply detector only: one line per environment
     for each disposition this run produced (explicit left pending, skipped, held for review) and
     a `held:` remedy line when any is held. Env names are author-controlled, so `_md_escape`d.
     `compact` renders each disposition as one line naming its environments comma-separated, with
