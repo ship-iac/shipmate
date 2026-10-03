@@ -145,9 +145,9 @@ produced them. See
   fail, and the `summary` job must still be told which head to gate.
 - **`detect`** — `actions/build-matrix`, which computes the plan matrix from the
   *changed* stacks × their `env/*` tags, and then `terramate fmt --check` and a
-  stale-codegen check (`terramate generate --detailed-exit-code`). That order is
-  the fork refusal's: `build-matrix` turns a fork's head away before either
-  terramate step reads the tree it wrote ([hardening](hardening.md)).
+  stale-codegen check (`terramate generate --detailed-exit-code`), in that
+  order, so a fork's head is refused before either terramate step reads it
+  ([hardening](hardening.md) §Contributors without push access).
   Environment membership comes purely from stack tags — no environment names in
   YAML. Reading the environment table costs one API call on top, to name the
   default branch it is read from.
@@ -158,13 +158,8 @@ produced them. See
   from the check), and uploads the `.otplan` + a TF_VAR fingerprint as an
   artifact. `detect` binds no environment. `plan` binds only the plan
   environment for the cell it is planning, never one holding an App credential.
-  `detect` also refuses fork pull requests: a plan would run the fork's own
-  Terramate/OpenTofu code on your runners with your plan environment's
-  variables, so the branch has to live in the repository. `facts` reports the
-  pull request's head repository and `build-matrix` refuses by default — an
-  unstated head repository is refused too. No input allows a fork; the one
-  opt-out says the run has no pull request at all, and only the drift workflow
-  sets it.
+  `detect` also refuses fork pull requests, and an unstated head repository,
+  by default ([hardening](hardening.md) §Contributors without push access).
 - **`summary`** — the one trusted job, bound to the fixed `shipmate-engine`
   GitHub Environment (`docs/github-app.md`), with no checkout at all: it
   downloads this run's cell summaries and calls
@@ -174,10 +169,9 @@ produced them. See
   `shipmate / gate` commit status, which stays non-green while any apply is
   pending or any plan cell failed.
 
-  That job declines outright — before its first step — on a fork pull request,
-  reading the head repository from `facts` in the same file. An empty head
-  repository, the shape a failed `facts` job produces, is a refusal rather than
-  a pass. Nothing a consumer writes reaches that decision. On a draft nobody
+  That job declines before its first step on a fork pull request or an empty
+  head repository ([hardening](hardening.md) §Contributors without push
+  access). On a draft nobody
   asked to plan, the job runs and writes `shipmate / gate` pending with the
   draft reason, unless the head already carries a gate status.
 
@@ -187,9 +181,9 @@ produced them. See
   shows none of them — not even a failed cell, which is the state
   `shipmate plan` exists to recover from.
 
-Fork pull requests do not get that far anyway: the `detect` job refuses them, so
-a fork's plan fails fast rather than fanning out plan cells over fork-authored
-code. A pull request that changed
+A fork's plan fails in `detect` before any plan cell starts
+([hardening](hardening.md) §Contributors without push access). A pull request
+that changed
 no stacks gets no plan comment at all — nothing is posted when there are no
 cells, no comment already on the pull request, and no `doctor` warning to
 point at — so docs-only and pin-bump changes stay quiet apart from their

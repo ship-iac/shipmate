@@ -693,7 +693,7 @@ plan comment, and nothing on the run page saying why. The pull request cannot
 merge, which is the intended direction. The head repository comes from the
 `facts` job in the same engine file, so a skipped `summary` is not a wiring
 mistake: check the pull request's head repository. A pull request whose head is
-in a fork is refused earlier still, at `detect` ("A fork's pull request is
+in a fork is refused earlier still, at `detect` ("Fork pull request
 refused", below).
 
 **The gate is pending with the draft reason.** The description reads "the pull
@@ -861,23 +861,15 @@ than one — and the dispatch comment on the pull request already links the run.
 `detect` fails with `fork pull requests are not supported`, or with
 `this run did not state its head repository`.
 
-Planning a fork head would run the pull request's own Terramate/OpenTofu code on
-your runners with whatever the plan environment exposes as variables — those
-are not secrets, and they are not withheld from a fork's run. No
-`shipmate / gate` status is ever written for a fork head either, so the pull
-request could not merge whatever the plan said. The refusal is loud rather than
-an empty matrix, so an outside contributor is not left waiting on a gate that
-cannot arrive.
-
 The refusal keys on the `head-repo` input, and it refuses by default: a run
 that states no head repository is refused too, with a message naming the input.
-Engine `plan.yml` fills that input from its own `facts` job, so the message
-means what it says — the head really is elsewhere. Engine `drift.yml` says it
-has no pull request at all with `no-pull-request: "true"` instead
-(`docs/drift.md`).
+No input allows a fork; engine `drift.yml`'s `no-pull-request: "true"`, which
+says the run has no pull request at all, is the only opt-out
+(`docs/drift.md`). [`hardening.md`](hardening.md) §Contributors without push
+access states why, and what a fork's plan cell would receive.
 
-No input allows a fork. Push the branch to this repository
-(`gh pr checkout`, then push) and open the pull request there.
+Push the branch to this repository (`gh pr checkout`, then push) and open the
+pull request there.
 
 ### An apply check never completes after a successful apply
 

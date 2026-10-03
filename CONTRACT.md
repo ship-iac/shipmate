@@ -1622,14 +1622,9 @@ The four jobs:
   with no `.github/workflows/shipmate.yml` — the one path this contract lets
   the consumer's workflow live at. `actions/build-matrix` fails `detect`
   outright unless the run states a head repository equal to the running
-  repository: fork pull requests are not planned, and no input permits one. A
-  fork's plan would execute the pull request's own Terramate/OpenTofu code with
-  everything the plan environment holds — `pull_request_target` withholds
-  nothing from a fork's run, its *secrets* included, so this refusal plus
-  `plan`'s `needs: detect` is what keeps a fork out of a plan cell once
-  `actions/checkout`'s own refusal to check out a fork head under that trigger
-  has been turned off or replaced (`docs/hardening.md` §"Contributors without
-  push access"). No
+  repository: fork pull requests are not planned, and no input permits one
+  (`docs/hardening.md` §Contributors without push access states what a fork's
+  plan cell would receive, and the layers that keep it out). No
   `shipmate / gate` is ever written for a fork head, so the refusal is loud
   rather than an empty matrix. The `head-repo` value the guard keys on is
   produced by `facts` in this same file rather than stated by the consumer, so
@@ -1731,23 +1726,9 @@ the draft skip as their own condition — not a draft, *or* named on demand —
 which is a cost control (it stops a draft burning runners), not a security
 property, and is why a requested plan runs on a draft at all.
 
-Binding `summary` to the `shipmate-engine` environment rather than trusting the
-trigger alone closes two paths a trigger check alone would not:
-
-- A fork's plan run completes normally but produces nothing further — the fork
-  clause above declines the `summary` job
-  (`docs/hardening.md` §"Contributors without push access"). That is the
-  autoplan leg; a commented `shipmate plan` naming a fork's pull request is
-  normally refused by `actions/comment-ops` before any run exists, and §Comment-ops
-  states the one case that still dispatches.
-- A branch-authored workflow cannot reach the key by declaring
-  `environment: shipmate-engine` itself: that environment's deployment
-  branch policy is scoped to the default branch, and a job triggered by a
-  `push` to any other branch — or by `pull_request`, whose ref is
-  `refs/pull/<n>/merge` — never satisfies it, regardless of what the workflow
-  file says. `pull_request_target` is the one pull-request-side trigger that
-  does satisfy it, which is why the trust conditions above are engine-owned
-  (`docs/github-app.md` §Key-exposure boundary).
+Why `summary` is bound to `shipmate-engine` rather than trusting the trigger
+alone: `docs/hardening.md` §Contributors without push access for a fork's run,
+and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 
 ## Consumption
 

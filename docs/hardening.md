@@ -9,14 +9,11 @@ It starts from one fact.
 A branch may carry its own workflow files. GitHub runs them, with whatever
 secrets that job's own environment bindings grant, on push — before a pull
 request exists, before review, and before `CODEOWNERS` applies.
-`SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way. The
-`shipmate-engine` environment's deployment branch policy only ever satisfies
-a job running at the default-branch ref (row 16; `docs/github-app.md`
-§Key-exposure boundary), so a branch-pushed workflow cannot mint an App token.
-Without a token it cannot POST a `shipmate / gate` status, submit an approving
-review as the App, complete `apply / <stack> / <env>` checks, or dispatch an
-apply — but the gate's verdict is still computed from artifacts the branch's
-own plan run produced (see "What none of this fixes").
+`SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way, so a branch-pushed
+workflow mints no App token and writes no gate status, App review, apply-check
+completion or apply dispatch (row 16; `docs/github-app.md` §Key-exposure
+boundary) — but the gate's verdict is still computed from artifacts the
+branch's own plan run produced (see "What none of this fixes").
 
 Two things a branch-pushed workflow *can* still do, absent the rest of this
 checklist:
@@ -1026,9 +1023,11 @@ nothing keeping a fork out of a plan cell depends on it.
 
 `pull_request_target` does not sandbox a fork's run: nothing is withheld from
 it, so a plan cell reached by a fork would read the plan environment's
-variables *and its secrets* (engine `plan.yml` passes
-`secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`) while executing the
-pull request's own Terramate/OpenTofu code. GitHub withholds secrets from a
+variables *and its secrets* (engine `plan.yml` passes `secrets.SHIPMATE_SECRETS`
+and `secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`), and would hold
+the plan role's cloud credentials (the `plan` job's `configure-aws-credentials`
+step assumes `matrix.role_arn` when the environment names one), while executing
+the pull request's own Terramate/OpenTofu code. GitHub withholds secrets from a
 fork under `pull_request`, not `pull_request_target`, so that layer does not
 exist here. Keep both of the layers that do —
 dropping the `needs:` edge, moving `plan` off `detect`'s matrix, or turning the
