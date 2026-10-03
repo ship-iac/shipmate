@@ -44,6 +44,7 @@ section below names the SHA the release tags.
 - **`apply-all.yml` is gone: in the re-pin commit, replace the workflow file's `targeted` and `all` jobs with one `apply` job calling `apply.yml` with `environment`, `ref` and `pr_number` (`docs/getting-started.md`).**
 - **Every path reads `.github/shipmate.toml` through the contents API from the default branch; the could-not-be-read refusal no longer names a ref, and a failed `gh`, `git` or `terramate` call in CI annotates with its stderr below the error line.**
 - **`shipmate doctor` checks `shipmate.yml`'s job name, dispatch wiring and routing as one probe, so one unreadable file degrades all three together, and a file that calls no engine plan workflow is reported once.**
+- **`shipmate doctor`'s `needs` and `explicit` notices end a cut list with ` … and N more` and never cut an item inside.**
 
 ### Removed
 

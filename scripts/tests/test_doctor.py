@@ -4380,11 +4380,11 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
 
 
 def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
-    """Each defaults line is cut before the first env name that would pass 400 characters,
-    never inside one.
+    """Each defaults line shows the whole env names that fit 400 characters with the count of
+    the rest, never part of a name.
 
-    Mutations: render `shown` or the explicit list through `_one_line(..., 400)` again --
-    the last name shown is cut mid-text; drop the `…` -- the cut reads as the whole list.
+    Mutations: render `shown` or the explicit list through `_one_line(..., 400)` -- the last
+    name shown is cut mid-text; drop the count from the tail -- the line ends ` …`.
     """
     name = "environment-with-a-long-name-{:02d}".format
     table = {
@@ -4401,8 +4401,9 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
             "environment-with-a-long-name-02 after environment-with-a-long-name-01; "
             "environment-with-a-long-name-03 after environment-with-a-long-name-02; "
             "environment-with-a-long-name-04 after environment-with-a-long-name-03; "
-            "environment-with-a-long-name-05 after environment-with-a-long-name-04; "
-            "…: a bare `shipmate apply` applies one env-level fully before it starts the next.",
+            "environment-with-a-long-name-05 after environment-with-a-long-name-04"
+            " … and 14 more: a bare `shipmate apply` applies one env-level fully before it "
+            "starts the next.",
         ),
         (
             doctor.NOTICE,
@@ -4412,17 +4413,48 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
             "environment-with-a-long-name-04, environment-with-a-long-name-05, "
             "environment-with-a-long-name-06, environment-with-a-long-name-07, "
             "environment-with-a-long-name-08, environment-with-a-long-name-09, "
-            "environment-with-a-long-name-10, environment-with-a-long-name-11, "
-            "…: a bare `shipmate apply` skips those, and each needs its own "
+            "environment-with-a-long-name-10"
+            " … and 9 more: a bare `shipmate apply` skips those, and each needs its own "
             "`shipmate apply <env>`.",
         ),
     ]
 
 
-def test_a_first_item_over_the_budget_is_cut_inside_rather_than_dropped():
-    """Mutation: return `sep.join([*shown, "…"])` whatever `shown` holds -- the line is `…`."""
+class _SliceBudget(list):
+    """A row list that refuses a 64th slice, so a trim loop that never ends fails fast."""
+
+    slices = 0
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            self.slices += 1
+            assert self.slices < 64, "the trim loop did not stop"
+        return super().__getitem__(key)
+
+
+def test_a_first_item_over_the_limit_shows_only_the_count():
+    """Mutation: stop trimming at one item (`while ... and shown > 1`) -- the first item
+    shows, over the limit."""
     item = "a after " + ", ".join(f"predecessor-{i:02d}" for i in range(30))
-    assert doctor._whole_items([item, "b after a"], "; ") == item[:399] + "…"
+    assert doctor._fit_items([item, "b after a"], "; ", 400) == " … and 2 more"
+
+
+def test_a_limit_shorter_than_the_count_shows_the_count_and_stops():
+    """A roles heading over the budget leaves a negative limit: trimming went on past zero
+    items, the count growing, and hung the report.
+
+    Mutation: drop `and shown` -- the 64th slice fails inside `_SliceBudget` instead of
+    hanging.
+    """
+    rows = _SliceBudget(["plan every cell: no role", "apply every cell: no role"])
+    assert doctor._fit_items(rows, "; ", -1) == " … and 2 more"
+
+
+def test_a_list_that_fits_the_limit_exactly_has_no_tail():
+    """Mutation: trim while the text is `>= limit` -- the 400-character list loses an item to
+    a ` … and 1 more` tail."""
+    items = ["a" * 198, "b" * 200]
+    assert doctor._fit_items(items, "; ", 400) == "a" * 198 + "; " + "b" * 200
 
 
 #: A varying identity with two workloads listed out of alphabetical order, an apply-only
@@ -4574,32 +4606,27 @@ def test_the_roles_section_stays_within_its_budget_and_keeps_the_harvest():
     ]
 
 
-class _SliceBudget(list):
-    """A row list that refuses a 64th slice, so a trim loop that never ends fails fast."""
-
-    slices = 0
-
-    def __getitem__(self, key):
-        if isinstance(key, slice):
-            self.slices += 1
-            assert self.slices < 64, "the trim loop did not stop"
-        return super().__getitem__(key)
-
-
 def test_a_heading_over_the_budget_shows_no_items_and_stops():
     """A lowercase environment name of 8,000 characters is valid, and its heading alone is
-    over the budget: trimming went on past zero rows, the count growing, and hung the report.
-    Zero rows shown gives the heading and the count, over budget, for `_config_roles` to
-    count as not shown.
+    over the budget: it and every environment after it are counted, not shown.
 
-    Mutation: drop the `shown and` guard -- the 64th slice fails the assertion inside
-    `_SliceBudget` instead of hanging (observed).
+    Mutation: remove the `break` after the count notice -- `zz`'s notice follows it.
     """
-    env = "e" * 8000
-    rows = _SliceBudget(["plan every cell: no role", "apply every cell: no role"])
-    assert doctor._roles_notice(env, rows, doctor.ROLE_LINES_BUDGET) == (
-        f"`{env}` resolves these roles at the commit under examination:  … and 2 more."
-    )
+    narrow = {"aws": {"account": "222222222222", "plan": "zz-plan"}}
+    table = {
+        "layout": "folder",
+        "identities": {"narrow": narrow},
+        "environments": {
+            env: {"region": "eu-west-1", "identity": "narrow"} for env in ("e" * 8000, "zz")
+        },
+    }
+    assert doctor._config_roles(doctor.ec.validate_structure(table)) == [
+        (
+            doctor.NOTICE,
+            "roles for 2 more environment(s) not shown, to keep this report under GitHub's "
+            "comment limit; `CONTRACT.md` §Resolution lists how each cell resolves.",
+        )
+    ]
 
 
 def test_the_contract_states_the_roles_budget_doctor_applies():

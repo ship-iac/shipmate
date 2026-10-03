@@ -1587,19 +1587,15 @@ def _one_line(s, limit=200):
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
-def _whole_items(items, sep, limit=400):
-    """`items` joined by `sep`, cut before the first item that would pass `limit`, so no env
-    name is shown half-cut. A first item over `limit` on its own is cut inside instead, so
-    the line never shows nothing but the `…`."""
-    joined = sep.join(items)
-    if len(joined) <= limit:
-        return joined
-    shown = []
-    for item in items:
-        if len(sep.join([*shown, item, "…"])) > limit:
-            break
-        shown.append(item)
-    return sep.join([*shown, "…"]) if shown else _one_line(joined, limit)
+def _fit_items(items, sep, limit):
+    """Whole `items` joined by `sep` within `limit` characters, then ` … and N more` for the
+    rest. No item is cut inside: a first item over `limit` shows only the count."""
+    shown = len(items)
+    text = sep.join(items)
+    while len(text) > limit and shown:
+        shown -= 1
+        text = sep.join(items[:shown]) + f" … and {len(items) - shown} more"
+    return text
 
 
 CONFIG_PATH = ec.CONFIG_PATH
@@ -1643,17 +1639,6 @@ CONFIG_REFERENCES = (
 )
 
 
-def _roles_notice(env, rows, budget):
-    """One environment's roles notice, its items cut to fit `budget` and counted when it
-    alone exceeds it."""
-    head = f"`{env}` resolves these roles at the commit under examination: "
-    text, shown = head + "; ".join(rows) + ".", len(rows)
-    while len(text) > budget and shown:
-        shown -= 1
-        text = head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more."
-    return text
-
-
 def _config_roles(table):
     """One notice per environment naming an identity: the role each path and listed workload
     resolves, `no role` for a path it grants nothing on. An identity that does not vary shows
@@ -1671,7 +1656,8 @@ def _config_roles(table):
         items.setdefault(env, []).append(f"{path} {cells}: {shown}")
     notices, left = [], ROLE_LINES_BUDGET
     for done, (env, rows) in enumerate(items.items()):
-        text = _roles_notice(env, rows, left)
+        head = f"`{env}` resolves these roles at the commit under examination: "
+        text = head + _fit_items(rows, "; ", left - len(head) - 1) + "."
         if len(text) > left:
             notices.append(
                 f"roles for {len(items) - done} more environment(s) not shown, to keep this "
@@ -1697,9 +1683,10 @@ def _config_defaults(table):
     """
     order = ec.env_order(table)
     envs = ec.explicit_envs(table)
-    shown = _whole_items(
+    shown = _fit_items(
         [f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())],
         "; ",
+        400,
     )
     return [
         (
@@ -1712,7 +1699,7 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"`explicit = true` on {_whole_items(envs, ', ')}: a bare "
+            f"`explicit = true` on {_fit_items(envs, ', ', 400)}: a bare "
             "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             if envs
             else "`explicit`: set on no environment, so every environment applies on a bare "
@@ -1981,10 +1968,9 @@ def _parse_check_run(line, app_id):
         return None
     if not isinstance(run, dict):
         return None
-    # github-actions authors the plan/apply/drift auto check-runs carrying shipmate's
-    # ::warning:: emissions; the shipmate App is matched by id instead (org-dependent slug). A
-    # consumer's own non-shipmate workflows are indistinguishable here and remain, hence the
-    # generic "workflow runs".
+    # github-actions authors the check-runs carrying shipmate's ::warning:: emissions; the App
+    # is matched by id, its slug being org-dependent. A consumer's own workflows pass too,
+    # hence the generic "workflow runs".
     if run.get("app_slug") != "github-actions" and not (
         app_id and str(run.get("app_id")) == str(app_id)
     ):
