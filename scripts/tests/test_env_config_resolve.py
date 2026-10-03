@@ -325,8 +325,14 @@ def test_an_unshared_environment_keeps_the_requested_path():
     }
 
 
-def test_shared_envs_names_the_entries_holding_shared_true():
-    """Mutation: test the key for presence rather than for `true` -- `dev-us` joins the set."""
+def test_shared_envs_names_the_entries_holding_shared_true(monkeypatch):
+    """The retired `SHIPMATE_SHARED_ENVS` is set both bare and in `SHIPMATE_GITHUB_VARS`, so a
+    fallback beside the table changes the set. Mutations: test the key for presence rather
+    than for `true` -- `dev-us` joins the set; union `SHIPMATE_SHARED_ENVS` from the parsed
+    `SHIPMATE_GITHUB_VARS`, or from the process environment, into `shared_envs`' result --
+    `dev-us` joins."""
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"SHIPMATE_SHARED_ENVS": "dev-us"}')
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "dev-us")
     table = {
         "layout": "folder",
         "environments": {
