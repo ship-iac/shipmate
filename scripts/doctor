@@ -1792,7 +1792,7 @@ def _default_branch_table(ctx):
 
     The default branch, not the commit under examination: execution reads that copy, so on a
     pull request that edits the table every run until merge still follows the default
-    branch's. The readers of `env-config` below may only see a validated table.
+    branch's. `_bound_names` passes it to `env-config`, which may only see a validated table.
 
     Read once per run and kept on `ctx`, so every probe judges the same copy.
     """

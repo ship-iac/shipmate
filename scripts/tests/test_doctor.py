@@ -4055,6 +4055,20 @@ def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
 
 
+def test_declared_envs_reads_every_run_directory_of_comment_ops_download(tmp_path):
+    """comment-ops downloads each plan run into its own directory, so a summary sits at
+    `<run>/<artifact>/cell.json`, or at `<run>/cell.json` when the run had one artifact.
+    Mutation: `glob("*/cell.json")` reads only the flat layout and drops `dev-us`."""
+    for path, env in [
+        ("1281/cell-summary.dev-eu.stacks-app/cell.json", "dev-eu"),
+        ("1290/cell.json", "dev-eu"),
+        ("1302/cell-summary.dev-us.stacks-db/cell.json", "dev-us"),
+    ]:
+        (tmp_path / path).parent.mkdir(parents=True)
+        (tmp_path / path).write_text(json.dumps({"environment": env}), encoding="utf-8")
+    assert doctor._declared_envs(tmp_path) == {"dev-eu", "dev-us"}
+
+
 #: The refusal the misplaced control earns, whole: the probe's own framing plus the
 #: missing-layout and `_check_environment` messages with the `::error::` prefix stripped.
 #: Hand-written, not read back from the module, so a probe that reported a different
