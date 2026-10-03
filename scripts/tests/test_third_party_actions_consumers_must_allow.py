@@ -29,7 +29,6 @@ THIRD_PARTY = {
     "astral-sh/setup-uv",
     "aws-actions/configure-aws-credentials",
     "opentofu/setup-opentofu",
-    "terramate-io/terramate-action",
 }
 
 
