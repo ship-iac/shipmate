@@ -84,10 +84,8 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.detect.outputs.cells) }}
     environment: ${{ matrix.env_binding }}
-    # Byte-identical to the wave jobs' group in apply-env-level.yml (guarded by
-    # scripts/tests/test_apply_cell_concurrency_guard.py and test_verb_path_isolation.py). That
-    # identity queues an unlock behind a live apply for the cell, so the lock is then gone or
-    # genuinely orphaned by the time the unlock runs.
+    # The wave jobs' group (scripts/tests/test_apply_cell_concurrency_guard.py): an unlock queues
+    # behind a live apply for the cell, so the lock is gone or orphaned by the time it runs.
     concurrency:
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false

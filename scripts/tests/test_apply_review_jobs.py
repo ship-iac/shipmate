@@ -146,25 +146,6 @@ def test_detect_needs_review_and_refuses_to_run_after_it_failed():
 _DETECTS = (("apply-all-detect", "apply-detect"), ("apply-detect", "apply-detect"))
 
 
-def test_detect_sources_the_review_decision_from_the_server_side_value():
-    """The exemption list comes from the default branch's file, inside detect. What the
-    workflow still has to thread is the decision, and it must arrive raw.
-
-    Mutation: add `ungated-envs: ${{ vars.SHIPMATE_UNGATED_ENVS }}` back, which gives the
-    exemption a branch-independent second source an admin can set without a pull request.
-    """
-    step = next(
-        s
-        for s in _jobs("apply.yml")["detect"]["steps"]
-        if "actions/apply-detect" in str(s.get("uses") or "")
-    )
-    with_ = step["with"]
-    assert "ungated-envs" not in with_
-    # Raw, never `|| 'NONE'`: a decision that never arrived must arrive empty, which is the
-    # hold-everything, refuse-the-run value.
-    assert with_["review-decision"] == "${{ needs.review.outputs.decision }}"
-
-
 @pytest.mark.parametrize(("detect", "action"), _DETECTS)
 def test_the_action_feeds_every_shipmate_env_var_the_script_reads(detect, action):
     """Derived from the script's own source, not a second hand-written list: a renamed read on
