@@ -28,7 +28,9 @@ inputs:
 outputs:
   authorized:
     description: true when the command is valid and authorized.
-    value: ${{ steps.verdict.outputs.authorized }}
+    # At most one of authz and planauthz runs, and a skipped step's empty output reads as false.
+    # React on accept repeats this expression: a composite step cannot read its action's outputs.
+    value: ${{ steps.authz.outputs.authorized == 'true' || steps.planauthz.outputs.authorized == 'true' }}
   environment:
     description: Parsed target environment; empty for a bare `shipmate apply` (all non-explicit environments) and on the plan route, whose dispatched run carries no environment.
     value: ${{ steps.authz.outputs.environment }}
@@ -140,8 +142,8 @@ runs:
     - name: Authorize the commenter's permission
       id: access
       # Every later step that mints, reads or posts on these routes, except the two
-      # refusal/failure replies below, runs only when this authorized. The verdict step
-      # never reads it, so a permitted doctor dispatches nothing.
+      # refusal/failure replies below, runs only when this authorized. The `authorized`
+      # output never reads it, so a permitted doctor dispatches nothing.
       if: ${{ steps.parse.outputs.route != '' && steps.parse.outputs.route != 'help' }}
       shell: bash
       env:
@@ -596,27 +598,8 @@ runs:
         SHIPMATE_VERB: ${{ steps.parse.outputs.route }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/authorize"
 
-    - name: Combine the route verdicts
-      id: verdict
-      # One value for every route, so the reaction, the caller's dispatch condition and this
-      # action's `authorized` output cannot disagree. At most one of `authz` and `planauthz` runs --
-      # their `if:`s name disjoint routes -- and an empty output reads as false. No `if:` here: a
-      # skipped step writes no output, and then no route has a verdict at all. Routes that
-      # dispatch nothing (help, doctor, a non-command) land on false.
-      shell: bash
-      env:
-        APPLY_AUTHORIZED: ${{ steps.authz.outputs.authorized }}
-        PLAN_AUTHORIZED: ${{ steps.planauthz.outputs.authorized }}
-      run: |
-        set -euo pipefail
-        if [ "${APPLY_AUTHORIZED:-}" = "true" ] || [ "${PLAN_AUTHORIZED:-}" = "true" ]; then
-          echo "authorized=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "authorized=false" >> "$GITHUB_OUTPUT"
-        fi
-
     - name: React on accept
-      if: ${{ steps.verdict.outputs.authorized == 'true' }}
+      if: ${{ steps.authz.outputs.authorized == 'true' || steps.planauthz.outputs.authorized == 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
