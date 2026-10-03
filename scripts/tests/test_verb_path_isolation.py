@@ -10,7 +10,7 @@ Pinned on the apply side:
 - its `workflow_call` inputs, whole. The retired `mode` rail coming back is the regression, and
   an absence nothing compares is fail-open by construction;
 - its job ids, whole, and that no step anywhere in the file calls `unlock-cell`;
-- the waves job's `if:`, which must carry no verb clause;
+- each `envlevel*` job's `if:`, which must carry no verb clause;
 - both `summary` action steps running unconditionally: an `if:` there was only ever the unlock
   skip.
 
@@ -56,7 +56,7 @@ ENV_LEVEL = "apply-env-level.yml"
 #: dispatch contract: an input the body sends that this file does not declare kills the run at
 #: startup with no job, no check-run and no retrievable log.
 APPLY_INPUTS = {
-    "environment": {"required": True, "type": "string"},
+    "environment": {"required": False, "type": "string", "default": ""},
     "ref": {"required": True, "type": "string"},
     "pr_number": {"required": True, "type": "string"},
 }
@@ -68,7 +68,16 @@ UNLOCK_INPUTS = {
 #: The whole job-id set of each file. The apply side is listed so pasting an `unlock` job back
 #: in reds on the job list as well as on the action check below: a guard that only looks for a
 #: forbidden action name passes whenever the leaked job reaches for a different one.
-APPLY_JOBS = {"guard", "review", "detect", "apply", "summary"}
+APPLY_JOBS = {
+    "guard",
+    "review",
+    "detect",
+    "envlevel0",
+    "envlevel1",
+    "envlevel2",
+    "envlevel3",
+    "summary",
+}
 UNLOCK_JOBS = {"guard", "detect", "unlock"}
 
 #: Every `uses:` each unlock job declares, in order, SHA dropped: a repin must not redden this,
@@ -106,9 +115,26 @@ DETECT_OUTPUTS = {"cells": "${{ steps.d.outputs.cells }}"}
 APPLY_FAMILY = ("apply-cell", "apply-complete", "gate-refresh", "apply-summary")
 APPLY_FAMILY_WORKFLOW = ".github/workflows/apply-env-level.yml"
 
-#: The whole `if:` of the waves job. The mode clause went with the input, and it must not come
-#: back as a verb clause either.
-WAVES_IF = "${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}"
+#: The whole `if:` of each `envlevel*` job. The mode clause went with the input, and it must not
+#: come back as a verb clause either.
+ENVLEVEL_IF = {
+    "envlevel0": (
+        "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true'"
+        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+    ),
+    "envlevel1": (
+        "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true'"
+        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+    ),
+    "envlevel2": (
+        "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true'"
+        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+    ),
+    "envlevel3": (
+        "${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true'"
+        " && !contains(join(needs.*.result, ','), 'cancelled') }}"
+    ),
+}
 
 #: The whole `if:` of the unlock job. `guard` is in its `needs` too, so a rejected dispatch
 #: reaches `!failure()` here instead of leaving `detect` skipped, whose outputs read as empty
@@ -201,11 +227,11 @@ def test_the_apply_workflow_can_release_no_lock():
     )
 
 
-def test_the_waves_job_runs_on_every_apply_dispatch():
-    got = _job(APPLY, "apply").get("if")
-    assert got == WAVES_IF, (
-        f"the waves job's `if:` is {got!r}, not {WAVES_IF!r} -- a verb clause here would "
-        "be a second place deciding what this file does, and the file already decided"
+def test_each_envlevel_job_runs_on_every_apply_dispatch():
+    got = {job_id: _job(APPLY, job_id).get("if") for job_id in ENVLEVEL_IF}
+    assert got == ENVLEVEL_IF, (
+        f"the envlevel jobs' `if:` are {got!r}, not {ENVLEVEL_IF!r} -- a verb clause here "
+        "would be a second place deciding what this file does, and the file already decided"
     )
 
 

@@ -18,6 +18,7 @@ section below names the SHA the release tags.
 - **`scripts/onboard`'s closing checklist names the stacks without a git-tracked `.terraform.lock.hcl`.**
 - **`shipmate doctor` lists the role each environment resolves, per path and workload.**
 - **A listed workload that no stack tags is warned about on the paths that scan the whole tree.**
+- **`apply.yml` called without `environment` runs a bare apply of every environment the review decision allows, in `needs` order.**
 
 ### Changed
 

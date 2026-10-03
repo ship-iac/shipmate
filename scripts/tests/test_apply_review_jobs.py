@@ -29,7 +29,7 @@ from _loader import ENGINE, action_yaml, workflow_yaml
 _MINT = "actions/create-github-app-token"
 _CHECKOUT = "actions/checkout"
 
-#: The whole `if:` expression `apply-all.yml`'s `detect` carries, hand-written.
+#: The whole `if:` expression both apply paths' `detect` carries, hand-written.
 #: A failed `review` must skip it; nothing else may.
 _DETECT_IF = "${{ !failure() && !cancelled() }}"
 _DETECT_NEEDS = ["guard", "review"]
@@ -131,11 +131,14 @@ def test_the_review_mint_requests_only_pull_requests_read():
     assert got == _MINT_PERMISSIONS
 
 
-def test_detect_needs_review_and_refuses_to_run_after_it_failed():
+@pytest.mark.parametrize("workflow", _APPLY_PATHS)
+def test_detect_needs_review_and_refuses_to_run_after_it_failed(workflow):
     """One property, two halves: without `review` in `needs` the decision never
     arrives, and the explicit `if:` is what keeps a FAILED `review` from being
-    read as anything but a dead run."""
-    detect = _jobs("apply-all.yml")["detect"]
+    read as anything but a dead run.
+
+    Mutation: set either file's detect `if:` to `${{ always() }}`."""
+    detect = _jobs(workflow)["detect"]
     assert detect.get("needs") == _DETECT_NEEDS
     # `.get`, not `[...]`: a deleted `if:` is a fail-open mutation, and a KeyError would red
     # without naming the expression that went missing.

@@ -84,8 +84,8 @@ Job display names in the apply/deploy path nest: a called reusable workflow's
 job displays as `<caller job> / <callee job>`, applied at every level, and GHA
 cannot suppress a level. The apply leaf is therefore three deep, e.g.
 `post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
-short and non-redundant (`L0`..`L3` for env-levels in `apply-all.yml` /
-`deploy.yml`, `waves` for the single-env `apply.yml`, `review / decision` for
+short and non-redundant (`L0`..`L3` for env-levels in `apply.yml` /
+`apply-all.yml` / `deploy.yml`, `review / decision` for
 the review re-read both apply paths call from `apply-review.yml`) rather than
 repeating the verb the leaf already carries; the consumer's calling job supplies the outermost
 segment (`post-merge` on the deploy path). Its file is named `shipmate`, so the
@@ -2697,8 +2697,8 @@ like a failed predecessor level. Completed cells skip idempotently, so
 re-commenting `shipmate apply` resumes where the previous run stopped.
 
 The engine ships this as a reusable, parameterized workflow
-(`.github/workflows/apply-env-level.yml`) that the engine's own `deploy.yml`
-and `apply-all.yml` reusable workflows call once per env-level, passing that
+(`.github/workflows/apply-env-level.yml`) that the engine's own `deploy.yml`,
+`apply.yml` and `apply-all.yml` reusable workflows call once per env-level, passing that
 level's pre-computed wave matrix; the workflow itself still fans applies out
 stack-wave by stack-wave exactly as described above (see Fan-out).
 
@@ -2708,7 +2708,8 @@ The engine ships the merge-deploy path as the reusable workflow
 bare-apply path as `.github/workflows/apply-all.yml` (detect → env-levels
 0..3 via `apply-env-level.yml` → gate refresh + result comment), and the
 targeted path as `.github/workflows/apply.yml` (single-env detect → one
-`apply-env-level.yml` call → gate refresh + result comment), and the unlock path
+`apply-env-level.yml` call → gate refresh + result comment; called without
+`environment`, it runs the bare-apply shape instead), and the unlock path
 as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlock
 matrix; it takes `environment` and `ref` only, and declares `SHIPMATE_SECRETS`
 and no engine secret). A
