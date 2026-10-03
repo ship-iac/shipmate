@@ -47,7 +47,6 @@ body:
       options:
         - plan
         - apply
-        - apply-all
         - deploy
         - drift
         - comment-ops

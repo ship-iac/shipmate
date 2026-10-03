@@ -112,7 +112,6 @@ def test_render_step_feeds_every_env_var_the_script_reads():
 # test_render_step_env_block_matches_the_expected_mapping.
 _RENDER_ENV = {
     "SHIPMATE_ENVIRONMENT": "${{ inputs.environment }}",
-    "SHIPMATE_WAVES_JSON": "${{ inputs.waves-json }}",
     "SHIPMATE_ENVLEVEL0_WAVES": "${{ inputs.envlevel0-waves }}",
     "SHIPMATE_ENVLEVEL1_WAVES": "${{ inputs.envlevel1-waves }}",
     "SHIPMATE_ENVLEVEL2_WAVES": "${{ inputs.envlevel2-waves }}",
@@ -303,50 +302,34 @@ def test_scan_step_uses_the_app_token_not_the_workflow_token():
     )
 
 
-def test_engine_callers_pass_head_sha_to_apply_summary():
-    for wf in ("apply.yml", "apply-all.yml"):
-        spec = workflow_yaml(wf)
-        steps = spec["jobs"]["summary"]["steps"]
-        step = _find_step(steps, uses_contains="actions/apply-summary")
-        assert step is not None, f"{wf} has no apply-summary step"
-        assert (step.get("with") or {}).get("head-sha") == "${{ inputs.ref }}", (
-            f"{wf} must thread the head SHA into apply-summary"
-        )
+#: The whole `with:` of `apply.yml`'s apply-summary step, hand-written.
+_APPLY_SUMMARY_WITH = {
+    "pr-number": "${{ inputs.pr_number }}",
+    "head-sha": "${{ inputs.ref }}",
+    "environment": "${{ inputs.environment }}",
+    "envlevel0-waves": "${{ needs.detect.outputs.envlevel0_waves }}",
+    "envlevel1-waves": "${{ needs.detect.outputs.envlevel1_waves }}",
+    "envlevel2-waves": "${{ needs.detect.outputs.envlevel2_waves }}",
+    "envlevel3-waves": "${{ needs.detect.outputs.envlevel3_waves }}",
+    "excluded-envs": "${{ needs.detect.outputs.excluded_envs }}",
+    "skipped-envs": "${{ needs.detect.outputs.skipped_envs }}",
+    "review-held-envs": "${{ needs.detect.outputs.review_held_envs }}",
+    "applied-ungated-envs": "${{ needs.detect.outputs.applied_ungated_envs }}",
+    "review-not-required-envs": "${{ needs.detect.outputs.review_not_required_envs }}",
+    "results": "${{ join(needs.*.result, ',') }}",
+    "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+    "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+}
 
 
-def test_apply_all_passes_the_held_and_ungated_outputs_to_apply_summary():
+def test_apply_passes_apply_summary_exactly_this_with():
     """Five detect outputs are JSON arrays of env names with identical shape, so a crossed wire
-    renders a plausible-looking comment naming the wrong environments for the wrong reason. The
-    detect job's `outputs:` entry is compared too: an input wired to an output the job never
-    declares resolves to the empty string, which renders as no sentence at all.
+    renders a plausible comment naming the wrong environments for the wrong reason, and a dropped
+    `environment` renders a targeted apply as the all-environments form. The detect outputs these
+    read are pinned whole in `test_detect_wiring_guard.py`.
 
-    Mutation: wire `applied_ungated_envs` into `review-not-required-envs` -- red.
-    Mutation: delete the detect job's `review_not_required_envs` output -- red."""
-    spec = workflow_yaml("apply-all.yml")
-    step = _find_step(spec["jobs"]["summary"]["steps"], uses_contains="actions/apply-summary")
-    with_ = step.get("with") or {}
-    assert with_.get("review-held-envs") == "${{ needs.detect.outputs.review_held_envs }}"
-    assert with_.get("applied-ungated-envs") == "${{ needs.detect.outputs.applied_ungated_envs }}"
-    assert with_.get("review-not-required-envs") == (
-        "${{ needs.detect.outputs.review_not_required_envs }}"
-    )
-    assert spec["jobs"]["detect"]["outputs"]["review_not_required_envs"] == (
-        "${{ steps.d.outputs.review_not_required_envs }}"
-    )
-
-
-def test_apply_passes_the_review_not_required_output_to_apply_summary():
-    """The targeted form carries the no-review-required set too: a targeted apply of a gated env
-    under a null decision is the case the sentence exists for.
-
-    Mutation: delete the `review-not-required-envs` line from apply.yml -- red.
-    Mutation: delete the detect job's `review_not_required_envs` output -- red."""
-    spec = workflow_yaml("apply.yml")
-    step = _find_step(spec["jobs"]["summary"]["steps"], uses_contains="actions/apply-summary")
-    assert (step.get("with") or {}).get("review-not-required-envs") == (
-        "${{ needs.detect.outputs.review_not_required_envs }}"
-    )
-    assert spec["jobs"]["detect"]["outputs"]["review_not_required_envs"] == (
-        "${{ steps.t.outputs.review_not_required_envs"
-        " || steps.d.outputs.review_not_required_envs }}"
-    )
+    Mutation: drop `environment:` from the step's `with:` -- red.
+    Mutation: wire `applied_ungated_envs` into `review-not-required-envs` -- red."""
+    steps = workflow_yaml("apply.yml")["jobs"]["summary"]["steps"]
+    step = _find_step(steps, uses_contains="actions/apply-summary")
+    assert step["with"] == _APPLY_SUMMARY_WITH

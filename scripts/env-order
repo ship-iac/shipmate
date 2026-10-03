@@ -13,8 +13,7 @@ therefore cannot reorder its own apply waves or drop its own exclusion.
 `MAX_ENV_LEVELS` is fixed because GHA declares no jobs or outputs dynamically.
 Bumping it needs matching `envlevelN_waves`/`_empty` output slots in
 actions/deploy-detect/action.yml and actions/apply-all-detect/action.yml, one
-envlevelN job in the engine's apply-all.yml, and one caller job per env-level in
-each consumer deploy.yml.
+envlevelN job in each of the engine's apply.yml and deploy.yml.
 """
 
 import json

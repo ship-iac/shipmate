@@ -86,11 +86,11 @@ def test_plan_body_is_the_dispatch_ref_the_verb_and_pr_number_alone():
 
 
 def test_apply_body_omits_the_environment_when_it_is_empty():
-    """A bare `shipmate apply` sends {verb, ref, pr_number} and no environment key, which is
-    what selects the `all` job (`inputs.environment == ''`) over `targeted`.
+    """A bare `shipmate apply` sends {verb, ref, pr_number} and no environment key, which
+    `apply.yml` reads as `inputs.environment == ''` and runs as the bare form.
 
-    Mutation: drop the `if os.environ.get("ENVIRONMENT")` guard, and a bare apply routes to
-    `targeted` instead — one environment applied where every environment was asked for.
+    Mutation: drop the `if os.environ.get("ENVIRONMENT")` guard -- the body carries an empty
+    `environment`, red.
     """
     assert _build_dispatch_body("apply") == {
         "ref": "main",
@@ -226,7 +226,7 @@ def test_an_unknown_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_
 def test_every_verb_dispatches_the_one_consumer_file(tmp_path, verb):
     """One entry point for every verb: the file is fixed, and the body's `verb` selects the
     job. What kept the verbs apart before was the filename; what keeps them apart now is the
-    seven `if:` expressions `shipmate doctor`'s routing probe compares whole.
+    six `if:` expressions `shipmate doctor`'s routing probe compares whole.
 
     Mutation: make the `case` resolve a per-verb filename again.
     """

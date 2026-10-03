@@ -4,8 +4,8 @@
 Reads the run's jobs listing as JSON Lines on stdin (one object per line,
 keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 '.jobs[]'`), per-cell `apply-summary.*` artifacts from the $CELLS directory,
-the expected-cell set (waves JSON — targeted or per-env-level), the head SHA,
-the excluded/skipped/held envs (apply-all only) and the ungated and no-review envs,
+the expected-cell set (per-env-level waves JSON), the head SHA,
+the excluded/skipped/held envs (bare form only) and the ungated and no-review envs,
 and writes a fresh comment.md -- this comment is never upserted, unlike the plan
 sticky comment. The ungated and no-review envs go to stdout, the step log, as
 `notices` annotations, not into the comment.
@@ -255,12 +255,11 @@ def load_cells(cells_dir):
 
 
 def _expected_cells():
-    """Union of every wave array in SHIPMATE_WAVES_JSON (targeted) or the
-    SHIPMATE_ENVLEVEL{0..N}_WAVES inputs (all-environments); '' contributes
-    nothing. Cell identity is (environment, stack_path) -- a wave element is
+    """Union of every wave array in the SHIPMATE_ENVLEVEL{0..N}_WAVES inputs (a
+    targeted apply fills level 0 alone); '' contributes nothing. Cell identity is
+    (environment, stack_path) -- a wave element is
     `{"stack": "<stack path>", "environment": "<env>"}`."""
-    raw_values = [os.environ.get("SHIPMATE_WAVES_JSON", "") or ""]
-    raw_values += [
+    raw_values = [
         os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") or "" for i in range(MAX_ENV_LEVELS)
     ]
     expected = set()
@@ -522,7 +521,7 @@ _UNGATED = (
 _NO_REVIEW = "no approving review was required, so gated had nothing to enforce"
 
 
-def notices(rows, env_name, applied_ungated, review_not_required):
+def notices(rows, applied_ungated, review_not_required):
     """One `::notice::` workflow command per environment in `applied_ungated` (all-environments
     form only, empty in the targeted one) and per environment in `review_not_required` that has
     an applied, failed or unrecorded row, where infrastructure may have changed, so a run with
@@ -539,8 +538,6 @@ def notices(rows, env_name, applied_ungated, review_not_required):
     request's review state required none, so `gated` enforced nothing. It is a different cause
     from `applied_ungated`, so it gets its own text, which states the authorization fact and
     never that nobody reviewed -- a code-owner review can still be required at count 0."""
-    if env_name:
-        applied_ungated = ()
     ran = {r["environment"] for r in rows if r["status"] in _SECTION_STATUSES}
     lines = [f"::notice::{sc.command_data(e)}: {_UNGATED}" for e in applied_ungated]
     return lines + [
@@ -548,12 +545,10 @@ def notices(rows, env_name, applied_ungated, review_not_required):
     ]
 
 
-def _dispositions(excluded, skipped, env_name, held):
+def _dispositions(excluded, skipped, held):
     """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
     All are all-environments concepts, empty in the targeted form. A held env that is also
     explicit is listed under `held` only, and under `held_explicit` for its command."""
-    if env_name:
-        excluded = skipped = held = ()
     excluded, held = _esc(excluded), _esc(held)
     return {
         "explicit": [e for e in excluded if e not in held],
@@ -598,7 +593,7 @@ def _grouped_lines(d):
     return lines
 
 
-def _footer_parts(excluded, skipped, env_name, held=(), compact=False):
+def _footer_parts(excluded, skipped, held=(), compact=False):
     """The lines above the footer, in the all-environments form only: one line per environment
     for each disposition this run produced (explicit left pending, skipped, held for review) and
     a `held:` remedy line when any is held. Env names are author-controlled, so `_md_escape`d.
@@ -615,7 +610,7 @@ def _footer_parts(excluded, skipped, env_name, held=(), compact=False):
     and an unknown or absent decision) and only the run's own detect notice
     carries which one, since the decision never reaches this renderer; the
     `held:` line names every remedy and points there."""
-    d = _dispositions(excluded, skipped, env_name, held)
+    d = _dispositions(excluded, skipped, held)
     return _grouped_lines(d) if compact else _per_env_lines(d)
 
 
@@ -687,7 +682,7 @@ def build_comment(
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
     )
-    dispositions = (excluded, skipped, env_name, held)
+    dispositions = (excluded, skipped, held)
     parts = _footer_parts(*dispositions)
     tail = _tail(notes, parts, hint)
     urls = [_job_url(r, jobs, run_url) for r in rows]
@@ -732,7 +727,6 @@ def main():
     # Printed before the render, so an over-cap SystemExit still leaves the audit trail.
     for line in notices(
         rows,
-        env_name,
         json.loads(os.environ.get("SHIPMATE_APPLIED_UNGATED_ENVS") or "[]"),
         json.loads(os.environ.get("SHIPMATE_REVIEW_NOT_REQUIRED_ENVS") or "[]"),
     ):

@@ -41,6 +41,7 @@ section below names the SHA the release tags.
 - **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 - **A stack at path `apply` or `shipmate` plans; `build-matrix` no longer refuses either.**
 - **`actions/setup` downloads Terramate with curl instead of `terramate-io/terramate-action`, which consumers may drop from their allowed-actions list; a self-hosted runner's own curl config applies.**
+- **`apply-all.yml` is gone: the workflow file's `targeted` and `all` jobs become one `apply` job calling `apply.yml` with `environment`, `ref` and `pr_number` (`docs/getting-started.md`).**
 
 ### Removed
 

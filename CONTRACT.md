@@ -43,10 +43,10 @@ reports a plan-calling job carrying another name; until it is fixed,
 `shipmate / <stack> / <env>` lookup across every check run on the head SHA —
 finds no match and every `plan` link falls back to the workflow-run URL.
 
-The consumer's one workflow file gates seven jobs on the event (§Post-plan
+The consumer's one workflow file gates six jobs on the event (§Post-plan
 topology), so every run also carries one one-segment check-run per job that did
 not run, named by that job's display name — `shipmate`, `post-merge`,
-`targeted`, `all`, `unlock` — with conclusion `skipped`. They are display
+`apply`, `unlock` — with conclusion `skipped`. They are display
 artefacts of the file's shape, and nothing functional depends on them:
 `shipmate / gate` is the required check, `scripts/summary-comment` resolves plan
 links by an exact three-segment name, and `scripts/mirror-checks` copies only
@@ -85,8 +85,8 @@ job displays as `<caller job> / <callee job>`, applied at every level, and GHA
 cannot suppress a level. The apply leaf is therefore three deep, e.g.
 `post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
 short and non-redundant (`L0`..`L3` for env-levels in `apply.yml` /
-`apply-all.yml` / `deploy.yml`, `review / decision` for
-the review re-read both apply paths call from `apply-review.yml`) rather than
+`deploy.yml`, `review / decision` for
+the review re-read `apply.yml` calls from `apply-review.yml`) rather than
 repeating the verb the leaf already carries; the consumer's calling job supplies the outermost
 segment (`post-merge` on the deploy path). Its file is named `shipmate`, so the
 pull request's checks UI renders that workflow name and then the job path
@@ -325,7 +325,7 @@ never used.
   boundary for the key, `docs/drift.md` §Slack (optional) for the webhook).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
-  the apply path (`apply.yml`, `apply-all.yml`, `apply-review.yml`,
+  the apply path (`apply.yml`, `apply-review.yml`,
   `apply-env-level.yml`, `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
   passes the key, and on its `deploy` and `drift` jobs the webhook, by name and
   binds no environment of its own. Each of those
@@ -914,7 +914,7 @@ the apply-match fingerprint by construction — it hashes only non-empty
 
 **Every calling job whose callee runs a cell must grant `id-token: write`, cloud
 or not.** GitHub caps a called workflow's permissions at each `uses:` boundary,
-so the `plan`, `drift`, `deploy`, `targeted`, `all` and `unlock` jobs of the
+so the `plan`, `drift`, `deploy`, `apply` and `unlock` jobs of the
 consumer's `shipmate.yml` grant it; its `comment-ops` job does not, because no
 job in engine `comment-ops.yml` requests it. This applies to a consumer that
 uses no cloud credentials whatsoever: without the grant the run fails at
@@ -998,8 +998,7 @@ or saying the permission could not be read. `help` answers anyone.
 
 Every dispatching verb dispatches the same file,
 `.github/workflows/shipmate.yml`, and the `verb` input in the dispatch body
-selects the job: `plan` → the `plan` job, `apply` with an environment → the
-`targeted` job, `apply` without one → the `all` job, `unlock` → the `unlock`
+selects the job: `plan` → the `plan` job, `apply` → the `apply` job, `unlock` → the `unlock`
 job. That file carries five triggers; `workflow_dispatch` is the one a
 commented verb reaches, and the other four (`pull_request_target`,
 `issue_comment`, `push`, `schedule`) fire from their own events. `doctor` and
@@ -1270,10 +1269,10 @@ there is no owners parser here to disagree with it.
 
 A bare `shipmate apply` is authorized once at comment time, by the same five
 apply requirements. Comment time is never the whole review decision: both apply
-paths re-read `reviewDecision` server-side before anything applies (below), so
+forms re-read `reviewDecision` server-side before anything applies (below), so
 an approval dismissed between the comment and the dispatch holds. Both forms
 dispatch the consumer's `shipmate.yml` with `verb: apply`; the optional
-`environment` input selects the job (set → `targeted`, empty → `all`). Both
+`environment` input selects the form `apply.yml` runs (set → targeted, empty → bare). Both
 share the same App-minted `workflow_dispatch` mechanism and the same per-env
 `apply-<env>-<stack>` concurrency groups.
 
@@ -1312,16 +1311,15 @@ to fall through to.
 Opting in takes two things, and the setting alone is not enough:
 
 1. `gated = false` on the environment's entry on the default branch, and
-2. the consumer's `shipmate.yml` pinning both engine references —
-   `.github/workflows/apply.yml@` (the `targeted` job) and
-   `.github/workflows/apply-all.yml@` (the `all` job) — to the same commit as
-   its `comment-ops.yml` reference, as §Consumption's one-change rule requires.
-   `comment-ops.yml` authorizes an apply under the exemption that `apply.yml` and
-   `apply-all.yml` enforce; pinned at different commits, an apply authorized under
-   one engine's rule is enforced by another's, or by none.
+2. the consumer's `shipmate.yml` pinning its `.github/workflows/apply.yml@`
+   reference (the `apply` job) to the same commit as its `comment-ops.yml`
+   reference, as §Consumption's one-change rule requires. `comment-ops.yml`
+   authorizes an apply under the exemption that `apply.yml` enforces; pinned at
+   different commits, an apply authorized under one engine's rule is enforced by
+   another's, or by none.
 
 **One source, three readers.** `actions/comment-ops` resolves the ungated set
-before it authorizes, and each apply path's detect resolves it again before it
+before it authorizes, and each apply form's detect resolves it again before it
 enforces —
 `scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
 three reading `.github/shipmate.toml` on the **default branch** through the same
@@ -1353,7 +1351,7 @@ engine-owned scripts read it.
   re-applies the identical rule to the freshly read decision and refuses the
   run before any wave, leaving every apply check — and the gate — pending.
 - **Bare `shipmate apply`** — authorized at comment time whenever any entry is
-  ungated, then partitioned per environment by the engine's `apply-all.yml`.
+  ungated, then partitioned per environment by the engine's `apply.yml`.
   `NONE` / `APPROVED` apply everything; `REVIEW_REQUIRED` applies the ungated
   environments and holds the rest — all of them when none is ungated;
   `CHANGES_REQUESTED`, an unknown value, or no decision at all holds
@@ -1508,7 +1506,7 @@ is then refused by the exact-plan fail-safe if the first advanced the state.
 ## Post-plan topology
 
 The consumer's workflow is one file, `.github/workflows/shipmate.yml`: five
-triggers, and seven jobs each gated on the event with an `if:` and each calling
+triggers, and six jobs each gated on the event with an `if:` and each calling
 one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
 declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY`,
 `SHIPMATE_PLAN_PASSPHRASE` and `SHIPMATE_SECRETS` by name (never
@@ -1522,12 +1520,11 @@ SHA-pinned YAML.
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` | `deploy` | `deploy.yml` |
 | `schedule`, or `workflow_dispatch` with `verb: drift` | `drift` | `drift.yml` |
-| `workflow_dispatch` with `verb: apply` and an `environment` | `targeted` | `apply.yml` |
-| `workflow_dispatch` with `verb: apply` and no `environment` | `all` | `apply-all.yml` |
+| `workflow_dispatch` with `verb: apply` | `apply` | `apply.yml` |
 | `workflow_dispatch` with `verb: unlock` | `unlock` | `unlock.yml` |
 
 Each of those `if:` expressions is a contract literal, not a style choice:
-`shipmate doctor`'s routing probe holds all seven and compares each one whole,
+`shipmate doctor`'s routing probe holds all six and compares each one whole,
 because a wrong expression sends a verb nowhere and produces a dispatched run
 that completes with every job skipped — green, and no work done.
 
@@ -1661,8 +1658,8 @@ The four jobs:
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
-- **`apply.yml` / `apply-all.yml` / `apply-review.yml` / `apply-env-level.yml` /
-  `deploy.yml`** (engine, reached through the `targeted`, `all` and `deploy` jobs —
+- **`apply.yml` / `apply-review.yml` / `apply-env-level.yml` /
+  `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (reading the review decision, completing apply
   checks, refreshing the gate, posting the apply result comment) are likewise
@@ -1784,7 +1781,7 @@ trigger alone closes two paths a trigger check alone would not:
   `docs/hardening.md`.
 - The engine holds no pins of itself. Every engine step calls its action as `$/actions/<name>`,
   which GitHub resolves in this repository at the commit the consumer's `uses:` resolved to, so
-  the consumer's one pin names the whole tree that runs. The consumer surface is the seven
+  the consumer's one pin names the whole tree that runs. The consumer surface is the six
   reusable workflows; the composite actions are engine-internal.
 - Every engine reference moves in one change: a repository that bumps some refs and leaves
   others behind runs two engine versions against one contract.
@@ -1920,7 +1917,7 @@ verbatim:
 
 `apply-cell` (writer) and `scripts/apply-comment` (reader, via
 `actions/apply-summary`) are pinned by the same SHA in the consumer's
-`shipmate.yml`, on its `apply.yml` / `apply-all.yml` references. The reader
+`shipmate.yml`, on its `apply.yml` reference. The reader
 fails loud on a `cell.json` missing schema keys or carrying an out-of-enum
 `result`.
 
@@ -2036,8 +2033,8 @@ it holds the gate in either direction.
 
 ## Apply result comment
 
-Every comment-ops apply run — targeted `shipmate apply <env>` (`apply.yml`)
-and bare `shipmate apply` (`apply-all.yml`); the merge-deploy path,
+Every comment-ops apply run — targeted `shipmate apply <env>` and bare
+`shipmate apply`, both through `apply.yml`; the merge-deploy path,
 `deploy.yml`, stays comment-less — posts a fresh PR comment via
 `actions/apply-summary`. Unlike the plan comment above, it is deliberately
 not upserted against a marker: every run's comment is new, so a
@@ -2457,14 +2454,14 @@ uploaded artifact. When the consumer sets the optional `plan-passphrase` input
 on `plan-cell` (in `plan.yml`), the engine encrypts the plan before upload
 using a single symmetric cipher: `openssl enc -aes-256-ctr -pbkdf2 -salt`,
 passphrase supplied via `-pass env:` (never on the command line). `apply-cell`
-decrypts it after download on every apply path: all three paths pass it
+decrypts it after download on every apply path: both paths pass it
 as the optional `SHIPMATE_PLAN_PASSPHRASE` secret into the reusable
 `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
-merge-deploy path, via the engine `apply-all.yml` for the bare form, and via
-the engine `apply.yml` for the targeted form. Consumers set
+merge-deploy path, and via the engine `apply.yml` for the targeted and bare
+forms. Consumers set
 `SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret and forward it
-by name in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`,
-`targeted` and `all` jobs. Never `secrets: inherit`: it hands the engine the caller's whole
+by name in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`
+and `apply` jobs. Never `secrets: inherit`: it hands the engine the caller's whole
 secret set, and across an organization boundary it delivers nothing at all.
 
 Not a variable, and not a secret on one half of a split environment alone: a
@@ -2697,27 +2694,25 @@ like a failed predecessor level. Completed cells skip idempotently, so
 re-commenting `shipmate apply` resumes where the previous run stopped.
 
 The engine ships this as a reusable, parameterized workflow
-(`.github/workflows/apply-env-level.yml`) that the engine's own `deploy.yml`,
-`apply.yml` and `apply-all.yml` reusable workflows call once per env-level, passing that
+(`.github/workflows/apply-env-level.yml`) that the engine's own `deploy.yml`
+and `apply.yml` reusable workflows call once per env-level, passing that
 level's pre-computed wave matrix; the workflow itself still fans applies out
 stack-wave by stack-wave exactly as described above (see Fan-out).
 
 The engine ships the merge-deploy path as the reusable workflow
 `.github/workflows/deploy.yml` (deploy-detect → env-levels 0..3 via
 `apply-env-level.yml` → gate completion + optional Slack notify), the
-bare-apply path as `.github/workflows/apply-all.yml` (detect → env-levels
-0..3 via `apply-env-level.yml` → gate refresh + result comment), and the
-targeted path as `.github/workflows/apply.yml` (single-env detect → one
-`apply-env-level.yml` call → gate refresh + result comment; called without
-`environment`, it runs the bare-apply shape instead), and the unlock path
+apply path as `.github/workflows/apply.yml` (detect → env-levels 0..3 via
+`apply-env-level.yml` → gate refresh + result comment; a targeted apply is one
+env-level, a bare one every pending environment in `needs` order), and the unlock path
 as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlock
 matrix; it takes `environment` and `ref` only, and declares `SHIPMATE_SECRETS`
 and no engine secret). A
-consuming repo reaches all four from `shipmate.yml`: the `deploy` job (on
-`push` to the default branch; passes secrets and no input), the `targeted` and `all` jobs (dispatched
-`apply`, split on whether an `environment` was given) and the `unlock` job
+consuming repo reaches all three from `shipmate.yml`: the `deploy` job (on
+`push` to the default branch; passes secrets and no input), the `apply` job (dispatched
+`apply`, with or without an `environment`) and the `unlock` job
 (dispatched `unlock`; a `secrets:` block naming
-`SHIPMATE_SECRETS` alone). All four grant `id-token: write` (§AWS OIDC).
+`SHIPMATE_SECRETS` alone). All three grant `id-token: write` (§AWS OIDC).
 
 ## OpenTofu note
 

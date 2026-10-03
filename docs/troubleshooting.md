@@ -96,11 +96,11 @@ live probes.
   and linking the comment-handling run that carries the error.
   Without the last the dispatch is accepted and the run plans nothing.
 - **Whether each of `shipmate.yml`'s jobs is selected by the `if:` its event
-  needs.** One file gates seven jobs, one per engine reusable workflow, and the
+  needs.** One file gates six jobs, one per engine reusable workflow, and the
   probe compares each job's whole `if:` against the expression that file's
   published fence carries. Each finding identifies the job by the engine
   workflow it calls — "the job calling the engine's `apply.yml`", which is the
-  fence's `targeted` — because a job that is missing or duplicated has no one
+  fence's `apply` — because a job that is missing or duplicated has no one
   job id to name. A wrong expression and a missing `if:` are both quoted with
   the expression to write; a job count other than one is not, since there is no
   single job to compare. Nothing else observes any of this: a verb whose job
@@ -313,11 +313,9 @@ acquiring it. See §A state lock is held.
 
 **No supported route aims an apply at a superseded plan.** That is why this
 error normally means the state moved rather than that the wrong plan was chosen.
-Both dispatched apply workflows refuse in their `guard` job any dispatch whose
+The dispatched apply workflow refuses in its `guard` job any dispatch whose
 actor is not a `[bot]` — a hand-run one fails with `apply must be dispatched by
-the shipmate App via comment-ops, not by a direct workflow_dispatch`, or from
-`apply-all.yml` with `apply-all must be dispatched by the shipmate App via
-comment-ops, not by a direct workflow_dispatch` — and
+the shipmate App via comment-ops, not by a direct workflow_dispatch` — and
 comment-ops reads the plan run each `apply / <stack> / <env>` check on the pull
 request's current head records, refusing the command when that head names none.
 These fail-safes are defence in depth behind that control, not the only thing
@@ -838,9 +836,9 @@ files plans the destroy of what the revert removed from configuration, and a
 
 ### A dispatched verb produced a run in which every job was skipped
 
-The comment was accepted, the dispatch succeeded and the run page shows seven
+The comment was accepted, the dispatch succeeded and the run page shows six
 skipped jobs and nothing else — which is what a healthy run also shows for the
-six jobs the event did not select.
+five jobs the event did not select.
 
 The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs

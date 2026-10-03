@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply detect: a dispatched single-env apply's work set + waves.
 
-The dispatched workflow is the consumer's `shipmate.yml`, whose `targeted` job
+The dispatched workflow is the consumer's `shipmate.yml`, whose `apply` job
 the `verb: apply` body selects; the engine's own `apply.yml` is `workflow_call`
 and is what that job calls.
 
@@ -12,7 +12,7 @@ checks on the head, and the plan run it applies from is the one that check
 records. Cells whose apply check already completed are dropped (idempotent
 no-op), and the rest wave-ordered. A targeted `shipmate apply <env>` is explicit by
 design — it never blocks on other environments; region-level sequencing across
-envs is handled separately on the apply-all path.
+envs is handled separately by the bare form.
 
 Before any of that, the PR's review decision — read server-side by the `review`
 job, narrowed by `gated = false` on the environment's entry — must authorize this

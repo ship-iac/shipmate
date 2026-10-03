@@ -68,7 +68,7 @@ holds the App key. `shipmate doctor` warns for every workflow file declaring the
 trigger except `shipmate.yml`, matched by exact name. Every trigger the engine
 uses lives in that one file, so what separates them is not which file holds
 which trigger but each job's `if:` — a `pull_request_target` event selects the
-`plan` job and no other. doctor's routing probe compares all seven of those
+`plan` job and no other. doctor's routing probe compares all six of those
 expressions, whole, against the fence `getting-started.md` publishes. See
 "Contributors without push access" for the trade-off that follows.
 
@@ -297,7 +297,7 @@ the other:
   requirements are untouched (CONTRACT.md §Comment-ops). Environments without
   it are held out of a bare `shipmate apply` and refused on a targeted
   one, their apply checks left pending, so the gate keeps blocking the merge
-  until they are applied with a review in hand. Both engine apply paths resolve
+  until they are applied with a review in hand. Both engine apply forms resolve
   the setting themselves and enforce on it; engine `comment-ops.yml`'s read of it
   is an early refusal, not the policy. Opting in takes no line in your workflow
   file — see `docs/getting-started.md`.
@@ -886,8 +886,8 @@ included, because it compares the policy names against the default branch alone.
 
 The documented file's jobs pass four secrets by name:
 `SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
-writes or reads an encrypted plan artifact (the `plan`, `deploy`, `targeted` and
-`all` jobs; `unlock` passes neither engine secret), `SHIPMATE_SECRETS` on
+writes or reads an encrypted plan artifact (the `plan`, `deploy` and `apply`
+jobs; `unlock` passes neither engine secret), `SHIPMATE_SECRETS` on
 every job whose callee runs a cell, and `SHIPMATE_SLACK_WEBHOOK` on the `deploy`
 and `drift` jobs, read only by engine jobs that bind `shipmate-engine`. Nothing
 else crosses into a called workflow, because GHA forwards no secret a caller does

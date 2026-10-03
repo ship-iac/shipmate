@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""apply-all.yml detect: the bare `shipmate apply` work set -> env-levels -> waves.
+"""apply.yml detect, bare form: the bare `shipmate apply` work set -> env-levels -> waves.
 
 The pre-merge equivalent of deploy-detect, sourced like apply-detect: cells are
 the tree's stacks whose `apply / <stack> / <env>` check is on the head, each

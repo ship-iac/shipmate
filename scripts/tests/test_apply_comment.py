@@ -319,8 +319,11 @@ def test_a_run_that_died_before_any_cell_reported_renders_failed():
 
 def test_the_short_form_names_a_failed_run():
     """Mutation: test `held` before the job results in `_verdict` -- red with a held env."""
-    assert _comment([], results="success,failure", held=["prod"]) == (
-        f"### shipmate apply dev-eu\n\n🔴 failed {AT}\n\n" + HINT
+    assert _comment([], env="", results="success,failure", held=["prod"]) == (
+        f"### shipmate apply\n\n🔴 failed {AT}\n\n"
+        "⚪ prod: held, the review state does not permit applying\n"
+        "held: get an approving review, or resolve or dismiss a requested-changes review. "
+        "The run log's apply-all-detect notice names the decision seen.\n\n" + HINT
     )
 
 
@@ -363,7 +366,7 @@ def test_the_footer_lines_of_the_all_environments_form():
     Mutation: `needs an approving review` in the held line -- red.
     Mutation: list every `excluded` env on an explicit line -- `sbx` appears twice, red.
     Mutation: append a `gate: pending until every environment is applied` line -- red."""
-    assert ac._footer_parts(["prod", "sbx"], ["stg"], "", ["dev", "sbx"]) == [
+    assert ac._footer_parts(["prod", "sbx"], ["stg"], ["dev", "sbx"]) == [
         "🟡 prod: left pending (explicit), comment `shipmate apply prod`",
         "⚪ stg: skipped, ordered after an environment not applying this run",
         "⚪ dev: held, the review state does not permit applying",
@@ -374,17 +377,10 @@ def test_the_footer_lines_of_the_all_environments_form():
     ]
 
 
-def test_the_targeted_form_renders_no_footer_lines():
-    """Explicit, skipped and held are apply-all concepts.
-
-    Mutation: drop the `if env_name` reset in `_dispositions` -- red."""
-    assert ac._footer_parts(["prod"], ["stg"], "dev-eu", ["dev"]) == []
-
-
 def test_the_footer_lines_escape_every_env_name():
     """Env names are author-controlled. Mutation: `_dispositions` escapes `excluded` but not
     `held` -- red (both the held line and its command)."""
-    assert ac._footer_parts(["e<1"], ["s<2"], "", ["h<3", "e<1"]) == [
+    assert ac._footer_parts(["e<1"], ["s<2"], ["h<3", "e<1"]) == [
         "⚪ s&lt;2: skipped, ordered after an environment not applying this run",
         "⚪ h&lt;3: held, the review state does not permit applying",
         "⚪ e&lt;1: held, the review state does not permit applying; once it clears, comment "
@@ -408,19 +404,9 @@ def test_the_notices_name_ungated_then_no_review_envs():
     Mutation: `applied without an approving review` in `_UNGATED` -- red.
     Mutation: list the no-review envs first -- red."""
     rows = [_row(environment="qa")]
-    assert ac.notices(rows, "", ["dev-eu"], ["qa"]) == [
+    assert ac.notices(rows, ["dev-eu"], ["qa"]) == [
         "::notice::dev-eu" + _UNGATED_NOTICE,
         "::notice::qa" + _NO_REVIEW_NOTICE,
-    ]
-
-
-def test_the_targeted_form_has_no_ungated_notice():
-    """Ungated is an apply-all concept; a targeted apply of a gated env under a null decision is
-    the case the no-review notice exists for.
-
-    Mutation: drop the `if env_name` reset in `notices` -- red."""
-    assert ac.notices([_row()], "dev-eu", ["dev-eu"], ["dev-eu"]) == [
-        "::notice::dev-eu" + _NO_REVIEW_NOTICE
     ]
 
 
@@ -429,7 +415,7 @@ def test_no_review_notice_skips_an_env_whose_apply_never_ran():
 
     Mutation: skip the row filter in `notices` -- the notice prints, red."""
     rows = [_row(environment="sbx", status="blocked", reason="upstream failed", apply_text=None)]
-    assert ac.notices(rows, "sbx", [], ["sbx"]) == []
+    assert ac.notices(rows, [], ["sbx"]) == []
 
 
 @pytest.mark.parametrize("status", ["applied", "failed", "unrecorded"])
@@ -438,7 +424,7 @@ def test_no_review_notice_names_an_env_whose_apply_ran(status):
 
     Mutation: narrow the row filter in `notices` to `status == "applied"` -- red."""
     rows = [_row(environment="sbx", status=status)]
-    assert ac.notices(rows, "sbx", [], ["sbx"]) == ["::notice::sbx" + _NO_REVIEW_NOTICE]
+    assert ac.notices(rows, [], ["sbx"]) == ["::notice::sbx" + _NO_REVIEW_NOTICE]
 
 
 def test_the_not_attempted_note_names_the_targeted_env_escaped():
@@ -762,7 +748,7 @@ def test_the_compact_footer_lines_group_every_disposition():
     Mutation: delete the `held_explicit` clause in `_grouped_lines` -- red.
     Mutation: append a `gate: pending until every environment is applied` line -- red."""
     assert ac._footer_parts(
-        ["prod", "prod-us", "sbx"], ["stg", "uat"], "", ["dev", "sbx"], compact=True
+        ["prod", "prod-us", "sbx"], ["stg", "uat"], ["dev", "sbx"], compact=True
     ) == [
         "🟡 left pending (explicit): prod, prod-us; comment `shipmate apply <env>` for each",
         "⚪ skipped, ordered after an environment not applying this run: stg, uat",
@@ -1416,10 +1402,12 @@ def test_wave_job_name_matches_the_apply_check_grammar():
 
 
 def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
+    """The render step's env for a targeted `dev-eu` apply as `apply.yml` wires it: `waves_json`
+    in env-level 0, the other levels and every env set empty."""
     monkeypatch.setenv("CELLS", str(cells_dir))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
-    monkeypatch.setenv("SHIPMATE_WAVES_JSON", waves_json)
-    for i in range(ac.MAX_ENV_LEVELS):
+    monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves_json)
+    for i in range(1, ac.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
     monkeypatch.setenv("SHIPMATE_RESULTS", "success")
     monkeypatch.setenv("SHIPMATE_CHECKS", checks_path)
@@ -1650,6 +1638,30 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
         f'🟢 app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>'
+    )
+
+
+def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
+    """A targeted apply's expected cells arrive in env-level 0, the slot `apply.yml` fills from
+    `apply-detect`. `stacks/db` has no artifact, so only the expected-cell set can name it.
+
+    Mutation: read the expected cells from `range(1, MAX_ENV_LEVELS)` in `_expected_cells` --
+    the db row and its note are gone, red."""
+    cells = tmp_path / "cells"
+    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
+    waves = json.dumps(
+        {
+            "wave0": [{"stack": "stacks/app", "environment": "dev-eu"}],
+            "wave1": [{"stack": "stacks/db", "environment": "dev-eu"}],
+        }
+    )
+    _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n🟡 1 not attempted, 1 applied {_MAIN_AT}\n\n"
+        f'🟢 app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>\n'
+        f'🟡 stacks/db (dev-eu): not attempted <a href="{_MAIN_RUN}">logs</a>\n\n'
+        "not attempted: the apply checks stay pending; retry with `shipmate apply dev-eu`.\n\n"
+        + HINT
     )
 
 

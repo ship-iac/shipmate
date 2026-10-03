@@ -77,7 +77,6 @@ ENGINE_CALL_SECRETS = {
     "drift.yml": {**_APP_KEY_AND_SECRETS, **_SLACK_SECRET},
     "comment-ops.yml": _APP_KEY,
     "apply.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
-    "apply-all.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     "deploy.yml": {**_APP_KEY_PASSPHRASE_AND_SECRETS, **_SLACK_SECRET},
     "apply-env-level.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     "apply-review.yml": _APP_KEY,

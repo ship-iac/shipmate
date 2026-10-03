@@ -339,7 +339,7 @@ The whole file goes in at tier 1, and three of its jobs are this tier's:
 and the App key and nothing else. `deploy` runs from the start too: on every
 push to the default branch it applies the merged pull request's cells still
 pending, in the `<env>-apply` this tier has you create (a shared env's bare
-`<env>`). The other three, `targeted`, `all` and `unlock`, wait for the
+`<env>`). The other two, `apply` and `unlock`, wait for the
 environments and secrets the apply tier creates.
 
 The plan triggers are `pull_request_target` for the automatic plan on every push
@@ -377,8 +377,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` to the default branch | `deploy` | `deploy.yml` |
 | `schedule`, or `verb: drift` | `drift` | `drift.yml` |
-| `verb: apply` with an `environment` | `targeted` | `apply.yml` |
-| `verb: apply` with no `environment` | `all` | `apply-all.yml` |
+| `verb: apply` | `apply` | `apply.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Only the `plan` and `drift` jobs accept a `runs_on:` input. Behind every other
@@ -440,7 +439,7 @@ jobs:
     name: shipmate
     # `github.event.inputs` is the form readable under either trigger, unlike the `inputs`
     # context, and `plan` and `drift` also run under one that is not `workflow_dispatch`; the
-    # concurrency group below relies on the same thing. `targeted`, `all` and `unlock` are
+    # concurrency group below relies on the same thing. `apply` and `unlock` are
     # dispatch-only and keep `inputs.`, because only that form applies a declared default,
     # which is what makes an omitted `environment` key read as the empty string.
     if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
@@ -505,8 +504,8 @@ jobs:
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
       # Same `shipmate-engine` webhook as `deploy`; delete this line and drift sends no Slack message.
       SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}
-  targeted:
-    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' && inputs.environment != ''
+  apply:
+    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, actions: read, id-token: write }
     secrets:
@@ -515,17 +514,6 @@ jobs:
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       environment: ${{ inputs.environment }}
-      ref: ${{ inputs.ref }}
-      pr_number: ${{ inputs.pr_number }}
-  all:
-    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' && inputs.environment == ''
-    uses: ship-iac/shipmate/.github/workflows/apply-all.yml@<engine-sha>  # see the latest release
-    permissions: { contents: read, checks: read, actions: read, id-token: write }
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    with:
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
   unlock:
@@ -604,8 +592,8 @@ plan environment, so these placements fail
 ## Required — apply
 
 This tier gets you `shipmate apply` and `shipmate unlock` in a pull request
-comment (a pre-merge apply of the reviewed plan, through the `targeted` and `all`
-jobs, and a lock release through `unlock`), and the environment protection that
+comment (a pre-merge apply of the reviewed plan, through the `apply`
+job, and a lock release through `unlock`), and the environment protection that
 also governs the idempotent post-merge apply the tier-1 `deploy` job runs on
 push to the default branch.
 
@@ -673,7 +661,7 @@ rules from Settings → Environments → `<name>` (or the API):
 
 ### The apply jobs
 
-This tier adds no file. The `targeted`, `all` and `unlock` jobs are already in
+This tier adds no file. The `apply` and `unlock` jobs are already in
 the `shipmate.yml` published above (§[The workflow file](#the-workflow-file));
 what this tier does is create the environments and secrets they need. The
 `comment-ops` job that dispatches them and the `deploy` job are tier 1's;
@@ -700,12 +688,13 @@ environment of their own. The `ops` job can declare it because an
 environment's branch policy admits — the same reason engine `drift.yml`'s
 `issues` job can, on the nightly `schedule`.
 
-The two apply jobs split on the dispatched `environment`: a targeted
-`shipmate apply <env>` sends one, so `targeted` runs and calls the engine's
-`apply.yml`; a bare `shipmate apply` sends none, so `all` runs and calls
-`apply-all.yml`. Both jobs read `inputs.environment` rather than
-`github.event.inputs.environment`, because only the `inputs` context applies the
-declared default, which is what makes an omitted key read as the empty string.
+`shipmate apply` lands on the `apply` job, which calls the engine's `apply.yml`
+with the dispatched `environment`: a targeted `shipmate apply <env>` sends one
+and applies that environment alone; a bare `shipmate apply` sends none and
+applies every pending environment in `needs` order. The job reads
+`inputs.environment` rather than `github.event.inputs.environment`, because only
+the `inputs` context applies the declared default, which is what makes an
+omitted key read as the empty string.
 
 `shipmate unlock <env>` lands on the `unlock` job. It calls the engine's
 `unlock.yml`, which takes `environment`, `ref` and `SHIPMATE_SECRETS` — releasing
@@ -739,10 +728,10 @@ Two reasons, and the second one is a hard failure:
 
 Pass only what each callee declares. `comment-ops.yml` declares
 `SHIPMATE_APP_PRIVATE_KEY` alone — it mints an App token, reads no plan
-artifact, and runs no cell. `plan.yml`, `apply.yml`, `apply-all.yml` and
+artifact, and runs no cell. `plan.yml`, `apply.yml` and
 `deploy.yml` declare `SHIPMATE_PLAN_PASSPHRASE` too, because each of them writes
 or reads an encrypted plan artifact. Every callee that runs a cell —
-`plan.yml`, `drift.yml`, the three apply paths and `unlock.yml` — also declares
+`plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml` and `unlock.yml` — also declares
 `SHIPMATE_SECRETS`, which is why `unlock.yml` declares neither engine secret and
 still takes a `secrets:` block. `deploy.yml` and `drift.yml` also declare
 `SHIPMATE_SLACK_WEBHOOK`, because their `shipmate-engine` jobs post to Slack.
@@ -950,16 +939,16 @@ gated  = false
 ```
 
 Your workflow file needs no line for it, and neither does a repository setting.
-Comment-ops and both apply paths each resolve the flag themselves, from the file
+Comment-ops and both apply forms each resolve the flag themselves, from the file
 on your **default branch** — so an edit takes effect when it merges, and a pull
 request cannot exempt itself. Set it on no entry and every environment keeps
 the ruleset's requirement.
 
-The `comment-ops`, `targeted` and `all` jobs must pin one engine commit:
-`comment-ops.yml` authorizes an apply that `apply.yml` and `apply-all.yml`
-enforce, so at different commits an apply authorized under one engine's rule is
+The `comment-ops` and `apply` jobs must pin one engine commit:
+`comment-ops.yml` authorizes an apply that `apply.yml`
+enforces, so at different commits an apply authorized under one engine's rule is
 enforced by another's, or by none. [`releasing.md`](releasing.md) § Re-pin a consumer
-moves all seven pins together.
+moves all six pins together.
 
 What this does and does not do: an ungated environment may be applied without an
 approving review; every other apply requirement still decides, including
