@@ -60,7 +60,11 @@ runs:
           exit 1
         fi
         tar -xzf "$dir/terramate.tar.gz" -C "$dir" terramate
-        "$dir/terramate" --version
+        got="$("$dir/terramate" --version)"
+        if [ "$got" != "$v" ]; then
+          echo "::error title=Terramate install failed::Terramate ${v} did not install: ${url} delivered version ${got}; check VERSIONS and the release asset."
+          exit 1
+        fi
         echo "$dir" >> "$GITHUB_PATH"
     - name: Provider plugin cache
       shell: bash

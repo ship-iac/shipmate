@@ -33,11 +33,12 @@ def _stub(bin_dir, name, body):
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
 
 
-def _install(tmp_path, curl_output, curl_rc):
+def _install(tmp_path, curl_output, curl_rc, binary_version=_VERSION):
     """Run the step's body with a curl that prints `curl_output` and exits `curl_rc`.
 
     The tar stub writes a `terramate` stub where the real extract would, and that stub records
-    its argv when run. Return (result, runner_temp, the logs dir holding each stub's argv).
+    its argv and prints `binary_version` when run. Return (result, runner_temp, the logs dir
+    holding each stub's argv).
     """
     bin_dir = tmp_path / "bin"
     logs = tmp_path / "logs"
@@ -54,7 +55,8 @@ def _install(tmp_path, curl_output, curl_rc):
         bin_dir,
         "tar",
         f"printf '%s\\n' \"$@\" > '{log}/tar'\n"
-        f'printf \'#!/usr/bin/env bash\\nprintf "%%s\\\\n" "$@" > {log}/terramate\\n\''
+        f'printf \'#!/usr/bin/env bash\\nprintf "%%s\\\\n" "$@" > {log}/terramate\\n'
+        'echo "$STUB_TERRAMATE_VERSION"\\n\''
         ' > "$4/terramate"\nchmod +x "$4/terramate"',
     )
     _stub(
@@ -73,6 +75,7 @@ def _install(tmp_path, curl_output, curl_rc):
             "RUNNER_TEMP": runner_temp.as_posix(),
             "GITHUB_PATH": str(github_path),
             "SHIPMATE_TERRAMATE_VERSION": _VERSION,
+            "STUB_TERRAMATE_VERSION": binary_version,
         },
     )
     return r, runner_temp.as_posix(), logs
@@ -132,4 +135,16 @@ def test_a_failed_download_fails_the_step_with_one_annotation(tmp_path, curl_out
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == _annotation(code, curl_rc) + "\n"
     assert _argv(logs, "tar") is None
+    assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+
+
+@bash_only
+def test_a_binary_of_another_version_fails_the_step_with_one_annotation(tmp_path):
+    """Mutation: replace the version comparison with a bare `"$dir/terramate" --version`."""
+    r, _, _ = _install(tmp_path, "200", 0, binary_version="0.17.0")
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == (
+        f"::error title=Terramate install failed::Terramate {_VERSION} did not install: "
+        f"{_URL} delivered version 0.17.0; check VERSIONS and the release asset.\n"
+    )
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
