@@ -178,9 +178,10 @@ def test_existing_issue_numbers_keeps_the_lowest_on_a_title_collision(monkeypatc
 
 
 def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, capsys):
-    # A rate limit on one cell must not leave every later cell unprocessed: a stack that has
-    # gone clean would keep an open Issue saying it drifts. The run still fails, naming every
-    # cell that failed.
+    """A rate limit on one cell must not leave every later cell unprocessed: a stack that has
+    gone clean would keep an open Issue saying it drifts. The run still fails, naming every
+    cell that failed, and annotates the failed cell. Mutation: delete the per-cell
+    `::error::drift issue update failed` print in `main()`."""
     for name in ("a", "b", "c"):
         _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", stack_name=name, drifted=True))
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
@@ -205,6 +206,43 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     assert created == ["drift: dev-eu / a", "drift: dev-eu / c"]
     assert "dev-eu / b" in str(exc.value)
     assert "dev-eu / a" not in str(exc.value)
+    assert capsys.readouterr().out == (
+        "::error::drift issue update failed for dev-eu / b: "
+        "::error::command failed (1): gh issue create\n"
+    )
+
+
+def test_main_leaves_a_plan_not_ok_cells_open_issue_untouched(tmp_path, monkeypatch):
+    """A failed plan says nothing about drift, so its open Issue is neither edited nor closed.
+    Mutation: in `upsert_or_close`, close the open Issue for a `plan_ok` false cell."""
+    _write_cell(tmp_path, "app", _cell(plan_ok=False, drifted=False))
+    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    calls = []
+
+    def fake_run(args):
+        calls.append(args)
+        return json.dumps([{"number": 7, "title": "drift: dev-eu / app"}])
+
+    monkeypatch.setattr(di, "_run", fake_run)
+    di.main()
+    assert calls == [
+        [
+            "gh",
+            "issue",
+            "list",
+            "--label",
+            "drift",
+            "--state",
+            "open",
+            "--limit",
+            "1000",
+            "--json",
+            "number,title",
+        ]
+    ]
 
 
 def test_main_with_no_cells_never_lists_issues(tmp_path, monkeypatch):

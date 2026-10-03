@@ -122,8 +122,7 @@ def upsert_or_close(cell, existing, run_url):
         else:
             _ensure_label()
             _run(["gh", "issue", "create", "--title", title, "--label", LABEL, "--body", body])
-        return
-    if number is not None:
+    elif number is not None:
         resolved = f"Drift resolved -- clean plan for {cell['environment']} / {cell['stack_name']}."
         _run(["gh", "issue", "close", str(number), "--comment", resolved])
 

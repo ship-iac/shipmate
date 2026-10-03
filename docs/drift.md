@@ -11,6 +11,9 @@ environment, titled `drift: <env> / <stack>`, updated in place while the drift
 persists and closed with a "Drift resolved" comment on the next clean run that
 covers it. The lookup is over open Issues only, so drift that returns later
 opens a fresh Issue rather than reopening the closed one.
+To reach Slack, subscribe GitHub's Slack app
+(`/github subscribe <owner>/<repo> issues workflows`): it posts Issue opens and
+closes and workflow runs, not an update to an Issue that stays open.
 
 A cell whose plan attempt did not succeed is not treated as clean: `drift-cell`
 records `plan_ok: false`, and `actions/drift-issues` skips that cell entirely,
