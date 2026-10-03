@@ -661,7 +661,7 @@ def test_strict_policy_off_warned(monkeypatch):
 
 
 def test_probe_403_degrades_to_note_not_failure(monkeypatch):
-    """`bm.gh_json` hard-fails a nonzero `gh api` exit with `raise SystemExit`, which derives
+    """`ec.gh_json` hard-fails a nonzero `gh api` exit with `raise SystemExit`, which derives
     from BaseException, so a catch of only `except Exception` lets a 403 on `rules/branches`
     propagate past `warnings()`. The environments probe still succeeds and its own finding
     must surface beside the degrade note: one probe failing may not swallow the other."""
@@ -711,7 +711,7 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
 
 def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
     """The degrade text renders verbatim into the sticky comment and into `::warning ...::`
-    annotation data, so echoing `bm.gh_json`'s `::error::command failed (N): gh api <path>`
+    annotation data, so echoing `ec.gh_json`'s `::error::command failed (N): gh api <path>`
     would put a literal workflow command in the comment body, nest one inside another in
     annotate mode, and leak the internal endpoint. Name the probe skipped; keep the reason."""
     quiet = _quiet_new_probes()
@@ -953,7 +953,7 @@ def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypat
 
 
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
-    """`bm.gh_json`'s exception carries no status code, so a 403 or 5xx on an environment
+    """`ec.gh_json`'s exception carries no status code, so a 403 or 5xx on an environment
     that IS in the listing is indistinguishable from a 404; swallowing it lets the report
     say the settings probes found no problems. Listing first separates the two:
     present-but-unreadable is a note that names the environment."""
@@ -1010,7 +1010,7 @@ def _engine_env_responses(env=None, policies=None, listed=True):
 
 def test_missing_engine_environment_warns(monkeypatch):
     """The headline case: `shipmate-engine` absent from the environments listing itself,
-    never a per-environment-read failure standing in for absence -- `bm.gh_json` cannot
+    never a per-environment-read failure standing in for absence -- `ec.gh_json` cannot
     tell that apart from a 403 or a 5xx on an environment that does exist."""
     monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(listed=False))
     out = doctor._engine_environment_warnings(_ctx())
@@ -3862,7 +3862,7 @@ def test_no_probe_reads_a_repository_variable(monkeypatch):
 
 def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
     """`_APP_KEY_NAME in names` is a membership test over the names actually read, and
-    `bm.gh_json` does not multi-page, so on a truncated listing the key can sit outside
+    `ec.gh_json` does not multi-page, so on a truncated listing the key can sit outside
     the page and produce silence -- the one configuration no document blesses reading as a
     routine note. Absence is reportable only when the read was complete."""
     responses = {
@@ -4012,7 +4012,7 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
 
 def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
     """Existence comes from the environments *listing*, never from the per-environment
-    read's exception: `bm.gh_json` raises without a status code, so a 404 for a
+    read's exception: `ec.gh_json` raises without a status code, so a 404 for a
     declared-but-absent environment is indistinguishable from a 403, and the degrade note
     would claim it exists. Asserted on the paths requested, since a probe that read the
     absent environment and swallowed the error also returns []."""
@@ -4094,7 +4094,7 @@ def test_plan_env_secret_listing_failure_propagates_to_the_degrade_note(monkeypa
 
 
 def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
-    """`bm.gh_json` does not multi-page, so an environment with more than 100 secrets
+    """`ec.gh_json` does not multi-page, so an environment with more than 100 secrets
     returns a partial list, and reporting `len(names)` understates it as the whole set.
     The same partial read also warns that the App-key check could not be completed."""
     responses = {
@@ -4633,7 +4633,7 @@ def test_the_roles_section_stays_within_its_budget_and_keeps_the_harvest():
     environment's items -- the first notice alone is over budget, so both environments are
     only counted.
     """
-    table = doctor.bm.ec.validate_structure(_wide_roles_table("dev", "prod"))
+    table = doctor.ec.validate_structure(_wide_roles_table("dev", "prod"))
     roles = doctor._config_roles(table)
     body = doctor.render_report([], [_ann(title="stale codegen")], _ctx(), roles)
     assert (doctor.CONFIG_HEADING in body, "stale codegen" in body) == (True, True)
@@ -4700,7 +4700,7 @@ def test_a_later_environment_over_the_budget_is_cut_against_what_is_left():
     table = _wide_roles_table("dev")
     table["identities"]["narrow"] = {"aws": {"account": "222222222222", "plan": "aa-plan"}}
     table["environments"]["aa"] = {"region": "eu-west-1", "identity": "narrow"}
-    roles = doctor._config_roles(doctor.bm.ec.validate_structure(table))
+    roles = doctor._config_roles(doctor.ec.validate_structure(table))
     arn = f"`arn:aws:iam::111111111111:role/{_LONG_ROLE}`"
     items = [f"plan w{i:03}: {arn}" for i in range(256)] + [
         f"apply w{i:03}: {arn}" for i in range(256)
@@ -4778,8 +4778,8 @@ def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
     def forbidden(*a, **kw):
         pytest.fail("the config probe reached the execution path")
 
-    monkeypatch.setattr(doctor.bm.ec, "read_table", forbidden)
-    monkeypatch.setattr(doctor.bm.ec, "resolve", forbidden)
+    monkeypatch.setattr(doctor.ec, "read_table", forbidden)
+    monkeypatch.setattr(doctor.ec, "resolve", forbidden)
     for text in (CANONICAL, MISPLACED_CONTROL):
         responses = _config_responses(text)
         monkeypatch.setattr(doctor, "_gh_json", lambda path, r=responses: r[path])

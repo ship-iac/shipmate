@@ -55,8 +55,8 @@ import urllib.parse
 
 from _shipmate import _load, current_run_url, utf8_output
 
-bm = _load("build-matrix")
-_gh_json = bm.gh_json
+ec = _load("env-config")
+_gh_json = ec.gh_json
 sc = _load("summary-comment")
 ag = _load("apply-gate")
 _md_escape = sc._md_escape
@@ -110,10 +110,6 @@ DOCTOR_MARKER = "<!-- shipmate:doctor -->"
 ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
 HARVEST_LEVELS = ("warning", "failure")
 _LEVEL_EMOJI = {WARNING: "🟠", NOTICE: "⚪"}
-# github-actions authors the plan/apply/drift auto check-runs carrying shipmate's ::warning::
-# emissions; the shipmate App is matched by id instead (org-dependent slug). A consumer's own
-# non-shipmate workflows are indistinguishable here and remain, hence the generic "workflow runs".
-_HARVEST_APP_SLUGS = ("github-actions",)
 # Covers both shapes the gather step reports: nothing read at all, and some read
 # but not all. A list item, so it reads as a peer of the rows it follows.
 HARVEST_INCOMPLETE = (
@@ -236,7 +232,7 @@ def _no_review_findings(ctx, branch, code_owner):
     gated = []
     if table is not None:
         listed = set(table.get("environments", {})) | set(ctx["envs"])
-        gated = sorted(listed - bm.ec.ungated_envs(table))
+        gated = sorted(listed - ec.ungated_envs(table))
     if gated:
         level = NOTICE if code_owner else WARNING
         return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=_code_spans(gated)))]
@@ -254,21 +250,20 @@ def _code_spans(names):
 def _existing_env_names(ctx):
     """The repository's GitHub Environment names.
 
-    THE LISTING IS THE ONLY EXISTENCE ORACLE. `bm.gh_json`'s exception carries
+    THE LISTING IS THE ONLY EXISTENCE ORACLE. `ec.gh_json`'s exception carries
     `gh`'s stderr as free text, which doctor never parses, so a per-environment
     read cannot tell a 404 (absence, which is `_environment_warnings`' finding)
-    from a 403 or a 5xx. Every probe below
-    that needs existence decides it from here, then treats a failed
-    per-environment read as "not checked" — inferring absence from that read
-    would let a token lacking `environments` access produce loud findings about
-    environments that are fine, while a genuine 403 on a present one passes as
-    healthy. A failure of this listing is the caller's precondition and
-    propagates to `warnings()`' degrade note.
+    from a 403 or a 5xx. Every probe below that needs existence decides it from
+    here, then treats a failed per-environment read as "not checked" — inferring
+    absence from that read would let a token lacking `environments` access
+    produce loud findings about environments that are fine, while a genuine 403
+    on a present one passes as healthy. A failure of this listing is the
+    caller's precondition and propagates to `warnings()`' degrade note.
 
     Re-read per probe rather than shared through `ctx`: `warnings()` degrades
     per probe, so one endpoint failure must not silence the others.
 
-    per_page=100 covers >=50 logical env pairs, and `bm.gh_json` does not
+    per_page=100 covers >=50 logical env pairs, and `ec.gh_json` does not
     multi-page merge, so a repository past that raises rather than reports on half
     the names: each environment past the page would read as absent. `total_count` is
     read strictly -- a listing missing the key is a listing whose completeness is
@@ -291,9 +286,7 @@ def _bound_names(ctx):
     if shared is None:
         return None
     return [
-        (env, name, role)
-        for env in sorted(ctx["envs"])
-        for name, role in bm.ec.env_names(env, shared)
+        (env, name, role) for env in sorted(ctx["envs"]) for name, role in ec.env_names(env, shared)
     ]
 
 
@@ -350,7 +343,7 @@ def _environment_warnings(ctx):
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
-    if bm.ec.interpreter_refusal():
+    if ec.interpreter_refusal():
         return [ENV_PROBES_INTERPRETER_REFUSED]
     names = _existing_env_names(ctx)
     bound = _bound_names(ctx)
@@ -366,7 +359,7 @@ def _probed_bindings(ctx):
     With no declared env nothing is read: listing the environments anyway would let a
     repository whose token cannot list them collect a "could not verify" degrade for a probe
     that had no work to do. Existence comes from `_existing_env_names`."""
-    if not ctx["envs"] or bm.ec.interpreter_refusal():
+    if not ctx["envs"] or ec.interpreter_refusal():
         return []
     existing = _existing_env_names(ctx)
     bound = _bound_names(ctx)
@@ -608,7 +601,7 @@ def _env_secret_names(ctx, name):
     Published anyway because "holds 3 secret(s)" tells an operator nothing about
     which credential to move.
 
-    `total` comes from the payload, not the list length, because `bm.gh_json` does
+    `total` comes from the payload, not the list length, because `ec.gh_json` does
     not multi-page.
     """
     data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
@@ -624,7 +617,7 @@ def _env_secret_names(ctx, name):
 def _app_key_findings(env, names, total, noun):
     """The App-key half of the plan-env secret finding, for one environment.
 
-    `bm.gh_json` does not multi-page, so on a truncated listing the key can sit
+    `ec.gh_json` does not multi-page, so on a truncated listing the key can sit
     outside the page: absence is reportable as absence ONLY when the read was
     complete. A partial listing says the check could not be completed rather
     than passing the most dangerous configuration off as a routine note. Both
@@ -817,7 +810,7 @@ def _contents_text(path):
     The binding is what keeps this module's tests intercepting the read: they patch
     `_gh_json`, which a call reaching `gh` through `env-config` would bypass.
     """
-    return bm.ec.contents_text(path, fetch=_gh_json)
+    return ec.contents_text(path, fetch=_gh_json)
 
 
 def _workflow_text(path):
@@ -1646,7 +1639,7 @@ def _whole_items(items, sep, limit=400):
     return sep.join([*shown, "…"]) if shown else _one_line(joined, limit)
 
 
-CONFIG_PATH = bm.ec.CONFIG_PATH
+CONFIG_PATH = ec.CONFIG_PATH
 #: The refusal lines one invalid-file finding shows. The finding lands in the PR comment and
 #: in an annotation, so it stays bounded however many errors the file holds.
 CONFIG_ERROR_LINES = 10
@@ -1708,7 +1701,7 @@ def _config_roles(table):
     left out.
     """
     items = {}
-    for env, path, workload, role in bm.ec.resolved_roles(table):
+    for env, path, workload, role in ec.resolved_roles(table):
         shown = f"`{role}`" if role else "no role"
         written = "workloads" in table["environments"][env]
         cells = workload or ("untagged and listed cells" if written else "every cell")
@@ -1739,8 +1732,8 @@ def _config_defaults(table):
     `gated` gets no line: its absence exempts nothing, which is the safe direction and the
     one a reader already assumes.
     """
-    order = bm.ec.env_order(table)
-    envs = bm.ec.explicit_envs(table)
+    order = ec.env_order(table)
+    envs = ec.explicit_envs(table)
     shown = _whole_items(
         [f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())],
         "; ",
@@ -1778,7 +1771,7 @@ def _config_table(ctx):
     alone — `validate_structure`, not `validate` — because the rest need run context;
     CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
     """
-    refusal = bm.ec.interpreter_refusal()
+    refusal = ec.interpreter_refusal()
     if refusal:
         # Ahead of every read, and outside the try below: the floor is a property of this
         # runner, so no revision of the file can be at fault and none is worth reading.
@@ -1798,7 +1791,7 @@ def _config_table(ctx):
     if text is None:
         return None, [CONFIG_UNREADABLE], []
     try:
-        table = bm.ec.validate_structure(bm.ec.parse_table(text))
+        table = ec.validate_structure(ec.parse_table(text))
     except SystemExit as exc:
         # The refusal IS the finding, and it must not reach warnings()'s degrade handler:
         # that one reports a probe as skipped and truncates the message to 120 characters.
@@ -1814,7 +1807,7 @@ def _config_table(ctx):
             "branch's copy, which this says nothing about.",
         )
         return None, [invalid], []
-    refs = bm.ec.references(bm.ec.load_toml(text))
+    refs = ec.references(ec.load_toml(text))
     shown = "; ".join(f"`{path}` from variable `{name}`" for path, name in refs)
     return table, [], [(NOTICE, CONFIG_REFERENCES.format(refs=shown))] if refs else []
 
@@ -1876,7 +1869,7 @@ def _read_default_branch_table(ctx):
     if text is None:
         return None
     try:
-        return bm.ec.validate_structure(bm.ec.parse_table(text))
+        return ec.validate_structure(ec.parse_table(text))
     except SystemExit:
         return None
 
@@ -1889,7 +1882,7 @@ def _shared_envs(ctx):
     job binds.
     """
     table = _default_branch_table(ctx)
-    return None if table is None else bm.ec.shared_envs(table)
+    return None if table is None else ec.shared_envs(table)
 
 
 def _app_permission_warnings(ctx):
@@ -1939,7 +1932,7 @@ def _probe_label(probe):
 
 def _degrade_reason(e):
     """The failure reason, safe in a comment body or an annotation. Strips
-    `bm.gh_json`'s `::error::...: gh api <path>` wrapper -- the workflow-command
+    `ec.gh_json`'s `::error::...: gh api <path>` wrapper -- the workflow-command
     prefix would nest inside `::warning ...::` in annotate mode, and the
     endpoint is an internal detail no reader can act on."""
     return _one_line(str(e).removeprefix("::error::").split(": gh api ")[0], 120)
@@ -1950,7 +1943,7 @@ def warnings(ctx):
     for probe in PROBES:
         try:
             out.extend(probe(ctx))
-        # noqa: BLE001 - doctor must never fail the run. `bm.gh_json` raises
+        # noqa: BLE001 - doctor must never fail the run. `ec.gh_json` raises
         # SystemExit, not a plain Exception, so both are caught -- but never
         # bare BaseException, so KeyboardInterrupt still propagates.
         except (Exception, SystemExit) as e:  # noqa: BLE001
@@ -2027,7 +2020,11 @@ def _parse_check_run(line, app_id):
         return None
     if not isinstance(run, dict):
         return None
-    if run.get("app_slug") not in _HARVEST_APP_SLUGS and not (
+    # github-actions authors the plan/apply/drift auto check-runs carrying shipmate's
+    # ::warning:: emissions; the shipmate App is matched by id instead (org-dependent slug). A
+    # consumer's own non-shipmate workflows are indistinguishable here and remain, hence the
+    # generic "workflow runs".
+    if run.get("app_slug") != "github-actions" and not (
         app_id and str(run.get("app_id")) == str(app_id)
     ):
         return None
@@ -2053,7 +2050,7 @@ def latest_check_ids(lines, app_id=""):
         # An on-demand plan's mirrored cell checks share a name with the autoplan's
         # annotation-bearing ones and are created later, so ranking them together loses the
         # annotations: the mirror carries none. Only the apply checks are wanted from the App.
-        if run.get("app_slug") not in _HARVEST_APP_SLUGS and not name.startswith(ag.APPLY_PREFIX):
+        if run.get("app_slug") != "github-actions" and not name.startswith(ag.APPLY_PREFIX):
             continue
         prev = newest.get(name)
         if prev is None or (run.get("started_at") or "") >= (prev.get("started_at") or ""):
@@ -2201,6 +2198,18 @@ def _render_annotation_row(a):
     return f"  - {emoji} {title}: {msg}" if title else f"  - {emoji} {msg}"
 
 
+def _fit(out, rows, used, budget):
+    """Append to `out` each of `rows` that fits within `budget`, counting the newline.
+    Returns (new_used, rows_added, rows_dropped)."""
+    added = 0
+    for row in rows:
+        if used + len(row) + 1 <= budget:
+            out.append(row)
+            used += len(row) + 1
+            added += 1
+    return used, added, len(rows) - added
+
+
 def _emit_section(lines, name, rows, used, budget):
     """Append one check's header + as many of its rows as fit in the
     remaining budget. The header is emitted only when at least its first row
@@ -2212,16 +2221,7 @@ def _emit_section(lines, name, rows, used, budget):
     if used + len(header) + 1 + len(rendered[0]) + 1 > budget:
         return used, 0, len(rows)
     lines.append(header)
-    used += len(header) + 1
-    added, dropped = 0, 0
-    for row in rendered:
-        if used + len(row) + 1 <= budget:
-            lines.append(row)
-            used += len(row) + 1
-            added += 1
-        else:
-            dropped += 1
-    return used, added, dropped
+    return _fit(lines, rendered, used + len(header) + 1, budget)
 
 
 def _harvest_lines(sections, annotations, budget):
@@ -2250,14 +2250,8 @@ def _findings_lines(findings, budget):
     """Render settings-probe finding rows within `budget` chars. Returns
     (lines, dropped_count) -- the last-ditch fallback path (render_report,
     when even the harvest-less body still exceeds sc.HARD_CAP)."""
-    lines, used, dropped = [], 0, 0
-    for lvl, text in findings:
-        line = _finding_row(lvl, text)
-        if used + len(line) + 1 <= budget:
-            lines.append(line)
-            used += len(line) + 1
-        else:
-            dropped += 1
+    lines = []
+    _, _, dropped = _fit(lines, [_finding_row(lvl, text) for lvl, text in findings], 0, budget)
     return lines, dropped
 
 
