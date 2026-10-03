@@ -308,10 +308,9 @@ runs:
           exit 0
         fi
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
-        # Harvest: latest shipmate-authored check run per name (check-ids mode filters on app
-        # slug/id), then its annotations; degrades to empty, never fails the command. harvest_failed
-        # is written once, after every fallible step could flip it: an empty "ann/<id>.json"
-        # fallback is byte-identical to "no annotations", so a failed fetch must not look complete.
+        # Harvest: latest shipmate-authored check run per name (check-ids filters on app slug/id), then
+        # its annotations; never fails. harvest_failed is written once, after every step that could flip
+        # it: an empty ann/<id>.json reads as "no annotations", so a failed fetch must not look complete.
         mkdir -p ann
         : > check-ids.tsv
         harvest_failed=false
@@ -353,8 +352,8 @@ runs:
         run_ids=$(python3 -c 'import json,sys; print("\n".join(sorted(set(json.load(sys.stdin).values()))))' \
                     < plan_runs.json || echo "")
         # -R because this job checks out nothing, so gh has no remote to infer the repo from. One
-        # directory per run: a cell replanned in a later run carries the same artifact name, and
-        # a shared directory would let one run's copy overwrite the other's.
+        # directory per run: a cell planned in two runs has one artifact name in both, and those
+        # identical names would collide in one shared directory.
         mkdir -p doctor-cells
         while read -r rid; do
           [ -n "$rid" ] || continue

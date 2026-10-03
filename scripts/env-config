@@ -196,17 +196,32 @@ _UNREADABLE = (
 )
 
 
+def log_failure(e, label=""):
+    """Write a caught failure to stderr for the step log, never as a workflow command.
+
+    `gh_json`'s leading `::error::` is cut, and every other line starting with `::` (gh's
+    stderr rides in the message) gets a space between the colons; the runner trims leading
+    whitespace before matching a command, so indenting would not neutralise it. A failure
+    other than `SystemExit` is prefixed with its type: a `KeyError`'s message is only the key.
+    """
+    text = str(e).removeprefix("::error::")
+    if not isinstance(e, SystemExit):
+        text = f"{type(e).__name__}: {text}"
+    if label:
+        text = f"{label}: {text}"
+    sys.stderr.write(re.sub(r"(?m)^([ \t]*):(?=:)", r"\1: ", text) + "\n")
+
+
 def _reporting_fetch(path):
     """`gh_json`, writing a failed call's reason to stderr before re-raising it.
 
     `contents_text` swallows every exception, so this is the only place a 404, a 403, a
-    missing `gh` or a non-JSON answer is seen. The `::error::` prefix is cut so the
-    refusal stays the step's one annotation.
+    missing `gh` or a non-JSON answer is seen.
     """
     try:
         return gh_json(path)
     except (Exception, SystemExit) as e:
-        sys.stderr.write(f"{str(e).removeprefix('::error::')}\n")
+        log_failure(e)
         raise
 
 
