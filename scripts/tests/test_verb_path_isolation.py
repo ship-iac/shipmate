@@ -28,7 +28,6 @@ Pinned on the unlock side:
 - its `strategy`: `fail-fast: false`, so one cell that cannot determine its lock state does not
   strand its siblings' locks, and the matrix source is `cells` (`waves` is the empty string on
   the unlock path, not `{}`, so a matrix over it dies at `fromJSON`);
-- the concurrency group, against the wave jobs' and a hand-written constant;
 - `detect`'s `apply-detect` inputs, whole, including the literal `unlock` mode;
 - `detect`'s environment pre-flight. The unlock job binds `<env>-apply`, and GitHub creates a
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an
@@ -37,7 +36,8 @@ Pinned on the unlock side:
 
 Not re-pinned here, to keep one selector per property: the bot-actor `guard` job
 (`test_apply_dispatch_actor_guard.py` covers both files), the `<env>-apply` environment binding
-(`test_apply_env_binding_guard.py`), and each job's `needs` list (the actor guard's
+(`test_apply_env_binding_guard.py`), the concurrency group shared with the wave jobs
+(`test_apply_cell_concurrency_guard.py`), and each job's `needs` list (the actor guard's
 whole-list-per-job map).
 
 Threat model is accidental regression -- a clause dropped in a refactor, a matrix pointed at the
@@ -49,7 +49,6 @@ from _loader import local_action, workflow_yaml
 
 APPLY = "apply.yml"
 UNLOCK = "unlock.yml"
-ENV_LEVEL = "apply-env-level.yml"
 
 #: The whole `workflow_call.inputs` mapping of each file, hand-written. `mode` is absent from
 #: the apply side and never existed on the unlock side. On the unlock side this set is also the
@@ -146,13 +145,6 @@ UNLOCK_STRATEGY = {
     "fail-fast": False,
     "matrix": {"include": "${{ fromJSON(needs.detect.outputs.cells) }}"},
 }
-
-#: The per-cell serialization group, hand-written. Asserted equal to both the unlock job's and
-#: every wave job's: a live apply for a cell makes the unlock queue behind it, so by the time it
-#: runs the lock is either gone or genuinely orphaned. Deriving it from either file would pass
-#: whatever that file says.
-CONCURRENCY_GROUP = "apply-${{ matrix.environment }}-${{ matrix.stack }}"
-WAVES = [f"wave{i}" for i in range(8)]
 
 #: The whole `with:` of unlock's `apply-detect` step. `mode` is a literal, not an expression:
 #: the file is the verb, so nothing may make it configurable. `review-decision` and
@@ -322,22 +314,6 @@ def test_the_unlock_matrix_reads_cells_and_never_fails_fast():
         "one cell that cannot read its lock state strand every sibling's lock, and the "
         "`waves` output is the empty string on this path, so a matrix over it dies at "
         "fromJSON"
-    )
-
-
-def test_the_unlock_job_shares_the_wave_jobs_serialization_queue():
-    unlock_group = (_job(UNLOCK, "unlock").get("concurrency") or {}).get("group")
-    wave_groups = {w: (_job(ENV_LEVEL, w).get("concurrency") or {}).get("group") for w in WAVES}
-    assert unlock_group == CONCURRENCY_GROUP, (
-        f"the unlock job's concurrency group is {unlock_group!r}, not "
-        f"{CONCURRENCY_GROUP!r} -- a group that differs from the wave jobs' puts an "
-        "unlock and a live apply for one cell into different queues, so the unlock can "
-        "break a lock the apply is holding"
-    )
-    assert set(wave_groups.values()) == {CONCURRENCY_GROUP}, (
-        f"{ENV_LEVEL}'s wave jobs use {wave_groups!r}, not {CONCURRENCY_GROUP!r} -- the "
-        "identity with the unlock job's group is what makes an unlock wait behind a live "
-        "apply for the same cell"
     )
 
 

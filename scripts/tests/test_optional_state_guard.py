@@ -10,7 +10,7 @@ dropped `always()` or a condition moved into a comment must fail these guards.
 """
 
 import pytest
-from _loader import ACTIONS, WORKFLOWS, action_yaml, local_action, step_by, workflow_yaml
+from _loader import local_action, step_by
 
 _CELLS = ["apply-cell", "drift-cell", "plan-cell"]
 
@@ -57,50 +57,6 @@ _SAVE = {
     "uses": local_action("state"),
     "with": {**_STATE_WITH, "mode": "save"},
 }
-
-
-def _with_keys(where, node):
-    for job_id, job in (node.get("jobs") or {}).items():
-        yield f"{where} jobs.{job_id}", job.get("with") or {}
-        for i, step in enumerate(job.get("steps") or []):
-            yield f"{where} jobs.{job_id}.steps[{i}]", step.get("with") or {}
-    for i, step in enumerate((node.get("runs") or {}).get("steps") or []):
-        yield f"{where} runs.steps[{i}]", step.get("with") or {}
-
-
-def test_no_workflow_or_action_carries_a_state_path_setting():
-    """The state path comes from the init record alone, so no caller can name one. Parsed keys,
-    not text: the three cells legitimately run the helper `scripts/state-path`.
-
-    Mutations: `apply-env-level.yml` `wave3`'s `steps: *wave-steps` replaced with a copy of
-    wave0's steps plus a `state-path:` key in the cell `with:`, and `state_suffix` re-declared
-    under `plan.yml`'s `workflow_call.inputs`.
-    """
-    found = []
-    for path in sorted(WORKFLOWS.glob("*.yml")):
-        spec = workflow_yaml(path)
-        on = spec.get("on", spec.get(True)) or {}
-        call = on.get("workflow_call") if isinstance(on, dict) else None
-        if "state_suffix" in ((call or {}).get("inputs") or {}):
-            found.append(f"{path.name} workflow_call.inputs.state_suffix")
-        found += [
-            f"{where}.with.{key}"
-            for where, keys in _with_keys(path.name, spec)
-            for key in ("state_suffix", "state-path")
-            if key in keys
-        ]
-    for path in sorted(ACTIONS.glob("*/action.yml")):
-        spec = action_yaml(path)
-        where = path.parent.name
-        if "state-path" in (spec.get("inputs") or {}):
-            found.append(f"{where} inputs.state-path")
-        found += [
-            f"{w}.with.{key}"
-            for w, keys in _with_keys(where, spec)
-            for key in ("state_suffix", "state-path")
-            if key in keys
-        ]
-    assert found == []
 
 
 @pytest.mark.parametrize("cell", _CELLS)

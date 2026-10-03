@@ -858,8 +858,9 @@ every path is wired the same way: the wave jobs of `apply-env-level.yml`,
 job each request `id-token: write` and run
 `aws-actions/configure-aws-credentials`, gated on a role resolving non-empty,
 before the cell step. The step reads the row, which the detect resolved from the
-identity's `aws.apply` on the first two and its `aws.plan` on the other two. The
-`snapshot` and `complete` jobs deliberately get no token.
+identity's `aws.apply` on the first two and its `aws.plan` on the other two,
+except that a shared environment (`shared = true`) resolves `aws.apply` on
+every path. The `snapshot` and `complete` jobs deliberately get no token.
 
 On the apply path the engine passes through whatever role the environment
 resolves, and nothing more: which role that is — and whether two environments'
@@ -1078,67 +1079,26 @@ and this run (`at an unknown commit in [run #<n>](<run url>)` when the commit
 is not a 40-character lowercase hex SHA). Each finding and harvested annotation
 carries the same circles. Under any verdict but 🟢 the report ends with the help
 hint ``Comment `shipmate help` for the available commands.``; a 🟢 report has
-no footer. It combines eleven live settings probes (gate ruleset,
-default-branch `pull_request` rule, environment existence, environment
-protection shape, plan-environment secrets, the `shipmate-engine`
-environment's own existence and default-branch scoping, `pull_request_target`
-triggers in the consumer's workflow files other than `shipmate.yml`, which uses
-that trigger by design, engine action-pin freshness,
-the consumer's `shipmate.yml`, read once for three checks — the plan-calling
-job's name, which must be `shipmate` or the plan cell checks are not
-`shipmate / <stack> / <env>` and every `plan` link in the plan comment falls
-back to the workflow-run page; the `workflow_dispatch` trigger every commented
-verb dispatches and the four inputs that dispatch sends, without which GitHub
-refuses the dispatch with an HTTP 422 and creates no run at all; and the event
-routing, one job per engine reusable workflow, each carrying the `if:` that
-selects it, so a wrong one sends a verb nowhere,
-the environment table at the commit under examination — `.github/shipmate.toml`
-parsed and checked against every rule a file can be judged on by itself, so a
-malformed or misplaced setting is reported before it merges to the branch
-execution reads it from,
-and App installation permission
-drift — see `docs/troubleshooting.md`) with a harvest of the warning and
-failure annotations GitHub already recorded on this commit's workflow runs
-(shipmate's own and any other Actions workflow run on that commit;
-third-party-app-authored check runs are excluded). An empty harvest is
+no footer. It combines eleven live settings probes, listed in
+`docs/troubleshooting.md` §shipmate doctor with their scopes and degrade paths,
+and a harvest of the warning and failure annotations GitHub already recorded on
+this commit's workflow runs (shipmate's own and any other Actions workflow run
+on that commit; third-party-app-authored check runs are excluded).
+Only ten of the eleven probes can produce a finding from the plan path's own
+`annotate`-mode invocation: the App-permission-drift probe reports only on a
+full-manifest permission-set mint, which only `shipmate doctor` attempts. An
+empty harvest is
 reported as an all-clear only when the harvest both completed and had nothing
 left to wait for: if any of the commit's relevant check runs had not finished
 when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only ten of the eleven
-probes can produce a finding from the plan path's own `annotate`-mode
-invocation: the
-App-permission-drift probe only has something to report when a
-full-manifest permission-set mint was actually attempted, which only
-`shipmate doctor` does. That probe is effectively comment-path-only —
-it surfaces findings only via `shipmate doctor`, never on the plan path's
-own annotations.
+plenty.
 
-Four of the probes are narrower than the repository. All three environment
-probes (existence, protection shape, and the secrets a plan environment
-holds) see only the environments of the stacks this pull request changed — the
-declared set comes from the plan matrix's cell summaries — so the report's all-clear line names the environments it actually
-covered instead of claiming the repository's environments are all sound, and
-says plainly when the set was empty. An environment that is in the repository's
-environments listing but whose own settings cannot be read becomes a note
-naming it, rather than being silently skipped the way a nonexistent
-environment is. The engine-pin probe reports only on pins of the engine's
-own repository, which the calling engine job passes in as
-`SHIPMATE_ENGINE_REPO` from `job.workflow_repository` on the step that runs the
-action (nothing is hardcoded — a
-consumer's other shared actions belong to whoever ships them);
-when either that or the commit under examination is unavailable it says pin
-freshness was not verified rather than falling back to a weaker read.
-
-Those warnings are not read from the sticky plan comment — a plan run writes the
-full plan comment (a verdict line linking the run, and one line or fold-out
-per cell) but does not append doctor findings to it. A run with nothing planned
-writes no comment at all *unless* doctor emitted a warning, so the pull request
-still links the run whose page shows them (see §Plan comment). Instead, `actions/summary` runs
-`scripts/doctor` on every plan run and emits its findings as
-workflow-command annotations, verbatim:
+The plan comment carries no doctor findings (see §Plan comment). Instead,
+`actions/summary` runs `scripts/doctor` on every plan run and emits its
+findings as workflow-command annotations, verbatim:
 
 - `::warning title=shipmate doctor::<text>` for a misconfiguration,
 - `::notice title=shipmate doctor::<text>` for an informational finding.
@@ -1149,26 +1109,15 @@ live probes already re-state fresh against current settings — this is
 machine-read, not a formatting choice, and a mismatch between the annotate
 call and the harvest filter is a regression. `shipmate doctor` is entirely
 read-only: it dispatches nothing and changes no setting, and writes nothing
-but its own sticky comment
+but its own sticky comment, a copy of its report in the job summary
 and an `eyes` reaction on the triggering comment (`doctor`, `help` and `plan`
 all get that acknowledgement as soon as the command is accepted — `rocket`
 marks an authorized dispatch, whether `apply`, `unlock` or `plan`, instead; a
 reaction that cannot be posted is ignored), a `🔴 failed:` reply when it
 cannot mint an App token or when reading or deciding the commenter's permission
 errors, a `🔴 refused:` reply when the commenter may not have
-the report (below), and a
-handful of untitled `::warning::` annotations on its own degrade paths — an
-unreadable PR head SHA, unreadable plan records on this commit's apply checks,
-a plan run whose cell summaries could not be downloaded or reconciled, a failed
-check-runs listing or reduction, a failed per-check annotations fetch, and a
-failed listing of the pull request's comments, on which the report is skipped
-for that run rather than posted as a second sticky comment. Those annotations
-land on the
-`issue_comment` workflow run that is executing `shipmate doctor` itself, at
-`github.sha` (this job checks out no consumer content — it reads entirely
-through `gh api`/`gh run download -R` — so `github.sha` is the default
-branch's tip, not a checked-out commit), not on the PR head SHA whose check
-runs the harvest reads — so there is no self-harvest loop. `shipmate doctor`
+the report (below), and untitled `::warning::` annotations on its own degrade
+paths, which `docs/troubleshooting.md` §shipmate doctor lists. `shipmate doctor`
 never affects `shipmate / gate`.
 
 Because the report enumerates the guardrails a repository is *missing* — an
@@ -1516,7 +1465,7 @@ SHA-pinned YAML.
 | `workflow_dispatch` with `verb: unlock` | `unlock` | `unlock.yml` |
 
 Each of those `if:` expressions is a contract literal, not a style choice:
-`shipmate doctor`'s routing probe holds all six and compares each one whole,
+`shipmate doctor`'s `shipmate.yml` probe holds all six and compares each one whole,
 because a wrong expression sends a verb nowhere and produces a dispatched run
 that completes with every job skipped — green, and no work done.
 
@@ -1575,7 +1524,7 @@ in the engine placing it there. What *is* base-branch under this trigger is the
 checkout: `GITHUB_SHA` and `GITHUB_REF` name the base, which is why the engine's
 `detect` and `plan` jobs pass `ref: ${{ needs.facts.outputs.head-sha }}`
 explicitly. The two are routinely confused; they are opposite sides of the same
-trigger. The file's other six jobs are skipped under that trigger, each
+trigger. The file's other five jobs are skipped under that trigger, each
 completing as a `skipped` check-run on the same head; nothing functional depends
 on them, and `scripts/mirror-checks` does not copy them.
 
@@ -1622,14 +1571,9 @@ The four jobs:
   with no `.github/workflows/shipmate.yml` — the one path this contract lets
   the consumer's workflow live at. `actions/build-matrix` fails `detect`
   outright unless the run states a head repository equal to the running
-  repository: fork pull requests are not planned, and no input permits one. A
-  fork's plan would execute the pull request's own Terramate/OpenTofu code with
-  everything the plan environment holds — `pull_request_target` withholds
-  nothing from a fork's run, its *secrets* included, so this refusal plus
-  `plan`'s `needs: detect` is what keeps a fork out of a plan cell once
-  `actions/checkout`'s own refusal to check out a fork head under that trigger
-  has been turned off or replaced (`docs/hardening.md` §"Contributors without
-  push access"). No
+  repository: fork pull requests are not planned, and no input permits one
+  (`docs/hardening.md` §Contributors without push access states what a fork's
+  plan cell would receive, and the layers that keep it out). No
   `shipmate / gate` is ever written for a fork head, so the refusal is loud
   rather than an empty matrix. The `head-repo` value the guard keys on is
   produced by `facts` in this same file rather than stated by the consumer, so
@@ -1667,11 +1611,12 @@ The four jobs:
   dispatched run evaluates at the default branch.
 
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
-workflow files for five probes — stale engine pins, `pull_request_target`
-triggers, and `shipmate.yml`'s plan-calling job name, dispatch wiring and event
-routing; the last three observe whether the plan comment's per-cell links
-will resolve, whether a commented verb reaches anything at all, and whether the
-job it reaches is the one that verb names — and they report rather than fail.
+workflow files for three probes — stale engine pins, `pull_request_target`
+triggers, and `shipmate.yml`'s wiring, whose checks of the plan-calling job
+name, dispatch wiring and event routing observe whether the plan comment's
+per-cell links will resolve, whether a commented verb reaches anything at all,
+and whether the job it reaches is the one that verb names — and they report
+rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
@@ -1680,8 +1625,8 @@ to that literal filename, naming the verb in the dispatch body, so a renamed
 file is dispatched nowhere, and the pull request is told only that the dispatch
 failed, with the API's refusal left in the comment-handling run that comment
 links; and doctor keys on the exact name for its `pull_request_target`
-exemption and for the calling-job-name, dispatch-wiring and routing probes,
-all of which report nothing on a file called anything else.
+exemption and for its `shipmate.yml` probe, whose job-name, dispatch and
+routing checks all report nothing on a file called anything else.
 Rename the file and planning is refused from that commit on, and the renamed
 file starts drawing doctor's own `pull_request_target` warning. Each symptom
 surfaces on its own — the refusal names the path it looked for — but none of
@@ -1731,23 +1676,9 @@ the draft skip as their own condition — not a draft, *or* named on demand —
 which is a cost control (it stops a draft burning runners), not a security
 property, and is why a requested plan runs on a draft at all.
 
-Binding `summary` to the `shipmate-engine` environment rather than trusting the
-trigger alone closes two paths a trigger check alone would not:
-
-- A fork's plan run completes normally but produces nothing further — the fork
-  clause above declines the `summary` job
-  (`docs/hardening.md` §"Contributors without push access"). That is the
-  autoplan leg; a commented `shipmate plan` naming a fork's pull request is
-  normally refused by `actions/comment-ops` before any run exists, and §Comment-ops
-  states the one case that still dispatches.
-- A branch-authored workflow cannot reach the key by declaring
-  `environment: shipmate-engine` itself: that environment's deployment
-  branch policy is scoped to the default branch, and a job triggered by a
-  `push` to any other branch — or by `pull_request`, whose ref is
-  `refs/pull/<n>/merge` — never satisfies it, regardless of what the workflow
-  file says. `pull_request_target` is the one pull-request-side trigger that
-  does satisfy it, which is why the trust conditions above are engine-owned
-  (`docs/github-app.md` §Key-exposure boundary).
+Why `summary` is bound to `shipmate-engine` rather than trusting the trigger
+alone: `docs/hardening.md` §Contributors without push access for a fork's run,
+and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 
 ## Consumption
 

@@ -1,14 +1,12 @@
 name: manifest-load
 
-# GitHub parses these manifests here, because GitHub is what parses them in production.
-# `yaml.safe_load` is more permissive than GitHub.DistributedTask.ObjectTemplating: it accepts an
-# unquoted description whose comma splits a `{ }` flow mapping into a bogus key, and GitHub then
-# refuses the whole file. v0.16.0 shipped that, and every apply and deploy job died in "Set up job".
+# GitHub parses these manifests here because it parses them in production. `yaml.safe_load` is
+# more permissive: it accepts an unquoted description whose comma splits a `{ }` flow mapping, and
+# GitHub refuses that whole file, failing every job that uses it in "Set up job".
 
-# @main makes this merge-time coverage, not PR-time: `uses:` takes no expressions, so the ref
-# cannot follow a PR head. It still runs before any release tag, where the defect escaped.
-# workflow_dispatch serves the pre-tag check in docs/releasing.md § Manifest load, for when the
-# push run predates the tip.
+# @main makes this merge-time coverage: `uses:` takes no expressions, so the ref cannot follow a
+# PR head, but it runs before any release tag. workflow_dispatch serves the pre-tag check in
+# docs/releasing.md § Manifest load, for when the push run predates the tip.
 on:
   push:
     branches: [main]
@@ -20,10 +18,9 @@ permissions:
 jobs:
   load:
     runs-on: ubuntu-latest
-    # The ref is remote (ship-iac/shipmate/...@main), not ./actions/...: the runner downloads and
-    # parses a remote manifest during "Set up job", while a local ./ manifest is read only when the
-    # step executes. `if: false` therefore parses every manifest and runs no action, so no action
-    # needs inputs, credentials or a live pull request.
+    # Remote refs, not ./actions: the runner parses a remote manifest during "Set up job" and a
+    # local one only when the step runs, so `if: false` parses every manifest and runs no action,
+    # needing no inputs, credentials or live pull request.
     steps:
       # Measured 2026-08-22: a comma-split manifest under `if: false` fails Set up job with the
       # production error, so the pair discriminates.

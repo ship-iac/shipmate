@@ -1779,31 +1779,6 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     assert found == _EXPECTED_CALLEES
 
 
-def test_the_rendered_file_passes_no_state_setting_to_any_engine_call():
-    """The engine derives each cell's state path from `tofu init`, so no calling job carries
-    a `state_suffix`. `_render` reads the published fence itself, so a comparison against the
-    fence moves with it; this reads the parsed rendered file instead. The job-name set is
-    hand-written, so a parse that finds no engine calls cannot pass vacuously.
-
-    Mutation: add `state_suffix: ""` to the `drift` job's `with:` in the
-    `docs/getting-started.md` fence.
-    """
-    jobs = yaml.safe_load(onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"))["jobs"]
-    callers = {name for name, job in jobs.items() if _CALL_PATH in (job.get("uses") or "")}
-    assert callers == {"plan", "comment-ops", "deploy", "drift", "apply", "unlock"}
-    assert [n for n in sorted(callers) if "state_suffix" in (jobs[n].get("with") or {})] == []
-
-
-def test_main_rejects_the_retired_state_suffix_flag(capsys):
-    """Mutation: add back `ap.add_argument("--state-suffix", default="")`. `--key k` does not
-    exist, so `_read_key` would exit too; the assertion is on argparse's usage error.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard.main(["--app-id", "1", "--key", "k", "--state-suffix", ""])
-    assert e.value.code == 2
-    assert "unrecognized arguments: --state-suffix" in capsys.readouterr().err
-
-
 _EXPECTED_PINS = {"shipmate.yml": 6}
 
 

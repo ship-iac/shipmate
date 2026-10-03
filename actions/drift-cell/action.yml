@@ -150,10 +150,9 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/drift-cell-summary"
 
     - name: Upload drift summary
-      # NOT continue-on-error, unlike apply-cell's namesake, whose artifact is only comment
-      # data: this upload is the ONLY channel by which this cell's drift becomes visible at all.
-      # Lose it and drift-issues' glob does not see the cell -- no Issue and a green
-      # nightly run over real drift.
+      # Fatal: not continue-on-error, unlike apply-cell's namesake, because this upload is the
+      # ONLY channel by which this cell's drift becomes visible. Lose it and drift-issues never
+      # sees the cell, leaving no Issue and a green nightly run over real drift.
       if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:

@@ -73,9 +73,10 @@ live probes.
 - **Engine action-pin freshness in the consumer's own workflow files.** Each is
   read at the commit under examination, so the pull request that bumps a stale
   pin is not itself reported stale. It covers only pins of the engine's own
-  repository, which the probe learns at runtime from the running action rather
-  than from any hardcoded slug — another org's shared action is not shipmate's
-  to report on.
+  repository, which the probe learns at runtime from `SHIPMATE_ENGINE_REPO`, set
+  from `job.workflow_repository` by the engine job that runs it, rather than
+  from any hardcoded slug — another org's shared action is not shipmate's to
+  report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
   the commit under examination, feeds three checks, so an unreadable file
   leaves all three unverified together:
@@ -168,11 +169,24 @@ All three environment probes — existence, protection shape, and the
 secrets a plan environment holds — cover only the environments of the stacks a
 given pull request changed; the declared set comes from that commit's plan
 matrix. So the report's all-clear line names the environments it actually probed
-instead of implying the repository's environments are all sound, and a clean
-secret probe says nothing about an environment this pull request did not touch.
+instead of implying the repository's environments are all sound, says plainly
+when the set was empty, and a clean secret probe says nothing about an
+environment this pull request did not touch.
 The declared set is the cell summaries of the plan runs this commit's own apply
 checks record, so a run whose summaries cannot be downloaded is warned about and
 its environments are absent from the set.
+
+`shipmate doctor` also emits untitled `::warning::` annotations on its own
+degrade paths: an unreadable PR head SHA, unreadable plan records on this
+commit's apply checks, a plan run whose cell summaries could not be downloaded,
+a failed check-runs listing or reduction, a failed per-check annotations fetch,
+a failed job-summary write, and a failed listing of the pull request's
+comments, on which the report is not posted for that run rather than posted as
+a second sticky comment. Those annotations land on the `issue_comment` run
+executing `shipmate doctor`, at `github.sha`, not on the PR head SHA whose
+check runs the harvest reads, so the harvest never reads them back. That job
+checks out no consumer content and reads entirely through `gh api` and
+`gh run download -R`, so `github.sha` is the default branch's tip.
 
 Separately, the report states plainly when some of the commit's workflow runs
 had not finished yet, and when the warnings harvest itself could not complete
@@ -693,7 +707,7 @@ plan comment, and nothing on the run page saying why. The pull request cannot
 merge, which is the intended direction. The head repository comes from the
 `facts` job in the same engine file, so a skipped `summary` is not a wiring
 mistake: check the pull request's head repository. A pull request whose head is
-in a fork is refused earlier still, at `detect` ("A fork's pull request is
+in a fork is refused earlier still, at `detect` ("Fork pull request
 refused", below).
 
 **The gate is pending with the draft reason.** The description reads "the pull
@@ -747,27 +761,9 @@ The apply comment carries a line
 `⚪ <env>: held, the review state does not permit applying`, or
 `shipmate apply` was refused with a review reason.
 
-`gated = false` on an entry in `.github/shipmate.toml` exempts that environment
-from the review requirement and nothing else. A targeted `shipmate apply <env>`
-is decided at comment time: a gated env gets the usual refusal, extended to
-name its `environments.<env>.gated` setting, and the engine re-applies the same rule to
-the decision it reads at apply time — a run refused there dies before any wave,
-leaving the apply checks pending. A bare `shipmate apply` is partitioned
-per environment on the apply path, from the review decision read there:
-
-| `reviewDecision` when the apply runs | what applies |
-|---|---|
-| `NONE` (no rule requires a review, or the only review rule is code-owner review and no changed file has an owner) or `APPROVED` | everything pending — no partition |
-| `REVIEW_REQUIRED` | the ungated environments; every other pending environment is held — all of them when no entry holds `gated = false` |
-| `CHANGES_REQUESTED` | nothing — every environment is held, ungated ones included |
-| anything else, or no decision arrived | nothing — every environment is held |
-
-Held environments keep their `apply / <stack> / <env>` checks pending, so
-`shipmate / gate` stays pending and the merge stays blocked; environments
-ordered after a held one are skipped for the same run. `gated = false` only ever
-narrows what a `REVIEW_REQUIRED` decision holds; it is the decision that
-decides, so an unreviewed pull request holds every environment in a repository
-that declares nothing.
+Which review decision refuses a targeted apply, and which environments a bare
+apply holds for each decision, is in [`../CONTRACT.md`](../CONTRACT.md)
+§Comment-ops (the `gated = false` rules).
 
 **The apply is refused although the environment is ungated.** Check which copy
 of the file you edited: all three readers resolve `gated` from the
@@ -851,7 +847,7 @@ five jobs the event did not select.
 
 The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
-do not cover. `shipmate doctor`'s routing probe reports that job on every plan
+do not cover. `shipmate doctor`'s `shipmate.yml` probe reports that job on every plan
 run — with the expression to write, unless what it found was a job count other
 than one — and the dispatch comment on the pull request already links the run. Reconcile the job against the fence in
 [`getting-started.md`](getting-started.md) §The workflow file.
@@ -861,23 +857,15 @@ than one — and the dispatch comment on the pull request already links the run.
 `detect` fails with `fork pull requests are not supported`, or with
 `this run did not state its head repository`.
 
-Planning a fork head would run the pull request's own Terramate/OpenTofu code on
-your runners with whatever the plan environment exposes as variables — those
-are not secrets, and they are not withheld from a fork's run. No
-`shipmate / gate` status is ever written for a fork head either, so the pull
-request could not merge whatever the plan said. The refusal is loud rather than
-an empty matrix, so an outside contributor is not left waiting on a gate that
-cannot arrive.
-
 The refusal keys on the `head-repo` input, and it refuses by default: a run
 that states no head repository is refused too, with a message naming the input.
-Engine `plan.yml` fills that input from its own `facts` job, so the message
-means what it says — the head really is elsewhere. Engine `drift.yml` says it
-has no pull request at all with `no-pull-request: "true"` instead
-(`docs/drift.md`).
+No input allows a fork; engine `drift.yml`'s `no-pull-request: "true"`, which
+says the run has no pull request at all, is the only opt-out
+(`docs/drift.md`). [`hardening.md`](hardening.md) §Contributors without push
+access states why, and what a fork's plan cell would receive.
 
-No input allows a fork. Push the branch to this repository
-(`gh pr checkout`, then push) and open the pull request there.
+Push the branch to this repository (`gh pr checkout`, then push) and open the
+pull request there.
 
 ### An apply check never completes after a successful apply
 

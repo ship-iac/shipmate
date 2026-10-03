@@ -239,15 +239,13 @@ runs:
         repositories: ${{ github.event.repository.name }}
         permission-checks: read
         permission-contents: read
-        # `pull-requests`, not `issues`: the report posts to `/issues/{pr}/comments`, but a
-        # pull request comment is governed by the pull-requests permission -- an installation
-        # token holding only `issues: write` gets 403 "Resource not accessible by integration"
-        # there. Same permission the plan and apply comment mints use.
+        # `pull-requests`, not `issues`: a pull request comment posted to `/issues/{pr}/comments`
+        # is governed by pull-requests, and an `issues: write` token gets 403 "Resource not
+        # accessible by integration" there.
         permission-pull-requests: write
-        # The environment probes read `/environments` and `/environments/{name}`; on some
-        # configurations a fine-grained installation token needs Actions read to see them, and
-        # a degraded probe surfaces only as a "could not verify" note. A subset of the
-        # `actions: write` app/manifest.json declares, so no re-approval is needed.
+        # Some configurations need Actions read for the environment probes' `/environments`
+        # reads; without it they degrade to "could not verify". A subset of the manifest's
+        # `actions: write`, so no re-approval.
         permission-actions: read
         # The plan-environment secret probe lists `/environments/{name}/secrets`.
         permission-environments: read
@@ -310,22 +308,19 @@ runs:
           exit 0
         fi
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
-        # Harvest: latest shipmate-authored check-run per name (check-ids mode filters on app
-        # slug/id), then its annotations. Degrades to an empty harvest rather than failing the
-        # command. harvest_failed is written exactly once, after every fallible step has had a
-        # chance to flip it: a per-id annotations-fetch failure is as much a partial harvest as
-        # the listing or the reduction failing, and an empty "ann/<id>.json" fallback is
-        # byte-identical to "no annotations", so it must not look like a complete harvest.
+        # Harvest: latest shipmate-authored check run per name (check-ids mode filters on app
+        # slug/id), then its annotations; degrades to empty, never fails the command. harvest_failed
+        # is written once, after every fallible step could flip it: an empty "ann/<id>.json"
+        # fallback is byte-identical to "no annotations", so a failed fetch must not look complete.
         mkdir -p ann
         : > check-ids.tsv
         harvest_failed=false
         if GH_TOKEN="$APP_TOKEN" gh api --paginate \
              "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
              --jq '.check_runs[] | {id, name, status, started_at, external_id, app: {id: .app.id}, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
-          # check-ids mode also writes the `harvest_pending` step output, true when any
-          # shipmate-relevant check run on this commit has not completed -- this is the one
-          # step that already reads every check run. The render step needs it so a report
-          # requested mid-run says so instead of printing an all-clear nothing refreshes.
+          # check-ids mode also writes `harvest_pending`, true while any shipmate check run on
+          # this commit is incomplete, so a report requested mid-run says so instead of printing
+          # an all-clear nothing refreshes.
           if ! python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv; then
             echo "::warning::doctor check-ids reduction failed; doctor reports settings probes only"
             : > check-ids.tsv
@@ -357,10 +352,9 @@ runs:
         fi
         run_ids=$(python3 -c 'import json,sys; print("\n".join(sorted(set(json.load(sys.stdin).values()))))' \
                     < plan_runs.json || echo "")
-        # -R is required: this job checks out nothing, so the workspace holds no consumer git
-        # remote for gh to infer the repo from, and `gh run download` would fail every time. One
-        # directory per run, never a shared one: a cell replanned in a later run carries the same
-        # artifact name in both, and one run's copy would overwrite the other's.
+        # -R because this job checks out nothing, so gh has no remote to infer the repo from. One
+        # directory per run: a cell replanned in a later run carries the same artifact name, and
+        # a shared directory would let one run's copy overwrite the other's.
         mkdir -p doctor-cells
         while read -r rid; do
           [ -n "$rid" ] || continue
@@ -382,10 +376,8 @@ runs:
         SHIPMATE_CELLS_DIR: doctor-cells
         SHIPMATE_HEAD_SHA: ${{ steps.gatherdoc.outputs.head_sha }}
         SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}
-        # `|| 'true'`: this step's `if:` does not key on gatherdoc's outcome, so a red or
-        # skipped gatherdoc leaves the output unset. An empty string is falsy here, so the
-        # fallback fires and the harvest reads as failed rather than as false. A real 'false'
-        # is a non-empty string, hence truthy, and passes through.
+        # `|| 'true'`: a red or skipped gatherdoc leaves the output empty, which is falsy, so the
+        # harvest reads as failed. A real 'false' is a non-empty string, hence truthy, and passes.
         SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed || 'true' }}
         # Written by check-ids mode. No `|| 'true'` fallback: if gatherdoc never ran there is
         # no harvest at all and SHIPMATE_HARVEST_FAILED already says so, and adding "some runs
@@ -407,44 +399,30 @@ runs:
         # the summary actually carries the report, so the listing-failure branch stays a single
         # `echo`: a nested `if` inside that asserted degrade block would hide the warning.
         retry_hint="comment shipmate doctor again to retry"
-        # The report is 30-60s of probes, and two failures lose it: a failed comment listing
-        # exits 0 by design, leaving a green run with no report at all -- to the commenter,
-        # indistinguishable from the engine ignoring them -- and a failed PATCH or POST of the
-        # comment reds the step after the render. Writing the job summary first means the run
-        # page carries the report even when the pull request does not.
-        # Degrading, never fatal, and deliberately not `|| true`, which a guard on the listing
-        # forbids in this step: the summary is the added surface, so losing it must not cost a
-        # comment that would have posted -- which a bare `cat` under `set -e` would do. `:-` in
-        # the emptiness test keeps `set -u` from killing the step on a runner that never
-        # exports the variable; the write itself can still fail on a full or read-only volume.
+        # The job summary is written first so the run page keeps the report when the comment
+        # listing (exit 0 by design) or the PATCH/POST fails. Reviewer-facing only, never fatal,
+        # and not `|| true` (a guard forbids it here); `:-` keeps `set -u` alive when unset.
         if [ -z "${GITHUB_STEP_SUMMARY:-}" ] || ! cat doctor.md >> "$GITHUB_STEP_SUMMARY"; then
           echo "::warning::could not publish the doctor report to this job's summary; it survives only as the pull request comment"
         else
           retry_hint="read it in this job's summary, or $retry_hint"
         fi
         marker='<!-- shipmate:doctor -->'
-        # Same upsert discipline as the sticky plan comment: marker plus Bot author (the App's
-        # bot login is org-dependent), single id.
-        # `startswith`, not `contains`: render_report emits the marker as the body's FIRST
-        # line. A `contains` match also selects a comment that merely quotes the marker -- the
-        # sticky plan comment embeds `tofu plan` output verbatim -- and this step would then
-        # PATCH the plan comment with the doctor report, destroying it and orphaning the
-        # summary marker.
+        # Marker plus Bot author, since the App's bot login is org-dependent. `startswith`, not
+        # `contains`: the sticky plan comment can quote the marker in `tofu plan` output, and a
+        # `contains` match would PATCH the doctor report over the plan comment.
         if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
                --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
                > doctor-comment-ids.txt; then
-          # `retry_hint` names the surface that did survive. Without it the only signal is
-          # this annotation, invisible from the pull request, so the commenter's next move is
-          # another `shipmate doctor` -- a second mint and 30-60s of probes for a report this
-          # run already rendered. A failed listing skips the post so the next run can recover.
+          # `retry_hint` names the surface that survived, so the commenter need not re-run 30-60s
+          # of probes for a report this run already rendered. A failed listing skips the post so
+          # the next run can recover.
           echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run: $retry_hint"
           exit 0
         fi
-        # --paginate evaluates --jq per page, so a marker match on >1 page emits one id per
-        # matching page; the first line is the single id PATCH needs. The lookup writes to a
-        # file rather than piping into `head`, which raises EPIPE under `pipefail` and needs a
-        # `|| true` that also masks a genuine listing failure -- an empty id then falls through
-        # to the create branch, leaving two marker-bearing Bot comments.
+        # --paginate runs --jq per page, so take the first id. Via a file, not a pipe into `head`:
+        # EPIPE under `pipefail` would need a `|| true` that masks a listing failure, and the empty
+        # id would then create a second marker-bearing Bot comment.
         id=$(head -n1 doctor-comment-ids.txt)
         if [ -n "$id" ]; then
           gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@doctor.md >/dev/null
@@ -491,10 +469,9 @@ runs:
       # `ungated_envs` from this step, and a resolve that skips while authorization runs
       # hands it an empty list, which exempts nothing.
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' }}
-      # A failed resolve must not hard-fail the step: every later step is `success()`-gated,
-      # so the reaction, the exemption report and the refusal would all skip and the
-      # commenter would get nothing at all -- including for `unlock`, the recovery verb.
-      # `Gate configuration unreadable` reports it and then fails the job in its place.
+      # Fatal, deferred: every later step is `success()`-gated, so a hard failure here would
+      # leave the commenter nothing, even for `unlock`, the recovery verb. `Gate configuration
+      # unreadable` reports it and then fails the job in its place.
       continue-on-error: true
       shell: bash
       env:
@@ -535,10 +512,9 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |
         set -euo pipefail
-        # Retry until `mergeable` is computed; GitHub computes it asynchronously. Not for
-        # unlock, which ignores `mergeable`: a merged pull request reports it null forever --
-        # exactly the stranded-lock case unlock exists for -- so the retries would cost 15s
-        # and end in a warning that is false for a verb that never reads the field.
+        # GitHub computes `mergeable` asynchronously, so retry. Not for unlock, which ignores it:
+        # a merged pull request, the stranded-lock case, reports null forever, and the retries
+        # would cost 15s and end in a false warning.
         if [ "$SHIPMATE_VERB" != unlock ]; then
           pr_ok=""
           for _ in 1 2 3 4 5; do
@@ -551,24 +527,17 @@ runs:
         else
           gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" > pr.json
         fi
-        # Review decision (ruleset-driven). GitHub returns null when no rule requires a review,
-        # and also when the only review rule is code-owner review and no changed file has an
-        # owner. Normalize it to the explicit NONE sentinel: authorize fails closed on anything
-        # that is neither NONE nor a decision enum value, and an empty string must never be a
-        # pass value.
-        # The $owner/$repo/$pr tokens are GraphQL query variables (bound via -F), not
-        # shell variables: single quotes are intentional.
-        # shellcheck disable=SC2016
+        # reviewDecision is null when no rule requires a review, or code-owner review owns no
+        # changed file. NONE makes that explicit, since an empty string must never be a pass value:
+        # authorize fails closed outside NONE and the enum.
+        # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
         rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
           -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
           --jq '.data.repository.pullRequest.reviewDecision // "NONE"')
         echo "review_decision=$rd" >> "$GITHUB_OUTPUT"
-        # The reviewed plan runs for the CURRENT head: every App-authored apply check on the
-        # head records the plan run its plan came from, so a record read here is for this head
-        # by construction -- no plan-workflow lookup, and no head SHA left to compare. An empty
-        # mapping means nothing has planned this head, which authorize refuses.
-        # An unlock consumes no plan artifact and must not depend on a plan run existing;
-        # authorize ignores the file for unlock, so leave it {}.
+        # Each App-authored apply check on the head records its plan run, so these records are for
+        # this head by construction; an empty mapping means nothing planned it (authorize refuses).
+        # Unlock consumes no plan and authorize ignores the file for it, so it stays {}.
         if [ "$SHIPMATE_VERB" != unlock ]; then
           head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
           GH_TOKEN="$APP_TOKEN" gh api --paginate \
@@ -606,10 +575,9 @@ runs:
           -f content=rocket >/dev/null || true
         echo "::notice title=comment-ops::command authorized (the caller's next step dispatches it)"
 
-    # A report, not a decision: authorize already decided. It exists because `reviewDecision`
-    # keeps no history -- once the review lands, nothing else records that this apply was
-    # permitted without one. The wording claims permission, never completion: nothing has
-    # applied at comment time.
+    # A report, not a decision: `reviewDecision` keeps no history, so nothing else records that
+    # this apply was permitted without a review. It claims permission, never completion: nothing
+    # has applied at comment time.
     - name: Report the review exemption
       if: ${{ steps.authz.outputs.ungated_exemption == 'true' }}
       shell: bash

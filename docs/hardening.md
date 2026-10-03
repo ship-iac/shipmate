@@ -9,14 +9,12 @@ It starts from one fact.
 A branch may carry its own workflow files. GitHub runs them, with whatever
 secrets that job's own environment bindings grant, on push — before a pull
 request exists, before review, and before `CODEOWNERS` applies.
-`SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way. The
-`shipmate-engine` environment's deployment branch policy only ever satisfies
-a job running at the default-branch ref (row 16; `docs/github-app.md`
-§Key-exposure boundary), so a branch-pushed workflow cannot mint an App token.
-Without a token it cannot POST a `shipmate / gate` status, submit an approving
-review as the App, complete `apply / <stack> / <env>` checks, or dispatch an
-apply — but the gate's verdict is still computed from artifacts the branch's
-own plan run produced (see "What none of this fixes").
+`SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way, so a branch-pushed
+workflow mints no App token, writes no gate status, submits no App review,
+completes no apply check and sends no apply dispatch (row 16;
+`docs/github-app.md` §Key-exposure boundary) — but the gate's verdict is still
+computed from artifacts the branch's own plan run produced (see "What none of
+this fixes").
 
 Two things a branch-pushed workflow *can* still do, absent the rest of this
 checklist:
@@ -68,7 +66,7 @@ holds the App key. `shipmate doctor` warns for every workflow file declaring the
 trigger except `shipmate.yml`, matched by exact name. Every trigger the engine
 uses lives in that one file, so what separates them is not which file holds
 which trigger but each job's `if:` — a `pull_request_target` event selects the
-`plan` job and no other. doctor's routing probe compares all six of those
+`plan` job and no other. doctor's `shipmate.yml` probe compares all six of those
 expressions, whole, against the fence `getting-started.md` publishes. See
 "Contributors without push access" for the trade-off that follows.
 
@@ -103,17 +101,16 @@ default split naming (`<env>-plan` + `<env>-apply`). A logical env whose
 both paths instead (CONTRACT.md §Env model). On such an environment:
 
 - **Row 6 is forfeited.** A protection rule gates every job that binds the
-  environment, with no per-job filter, so a required reviewer or a wait timer
-  stalls the plan cells and the nightly drift run. The reviewer gate is not
-  relocated, it is gone, and rows 7 and 18 then place credentials on an
+  environment, with no per-job filter, so a wait timer stalls the plan cells
+  and the nightly drift run just as a reviewer does (§6). The reviewer gate is
+  not relocated, it is gone, and rows 7 and 18 then place credentials on an
   environment plan-time code reaches.
-- **Row 17 still works, conditionally.** A deployment branch policy naming the
-  default branch admits plan cells (they evaluate at the pull request's *base*
-  ref), the scheduled drift run and the apply, while still refusing a
-  branch-authored workflow that names the environment — the control row 17 exists
-  for. It holds only while every pull request targets a branch the policy names.
-  A repository using release branches must open the policy up, and then row 17 is
-  forfeited too.
+- **Row 17 still works, conditionally (§6).** A deployment branch policy naming
+  the default branch admits plan cells (they evaluate at the pull request's
+  *base* ref), the scheduled drift run and the apply, while still refusing a
+  branch-authored workflow that names the environment — the control row 17
+  exists for. A repository using release branches must open the policy up, and
+  then row 17 is forfeited too.
 
 ### Plan prerequisites
 
@@ -291,16 +288,9 @@ the other:
 
 - **`gated = false` exempts an environment from the code review before apply,
   and from nothing else.** It is a flag on the environment's entry in
-  `.github/shipmate.toml` on the default branch. The
-  ruleset still requires the review before the merge, `CHANGES_REQUESTED`
-  still refuses, and the write-access, not-a-draft, mergeable and exact-plan
-  requirements are untouched (CONTRACT.md §Comment-ops). Environments without
-  it are held out of a bare `shipmate apply` and refused on a targeted
-  one, their apply checks left pending, so the gate keeps blocking the merge
-  until they are applied with a review in hand. Both engine apply forms resolve
-  the setting themselves and enforce on it; engine `comment-ops.yml`'s read of it
-  is an early refusal, not the policy. Opting in takes no line in your workflow
-  file — see `docs/getting-started.md`.
+  `.github/shipmate.toml` on the default branch, and the ruleset still
+  requires the review before the merge. What it exempts and what still decides
+  is in `CONTRACT.md` §Comment-ops; the recipe is in `docs/getting-started.md`.
 - **Environment `required_reviewers` on `<env>-apply` (§6) gates the
   deployment.** A human other than the author releases the environment's
   secrets and lets the apply proceed. It is unforgeable by a holder of the App
@@ -308,27 +298,19 @@ the other:
 
 Two things to know before relying on it:
 
-- **What bounds the exemption is the default branch.**
-  All three readers resolve the
-  file there, so the pull request that benefits from an exemption cannot also
-  grant it: adding an entry is a commit, under whatever your ruleset requires of
-  one, and a reviewer reads it as code. Anyone who can push a branch can still
-  *propose* the entry, so this bounds when it takes effect, not who may ask.
-  `shipmate doctor` validates the file and reports a malformed entry, but does not
-  list the `gated = false` entries; its count-0 finding below names their
-  complement, the gated environments.
+- **What bounds the exemption is the default branch.** All three readers
+  resolve the file there (`CONTRACT.md` §Comment-ops names them), so the pull
+  request that benefits from an exemption cannot also grant it: adding an entry
+  is a commit, under whatever your ruleset requires of one, and a reviewer reads
+  it as code. Anyone who can push a branch can still *propose* the entry, so
+  this bounds when it takes effect, not who may ask.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
   environment is already ungated there, so `gated = false` on some narrows nothing. It
-  can only relax an existing requirement, never create one. When it can read the
-  default branch's table, `shipmate doctor` names the environments still marked
-  gated: each of them can apply without an approving review, and is held only
-  where a code-owner review is required for the changed files. It is a note
-  while code-owner review is on, and a warning beside the code-owner warning
-  while that review is off. With the table unreadable it names none, and reports only
-  the sole-maintainer note, or only the code-owner warning when that review is
-  off. A notice annotation in the apply run's log also names each
-  gated environment a run applied while `reviewDecision` was `NONE`, stating that
-  no approving review was required.
+  can only relax an existing requirement, never create one: every environment
+  still marked gated can apply without an approving review, and is held only
+  where a code-owner review is required for the changed files. What
+  `shipmate doctor` and the apply run's log report about it is in `CONTRACT.md`
+  §Comment-ops.
 
 `require_code_owner_review` is doing more work here than the approval count.
 A GitHub App cannot be listed in `CODEOWNERS`, so a code-owner review is one of
@@ -1026,9 +1008,12 @@ nothing keeping a fork out of a plan cell depends on it.
 
 `pull_request_target` does not sandbox a fork's run: nothing is withheld from
 it, so a plan cell reached by a fork would read the plan environment's
-variables *and its secrets* (engine `plan.yml` passes
-`secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`) while executing the
-pull request's own Terramate/OpenTofu code. GitHub withholds secrets from a
+variables *and its secrets* (engine `plan.yml` passes `secrets.SHIPMATE_SECRETS`
+and `secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`), and would hold
+the cell's resolved role's cloud credentials — `aws.plan`, or `aws.apply` in a
+shared environment (the `plan` job's `configure-aws-credentials` step assumes
+`matrix.role_arn` when the environment names one) — while executing
+the pull request's own Terramate/OpenTofu code. GitHub withholds secrets from a
 fork under `pull_request`, not `pull_request_target`, so that layer does not
 exist here. Keep both of the layers that do —
 dropping the `needs:` edge, moving `plan` off `detect`'s matrix, or turning the

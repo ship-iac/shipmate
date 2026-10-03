@@ -163,27 +163,21 @@ Beyond the schema:
   differ only in punctuation are two workloads. `{workload}` in a role string is
   the other way to vary: `shipmate-apply-{workload}` names one role per listed
   workload.
-- **A tag outside `workloads` is refused at detect**, naming every such cell,
-  for the cells a run plans, applies or unlocks. An untagged stack in `dev-eu`
-  runs with no credential, because its identity varies. Add a workload to the
-  list on its own pull request before the branch that tags a stack with it, and
-  remove it after the branch that drops the last tag; in between, the paths
-  that scan the whole tree warn about a listed workload no stack tags.
+- **A tag outside `workloads` is refused at detect**, and an untagged stack in
+  `dev-eu` runs with no credential, because its identity varies. Add and remove
+  a workload in the order [`../CONTRACT.md`](../CONTRACT.md) §Adding and
+  removing an environment gives.
 - **Several environments may name one identity.** One edit to
   `[identities.dev]` then retargets all of them; `shipmate doctor`'s roles lines
-  on the pull request list what each environment resolves. A referenced role
-  there shows the value comment-ops resolves: a `shipmate-engine` Environment
-  variable of the same name wins in comment-ops, and never in a cell.
-- **A shared environment resolves `aws.apply` on both paths**, because it is one
-  environment with one role. A shared environment naming an identity that sets
-  `aws.plan` is refused rather than silently ignored.
-- **Adding or removing an environment takes two pull requests**, configuration
-  first when adding and last when removing, because the table is read from the
-  default branch while the stacks' tags come from the branch under test.
-  [`../CONTRACT.md`](../CONTRACT.md) §Environment table has the ordered sequence.
-  The same rule governs the first table of all: it has to be on the default
-  branch before the first plan run, so it lands in the commit that adds the
-  workflow file rather than in a pull request of its own.
+  list what each environment resolves ([`../CONTRACT.md`](../CONTRACT.md)
+  §Resolution).
+- **A shared environment resolves `aws.apply` on both paths**
+  ([`hardening.md`](hardening.md) §7–9 has the cost).
+- **Adding or removing an environment takes two pull requests**
+  ([`../CONTRACT.md`](../CONTRACT.md) §Adding and removing an environment). The
+  first table of all has to be on the default branch before the first plan run,
+  so it lands in the commit that adds the workflow file rather than in a pull
+  request of its own.
 
 ## Where the credentials step goes
 
@@ -198,13 +192,9 @@ side, reading `<env>-apply` (or the bare `<env>` in shared mode), and
 `id-token: write` on itself (see
 [`getting-started.md`](getting-started.md) §Required — plan).
 
-The plan-side role is the identity's `aws.plan`. In shared mode — a logical env
-holding `shared = true` binds one bare `<env>` on both paths — there
-is one role for both and the wave jobs use it, so it must be the apply role: plan-time
-branch code and the drift run then have write access, and the read-only plan
-role is unreachable for that env ([`hardening.md`](hardening.md) §7–9). Such an
-environment resolves `aws.apply` on both paths, and naming an identity that sets
-`aws.plan` from it is refused rather than ignored.
+The plan-side role is the identity's `aws.plan`. A shared environment resolves
+`aws.apply` on both paths instead, so plan-time branch code holds the apply role
+([`hardening.md`](hardening.md) §7–9).
 
 **The plan and drift steps resolve a workload role too**, like the wave jobs:
 an `aws.plan` map or a `{workload}` in it gives each listed workload its own

@@ -343,6 +343,11 @@ actual work here:
 - **A `push` to a non-default branch cannot reach the key.** Measured, not
   inferred: such a job is refused before its first step, because a branch ref
   matches no pattern the policy names.
+- **A `pull_request` job cannot reach the key either.** This follows from its
+  ref and was not measured: whatever `environment:` its workflow file declares,
+  its ref is `refs/pull/<n>/merge`, which no pattern the policy names matches.
+  `pull_request_target` is the one pull-request-side trigger that does satisfy
+  the policy, which is why the plan path's trust conditions are engine-owned.
 - **The jobs that can reach the key all run at the default-branch ref.** The
   autoplan reaches the `plan` job through `pull_request_target`, which evaluates
   at the base branch ref rather than the pull request head, so its trusted

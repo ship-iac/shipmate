@@ -19,19 +19,16 @@ jobs:
   # then capture the apply-check ids. It needs no secret and no environment.
   snapshot:
     runs-on: ubuntu-slim
-    # Permissions cap at each `uses:` boundary, so every calling job must also grant checks:read or
-    # this job fails at workflow-resolution time. actions:read is not decorative: on a private
-    # repository, listing environments 403s with checks:read alone, and actions:read unlocks it
-    # (measured; undocumented). Every call site already grants it for the waves and `complete`.
+    # Permissions cap at each `uses:` boundary, so every calling job must grant checks:read too,
+    # or this fails at workflow resolution. actions:read is not decorative: on a private repository,
+    # listing environments 403s without it (measured; undocumented).
     permissions: { checks: read, actions: read }
     outputs:
       snapshot: ${{ steps.snap.outputs.snapshot }}
     steps:
-      # First, before anything else in this workflow: an apply that binds an environment nobody
-      # created gets one auto-created with no reviewers, no wait timer and no branch policy.
-      # A cell's variables come from the environment table keyed by matrix.environment, so plan
-      # and apply hash identically whatever the job bound and the fingerprint pins nothing about
-      # the binding. Existence is the only discriminator.
+      # First in this workflow: binding an environment nobody created auto-creates it with no
+      # protection. Variables are keyed by matrix.environment, so the fingerprint pins nothing
+      # about the binding; existence is the only discriminator.
       - uses: $/actions/verify-environments
         with:
           waves-json: ${{ inputs.waves_json }}
@@ -172,10 +169,9 @@ jobs:
     name: *wave-name
     steps: *wave-steps
 
-  # Completes the checks the `snapshot` job captured, for every cell whose wave job succeeded in
-  # this run. The only job in this workflow that holds the App key. Ordered after every wave, so
-  # that gate-refresh and the apply-summary comment -- both of which `needs:` this called workflow
-  # in the callers -- never observe a stale-pending check for a cell that just applied.
+  # Completes the snapshot's checks for every cell whose wave job succeeded; the only job here
+  # holding the App key. After every wave, so gate-refresh and apply-summary, which `needs:` this
+  # workflow, never see a stale-pending check for a cell that just applied.
   complete:
     needs: [snapshot, wave0, wave1, wave2, wave3, wave4, wave5, wave6, wave7]
     if: ${{ always() && needs.snapshot.result == 'success' }}
