@@ -1524,7 +1524,7 @@ in the engine placing it there. What *is* base-branch under this trigger is the
 checkout: `GITHUB_SHA` and `GITHUB_REF` name the base, which is why the engine's
 `detect` and `plan` jobs pass `ref: ${{ needs.facts.outputs.head-sha }}`
 explicitly. The two are routinely confused; they are opposite sides of the same
-trigger. The file's other six jobs are skipped under that trigger, each
+trigger. The file's other five jobs are skipped under that trigger, each
 completing as a `skipped` check-run on the same head; nothing functional depends
 on them, and `scripts/mirror-checks` does not copy them.
 
