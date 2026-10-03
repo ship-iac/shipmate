@@ -93,3 +93,9 @@ def test_approval_rules_skip_the_branch_policy_and_repeat_no_type():
         ]
     }
     assert approval_rules(env) == ["required_reviewers", "wait_timer"]
+
+
+def test_approval_rules_report_a_typeless_rule_as_unknown():
+    """Mutation: drop the `or "?"` (or subtract `"?"`) -- the typeless rules vanish."""
+    env = {"protection_rules": [{"type": "wait_timer"}, {}, {"type": ""}, {"type": None}]}
+    assert approval_rules(env) == ["?", "wait_timer"]

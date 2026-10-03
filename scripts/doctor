@@ -1861,7 +1861,12 @@ def _degrade_reason(e):
     """The failure reason, safe in a comment body or an annotation. Strips
     `ec.gh_json`'s `::error::...: gh api <path>` wrapper -- the workflow-command
     prefix would nest inside `::warning ...::` in annotate mode, and the
-    endpoint is an internal detail no reader can act on."""
+    endpoint is an internal detail no reader can act on.
+
+    The whole message, with gh's stderr, goes to the step log instead: the cut drops
+    the HTTP status that says why the probe degraded. The `::error::` prefix is
+    stripped there too, so the log line does not become a second annotation."""
+    sys.stderr.write(f"{str(e).removeprefix('::error::')}\n")
     return _one_line(str(e).removeprefix("::error::").split(": gh api ")[0], 120)
 
 

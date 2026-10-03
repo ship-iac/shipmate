@@ -3102,6 +3102,24 @@ def test_a_failing_shipmate_yml_probe_degrades_naming_the_file(monkeypatch):
     ]
 
 
+def test_a_degraded_probe_logs_the_whole_failure_to_stderr(monkeypatch, capsys):
+    """Mutation: drop the `sys.stderr.write` in `_degrade_reason` -- stderr is empty and the
+    403 appears nowhere. The report note stays cut at ": gh api "."""
+
+    def _probe_warnings(ctx):
+        raise SystemExit("::error::command failed (1): gh api x\ngh: HTTP 403")
+
+    monkeypatch.setattr(doctor, "PROBES", (_probe_warnings,))
+    assert doctor.warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "doctor could not verify the probe settings (command failed (1)): probe skipped.",
+        )
+    ]
+    captured = capsys.readouterr()
+    assert captured.err == "command failed (1): gh api x\ngh: HTTP 403\n"
+
+
 # The routing findings, hand-written and whole, never derived from `scripts/doctor` or from
 # `ROUTING_IFS`: the expressions are spelled out here, so an edited constant reddens these
 # rather than being followed by them.
