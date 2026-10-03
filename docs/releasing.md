@@ -17,9 +17,12 @@ merges a Dependabot pull request that bumps one line alone.
 ### Re-pin a consumer
 
 `<release-sha>` is the release's full 40-hex commit (`git rev-list -n1 vX.Y.Z` once tagged),
-never a short SHA. `<consumer>` is the consumer repository's checkout. Use GNU sed: `-b`
-keeps a CRLF file's line endings under Git Bash. On macOS, install GNU sed and run it as
-`gsed`, because BSD sed rejects `-b`.
+never a short SHA. `<consumer>` is the consumer repository's checkout. Make every table and
+consumer-file edit the release's CHANGELOG `### Removed` and `### Changed` lines name in the
+re-pin commit itself. The re-pin pull request's runs use the default branch's old pin and
+table, so the edits take effect together at merge.
+Use GNU sed: `-b` keeps a CRLF file's line endings under Git Bash. On macOS, install GNU sed
+and run it as `gsed`, because BSD sed rejects `-b`.
 
 1. From the engine clone, check that `<release-sha>` is 40 hex and on `origin/main`, then
    rewrite every engine ref. The checks are `&&`-chained, so a bad SHA rewrites nothing. A
@@ -44,7 +47,7 @@ keeps a CRLF file's line endings under Git Bash. On macOS, install GNU sed and r
 3. Check that every engine workflow the consumer calls exists at `<release-sha>`, from the
    engine clone. It must print nothing. A printed `missing at release: <path>` is a callee the
    release deleted or renamed, and the pin would not resolve: make the consumer-file edit the
-   CHANGELOG's `BREAKING CHANGE` footer names for that release, in the same commit.
+   release's CHANGELOG entries name, in the same commit.
 
    ```bash
    grep -rhoE 'ship-iac/shipmate/\.github/workflows/[^@[:space:]"]+' <consumer>/.github/workflows/ | sort -u | sed 's|ship-iac/shipmate/||' | \

@@ -22,7 +22,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **Credentials live only in `[identities.<name>]`; an environment names one with `identity` and lists the workloads it admits with `workloads`.**
+- **Credentials live only in `[identities.<name>]`: rewrite each environment's `aws` block as an `[identities.<name>]` table (`CONTRACT.md` §Environment table) in the re-pin commit.**
 - **A stack carrying two `workload/*` tags is refused at detect.**
 - **A workload tag outside the environment's `workloads` list is refused at detect, naming every such cell.**
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
@@ -37,22 +37,22 @@ section below names the SHA the release tags.
 - **The plan summary's and `shipmate doctor`'s App tokens request `environments: read`; the plan-environment secret probe has no token of its own and no not-checked warning.**
 - **Comments by bots or without `shipmate` start no engine `ops` job.**
 - **The workflow file's `comment-ops` job has no concurrency group, so a later comment no longer cancels a command still waiting to run; delete the `concurrency:` block from that job.**
-- **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed.**
+- **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed; delete `[gate]` in the re-pin commit.**
 - **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 - **A stack at path `apply` or `shipmate` plans; `build-matrix` no longer refuses either.**
 - **`actions/setup` downloads Terramate with curl instead of `terramate-io/terramate-action`, which consumers may drop from their allowed-actions list; a self-hosted runner's own curl config applies.**
-- **`apply-all.yml` is gone: the workflow file's `targeted` and `all` jobs become one `apply` job calling `apply.yml` with `environment`, `ref` and `pr_number` (`docs/getting-started.md`).**
+- **`apply-all.yml` is gone: in the re-pin commit, replace the workflow file's `targeted` and `all` jobs with one `apply` job calling `apply.yml` with `environment`, `ref` and `pr_number` (`docs/getting-started.md`).**
 
 ### Removed
 
-- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting.**
-- **The drift workflow and `actions/build-matrix` take no `tags` input; every sweep covers every cell.**
+- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting, so delete it in the re-pin commit.**
+- **The drift workflow and `actions/build-matrix` take no `tags` input; every sweep covers every cell. In the re-pin commit, delete `tags:` from the drift job's `with:`, because an undeclared input fails the whole workflow file at load.**
 - **`scripts/onboard` takes no `--vars-at-org`; it always writes the repository `SHIPMATE_APP_ID`.**
 
 ### Fixed
 
 - **`shipmate plan` and `shipmate unlock` runs cannot save an Actions-cache entry: `plan.yml` and `unlock.yml` declare `cache-mode: read`.**
-- **The Terramate download retries transient errors three times, and a failed install names the release URL and the status it answers.**
+- **The Terramate download retries transient errors three times, and a failed install names its cause in one annotation: the URL and status for a failed download, or the missing curl.**
 - **`shipmate / gate`'s hold is read from every page of the head's status contexts, so a head carrying many no longer lets an apply green a held gate.**
 - **`scripts/onboard` and `scripts/register-app` write UTF-8 on a Windows console, and the docs run them with `python`.**
 - **The provider cache no longer serves an empty entry saved by a detect job.**

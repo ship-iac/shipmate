@@ -7,7 +7,9 @@ passed to a curl older than 7.71 or withheld from a newer one, or an added `--fa
 """
 
 import os
+import shutil
 import stat
+from pathlib import Path
 
 import pytest
 from _loader import bash_only, run_step, step_by
@@ -192,3 +194,39 @@ def test_a_binary_of_another_version_fails_the_step_with_one_annotation(tmp_path
         f"{_PREFIX}{_URL} delivered version 0.17.0; check VERSIONS and the release asset.\n"
     )
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+
+
+@bash_only
+def test_a_runner_without_curl_fails_the_step_with_one_annotation(tmp_path):
+    """PATH holds every tool the step runs but curl. The stubs use `#!/bin/sh`, because
+    `#!/usr/bin/env bash` would look bash up on this PATH.
+
+    Mutation: delete the `command -v curl` line (the step reports HTTP 000, curl exit 127).
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stubs = {"uname": 'if [ "$1" = -s ]; then echo Linux; elif [ "$1" = -m ]; then echo x86_64; fi'}
+    for tool in ("tr", "mkdir", "awk"):
+        real = shutil.which(tool)
+        assert real, f"{tool} is not on PATH"
+        stubs[tool] = f'exec "{Path(real).as_posix()}" "$@"'
+    for name, body in stubs.items():
+        path = bin_dir / name
+        path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8", newline="\n")
+        path.chmod(path.stat().st_mode | stat.S_IEXEC)
+    github_path = tmp_path / "github_path"
+    github_path.write_text("", encoding="utf-8")
+    r = run_step(
+        tmp_path,
+        step_by(_ACTION, name=_STEP)["run"],
+        {
+            **os.environ,
+            "PATH": str(bin_dir),
+            "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
+            "GITHUB_PATH": str(github_path),
+            "SHIPMATE_TERRAMATE_VERSION": _VERSION,
+        },
+    )
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == f"{_PREFIX}curl is not installed on the runner.\n"
+    assert github_path.read_text(encoding="utf-8") == ""

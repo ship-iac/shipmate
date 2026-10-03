@@ -42,6 +42,9 @@ runs:
       run: |
         set -euo pipefail
         v="$SHIPMATE_TERRAMATE_VERSION"
+        # Fail-closed: every later step runs terramate.
+        fail() { echo "::error title=Terramate install failed::Terramate ${v} did not install: $1"; exit 1; }
+        command -v curl >/dev/null || fail "curl is not installed on the runner."
         system="$(uname -s | tr '[:upper:]' '[:lower:]')"
         case "$(uname -m)" in
           x86_64|x64) arch=x86_64 ;;
@@ -51,17 +54,15 @@ runs:
         url="https://github.com/terramate-io/terramate/releases/download/v${v}/terramate_${v}_${system}_${arch}.tar.gz"
         dir="$RUNNER_TEMP/terramate"
         mkdir -p "$dir"
-        # curl's --retry covers 408/429/5xx; --retry-all-errors adds resets, TLS errors and stalls.
-        # --retry-all-errors is curl 7.71+; an older curl exits 2 on it on the command line or in
-        # a -K file, so it is added only when supported.
+        # --retry covers 408/429/500/502/503/504 and timeouts, stalls included. --retry-all-errors
+        # adds connection resets and TLS errors; it is curl 7.71+, and an older curl exits 2 on it
+        # on the command line or in a -K file, so it is added only when supported.
         IFS=. read -r maj min _ <<<"$(curl -V | awk 'NR==1{print $2}')"
         retry_all=()
         if [ "$maj" -gt 7 ] || { [ "$maj" -eq 7 ] && [ "$min" -ge 71 ]; }; then retry_all=(--retry-all-errors); fi
         rc=0
         code="$(curl "${retry_all[@]}" -sSL --retry 3 --connect-timeout 10 --speed-limit 1024 --speed-time 30 \
           -o "$dir/terramate.tar.gz" -w '%{http_code}' "$url")" || rc=$?
-        # Fail-closed: every later step runs terramate.
-        fail() { echo "::error title=Terramate install failed::Terramate ${v} did not install: $1"; exit 1; }
         if [ "$rc" -ne 0 ] || [ "${code:-000}" != 200 ]; then
           if [ "${code:-000}" = 404 ]; then
             fail "${url} answered HTTP 404 (curl exit ${rc}); check VERSIONS and the runner's OS and architecture."
