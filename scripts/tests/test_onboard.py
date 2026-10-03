@@ -1982,9 +1982,6 @@ todo          SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
     gh secret set SHIPMATE_PLAN_PASSPHRASE
     An organization secret of that name is not visible to this read.
 
-todo          SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
-    gh secret set SHIPMATE_SLACK_WEBHOOK --env shipmate-engine
-
 todo          `.github/shipmate.toml`
     Add one: copy the example in docs/getting-started.md §Environments for this tier.
 
@@ -2026,7 +2023,6 @@ CONFIGURED_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
 ok            SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
-ok            SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)
 ok            `.github/shipmate.toml`
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
@@ -2101,7 +2097,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
     routes = {
         ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
         ENGINE_POLICIES: MAIN_POLICY,
-        ENGINE_SECRETS: {"secrets": [{"name": KEY}, {"name": "SHIPMATE_SLACK_WEBHOOK"}]},
+        ENGINE_SECRETS: {"secrets": [{"name": KEY}]},
         REPO_KEY_LIST: [{"name": "SHIPMATE_PLAN_PASSPHRASE"}],
         "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
         "repos/o/r/environments/dev-eu-apply": REVIEWED_APPLY,
@@ -2141,16 +2137,6 @@ def test_the_passphrase_is_read_from_the_repository_secrets():
             "gh secret set SHIPMATE_PLAN_PASSPHRASE",
             "An organization secret of that name is not visible to this read.",
         ],
-    )
-
-
-def test_the_webhook_is_read_from_the_engine_environment_secrets():
-    """Mutation: read `repo_secrets` for it."""
-    placed = ctx(engine_secrets={"SHIPMATE_SLACK_WEBHOOK"})
-    assert onboard._webhook_item(placed) == (
-        "ok",
-        "SHIPMATE_SLACK_WEBHOOK on shipmate-engine (optional)",
-        [],
     )
 
 

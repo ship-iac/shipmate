@@ -771,13 +771,6 @@ def _passphrase_item(ctx):
     )
 
 
-def _webhook_item(ctx):
-    item = f"SHIPMATE_SLACK_WEBHOOK on {ENGINE_ENV} (optional)"
-    if "SHIPMATE_SLACK_WEBHOOK" in ctx["engine_secrets"]:
-        return "ok", item, []
-    return "todo", item, [f"gh secret set SHIPMATE_SLACK_WEBHOOK --env {ENGINE_ENV}"]
-
-
 def _table_item(ctx):
     item = f"`{ec.CONFIG_PATH}`"
     if ctx["table"] is None:
@@ -941,7 +934,7 @@ def _checklist(ctx):
         for name, role in _env_names(env, ctx["shared"])
         if role == "apply"
     ]
-    items = [_passphrase_item(ctx), _webhook_item(ctx), _table_item(ctx)]
+    items = [_passphrase_item(ctx), _table_item(ctx)]
     items.append(_app_item(ctx))
     if gated:
         items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))

@@ -168,7 +168,7 @@ default branch. So does a run without `--key` while
 `shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
 It then prints a checklist of what it cannot set, because those values are
-yours: `SHIPMATE_PLAN_PASSPHRASE`, `SHIPMATE_SLACK_WEBHOOK`, the table with the
+yours: `SHIPMATE_PLAN_PASSPHRASE`, the table with the
 cloud role, region and env identity your layout injects,
 adding the repository to the App installation, an approving review before apply,
 a `CODEOWNERS` entry, a git-tracked `.terraform.lock.hcl` in each stack, and
@@ -822,10 +822,10 @@ the channel — the other five carry the same line without a comment.
 `SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
 value is readable by anyone who can see the repository and nothing in it reaches
 a cell; the run fails telling you to rotate what it held. A
-`SHIPMATE_SLACK_WEBHOOK`, `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE`
-variable is refused too, each with its own message: rotate the webhook or the key
-and set it as a secret on `shipmate-engine`; choose a new passphrase and set it as
-a repository or organization secret. The other direction cannot be
+`SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE` variable is refused too,
+each with its own message: rotate the key and set it as a secret on
+`shipmate-engine`; choose a new passphrase and set it as a repository or
+organization secret. The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 

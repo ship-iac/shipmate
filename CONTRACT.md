@@ -2329,10 +2329,9 @@ reaches the process.
   aimed at a cell, and refusing it would fail every run on correct
   configuration. An envelope key is **refused**: writing `TF_WORKSPACE` into
   `SHIPMATE_VARS` is a deliberate act with one meaning, and a silent drop leaves
-  the author debugging the wrong thing. Four enumerated names are **refused** rather
-  than skipped: `SHIPMATE_SECRETS`, `SHIPMATE_APP_PRIVATE_KEY`,
-  `SHIPMATE_PLAN_PASSPHRASE` and `SHIPMATE_SLACK_WEBHOOK`, secrets set on the
-  variable surface. Skipping one would export nothing while its value sat
+  the author debugging the wrong thing. Three enumerated names are **refused** rather
+  than skipped: `SHIPMATE_SECRETS`, `SHIPMATE_APP_PRIVATE_KEY` and
+  `SHIPMATE_PLAN_PASSPHRASE`, secrets set on the variable surface. Skipping one would export nothing while its value sat
   world-readable in the repository UI, and the engine's own namespace has no
   legitimate reading as a consumer variable. The refusal says to delete the
   variable, rotate what it held, and set the secret.

@@ -30,7 +30,6 @@ _ENUM_LABEL = "your GitHub variables"
 #: arrives inside the enumeration and is lifted out of it rather than read separately.
 _VARS = "SHIPMATE_VARS"
 _SECRETS = "SHIPMATE_SECRETS"
-_WEBHOOK = "SHIPMATE_SLACK_WEBHOOK"
 
 #: Secrets a consumer can mistakenly set as GitHub variables, each with the refusal
 #: `filter_enumeration` raises for it.
@@ -40,12 +39,6 @@ _NEVER_VARIABLES = {
         "Nothing in it reaches the cell, and its value is readable by anyone who can "
         "see the repository. Delete the variable, rotate every credential it held, "
         "and set a secret of that name instead."
-    ),
-    _WEBHOOK: (
-        f"::error::{_WEBHOOK} is set as a GitHub variable, and it must be a secret "
-        "on the shipmate-engine environment. Its value is readable by anyone who can see the "
-        "repository. Delete the variable, rotate the webhook, and run gh secret set "
-        f"{_WEBHOOK} --env shipmate-engine."
     ),
     "SHIPMATE_APP_PRIVATE_KEY": (
         "::error::SHIPMATE_APP_PRIVATE_KEY is set as a GitHub variable, and it must be a "
