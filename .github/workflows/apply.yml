@@ -2,7 +2,8 @@ name: apply
 on:
   workflow_call:
     inputs:
-      # Empty applies every pending environment in `needs` order; a name applies that one alone.
+      # Empty runs a bare apply: every pending environment the review decision and `explicit`
+      # allow, in `needs` order. A name applies that one alone.
       environment: { required: false, type: string, default: "" }
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
@@ -106,9 +107,8 @@ jobs:
     # `<caller job> / <this name> / <wave job>`, and GHA cannot suppress a level -- so each level
     # is named for the env-level it fans out instead of repeating the verb the wave job carries.
     name: L0
-    # `guard` and `review` join `detect` in `needs` so their failures reach `!failure()`: without
-    # them a rejected dispatch, or a `review` that could not mint the App key, skips `detect`, and
-    # a skipped `detect` reads its outputs as empty strings -- which `!= 'true'` fans out on, over
+    # `guard` and `review` are listed so their failures reach `!failure()`: otherwise a failed one
+    # skips `detect`, whose outputs then read as '' -- which `!= 'true'` fans out on, over
     # `fromJSON('')`.
     needs: [guard, review, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
@@ -168,11 +168,9 @@ jobs:
     # stays pending -- while `summary` still runs on `guard`'s success, so without the entry the
     # comment renders the non-failure form over a run that died.
     needs: [guard, review, detect, envlevel0, envlevel1, envlevel2, envlevel3]
-    # `always()` alone would still run this job, and mint the App key, when the bot-actor rejection
-    # failed; `needs.guard.result == 'success'` closes that. Keyed on `guard`, not `detect`:
-    # `always()` posts the comment and refreshes the gate when apply failed or was cancelled, and
-    # must do the same for a genuine `detect` failure -- a cell recording no plan run, or a `needs`
-    # cycle.
+    # `needs.guard.result == 'success'` stops `always()` minting the App key after a rejected
+    # dispatch. Keyed on `guard`, not `detect`: a genuine `detect` failure (no plan run, a `needs`
+    # cycle) still gets the comment and gate refresh, as a failed or cancelled apply does.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-slim
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as

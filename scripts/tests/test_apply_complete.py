@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 
+import pytest
 from _loader import ENGINE, SCRIPTS, action_steps, bash_only, load_script, run_step
 
 apply_complete = load_script("apply-complete")
@@ -22,21 +23,22 @@ def job(name, conclusion):
 
 def test_completes_only_cells_whose_wave_job_succeeded():
     jobs = [
-        job("waves / apply / stacks/dns / dev-eu", "success"),
-        job("waves / apply / stacks/app / dev-eu", "failure"),
+        job("L0 / apply / stacks/dns / dev-eu", "success"),
+        job("L0 / apply / stacks/app / dev-eu", "failure"),
     ]
     assert apply_complete.to_complete(SNAP, jobs) == ([1], [], [], ["stacks/app / dev-eu"])
 
 
-def test_matches_the_nested_reusable_workflow_job_name_suffix():
+@pytest.mark.parametrize("caller", ["targeted", "all"])
+def test_matches_the_nested_reusable_workflow_job_name_suffix(caller):
     # A called workflow's jobs display as `<caller job> / <called job> / <job>`.
-    jobs = [job("targeted / waves / apply / stacks/app / dev-eu", "success")]
+    jobs = [job(f"{caller} / L0 / apply / stacks/app / dev-eu", "success")]
     assert apply_complete.to_complete(SNAP, jobs) == ([2, 3], [], ["stacks/dns / dev-eu"], [])
 
 
 def test_a_cancelled_or_missing_job_leaves_the_check_pending():
     jobs = [
-        job("waves / apply / stacks/dns / dev-eu", "cancelled"),
+        job("L0 / apply / stacks/dns / dev-eu", "cancelled"),
     ]
     assert apply_complete.to_complete(SNAP, jobs) == (
         [],
@@ -48,14 +50,14 @@ def test_a_cancelled_or_missing_job_leaves_the_check_pending():
 
 def test_a_rerun_success_after_a_failure_completes_the_cell():
     jobs = [
-        job("waves / apply / stacks/dns / dev-eu", "failure"),
-        job("waves / apply / stacks/dns / dev-eu", "success"),
+        job("L0 / apply / stacks/dns / dev-eu", "failure"),
+        job("L0 / apply / stacks/dns / dev-eu", "success"),
     ]
     assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
 
 
 def test_never_completes_a_cell_that_was_not_snapshotted():
-    jobs = [job("waves / apply / stacks/rogue / dev-eu", "success")]
+    jobs = [job("L0 / apply / stacks/rogue / dev-eu", "success")]
     assert apply_complete.to_complete(SNAP, jobs)[0] == []
 
 
@@ -77,8 +79,8 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
         "app\x00dev-eu": [99],
     }
     jobs = [
-        job("waves / apply / stacks/my-app / dev-eu", "success"),
-        job("waves / apply / stacks/app / prod-dev-eu", "success"),
+        job("L0 / apply / stacks/my-app / dev-eu", "success"),
+        job("L0 / apply / stacks/app / prod-dev-eu", "success"),
     ]
     assert apply_complete.to_complete(snap, jobs)[0] == []
 
@@ -86,7 +88,7 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
 def test_a_job_present_without_a_conclusion_is_unresolved_not_dropped():
     # The listing lagging a finished job is the whole reason for the retry loop: a null
     # conclusion must be reported, never read as "did not run".
-    jobs = [job("waves / apply / stacks/dns / dev-eu", None)]
+    jobs = [job("L0 / apply / stacks/dns / dev-eu", None)]
     ids, unresolved, _, _ = apply_complete.to_complete(SNAP, jobs)
     assert (ids, unresolved) == ([], ["stacks/dns / dev-eu"])
 
@@ -95,14 +97,14 @@ def test_a_cell_with_no_matching_job_at_all_is_unmatched_not_unresolved():
     # Skip-propagation: an earlier wave failing skips wave1..wave7, and GitHub never expands a
     # skipped job's matrix, so those cells get no job row at all. Retrying cannot help, so they
     # are named rather than retried.
-    jobs = [job("waves / apply / stacks/dns / dev-eu", "success")]
+    jobs = [job("L0 / apply / stacks/dns / dev-eu", "success")]
     assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
 
 
 def test_skipped_and_failure_are_terminal_and_neither_completes_nor_blocks():
     jobs = [
-        job("waves / apply / stacks/dns / dev-eu", "skipped"),
-        job("waves / apply / stacks/app / dev-eu", "failure"),
+        job("L0 / apply / stacks/dns / dev-eu", "skipped"),
+        job("L0 / apply / stacks/app / dev-eu", "failure"),
     ]
     ids, unresolved, unmatched, unsuccessful = apply_complete.to_complete(SNAP, jobs)
     assert (ids, unresolved, unmatched) == ([], [], [])
@@ -119,7 +121,7 @@ LIVE_SNAP = {
 def _live_jobs(stale):
     return [
         job(
-            f"waves / apply / {key.split(chr(0))[0]} / {key.split(chr(0))[1]}",
+            f"L0 / apply / {key.split(chr(0))[0]} / {key.split(chr(0))[1]}",
             None if key == stale else "success",
         )
         for key in LIVE_SNAP
@@ -155,17 +157,14 @@ def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
 def test_main_prints_the_ids_and_exits_zero_when_every_cell_resolved():
     done = _run(
         SNAP,
-        [
-            job(f"waves / apply / {k.split(chr(0))[0]} / {k.split(chr(0))[1]}", "success")
-            for k in SNAP
-        ],
+        [job(f"L0 / apply / {k.split(chr(0))[0]} / {k.split(chr(0))[1]}", "success") for k in SNAP],
     )
     assert done.returncode == 0
     assert done.stdout.split() == ["1", "2", "3"]
 
 
 def test_main_names_the_unmatched_cells_instead_of_dropping_them_silently():
-    done = _run(SNAP, [job("waves / apply / stacks/dns / dev-eu", "success")])
+    done = _run(SNAP, [job("L0 / apply / stacks/dns / dev-eu", "success")])
     assert done.returncode == 0
     assert done.stdout.split() == ["1"]
     assert "::warning::" in done.stderr
@@ -179,8 +178,8 @@ def test_main_names_the_cells_whose_apply_job_did_not_succeed():
     done = _run(
         SNAP,
         [
-            job("waves / apply / stacks/dns / dev-eu", "success"),
-            job("waves / apply / stacks/app / dev-eu", "failure"),
+            job("L0 / apply / stacks/dns / dev-eu", "success"),
+            job("L0 / apply / stacks/app / dev-eu", "failure"),
         ],
     )
     assert done.returncode == 0
@@ -194,7 +193,7 @@ def test_the_zero_match_floor_is_retryable_not_an_immediate_hard_failure():
     a lost, truncated or lagging listing. Completing nothing off it strands every check, so it
     must never exit 0, and the code it exits is the retryable one because the loop exists to
     outlast exactly this lag."""
-    done = _run(SNAP, [job("waves / apply / stacks/rogue / dev-eu", "success")])
+    done = _run(SNAP, [job("L0 / apply / stacks/rogue / dev-eu", "success")])
     assert done.returncode == apply_complete.UNRESOLVED_EXIT
     assert apply_complete.RETRY_PREFIX in done.stderr
     assert "refusing to complete nothing" in done.stderr
