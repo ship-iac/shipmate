@@ -23,6 +23,8 @@ import re
 from _loader import SCRIPTS, action_yaml
 
 DETECTS = ("apply-detect", "deploy-detect", "apply-all-detect")
+# `apply-detect`'s action runs both apply-form scripts.
+DETECT_ACTIONS = ("apply-detect", "deploy-detect")
 
 # The App-scoped predicate, and the unscoped one that ignores authorship entirely.
 _SCOPED_CALL = "app_done_names("
@@ -60,7 +62,7 @@ def test_detect_actions_forward_the_app_id_to_the_script():
     # Every detect reads SHIPMATE_APP_ID and passes it to the query, so a call-site audit of the
     # scripts alone looks complete while the env: line that supplies it is dropped, which fails
     # that detect with a KeyError.
-    for name in DETECTS:
+    for name in DETECT_ACTIONS:
         spec = action_yaml(name)
         env_blocks = [step.get("env") or {} for step in (spec["runs"].get("steps") or [])]
         assert any("SHIPMATE_APP_ID" in env for env in env_blocks), (

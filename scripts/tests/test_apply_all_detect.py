@@ -131,6 +131,7 @@ def test_reuses_single_sourced_helpers():
     assert aad.ad.cells_for_env is not None
     assert aad.ad.with_plan_runs is not None
     assert aad.eo.waves_by_env_level is not None
+    assert aad.eo.env_level_waves is not None
     assert aad.eo.write_env_level_waves is not None
     # No local apply-gate alias. test_detect_app_scoping pins which route main() takes, and
     # this only asserts the second one does not exist.
@@ -139,8 +140,7 @@ def test_reuses_single_sourced_helpers():
     assert not hasattr(aad, "cells_from_artifacts")
 
 
-PENDING = {"dev-eu", "dev-us", "prod-eu"}
-UNGATED = frozenset({"dev-eu", "dev-us"})
+ALL_PENDING = ["dev-eu", "dev-us", "prod-eu"]
 
 
 @pytest.mark.parametrize(
@@ -149,20 +149,24 @@ UNGATED = frozenset({"dev-eu", "dev-us"})
         ("NONE", []),
         ("APPROVED", []),
         ("REVIEW_REQUIRED", ["prod-eu"]),
-        ("CHANGES_REQUESTED", ["dev-eu", "dev-us", "prod-eu"]),
-        ("", ["dev-eu", "dev-us", "prod-eu"]),
-        ("BANANA", ["dev-eu", "dev-us", "prod-eu"]),
+        ("CHANGES_REQUESTED", ALL_PENDING),
+        ("", ALL_PENDING),
+        (None, ALL_PENDING),
+        ("BANANA", ALL_PENDING),
         # The review job's sentinel for a pr_number matching no pull request. GraphQL returns
         # a null pullRequest with no errors, so the query succeeds and only this value keeps
         # the run from applying everything.
-        ("MISSING_PR", ["dev-eu", "dev-us", "prod-eu"]),
+        ("MISSING_PR", ALL_PENDING),
     ],
 )
-def test_review_held_decision_table(decision, expected):
-    assert aad.review_held(PENDING, UNGATED, decision) == expected
-
-
-ALL_PENDING = ["dev-eu", "dev-us", "prod-eu"]
+def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, expected):
+    """`None` is the unset variable. Mutations: drop `ungated` from the `_review_reason` call
+    -- REVIEW_REQUIRED holds dev-eu and dev-us too; `if not ad.az._review_reason(...)` --
+    every row inverts; `sorted(..., reverse=True)` -- the multi-env rows reorder."""
+    parsed = _run_main(
+        tmp_path, monkeypatch, envs=ALL_PENDING, ungated="dev-eu,dev-us", decision=decision
+    )
+    assert json.loads(parsed["review_held_envs"]) == expected
 
 
 @pytest.mark.parametrize(
@@ -176,12 +180,18 @@ ALL_PENDING = ["dev-eu", "dev-us", "prod-eu"]
         ("REVIEW_REQUIRED", ALL_PENDING),
         ("CHANGES_REQUESTED", ALL_PENDING),
         ("", ALL_PENDING),
+        (None, ALL_PENDING),
         ("BANANA", ALL_PENDING),
         ("MISSING_PR", ALL_PENDING),
     ],
 )
-def test_review_held_holds_everything_unreviewed_when_the_variable_is_unset(decision, expected):
-    assert aad.review_held(PENDING, frozenset(), decision) == expected
+def test_main_holds_everything_unreviewed_when_no_env_is_ungated(
+    tmp_path, monkeypatch, decision, expected
+):
+    """Mutations: `if not ad.az._review_reason(...)` -- every row inverts;
+    `sorted(..., reverse=True)` -- the multi-env rows reorder."""
+    parsed = _run_main(tmp_path, monkeypatch, envs=ALL_PENDING, decision=decision)
+    assert json.loads(parsed["review_held_envs"]) == expected
 
 
 def _run_main(

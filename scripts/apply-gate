@@ -11,9 +11,8 @@ GITHUB_OUTPUT:
                  conclusion (success, or neutral for no-change cells); the
                  caller may complete the `shipmate / gate` check.
 - `pending`    — at least one apply check is still open, failed, or was
-                 cancelled; the caller must leave the gate untouched.
-- `no-applies` — the commit has no apply checks at all (nothing to gate on);
-                 the caller must leave the gate untouched.
+                 cancelled, or the commit has no apply check at all; the
+                 caller must leave the gate untouched.
 
 Check-runs are filtered to the shipmate GitHub App's identity (`from_app`,
 env `SHIPMATE_APP_ID`) before verdict is computed, so a same-name run created
@@ -184,11 +183,7 @@ def plan_hashes_by_name(check_run_lines, app_id):
 
 def verdict(check_runs):
     latest = latest_by_name(check_runs)
-    if not latest:
-        return "no-applies"
-    if all(_is_done(run) for run in latest.values()):
-        return "complete"
-    return "pending"
+    return "complete" if latest and all(_is_done(r) for r in latest.values()) else "pending"
 
 
 def main():

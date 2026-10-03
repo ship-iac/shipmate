@@ -9,19 +9,19 @@ inputs:
     required: false
     default: ""
   envlevel0-waves:
-    description: Env-level 0 waves JSON; the targeted form's one env-level. Empty when unused.
+    description: Env-level 0 waves JSON; a targeted apply puts every cell here. A padded empty map when level 0 has no cell.
     required: false
     default: ""
   envlevel1-waves:
-    description: Env-level 1 waves JSON (all-environments form only). Empty when unused.
+    description: Env-level 1 waves JSON; a padded empty map when level 1 has no cell, as in every targeted apply.
     required: false
     default: ""
   envlevel2-waves:
-    description: Env-level 2 waves JSON (all-environments form only). Empty when unused.
+    description: Env-level 2 waves JSON; a padded empty map when level 2 has no cell, as in every targeted apply.
     required: false
     default: ""
   envlevel3-waves:
-    description: Env-level 3 waves JSON (all-environments form only). Empty when unused.
+    description: Env-level 3 waves JSON; a padded empty map when level 3 has no cell, as in every targeted apply.
     required: false
     default: ""
   excluded-envs:

@@ -58,47 +58,34 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions: { contents: read, checks: read, actions: read }
-    # Exactly one of `t` (targeted) and `d` (every environment) runs, and a skipped step's outputs
-    # read as ''. A targeted apply is one env-level, so levels 1-3 read 'true' from the input, never
-    # from a missing output: an unwritten `_empty` reads '', runs its level and dies at fromJSON.
+    # An unwritten `_empty` reads '', runs its level and dies at fromJSON.
     outputs:
-      envlevel0_waves: ${{ steps.t.outputs.waves || steps.d.outputs.envlevel0_waves }}
+      envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
       envlevel1_waves: ${{ steps.d.outputs.envlevel1_waves }}
       envlevel2_waves: ${{ steps.d.outputs.envlevel2_waves }}
       envlevel3_waves: ${{ steps.d.outputs.envlevel3_waves }}
-      envlevel0_empty: ${{ steps.t.outputs.empty || steps.d.outputs.envlevel0_empty }}
-      envlevel1_empty: ${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel1_empty }}
-      envlevel2_empty: ${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel2_empty }}
-      envlevel3_empty: ${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel3_empty }}
-      head_sha: ${{ steps.t.outputs.head_sha || steps.d.outputs.head_sha }}
+      envlevel0_empty: ${{ steps.d.outputs.envlevel0_empty }}
+      envlevel1_empty: ${{ steps.d.outputs.envlevel1_empty }}
+      envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
+      envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
+      head_sha: ${{ steps.d.outputs.head_sha }}
       excluded_envs: ${{ steps.d.outputs.excluded_envs }}
       skipped_envs: ${{ steps.d.outputs.skipped_envs }}
       review_held_envs: ${{ steps.d.outputs.review_held_envs }}
       applied_ungated_envs: ${{ steps.d.outputs.applied_ungated_envs }}
-      review_not_required_envs: ${{ steps.t.outputs.review_not_required_envs || steps.d.outputs.review_not_required_envs }}
+      review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: $/actions/setup
-      - id: t
-        if: ${{ inputs.environment != '' }}
+      - id: d
         uses: $/actions/apply-detect
         with:
           environment: ${{ inputs.environment }}
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           # Passed through raw, never defaulted: an empty decision means the review signal never
-          # arrived, and empty refuses the run.
-          review-decision: ${{ needs.review.outputs.decision }}
-          github-vars: ${{ toJSON(vars) }}
-      - id: d
-        if: ${{ inputs.environment == '' }}
-        uses: $/actions/apply-all-detect
-        with:
-          head-sha: ${{ inputs.ref }}
-          app-id: ${{ vars.SHIPMATE_APP_ID }}
-          # Passed through raw, never defaulted: an empty decision means the review signal never
-          # arrived, and empty is the hold-everything value.
+          # arrived, which refuses a targeted apply and holds every environment of a bare one.
           review-decision: ${{ needs.review.outputs.decision }}
           github-vars: ${{ toJSON(vars) }}
 

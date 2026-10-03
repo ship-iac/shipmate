@@ -175,7 +175,7 @@ def test_the_targeted_apply_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
     out = tad._apply_env(monkeypatch, tmp_path, table=_TABLE)
     tad._stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     tad.ad.main()
-    assert json.loads(tad._parsed(out)["waves"])["wave0"] == [
+    assert json.loads(tad._parsed(out)["envlevel0_waves"])["wave0"] == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",

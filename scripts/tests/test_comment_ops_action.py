@@ -194,10 +194,11 @@ def test_the_routes_that_change_no_infrastructure_are_acknowledged_with_a_reacti
 
 def test_the_rocket_reaction_stays_on_an_authorized_dispatch():
     # `eyes` = accepted a command that changes no infrastructure, `rocket` = a dispatch was
-    # authorized. The two must not collapse into one signal. It reads the combined verdict,
-    # not the apply route's own step: keyed on `authz` it stays silent on authorized plans.
-    block = _step("content=rocket")
-    assert "steps.verdict.outputs.authorized == 'true'" in block
+    # authorized. The two must not collapse into one signal. It reads both routes' verdicts,
+    # not the apply route's alone: keyed on `authz` it stays silent on authorized plans.
+    # Mutation: `||` -> `&&` in React on accept's `if:`.
+    [step] = [s for s in action_steps("comment-ops") if "content=rocket" in s.get("run", "")]
+    assert step["if"] == _AUTHORIZED
 
 
 @bash_only
@@ -1374,10 +1375,8 @@ def test_the_contract_verb_table_carries_every_active_verb():
 
 
 #: Every step of the action, in order, hand-written. One constant for the whole shape: it
-#: carries the plan route's placement, and the verdict step's -- `Combine the route verdicts`
-#: must sit after `Authorize`, which it reads, and before `React on accept`, which reads it. A
-#: step inserted, dropped or reordered fails here rather than in whichever positional guard
-#: happened to care.
+#: carries the plan route's placement. A step inserted, dropped or reordered fails here rather
+#: than in whichever positional guard happened to care.
 _STEP_NAMES = [
     "Ignore bot-authored comments",
     "Parse command",
@@ -1401,7 +1400,6 @@ _STEP_NAMES = [
     "Gate configuration unreadable",
     "Gather authorization inputs",
     "Authorize",
-    "Combine the route verdicts",
     "React on accept",
     "Report the review exemption",
     "Reject with reason",
@@ -1565,46 +1563,21 @@ def test_no_step_on_the_plan_route_touches_the_app_key():
         assert "steps.apptoken" not in text, step.get("name")
 
 
-#: The verdict step's whole `run` body and `env:` block, hand-written. Both
-#: routes have to reach it: dropping either branch silently unauthorizes a whole
-#: verb while the reaction, the caller's dispatch condition and this action's
-#: `authorized` output all keep agreeing with each other.
-_VERDICT_ENV = {
-    "APPLY_AUTHORIZED": "${{ steps.authz.outputs.authorized }}",
-    "PLAN_AUTHORIZED": "${{ steps.planauthz.outputs.authorized }}",
-}
-_VERDICT_RUN = """set -euo pipefail
-if [ "${APPLY_AUTHORIZED:-}" = "true" ] || [ "${PLAN_AUTHORIZED:-}" = "true" ]; then
-  echo "authorized=true" >> "$GITHUB_OUTPUT"
-else
-  echo "authorized=false" >> "$GITHUB_OUTPUT"
-fi
-"""
+#: The authorization verdict, hand-written whole. Both routes have to reach it: dropping either
+#: arm silently unauthorizes a whole verb.
+_AUTHORIZED = (
+    "${{ steps.authz.outputs.authorized == 'true' || "
+    "steps.planauthz.outputs.authorized == 'true' }}"
+)
 
 
-def test_one_verdict_answers_for_every_route_and_is_never_skipped():
-    """Two readers of two different authorization steps is how one policy diverges, so the reaction
-    and the composite's `authorized` output read a single combined step. It carries no `if:` on
-    purpose: a skipped step writes no output, so any condition at all leaves some route with no
-    verdict -- and an empty output is falsy, reading as "not authorized" for a command that was.
-    `access` writes `authorized=true` for every permitted commenter, so the verdict reading it
-    would dispatch a doctor; `_VERDICT_ENV` excludes it.
+def test_one_verdict_answers_for_every_route():
+    """Two readers of two different authorization expressions is how one policy diverges, so the
+    reaction and the composite's `authorized` output carry the same whole expression. `access`
+    writes `authorized=true` for every permitted commenter, so a verdict reading it would
+    dispatch a doctor; `_AUTHORIZED` excludes it.
 
-    Mutation: add `ACCESS_AUTHORIZED: ${{ steps.access.outputs.authorized }}` to the verdict
-    env."""
-    verdict = _by_id("verdict")
-    assert "if" not in verdict, verdict.get("if")
-    assert verdict["env"] == _VERDICT_ENV
-    assert verdict["run"] == _VERDICT_RUN
-    assert action_yaml("comment-ops")["outputs"]["authorized"]["value"] == (
-        "${{ steps.verdict.outputs.authorized }}"
-    )
-    # Every in-step reader of the verdict runs after it. `_STEP_NAMES` pins the order; this
-    # pins that the readers are the steps it assumes.
-    names = [s.get("name") for s in action_steps("comment-ops")]
-    readers = [
-        s.get("name") for s in action_steps("comment-ops") if "steps.verdict." in json.dumps(s)
-    ]
-    assert readers == ["React on accept"], readers
-    for reader in readers:
-        assert names.index(reader) > names.index("Combine the route verdicts")
+    Mutations, one at a time: drop the `planauthz` arm from the output only; `||` -> `&&` in
+    React on accept's `if:` only; add `steps.access.outputs.authorized == 'true' ||` to both."""
+    assert action_yaml("comment-ops")["outputs"]["authorized"]["value"] == _AUTHORIZED
+    assert step_by("comment-ops", name="React on accept")["if"] == _AUTHORIZED

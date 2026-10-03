@@ -7,7 +7,6 @@ order through unchanged stacks is preserved and empty middle waves are normal.
 A module, never a program: apply-detect and env-order `_load` it.
 """
 
-import json
 import re
 from graphlib import CycleError, TopologicalSorter
 
@@ -106,10 +105,3 @@ def pad_waves(waves):
             f"::error::change spans {over[-1] + 1} dependency levels (> {MAX_WAVES}); split the PR."
         )
     return {f"wave{i}": (waves[i] if i < len(waves) else []) for i in range(MAX_WAVES)}
-
-
-def write_waves(fh, waves):
-    """Emit the aggregate `waves` JSON object + the `empty` flag to a
-    GITHUB_OUTPUT file handle, refusing overflow before writing."""
-    fh.write(f"waves={json.dumps(pad_waves(waves))}\n")
-    fh.write(f"empty={'false' if any(waves) else 'true'}\n")

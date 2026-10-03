@@ -255,7 +255,7 @@ def test_the_targeted_apply_refuses_an_outside_tag_only_on_a_pending_cell(
         assert exc.value.code == _GAP_ERROR
     else:
         tad.ad.main()
-        assert json.loads(tad._parsed(out)["waves"])["wave0"] == []
+        assert json.loads(tad._parsed(out)["envlevel0_waves"])["wave0"] == []
 
 
 @pytest.mark.parametrize("pending", [True, False], ids=["pending", "completed"])

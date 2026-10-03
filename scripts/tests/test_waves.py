@@ -1,6 +1,3 @@
-import io
-import json
-
 import pytest
 from _loader import SCRIPTS as _dir
 from _loader import load_script
@@ -101,28 +98,6 @@ def test_pad_waves_ignores_empty_trailing_levels():
     w.pad_waves(waves)  # must not raise
 
 
-def test_write_waves_emits_aggregate_waves_json():
-    # apply-env-level.yml indexes fromJSON(waves_json).waveN for every N and errors on a missing
-    # key, so the aggregate must always carry all 8.
-    fh = io.StringIO()
-    cells = [{"stack": "stacks/dns", "environment": "dev-eu"}]
-    w.write_waves(fh, [cells, []])
-    out = dict(line.split("=", 1) for line in fh.getvalue().strip().splitlines())
-    agg = json.loads(out["waves"])
-    assert set(agg) == {f"wave{i}" for i in range(w.MAX_WAVES)}
-    assert agg["wave0"] == cells
-    assert all(agg[f"wave{i}"] == [] for i in range(1, w.MAX_WAVES))
-    assert out["empty"] == "false"
-
-
-def test_write_waves_pads_short_and_flags_empty():
-    fh = io.StringIO()
-    w.write_waves(fh, [])
-    out = dict(line.split("=", 1) for line in fh.getvalue().strip().splitlines())
-    assert json.loads(out["waves"]) == {f"wave{i}": [] for i in range(w.MAX_WAVES)}
-    assert out["empty"] == "true"
-
-
 def _linear_chain_dot(n):
     """A dot fixture of n nodes in a straight chain s1->...->sn: n topological levels, one node
     per level."""
@@ -130,17 +105,6 @@ def _linear_chain_dot(n):
     lines += [f'\tn{i}[label="/stacks/s{i}"];' for i in range(1, n + 1)]
     lines += [f"\tn{i}->n{i + 1};" for i in range(1, n)]
     return "\n".join(lines + ["}"])
-
-
-def test_padding_and_writing_refuse_overflow_before_emitting_output():
-    """Removing validation from pad_waves must fail both public output paths."""
-    waves = [[] for _ in range(w.MAX_WAVES)] + [["cell8"]]
-    with pytest.raises(SystemExit, match="dependency levels"):
-        w.pad_waves(waves)
-    fh = io.StringIO()
-    with pytest.raises(SystemExit, match="dependency levels"):
-        w.write_waves(fh, waves)
-    assert fh.getvalue() == ""
 
 
 def test_env_level_waves_refuses_a_change_deeper_than_max_waves():

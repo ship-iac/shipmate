@@ -13,7 +13,7 @@ therefore cannot reorder its own apply waves or drop its own exclusion.
 `MAX_ENV_LEVELS` is fixed because GHA declares no jobs or outputs dynamically.
 Bumping it needs, per new level N:
 - `envlevelN_waves`/`_empty` outputs in actions/deploy-detect/action.yml and
-  actions/apply-all-detect/action.yml;
+  actions/apply-detect/action.yml;
 - the same two slots in the `detect` job `outputs:` of .github/workflows/apply.yml
   and .github/workflows/deploy.yml, and an `envlevelN` job in each;
 - an `envlevelN-waves` input on apply.yml's `summary` step and on
@@ -69,7 +69,9 @@ def waves_by_env_level(pending, deps, levels):
     with no predecessors), then stack-wave-ordered within it. Env-levels apply
     fully in order: level 0 entirely before level 1, and so on. No env-order
     global -> every env is level 0 -> a single populated level. Shared by
-    deploy-detect (merge path) and apply-all-detect (bare `shipmate apply`).
+    deploy-detect (merge path) and apply-all-detect (bare `shipmate apply`)
+    through `env_level_waves`, and by apply-detect (targeted `shipmate apply`)
+    with no levels, which puts every cell at level 0.
 
     Refuses an env beyond MAX_ENV_LEVELS before bucketing: the loop below keys on
     `range(MAX_ENV_LEVELS)`, so an over-deep env falls out of every level and its
@@ -89,12 +91,18 @@ def waves_by_env_level(pending, deps, levels):
     return out
 
 
+def env_level_waves(cells, order, deps):
+    """MAX_ENV_LEVELS wave dicts: `cells` bucketed by `order`'s env-levels, each level
+    stack-wave-ordered (`waves_by_env_level`). The deploy and bare-apply tail."""
+    return waves_by_env_level(cells, deps, env_levels(order, {c["environment"] for c in cells}))
+
+
 def write_env_level_waves(fh, per_level):
     """Emit envlevel{0..N}_waves (JSON) + envlevel{0..N}_empty flags for a list
     of per-env-level wave dicts, to a GITHUB_OUTPUT file handle. Shared by
-    deploy-detect and apply-all-detect so the env-level output contract that the
-    reusable apply-env-level.yml consumes stays single-sourced -- a format drift
-    between the two detect paths would silently break that shared consumer."""
+    deploy-detect, apply-detect and apply-all-detect so the env-level output contract
+    that the reusable apply-env-level.yml consumes stays single-sourced -- a format
+    drift between the detect paths would silently break that shared consumer."""
     for lvl, w in enumerate(per_level):
         fh.write(f"envlevel{lvl}_waves={json.dumps(w)}\n")
         fh.write(f"envlevel{lvl}_empty={'false' if any(w.values()) else 'true'}\n")

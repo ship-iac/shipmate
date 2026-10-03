@@ -22,7 +22,7 @@ import os
 import pathlib
 import re
 
-from _shipmate import _load
+from _shipmate import _load, cell_summaries
 
 ag = _load("apply-gate")
 
@@ -36,17 +36,12 @@ def bodies(cells_dir, head_sha):
             "never find the reviewed plan."
         )
     out = []
-    # Recursive, not `cell-summary.*/cell.json`: `actions/download-artifact` drops the
-    # per-artifact subdirectory when exactly one artifact matches the pattern, so a one-cell
-    # plan lands at `<cells>/cell.json`, where the nested-only glob matched nothing.
-    for cj in sorted(pathlib.Path(cells_dir).glob("**/cell.json")):
-        cell = json.loads(cj.read_text(encoding="utf-8"))
-        if "fingerprint" not in cell:
-            raise SystemExit(
-                f"::error::{cj} has no 'fingerprint' key: plan-cell and summary "
-                "are from mismatched engine revisions; re-run the plan."
-            )
-        txt = cj.with_name("plan.txt")
+    for cj, cell in cell_summaries(
+        cells_dir,
+        ("stack_path", "environment", "changed", "fingerprint"),
+        "-- plan-cell and the summary job must run the same engine revision; re-run the plan",
+    ):
+        txt = pathlib.Path(cj).with_name("plan.txt")
         if not txt.is_file():
             raise SystemExit(
                 f"::error::{cj} has no plan.txt beside it: the plan text a reviewer "

@@ -14,6 +14,10 @@ no-op), and the rest wave-ordered. A targeted `shipmate apply <env>` is explicit
 design — it never blocks on other environments; region-level sequencing across
 envs is handled separately by the bare form.
 
+Apply mode writes the same env-level output contract as the bare form
+(`env-order.write_env_level_waves`), with every wave at env-level 0 and levels
+1-3 empty.
+
 Before any of that, the PR's review decision — read server-side by the `review`
 job, narrowed by `gated = false` on the environment's entry — must authorize this
 environment, or the run refuses.
@@ -30,6 +34,7 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 bm = _load("build-matrix")
 wv = _load("waves")
+eo = _load("env-order")
 ag = _load("apply-gate")
 az = _load("authorize")
 
@@ -66,11 +71,14 @@ def cells_for_env(env, paths, tags_by_stack):
     ]
 
 
-def with_plan_runs(cells, plan_runs, plan_hashes):
+def with_plan_runs(cells, check_run_lines, app_id):
     """Each cell gains the plan run id and the plan-text digest ITS OWN check
-    records, so a cell recovered by a re-run plan job downloads from the run that
-    re-planned it, and is bound to the plan text reviewed for it, while its
-    siblings stay on the original.
+    records in `check_run_lines`, so a cell recovered by a re-run plan job downloads
+    from the run that re-planned it, and is bound to the plan text reviewed for it,
+    while its siblings stay on the original.
+
+    Both are read only from records App `app_id` wrote. That App authorship is what
+    binds a run id to the plan workflow; there is no workflow-path check to re-add.
 
     A cell whose newest check records no usable run refuses. The alternative —
     falling back to a lookup keyed on a plan run's head_sha — is the platform
@@ -89,6 +97,8 @@ def with_plan_runs(cells, plan_runs, plan_hashes):
     request is already merged — a remedy phrased as "re-plan on this pull
     request" would send a post-merge operator to a pull request that no longer
     accepts commits."""
+    plan_runs = ag.plan_runs_by_name(check_run_lines, app_id)
+    plan_hashes = ag.plan_hashes_by_name(check_run_lines, app_id)
     named = [
         (
             c,
@@ -123,7 +133,7 @@ def filter_pending(cells, completed_names):
 
 
 def _check_run_lines(repo, head_sha):
-    """The commit's check-runs as JSONL lines, for the two name queries below."""
+    """The commit's check-runs as JSONL lines, for the apply and unlock name queries."""
     return bm._run(
         [
             "gh",
@@ -143,24 +153,10 @@ def apply_check_names(check_run_lines, app_id):
     """Every App-authored apply check name on the head, whatever the newest run's
     status — the apply workset's membership authority.
 
-    Not `pending_apply_names`: a completed run with a failing conclusion is not
-    pending, but its cell must stay re-appliable, so the done cells are dropped
-    by `filter_pending` (apply-gate's success/neutral predicate) instead."""
+    Not the unlock queue's pending set: a completed run with a failing conclusion
+    is not pending, but its cell must stay re-appliable, so the done cells are
+    dropped by `filter_pending` (apply-gate's success/neutral predicate) instead."""
     return set(ag.latest_by_name(ag.app_runs(check_run_lines, app_id)))
-
-
-def pending_apply_names(repo, head_sha):
-    """App-authored apply checks on `head_sha` whose latest run is present and
-    NOT completed — the inverse question `ag.app_done_names` answers, and the
-    unlock queue's only membership authority.
-
-    Not the complement of `ag.app_done_names`: a name absent from the listing has
-    no run at all and is not pending, and a completed run with a bad conclusion is
-    done being run whatever its verdict. Both would otherwise enrol a cell nobody
-    asked about into a force-unlock. Built on the same apply-gate primitives so
-    "newest run per name" and "authored by our App" have one definition each."""
-    runs = ag.app_runs(_check_run_lines(repo, head_sha), os.environ["SHIPMATE_APP_ID"])
-    return {n for n, r in ag.latest_by_name(runs).items() if r["status"] != "completed"}
 
 
 def run_graph_deps():
@@ -246,11 +242,11 @@ def run_unlock(repo, env, head):
     """The unlock branch: the cells in `env` that HAVE a pending apply check, as
     a flat queue — releasing a lock has no dependencies, so there are no waves.
 
-    Selection is by membership in `pending_apply_names`, not by removing the
-    completed ones: every queued cell takes a real state lock and may force-break
-    one, so a stack this pull request never planned — no apply check at all —
-    must not be in range. The tree walk still supplies the cells because a
-    check-run name carries no workload.
+    Selection is by membership in the App-authored apply checks whose newest run
+    is not completed, not by removing the completed ones: every queued cell takes
+    a real state lock and may force-break one, so a stack this pull request never
+    planned — no apply check at all — must not be in range. The tree walk still
+    supplies the cells because a check-run name carries no workload.
 
     Unlike the apply path it needs no plan run at all: a lock outlives the run
     that stranded it, those plan artifacts may be long expired, and unlock
@@ -288,7 +284,10 @@ def run_unlock(repo, env, head):
     because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
     `fromJSON('')` is an error."""
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
-    names = pending_apply_names(repo, head)
+    runs = ag.app_runs(_check_run_lines(repo, head), os.environ["SHIPMATE_APP_ID"])
+    # Not the complement of done: a name with no run is not pending, and a completed run
+    # with a bad conclusion is done being run; either would enrol a cell into a force-unlock.
+    names = {n for n, r in ag.latest_by_name(runs).items() if r["status"] != "completed"}
     in_env = stacks_by_env.get(env, [])
     queued = [s for s in in_env if ag.check_name(s, env) in names]
     pending = bm.build_matrix([env], {env: queued}, tags_by_stack)
@@ -342,11 +341,6 @@ def main():
     # completing mid-run cannot make the three disagree.
     lines = _check_run_lines(repo, head)
     names = apply_check_names(lines, app_id)
-    # The run ids are read only from records our App wrote (plan_runs_by_name's
-    # from_app filter). That App authorship is what binds a run id to the plan
-    # workflow; there is no workflow-path check to re-add here.
-    plan_runs = ag.plan_runs_by_name(lines, app_id)
-    plan_hashes = ag.plan_hashes_by_name(lines, app_id)
     completed = ag.app_done_names(lines, app_id)
 
     # Tags only for the workset: this path reconstructs its cells from the head's
@@ -357,18 +351,20 @@ def main():
     table = bm.env_config(cells, table=table)
     cells = bm.stamp_rows(cells, table, "apply")
 
-    pending = with_plan_runs(filter_pending(cells, completed), plan_runs, plan_hashes)
+    pending = with_plan_runs(filter_pending(cells, completed), lines, app_id)
     bm.refuse_workload_gaps(pending, table)
 
-    waves = wv.assign_waves(wv.stack_levels(deps), pending)
+    # Before the padding, whose over-depth refusal is where this line helps most.
     print(dag_shape_notice(deps))
+    per_level = eo.waves_by_env_level(pending, deps, {})
+    w0 = per_level[0]
     print(
         f"::notice title=apply-detect::env={env} head={head} "
         f"cells={len(cells)} completed={len(completed)} pending={len(pending)} "
-        f"waves={[len(w) for w in waves]} empty={not any(waves)}"
+        f"waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        wv.write_waves(fh, waves)
+        eo.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
         fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
 
