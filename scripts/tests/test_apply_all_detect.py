@@ -102,30 +102,6 @@ def test_cells_from_checks_rejects_dotted_env():
         aad.cells_from_checks(set(), {"dev.eu": ["stacks/app"]}, {})
 
 
-def test_partition_no_explicit_envs():
-    assert aad.partition_envs({"dev", "stage"}, [], {"stage": ["dev"]}) == ([], [])
-
-
-def test_partition_excludes_explicit_env_with_pending_work():
-    excluded, skipped = aad.partition_envs({"dev", "stage"}, ["stage"], {"stage": ["dev"]})
-    assert excluded == ["stage"] and skipped == []
-
-
-def test_partition_skips_envs_ordered_after_unapplied_explicit():
-    # stage is explicit and pending, so prod, transitively after stage, is skipped. sbx is at
-    # level 1 but independent of stage, so it still runs.
-    order = {"stage": ["dev"], "prod": ["stage"], "sbx": ["dev"]}
-    excluded, skipped = aad.partition_envs({"dev", "stage", "prod", "sbx"}, ["stage"], order)
-    assert excluded == ["stage"]
-    assert skipped == ["prod"]
-
-
-def test_partition_applied_explicit_env_blocks_nothing():
-    # prod is explicit but has no pending cells, so it is not excluded and successors run.
-    excluded, skipped = aad.partition_envs({"dev"}, ["prod"], {"after-prod": ["prod"]})
-    assert excluded == [] and skipped == []
-
-
 def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeypatch):
     """A completed+success check of the same name from another identity (github-actions, app id
     15368) must not count the cell as applied. It is also the newer run of that name, so only
@@ -493,6 +469,11 @@ def test_main_keeps_a_failed_apply_check_re_appliable(tmp_path, monkeypatch):
 
 
 def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypatch):
+    """dev-us is ordered after prod-eu, which is held for review rather than explicit, so
+    dev-us is skipped: a held env stops its successors exactly like an explicit one.
+
+    Mutation: `stopped = pending_envs & set(explicit)` -- dev-us leaves `skipped_envs` and
+    applies, red."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -508,12 +489,32 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
     assert json.loads(parsed["skipped_envs"]) == ["dev-us"]
 
 
+def test_main_skips_only_the_successors_of_a_pending_explicit_env(tmp_path, monkeypatch):
+    """stage-eu is explicit with pending work, so prod-eu, ordered after it, is skipped.
+    sbx-eu is explicit with no pending cells, so it is already applied and after-sbx, ordered
+    after it, applies.
+
+    Mutation: `stopped = pending_envs & set(held)` -- prod-eu applies, red.
+    Mutation: `stopped = set(explicit + held)` -- after-sbx is skipped, red."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["after-sbx", "dev-eu", "prod-eu", "stage-eu"],
+        order={"prod-eu": ["stage-eu"], "after-sbx": ["sbx-eu"]},
+        explicit=["sbx-eu", "stage-eu"],
+        decision="APPROVED",
+    )
+    assert json.loads(parsed["excluded_envs"]) == ["stage-eu"]
+    assert json.loads(parsed["skipped_envs"]) == ["prod-eu"]
+    assert _wave_envs(parsed) == ["after-sbx", "dev-eu"]
+
+
 def test_main_reports_a_held_explicit_env_as_excluded_too(tmp_path, monkeypatch):
     """prod-eu is explicit and held, so it is in both outputs and the comment can name its
     targeted command under the hold; dev-eu is held and not explicit, so it is held only.
 
     Mutation: subtract `held` from `excluded` -- prod-eu leaves `excluded_envs`, red.
-    Mutation: take `excluded` from `partition_envs(..., explicit + held, ...)` -- dev-eu
+    Mutation: take `excluded` from `sorted(stopped)`, the explicit and held envs -- dev-eu
     enters `excluded_envs`, red."""
     parsed = _run_main(
         tmp_path,

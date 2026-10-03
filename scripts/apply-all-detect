@@ -54,15 +54,6 @@ def cells_from_checks(check_names, stacks_by_env, tags_by_stack):
     return cells
 
 
-def partition_envs(pending_envs, explicit, order):
-    """(excluded, skipped): explicit envs that still have pending work, and
-    envs whose ordering (transitively) waits on one of them. An explicit env
-    with NO pending cells excludes nothing — it is already applied."""
-    excluded = sorted(set(pending_envs) & set(explicit))
-    skipped = sorted(eo.blocked_envs(order, set(excluded), set(pending_envs) - set(excluded)))
-    return excluded, skipped
-
-
 def review_held(pending_envs, ungated, decision):
     """Envs whose apply waits for a review this run.
 
@@ -101,7 +92,8 @@ def main():
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
     held = review_held(pending_envs, ungated, decision)
     explicit = bm.ec.explicit_envs(table)
-    _, skipped = partition_envs(pending_envs, explicit + held, order)
+    stopped = pending_envs & set(explicit + held)
+    skipped = sorted(eo.blocked_envs(order, stopped, pending_envs - stopped))
     # Every pending explicit env, held or not: the comment names a held one's
     # explicit command under the hold. A held env that is not explicit stays out.
     excluded = sorted(pending_envs & set(explicit))

@@ -743,8 +743,8 @@ def _report_unused(table, tagged):
     The table is read from the default branch and the tags from the feature branch, so
     adding or removing an environment takes two pull requests; refusing an unused entry
     would deadlock both. Names are matched exactly, as `resolve`, `_check_dry_coverage` and
-    `partition_envs` match them. An uppercase entry name never gets here: `_check_env_name`
-    refuses it, so an unused entry is a lowercase one no stack tags.
+    apply-all-detect's exclusions match them. An uppercase entry name never gets here:
+    `_check_env_name` refuses it, so an unused entry is a lowercase one no stack tags.
 
     A `needs` predecessor no stack tags gets its own warning, because the key is fail-open: it
     reads as ordering something while the run orders nothing. The charset rule catches only
