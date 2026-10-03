@@ -1078,22 +1078,20 @@ and this run (`at an unknown commit in [run #<n>](<run url>)` when the commit
 is not a 40-character lowercase hex SHA). Each finding and harvested annotation
 carries the same circles. Under any verdict but 🟢 the report ends with the help
 hint ``Comment `shipmate help` for the available commands.``; a 🟢 report has
-no footer. It combines thirteen live settings probes (gate ruleset,
+no footer. It combines eleven live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files other than `shipmate.yml`, which uses
 that trigger by design, engine action-pin freshness,
-the plan-calling job name in the consumer's `shipmate.yml`, which must be
-`shipmate` or the plan cell checks are not `shipmate / <stack> / <env>` and
-every `plan` link in the plan comment falls back to the workflow-run page,
-the dispatch wiring of the consumer's `shipmate.yml` — the `workflow_dispatch`
-trigger every commented verb dispatches, the four inputs that dispatch sends,
-and its call of the engine's plan workflow, without which the dispatch starts a
-run that plans nothing; without the first two GitHub refuses the dispatch with an
-HTTP 422 and creates no run at all,
-the event routing of that same file — one job per engine reusable workflow,
-each carrying the `if:` that selects it, so a wrong one sends a verb nowhere,
+the consumer's `shipmate.yml`, read once for three checks — the plan-calling
+job's name, which must be `shipmate` or the plan cell checks are not
+`shipmate / <stack> / <env>` and every `plan` link in the plan comment falls
+back to the workflow-run page; the `workflow_dispatch` trigger every commented
+verb dispatches and the four inputs that dispatch sends, without which GitHub
+refuses the dispatch with an HTTP 422 and creates no run at all; and the event
+routing, one job per engine reusable workflow, each carrying the `if:` that
+selects it, so a wrong one sends a verb nowhere,
 the environment table at the commit under examination — `.github/shipmate.toml`
 parsed and checked against every rule a file can be judged on by itself, so a
 malformed or misplaced setting is reported before it merges to the branch
@@ -1109,7 +1107,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only twelve of the thirteen
+plenty. Only ten of the eleven
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the
 App-permission-drift probe only has something to report when a

@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining thirteen
+shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -76,37 +76,41 @@ live probes.
   repository, which the probe learns at runtime from the running action rather
   than from any hardcoded slug — another org's shared action is not shipmate's
   to report on.
-- **Whether `shipmate.yml`'s plan-calling job is named `shipmate`.** GitHub
-  names a called workflow's check runs `<caller job> / <callee job>`, so that
-  name is what makes the plan cell checks `shipmate / <stack> / <env>`. Under
-  another name the plan still runs and the gate is unaffected; what is lost is
-  every `plan` link in the plan comment, which falls back to the workflow-run
-  page instead of the cell's own check. A job with no `name:` is judged by its
-  job id, which is what GitHub displays then.
-- **Whether `shipmate.yml` can serve a dispatched verb at all.** That needs the
-  `workflow_dispatch` trigger every commented verb dispatches; all four inputs
-  those bodies name (`verb`, `environment`, `ref` and `pr_number`); a `verb`
-  offering the whole option list the file routes, since a missing option is
-  refused at the dispatch form and at the API while an extra one offers a verb no
-  job selects; no input but `verb` declared `required: true`, because a body that
-  leaves one empty is refused whole — so a required input of your own refuses
-  every verb, not just the one it was added for; and the call of the engine's
-  plan workflow. All but the last are refused at dispatch time with an HTTP 422
-  and no run created; the pull request gets a comment saying the dispatch failed
-  and linking the comment-handling run that carries the error.
-  Without the last the dispatch is accepted and the run plans nothing.
-- **Whether each of `shipmate.yml`'s jobs is selected by the `if:` its event
-  needs.** One file gates six jobs, one per engine reusable workflow, and the
-  probe compares each job's whole `if:` against the expression that file's
-  published fence carries. Each finding identifies the job by the engine
-  workflow it calls — "the job calling the engine's `apply.yml`", which is the
-  fence's `apply` — because a job that is missing or duplicated has no one
-  job id to name. A wrong expression and a missing `if:` are both quoted with
-  the expression to write; a job count other than one is not, since there is no
-  single job to compare. Nothing else observes any of this: a verb whose job
-  never runs completes green with nothing done, and a job whose `if:` is too
-  wide runs on an event it was never meant to see. The fence in
-  [`getting-started.md`](getting-started.md) has every expression.
+- **Whether `shipmate.yml` is wired as published.** One read of the file, at
+  the commit under examination, feeds three checks, so an unreadable file
+  leaves all three unverified together:
+  - Whether its plan-calling job is named `shipmate`. GitHub names a called
+    workflow's check runs `<caller job> / <callee job>`, so that name is what
+    makes the plan cell checks `shipmate / <stack> / <env>`. Under another name
+    the plan still runs and the gate is unaffected; what is lost is every `plan`
+    link in the plan comment, which falls back to the workflow-run page instead
+    of the cell's own check. A job with no `name:` is judged by its job id,
+    which is what GitHub displays then.
+  - Whether it can serve a dispatched verb at all. That needs the
+    `workflow_dispatch` trigger every commented verb dispatches; all four inputs
+    those bodies name (`verb`, `environment`, `ref` and `pr_number`); a `verb`
+    offering the whole option list the file routes, since a missing option is
+    refused at the dispatch form and at the API while an extra one offers a verb
+    no job selects; and no input but `verb` declared `required: true`, because a
+    body that leaves one empty is refused whole — so a required input of your
+    own refuses every verb, not just the one it was added for. Each is refused
+    at dispatch time with an HTTP 422 and no run created; the pull request gets
+    a comment saying the dispatch failed and linking the comment-handling run
+    that carries the error.
+  - Whether each of its jobs is selected by the `if:` its event needs. One file
+    gates six jobs, one per engine reusable workflow, and the probe compares
+    each job's whole `if:` against the expression that file's published fence
+    carries. Each finding identifies the job by the engine workflow it calls —
+    "the job calling the engine's `apply.yml`", which is the fence's `apply` —
+    because a job that is missing or duplicated has no one job id to name. A
+    file with no call of the engine's plan workflow is reported here, as zero
+    jobs calling `plan.yml`: its dispatch is accepted and the run plans nothing.
+    A wrong expression and a missing `if:` are both quoted with the expression
+    to write; a job count other than one is not, since there is no single job to
+    compare. Nothing else observes any of this: a verb whose job never runs
+    completes green with nothing done, and a job whose `if:` is too wide runs on
+    an event it was never meant to see. The fence in
+    [`getting-started.md`](getting-started.md) has every expression.
 - **Whether `.github/shipmate.toml` at the commit under examination is valid.**
   Read through the API at that commit, never from the default branch and never
   substituted by it, so a malformed or misplaced setting is reported on the pull
@@ -131,7 +135,7 @@ annotations GitHub already recorded on this commit's workflow runs — shipmate'
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only twelve of the thirteen probes can produce a finding from the plan path's
+Only ten of the eleven probes can produce a finding from the plan path's
 own `annotate`-mode run (`actions/summary`). The App-permission-drift probe
 only has something to report when a full-manifest permission-set mint was
 actually attempted, which only `shipmate doctor` does. It is effectively
