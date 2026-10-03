@@ -13,6 +13,8 @@ Messages are compared whole against hand-written literals: an operator reading a
 in a run log has no other source, so the text is part of the contract.
 """
 
+from typing import Any
+
 import pytest
 from _loader import load_script
 
@@ -33,7 +35,7 @@ UNUSED_TWO = (
     "branch, so an environment arrives and leaves over two pull requests."
 )
 
-TABLE = {
+TABLE: dict[str, Any] = {
     "layout": "folder",
     "environments": {
         "dev-eu": {"region": "eu-west-1"},

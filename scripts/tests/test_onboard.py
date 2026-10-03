@@ -63,9 +63,9 @@ def make_gh(routes):
             raise answer
         return json.dumps(answer)
 
-    _run.calls = calls
-    _run.stdin = stdins
-    _run.secrets = scrubbed
+    _run.calls = calls  # ty: ignore[unresolved-attribute]
+    _run.stdin = stdins  # ty: ignore[unresolved-attribute]
+    _run.secrets = scrubbed  # ty: ignore[unresolved-attribute]
     return _run
 
 

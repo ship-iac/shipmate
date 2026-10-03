@@ -370,10 +370,14 @@ def test_the_footer_lines_of_the_all_environments_form():
         "🟡 prod: left pending (explicit), comment `shipmate apply prod`",
         "⚪ stg: skipped, ordered after an environment not applying this run",
         "⚪ dev: held, the review state does not permit applying",
-        "⚪ sbx: held, the review state does not permit applying; once it clears, comment "
-        "`shipmate apply sbx`",
-        "held: get an approving review, or resolve or dismiss a requested-changes review. "
-        "The run log's apply-all-detect notice names the decision seen.",
+        (
+            "⚪ sbx: held, the review state does not permit applying; once it clears, comment "
+            "`shipmate apply sbx`"
+        ),
+        (
+            "held: get an approving review, or resolve or dismiss a requested-changes review. "
+            "The run log's apply-all-detect notice names the decision seen."
+        ),
     ]
 
 
@@ -383,10 +387,14 @@ def test_the_footer_lines_escape_every_env_name():
     assert ac._footer_parts(["e<1"], ["s<2"], ["h<3", "e<1"]) == [
         "⚪ s&lt;2: skipped, ordered after an environment not applying this run",
         "⚪ h&lt;3: held, the review state does not permit applying",
-        "⚪ e&lt;1: held, the review state does not permit applying; once it clears, comment "
-        "`shipmate apply e&lt;1`",
-        "held: get an approving review, or resolve or dismiss a requested-changes review. "
-        "The run log's apply-all-detect notice names the decision seen.",
+        (
+            "⚪ e&lt;1: held, the review state does not permit applying; once it clears, comment "
+            "`shipmate apply e&lt;1`"
+        ),
+        (
+            "held: get an approving review, or resolve or dismiss a requested-changes review. "
+            "The run log's apply-all-detect notice names the decision seen."
+        ),
     ]
 
 
@@ -752,10 +760,14 @@ def test_the_compact_footer_lines_group_every_disposition():
     ) == [
         "🟡 left pending (explicit): prod, prod-us; comment `shipmate apply <env>` for each",
         "⚪ skipped, ordered after an environment not applying this run: stg, uat",
-        "⚪ held, the review state does not permit applying: dev, sbx; once the hold clears, "
-        "comment `shipmate apply <env>` for sbx",
-        "held: get an approving review, or resolve or dismiss a requested-changes review. "
-        "The run log's apply-all-detect notice names the decision seen.",
+        (
+            "⚪ held, the review state does not permit applying: dev, sbx; once the hold clears, "
+            "comment `shipmate apply <env>` for sbx"
+        ),
+        (
+            "held: get an approving review, or resolve or dismiss a requested-changes review. "
+            "The run log's apply-all-detect notice names the decision seen."
+        ),
     ]
 
 
