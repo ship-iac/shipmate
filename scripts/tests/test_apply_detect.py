@@ -267,7 +267,7 @@ def test_apply_path_never_enrols_a_slug_alike_stack(monkeypatch, tmp_path):
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"a/b": set(), "a-b": set()}, [_apply_check("a-b")])
     ad.main()
-    assert [c["stack"] for c in json.loads(_parsed(out)["waves"])["wave0"]] == ["a-b"]
+    assert [c["stack"] for c in json.loads(_parsed(out)["envlevel0_waves"])["wave0"]] == ["a-b"]
 
 
 def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
@@ -277,7 +277,9 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     out = _apply_env(monkeypatch, tmp_path)
     urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
     ad.main()
-    assert len(json.loads(_parsed(out)["waves"])["wave0"]) == 1  # Not vacuous: a cell exists.
+    assert (
+        len(json.loads(_parsed(out)["envlevel0_waves"])["wave0"]) == 1
+    )  # Not vacuous: a cell exists.
     assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
 
 
@@ -295,7 +297,9 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(_parsed(out)["waves"])["wave0"]] == ["stacks/app"]
+    assert [c["stack"] for c in json.loads(_parsed(out)["envlevel0_waves"])["wave0"]] == [
+        "stacks/app"
+    ]
 
 
 def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_path):
@@ -311,7 +315,9 @@ def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(_parsed(out)["waves"])["wave0"]] == ["stacks/app"]
+    assert [c["stack"] for c in json.loads(_parsed(out)["envlevel0_waves"])["wave0"]] == [
+        "stacks/app"
+    ]
 
 
 def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
@@ -329,7 +335,9 @@ def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(_parsed(out)["waves"])["wave0"]] == ["stacks/app"]
+    assert [c["stack"] for c in json.loads(_parsed(out)["envlevel0_waves"])["wave0"]] == [
+        "stacks/app"
+    ]
 
 
 def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
@@ -347,8 +355,8 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
 
 
 def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path):
-    """Mutation: `wv.levels` for `wv.stack_levels` in main's `assign_waves` call -- a raw
-    `CycleError` escapes instead of this `SystemExit`."""
+    """Mutation: `wv.levels` for `wv.stack_levels` inside `env-order.waves_by_env_level` -- a
+    raw `CycleError` escapes instead of this `SystemExit`."""
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
@@ -365,23 +373,24 @@ def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path)
 
 
 def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path):
-    """`main` reaches the guarded writer, so a chain too deep for the pre-declared wave jobs
-    refuses instead of emitting wave0..wave7 with the deepest cells dropped. The AST test that
-    used to pin this caller's reach into `write_waves` is gone; nothing else covers it.
+    """`main` reaches `waves_by_env_level`'s padding, so a chain too deep for the pre-declared
+    wave jobs refuses before any output instead of emitting wave0..wave7 with the deepest cells
+    dropped.
 
-    Mutation: pad and write the waves inline in `main` without `wv.pad_waves`' refusal -- the
-    run writes eight truncated waves and exits 0.
+    Mutation: bucket the cells in `main` without `waves_by_env_level` (`wv.assign_waves` and
+    unpadded waves into `write_env_level_waves`) -- the run writes the waves and exits 0.
     """
     depth = ad.wv.MAX_WAVES + 1
     stacks = [f"stacks/s{i}" for i in range(depth)]
     deps = {s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)}
     out = _apply_env(monkeypatch, tmp_path)
+    out.touch()  # The runner creates GITHUB_OUTPUT before the step runs.
     _stub_apply(monkeypatch, deps, [_apply_check(s) for s in stacks])
 
     with pytest.raises(SystemExit, match="dependency levels"):
         ad.main()
 
-    assert "wave0=" not in out.read_text(encoding="utf-8")
+    assert "envlevel0_waves=" not in out.read_text(encoding="utf-8")
 
 
 def test_validate_head_sha_rejects_short():
@@ -471,7 +480,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     )
     ad.main()
     parsed = dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
-    assert json.loads(parsed["waves"])["wave0"] == [
+    assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -625,7 +634,7 @@ def test_main_exempts_an_env_whose_entry_is_ungated(monkeypatch, tmp_path):
     )
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
-    assert json.loads(_parsed(out)["waves"])["wave0"][0]["stack"] == "stacks/app"
+    assert json.loads(_parsed(out)["envlevel0_waves"])["wave0"][0]["stack"] == "stacks/app"
 
 
 def test_main_validates_the_table_before_it_reads_the_gate(monkeypatch, tmp_path):
@@ -878,15 +887,20 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
 
 
 def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
-    # The guard against a fall-through into the apply matrix: a mode confusion that reaches the
-    # wave assignment turns an unlock into an apply.
+    """The guard against a fall-through into the apply matrix: a mode confusion that reaches the
+    wave assignment turns an unlock into an apply.
+
+    Mutation: delete the `return` after `run_unlock` -- reddens on `refuse_unreviewed`'s
+    refusal of the absent decision before the key filter is reached, so it does not prove the
+    filter.
+    Mutation: write an `envlevel0_waves=` line from `run_unlock` -- the filter reddens."""
     out = _unlock_env(monkeypatch, tmp_path)
     _boom_on_plan_path(monkeypatch)
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
     ad.main()
     parsed = _parsed(out)
     assert len(json.loads(parsed["cells"])) == 3  # Not vacuous: there is a queue.
-    wave_keys = [k for k in parsed if k == "waves" or k.startswith("wave")]
+    wave_keys = [k for k in parsed if "waves" in k or "empty" in k]
     assert wave_keys == []
 
 
@@ -972,13 +986,20 @@ def test_unlock_notice_names_the_mode(monkeypatch, tmp_path, capsys):
 
 def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
-    key on the apply path is caught. apply.yml reads `waves`, `empty`, `head_sha` and
-    `review_not_required_envs`."""
+    key on the apply path is caught. apply.yml reads the four `envlevelN_waves`, the four
+    `envlevelN_empty`, `head_sha` and `review_not_required_envs`; a targeted apply is env-level
+    0 alone, so levels 1-3 must say `true` or apply.yml runs them into `fromJSON('')`.
+
+    Mutation: pass `{env: 1}` to `waves_by_env_level` -- the cells land in `envlevel1`."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
+    empty = (
+        '{"wave0": [], "wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], '
+        '"wave6": [], "wave7": []}'
+    )
     assert out.read_text(encoding="utf-8") == (
-        'waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
+        'envlevel0_waves={"wave0": [{"stack": "stacks/app", "environment": "dev-eu", '
         '"workload": "app", '
         '"role_arn": "", "cred_region": "", "tf_vars": {}, "config_path": "apply", '
         '"env_binding": "dev-eu-apply", '
@@ -986,9 +1007,32 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
         '"plan_sha256": "dddddddddddddddd'
         'dddddddddddddddddddddddddddddddddddddddddddddddd"}], "wave1": [], "wave2": [], '
         '"wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []}\n'
-        "empty=false\n"
+        "envlevel0_empty=false\n"
+        f"envlevel1_waves={empty}\n"
+        "envlevel1_empty=true\n"
+        f"envlevel2_waves={empty}\n"
+        "envlevel2_empty=true\n"
+        f"envlevel3_waves={empty}\n"
+        "envlevel3_empty=true\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "review_not_required_envs=[]\n"
+    )
+
+
+def test_apply_mode_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
+    """Mutation: iterate `w0` instead of `w0.values()` in the notice -- it prints the key
+    lengths `[5, 5, ...]` and `empty=False`."""
+    _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/a": set(), "stacks/b": {"stacks/a"}},
+        [_apply_check("stacks/a"), _apply_check("stacks/b")],
+    )
+    ad.main()
+    assert (
+        f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
+        "cells=2 completed=0 pending=2 waves=[1, 1, 0, 0, 0, 0, 0, 0] empty=False"
+        in capsys.readouterr().out.splitlines()
     )
 
 

@@ -28,8 +28,6 @@ jobs:
       # Measured 2026-08-22: a comma-split manifest under `if: false` fails Set up job with the
       # production error, so the pair discriminates.
       - if: false
-        uses: ship-iac/shipmate/actions/apply-all-detect@main
-      - if: false
         uses: ship-iac/shipmate/actions/apply-cell@main
       - if: false
         uses: ship-iac/shipmate/actions/apply-complete@main

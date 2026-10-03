@@ -142,12 +142,11 @@ def test_detect_needs_review_and_refuses_to_run_after_it_failed():
     assert detect.get("if") == _DETECT_IF
 
 
-#: The detect actions `apply.yml` calls, one per form, each also its script's name.
-_DETECTS = ("apply-all-detect", "apply-detect")
+#: Each apply-form script, and the action whose script step runs it.
+_DETECTS = (("apply-all-detect", "apply-detect"), ("apply-detect", "apply-detect"))
 
 
-@pytest.mark.parametrize("detect", _DETECTS)
-def test_detect_sources_the_review_decision_from_the_server_side_value(detect):
+def test_detect_sources_the_review_decision_from_the_server_side_value():
     """The exemption list comes from the default branch's file, inside detect. What the
     workflow still has to thread is the decision, and it must arrive raw.
 
@@ -157,7 +156,7 @@ def test_detect_sources_the_review_decision_from_the_server_side_value(detect):
     step = next(
         s
         for s in _jobs("apply.yml")["detect"]["steps"]
-        if f"actions/{detect}" in str(s.get("uses") or "")
+        if "actions/apply-detect" in str(s.get("uses") or "")
     )
     with_ = step["with"]
     assert "ungated-envs" not in with_
@@ -166,18 +165,20 @@ def test_detect_sources_the_review_decision_from_the_server_side_value(detect):
     assert with_["review-decision"] == "${{ needs.review.outputs.decision }}"
 
 
-@pytest.mark.parametrize("detect", _DETECTS)
-def test_the_action_feeds_every_shipmate_env_var_the_script_reads(detect):
+@pytest.mark.parametrize(("detect", "action"), _DETECTS)
+def test_the_action_feeds_every_shipmate_env_var_the_script_reads(detect, action):
     """Derived from the script's own source, not a second hand-written list: a renamed read on
-    either side is the regression this catches."""
+    either side is the regression this catches.
+
+    Mutation: delete `SHIPMATE_HEAD_SHA` from `apply-detect`'s script step -- both rows redden."""
     src = (ENGINE / "scripts" / detect).read_text(encoding="utf-8")
     read = set(re.findall(r'os\.environ(?:\.get)?\(?\[?["\'](SHIPMATE_[A-Z0-9_]+)["\']', src))
     assert "SHIPMATE_REVIEW_DECISION" in read, (
         f"{detect} no longer reads the review decision: {sorted(read)}"
     )
-    step = action_yaml(detect)["runs"]["steps"][0]
+    step = action_yaml(action)["runs"]["steps"][0]
     missing = read - set(step["env"])
-    assert not missing, f"the {detect} action's env: block omits {sorted(missing)}"
+    assert not missing, f"the {action} action's env: block omits {sorted(missing)} for {detect}"
 
 
 def test_the_decision_query_distinguishes_a_missing_pull_request():

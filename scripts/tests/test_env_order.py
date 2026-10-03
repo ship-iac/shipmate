@@ -85,7 +85,7 @@ def test_waves_by_env_level_refuses_an_env_beyond_the_cap():
 
 
 def test_waves_by_env_level_refuses_a_cyclic_stack_graph():
-    """deploy-detect and apply-all-detect sort the stack graph only here.
+    """deploy-detect, apply-detect and apply-all-detect sort the stack graph only here.
 
     Mutation: `wv.levels` for `wv.stack_levels` in `waves_by_env_level` -- a raw `CycleError`
     escapes instead of the `SystemExit`."""
@@ -99,7 +99,7 @@ def test_waves_by_env_level_refuses_a_cyclic_stack_graph():
 
 
 def test_waves_by_env_level_buckets_and_orders():
-    # Env-level bucketing lives in env-order, shared by deploy-detect and apply-all-detect. It
+    # Env-level bucketing lives in env-order, shared by the three detects. It
     # buckets cells by their env's level, then stack-wave-orders within each level.
     pending = [
         {"stack": "stacks/dns", "environment": "dev-eu"},
@@ -140,7 +140,7 @@ def test_waves_by_env_level_backward_compat_single_level():
 def test_write_env_level_waves_emits_waves_and_empty_flags(tmp_path):
     # The shared GITHUB_OUTPUT writer must emit envlevelN_waves as JSON plus an envlevelN_empty
     # flag per level: 'false' for a level with any cell, 'true' for an empty one. Single-sourced,
-    # so deploy-detect and apply-all-detect cannot drift apart on apply-env-level.yml's contract.
+    # so the three detects cannot drift apart on apply-env-level.yml's contract.
     cell = {"stack": "s", "environment": "dev-eu"}
     per_level = [
         {f"wave{i}": ([cell] if i == 0 else []) for i in range(8)},
