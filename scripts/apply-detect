@@ -133,7 +133,7 @@ def filter_pending(cells, completed_names):
 
 
 def _check_run_lines(repo, head_sha):
-    """The commit's check-runs as JSONL lines, for the two name queries below."""
+    """The commit's check-runs as JSONL lines, for the apply and unlock name queries."""
     return bm._run(
         [
             "gh",
@@ -153,24 +153,10 @@ def apply_check_names(check_run_lines, app_id):
     """Every App-authored apply check name on the head, whatever the newest run's
     status — the apply workset's membership authority.
 
-    Not `pending_apply_names`: a completed run with a failing conclusion is not
-    pending, but its cell must stay re-appliable, so the done cells are dropped
-    by `filter_pending` (apply-gate's success/neutral predicate) instead."""
+    Not the unlock queue's pending set: a completed run with a failing conclusion
+    is not pending, but its cell must stay re-appliable, so the done cells are
+    dropped by `filter_pending` (apply-gate's success/neutral predicate) instead."""
     return set(ag.latest_by_name(ag.app_runs(check_run_lines, app_id)))
-
-
-def pending_apply_names(repo, head_sha):
-    """App-authored apply checks on `head_sha` whose latest run is present and
-    NOT completed — the inverse question `ag.app_done_names` answers, and the
-    unlock queue's only membership authority.
-
-    Not the complement of `ag.app_done_names`: a name absent from the listing has
-    no run at all and is not pending, and a completed run with a bad conclusion is
-    done being run whatever its verdict. Both would otherwise enrol a cell nobody
-    asked about into a force-unlock. Built on the same apply-gate primitives so
-    "newest run per name" and "authored by our App" have one definition each."""
-    runs = ag.app_runs(_check_run_lines(repo, head_sha), os.environ["SHIPMATE_APP_ID"])
-    return {n for n, r in ag.latest_by_name(runs).items() if r["status"] != "completed"}
 
 
 def run_graph_deps():
@@ -256,11 +242,11 @@ def run_unlock(repo, env, head):
     """The unlock branch: the cells in `env` that HAVE a pending apply check, as
     a flat queue — releasing a lock has no dependencies, so there are no waves.
 
-    Selection is by membership in `pending_apply_names`, not by removing the
-    completed ones: every queued cell takes a real state lock and may force-break
-    one, so a stack this pull request never planned — no apply check at all —
-    must not be in range. The tree walk still supplies the cells because a
-    check-run name carries no workload.
+    Selection is by membership in the App-authored apply checks whose newest run
+    is not completed, not by removing the completed ones: every queued cell takes
+    a real state lock and may force-break one, so a stack this pull request never
+    planned — no apply check at all — must not be in range. The tree walk still
+    supplies the cells because a check-run name carries no workload.
 
     Unlike the apply path it needs no plan run at all: a lock outlives the run
     that stranded it, those plan artifacts may be long expired, and unlock
@@ -298,7 +284,10 @@ def run_unlock(repo, env, head):
     because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
     `fromJSON('')` is an error."""
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
-    names = pending_apply_names(repo, head)
+    runs = ag.app_runs(_check_run_lines(repo, head), os.environ["SHIPMATE_APP_ID"])
+    # Not the complement of done: a name with no run is not pending, and a completed run
+    # with a bad conclusion is done being run; either would enrol a cell into a force-unlock.
+    names = {n for n, r in ag.latest_by_name(runs).items() if r["status"] != "completed"}
     in_env = stacks_by_env.get(env, [])
     queued = [s for s in in_env if ag.check_name(s, env) in names]
     pending = bm.build_matrix([env], {env: queued}, tags_by_stack)

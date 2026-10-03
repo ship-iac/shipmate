@@ -723,7 +723,7 @@ def _boom_on_plan_path(monkeypatch):
     """Every apply-workset call fails loudly: unlock must reach none of them.
 
     `_check_run_lines` is deliberately not boomed, because the unlock queue reads the same
-    listing through `pending_apply_names`. What unlock must never reach is the workset built
+    listing for its pending names. What unlock must never reach is the workset built
     from it, and the plan run each cell would apply from."""
 
     def _boom(*a, **kw):
@@ -1036,15 +1036,20 @@ def test_apply_mode_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsy
     )
 
 
+def _stub_one_pending_check(monkeypatch):
+    """One pending App-authored check, for `stacks/app / dev-eu`, as the raw JSONL `gh` emits."""
+    line = json.dumps(_check(name="apply / stacks/app / dev-eu", status="queued", conclusion=None))
+    monkeypatch.setattr(ad.bm, "_run", lambda args, check=True: line)
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+
+
 def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, tmp_path):
     # Through the real env_membership: require_env_tag=True would abort on `stacks/orphan` and
     # make unlock unavailable for every environment, precisely when the pipeline is already
     # degraded enough to strand a lock.
     out = _unlock_env(monkeypatch, tmp_path)
     _boom_on_plan_path(monkeypatch)
-    monkeypatch.setattr(
-        ad, "pending_apply_names", lambda repo, head: {"apply / stacks/app / dev-eu"}
-    )
+    _stub_one_pending_check(monkeypatch)
     monkeypatch.setattr(
         ad.bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/orphan"]
     )
@@ -1074,9 +1079,7 @@ def test_unlock_ignores_two_workload_tags_on_a_stack_outside_the_queue(monkeypat
     two-workload-tag refusal fires."""
     out = _unlock_env(monkeypatch, tmp_path)
     _boom_on_plan_path(monkeypatch)
-    monkeypatch.setattr(
-        ad, "pending_apply_names", lambda repo, head: {"apply / stacks/app / dev-eu"}
-    )
+    _stub_one_pending_check(monkeypatch)
     monkeypatch.setattr(
         ad.bm,
         "env_membership",

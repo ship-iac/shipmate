@@ -1109,37 +1109,43 @@ def _jsonl(*checks):
     return [json.dumps(c) for c in checks]
 
 
-def test_check_state_maps_splits_present_and_done():
-    lines = _jsonl(
+def _check_maps(tmp_path, *checks):
+    p = tmp_path / "checks.jsonl"
+    p.write_text("\n".join(_jsonl(*checks)), encoding="utf-8")
+    return ac.load_check_maps(str(p), APP_ID)
+
+
+def test_load_check_maps_splits_present_and_done(tmp_path):
+    present, done = _check_maps(
+        tmp_path,
         _check("apply / stacks/app / dev-eu", run_id=1),
         _check("apply / stacks/db / dev-eu", status="in_progress", conclusion=None, run_id=2),
     )
-    present, done = ac.check_state_maps(lines, APP_ID)
     assert present == {"apply / stacks/app / dev-eu", "apply / stacks/db / dev-eu"}
     assert done == {"apply / stacks/app / dev-eu"}
 
 
-def test_check_state_maps_ignores_checks_from_another_app_identity():
+def test_load_check_maps_ignores_checks_from_another_app_identity(tmp_path):
     # Security-relevant: a same-name check created by any other identity must
     # not be able to paint an applied cell as stranded (nor green a pending
     # one). Same posture as the gate's own from_app filter.
-    lines = _jsonl(
-        _check("apply / stacks/app / dev-eu", status="in_progress", conclusion=None, app_id=15368)
+    present, done = _check_maps(
+        tmp_path,
+        _check("apply / stacks/app / dev-eu", status="in_progress", conclusion=None, app_id=15368),
     )
-    present, done = ac.check_state_maps(lines, APP_ID)
     assert present == set()
     assert done == set()
 
 
-def test_check_state_maps_judges_the_newest_run_per_name():
+def test_load_check_maps_judges_the_newest_run_per_name(tmp_path):
     # A duplicate apply check created mid-apply is deliberately left pending by
     # apply-cell; the newest run per name (highest id) must win, so the cell
     # reads pending even though an older completed run exists.
-    lines = _jsonl(
+    present, done = _check_maps(
+        tmp_path,
         _check("apply / stacks/app / dev-eu", run_id=1),
         _check("apply / stacks/app / dev-eu", status="queued", conclusion=None, run_id=2),
     )
-    present, done = ac.check_state_maps(lines, APP_ID)
     assert present == {"apply / stacks/app / dev-eu"}
     assert done == set()
 
