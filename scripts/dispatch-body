@@ -30,7 +30,7 @@ def main():
             "pr_number": os.environ["PR_NUMBER"],
         }
         # The `environment` key is included only when set: an empty value is the bare
-        # `shipmate apply`, which is what selects the `all` job over `targeted`.
+        # `shipmate apply`, which `apply.yml` runs across every pending environment.
         if os.environ.get("ENVIRONMENT"):
             inputs["environment"] = os.environ["ENVIRONMENT"]
     print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))

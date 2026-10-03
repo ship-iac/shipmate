@@ -8,7 +8,7 @@
   site passes it `toJSON(vars)`, so `env-config` can resolve a `{ vars = "NAME" }` reference in
   the table. The
   `with:` of `plan.yml`, `drift.yml` and `unlock.yml`'s detect steps is pinned whole beside the
-  rest of those workflows; the other four steps are pinned here whole, beside `apply.yml`'s
+  rest of those workflows; the other three steps are pinned here whole, beside `apply.yml`'s
   `detect` outputs.
 - The set of workflow steps carrying `toJSON(vars)` is exactly the detect and cell steps. The
   enumeration holds every repository and organization variable, so a new holder is a decision.
@@ -81,16 +81,6 @@ _DETECT_STEPS = {
             "github-vars": "${{ toJSON(vars) }}",
         },
     },
-    ("apply-all.yml", "$/actions/apply-all-detect"): {
-        "id": "d",
-        "uses": "$/actions/apply-all-detect",
-        "with": {
-            "head-sha": "${{ inputs.ref }}",
-            "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-            "review-decision": "${{ needs.review.outputs.decision }}",
-            "github-vars": "${{ toJSON(vars) }}",
-        },
-    },
     ("deploy.yml", "$/actions/deploy-detect"): {
         "id": "d",
         "uses": "$/actions/deploy-detect",
@@ -131,7 +121,7 @@ _APPLY_DETECT_OUTPUTS = {
     ),
 }
 
-#: Every (workflow, job, step) that carries `toJSON(vars)`: seven detect steps, eleven cell steps,
+#: Every (workflow, job, step) that carries `toJSON(vars)`: six detect steps, eleven cell steps,
 #: the `comment-ops` step and the plan `summary` step.
 _VARS_HOLDERS = {
     ("plan.yml", "detect", "$/actions/build-matrix"),
@@ -139,7 +129,6 @@ _VARS_HOLDERS = {
     ("apply.yml", "detect", "$/actions/apply-detect"),
     ("apply.yml", "detect", "$/actions/apply-all-detect"),
     ("unlock.yml", "detect", "$/actions/apply-detect"),
-    ("apply-all.yml", "detect", "$/actions/apply-all-detect"),
     ("deploy.yml", "detect", "$/actions/deploy-detect"),
     ("plan.yml", "plan", "$/actions/plan-cell"),
     ("drift.yml", "drift", "$/actions/drift-cell"),
@@ -186,7 +175,10 @@ def test_the_detect_step_is_exactly_this_step(workflow, uses):
 
 
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
-    """Mutation: drop `&& 'true'` from `envlevel1_empty`'s targeted arm."""
+    """The four disposition sets read `d` alone, so a targeted apply's comment renders none.
+
+    Mutation: drop `&& 'true'` from `envlevel1_empty`'s targeted arm.
+    Mutation: give `review_held_envs` a `steps.t.outputs.review_held_envs ||` arm."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 

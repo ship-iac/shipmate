@@ -18,7 +18,6 @@ _ABSENT = object()
 
 #: Hand-written: every workflow file by name, so a new file reds until its mode is decided.
 _EXPECTED = {
-    "apply-all.yml": (_ABSENT, {}),
     "apply-env-level.yml": (_ABSENT, {}),
     "apply-review.yml": (_ABSENT, {}),
     "apply.yml": (_ABSENT, {}),

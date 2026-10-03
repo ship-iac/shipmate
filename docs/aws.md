@@ -239,7 +239,7 @@ the `ubuntu-latest` default. Outside them the
 runner is fixed:
 
 - `ubuntu-slim`: the control jobs, which run neither `tofu` nor `terramate`.
-  These are `guard` and `summary` in `apply.yml` and `apply-all.yml`, `review`
+  These are `guard` and `summary` in `apply.yml`, `review`
   in `apply-review.yml`, `snapshot` and `complete` in `apply-env-level.yml`,
   `summary` in `deploy.yml`, `guard` in `unlock.yml`, and `ops` in
   `comment-ops.yml`.

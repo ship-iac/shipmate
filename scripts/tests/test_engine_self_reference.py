@@ -107,7 +107,7 @@ def test_every_job_running_an_engine_action_is_counted():
         for job_name, job in (doc.get("jobs") or {}).items()
         if any(_uses(s).startswith(LOCAL_PREFIX) for s in job.get("steps") or [])
     ]
-    assert len(covered) == 27, f"{len(covered)} jobs run an engine action: {covered}"
+    assert len(covered) == 25, f"{len(covered)} jobs run an engine action: {covered}"
 
 
 #: The steps that run an engine action calling `scripts/doctor`, and so must hand it the

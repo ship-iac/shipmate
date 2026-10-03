@@ -124,7 +124,6 @@ def test_the_wrapper_snippets_are_still_being_found():
         for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
     )
     assert found == [
-        ("docs/getting-started.md", "apply-all.yml"),
         ("docs/getting-started.md", "apply.yml"),
         ("docs/getting-started.md", "comment-ops.yml"),
         ("docs/getting-started.md", "deploy.yml"),

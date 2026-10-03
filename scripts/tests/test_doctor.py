@@ -220,7 +220,7 @@ def _quiet_new_probes():
     fork-trigger probe quiet: it is the exemption, not the absence of the trigger. Its
     plan-calling job is named `shipmate`, keeping the shim-job-name probe quiet; its dispatch
     leg -- the trigger, the four inputs, the verb options, the call of the engine's plan
-    workflow -- keeps the dispatch-wiring probe quiet; and its seven jobs carry the seven
+    workflow -- keeps the dispatch-wiring probe quiet; and its six jobs carry the six
     documented `if:` expressions, keeping the routing probe quiet. The plan-env secret probe
     reads one listing per plan env; an empty one keeps the healthy path quiet."""
     return {
@@ -1200,7 +1200,7 @@ _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
 #: The consumer workflow file `_quiet_new_probes()` serves, in the shipped shape, and the
-#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: seven jobs, one per
+#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: six jobs, one per
 #: engine reusable workflow, each with the `if:` that routes its event. Hand-written rather
 #: than read from the page, so a drifting page reddens the fence guard and not every test
 #: here. Defined here rather than beside that fixture because interpolating `_SHA` happens at
@@ -1259,14 +1259,9 @@ _SHIPMATE_WF = (
     "    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' "
     "&& github.event.inputs.verb == 'drift')\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/drift.yml@{_SHA}\n"
-    "  targeted:\n"
-    "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
-    "&& inputs.environment != ''\n"
+    "  apply:\n"
+    "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
-    "  all:\n"
-    "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
-    "&& inputs.environment == ''\n"
-    f"    uses: {_ENGINE_REPO}/.github/workflows/apply-all.yml@{_SHA}\n"
     "  unlock:\n"
     "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/unlock.yml@{_SHA}\n"
@@ -3135,11 +3130,10 @@ def test_dispatch_wiring_probe_is_registered(monkeypatch):
 # rather than being followed by them.
 _EDITED_IF_TEXT = (
     "`shipmate.yml`'s job calling the engine's `apply.yml` is selected by "
-    "`github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'`, not "
-    "`github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
-    "&& inputs.environment != ''`. A wrong expression routes a verb nowhere and its "
-    "dispatched run completes with every job skipped, which reads as success everywhere "
-    "(docs/getting-started.md)."
+    "`github.event_name == 'workflow_dispatch'`, not "
+    "`github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'`. A wrong expression "
+    "routes a verb nowhere and its dispatched run completes with every job skipped, which "
+    "reads as success everywhere (docs/getting-started.md)."
 )
 
 
@@ -3181,19 +3175,19 @@ def test_the_routing_probe_is_silent_on_the_documented_file(monkeypatch):
     """The floor under the three reporting cases below, and the oracle for false positives:
     the file consumers paste, verbatim, through the whole probe.
 
-    Mutation: edit any one of the seven `ROUTING_IFS` expressions."""
+    Mutation: edit any one of the six `ROUTING_IFS` expressions."""
     responses = _fork_responses({"shipmate.yml": _documented_workflow_file()})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._routing_warnings(_ctx()) == []
 
 
 def test_the_routing_probe_reports_a_job_whose_if_was_edited(monkeypatch):
-    """One clause dropped from the targeted-apply job's `if:` and every `shipmate apply <env>`
-    goes to the bare-apply job as well: two applies from one dispatch.
+    """One clause dropped from the apply job's `if:` and every dispatched verb, `plan`, `unlock`
+    and `drift` included, starts an apply as well.
 
     Mutation: compare the found expression as a prefix of the expected one instead of whole,
     and this edit passes."""
-    text = _SHIPMATE_WF.replace(" && inputs.environment != ''\n", "\n", 1)
+    text = _SHIPMATE_WF.replace(" && inputs.verb == 'apply'\n", "\n", 1)
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._routing_warnings(_ctx()) == [(doctor.WARNING, _EDITED_IF_TEXT)]
@@ -3241,9 +3235,8 @@ def test_the_routing_probe_reports_two_jobs_calling_one_callee(monkeypatch):
 
     Mutation: report only a callee no job calls (`if count == 0`)."""
     text = _SHIPMATE_WF + (
-        "  targeted-eu:\n"
-        "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
-        "&& inputs.environment != ''\n"
+        "  apply-eu:\n"
+        "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'\n"
         f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
     )
     responses = _fork_responses({"shipmate.yml": text})

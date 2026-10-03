@@ -17,7 +17,6 @@ SETUP = {local_action("setup"), "ship-iac/shipmate/actions/setup"}
 #: with whatever the tree says. This reds when a call site appears or disappears, which is
 #: when the `with:` question has to be answered again.
 EXPECTED_CALL_SITES = {
-    "apply-all.yml": 1,
     "apply-env-level.yml": 8,
     "apply.yml": 1,
     "deploy.yml": 1,

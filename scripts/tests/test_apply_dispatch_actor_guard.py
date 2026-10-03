@@ -1,6 +1,5 @@
 """Only a bot actor may dispatch a verb; a human with write access must not
-bypass authorize by hand-rolling `gh workflow run apply.yml`/`apply-all.yml`/
-`unlock.yml`.
+bypass authorize by hand-rolling `gh workflow run apply.yml`/`unlock.yml`.
 
 The rejection is its own tiny job, `guard`, not a first step of `detect`. Two separate outcomes
 have to be told apart:
@@ -37,22 +36,17 @@ GUARD_ERROR_LINE = {
         "::error::apply must be dispatched by the shipmate App via comment-ops, "
         "not by a direct workflow_dispatch"
     ),
-    "apply-all.yml": (
-        "::error::apply-all must be dispatched by the shipmate App via comment-ops, "
-        "not by a direct workflow_dispatch"
-    ),
     "unlock.yml": (
         "::error::unlock must be dispatched by the shipmate App via comment-ops, "
         "not by a direct workflow_dispatch"
     ),
 }
-#: The whole `needs:` list each dispatched workflow's `detect` carries. Both apply paths wait on
+#: The whole `needs:` list each dispatched workflow's `detect` carries. The apply path waits on
 #: the `review` job that reads the pull request's review decision server-side. `unlock.yml`
 #: carries no such job, because an approval reviews a diff and unlock applies none. Compared
 #: whole, so neither `guard` dropping out nor an unreviewed extra dependency can slip in.
 DETECT_NEEDS = {
     "apply.yml": ["guard", "review"],
-    "apply-all.yml": ["guard", "review"],
     "unlock.yml": ["guard"],
 }
 #: The whole `needs:` list of every job downstream of `detect`, per file. Every job that can fail
@@ -79,31 +73,13 @@ DOWNSTREAM_NEEDS = {
             "envlevel3",
         ],
     },
-    "apply-all.yml": {
-        "envlevel0": ["guard", "review", "detect"],
-        "envlevel1": ["guard", "review", "detect", "envlevel0"],
-        "envlevel2": ["guard", "review", "detect", "envlevel0", "envlevel1"],
-        "envlevel3": ["guard", "review", "detect", "envlevel0", "envlevel1", "envlevel2"],
-        "summary": [
-            "guard",
-            "review",
-            "detect",
-            "envlevel0",
-            "envlevel1",
-            "envlevel2",
-            "envlevel3",
-        ],
-    },
     # No `summary` job at all: an unlock posts no comment and refreshes no gate, which is why
     # nothing here mints the App key.
     "unlock.yml": {"unlock": ["guard", "detect"]},
 }
 SUMMARY_IF = "${{ always() && needs.guard.result == 'success' }}"
 #: Every workflow `actions/dispatch` can target that carries the bot-actor rejection.
-#: `APPLY_PATHS` is the subset that also posts a result comment, and so has a `summary` job for
-#: test_apply_paths_summary_is_gated_on_the_guard_and_not_on_detect to read.
-DISPATCH_PATHS = ("apply.yml", "apply-all.yml", "unlock.yml")
-APPLY_PATHS = ("apply.yml", "apply-all.yml")
+DISPATCH_PATHS = ("apply.yml", "unlock.yml")
 
 
 def _jobs(name):
@@ -171,6 +147,10 @@ def test_every_fan_out_job_carries_the_guard_in_its_needs():
 
 
 def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
+    """`DOWNSTREAM_NEEDS`, whole list per job, also pins the env-level order: each level needs
+    every level before it, so a bare apply runs them in `needs` order.
+
+    Mutation: drop `envlevel1` from `apply.yml`'s `envlevel2` `needs:` -- red."""
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
         jobs = _jobs(name)
         # Discovery decides the scope: a job added downstream of `detect` and left out of the map
@@ -202,7 +182,7 @@ def test_deploy_detect_carries_no_bot_actor_guard():
     )
 
 
-def test_apply_paths_summary_is_gated_on_the_guard_and_not_on_detect():
+def test_apply_summary_is_gated_on_the_guard_and_not_on_detect():
     """`if: always()` alone runs `summary` regardless of every `needs` conclusion, and
     `summary`'s steps read raw workflow_call inputs (pr_number, ref) rather than anything gated
     on `detect`. So a bare `always()`, or `always() || needs.guard.result == 'success'`, still
@@ -210,12 +190,11 @@ def test_apply_paths_summary_is_gated_on_the_guard_and_not_on_detect():
     request comment. Gating on `needs.detect.result` instead is the opposite regression: it also
     silences every genuine detect failure, so the developer gets no failure comment and no gate
     refresh. The whole expression is pinned so either escape fails."""
-    for name in APPLY_PATHS:
-        job = _jobs(name)["summary"]
-        summary_if = job.get("if")
-        assert summary_if == SUMMARY_IF, (
-            f"{name}: summary's if: must be exactly {SUMMARY_IF!r}, got {summary_if!r}"
-        )
-        assert "detect" in _needs(job), (
-            f"{name}: summary still reads detect's outputs, so detect must stay in its needs"
-        )
+    job = _jobs("apply.yml")["summary"]
+    summary_if = job.get("if")
+    assert summary_if == SUMMARY_IF, (
+        f"summary's if: must be exactly {SUMMARY_IF!r}, got {summary_if!r}"
+    )
+    assert "detect" in _needs(job), (
+        "summary still reads detect's outputs, so detect must stay in its needs"
+    )

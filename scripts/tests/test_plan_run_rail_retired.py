@@ -14,7 +14,6 @@ from _loader import WORKFLOWS, workflow_yaml
 #: inputs is listed as `{}`, so a new workflow reaching for the retired rail cannot dodge the
 #: comparison.
 EXPECTED_INPUTS = {
-    "apply-all.yml": {"workflow_call": ["pr_number", "ref"]},
     "apply-env-level.yml": {"workflow_call": ["head_sha", "waves_json"]},
     "apply-review.yml": {"workflow_call": ["pr_number"]},
     "apply.yml": {"workflow_call": ["environment", "pr_number", "ref"]},

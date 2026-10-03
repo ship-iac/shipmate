@@ -228,6 +228,10 @@ def test_the_apply_workflow_can_release_no_lock():
 
 
 def test_each_envlevel_job_runs_on_every_apply_dispatch():
+    """Each level's whole `if:`, the cancel guard included: without it a level runs after a
+    cancelled predecessor and applies out of `needs` order.
+
+    Mutation: drop the cancel guard from `envlevel2`'s `if:` -- red."""
     got = {job_id: _job(APPLY, job_id).get("if") for job_id in ENVLEVEL_IF}
     assert got == ENVLEVEL_IF, (
         f"the envlevel jobs' `if:` are {got!r}, not {ENVLEVEL_IF!r} -- a verb clause here "

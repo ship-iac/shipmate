@@ -32,7 +32,7 @@ def snapshot(waves, check_runs, app_id):
     its apply check stays pending forever, the gate stays pending with it, and
     a re-run hits the exact-plan stale-plan fail-safe against the state the
     skipped cell already advanced. Failing pre-flight costs the run's other
-    waves — and, on the deploy/apply-all paths, the successor env-levels — but
+    waves — and, on the deploy and bare-apply paths, the successor env-levels — but
     leaves nothing half-applied, the recoverable direction.
     """
     runs = ag.from_app(check_runs, app_id)

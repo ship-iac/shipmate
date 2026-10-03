@@ -1747,7 +1747,6 @@ _EXPECTED_CALLEES = {
         "deploy.yml",
         "drift.yml",
         "apply.yml",
-        "apply-all.yml",
         "unlock.yml",
     ],
 }
@@ -1766,8 +1765,8 @@ def _callees(text):
 def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflows():
     """The locator reads the workflow file's body out of the docs rather than carrying a
     copy. It must find exactly one fence, and that fence must call every engine reusable
-    workflow the file routes to, in document order -- seven jobs, seven pin sites, and a
-    locator that found only the first would ship six unpinned calls.
+    workflow the file routes to, in document order -- six jobs, six pin sites, and a
+    locator that found only the first would ship five unpinned calls.
 
     The expected callee list is hand-written here, never read out of the docs, and the
     whole mapping is compared with `==`.
@@ -1791,7 +1790,7 @@ def test_the_rendered_file_passes_no_state_setting_to_any_engine_call():
     """
     jobs = yaml.safe_load(onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"))["jobs"]
     callers = {name for name, job in jobs.items() if _CALL_PATH in (job.get("uses") or "")}
-    assert callers == {"plan", "comment-ops", "deploy", "drift", "targeted", "all", "unlock"}
+    assert callers == {"plan", "comment-ops", "deploy", "drift", "apply", "unlock"}
     assert [n for n in sorted(callers) if "state_suffix" in (jobs[n].get("with") or {})] == []
 
 
@@ -1805,11 +1804,11 @@ def test_main_rejects_the_retired_state_suffix_flag(capsys):
     assert "unrecognized arguments: --state-suffix" in capsys.readouterr().err
 
 
-_EXPECTED_PINS = {"shipmate.yml": 7}
+_EXPECTED_PINS = {"shipmate.yml": 6}
 
 
 def test_every_shim_is_pinned_at_every_site():
-    """One file, seven pins, and a file shipped still carrying `@<engine-sha>` resolves to
+    """One file, six pins, and a file shipped still carrying `@<engine-sha>` resolves to
     nothing.
 
     Nothing else can see a missed rewrite: `_callees` splits before the `@`, so a surviving
@@ -1817,13 +1816,13 @@ def test_every_shim_is_pinned_at_every_site():
     expensive: `_DOC_PIN` requires the trailing `#` comment, so a docs edit dropping
     `# see the latest release` from one line stops that pin being rewritten; and it is
     anchored on `ship-iac`, so normalising an owner in the docs to `<owner>` would unpin all
-    seven. `_DOC_PIN` stays anchored deliberately -- the docs/releasing.md re-pin is anchored
+    six. `_DOC_PIN` stays anchored deliberately -- the docs/releasing.md re-pin is anchored
     the same way and the two writers must agree -- and this vector is what makes either edit
     loud.
 
     Hand-written, never derived from the docs.
 
-    Mutations: `_DOC_PIN.sub(..., count=1)`, which rewrites one pin of the seven; and delete
+    Mutations: `_DOC_PIN.sub(..., count=1)`, which rewrites one pin of the six; and delete
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """

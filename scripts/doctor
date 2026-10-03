@@ -1120,7 +1120,7 @@ def _fork_trigger_warnings(ctx):
     comment-ops, deploy, drift, apply and unlock jobs in it: every one of those `if:`
     expressions is false under `pull_request_target`, so those jobs do not run, and a job
     that does not run binds no environment and is handed no token. `_routing_warnings` is
-    what watches those seven `if:` expressions.
+    what watches those six `if:` expressions.
 
     Reads the consumer's workflow files at the commit under examination
     (`_contents_ref`): a pull request that *removes* the trigger must not still
@@ -1525,7 +1525,7 @@ def _dispatch_wiring_finding(text, name):
 
 
 #: The whole `if:` of each job of `shipmate.yml`, keyed by the engine reusable workflow it
-#: calls. The consumer owns these seven expressions and `docs/getting-started.md` publishes
+#: calls. The consumer owns these six expressions and `docs/getting-started.md` publishes
 #: them; a wrong one routes a verb nowhere and its dispatched run completes with every job
 #: skipped, which reads as success everywhere. Compared whole — normalised only for an
 #: enclosing quote pair, the optional `${{ }}` wrapper and whitespace — because a subset check
@@ -1542,14 +1542,7 @@ ROUTING_IFS = {
         "github.event_name == 'schedule' || "
         "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')"
     ),
-    "apply.yml": (
-        "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
-        "&& inputs.environment != ''"
-    ),
-    "apply-all.yml": (
-        "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply' "
-        "&& inputs.environment == ''"
-    ),
+    "apply.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'",
     "unlock.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
 }
 ROUTING_UNREADABLE, ROUTING_NO_COMMIT = _unverified("the workflow file's event routing")
@@ -1563,7 +1556,7 @@ def _normalize_if(value):
     so a consumer who writes `if: ${{ ... }}` — the shape `docs/getting-started.md` shipped
     before this file existed — must not be reported for a difference that is not one.
 
-    Only a MATCHING enclosing pair of quotes is dropped: five of the seven expressions end
+    Only a MATCHING enclosing pair of quotes is dropped: four of the six expressions end
     in a `'`, and stripping quote characters off both ends would mangle every one of them
     on both sides of the comparison, which stays green while the message is wrong."""
     v = value.strip()
@@ -1620,12 +1613,12 @@ def _routing_finding(text, name):
 
 
 def _routing_warnings(ctx):
-    """One file gates seven jobs on the event, and a wrong gate is silent in both directions:
+    """One file gates six jobs on the event, and a wrong gate is silent in both directions:
     a dispatched verb whose job never runs completes green with nothing done, and a job whose
     `if:` is too wide runs on an event it was never meant to see.
 
     Nothing else observes this. `actions/dispatch` sees an accepted dispatch; the run page
-    shows six skipped jobs beside the one that ran, which is what a healthy run also shows.
+    shows five skipped jobs beside the one that ran, which is what a healthy run also shows.
 
     Reads the consumer's workflow files at the commit under examination (`_contents_ref`): a
     pull request that FIXES an expression must not still be reported."""
@@ -2048,8 +2041,8 @@ def latest_check_ids(lines, app_id=""):
     annotations to harvest, so ranking it BELOW a completed run is wanted.
 
     Carries the consumer file's skipped router jobs too — they are
-    `github-actions`-authored, so about five rows per report cost an annotation
-    fetch that returns nothing."""
+    `github-actions`-authored, so four rows per report (shipmate, post-merge, apply,
+    unlock) cost an annotation fetch that returns nothing."""
     newest = {}
     for line in lines:
         run = _parse_check_run(line, app_id)

@@ -8,24 +8,20 @@ inputs:
     description: Environment name for the targeted apply form. Empty = the all-environments form.
     required: false
     default: ""
-  waves-json:
-    description: Targeted form's waves JSON (one wave array). Empty when unused.
-    required: false
-    default: ""
   envlevel0-waves:
-    description: All-environments form's env-level 0 waves JSON. Empty when unused.
+    description: Env-level 0 waves JSON; the targeted form's one env-level. Empty when unused.
     required: false
     default: ""
   envlevel1-waves:
-    description: All-environments form's env-level 1 waves JSON. Empty when unused.
+    description: Env-level 1 waves JSON (all-environments form only). Empty when unused.
     required: false
     default: ""
   envlevel2-waves:
-    description: All-environments form's env-level 2 waves JSON. Empty when unused.
+    description: Env-level 2 waves JSON (all-environments form only). Empty when unused.
     required: false
     default: ""
   envlevel3-waves:
-    description: All-environments form's env-level 3 waves JSON. Empty when unused.
+    description: Env-level 3 waves JSON (all-environments form only). Empty when unused.
     required: false
     default: ""
   excluded-envs:
@@ -147,7 +143,6 @@ runs:
       shell: bash
       env:
         SHIPMATE_ENVIRONMENT: ${{ inputs.environment }}
-        SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_ENVLEVEL0_WAVES: ${{ inputs.envlevel0-waves }}
         SHIPMATE_ENVLEVEL1_WAVES: ${{ inputs.envlevel1-waves }}
         SHIPMATE_ENVLEVEL2_WAVES: ${{ inputs.envlevel2-waves }}

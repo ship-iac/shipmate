@@ -29,7 +29,7 @@ def test_completes_only_cells_whose_wave_job_succeeded():
     assert apply_complete.to_complete(SNAP, jobs) == ([1], [], [], ["stacks/app / dev-eu"])
 
 
-@pytest.mark.parametrize("caller", ["targeted", "all"])
+@pytest.mark.parametrize("caller", ["apply", "post-merge"])
 def test_matches_the_nested_reusable_workflow_job_name_suffix(caller):
     # A called workflow's jobs display as `<caller job> / <called job> / <job>`.
     jobs = [job(f"{caller} / L0 / apply / stacks/app / dev-eu", "success")]

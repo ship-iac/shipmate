@@ -10,8 +10,8 @@ pinned, and the engine's own nested workflows, `apply-env-level.yml` and
 
 ## Consumers move every engine ref in one change
 
-The seven reusable workflows share inputs and secrets across a release, so a consumer re-pins
-all seven `uses:` lines in one commit (§ Re-pin a consumer) and never
+The six reusable workflows share inputs and secrets across a release, so a consumer re-pins
+all six `uses:` lines in one commit (§ Re-pin a consumer) and never
 merges a Dependabot pull request that bumps one line alone.
 
 ### Re-pin a consumer
@@ -41,7 +41,17 @@ keeps a CRLF file's line endings under Git Bash. On macOS, install GNU sed and r
    grep -rnE 'ship-iac/shipmate/[^@[:space:]"]+@' <consumer>/.github/workflows/ | grep -vE '@<release-sha>"? # vX\.Y\.Z'$'\r''?$'
    ```
 
-3. Commit the rewrite as one commit.
+3. Check that every engine workflow the consumer calls exists at `<release-sha>`, from the
+   engine clone. It must print nothing. A printed `missing at release: <path>` is a callee the
+   release deleted or renamed, and the pin would not resolve: make the consumer-file edit the
+   CHANGELOG's `BREAKING CHANGE` footer names for that release, in the same commit.
+
+   ```bash
+   grep -rhoE 'ship-iac/shipmate/\.github/workflows/[^@[:space:]"]+' <consumer>/.github/workflows/ | sort -u | sed 's|ship-iac/shipmate/||' | \
+     while read -r f; do git cat-file -e "<release-sha>:$f" 2>/dev/null || echo "missing at release: $f"; done
+   ```
+
+4. Commit the rewrite as one commit.
 
 The `sed` reads `.yml` files only. Every consumer file this engine renders is `.yml`; step 2
 reports the engine refs it leaves in a `.yaml` workflow: rename that file or re-pin it by hand.

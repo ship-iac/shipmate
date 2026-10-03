@@ -82,7 +82,7 @@ def test_only_this_suites_completed_checks_are_mirrored():
 def test_only_the_engine_cell_checks_are_mirrored():
     """A dispatched plan's suite holds the callee's cell checks AND the skipped router jobs of
     the consumer's one workflow file. Only the first belong on the pull-request head: a grey
-    `targeted` or `post-merge` there says an apply was skipped for this commit, which is not
+    `apply` or `post-merge` there says an apply was skipped for this commit, which is not
     what happened and not what the reviewer is being asked to read.
 
     Mutation: drop the prefix filter from `bodies`, and the two skipped router rows below are
@@ -90,7 +90,7 @@ def test_only_the_engine_cell_checks_are_mirrored():
     """
     lines = _lines(
         _check("shipmate / stacks/network / dev-eu"),
-        _check("targeted", conclusion="skipped"),
+        _check("apply", conclusion="skipped"),
         _check("shipmate", conclusion="skipped"),
     )
     got = [b["name"] for b in mc.bodies(lines, SUITE, HEAD)]
