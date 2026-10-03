@@ -806,6 +806,20 @@ def test_apply_env_with_only_a_branch_policy_is_still_noted(monkeypatch):
     assert "dev-eu-apply" in out[0][1] and "no approval rules" in out[0][1]
 
 
+def test_apply_env_with_only_a_typeless_rule_is_still_noted(monkeypatch):
+    """A typeless rule confirms no reviewer or wait timer, so the apply notice stands.
+    Mutation: key the notice on `not approval` -- the `?` rule silences it."""
+    responses = _protection(_env("dev-eu-plan"), _env("dev-eu-apply", rules=("",)))
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._env_protection_warnings(_ctx()) == [
+        (
+            doctor.NOTICE,
+            "GitHub Environment `dev-eu-apply` has no approval rules (required reviewers "
+            "or a wait timer), so pre-merge applies to it are unreviewed.",
+        )
+    ]
+
+
 def test_apply_env_with_an_approval_rule_and_a_branch_policy_is_silent(monkeypatch):
     # The other shape of the same pair: a genuinely reviewed apply environment
     # that also restricts branches must produce nothing.
@@ -3103,21 +3117,22 @@ def test_a_failing_shipmate_yml_probe_degrades_naming_the_file(monkeypatch):
 
 
 def test_a_degraded_probe_logs_the_whole_failure_to_stderr(monkeypatch, capsys):
-    """Mutation: drop the `sys.stderr.write` in `_degrade_reason` -- stderr is empty and the
-    403 appears nowhere. The report note stays cut at ": gh api "."""
+    """Mutation: drop the `ec.log_failure` call in `warnings` -- stderr is empty and the 403
+    appears nowhere; pass it no label -- the probe goes unnamed. The note stays cut at
+    ": gh api "."""
 
-    def _probe_warnings(ctx):
+    def _pin_warnings(ctx):
         raise SystemExit("::error::command failed (1): gh api x\ngh: HTTP 403")
 
-    monkeypatch.setattr(doctor, "PROBES", (_probe_warnings,))
+    monkeypatch.setattr(doctor, "PROBES", (_pin_warnings,))
     assert doctor.warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "doctor could not verify the probe settings (command failed (1)): probe skipped.",
+            "doctor could not verify the pin settings (command failed (1)): probe skipped.",
         )
     ]
     captured = capsys.readouterr()
-    assert captured.err == "command failed (1): gh api x\ngh: HTTP 403\n"
+    assert captured.err == "pin probe: command failed (1): gh api x\ngh: HTTP 403\n"
 
 
 # The routing findings, hand-written and whole, never derived from `scripts/doctor` or from

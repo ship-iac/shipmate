@@ -82,8 +82,9 @@ def test_review_count_is_the_highest_over_every_pull_request_rule():
     assert review_count(rules) == 2
 
 
-def test_approval_rules_skip_the_branch_policy_and_repeat_no_type():
-    """Mutation: keep `branch_policy` -- it appears in the list."""
+def test_approval_rules_drop_the_branch_policy_and_list_each_type_once():
+    """Mutation: keep `branch_policy` -- it appears in the list; build `types` as a list and
+    filter `branch_policy` out of it -- `wait_timer` appears twice."""
     env = {
         "protection_rules": [
             {"type": "wait_timer"},
@@ -96,6 +97,7 @@ def test_approval_rules_skip_the_branch_policy_and_repeat_no_type():
 
 
 def test_approval_rules_report_a_typeless_rule_as_unknown():
-    """Mutation: drop the `or "?"` (or subtract `"?"`) -- the typeless rules vanish."""
+    """Mutation: `or "?"` -> `or "x"` -- `x` is listed instead; subtract `"?"` too -- the
+    typeless rules vanish."""
     env = {"protection_rules": [{"type": "wait_timer"}, {}, {"type": ""}, {"type": None}]}
     assert approval_rules(env) == ["?", "wait_timer"]

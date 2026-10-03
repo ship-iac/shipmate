@@ -308,9 +308,9 @@ runs:
           exit 0
         fi
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
-        # Harvest: latest shipmate-authored check run per name (check-ids mode filters on app slug/id),
-        # then its annotations; never fails the command. harvest_failed is written last: an empty
-        # "ann/<id>.json" fallback reads as "no annotations", so a failed fetch must not look complete.
+        # Harvest: latest shipmate-authored check run per name (check-ids filters on app slug/id), then
+        # its annotations; never fails. harvest_failed is written once, after every step that could flip
+        # it: an empty ann/<id>.json reads as "no annotations", so a failed fetch must not look complete.
         mkdir -p ann
         : > check-ids.tsv
         harvest_failed=false
