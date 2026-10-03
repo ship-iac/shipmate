@@ -1805,31 +1805,6 @@ def test_main_rejects_the_retired_state_suffix_flag(capsys):
     assert "unrecognized arguments: --state-suffix" in capsys.readouterr().err
 
 
-def test_the_rendered_pin_is_byte_identical_to_what_repin_consumer_writes(tmp_path):
-    """Two writers produce one string. `dev/repin_consumer.py` re-pins a consumer at release
-    time; this script writes the first copy. A spacing difference between them makes every
-    re-pinned consumer report `differs` forever, and acceptance can never pass.
-
-    Mutation: render the separator as two spaces before the `#`.
-    """
-    import repin_consumer
-
-    wf = tmp_path / ".github" / "workflows"
-    wf.mkdir(parents=True)
-    (wf / "shipmate.yml").write_text(
-        onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"), encoding="utf-8", newline="\n"
-    )
-    # The real release writer, not an imitation of it. `docs/releasing.md` runs
-    # `repin_consumer.main`, which reaches this planner through `_rewrite_and_report` and
-    # writes the planned text unchanged.
-    planned = repin_consumer._plan_consumer(tmp_path, "d" * 40, "v9.9.10")
-    assert len(planned) == 1
-    assert planned[0].text == onboard._render(ENGINE, "d" * 40, "v9.9.10", "main"), (
-        "onboard and repin_consumer disagree on the pin line, so a re-pinned consumer "
-        "never reports `ok`"
-    )
-
-
 _EXPECTED_PINS = {"shipmate.yml": 7}
 
 
@@ -1843,8 +1818,8 @@ def test_every_shim_is_pinned_at_every_site():
     requires the trailing `#` comment, so a docs edit dropping `# see the latest release`
     from one line stops that pin being rewritten; and it is anchored on `ship-iac`, so
     normalising an owner in the docs to `<owner>` would unpin all seven. `_DOC_PIN` stays
-    anchored deliberately -- `dev/repin_consumer.py` is anchored the same way and the two
-    writers must agree -- and this vector is what makes either edit loud.
+    anchored deliberately -- the docs/releasing.md re-pin is anchored the same way and the
+    two writers must agree -- and this vector is what makes either edit loud.
 
     Hand-written, never derived from the docs.
 
@@ -1916,8 +1891,8 @@ def test_an_identical_file_reports_ok_through_crlf(tmp_path):
 
 def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     """A consumer sitting on an older release differs only in its pin, and moving a pin is
-    `dev/repin_consumer.py`'s job. Naming that remedy is the whole point of the verb, and it
-    is not drift, so it must not set exit 2 and fail the operator's run.
+    the docs/releasing.md re-pin's job. Naming that remedy is the whole point of the verb,
+    and it is not drift, so it must not set exit 2 and fail the operator's run.
 
     Mutation: make `_depin` leave the trailing comment in place, so the version comment alone
     reads as `differs`.
@@ -1926,7 +1901,13 @@ def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "main")
     path.write_text(older, encoding="utf-8", newline="\n")
     onboard._reconcile_shim(_shim_ctx(tmp_path))
-    assert onboard.REPORT == [("pin-only", "shipmate.yml", "run dev/repin_consumer.py")]
+    assert onboard.REPORT == [
+        (
+            "pin-only",
+            "shipmate.yml",
+            "move every engine ref to this engine's SHA in one commit (docs/releasing.md)",
+        )
+    ]
     assert path.read_text(encoding="utf-8") == older
     assert onboard._exit_code() == 0
 
@@ -1950,7 +1931,7 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
 
 def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
     """The shim is written LF-delimited whatever platform the operator runs on: every other
-    copy of it -- the docs, `dev/repin_consumer.py`'s rewrite, the other consumers -- is LF.
+    copy of it -- the docs, the docs/releasing.md re-pin, the other consumers -- is LF.
 
     The whole kwargs mapping is compared against a hand-written dict rather than only the
     bytes on disk, for the reason `test_run_passes_stdin_as_bytes_with_text_mode_off` gives:
@@ -1976,8 +1957,8 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
 
 def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp_path):
     """A consumer who pasted the published fence by hand holds `@<engine-sha>`, which is not a
-    pin `dev/repin_consumer.py` can move: its pattern requires 40 hex, so it would answer "no
-    engine references found". Naming a remedy that cannot work is worse than naming none, so
+    pin the docs/releasing.md re-pin can move: its `sed` requires 40 hex, so it would rewrite
+    nothing. Naming a remedy that cannot work is worse than naming none, so
     that file is `differs`.
 
     Mutation: widen `_ANY_PIN` from `[0-9a-f]{40}` to `\\S+`.

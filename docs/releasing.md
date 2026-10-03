@@ -11,8 +11,37 @@ pinned, and the engine's own nested workflows, `apply-env-level.yml` and
 ## Consumers move every engine ref in one change
 
 The seven reusable workflows share inputs and secrets across a release, so a consumer re-pins
-all seven `uses:` lines in one commit (`dev/repin_consumer.py` does exactly that) and never
+all seven `uses:` lines in one commit (§ Re-pin a consumer) and never
 merges a Dependabot pull request that bumps one line alone.
+
+### Re-pin a consumer
+
+`<release-sha>` is the release's full 40-hex commit (`git rev-list -n1 vX.Y.Z` once tagged),
+never a short SHA. `<consumer>` is the consumer repository's checkout. Use GNU sed: `-b`
+keeps a CRLF file's line endings under Git Bash.
+
+1. From the engine clone, check that `<release-sha>` is on `origin/main` and rewrite every
+   engine ref. The check is `&&`-chained, so a SHA not on `origin/main` rewrites nothing: a
+   commit reachable only from a branch stops resolving once that branch is force-pushed or
+   deleted.
+
+   ```bash
+   git fetch origin main && git merge-base --is-ancestor <release-sha> origin/main && \
+     sed -b -i -E 's|(ship-iac/shipmate/[^@[:space:]"]+)@[0-9a-f]{40}("?)([[:space:]]+# v[^[:space:]]*)?|\1@<release-sha>\2 # vX.Y.Z|' <consumer>/.github/workflows/*.yml
+   ```
+
+2. List the engine refs the rewrite left behind. It must print nothing, because every engine
+   ref moves in one commit. A printed line is a ref the `sed` does not handle (`@main`, a
+   single-quoted ref, a comment that is not `# vX.Y.Z`): fix it by hand and run step 2 again.
+
+   ```bash
+   grep -nE 'ship-iac/shipmate/[^@[:space:]"]+@' <consumer>/.github/workflows/*.yml | grep -vE '@<release-sha>"? # vX\.Y\.Z'$'\r''?$'
+   ```
+
+3. Commit the rewrite as one commit.
+
+The `sed` reads `.yml` files only. Every consumer file this engine renders is `.yml`; rename a
+`.yaml` workflow that calls the engine, or re-pin it by hand.
 
 ## Manifest load
 
@@ -126,15 +155,17 @@ the release commit, from `repo-example-stacks-aws`:
 
    ```bash
    git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z
-   python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sha> --label vX.Y.Z
    ```
 
-   **`repin_consumer.py` rewrites pins and nothing else.** When a release
+   Then run § Re-pin a consumer with `<consumer>` set to `../repo-example-stacks-aws` and
+   `<release-sha>` set to the release commit.
+
+   **The re-pin rewrites pins and nothing else.** When a release
    changes the consumer file's declared input contract, make those body edits on
    the scratch branch too — a new pin under an old body is the load-time
    rejection described below, not a smoke result.
 
-   The same gap has a second form the tool cannot reach at all: a consumer's
+   The same gap has a second form the re-pin cannot reach at all: a consumer's
    allowed-actions list is a repository setting, not a file. Under
    `docs/hardening.md` row 12 a consumer restricts `allowed_actions` to a named
    pattern list, and those patterns end `@*` — so a version bump is absorbed,
@@ -250,14 +281,9 @@ to that same SHA, annotating the pin `# vX.Y.Z`. Re-pinning first would leave
 the sample on a commit with no release, which is exactly the state the probe
 reads as staleness.
 
-```bash
-python dev/repin_consumer.py --repo ../repo-example-stacks-aws --sha <release-sha> --label vX.Y.Z
-```
-
-`dev/repin_consumer.py` moves every engine reference in one pass (see
-§ Consumers move every engine ref in one change) and refuses a target not
-reachable from `origin/main` (exit 1), so it cannot re-pin a sample to a branch
-commit.
+Run § Re-pin a consumer with `<consumer>` set to `../repo-example-stacks-aws`. Its
+ancestor check refuses a target not reachable from `origin/main`, so it cannot re-pin a
+sample to a branch commit.
 
 **A re-pin pull request is always pins-only.** Bump `global.version` in its own
 pull request afterwards, whose plan runs the new engine. Under

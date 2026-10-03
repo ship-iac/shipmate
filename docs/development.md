@@ -10,15 +10,6 @@ Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
   exception is `_shipmate.py`, the loader the helpers import to reach each
   other, which also holds the secret scrubber and repository-slug check
   `onboard` and `register-app` share; it is never a step. `scripts/tests/` holds their unit tests.
-- `dev/` — maintainer tooling you run by hand, never from a workflow. Nothing in
-  `actions/` or `.github/workflows/` references it and it adds no action input.
-  It exists because consumers pin by SHA and all seven refs move together:
-  `repin_consumer.py` re-pins a consuming repo, refusing a target not reachable
-  from `origin/main`.
-
-  [`releasing.md`](releasing.md) is the runbook that drives it.
-  `pyproject.toml` puts `dev/` on the pytest `pythonpath`. That is how the
-  tests under `scripts/tests/` import `repin_consumer`.
 - `app/` — the GitHub App manifest.
 - `docs/` — these pages.
 

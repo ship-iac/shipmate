@@ -678,8 +678,8 @@ _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", r
 _DOC_PIN = re.compile(
     r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
 )
-#: Only a 40-hex pin, matching what `dev/repin_consumer.py` rewrites: a file still carrying the
-#: docs placeholder must not be reported `pin-only`, because that names a remedy which would
+#: Only a 40-hex pin, matching what the docs/releasing.md re-pin rewrites: a file still carrying
+#: the docs placeholder must not be reported `pin-only`, because that names a remedy which would
 #: then find no engine reference to move.
 _ANY_PIN = re.compile(
     r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@[0-9a-f]{40}[^\S\n]*(#[^\n]*)?"
@@ -728,8 +728,8 @@ def _depin(text):
 def _reconcile_shim(ctx):
     """Write the consumer workflow file, reporting anything already there.
 
-    `pin-only` is not drift: moving a pin is `dev/repin_consumer.py`'s job, driven by
-    docs/releasing.md, so it does not reach `_exit_code`.
+    `pin-only` is not drift: moving a pin is the re-pin procedure in docs/releasing.md, so
+    it does not reach `_exit_code`.
     """
     filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
@@ -742,7 +742,11 @@ def _reconcile_shim(ctx):
     if current == text:
         report("ok", filename)
     elif _depin(current) == _depin(text):
-        report("pin-only", filename, "run dev/repin_consumer.py")
+        report(
+            "pin-only",
+            filename,
+            "move every engine ref to this engine's SHA in one commit (docs/releasing.md)",
+        )
     elif "<engine-sha>" in current:
         report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:

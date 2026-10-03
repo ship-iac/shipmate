@@ -958,8 +958,8 @@ the ruleset's requirement.
 The `comment-ops`, `targeted` and `all` jobs must pin one engine commit:
 `comment-ops.yml` authorizes an apply that `apply.yml` and `apply-all.yml`
 enforce, so at different commits an apply authorized under one engine's rule is
-enforced by another's, or by none. `dev/repin_consumer.py` moves all seven pins
-together.
+enforced by another's, or by none. [`releasing.md`](releasing.md) § Re-pin a consumer
+moves all seven pins together.
 
 What this does and does not do: an ungated environment may be applied without an
 approving review; every other apply requirement still decides, including
