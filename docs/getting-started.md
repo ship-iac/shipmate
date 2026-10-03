@@ -943,18 +943,9 @@ enforces, so at different commits an apply authorized under one engine's rule is
 enforced by another's, or by none. [`releasing.md`](releasing.md) § Re-pin a consumer
 moves all six pins together.
 
-What this does and does not do: an ungated environment may be applied without an
-approving review; every other apply requirement still decides, including
-`CHANGES_REQUESTED`, and every gated environment keeps the requirement. A
-bare `shipmate apply` on an unreviewed pull request applies the ungated
-environments and holds the rest — their apply checks stay pending, so
-`shipmate / gate` stays pending and the merge stays blocked until they are
-applied with a review in hand. Ungating an environment is a commit to
-the default branch, under whatever your ruleset requires of one, so the pull
-request that benefits from the exemption cannot also grant it. That is all
-it claims. Full semantics in [`../CONTRACT.md`](../CONTRACT.md)
-§Comment-ops. An environment's `required_reviewers` still gates the deployment:
-it is a separate control, and the trade-off against it is in
+What the exemption does and does not cover, including a bare `shipmate apply`
+on an unreviewed pull request, is in [`../CONTRACT.md`](../CONTRACT.md)
+§Comment-ops; how it compares with an environment's `required_reviewers` is in
 [`hardening.md`](hardening.md) §3–5.
 
 ### Further hardening

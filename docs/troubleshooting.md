@@ -747,27 +747,9 @@ The apply comment carries a line
 `⚪ <env>: held, the review state does not permit applying`, or
 `shipmate apply` was refused with a review reason.
 
-`gated = false` on an entry in `.github/shipmate.toml` exempts that environment
-from the review requirement and nothing else. A targeted `shipmate apply <env>`
-is decided at comment time: a gated env gets the usual refusal, extended to
-name its `environments.<env>.gated` setting, and the engine re-applies the same rule to
-the decision it reads at apply time — a run refused there dies before any wave,
-leaving the apply checks pending. A bare `shipmate apply` is partitioned
-per environment on the apply path, from the review decision read there:
-
-| `reviewDecision` when the apply runs | what applies |
-|---|---|
-| `NONE` (no rule requires a review, or the only review rule is code-owner review and no changed file has an owner) or `APPROVED` | everything pending — no partition |
-| `REVIEW_REQUIRED` | the ungated environments; every other pending environment is held — all of them when no entry holds `gated = false` |
-| `CHANGES_REQUESTED` | nothing — every environment is held, ungated ones included |
-| anything else, or no decision arrived | nothing — every environment is held |
-
-Held environments keep their `apply / <stack> / <env>` checks pending, so
-`shipmate / gate` stays pending and the merge stays blocked; environments
-ordered after a held one are skipped for the same run. `gated = false` only ever
-narrows what a `REVIEW_REQUIRED` decision holds; it is the decision that
-decides, so an unreviewed pull request holds every environment in a repository
-that declares nothing.
+Which review decision refuses a targeted apply, and which environments a bare
+apply holds for each decision, is in [`../CONTRACT.md`](../CONTRACT.md)
+§Comment-ops (the `gated = false` rules).
 
 **The apply is refused although the environment is ungated.** Check which copy
 of the file you edited: all three readers resolve `gated` from the
