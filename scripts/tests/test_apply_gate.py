@@ -101,9 +101,12 @@ def test_non_apply_checks_ignored():
     assert ag.verdict(runs) == "complete"
 
 
-def test_no_apply_checks_at_all():
+def test_no_apply_checks_at_all_is_pending():
+    """`all([])` is True, so an empty listing must not read complete.
+
+    Mutation: drop `latest and` from `verdict` -- the empty listing reads `complete`."""
     runs = [_run("stacks/app / dev-eu", "completed", "success")]
-    assert ag.verdict(runs) == "no-applies"
+    assert ag.verdict(runs) == "pending"
 
 
 def test_cancelled_apply_stays_pending():

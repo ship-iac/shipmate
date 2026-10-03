@@ -1,6 +1,7 @@
 """pending-checks: check-run POST bodies from downloaded cell summaries."""
 
 import json
+import os
 
 import pytest
 from _loader import load_script
@@ -88,6 +89,8 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
 
 
 def test_missing_fingerprint_fails_loud(tmp_path):
+    """Mutation: drop `"fingerprint"` from `bodies`' required keys -- a `KeyError` instead of
+    the `SystemExit`."""
     _write_cell(
         tmp_path,
         "dev-eu",
@@ -97,8 +100,13 @@ def test_missing_fingerprint_fails_loud(tmp_path):
         environment="dev-eu",
         changed=True,
     )
-    with pytest.raises(SystemExit, match="has no 'fingerprint' key"):
+    with pytest.raises(SystemExit) as exc_info:
         pc.bodies(str(tmp_path), HEAD)
+    cell_json = os.path.join(str(tmp_path), "cell-summary.dev-eu.stacks-app", "cell.json")
+    assert str(exc_info.value) == (
+        f"::error::cell summary {cell_json} missing keys ['fingerprint'] -- plan-cell and the "
+        "summary job must run the same engine revision; re-run the plan"
+    )
 
 
 def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):

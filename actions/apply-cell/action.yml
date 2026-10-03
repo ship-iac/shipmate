@@ -7,9 +7,6 @@ inputs:
   env:
     description: Environment name, e.g. dev-eu.
     required: true
-  head-sha:
-    description: PR head SHA carrying the pending apply check.
-    required: true
   plan-run-id:
     description: Plan run id holding the reviewed plan artifact.
     required: true
