@@ -65,8 +65,19 @@ DETECT_NEEDS = {
 #: omitted passes unnoticed.
 DOWNSTREAM_NEEDS = {
     "apply.yml": {
-        "apply": ["guard", "review", "detect"],
-        "summary": ["guard", "review", "detect", "apply"],
+        "envlevel0": ["guard", "review", "detect"],
+        "envlevel1": ["guard", "review", "detect", "envlevel0"],
+        "envlevel2": ["guard", "review", "detect", "envlevel0", "envlevel1"],
+        "envlevel3": ["guard", "review", "detect", "envlevel0", "envlevel1", "envlevel2"],
+        "summary": [
+            "guard",
+            "review",
+            "detect",
+            "envlevel0",
+            "envlevel1",
+            "envlevel2",
+            "envlevel3",
+        ],
     },
     "apply-all.yml": {
         "envlevel0": ["guard", "review", "detect"],

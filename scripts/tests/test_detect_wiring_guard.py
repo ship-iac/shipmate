@@ -8,7 +8,8 @@
   site passes it `toJSON(vars)`, so `env-config` can resolve a `{ vars = "NAME" }` reference in
   the table. The
   `with:` of `plan.yml`, `drift.yml` and `unlock.yml`'s detect steps is pinned whole beside the
-  rest of those workflows; the other three are pinned here.
+  rest of those workflows; the other four steps are pinned here whole, beside `apply.yml`'s
+  `detect` outputs.
 - The set of workflow steps carrying `toJSON(vars)` is exactly the detect and cell steps. The
   enumeration holds every repository and organization variable, so a new holder is a decision.
 """
@@ -54,43 +55,89 @@ _TABLE_READERS = (
     "summary",
 )
 
-#: The whole `with:` of the detect steps no other guard pins whole, by workflow.
-_DETECT_WITH = {
-    "apply.yml": (
-        "$/actions/apply-detect",
-        {
+#: The whole detect steps no other guard pins whole, by workflow and action. `apply.yml` runs
+#: exactly one of its two by `if:`, and its job outputs read each by `id`.
+_DETECT_STEPS = {
+    ("apply.yml", "$/actions/apply-detect"): {
+        "id": "t",
+        "if": "${{ inputs.environment != '' }}",
+        "uses": "$/actions/apply-detect",
+        "with": {
             "environment": "${{ inputs.environment }}",
             "head-sha": "${{ inputs.ref }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "review-decision": "${{ needs.review.outputs.decision }}",
             "github-vars": "${{ toJSON(vars) }}",
         },
-    ),
-    "apply-all.yml": (
-        "$/actions/apply-all-detect",
-        {
+    },
+    ("apply.yml", "$/actions/apply-all-detect"): {
+        "id": "d",
+        "if": "${{ inputs.environment == '' }}",
+        "uses": "$/actions/apply-all-detect",
+        "with": {
             "head-sha": "${{ inputs.ref }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "review-decision": "${{ needs.review.outputs.decision }}",
             "github-vars": "${{ toJSON(vars) }}",
         },
-    ),
-    "deploy.yml": (
-        "$/actions/deploy-detect",
-        {
+    },
+    ("apply-all.yml", "$/actions/apply-all-detect"): {
+        "id": "d",
+        "uses": "$/actions/apply-all-detect",
+        "with": {
+            "head-sha": "${{ inputs.ref }}",
+            "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+            "review-decision": "${{ needs.review.outputs.decision }}",
+            "github-vars": "${{ toJSON(vars) }}",
+        },
+    },
+    ("deploy.yml", "$/actions/deploy-detect"): {
+        "id": "d",
+        "uses": "$/actions/deploy-detect",
+        "with": {
             "base-sha": "${{ github.event.before }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "github-vars": "${{ toJSON(vars) }}",
         },
+    },
+}
+
+#: The whole `outputs:` of `apply.yml`'s `detect`. A skipped step's outputs read as '', so each
+#: two-sourced value is whichever step ran. Levels 1-3 read 'true' from the input on a targeted
+#: apply: `apply-detect` writes none, and a missing `_empty` must run its level red, never skip.
+_APPLY_DETECT_OUTPUTS = {
+    "envlevel0_waves": "${{ steps.t.outputs.waves || steps.d.outputs.envlevel0_waves }}",
+    "envlevel1_waves": "${{ steps.d.outputs.envlevel1_waves }}",
+    "envlevel2_waves": "${{ steps.d.outputs.envlevel2_waves }}",
+    "envlevel3_waves": "${{ steps.d.outputs.envlevel3_waves }}",
+    "envlevel0_empty": "${{ steps.t.outputs.empty || steps.d.outputs.envlevel0_empty }}",
+    "envlevel1_empty": (
+        "${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel1_empty }}"
+    ),
+    "envlevel2_empty": (
+        "${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel2_empty }}"
+    ),
+    "envlevel3_empty": (
+        "${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel3_empty }}"
+    ),
+    "head_sha": "${{ steps.t.outputs.head_sha || steps.d.outputs.head_sha }}",
+    "excluded_envs": "${{ steps.d.outputs.excluded_envs }}",
+    "skipped_envs": "${{ steps.d.outputs.skipped_envs }}",
+    "review_held_envs": "${{ steps.d.outputs.review_held_envs }}",
+    "applied_ungated_envs": "${{ steps.d.outputs.applied_ungated_envs }}",
+    "review_not_required_envs": (
+        "${{ steps.t.outputs.review_not_required_envs"
+        " || steps.d.outputs.review_not_required_envs }}"
     ),
 }
 
-#: Every (workflow, job, step) that carries `toJSON(vars)`: six detect steps, eleven cell steps,
+#: Every (workflow, job, step) that carries `toJSON(vars)`: seven detect steps, eleven cell steps,
 #: the `comment-ops` step and the plan `summary` step.
 _VARS_HOLDERS = {
     ("plan.yml", "detect", "$/actions/build-matrix"),
     ("drift.yml", "detect", "$/actions/build-matrix"),
     ("apply.yml", "detect", "$/actions/apply-detect"),
+    ("apply.yml", "detect", "$/actions/apply-all-detect"),
     ("unlock.yml", "detect", "$/actions/apply-detect"),
     ("apply-all.yml", "detect", "$/actions/apply-all-detect"),
     ("deploy.yml", "detect", "$/actions/deploy-detect"),
@@ -127,14 +174,20 @@ def test_every_table_reader_declares_the_variables_input(action):
     assert declared == {"required": False, "default": ""}
 
 
-@pytest.mark.parametrize("workflow", sorted(_DETECT_WITH))
-def test_the_detect_step_passes_exactly_these_inputs(workflow):
-    """Mutation: delete the `github-vars:` line from `deploy.yml`'s detect step."""
-    uses, expected = _DETECT_WITH[workflow]
+@pytest.mark.parametrize(("workflow", "uses"), sorted(_DETECT_STEPS))
+def test_the_detect_step_is_exactly_this_step(workflow, uses):
+    """Mutation: delete the `github-vars:` line from `deploy.yml`'s detect step.
+    Mutation: swap the `if:` of `apply.yml`'s two detect steps.
+    Mutation: delete `review-decision` from `apply.yml`'s step `t`."""
     doc = workflow_yaml(workflow)
     steps = [s for s in doc["jobs"]["detect"]["steps"] if s.get("uses") == uses]
     assert len(steps) == 1, f"{workflow}: {len(steps)} {uses} steps"
-    assert steps[0]["with"] == expected
+    assert steps[0] == _DETECT_STEPS[(workflow, uses)]
+
+
+def test_the_apply_detect_job_outputs_exactly_these_expressions():
+    """Mutation: drop `&& 'true'` from `envlevel1_empty`'s targeted arm."""
+    assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
 def test_only_the_listed_steps_carry_the_variables():

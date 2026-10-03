@@ -347,5 +347,6 @@ def test_apply_passes_the_review_not_required_output_to_apply_summary():
         "${{ needs.detect.outputs.review_not_required_envs }}"
     )
     assert spec["jobs"]["detect"]["outputs"]["review_not_required_envs"] == (
-        "${{ steps.d.outputs.review_not_required_envs }}"
+        "${{ steps.t.outputs.review_not_required_envs"
+        " || steps.d.outputs.review_not_required_envs }}"
     )

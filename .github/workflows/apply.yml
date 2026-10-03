@@ -2,7 +2,8 @@ name: apply
 on:
   workflow_call:
     inputs:
-      environment: { required: true, type: string }
+      # Empty applies every pending environment in `needs` order; a name applies that one alone.
+      environment: { required: false, type: string, default: "" }
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
     # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
@@ -49,19 +50,37 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
 
   detect:
+    # A `review` that FAILS is caught by `!failure()`, so nothing applies and the run is visibly
+    # red. The explicit `if:` stays rather than reverting to GHA's default `success()`: both forms
+    # refuse a failed `review`, and this one says so.
     needs: [guard, review]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions: { contents: read, checks: read, actions: read }
+    # Exactly one of `t` (targeted) and `d` (every environment) runs, and a skipped step's outputs
+    # read as ''. A targeted apply is one env-level, so levels 1-3 read 'true' from the input, never
+    # from a missing output: an unwritten `_empty` reads '', runs its level and dies at fromJSON.
     outputs:
-      waves: ${{ steps.d.outputs.waves }}
-      empty: ${{ steps.d.outputs.empty }}
-      head_sha: ${{ steps.d.outputs.head_sha }}
-      review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
+      envlevel0_waves: ${{ steps.t.outputs.waves || steps.d.outputs.envlevel0_waves }}
+      envlevel1_waves: ${{ steps.d.outputs.envlevel1_waves }}
+      envlevel2_waves: ${{ steps.d.outputs.envlevel2_waves }}
+      envlevel3_waves: ${{ steps.d.outputs.envlevel3_waves }}
+      envlevel0_empty: ${{ steps.t.outputs.empty || steps.d.outputs.envlevel0_empty }}
+      envlevel1_empty: ${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel1_empty }}
+      envlevel2_empty: ${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel2_empty }}
+      envlevel3_empty: ${{ inputs.environment != '' && 'true' || steps.d.outputs.envlevel3_empty }}
+      head_sha: ${{ steps.t.outputs.head_sha || steps.d.outputs.head_sha }}
+      excluded_envs: ${{ steps.d.outputs.excluded_envs }}
+      skipped_envs: ${{ steps.d.outputs.skipped_envs }}
+      review_held_envs: ${{ steps.d.outputs.review_held_envs }}
+      applied_ungated_envs: ${{ steps.d.outputs.applied_ungated_envs }}
+      review_not_required_envs: ${{ steps.t.outputs.review_not_required_envs || steps.d.outputs.review_not_required_envs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: $/actions/setup
-      - id: d
+      - id: t
+        if: ${{ inputs.environment != '' }}
         uses: $/actions/apply-detect
         with:
           environment: ${{ inputs.environment }}
@@ -71,30 +90,38 @@ jobs:
           # arrived, and empty refuses the run.
           review-decision: ${{ needs.review.outputs.decision }}
           github-vars: ${{ toJSON(vars) }}
+      - id: d
+        if: ${{ inputs.environment == '' }}
+        uses: $/actions/apply-all-detect
+        with:
+          head-sha: ${{ inputs.ref }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          # Passed through raw, never defaulted: an empty decision means the review signal never
+          # arrived, and empty is the hold-everything value.
+          review-decision: ${{ needs.review.outputs.decision }}
+          github-vars: ${{ toJSON(vars) }}
 
-  # A targeted apply is single-env by design, so its pending wave set is exactly one env-level's
-  # wave matrix. It runs through the same engine the deploy and bare-apply paths use, rather than
-  # duplicating wave0..wave7 here.
-  apply:
-    # Display name only (the job id stays `apply`): a called workflow's jobs display as
-    # `<caller job> / <this name> / <wave job>`, and GHA cannot suppress a level -- so this level
-    # is named for what it fans out instead of repeating the verb the wave job already carries.
-    name: waves
+  envlevel0:
+    # Display name only (the job ids stay `envlevel*`): a called workflow's jobs display as
+    # `<caller job> / <this name> / <wave job>`, and GHA cannot suppress a level -- so each level
+    # is named for the env-level it fans out instead of repeating the verb the wave job carries.
+    name: L0
     # `guard` and `review` join `detect` in `needs` so their failures reach `!failure()`: without
     # them a rejected dispatch, or a `review` that could not mint the App key, skips `detect`, and
-    # a skipped `detect` reads its outputs as empty strings -- which `!= 'true'` fans out on.
+    # a skipped `detect` reads its outputs as empty strings -- which `!= 'true'` fans out on, over
+    # `fromJSON('')`.
     needs: [guard, review, detect]
-    if: ${{ !failure() && !cancelled() && needs.detect.outputs.empty != 'true' }}
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
     uses: ./.github/workflows/apply-env-level.yml
-    permissions: { contents: read, checks: read, actions: read, id-token: write }
+    permissions: &envlevel-permissions { contents: read, checks: read, actions: read, id-token: write }
     with:
-      waves_json: ${{ needs.detect.outputs.waves }}
+      waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
     # Named, never `inherit`: these two files sit in one organization but the RUN belongs to the
     # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
     # `complete` job would hold no key, its applies would execute, and their apply checks would
     # strand pending forever.
-    secrets:
+    secrets: &envlevel-secrets
       # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
       # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
       # load-time error, unlike an undeclared action input, which is silently ignored.
@@ -102,16 +129,50 @@ jobs:
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
+  envlevel1:
+    name: L1
+    needs: [guard, review, detect, envlevel0]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel1_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ./.github/workflows/apply-env-level.yml
+    permissions: *envlevel-permissions
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+    secrets: *envlevel-secrets
+
+  envlevel2:
+    name: L2
+    needs: [guard, review, detect, envlevel0, envlevel1]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel2_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ./.github/workflows/apply-env-level.yml
+    permissions: *envlevel-permissions
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+    secrets: *envlevel-secrets
+
+  envlevel3:
+    name: L3
+    needs: [guard, review, detect, envlevel0, envlevel1, envlevel2]
+    if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel3_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}
+    uses: ./.github/workflows/apply-env-level.yml
+    permissions: *envlevel-permissions
+    with:
+      waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
+      head_sha: ${{ needs.detect.outputs.head_sha }}
+    secrets: *envlevel-secrets
+
   summary:
     # `review` is in this list because `results:` is `join(needs.*.result, ',')`, which covers only
     # THIS job's needs. A failed `review` skips `detect` -- correctly: nothing applies and the gate
     # stays pending -- while `summary` still runs on `guard`'s success, so without the entry the
     # comment renders the non-failure form over a run that died.
-    needs: [guard, review, detect, apply]
+    needs: [guard, review, detect, envlevel0, envlevel1, envlevel2, envlevel3]
     # `always()` alone would still run this job, and mint the App key, when the bot-actor rejection
     # failed; `needs.guard.result == 'success'` closes that. Keyed on `guard`, not `detect`:
     # `always()` posts the comment and refreshes the gate when apply failed or was cancelled, and
-    # must do the same for a genuine `detect` failure -- a cell recording no plan run.
+    # must do the same for a genuine `detect` failure -- a cell recording no plan run, or a `needs`
+    # cycle.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-slim
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as
@@ -136,7 +197,14 @@ jobs:
           pr-number: ${{ inputs.pr_number }}
           head-sha: ${{ inputs.ref }}
           environment: ${{ inputs.environment }}
-          waves-json: ${{ needs.detect.outputs.waves }}
+          envlevel0-waves: ${{ needs.detect.outputs.envlevel0_waves }}
+          envlevel1-waves: ${{ needs.detect.outputs.envlevel1_waves }}
+          envlevel2-waves: ${{ needs.detect.outputs.envlevel2_waves }}
+          envlevel3-waves: ${{ needs.detect.outputs.envlevel3_waves }}
+          excluded-envs: ${{ needs.detect.outputs.excluded_envs }}
+          skipped-envs: ${{ needs.detect.outputs.skipped_envs }}
+          review-held-envs: ${{ needs.detect.outputs.review_held_envs }}
+          applied-ungated-envs: ${{ needs.detect.outputs.applied_ungated_envs }}
           review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           results: ${{ join(needs.*.result, ',') }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
