@@ -137,10 +137,9 @@ runs:
         PLAN_SHA256: ${{ inputs.plan-sha256 }}
       run: |
         set -euo pipefail
-        # `required: true` is not enforced by GitHub Actions, so an unwired input arrives empty;
-        # one shape check refuses that and a malformed value, before any work is done. Its own
-        # step, and above the init: a wiring slip and a tampered plan need different remedies, so
-        # they must not share a blocked reason.
+        # GitHub does not enforce `required: true`: this refuses an empty or malformed digest before
+        # any work. Its own step, above the init: a wiring slip and a tampered plan need different
+        # remedies, so they must not share a blocked reason.
         [[ "$PLAN_SHA256" =~ ^[0-9a-f]{64}$ ]] || {
           echo "::error::apply aborted for $ENV/$STACK_NAME: no usable plan-text digest reached this action. Re-pin every engine reference to one commit, then re-plan."
           exit 1
@@ -207,11 +206,9 @@ runs:
         PLAN_SHA256: ${{ inputs.plan-sha256 }}
       run: |
         set -euo pipefail
-        # Binds the plan text a reviewer approved to the plan about to run: re-rendered with the
-        # command that wrote it, compared whole. `tofu show` of a stored plan is byte-identical
-        # across runners at one tofu version, and a version or provider change makes tofu refuse
-        # the plan file outright, so a difference here means the two disagree about content. The
-        # render needs the providers `init` installs, hence its place after that step.
+        # Binds the reviewed plan text to the plan about to run. `tofu show` is byte-identical across
+        # runners at one tofu version (a version change refuses the plan file), so a difference is
+        # a content mismatch. Needs the providers `init` installs, so it runs after init.
         rendered="$RUNNER_TEMP/rendered-plan.txt"
         tofu -chdir="$STACK" show -no-color stack.otplan > "$rendered"
         # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
@@ -227,25 +224,19 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      # The engine owns the command: `tofu apply stack.otplan` applies the reviewed plan
-      # artifact and nothing else, so the exact-plan invariant does not depend on branch
-      # content. tofu rejects a plan whose state moved since generation, and the non-zero
-      # exit leaves the apply check pending (fail-safe).
+      # The engine owns the command, so exact-plan does not depend on branch content. tofu rejects
+      # a plan whose state moved since generation, and the non-zero exit leaves the apply check
+      # pending (fail-safe).
       run: |
         set -euo pipefail
         echo "::group::terramate apply: $STACK"
-        # errexit is off for this one pipeline, and the step exits on tofu's own status via
-        # PIPESTATUS[0]: with errexit and pipefail live, a `tee` failure alone -- a full
-        # $RUNNER_TEMP, a disk hiccup mid-write -- would fail an apply whose every resource
-        # succeeded. `Save state` (always()) still persists the advanced state, so a re-run
-        # would hit the stale-plan fail-safe with no way back. Exiting on tofu's own
-        # captured status keeps a cosmetic `tee` failure from masking a success, or
-        # manufacturing one.
+        # Exit on tofu's own PIPESTATUS[0], not pipefail: a `tee` failure alone would fail a
+        # successful apply whose advanced state `Save state` persists, leaving a re-run on the
+        # stale-plan fail-safe with no way back.
         set +e
-        # No `-auto-approve`: applying a stored plan never prompts, so the flag is inert, and
-        # its absence is a backstop. Were the `stack.otplan` argument ever lost, `-input=false`
-        # alone fails with "Error asking for approval", where `-auto-approve` would re-plan
-        # from branch content and apply that unattended.
+        # No `-auto-approve`: inert on a stored plan, and its absence is a backstop. Were
+        # `stack.otplan` lost, `-input=false` fails "Error asking for approval", where
+        # `-auto-approve` would re-plan from branch content and apply that unattended.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
         status="${PIPESTATUS[0]}"
         set -e
@@ -253,19 +244,9 @@ runs:
         exit "$status"
 
     - name: Save state
-      # Persisted whenever the apply was attempted, not only on a clean apply: a partial
-      # `tofu apply` mutates local state per-resource whether it failed or was cancelled
-      # (manually, or by apply-<env>-<stack> concurrency displacement), and dropping that
-      # delta would orphan resources on the next run's restore-then-retry.
-      # always(), not !cancelled(), is safe because the sink is actions/cache: entries commit
-      # only on a completed, size-validated upload, keyed per run_id-run_attempt, so a
-      # teardown mid-upload never commits and can never clobber the last-good state. Worst
-      # case the delta is lost; best case the partial state persists and the next retry hits
-      # tofu's stale-plan fail-safe loudly.
-      # The guard on the restore's outcome keeps state that was never restored from being
-      # saved. On cancellation this job's own conclusion reads cancelled, so the trusted
-      # trailing job -- which completes a check only when the job that applied it succeeded --
-      # leaves the check pending and the work is re-detected.
+      # always(), not !cancelled(): a failed or cancelled apply still mutated state, and dropping
+      # that delta orphans resources. Safe because actions/cache commits only a completed upload,
+      # so a torn save never clobbers the last-good state. Never saves unrestored state.
       if: ${{ always() && steps.restore-state.outcome == 'success' }}
       uses: $/actions/state
       with:
@@ -296,14 +277,9 @@ runs:
         key: ${{ steps.provider-cache.outputs.cache-primary-key }}
 
     - name: Compose cell summary
-      # Runs even when a fail-safe or the apply itself failed or was cancelled: the
-      # aggregator needs a result for every attempted-or-blocked cell. Built from env vars
-      # only, because stack/env/reason text is author-controlled (Terramate tags, workflow
-      # inputs) and must never be shell-interpolated or spliced into JSON by string concat.
-      # continue-on-error because comment feedback must never outrank the work queue: this
-      # step only composes the apply result comment's data, and `Save state` has already
-      # advanced past the reviewed .otplan, so failing the job would leave a re-run on the
-      # stale-plan fail-safe with no way back on an otherwise-successful apply.
+      # always(): the aggregator needs a result for every attempted or blocked cell. Env vars only:
+      # stack, env and reason text is author-controlled, never shell- or JSON-spliced.
+      # Reviewer-facing only (continue-on-error): failing after `Save state` strands a stale plan.
       if: always()
       continue-on-error: true
       shell: bash
@@ -326,11 +302,9 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"
 
     - name: Upload apply summary
-      # continue-on-error, as on `Compose cell summary`: a failed cosmetic upload
-      # under-reports in the pull request comment, an applied cell rendering as
-      # not-attempted, rather than stranding an already-applied cell's check pending.
-      # `overwrite: true` because a job re-run in the same workflow run -- the documented
-      # "re-run the deploy" recovery path -- cannot 409 on the pre-existing artifact name.
+      # Reviewer-facing only (continue-on-error): a failed upload drops the cell's output from the
+      # comment rather than stranding its check pending. `overwrite: true` keeps a same-run job
+      # re-run, the documented recovery path, from failing 409 on the existing artifact name.
       if: always()
       continue-on-error: true
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

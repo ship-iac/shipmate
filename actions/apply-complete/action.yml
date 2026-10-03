@@ -23,24 +23,21 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_SNAPSHOT_JSON: ${{ inputs.snapshot }}
-      # A 256-cell level exceeds the 100-per-page cap, so `--paginate --jq` streams one job
-      # object per line to scripts/apply-complete on stdin. Unlike actions/apply-summary's
-      # cosmetic log-link listing, this one decides which checks get completed, so it must
-      # never degrade to no data: a successful apply would silently strand every check pending.
+      # `--paginate --jq` because a 256-cell level exceeds the 100-per-page cap. Unlike
+      # apply-summary's cosmetic listing, this one decides which checks complete, so it never
+      # degrades to no data: that would silently strand every applied check pending.
       run: |
         set -euo pipefail
         : > "$RUNNER_TEMP/earned-ids.txt"
         : > "$RUNNER_TEMP/stranded.txt"
         ok=""
-        # ~2 minutes of budget, not the ~30s a lag is expected to need: exhausting it fails
-        # `complete`, which fails the env-level, and deploy.yml's `!failure()` guards then skip
-        # every successor env-level -- halting a multi-region deploy over infrastructure that
-        # already applied.
+        # ~2 minutes, not the ~30s a lag needs: exhausting it fails the env-level, and
+        # deploy.yml's `!failure()` guards then skip every successor env-level, halting a
+        # multi-region deploy over infrastructure that already applied.
         attempts=12
-        # The listing lags: a wave job can finish seconds before its conclusion is readable
-        # here, and a cell that cannot yet be decided is not a cell that did not run. The
-        # fetch sits inside the loop because re-reading the listing IS the retry; hoisting it
-        # turns twelve attempts into one, plus 110 seconds of sleeping over a fixed snapshot.
+        # The listing lags behind a finished wave job, and an undecided cell is not one that did
+        # not run. Re-reading the listing IS the retry: hoisting the fetch out of the loop turns
+        # twelve attempts into one plus 110 seconds of sleep over a fixed snapshot.
         for n in $(seq "$attempts"); do
           rc=0
           : > "$RUNNER_TEMP/attempt-ids.txt"
@@ -52,10 +49,9 @@ runs:
               > "$RUNNER_TEMP/attempt-ids.txt" \
               2> "$RUNNER_TEMP/diagnostics.txt" || rc=$?
           else
-            # An empty listing or a failed fetch is the most extreme form of that lag, so it
-            # is retried rather than failed on. The half-written file is left unread: a
-            # truncated listing matches a subset of cells and so slips past the script's
-            # all-cells-unmatched floor.
+            # An empty or failed fetch is the extreme form of that lag, so it retries. The
+            # half-written file stays unread: a truncated listing matches a subset of cells
+            # and slips past the script's all-cells-unmatched floor.
             rc=75
             echo "retry: the run jobs listing came back empty or unreadable; cannot tell which wave cells succeeded" \
               > "$RUNNER_TEMP/diagnostics.txt"

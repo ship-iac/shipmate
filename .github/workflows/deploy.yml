@@ -2,10 +2,9 @@ name: deploy
 on:
   workflow_call:
     secrets:
-      # Consumers pass this by name. A `vars` entry such as SHIPMATE_APP_ID is inherited by a
-      # called workflow automatically; secrets are NOT, and an encrypting consumer
-      # that forwards nothing has every env-level apply fail its decrypt fail-safe. No environment
-      # can supply it either: the wave jobs bind the env's apply environment, not `shipmate-engine`.
+      # Consumers pass this by name: `vars` reach a called workflow automatically, secrets do not,
+      # and no environment supplies it (the waves bind the env's apply environment). Without it an
+      # encrypting consumer's every env-level apply fails its decrypt fail-safe.
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
       # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud one
       # step earlier, in that job's `Verify the App key arrived`.
@@ -123,10 +122,9 @@ jobs:
           if [ -z "$HEAD_SHA" ]; then
             echo "::error::detect produced no head SHA; deploy cannot gate"; exit 1
           fi
-          # Any env-level result other than success or skipped -- failure, cancelled, timed_out --
-          # blocks the gate; `grep -q failure` alone missed cancels. Scanned in-process because a
-          # pipeline whose reader exits early inverts the verdict under `pipefail`, SIGPIPE 141
-          # reading as "all clean".
+          # Any env-level result but success or skipped (failure, cancelled, timed_out) blocks the
+          # gate. Scanned in-process: a pipeline whose reader exits early inverts the verdict under
+          # `pipefail`, SIGPIPE 141 reading as "all clean".
           concl=success; title="all env-levels applied"
           IFS=',' read -ra results <<< "$RESULTS"
           # An empty result string means no env-level job reported at all. Nothing was applied,

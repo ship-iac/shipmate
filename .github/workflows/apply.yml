@@ -10,22 +10,16 @@ on:
     # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
     # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
     secrets:
-      # `required: false` is load-bearing: consumers hold this key on the `shipmate-engine`
-      # environment (docs/github-app.md §5), so a caller binding no environment has nothing to
-      # pass. A required declaration rejects the call before the first callee job binding none
-      # (`guard`) runs a step, with "Secret ... is required, but not provided while calling".
+      # `required: false` is load-bearing: the key lives on the `shipmate-engine` environment
+      # (docs/github-app.md §5), so a caller binding none has nothing to pass, and a required
+      # declaration rejects the call: "Secret ... is required, but not provided while calling".
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
 jobs:
-  # `gh workflow run apply.yml` by a human with write access would otherwise skip every requirement
-  # in scripts/authorize. A human cannot make github.actor a bot login, so this rejects any human
-  # dispatch -- though it admits any bot actor with actions:write, not only this App.
-  #
-  # Its own job, not a first step of `detect`: `summary` must refuse a rejected dispatch -- it mints
-  # the App key and comments on the dispatcher-supplied PR number -- while still posting the failure
-  # comment and refreshing the gate when `detect` genuinely fails. `needs.guard.result == 'success'`
-  # is false only for an unauthorised dispatch. No secrets, no environment, no checkout.
+  # A human cannot make github.actor a bot login, so this rejects a human dispatch that would skip
+  # scripts/authorize; it admits any bot with actions:write. Its own job so `summary` can refuse
+  # a rejected dispatch yet report a genuine `detect` failure. No secrets, environment or checkout.
   guard:
     runs-on: ubuntu-slim
     permissions: {}
@@ -104,10 +98,9 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-    # Named, never `inherit`: these two files sit in one organization but the RUN belongs to the
-    # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
-    # `complete` job would hold no key, its applies would execute, and their apply checks would
-    # strand pending forever.
+    # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
+    # consumer's `complete` job would hold no key, its applies would execute, and their apply
+    # checks would strand pending forever.
     secrets: &envlevel-secrets
       # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
       # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
@@ -150,10 +143,9 @@ jobs:
     secrets: *envlevel-secrets
 
   summary:
-    # `review` is in this list because `results:` is `join(needs.*.result, ',')`, which covers only
-    # THIS job's needs. A failed `review` skips `detect` -- correctly: nothing applies and the gate
-    # stays pending -- while `summary` still runs on `guard`'s success, so without the entry the
-    # comment renders the non-failure form over a run that died.
+    # `review` is listed because `results:` joins only THIS job's needs: a failed `review` skips
+    # `detect` while `summary` still runs on `guard`'s success, and without the entry the comment
+    # renders the non-failure form over a run that died.
     needs: [guard, review, detect, envlevel0, envlevel1, envlevel2, envlevel3]
     # `needs.guard.result == 'success'` stops `always()` minting the App key after a rejected
     # dispatch. Keyed on `guard`, not `detect`: a genuine `detect` failure (no plan run, a `needs`
@@ -164,10 +156,9 @@ jobs:
     # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
     # the default branch, so a branch-authored workflow naming it is denied and never sees the key.
     environment: shipmate-engine
-    # gate-refresh and apply-summary each mint their own App token: a checks:read scan plus the
-    # statuses:write gate write, and a checks:read scan of the head SHA's apply checks plus the
-    # comment POST. actions:read is the one GITHUB_TOKEN scope needed here, for apply-summary's
-    # artifact download and run-jobs listing.
+    # gate-refresh and apply-summary mint their own App tokens for their scans and writes; the
+    # one GITHUB_TOKEN scope needed is actions:read, for apply-summary's artifact download and
+    # run-jobs listing.
     permissions: { actions: read }
     steps:
       - name: Complete gate if every apply check is done

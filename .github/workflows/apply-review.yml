@@ -48,15 +48,9 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
-          # NONE is the sentinel for a PR that exists with a null decision: no rule requires a
-          # review, or the only review rule is code-owner review and no changed file has an
-          # owner. Nothing here has proved the PR exists -- comment-ops reads it over REST
-          # first, this does not -- and a pr_number matching no pull request returns a null
-          # `pullRequest` with no errors and exit 0, so MISSING_PR is its own value, which
-          # apply-detect refuses and apply-all-detect's catch-all holds every env on.
-          # The $owner/$repo/$pr tokens are GraphQL query variables (bound via
-          # -F), not shell variables -- single quotes are intentional.
-          # shellcheck disable=SC2016
+          # NONE: a null decision (no review rule, or code-owner review owns no changed file). A PR
+          # number matching none returns a null `pullRequest` with exit 0, hence MISSING_PR.
+          # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
           rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
             -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
             --jq '.data.repository.pullRequest | if type == "object" then (.reviewDecision // "NONE") else "MISSING_PR" end')

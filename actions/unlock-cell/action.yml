@@ -83,11 +83,9 @@ runs:
         if [ "$PROBE_STATUS" = "0" ]; then
           echo "::notice::no state lock held for $STACK_NAME / $ENV"
         else
-          # A failed probe with no parsable lock (a config error, a failed init, any other tofu
-          # failure) proves nothing at all, so it must never be reported as "no lock held" -- an
-          # operator reading that would take the cell for clean while it may still be locked. It
-          # fails the cell rather than annotating: the engine failing to look is not a success,
-          # and an annotation on a green run across dozens of cells is easy to miss.
+          # A failed probe with no parsable lock proves nothing, so it must never read as "no lock
+          # held" while the cell may still be locked. Fatal, not an annotation: failing to look is
+          # not a success, and a warning on a green run across dozens of cells is easy to miss.
           echo "::error::could not determine whether a lock is held for $STACK_NAME / $ENV, see the log"
           exit 1
         fi

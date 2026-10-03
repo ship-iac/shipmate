@@ -48,10 +48,9 @@ jobs:
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           github-vars: ${{ toJSON(vars) }}
-      # The apply path runs this pre-flight in apply-env-level.yml's `snapshot` job, before any
-      # wave binds an environment; the `unlock` job binds the same environment, so it needs the
-      # same refusal. A failure here fails `detect`, which `unlock`'s `!failure()` reads as "do
-      # not run".
+      # The `unlock` job binds the same environment as the apply waves, so it needs the pre-flight
+      # apply-env-level.yml's `snapshot` job runs. A failure fails `detect`, which `unlock`'s
+      # `!failure()` reads as "do not run".
       - name: Verify the unlock-path environment exists
         if: ${{ steps.d.outputs.cells != '[]' }}
         # GitHub creates a missing environment on demand with no reviewers, no wait timer and no
@@ -70,10 +69,9 @@ jobs:
     needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}
     runs-on: ubuntu-latest
-    # No PR comment, deliberately -- do not "fix" it. Posting one needs pull-requests: write, which
-    # the consumer's calling job does not grant this workflow, and widening a consumer's token
-    # for a prettier message is the wrong trade. comment-ops' reaction acknowledges acceptance, per-cell
-    # detail lands in each job's step summary, and a failure reds the run and notifies the actor.
+    # No PR comment, deliberately -- do not "fix" it: it needs pull-requests: write, which the
+    # consumer's job does not grant. comment-ops' reaction acknowledges acceptance, step summaries
+    # carry per-cell detail, and a failure reds the run and notifies the actor.
     permissions: { contents: read, actions: read, id-token: write }
     strategy:
       # One cell that cannot determine its lock state must not stop its siblings from releasing

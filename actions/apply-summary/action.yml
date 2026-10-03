@@ -66,11 +66,9 @@ runs:
         private-key: ${{ inputs.private-key }}
     - name: Download apply cell summaries
       id: download
-      # continue-on-error because for comment-ops the comment IS the feedback channel: a
-      # transient artifact-API 5xx or a 403 must not skip `Mint App installation token` and
-      # `Post apply result comment`, leaving a developer whose apply fully succeeded with no PR
-      # comment at all. The renderer already handles an empty or partial cells directory --
-      # missing cells render as not-attempted lines, one per expected cell, under the verdict.
+      # Reviewer-facing only (continue-on-error): for comment-ops the comment IS the feedback
+      # channel, so an artifact-API error must not skip the token and the post. The renderer
+      # handles an empty or partial cells directory.
       continue-on-error: true
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
@@ -107,11 +105,9 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
-      # The pending apply checks are the work queue, so the comment reads them rather than
-      # trusting the per-cell artifact alone. apply-cell composes its verdict from the apply step
-      # and uploads it; actions/apply-complete then completes the check from a later job, and only
-      # for cells whose own job recorded success. A failed `Save state` in the cell, or a failed
-      # completion, leaves an `applied` artifact against a still-pending check.
+      # The pending apply checks are the work queue, so the comment reads them rather than trusting
+      # the artifact alone: a failed `Save state` or a failed completion leaves an `applied`
+      # artifact against a still-pending check (CONTRACT.md, the apply result comment).
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
