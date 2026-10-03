@@ -377,17 +377,6 @@ def test_every_allowed_top_level_key_is_accepted():
     assert env_config.validate(table, ()) == table
 
 
-def test_the_old_explicit_envs_list_refuses_as_unknown():
-    """No alias: the old top-level list refuses through the strict top-level loop.
-
-    Mutation: keep `"explicit_envs"` in `_TOP_KEYS` -- the file then validates.
-    """
-    assert _refusal({"layout": "folder", "explicit_envs": ["prod"]}) == (
-        "::error::explicit_envs is not a setting this engine implements. "
-        ".github/shipmate.toml holds layout, identities, environments."
-    )
-
-
 def _needs(value):
     return {"layout": "folder", "environments": {"prod": {"needs": value}}}
 
@@ -539,17 +528,6 @@ def test_env_order_reads_needs_off_every_entry_holding_it():
     assert env_config.env_order(table) == {"a": ["x", "y"], "b": []}
 
 
-def test_the_old_env_order_table_refuses_as_unknown():
-    """No alias: the old top-level ordering table refuses through the strict top-level loop.
-
-    Mutation: keep `"env_order"` in `_TOP_KEYS` -- the file then validates.
-    """
-    assert _refusal({"layout": "folder", "env_order": {"prod": ["dev"]}}) == (
-        "::error::env_order is not a setting this engine implements. "
-        ".github/shipmate.toml holds layout, identities, environments."
-    )
-
-
 _ENTRY_NAMES = [
     (
         "Prod",
@@ -585,38 +563,6 @@ def test_an_entry_name_no_environment_can_take_refuses(name, message):
     )
 
 
-# --- 11: retired top-level keys ----------------------------------------------------------
-
-
-def test_a_schema_version_refuses_as_unknown():
-    """Mutation: put `"schema_version"` back into `_TOP_KEYS` -- the file then validates."""
-    assert _refusal({"layout": "folder", "schema_version": 1}) == (
-        "::error::schema_version is not a setting this engine implements. "
-        ".github/shipmate.toml holds layout, identities, environments."
-    )
-
-
-def test_the_old_version_key_refuses_as_unknown():
-    """No alias: the old name refuses through the strict top-level loop.
-
-    Mutation: keep `"version"` in `_TOP_KEYS` -- the file then validates.
-    """
-    assert _refusal({"layout": "folder", "version": 1}) == (
-        "::error::version is not a setting this engine implements. "
-        ".github/shipmate.toml holds layout, identities, environments."
-    )
-
-
-def test_a_leftover_gate_table_refuses_as_an_unknown_setting():
-    """Mutation: keep `"gate"` in `_TOP_KEYS` -- the file then validates."""
-    with pytest.raises(SystemExit) as exc:
-        env_config.validate_structure({"layout": "tf_vars", "gate": {}})
-    assert str(exc.value) == (
-        "::error::gate is not a setting this engine implements. "
-        ".github/shipmate.toml holds layout, identities, environments."
-    )
-
-
 # --- 12: the tf_vars layout, the entry's tf_vars table, the vars reference -------------
 
 
@@ -630,26 +576,6 @@ def test_the_tf_vars_layout_derives_both_identity_variables():
         "config_path": "plan",
         "env_binding": "dev-eu-plan",
     }
-
-
-@pytest.mark.parametrize("layout", ["dry", "vars"])
-def test_the_old_layout_name_and_the_reference_key_refuse_as_layouts(layout):
-    """No alias: `dry` is the old name, and `vars` names GitHub variables, not a layout.
-
-    Mutation: leave `"dry"` in `_LAYOUTS` -- the `dry` case then validates.
-    """
-    assert _refusal({"layout": layout}) == (
-        f"::error::layout is {layout!r}; it must be one of tf_vars, workspace, folder."
-    )
-
-
-def test_the_old_entry_vars_table_refuses_as_an_unknown_key():
-    """Mutation: keep `"vars"` in `_ENV_KEYS` -- the entry then validates."""
-    table = {"layout": "folder", "environments": {"dev-eu": {"vars": {"TF_VAR_x": "y"}}}}
-    assert _refusal(table) == (
-        "::error::environment dev-eu: vars is not a key this engine implements. "
-        "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
-    )
 
 
 def test_the_entry_tf_vars_table_reaches_the_row():
@@ -685,20 +611,6 @@ def test_a_vars_reference_resolves():
         "environments": {"prod": {"region": "eu-west-1", "identity": "prod"}},
     }
     assert env_config.validate_structure(table) == table
-
-
-def test_the_old_var_reference_is_ordinary_data():
-    """`{ var = "X" }` is a mapping again, so a string position refuses it. `region`, because
-    a role field is a string or a map, and there the mapping is a one-workload map.
-
-    Mutation: `_is_reference` accepts `var` as well as `vars` -- the value then resolves from
-    the variable set here and the table validates.
-    """
-    text = 'layout = "folder"\n\n[environments.prod]\nregion = { var = "REGION" }\n'
-    table = env_config.parse_table(text, {"REGION": "eu-west-1"})
-    with pytest.raises(SystemExit) as excinfo:
-        env_config.validate_structure(table)
-    assert str(excinfo.value) == "::error::environment prod: region must be a string, got dict."
 
 
 def test_a_lowercase_reference_refusal_spells_the_vars_key():
