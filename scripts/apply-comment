@@ -316,7 +316,7 @@ def check_state_maps(check_run_lines, app_id):
     a good conclusion. Both come from `apply-gate`, per this module's COUPLING
     note. Raises SystemExit on a malformed line or an empty app id, and ValueError
     on a non-numeric one."""
-    runs = ag.from_app(ag.parse_jsonl(check_run_lines), app_id)
+    runs = ag.app_runs(check_run_lines, app_id)
     return set(ag.latest_by_name(runs)), ag.done_names(runs)
 
 
@@ -352,7 +352,7 @@ def load_check_maps(path, app_id):
 def _check_name(row):
     """This row's apply check name, forward-built per the CONTRACT grammar
     `apply / <stack> / <env>` -- never reverse-parsed."""
-    return f"apply / {row['stack_path']} / {row['environment']}"
+    return ag.check_name(row["stack_path"], row["environment"])
 
 
 def apply_check_state(rows, present, done):

@@ -22,6 +22,10 @@ import os
 import pathlib
 import re
 
+from _shipmate import _load
+
+ag = _load("apply-gate")
+
 
 def bodies(cells_dir, head_sha):
     plan_run = os.environ.get("GITHUB_RUN_ID", "")
@@ -51,7 +55,7 @@ def bodies(cells_dir, head_sha):
             )
         plan_sha256 = hashlib.sha256(txt.read_bytes()).hexdigest()
         body = {
-            "name": f"apply / {cell['stack_path']} / {cell['environment']}",
+            "name": ag.check_name(cell["stack_path"], cell["environment"]),
             "head_sha": head_sha,
             "status": "queued",
             "external_id": json.dumps(

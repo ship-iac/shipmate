@@ -35,6 +35,18 @@ APPLY_PREFIX = "apply / "
 DONE_CONCLUSIONS = {"success", "neutral"}
 
 
+def check_name(stack, env):
+    """The apply check's name, `apply / <stack> / <env>`: built forward, never parsed back.
+    `stack` is the stack path, so a deploy that knows only the path rebuilds it exactly."""
+    return f"{APPLY_PREFIX}{stack} / {env}"
+
+
+def app_runs(check_run_lines, app_id):
+    """The check-runs in JSONL `check_run_lines` that the App `app_id` created: `parse_jsonl`
+    then the fail-closed `from_app`."""
+    return from_app(parse_jsonl(check_run_lines), app_id)
+
+
 def latest_by_name(check_runs, prefix=APPLY_PREFIX):
     """Group check-runs by name (names starting with `prefix`; default: apply
     checks), keeping only the newest run per name. Returns {name: run}.
@@ -110,7 +122,7 @@ def app_done_names(check_run_lines, app_id):
     from_app-filter to app_id, then done_names. The one entry point the
     detects call, so "only App-authored checks count as done" lives in one
     place — dropping the from_app filter here is a visible, tested change."""
-    return done_names(from_app(parse_jsonl(check_run_lines), app_id))
+    return done_names(app_runs(check_run_lines, app_id))
 
 
 def _records_by_name(check_run_lines, app_id):
@@ -125,7 +137,7 @@ def _records_by_name(check_run_lines, app_id):
     null/empty/non-JSON external_id (a bare hex digest included), or one that decodes
     to something other than an object. No JSONDecodeError escapes."""
     out = {}
-    for name, run in latest_by_name(from_app(parse_jsonl(check_run_lines), app_id)).items():
+    for name, run in latest_by_name(app_runs(check_run_lines, app_id)).items():
         try:
             record = json.loads(run.get("external_id") or "")
         except json.JSONDecodeError:
@@ -189,7 +201,7 @@ def main():
     if mode:
         print(json.dumps(plan_runs_by_name(sys.stdin, app_id)))
         return
-    runs = from_app(parse_jsonl(sys.stdin), app_id)
+    runs = app_runs(sys.stdin, app_id)
     v = verdict(runs)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"verdict={v}\n")

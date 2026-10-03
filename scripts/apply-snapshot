@@ -41,7 +41,7 @@ def snapshot(waves, check_runs, app_id):
     ]
     out = {}
     for stack, env in wanted:
-        name = f"apply / {stack} / {env}"
+        name = ag.check_name(stack, env)
         ids = [c["id"] for c in runs if c.get("name") == name]
         if not ids:
             raise SystemExit(

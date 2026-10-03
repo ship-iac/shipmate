@@ -68,7 +68,7 @@ def to_complete(snapshot, jobs):
     unsuccessful = []
     for key, ids in snapshot.items():
         stack, env = key.split(SEP)
-        suffix = f"apply / {stack} / {env}"
+        suffix = ag.check_name(stack, env)
         matched = [
             j for j in jobs if (name := j.get("name", "")) == suffix or name.endswith(f"/ {suffix}")
         ]
