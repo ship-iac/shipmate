@@ -369,13 +369,12 @@ def test_every_declared_engine_secret_is_refused_as_a_variable():
     derivation that finds no workflow reds rather than passing as an empty subset.
 
     Mutations: drop `SHIPMATE_PLAN_PASSPHRASE` from `_NEVER_VARIABLES`; point the derivation
-    at an empty directory.
+    at an empty directory; re-add `SHIPMATE_SLACK_WEBHOOK: { required: false }` to `deploy.yml`.
     """
     engine_secrets = {
         "SHIPMATE_APP_PRIVATE_KEY",
         "SHIPMATE_PLAN_PASSPHRASE",
         "SHIPMATE_SECRETS",
-        "SHIPMATE_SLACK_WEBHOOK",
     }
     assert _declared_engine_secrets() == engine_secrets
     assert engine_secrets <= set(env_inject._NEVER_VARIABLES)

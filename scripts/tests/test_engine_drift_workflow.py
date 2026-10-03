@@ -45,20 +45,19 @@ def test_the_workflow_call_inputs_are_exactly_these():
 
 
 def test_the_workflow_call_secrets_are_exactly_these():
+    """Mutation: re-add `SHIPMATE_SLACK_WEBHOOK: { required: false }`."""
     assert workflow_yaml(WF)[True]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
         "SHIPMATE_SECRETS": {"required": False},
-        "SHIPMATE_SLACK_WEBHOOK": {"required": False},
     }
 
 
-def test_drift_issues_reads_the_webhook_from_the_engine_secret():
-    """Mutation: point `slack-webhook` back at `${{ vars.SLACK_WEBHOOK }}`, a variable every plan
-    cell exports and the run log prints."""
+def test_drift_issues_gets_the_app_id_and_key():
+    """Mutations: re-add `slack-webhook: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}`; point
+    `private-key` at `vars.`, which every plan cell exports and the run log prints."""
     assert _step("issues", "actions/drift-issues")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-        "slack-webhook": "${{ secrets.SHIPMATE_SLACK_WEBHOOK }}",
     }
 
 
@@ -121,43 +120,6 @@ def test_only_the_issues_job_holds_the_app_key():
     assert holders == ["issues"]
     assert jobs["issues"]["environment"] == "shipmate-engine"
     assert "environment" not in jobs["detect"]
-
-
-def test_only_the_issues_job_names_the_webhook():
-    """Mutation: add `SHIPMATE_SLACK_WEBHOOK: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}` to the
-    `drift` job's `env:`, which hands it to a job running repository content."""
-    holders = [
-        job_id
-        for job_id, job in workflow_yaml(WF)["jobs"].items()
-        if "SHIPMATE_SLACK_WEBHOOK" in yaml.safe_dump(job)
-    ]
-    assert holders == ["issues"]
-
-
-_REFUSE_STEP = "Refuse a Slack webhook set as a variable"
-
-#: Hand-written, and the same text as scripts/env-inject's refusal for this name.
-_REFUSE_STEP_SPEC = {
-    "name": _REFUSE_STEP,
-    "if": "${{ always() && vars.SHIPMATE_SLACK_WEBHOOK != '' }}",
-    "run": (
-        'echo "::error::SHIPMATE_SLACK_WEBHOOK is set as a GitHub variable, and it must be a '
-        "secret on the shipmate-engine environment. Its value is readable by anyone who can see "
-        "the repository. Delete the variable, rotate the webhook, and run gh secret set "
-        'SHIPMATE_SLACK_WEBHOOK --env shipmate-engine."\n'
-        "exit 1\n"
-    ),
-}
-
-
-def test_issues_refuses_the_webhook_set_as_a_variable_last():
-    """No cell binds `shipmate-engine`, so env-inject never sees a variable set there; this step
-    does. Last, so it never holds back the Issue authoring. Mutations: delete the step;
-    `!= ''` -> `== ''`; drop `always()`; move it above `drift-issues`."""
-    steps = _job("issues")["steps"]
-    last = steps[-1]
-    run = last.get("run", "").replace("\r\n", "\n").replace("\r", "\n")
-    assert {**last, "if": " ".join(last.get("if", "").split()), "run": run} == _REFUSE_STEP_SPEC
 
 
 def test_every_job_declares_its_own_permissions():

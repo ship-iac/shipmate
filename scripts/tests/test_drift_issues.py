@@ -96,8 +96,7 @@ def test_plan_not_ok_cell_is_skipped_entirely(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(plan_ok=False, drifted=True)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 7}, "url")
-    assert result is False
+    di.upsert_or_close(cell, {"drift: dev-eu / app": 7}, "url")
     assert rec.calls == []  # An existing open issue is left untouched.
 
 
@@ -110,8 +109,7 @@ def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
         lambda *a, **k: label_calls.append(a) or type("R", (), {"returncode": 0})(),
     )
     cell = _cell(drifted=True, add=1)
-    result = di.upsert_or_close(cell, {}, "url")
-    assert result is True
+    di.upsert_or_close(cell, {}, "url")
     assert len(rec.calls) == 1
     assert rec.calls[0][:3] == ["gh", "issue", "create"]
     assert label_calls, "expected the label to be (best-effort) created"
@@ -134,8 +132,7 @@ def test_drifted_with_existing_issue_edits_it(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=True)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
-    assert result is True
+    di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
     assert rec.calls == [["gh", "issue", "edit", "42", "--body", di._body(cell, "url")]]
 
 
@@ -143,8 +140,7 @@ def test_clean_with_existing_issue_closes_it(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=False)
-    result = di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
-    assert result is False
+    di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
     assert rec.calls[0][:3] == ["gh", "issue", "close"]
 
 
@@ -152,8 +148,7 @@ def test_clean_with_no_existing_issue_touches_nothing(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=False)
-    result = di.upsert_or_close(cell, {}, "url")
-    assert result is False
+    di.upsert_or_close(cell, {}, "url")
     assert rec.calls == []
 
 
@@ -182,48 +177,6 @@ def test_existing_issue_numbers_keeps_the_lowest_on_a_title_collision(monkeypatc
     assert di.existing_issue_numbers() == {"drift: dev-eu / app": 3}
 
 
-def test_main_skips_slack_for_a_plan_not_ok_cell(tmp_path, monkeypatch):
-    _write_cell(tmp_path, "app", _cell(plan_ok=False, drifted=True))
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
-    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
-    monkeypatch.setenv("GITHUB_RUN_ID", "1")
-    monkeypatch.setenv("SHIPMATE_SLACK_WEBHOOK", "https://hooks.example.invalid/x")
-
-    def fake_run(args):
-        if args[:3] == ["gh", "issue", "list"]:
-            return "[]"
-        pytest.fail(f"gh mutated an issue for a blocked cell: {args}")
-        return ""
-
-    monkeypatch.setattr(di, "_run", fake_run)
-    monkeypatch.setattr(
-        di, "notify_slack", lambda webhook, cell: pytest.fail("slack hit for a blocked cell")
-    )
-    di.main()  # It must not raise, and must not touch any issue.
-
-
-def test_main_notifies_slack_once_for_a_newly_drifted_cell(tmp_path, monkeypatch):
-    _write_cell(tmp_path, "app", _cell(drifted=True))
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
-    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
-    monkeypatch.setenv("GITHUB_RUN_ID", "1")
-    monkeypatch.setenv("SHIPMATE_SLACK_WEBHOOK", "https://hooks.example.invalid/x")
-
-    def fake_run(args):
-        if args[:3] == ["gh", "issue", "list"]:
-            return "[]"
-        return ""
-
-    monkeypatch.setattr(di, "_run", fake_run)
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: type("R", (), {"returncode": 0})())
-    notified = []
-    monkeypatch.setattr(di, "notify_slack", lambda webhook, cell: notified.append(cell["stack"]))
-    di.main()
-    assert notified == ["stacks/app"]
-
-
 def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, capsys):
     # A rate limit on one cell must not leave every later cell unprocessed: a stack that has
     # gone clean would keep an open Issue saying it drifts. The run still fails, naming every
@@ -234,7 +187,6 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
-    monkeypatch.delenv("SHIPMATE_SLACK_WEBHOOK", raising=False)
     created = []
 
     def fake_run(args):
@@ -259,63 +211,6 @@ def test_main_with_no_cells_never_lists_issues(tmp_path, monkeypatch):
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
     monkeypatch.setattr(di, "_run", lambda args: pytest.fail(f"unexpected gh call: {args}"))
     di.main()  # It returns early, with no env or gh access at all.
-
-
-def test_slack_failure_fails_the_run_but_still_processes_later_cells(tmp_path, monkeypatch, capsys):
-    """A revoked or rotated webhook URL must not leave every nightly run green while no drift
-    notification reaches anyone. Slack failures therefore join the same collected `failed` list
-    the `gh` failures use, naming the cell and exiting nonzero only after every remaining cell
-    has been processed."""
-    for name in ("a", "b"):
-        _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", stack_name=name, drifted=True))
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
-    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
-    monkeypatch.setenv("GITHUB_RUN_ID", "1")
-    monkeypatch.setenv("SHIPMATE_SLACK_WEBHOOK", "https://hooks.example.invalid/x")
-    created = []
-
-    def fake_run(args):
-        if args[:3] == ["gh", "issue", "list"]:
-            return "[]"
-        created.append(args[args.index("--title") + 1])
-        return ""
-
-    monkeypatch.setattr(di, "_run", fake_run)
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: type("R", (), {"returncode": 0})())
-
-    def boom(webhook, cell):
-        if cell["stack_name"] == "a":
-            raise di.urllib.error.URLError("nope")
-
-    monkeypatch.setattr(di, "notify_slack", boom)
-    with pytest.raises(SystemExit) as exc:
-        di.main()
-    assert created == ["drift: dev-eu / a", "drift: dev-eu / b"]
-    assert "dev-eu / a" in str(exc.value)
-    assert "dev-eu / b" not in str(exc.value)
-    assert "::error::slack notify failed" in capsys.readouterr().out
-
-
-def test_no_webhook_never_calls_notify_slack(tmp_path, monkeypatch):
-    _write_cell(tmp_path, "app", _cell(drifted=True))
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
-    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
-    monkeypatch.setenv("GITHUB_RUN_ID", "1")
-    monkeypatch.delenv("SHIPMATE_SLACK_WEBHOOK", raising=False)
-
-    def fake_run(args):
-        if args[:3] == ["gh", "issue", "list"]:
-            return "[]"
-        return ""
-
-    monkeypatch.setattr(di, "_run", fake_run)
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: type("R", (), {"returncode": 0})())
-    monkeypatch.setattr(
-        di, "notify_slack", lambda webhook, cell: pytest.fail("must not notify with no webhook")
-    )
-    di.main()
 
 
 def test_action_names_the_repository_for_gh():

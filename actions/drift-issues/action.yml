@@ -1,5 +1,5 @@
 name: shipmate drift-issues
-description: Open/update/close drift Issues from downloaded drift-summary cell artifacts, and Slack-notify each drifted cell. The only step on the drift path that mints the App key.
+description: Open/update/close drift Issues from downloaded drift-summary cell artifacts. The only step on the drift path that mints the App key.
 inputs:
   app-id:
     description: shipmate App id (a repo/org variable, not a secret).
@@ -7,10 +7,6 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
-  slack-webhook:
-    description: Slack webhook URL; a drifted cell is posted when set. Empty posts nothing.
-    required: false
-    default: ""
 runs:
   using: composite
   steps:
@@ -39,7 +35,6 @@ runs:
         # without GH_REPO every one of those calls fails with "failed to determine base
         # repository".
         GH_REPO: ${{ github.repository }}
-        SHIPMATE_SLACK_WEBHOOK: ${{ inputs.slack-webhook }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/drift-issues"

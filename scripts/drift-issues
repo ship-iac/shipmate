@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
-"""Author drift Issues from every drift-cell's uploaded cell.json, and notify
-Slack once per drifted cell.
+"""Author drift Issues from every drift-cell's uploaded cell.json.
 
 Runs from the drift workflow's trusted trailing `issues` job -- the only place
-on the drift path that mints the App key. `drift-cell` touches no Issue and no
-Slack webhook: a plan environment must stay policy-free for planning to work at
-all, so a job naming one is reachable from a feature branch, and the credentialed
-work lives here so a compromised drift-cell run cannot open, close or comment on
-an Issue.
+on the drift path that mints the App key. `drift-cell` touches no Issue: a plan
+environment must stay policy-free for planning to work at all, so a job naming
+one is reachable from a feature branch, and the credentialed work lives here so a
+compromised drift-cell run cannot open, close or comment on an Issue.
 
-One cell's failure -- a rate limit, a transient 5xx, a rejected webhook -- must
-not abandon every later cell: a stack that has gone clean would otherwise keep an
-open Issue claiming it drifts. Failures are collected here and the run exits
-nonzero at the end naming every cell that failed -- Slack failures included,
-because a revoked or rotated URL must not leave every nightly run green while no
-notification reaches anyone.
+One cell's failure -- a rate limit, a transient 5xx -- must not abandon every
+later cell: a stack that has gone clean would otherwise keep an open Issue
+claiming it drifts. Failures are collected here and the run exits nonzero at the
+end naming every cell that failed.
 
 A cell whose plan attempt itself did not succeed (`plan_ok` false -- state
 restore or `terramate plan` failed, or the composite action aborted before
@@ -28,8 +24,6 @@ import functools
 import json
 import os
 import subprocess
-import urllib.error
-import urllib.request
 
 from _shipmate import _load, cell_summaries, current_run_url
 
@@ -116,10 +110,9 @@ def _ensure_label():
 
 
 def upsert_or_close(cell, existing, run_url):
-    """Create, update or close this cell's Issue. Returns True when the cell is
-    drifted and its Issue carries a fresh body -- the Slack-notify signal."""
+    """Create, update or close this cell's Issue."""
     if not cell["plan_ok"]:
-        return False
+        return
     title = _title(cell)
     number = existing.get(title)
     if cell["drifted"]:
@@ -129,25 +122,10 @@ def upsert_or_close(cell, existing, run_url):
         else:
             _ensure_label()
             _run(["gh", "issue", "create", "--title", title, "--label", LABEL, "--body", body])
-        return True
+        return
     if number is not None:
         resolved = f"Drift resolved -- clean plan for {cell['environment']} / {cell['stack_name']}."
         _run(["gh", "issue", "close", str(number), "--comment", resolved])
-    return False
-
-
-def notify_slack(webhook, cell):
-    payload = json.dumps(
-        {"text": f":ocean: drift detected: {cell['environment']} / {cell['stack_name']}"}
-    ).encode()
-    # webhook is the consumer's `shipmate-engine` secret, never user input --
-    # not an arbitrary scheme (create-github-app-token/gh already require https
-    # endpoints throughout this codebase).
-    req = urllib.request.Request(  # noqa: S310
-        webhook, data=payload, headers={"Content-Type": "application/json"}, method="POST"
-    )
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-        resp.read()
 
 
 def main():
@@ -156,24 +134,16 @@ def main():
         return
     url = current_run_url()
     existing = existing_issue_numbers()
-    webhook = os.environ.get("SHIPMATE_SLACK_WEBHOOK", "")
     # Failures are collected here, not raised: one cell's failure must not abandon the rest,
-    # and the run still exits nonzero at the end. The module docstring says why, per kind.
+    # and the run still exits nonzero at the end. The module docstring says why.
     failed = []
     for cell in cells:
         label = f"{cell['environment']} / {cell['stack_name']}"
         try:
-            drifted_now = upsert_or_close(cell, existing, url)
+            upsert_or_close(cell, existing, url)
         except SystemExit as exc:
             print(f"::error::drift issue update failed for {label}: {exc}")
             failed.append(label)
-            continue
-        if drifted_now and webhook:
-            try:
-                notify_slack(webhook, cell)
-            except (urllib.error.URLError, TimeoutError) as exc:
-                print(f"::error::slack notify failed for {label}: {exc}")
-                failed.append(label)
     if failed:
         raise SystemExit("::error::drift reporting failed for: " + "; ".join(failed))
 
