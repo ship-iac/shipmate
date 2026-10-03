@@ -41,12 +41,12 @@ section below names the SHA the release tags.
 - **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 - **A stack at path `apply` or `shipmate` plans; `build-matrix` no longer refuses either.**
 - **`actions/setup` downloads Terramate with curl instead of `terramate-io/terramate-action`, which consumers may drop from their allowed-actions list; a self-hosted runner's own curl config applies.**
-- **`apply-all.yml` is gone: the workflow file's `targeted` and `all` jobs become one `apply` job calling `apply.yml` with `environment`, `ref` and `pr_number` (`docs/getting-started.md`).**
+- **`apply-all.yml` is gone: in the re-pin commit, replace the workflow file's `targeted` and `all` jobs with one `apply` job calling `apply.yml` with `environment`, `ref` and `pr_number` (`docs/getting-started.md`).**
 
 ### Removed
 
-- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting.**
-- **The drift workflow and `actions/build-matrix` take no `tags` input; every sweep covers every cell.**
+- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting, so delete it on the default branch before re-pinning: the engine reads the table from there, and a re-pin with the key still present refuses every run.**
+- **The drift workflow and `actions/build-matrix` take no `tags` input; every sweep covers every cell. In the re-pin commit, delete `tags:` from the drift job's `with:`, because an undeclared input fails the whole workflow file at load.**
 - **`scripts/onboard` takes no `--vars-at-org`; it always writes the repository `SHIPMATE_APP_ID`.**
 
 ### Fixed

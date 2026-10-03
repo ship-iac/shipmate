@@ -646,16 +646,21 @@ Two locks this verb does not reach:
 
 ### `Terramate install failed`
 
-The `Install Terramate` step failed, and the annotation reads "Terramate
-<version> did not install; the step log above names the cause. <url> answers
-HTTP <code> now; re-run the failed job."
+The `Install Terramate` step in `actions/setup` failed. Every annotation starts
+"Terramate <version> did not install:" and ends with the cause:
 
-The download retries transient errors three times before the step fails. The
-status is a fresh probe of the release
-URL after the failure, not the one that failed; `000` means the URL was
-unreachable. The install also fails at unpacking, at its version check, and on
-a 404, and the `Install Terramate` step log names which. Re-run the failed job
-to recover from a transient cause.
+| Annotation ends with | Cause and remedy |
+|---|---|
+| "curl is not installed on the runner." | The runner has no `curl`. Install it on the runner image. |
+| "<url> answered HTTP 404 (curl exit <rc>); check VERSIONS and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
+| "<url> answered HTTP <code> (curl exit <rc>); re-run the failed job." | The download failed. `<code>` is the failed download's own status; `000` means no response arrived. Re-run the failed job. |
+| "tar could not extract terramate from <url>." | The downloaded archive did not unpack. |
+| "the binary from <url> failed to run terramate --version." | The unpacked binary did not run. |
+| "<url> delivered version <got>; check VERSIONS and the release asset." | The binary reports another version than the pinned one. |
+
+curl retries 408, 429 and 5xx responses three times before the step fails. curl
+7.71 and newer also retries connection resets, TLS errors and stalls
+(`--retry-all-errors`); an older curl runs without that flag.
 
 ### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
 

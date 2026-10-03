@@ -192,3 +192,29 @@ def test_a_binary_of_another_version_fails_the_step_with_one_annotation(tmp_path
         f"{_PREFIX}{_URL} delivered version 0.17.0; check VERSIONS and the release asset.\n"
     )
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+
+
+@bash_only
+def test_a_runner_without_curl_fails_the_step_with_one_annotation(tmp_path):
+    """On a runner, a missing curl otherwise reads as a download that answered HTTP 000.
+
+    Mutation: delete the `command -v curl` line.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    github_path = tmp_path / "github_path"
+    github_path.write_text("", encoding="utf-8")
+    r = run_step(
+        tmp_path,
+        step_by(_ACTION, name=_STEP)["run"],
+        {
+            **os.environ,
+            "PATH": str(bin_dir),
+            "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
+            "GITHUB_PATH": str(github_path),
+            "SHIPMATE_TERRAMATE_VERSION": _VERSION,
+        },
+    )
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == f"{_PREFIX}curl is not installed on the runner.\n"
+    assert github_path.read_text(encoding="utf-8") == ""
