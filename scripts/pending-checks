@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """Emit `POST /check-runs` bodies (JSONL on stdout) for every planned cell.
 
-Relocated from plan-cell: the summary job creates ALL pending apply checks
-with ONE App installation token, so the App private key never enters the
-plan matrix cells (they execute PR-head code) and a 256-cell run mints one
-token, not 256. Body semantics match the old plan-cell step apart from
-external_id: changed cells get a queued "apply pending" check, no-change cells
-a completed/neutral "no changes" check. external_id is new -- a JSON record of
-the TF_VAR fingerprint, the id of the plan run that produced the cell, and the
-sha256 of the plan text that run published, on either branch, where plan-cell
-wrote the bare fingerprint. That digest is computed here, over the whole
+The summary job creates ALL pending apply checks with ONE App installation
+token, so the App private key never enters the plan matrix cells (they execute
+PR-head code) and a 256-cell run mints one token, not 256. Changed cells get a
+queued "apply pending" check, no-change cells a completed/neutral "no changes"
+check. Each check's external_id is a JSON record of the TF_VAR fingerprint, the
+id of the plan run that produced the cell, and the sha256 of the plan text that
+run published, on either branch. That digest is computed here, over the whole
 plan.txt this job downloaded, never copied from the cell: it is what binds the
 reviewed text to the plan apply executes. The comment embeds a capped prefix of
 the same file, so the digest covers at least what a reviewer saw and often more.

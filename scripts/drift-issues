@@ -11,12 +11,10 @@ an Issue.
 
 One cell's failure -- a rate limit, a transient 5xx, a rejected webhook -- must
 not abandon every later cell: a stack that has gone clean would otherwise keep an
-open Issue claiming it drifts. The per-cell jobs this batch replaced isolated such
-a failure to one cell, and their `curl --fail-with-body` step failed the job on a
-rejected webhook, so failures are collected here and the run exits nonzero at the
-end naming every cell that failed -- Slack failures included, because a revoked or
-rotated URL must not leave every nightly run green while no notification reaches
-anyone.
+open Issue claiming it drifts. Failures are collected here and the run exits
+nonzero at the end naming every cell that failed -- Slack failures included,
+because a revoked or rotated URL must not leave every nightly run green while no
+notification reaches anyone.
 
 A cell whose plan attempt itself did not succeed (`plan_ok` false -- state
 restore or `terramate plan` failed, or the composite action aborted before

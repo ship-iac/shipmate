@@ -91,12 +91,11 @@ def parse_jsonl(lines):
 def from_app(check_runs, app_id):
     """Keep only check-runs created by the given GitHub App id.
 
-    Check-run writes moved to the shipmate App: a same-name check created by
-    any other identity (github-actions app id 15368, another App) must never
-    feed a gate verdict or a detect work queue — a forged newer completed
-    duplicate would otherwise green a pending name via latest_by_name, and a
-    forged pending one would wedge the gate. Runs with no `app` field are
-    dropped too (fail-closed)."""
+    A same-name check created by any other identity (github-actions app id
+    15368, another App) must never feed a gate verdict or a detect work queue —
+    a forged newer completed duplicate would otherwise green a pending name via
+    latest_by_name, and a forged pending one would wedge the gate. Runs with no
+    `app` field are dropped too (fail-closed)."""
     if not app_id:
         raise SystemExit(
             "::error::SHIPMATE_APP_ID is empty; set the SHIPMATE_APP_ID repo/org "
