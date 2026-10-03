@@ -65,7 +65,7 @@ holds the App key. `shipmate doctor` warns for every workflow file declaring the
 trigger except `shipmate.yml`, matched by exact name. Every trigger the engine
 uses lives in that one file, so what separates them is not which file holds
 which trigger but each job's `if:` — a `pull_request_target` event selects the
-`plan` job and no other. doctor's routing probe compares all six of those
+`plan` job and no other. doctor's `shipmate.yml` probe compares all six of those
 expressions, whole, against the fence `getting-started.md` publishes. See
 "Contributors without push access" for the trade-off that follows.
 

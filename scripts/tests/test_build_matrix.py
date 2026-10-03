@@ -650,10 +650,10 @@ def test_a_renamed_plan_workflow_is_refused(monkeypatch, tmp_path):
     assert bm.plan_workflow_error("pull_request") == (
         "::error::this repository has no `.github/workflows/shipmate.yml`, the one path "
         "`CONTRACT.md` lets the consumer's workflow file live at, and this refusal is what "
-        "enforces it. That exact filename is matched literally by `shipmate doctor`, which "
-        "keys its calling-job-name, dispatch-wiring and routing probes on it, and by "
+        "enforces it. That exact filename is matched literally by `shipmate doctor`, whose "
+        "`shipmate.yml` probe checks its job name, dispatch wiring and event routing, and by "
         "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
-        "under any other name silently loses those probes, draws doctor's own "
+        "under any other name silently loses that probe, draws doctor's own "
         "`pull_request_target` warning instead, and is reached by no `shipmate` command at "
         "all. Move the consumer's workflow back to `.github/workflows/shipmate.yml`."
     )

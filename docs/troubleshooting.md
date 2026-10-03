@@ -73,9 +73,10 @@ live probes.
 - **Engine action-pin freshness in the consumer's own workflow files.** Each is
   read at the commit under examination, so the pull request that bumps a stale
   pin is not itself reported stale. It covers only pins of the engine's own
-  repository, which the probe learns at runtime from the running action rather
-  than from any hardcoded slug — another org's shared action is not shipmate's
-  to report on.
+  repository, which the probe learns at runtime from `SHIPMATE_ENGINE_REPO`, set
+  from `job.workflow_repository` by the engine job that runs it, rather than
+  from any hardcoded slug — another org's shared action is not shipmate's to
+  report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
   the commit under examination, feeds three checks, so an unreadable file
   leaves all three unverified together:
@@ -168,11 +169,24 @@ All three environment probes — existence, protection shape, and the
 secrets a plan environment holds — cover only the environments of the stacks a
 given pull request changed; the declared set comes from that commit's plan
 matrix. So the report's all-clear line names the environments it actually probed
-instead of implying the repository's environments are all sound, and a clean
-secret probe says nothing about an environment this pull request did not touch.
+instead of implying the repository's environments are all sound, says plainly
+when the set was empty, and a clean secret probe says nothing about an
+environment this pull request did not touch.
 The declared set is the cell summaries of the plan runs this commit's own apply
 checks record, so a run whose summaries cannot be downloaded is warned about and
 its environments are absent from the set.
+
+`shipmate doctor` also emits untitled `::warning::` annotations on its own
+degrade paths: an unreadable PR head SHA, unreadable plan records on this
+commit's apply checks, a plan run whose cell summaries could not be downloaded,
+a failed check-runs listing or reduction, a failed per-check annotations fetch,
+a failed job-summary write, and a failed listing of the pull request's
+comments, on which the report is not posted for that run rather than posted as
+a second sticky comment. Those annotations land on the `issue_comment` run
+executing `shipmate doctor`, at `github.sha`, not on the PR head SHA whose
+check runs the harvest reads, so the harvest never reads them back. That job
+checks out no consumer content and reads entirely through `gh api` and
+`gh run download -R`, so `github.sha` is the default branch's tip.
 
 Separately, the report states plainly when some of the commit's workflow runs
 had not finished yet, and when the warnings harvest itself could not complete
@@ -833,7 +847,7 @@ five jobs the event did not select.
 
 The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
-do not cover. `shipmate doctor`'s routing probe reports that job on every plan
+do not cover. `shipmate doctor`'s `shipmate.yml` probe reports that job on every plan
 run — with the expression to write, unless what it found was a job count other
 than one — and the dispatch comment on the pull request already links the run. Reconcile the job against the fence in
 [`getting-started.md`](getting-started.md) §The workflow file.
