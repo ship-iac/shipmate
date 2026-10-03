@@ -658,9 +658,9 @@ The `Install Terramate` step in `actions/setup` failed. Every annotation starts
 | "the binary from <url> failed to run terramate --version." | The unpacked binary did not run. |
 | "<url> delivered version <got>; check VERSIONS and the release asset." | The binary reports another version than the pinned one. |
 
-curl retries 408, 429 and 5xx responses three times before the step fails. curl
-7.71 and newer also retries connection resets, TLS errors and stalls
-(`--retry-all-errors`); an older curl runs without that flag.
+curl retries HTTP 408, 429, 500, 502, 503 and 504 responses, timeouts and stalls
+three times before the step fails. curl 7.71 and newer also retries connection
+resets and TLS errors (`--retry-all-errors`); an older curl runs without that flag.
 
 ### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
 

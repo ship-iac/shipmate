@@ -22,7 +22,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **Credentials live only in `[identities.<name>]`; an environment names one with `identity` and lists the workloads it admits with `workloads`.**
+- **Credentials live only in `[identities.<name>]`: in the re-pin commit, move each environment's `aws` block into an `[identities.<name>]` table that the environment names with `identity`, and list the workloads it admits with `workloads`.**
 - **A stack carrying two `workload/*` tags is refused at detect.**
 - **A workload tag outside the environment's `workloads` list is refused at detect, naming every such cell.**
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
@@ -37,7 +37,7 @@ section below names the SHA the release tags.
 - **The plan summary's and `shipmate doctor`'s App tokens request `environments: read`; the plan-environment secret probe has no token of its own and no not-checked warning.**
 - **Comments by bots or without `shipmate` start no engine `ops` job.**
 - **The workflow file's `comment-ops` job has no concurrency group, so a later comment no longer cancels a command still waiting to run; delete the `concurrency:` block from that job.**
-- **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed.**
+- **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed; delete `[gate]` on the default branch before re-pinning.**
 - **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 - **A stack at path `apply` or `shipmate` plans; `build-matrix` no longer refuses either.**
 - **`actions/setup` downloads Terramate with curl instead of `terramate-io/terramate-action`, which consumers may drop from their allowed-actions list; a self-hosted runner's own curl config applies.**
@@ -52,7 +52,7 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **`shipmate plan` and `shipmate unlock` runs cannot save an Actions-cache entry: `plan.yml` and `unlock.yml` declare `cache-mode: read`.**
-- **The Terramate download retries transient errors three times, and a failed install names the release URL and the status it answers.**
+- **The Terramate download retries transient errors three times, and a failed install names its cause in one annotation: the URL and status for a failed download, or the missing curl.**
 - **`shipmate / gate`'s hold is read from every page of the head's status contexts, so a head carrying many no longer lets an apply green a held gate.**
 - **`scripts/onboard` and `scripts/register-app` write UTF-8 on a Windows console, and the docs run them with `python`.**
 - **The provider cache no longer serves an empty entry saved by a detect job.**
