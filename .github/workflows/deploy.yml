@@ -49,14 +49,9 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
-    # Named, never `inherit`: these two files sit in one organization but the RUN belongs to the
-    # consumer, and `inherit` is evaluated against the run -- so a cross-organization consumer's
-    # `complete` job would hold no key, its applies would execute, and their apply checks would
-    # strand pending forever.
+    # Named, never inherit: see the apply job in apply.yml.
     secrets: &envlevel-secrets
-      # Declare a new secret in apply-env-level.yml in the same change that maps it here: the
-      # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
-      # load-time error, unlike an undeclared action input, which is silently ignored.
+      # Declare a new secret in apply-env-level.yml first: see the apply job in apply.yml.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}

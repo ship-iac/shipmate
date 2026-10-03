@@ -20,9 +20,6 @@ Importable from every test module because ``scripts/tests`` is on the pytest ``p
 being no ``__init__.py`` here, but that is pytest's default behaviour rather than a declared
 invariant, and 20 modules failing collection is a poor way to discover someone changed the import
 mode.
-
-Tests of the ``dev/`` tooling do not use this. Those are real ``.py`` modules on the pytest
-``pythonpath`` (``pyproject.toml``), imported by name.
 """
 
 import copy

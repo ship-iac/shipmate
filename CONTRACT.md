@@ -1788,7 +1788,7 @@ trigger alone closes two paths a trigger check alone would not:
   reusable workflows; the composite actions are engine-internal.
 - Every engine reference moves in one change: a repository that bumps some refs and leaves
   others behind runs two engine versions against one contract.
-  `dev/repin_consumer.py` is the hand-run tool that moves a consumer's pins together. The SHA
+  `docs/releasing.md` § Re-pin a consumer moves a consumer's pins together. The SHA
   of record for a release is named in that release's section of `CHANGELOG.md`.
 - A release tag may be annotated, so `git/ref/tags/<tag>` can return the tag object's SHA,
   which a workflow cannot check out. Resolve a tag with

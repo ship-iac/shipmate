@@ -88,10 +88,14 @@ def _resolve(monkeypatch, tmp_path, table):
 
 
 def test_the_file_is_the_only_source(monkeypatch, tmp_path):
-    """The output comes from the table, sorted. Mutations: read the value from the process
-    environment -- there is no variable left to read, so the output goes empty and every
-    environment holds while the file says otherwise; or have `ungated_envs` return the
-    `gated = true` entries -- `prod` replaces both dev entries."""
+    """The output comes from the table, sorted. The retired `SHIPMATE_UNGATED_ENVS` is set
+    both bare and in `SHIPMATE_GITHUB_VARS`, so a fallback an admin could set without a pull
+    request changes the output. Mutations: union `SHIPMATE_UNGATED_ENVS` from the parsed
+    `SHIPMATE_GITHUB_VARS`, or from the process environment, into `ungated_envs`' result --
+    `prod` joins; or have `ungated_envs` return the `gated = true` entries -- `prod` replaces
+    both dev entries."""
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"SHIPMATE_UNGATED_ENVS": "prod"}')
+    monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", "prod")
     table = {
         "layout": "folder",
         "environments": {

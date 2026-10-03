@@ -10,19 +10,15 @@ requires-python = ">=3.11"
 package = false
 
 [tool.pytest.ini_options]
-# dev/ holds dev-time tooling (the consumer re-pin CLI), not
-# shipped runtime surface, so it is not importable from scripts/. Tests of that
-# tooling import it by name; this is what makes `import repin_consumer` resolve
-# without a sys.path hack in every test module.
-#
-# scripts/tests/ is listed for the same reason, for `from _loader import
-# load_script`. Prepend import mode happens to put a test's own directory on
-# sys.path already, so this is currently redundant — but that is pytest's default
-# behaviour rather than a declared invariant, and it stops holding the moment
+# scripts/tests/ is listed so `from _loader import load_script` resolves
+# without a sys.path hack in every test module. Prepend import mode happens to
+# put a test's own directory on sys.path already, so this is currently
+# redundant — but that is pytest's default behaviour rather than a declared
+# invariant, and it stops holding the moment
 # anyone adds an __init__.py or passes --import-mode=importlib. Declaring it
 # keeps 20 test modules from failing collection on a config change elsewhere.
 # scripts/ holds the shared loader that the scripts and the test loader import.
-pythonpath = ["dev", "scripts", "scripts/tests"]
+pythonpath = ["scripts", "scripts/tests"]
 
 [dependency-groups]
 dev = [
@@ -68,9 +64,3 @@ max-complexity = 8
 # Tests: assert is the point (S101); they invoke trusted dev tools by name
 # (shellcheck) via subprocess (S603/S607).
 "scripts/tests/*" = ["S101", "S603", "S607"]
-
-[tool.ty.environment]
-# dev/ is on the pytest pythonpath but not on ty's module path, so
-# `import repin_consumer` reads as unresolved without this. ty resolves the
-# pythonpath's other two entries, scripts/ and scripts/tests/, on its own.
-extra-paths = ["dev"]

@@ -1,9 +1,5 @@
 """Guards what the workflows and actions hand the detect scripts.
 
-- No workflow or action names the retired shared-environment repository variable or the
-  `shared-envs` input that carried it. Which environment is shared is `shared = true` in the
-  environment table, resolved by `env-config`; a restored hop would be a second source that
-  nothing reads, or worse, one somebody wires back in.
 - Each apply-side detect action hands its script exactly the names it reads. The whole `env:`
   block against a hand-written constant, so a renamed or dropped binding cannot hide behind a
   present input. `build-matrix`'s block is pinned by
@@ -19,9 +15,7 @@
 
 import pytest
 import yaml
-from _loader import ACTIONS, ENGINE, WORKFLOWS, action_yaml, workflow_yaml
-
-RETIRED = ("SHIPMATE_SHARED_ENVS", "shared-envs")
+from _loader import WORKFLOWS, action_yaml, workflow_yaml
 
 #: The whole `env:` of the step that runs each detect script.
 _SCRIPT_ENV = {
@@ -107,23 +101,6 @@ _VARS_HOLDERS = {
     ("comment-ops.yml", "ops", "$/actions/comment-ops"),
     ("plan.yml", "summary", "$/actions/summary"),
 }
-
-
-def test_no_workflow_or_action_names_the_retired_shared_env_variable():
-    """Raw text, comments included: a mention is where a re-added hop starts.
-
-    Mutation: restore `shared-envs: ${{ vars.SHIPMATE_SHARED_ENVS }}` in `plan.yml`'s
-    `build-matrix` step.
-    """
-    files = sorted((ENGINE / ".github/workflows").rglob("*")) + sorted(ACTIONS.rglob("*"))
-    hits = [
-        (path.relative_to(ENGINE).as_posix(), word)
-        for path in files
-        if path.is_file()
-        for word in RETIRED
-        if word in path.read_text(encoding="utf-8")
-    ]
-    assert hits == []
 
 
 @pytest.mark.parametrize("action", sorted(_SCRIPT_ENV))

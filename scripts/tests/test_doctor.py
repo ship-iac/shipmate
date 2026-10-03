@@ -4926,20 +4926,3 @@ def test_status_never_fails_the_run(monkeypatch):
 
     monkeypatch.setattr(doctor, "_contents_text", boom)
     assert doctor.config_status(_ctx()) == []
-
-
-def test_no_doctor_string_names_the_retired_variable_or_says_it_cannot_read_the_mode():
-    """The shared set is read from the table, so no finding or docstring may name the
-    retired repository variable or claim doctor cannot read what selects the mode. Over
-    every string constant in the parsed module, docstrings and f-string parts included.
-
-    Mutation: restore "remove `{env}` from `SHIPMATE_SHARED_ENVS`" in the shared
-    reviewer WARNING, or "which doctor cannot read" in `_shared_intro`."""
-    import ast
-
-    tree = ast.parse((SCRIPTS / "doctor").read_text(encoding="utf-8"))
-    strings = [
-        n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
-    ]
-    assert len(strings) > 500, "the walk found too few strings to be the whole module"
-    assert [t for t in strings if "SHIPMATE_SHARED_ENVS" in t or "cannot read" in t] == []

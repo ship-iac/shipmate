@@ -695,16 +695,15 @@ Settings → Actions → General:
   <owner>/shipmate/*@*
   astral-sh/setup-uv@*
   opentofu/setup-opentofu@*
-  terramate-io/terramate-action@*
   aws-actions/configure-aws-credentials@*
   ```
 
   The list must cover what the engine pulls in, not what your own workflows
   name. shipmate's composite actions execute inside your job, so their `uses:`
   refs are resolved against your repository's list: a consumer whose
-  `shipmate.yml` names no action at all still needs all four third-party
-  actions above — `astral-sh/setup-uv`, `opentofu/setup-opentofu`,
-  `terramate-io/terramate-action` and `aws-actions/configure-aws-credentials`,
+  `shipmate.yml` names no action at all still needs all three third-party
+  actions above — `astral-sh/setup-uv`, `opentofu/setup-opentofu` and
+  `aws-actions/configure-aws-credentials`,
   the last on every cell path (plan, drift, apply and unlock) even when no cell
   resolves a role (the step is gated, the `uses:` is not). Omit it and a plan run fails at "Set up job", not
   only an apply. Allowing

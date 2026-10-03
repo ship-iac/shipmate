@@ -306,12 +306,16 @@ def test_a_shared_environment_resolves_apply_on_the_plan_path():
     }
 
 
-def test_an_unshared_environment_keeps_the_requested_path():
+def test_an_unshared_environment_keeps_the_requested_path(monkeypatch):
     """The same table without the key: the identity sets no `aws.plan`, so the apply role must
-    not reach the plan path.
+    not reach the plan path. The retired `SHIPMATE_SHARED_ENVS` names `dev-eu` both bare and
+    in `SHIPMATE_GITHUB_VARS`, so a fallback beside the table reds this.
 
-    Mutation: treat every environment as shared.
+    Mutations: treat every environment as shared; at the `resolve` call site, `shared = env in
+    shared_envs(table) or env in os.environ.get("SHIPMATE_SHARED_ENVS", "")`.
     """
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"SHIPMATE_SHARED_ENVS": "dev-eu"}')
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "dev-eu")
     unshared = {
         **_SHARED,
         "environments": {"dev-eu": {"region": "eu-west-1", "identity": "dev"}},
@@ -325,8 +329,14 @@ def test_an_unshared_environment_keeps_the_requested_path():
     }
 
 
-def test_shared_envs_names_the_entries_holding_shared_true():
-    """Mutation: test the key for presence rather than for `true` -- `dev-us` joins the set."""
+def test_shared_envs_names_the_entries_holding_shared_true(monkeypatch):
+    """The retired `SHIPMATE_SHARED_ENVS` is set both bare and in `SHIPMATE_GITHUB_VARS`, so a
+    fallback beside the table changes the set. Mutations: test the key for presence rather
+    than for `true` -- `dev-us` joins the set; union `SHIPMATE_SHARED_ENVS` from the parsed
+    `SHIPMATE_GITHUB_VARS`, or from the process environment, into `shared_envs`' result --
+    `dev-us` joins."""
+    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"SHIPMATE_SHARED_ENVS": "dev-us"}')
+    monkeypatch.setenv("SHIPMATE_SHARED_ENVS", "dev-us")
     table = {
         "layout": "folder",
         "environments": {

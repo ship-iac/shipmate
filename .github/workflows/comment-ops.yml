@@ -6,8 +6,7 @@ on:
       # `shipmate-engine`, so a required declaration would fail at load time for every consumer
       # who scopes the key to an environment instead of the repository.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
-# Floor, not a default to inherit from: the job below declares its own block, so a job that
-# loses its block gets nothing rather than everything the caller granted.
+# Floor, not a default to inherit from: see plan.yml.
 permissions: {}
 jobs:
   ops:

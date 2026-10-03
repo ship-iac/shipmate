@@ -13,7 +13,7 @@ on:
     secrets:
       # `required: false` is load-bearing -- apply.yml's `secrets:` note has the argument.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
-# Floor, not a default to inherit from: the job below declares its own block.
+# Floor, not a default to inherit from: see plan.yml.
 permissions: {}
 jobs:
   review:

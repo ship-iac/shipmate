@@ -24,21 +24,19 @@ _ACTION = "setup"
 _EXPECTED_STEPS = [
     "Resolve versions",
     "Install OpenTofu",
-    "Retry transient download errors",
     "Install Terramate",
-    "Report a failed Terramate install",
     "Provider plugin cache",
 ]
 
-#: Each installer's whole `with:` block. `uses:` is deliberately absent -- it is a pin, bumped on
-#: its own schedule, and pinning it here would red this guard on every pin bump.
-_EXPECTED_WITH = {
-    "Install OpenTofu": {
-        "tofu_version": "${{ steps.versions.outputs.tofu }}",
-        "tofu_wrapper": False,
-    },
-    "Install Terramate": {"version": "${{ steps.versions.outputs.terramate }}"},
+#: The OpenTofu installer's whole `with:` block. `uses:` is deliberately absent -- it is a pin,
+#: bumped on its own schedule, and pinning it here would red this guard on every pin bump.
+_EXPECTED_TOFU_WITH = {
+    "tofu_version": "${{ steps.versions.outputs.tofu }}",
+    "tofu_wrapper": False,
 }
+
+#: The Terramate installer is a `run:` step; its whole `env:` block carries the version.
+_EXPECTED_TERRAMATE_ENV = {"SHIPMATE_TERRAMATE_VERSION": "${{ steps.versions.outputs.terramate }}"}
 
 _FIXTURE_VERSIONS = "terramate=9.9.9\ntofu=8.8.8\n"
 
@@ -50,8 +48,11 @@ def test_the_steps_run_in_this_order():
 
 def test_both_installers_read_the_resolve_steps_outputs():
     """Reds when an installer is pointed at anything but the resolve step's outputs."""
-    got = {name: step_by(_ACTION, name=name).get("with") for name in _EXPECTED_WITH}
-    assert got == _EXPECTED_WITH
+    got = (
+        step_by(_ACTION, name="Install OpenTofu").get("with"),
+        step_by(_ACTION, name="Install Terramate").get("env"),
+    )
+    assert got == (_EXPECTED_TOFU_WITH, _EXPECTED_TERRAMATE_ENV)
     assert step_by(_ACTION, name="Resolve versions").get("id") == "versions"
 
 
