@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the thirteen live probes'
+- report: render the sticky PR comment on demand — the eleven live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -30,14 +30,11 @@ Probes:
 - secrets held by each declared plan environment.
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
-- the plan-calling job name in the consumer's `shipmate.yml`: `shipmate`, or the
-  plan cell checks are not `shipmate / <stack> / <env>`.
-- the dispatch wiring of the consumer's `shipmate.yml`: the `workflow_dispatch`
-  trigger every commented verb needs, its four inputs, and its call of the
-  engine's plan workflow.
-- the event routing of `shipmate.yml`: one job per engine reusable workflow, each
-  with the `if:` that selects it — a wrong one sends a verb nowhere and its run
-  completes green with every job skipped.
+- the consumer's `shipmate.yml`: the plan-calling job named `shipmate`, or the plan
+  cell checks are not `shipmate / <stack> / <env>`; the `workflow_dispatch` trigger
+  every commented verb needs, with its four inputs; and one job per engine reusable
+  workflow, each with the `if:` that selects it — a wrong one sends a verb nowhere
+  and its run completes green with every job skipped.
 - the environment table at the commit under examination: `.github/shipmate.toml`
   parses and passes the checks a file can be judged on by itself, before it merges
   to the default branch execution reads it from.
@@ -51,12 +48,13 @@ import os
 import pathlib
 import re
 import sys
-import urllib.parse
 
-from _shipmate import _load, current_run_url, utf8_output
+from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
+from _shipmate import ENGINE_ENV as _ENGINE_ENV
+from _shipmate import _load, approval_rules, current_run_url, gate_check, review_count, utf8_output
 
-bm = _load("build-matrix")
-_gh_json = bm.gh_json
+ec = _load("env-config")
+_gh_json = ec.gh_json
 sc = _load("summary-comment")
 ag = _load("apply-gate")
 _md_escape = sc._md_escape
@@ -110,10 +108,6 @@ DOCTOR_MARKER = "<!-- shipmate:doctor -->"
 ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
 HARVEST_LEVELS = ("warning", "failure")
 _LEVEL_EMOJI = {WARNING: "🟠", NOTICE: "⚪"}
-# github-actions authors the plan/apply/drift auto check-runs carrying shipmate's ::warning::
-# emissions; the shipmate App is matched by id instead (org-dependent slug). A consumer's own
-# non-shipmate workflows are indistinguishable here and remain, hence the generic "workflow runs".
-_HARVEST_APP_SLUGS = ("github-actions",)
 # Covers both shapes the gather step reports: nothing read at all, and some read
 # but not all. A list item, so it reads as a peer of the rows it follows.
 HARVEST_INCOMPLETE = (
@@ -133,39 +127,34 @@ HARVEST_PENDING = (
 def _gate_rule_warnings(ctx):
     repo, default_branch = ctx["repo"], ctx["default_branch"]
     rules = _gh_json(f"repos/{repo}/rules/branches/{default_branch}?per_page=100")
-    for rule in rules:
-        if rule.get("type") != "required_status_checks":
-            continue
-        params = rule.get("parameters", {})
-        for chk in params.get("required_status_checks", []):
-            if chk.get("context") != GATE:
-                continue
-            out = []
-            if chk.get("integration_id") != int(ctx["app_id"]):
-                out.append(
-                    (
-                        WARNING,
-                        f"gate ruleset does not pin `integration_id` to the shipmate App "
-                        f"(found {chk.get('integration_id')!r}), so a forged `{GATE}` status "
-                        "from another identity would satisfy the required check.",
-                    )
-                )
-            if not params.get("strict_required_status_checks_policy"):
-                out.append(
-                    (
-                        WARNING,
-                        "gate ruleset does not require branches to be up to date "
-                        "(strict), so plans can go stale against the base before merge.",
-                    )
-                )
-            return out
-    return [
-        (
-            WARNING,
-            f"no active ruleset requires `{GATE}` on `{default_branch}`, so "
-            "merges are not gated (see docs/branch-protection.md).",
+    chk, params = gate_check(rules, GATE)
+    if chk is None:
+        return [
+            (
+                WARNING,
+                f"no active ruleset requires `{GATE}` on `{default_branch}`, so "
+                "merges are not gated (see docs/branch-protection.md).",
+            )
+        ]
+    out = []
+    if chk.get("integration_id") != int(ctx["app_id"]):
+        out.append(
+            (
+                WARNING,
+                f"gate ruleset does not pin `integration_id` to the shipmate App "
+                f"(found {chk.get('integration_id')!r}), so a forged `{GATE}` status "
+                "from another identity would satisfy the required check.",
+            )
         )
-    ]
+    if not params.get("strict_required_status_checks_policy"):
+        out.append(
+            (
+                WARNING,
+                "gate ruleset does not require branches to be up to date "
+                "(strict), so plans can go stale against the base before merge.",
+            )
+        )
+    return out
 
 
 def _review_rule_warnings(ctx):
@@ -202,7 +191,6 @@ def _review_rule_warnings(ctx):
     branch = ctx["default_branch"]
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
     found = readable = code_owner = False
-    count = 0
     for rule in rules:
         if rule.get("type") != "pull_request":
             continue
@@ -212,13 +200,12 @@ def _review_rule_warnings(ctx):
             continue
         readable = True
         code_owner = code_owner or bool(params.get("require_code_owner_review"))
-        count = max(count, params.get("required_approving_review_count") or 0)
     if not found:
         return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
     if not readable:
         return [(NOTICE, _REVIEW_RULE_UNREADABLE.format(branch=branch))]
     out = [] if code_owner else [(WARNING, _CODE_OWNER_REVIEW_OFF.format(branch=branch))]
-    return out if count else out + _no_review_findings(ctx, branch, code_owner)
+    return out if review_count(rules) else out + _no_review_findings(ctx, branch, code_owner)
 
 
 def _no_review_findings(ctx, branch, code_owner):
@@ -236,7 +223,7 @@ def _no_review_findings(ctx, branch, code_owner):
     gated = []
     if table is not None:
         listed = set(table.get("environments", {})) | set(ctx["envs"])
-        gated = sorted(listed - bm.ec.ungated_envs(table))
+        gated = sorted(listed - ec.ungated_envs(table))
     if gated:
         level = NOTICE if code_owner else WARNING
         return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=_code_spans(gated)))]
@@ -254,20 +241,20 @@ def _code_spans(names):
 def _existing_env_names(ctx):
     """The repository's GitHub Environment names.
 
-    THE LISTING IS THE ONLY EXISTENCE ORACLE. `bm.gh_json`'s exception carries
-    no status code, so a per-environment read cannot tell a 404 (absence, which
-    is `_environment_warnings`' finding) from a 403 or a 5xx. Every probe below
-    that needs existence decides it from here, then treats a failed
-    per-environment read as "not checked" — inferring absence from that read
-    would let a token lacking `environments` access produce loud findings about
-    environments that are fine, while a genuine 403 on a present one passes as
-    healthy. A failure of this listing is the caller's precondition and
-    propagates to `warnings()`' degrade note.
+    THE LISTING IS THE ONLY EXISTENCE ORACLE. `ec.gh_json`'s exception carries
+    `gh`'s stderr as free text, which doctor never parses, so a per-environment
+    read cannot tell a 404 (absence, which is `_environment_warnings`' finding)
+    from a 403 or a 5xx. Every probe below that needs existence decides it from
+    here, then treats a failed per-environment read as "not checked" — inferring
+    absence from that read would let a token lacking `environments` access
+    produce loud findings about environments that are fine, while a genuine 403
+    on a present one passes as healthy. A failure of this listing is the
+    caller's precondition and propagates to `warnings()`' degrade note.
 
     Re-read per probe rather than shared through `ctx`: `warnings()` degrades
     per probe, so one endpoint failure must not silence the others.
 
-    per_page=100 covers >=50 logical env pairs, and `bm.gh_json` does not
+    per_page=100 covers >=50 logical env pairs, and `ec.gh_json` does not
     multi-page merge, so a repository past that raises rather than reports on half
     the names: each environment past the page would read as absent. `total_count` is
     read strictly -- a listing missing the key is a listing whose completeness is
@@ -285,14 +272,17 @@ def _existing_env_names(ctx):
 
 def _bound_names(ctx):
     """[(env, environment name, role)] the default branch's table binds for each declared
-    env, or `None` when `_shared_envs` cannot tell."""
-    shared = _shared_envs(ctx)
-    if shared is None:
+    env, or `None` when `_default_branch_table` has no table.
+
+    `None` is never read as "shares none": guessing split mode would probe environments no
+    job binds.
+    """
+    table = _default_branch_table(ctx)
+    if table is None:
         return None
+    shared = ec.shared_envs(table)
     return [
-        (env, name, role)
-        for env in sorted(ctx["envs"])
-        for name, role in bm.ec.env_names(env, shared)
+        (env, name, role) for env in sorted(ctx["envs"]) for name, role in ec.env_names(env, shared)
     ]
 
 
@@ -349,7 +339,7 @@ def _environment_warnings(ctx):
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
-    if bm.ec.interpreter_refusal():
+    if ec.interpreter_refusal():
         return [ENV_PROBES_INTERPRETER_REFUSED]
     names = _existing_env_names(ctx)
     bound = _bound_names(ctx)
@@ -365,7 +355,7 @@ def _probed_bindings(ctx):
     With no declared env nothing is read: listing the environments anyway would let a
     repository whose token cannot list them collect a "could not verify" degrade for a probe
     that had no work to do. Existence comes from `_existing_env_names`."""
-    if not ctx["envs"] or bm.ec.interpreter_refusal():
+    if not ctx["envs"] or ec.interpreter_refusal():
         return []
     existing = _existing_env_names(ctx)
     bound = _bound_names(ctx)
@@ -378,11 +368,7 @@ def _env_shape_findings(name, env, data, role):
     """One environment's protection-shape findings, from its already-read
     "Get an environment" payload."""
     out = []
-    rules = sorted({r.get("type") for r in data.get("protection_rules", []) if r.get("type")})
-    # GitHub reports "branch_policy" whenever deployment_branch_policy is set. Excluded both
-    # ways: it refuses a plan job outright rather than delaying it (handled below), and it is
-    # not a review, so an apply env carrying nothing else is still entirely unreviewed.
-    approval = [r for r in rules if r != "branch_policy"]
+    approval = approval_rules(data)
     policy = data.get("deployment_branch_policy")
     if role == "plan" and approval:
         out.append(
@@ -482,9 +468,6 @@ def _env_protection_warnings(ctx):
     return out
 
 
-_ENGINE_ENV = "shipmate-engine"
-
-
 def _engine_environment_warnings(ctx):
     """The App private key lives in the `shipmate-engine` GitHub Environment,
     not a repository secret — a deployment branch policy scoped to the
@@ -574,11 +557,6 @@ def _engine_environment_warnings(ctx):
     return []
 
 
-# Named `_APP_KEY_NAME`, not `..._SECRET`: ruff's S105 hardcoded-password rule
-# fires on a "SECRET" token in the binding name, and this is a secret's *name*.
-_APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
-
-
 @contextlib.contextmanager
 def _gh_token(value):
     """Run the block with GH_TOKEN set to `value`, then restore it, unset included.
@@ -607,7 +585,7 @@ def _env_secret_names(ctx, name):
     Published anyway because "holds 3 secret(s)" tells an operator nothing about
     which credential to move.
 
-    `total` comes from the payload, not the list length, because `bm.gh_json` does
+    `total` comes from the payload, not the list length, because `ec.gh_json` does
     not multi-page.
     """
     data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
@@ -623,7 +601,7 @@ def _env_secret_names(ctx, name):
 def _app_key_findings(env, names, total, noun):
     """The App-key half of the plan-env secret finding, for one environment.
 
-    `bm.gh_json` does not multi-page, so on a truncated listing the key can sit
+    `ec.gh_json` does not multi-page, so on a truncated listing the key can sit
     outside the page: absence is reportable as absence ONLY when the read was
     complete. A partial listing says the check could not be completed rather
     than passing the most dangerous configuration off as a routine note. Both
@@ -816,7 +794,7 @@ def _contents_text(path):
     The binding is what keeps this module's tests intercepting the read: they patch
     `_gh_json`, which a call reaching `gh` through `env-config` would bypass.
     """
-    return bm.ec.contents_text(path, fetch=_gh_json)
+    return ec.contents_text(path, fetch=_gh_json)
 
 
 def _workflow_text(path):
@@ -844,10 +822,11 @@ def _scan_workflow_texts(ctx, ref, per_file, unreadable):
     only signal, and it is a NOTICE, so a pin-freshness report can name stale
     pins in the files it read while saying nothing about the rest.
 
-    The pin and fork-trigger probes each call this with their own reads rather
-    than sharing one — a module-level cache would outlive a single probe run and
-    couple two probes' failure modes — so each costs one listing plus one read
-    per file.
+    Each probe calls this with its own reads rather than sharing one — a
+    module-level cache would outlive a single probe run and couple two probes'
+    failure modes — so each costs one listing plus one read per file. The
+    `shipmate.yml` probe is the deliberate exception: its three findings judge one
+    file, so they share one pass and degrade together.
 
     Every caller's `unreadable` constant is a NOTICE, never a WARNING: the
     directory may not exist on the ref being read — the first shipmate pull
@@ -1119,8 +1098,8 @@ def _fork_trigger_warnings(ctx):
     The consumer's one workflow file is on this trigger by design and stays exempt with the
     comment-ops, deploy, drift, apply and unlock jobs in it: every one of those `if:`
     expressions is false under `pull_request_target`, so those jobs do not run, and a job
-    that does not run binds no environment and is handed no token. `_routing_warnings` is
-    what watches those six `if:` expressions.
+    that does not run binds no environment and is handed no token. `_shipmate_yml_warnings`
+    is what watches those six `if:` expressions.
 
     Reads the consumer's workflow files at the commit under examination
     (`_contents_ref`): a pull request that *removes* the trigger must not still
@@ -1159,14 +1138,13 @@ def _fork_trigger_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
 
 
-# The shim's call of the engine's plan workflow. Read by two probes: this one, which judges the
-# calling job's name, and the dispatch probe, for which the call's absence is the finding.
+# The shim's call of the engine's plan workflow, whose block the job-name finding judges. Its
+# absence is `_routing_finding`'s zero-count finding for `plan.yml`.
 _PLAN_WORKFLOW_CALL = re.compile(r"/\.github/workflows/plan\.yml@")
 # Line-anchored, and matched only against a direct child of the calling job: a `name:` or `if:`
 # deeper in the block belongs to something else. Read through `_job_key`.
 _JOB_KEY = re.compile(r"^[ \t]*(?P<key>name|if)[ \t]*:(?P<value>.*)$")
 _SHIM_JOB_NAME = "shipmate"
-SHIM_JOB_UNREADABLE, SHIM_JOB_NO_COMMIT = _unverified("the workflow file's calling job name")
 
 
 def _call_region(text, pattern):
@@ -1221,46 +1199,16 @@ def _job_key(region, key):
     return values[0] if values else None
 
 
-def _shipmate_yml_warnings(ctx, per_file, no_commit, unreadable):
-    """Findings from `per_file(text, name)` over the consumer's `shipmate.yml` alone, read at
-    the commit under examination (`_contents_ref`); `[no_commit]` when there is none.
-
-    Exact name: `shipmate.yml` is the file `actions/dispatch` targets for every verb and the
-    one whose cells produce the linked checks. The filter lives here rather than in each
-    `_finding` function so that a direct call of one with another file's name still reports —
-    silence there would read as a false positive that is not one."""
-    ref = _contents_ref(ctx)
-    if ref is None:
-        return [no_commit]
-
-    def finding(text, name):
-        return per_file(text, name) if name == "shipmate.yml" else []
-
-    return _scan_workflow_texts(ctx, ref, finding, unreadable)
-
-
-def _shim_job_name_warnings(ctx):
-    """A `shipmate.yml` whose plan-calling job is not named `shipmate` still plans
-    correctly, and its plan comment loses every per-cell deep link.
-
-    GitHub names a called workflow's check runs `<caller job> / <callee job>`,
-    so the plan cell checks are `shipmate / <stack> / <env>` only when that
-    job carries that name. `scripts/summary-comment` resolves each cell line's
-    `plan` link by that exact name and falls back to the workflow-run URL on a
-    miss — so the failure is a silently degraded comment, not an error anyone
-    sees.
-
-    Reads the consumer's workflow files at the commit under examination
-    (`_contents_ref`): a pull request that renames the job must not still be
-    reported for the old name."""
-    return _shipmate_yml_warnings(
-        ctx, _shim_job_name_finding, SHIM_JOB_NO_COMMIT, SHIM_JOB_UNREADABLE
-    )
-
-
 def _shim_job_name_finding(text, name):
     """The calling job's display name, or [] when it is `shipmate` or the file
     calls the engine's plan workflow nowhere.
+
+    A job not named `shipmate` still plans correctly, and its plan comment loses every
+    per-cell deep link. GitHub names a called workflow's check runs `<caller job> / <callee
+    job>`, so the plan cell checks are `shipmate / <stack> / <env>` only when that job
+    carries that name. `scripts/summary-comment` resolves each cell line's `plan` link by
+    that exact name and falls back to the workflow-run URL on a miss — so the failure is a
+    silently degraded comment, not an error anyone sees.
 
     Regex over the call's own block rather than a YAML parse, like every other
     finder here: a consumer file that does not parse must still be read for what
@@ -1326,21 +1274,6 @@ _VERB_OPTIONS_KEY = re.compile(r"[\s{,]options[ \t]*:[ \t]*(?P<value>\[[^\]]*\])
 # One mapping key at the start of a line, for the input names `_declared_inputs` enumerates.
 _INPUT_NAME = re.compile(r"[ \t]*([A-Za-z_][\w-]*)[ \t]*:")
 _REQUIRED_TRUE = re.compile(r"""[\s{,]required[ \t]*:[ \t]*["']?true["']?""", re.I)
-DISPATCH_WIRING_UNREADABLE, DISPATCH_WIRING_NO_COMMIT = _unverified(
-    "the workflow file's dispatch wiring"
-)
-
-
-def _dispatch_wiring_warnings(ctx):
-    """Every commented verb dispatches the consumer's own `shipmate.yml`, and every way
-    that file can be unready for it is invisible until someone comments.
-
-    Reads the consumer's workflow files at the commit under examination
-    (`_contents_ref`): a pull request that *adds* the trigger must not still be
-    reported for lacking it."""
-    return _shipmate_yml_warnings(
-        ctx, _dispatch_wiring_finding, DISPATCH_WIRING_NO_COMMIT, DISPATCH_WIRING_UNREADABLE
-    )
 
 
 def _input_block(on_text, input_name):
@@ -1460,7 +1393,9 @@ def _and_list(names):
 
 
 def _dispatch_wiring_finding(text, name):
-    """The five ways the consumer's workflow file cannot serve a dispatched verb.
+    """The four ways the consumer's workflow file cannot serve a dispatched verb. Every
+    commented verb dispatches the consumer's own `shipmate.yml`, and each of these is
+    invisible until someone comments.
 
     The trigger and its inputs are looked for inside the `on:` block
     (`_on_block`), inline remainder included, and not in the whole file: a `with:`
@@ -1470,16 +1405,14 @@ def _dispatch_wiring_finding(text, name):
     also what lets the two keys be matched unanchored, which is what sees a
     flow-style `on:` value.
 
-    Five findings rather than one, because the remedies differ and so do the
-    refusals. The first four end in a dispatch-time HTTP 422 with no run
-    created, and they are told apart by the message GitHub answers with:
-    `Workflow does not have 'workflow_dispatch' trigger` and `Unexpected inputs
-    provided` are the pair `actions/dispatch` recognises, while `Required input
-    not provided` is GitHub's answer to the requiredness finding and nothing
-    downstream reads it. A wrong `options:` list is refused the same way, one
-    verb at a time, and offers a verb no job's `if:` selects when it carries an
-    extra. The last is not a refusal at all: the file accepts the dispatch and
-    then runs nothing that plans.
+    Four findings rather than one, because the remedies differ and so do the
+    refusals. Each ends in a dispatch-time HTTP 422 with no run created, and they
+    are told apart by the message GitHub answers with: `Workflow does not have
+    'workflow_dispatch' trigger` and `Unexpected inputs provided` are the pair
+    `actions/dispatch` recognises, while `Required input not provided` is GitHub's
+    answer to the requiredness finding and nothing downstream reads it. A wrong
+    `options:` list is refused the same way, one verb at a time, and offers a verb
+    no job's `if:` selects when it carries an extra.
 
     The three input findings are examined only where the trigger itself is there: without it
     nothing is dispatched at all, and three further remedies below that one bury it.
@@ -1510,17 +1443,6 @@ def _dispatch_wiring_finding(text, name):
         )
     else:
         out.extend(_dispatch_input_findings(on_text, name))
-    if not _PLAN_WORKFLOW_CALL.search(_stripped_text(text)):
-        out.append(
-            (
-                WARNING,
-                f"`{name}` does not call the engine's plan workflow, so the dispatch is accepted "
-                "and the run starts, with nothing in it that resolves the pull request, plans a "
-                "cell or reports a gate status, so a commented `shipmate plan` produces a green "
-                "run and no plan. That call is the whole `plan` job: `uses: "
-                "<engine>/.github/workflows/plan.yml@<sha>` (docs/getting-started.md).",
-            )
-        )
     return out
 
 
@@ -1545,7 +1467,6 @@ ROUTING_IFS = {
     "apply.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'",
     "unlock.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
 }
-ROUTING_UNREADABLE, ROUTING_NO_COMMIT = _unverified("the workflow file's event routing")
 
 
 def _normalize_if(value):
@@ -1568,7 +1489,13 @@ def _normalize_if(value):
 
 
 def _routing_finding(text, name):
-    """One finding per `ROUTING_IFS` entry the file does not satisfy."""
+    """One finding per `ROUTING_IFS` entry the file does not satisfy.
+
+    One file gates six jobs on the event, and a wrong gate is silent in both directions: a
+    dispatched verb whose job never runs completes green with nothing done, and a job whose
+    `if:` is too wide runs on an event it was never meant to see. Nothing else observes this.
+    `actions/dispatch` sees an accepted dispatch; the run page shows five skipped jobs beside
+    the one that ran, which is what a healthy run also shows."""
     out = []
     stripped = _stripped_text(text)
     for callee, expected in ROUTING_IFS.items():
@@ -1612,17 +1539,37 @@ def _routing_finding(text, name):
     return out
 
 
-def _routing_warnings(ctx):
-    """One file gates six jobs on the event, and a wrong gate is silent in both directions:
-    a dispatched verb whose job never runs completes green with nothing done, and a job whose
-    `if:` is too wide runs on an event it was never meant to see.
+SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
+    "the workflow file's job name, dispatch wiring and event routing"
+)
 
-    Nothing else observes this. `actions/dispatch` sees an accepted dispatch; the run page
-    shows five skipped jobs beside the one that ran, which is what a healthy run also shows.
 
-    Reads the consumer's workflow files at the commit under examination (`_contents_ref`): a
-    pull request that FIXES an expression must not still be reported."""
-    return _shipmate_yml_warnings(ctx, _routing_finding, ROUTING_NO_COMMIT, ROUTING_UNREADABLE)
+def _shipmate_yml_warnings(ctx):
+    """The job-name, dispatch-wiring and routing findings over the consumer's `shipmate.yml`
+    alone, in that order, from one read at the commit under examination (`_contents_ref`): a
+    pull request that fixes the file must not still be reported for the old state.
+
+    Exact name: `shipmate.yml` is the file `actions/dispatch` targets for every verb and the
+    one whose cells produce the linked checks. The filter lives here rather than in each
+    `_finding` function so that a direct call of one with another file's name still reports —
+    silence there would read as a false positive that is not one."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [SHIPMATE_YML_NO_COMMIT]
+
+    def finding(text, name):
+        if name != "shipmate.yml":
+            return []
+        return [
+            *_shim_job_name_finding(text, name),
+            *_dispatch_wiring_finding(text, name),
+            *_routing_finding(text, name),
+        ]
+
+    return _scan_workflow_texts(ctx, ref, finding, SHIPMATE_YML_UNREADABLE)
+
+
+_shipmate_yml_warnings.label = "`shipmate.yml`"
 
 
 def _one_line(s, limit=200):
@@ -1630,22 +1577,19 @@ def _one_line(s, limit=200):
     return flat if len(flat) <= limit else flat[: limit - 1] + "…"
 
 
-def _whole_items(items, sep, limit=400):
-    """`items` joined by `sep`, cut before the first item that would pass `limit`, so no env
-    name is shown half-cut. A first item over `limit` on its own is cut inside instead, so
-    the line never shows nothing but the `…`."""
-    joined = sep.join(items)
-    if len(joined) <= limit:
-        return joined
-    shown = []
-    for item in items:
-        if len(sep.join([*shown, item, "…"])) > limit:
-            break
-        shown.append(item)
-    return sep.join([*shown, "…"]) if shown else _one_line(joined, limit)
+def _fit_items(items, sep, limit):
+    """Whole `items` joined by `sep` within `limit` characters, then ` … and N more` for the
+    rest. No item is cut inside: a first item over `limit` shows only `… and N more`, with
+    no leading space."""
+    shown = len(items)
+    text = sep.join(items)
+    while len(text) > limit and shown:
+        shown -= 1
+        text = (sep.join(items[:shown]) + " " if shown else "") + f"… and {len(items) - shown} more"
+    return text
 
 
-CONFIG_PATH = bm.ec.CONFIG_PATH
+CONFIG_PATH = ec.CONFIG_PATH
 #: The refusal lines one invalid-file finding shows. The finding lands in the PR comment and
 #: in an annotation, so it stays bounded however many errors the file holds.
 CONFIG_ERROR_LINES = 10
@@ -1686,17 +1630,6 @@ CONFIG_REFERENCES = (
 )
 
 
-def _roles_notice(env, rows, budget):
-    """One environment's roles notice, its items cut to fit `budget` and counted when it
-    alone exceeds it."""
-    head = f"`{env}` resolves these roles at the commit under examination: "
-    text, shown = head + "; ".join(rows) + ".", len(rows)
-    while len(text) > budget and shown:
-        shown -= 1
-        text = head + "; ".join(rows[:shown]) + f" … and {len(rows) - shown} more."
-    return text
-
-
 def _config_roles(table):
     """One notice per environment naming an identity: the role each path and listed workload
     resolves, `no role` for a path it grants nothing on. An identity that does not vary shows
@@ -1707,14 +1640,15 @@ def _config_roles(table):
     left out.
     """
     items = {}
-    for env, path, workload, role in bm.ec.resolved_roles(table):
+    for env, path, workload, role in ec.resolved_roles(table):
         shown = f"`{role}`" if role else "no role"
         written = "workloads" in table["environments"][env]
         cells = workload or ("untagged and listed cells" if written else "every cell")
         items.setdefault(env, []).append(f"{path} {cells}: {shown}")
     notices, left = [], ROLE_LINES_BUDGET
     for done, (env, rows) in enumerate(items.items()):
-        text = _roles_notice(env, rows, left)
+        head = f"`{env}` resolves these roles at the commit under examination: "
+        text = head + _fit_items(rows, "; ", left - len(head) - 1) + "."
         if len(text) > left:
             notices.append(
                 f"roles for {len(items) - done} more environment(s) not shown, to keep this "
@@ -1738,11 +1672,12 @@ def _config_defaults(table):
     `gated` gets no line: its absence exempts nothing, which is the safe direction and the
     one a reader already assumes.
     """
-    order = bm.ec.env_order(table)
-    envs = bm.ec.explicit_envs(table)
-    shown = _whole_items(
+    order = ec.env_order(table)
+    envs = ec.explicit_envs(table)
+    shown = _fit_items(
         [f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())],
         "; ",
+        400,
     )
     return [
         (
@@ -1755,7 +1690,7 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"`explicit = true` on {_whole_items(envs, ', ')}: a bare "
+            f"`explicit = true` on {_fit_items(envs, ', ', 400)}: a bare "
             "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             if envs
             else "`explicit`: set on no environment, so every environment applies on a bare "
@@ -1772,12 +1707,12 @@ def _config_table(ctx):
     Reports only. Nothing read here is passed to `read_table` or `resolve`: execution reads
     the default branch, and a branch's file must never become a value a run uses.
 
-    Reads through the contents API at `_contents_ref`, like the pin probe and for the
-    second reason that comment-ops has no consumer checkout for `git show`. Structural checks
+    Reads through the contents API at `_contents_ref`, like the pin probe and like
+    `read_table`, which reads the same file with no ref. Structural checks
     alone — `validate_structure`, not `validate` — because the rest need run context;
     CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
     """
-    refusal = bm.ec.interpreter_refusal()
+    refusal = ec.interpreter_refusal()
     if refusal:
         # Ahead of every read, and outside the try below: the floor is a property of this
         # runner, so no revision of the file can be at fault and none is worth reading.
@@ -1797,7 +1732,7 @@ def _config_table(ctx):
     if text is None:
         return None, [CONFIG_UNREADABLE], []
     try:
-        table = bm.ec.validate_structure(bm.ec.parse_table(text))
+        table = ec.validate_structure(ec.parse_table(text))
     except SystemExit as exc:
         # The refusal IS the finding, and it must not reach warnings()'s degrade handler:
         # that one reports a probe as skipped and truncates the message to 120 characters.
@@ -1813,7 +1748,7 @@ def _config_table(ctx):
             "branch's copy, which this says nothing about.",
         )
         return None, [invalid], []
-    refs = bm.ec.references(bm.ec.load_toml(text))
+    refs = ec.references(ec.load_toml(text))
     shown = "; ".join(f"`{path}` from variable `{name}`" for path, name in refs)
     return table, [], [(NOTICE, CONFIG_REFERENCES.format(refs=shown))] if refs else []
 
@@ -1860,35 +1795,21 @@ def _default_branch_table(ctx):
 
     The default branch, not the commit under examination: execution reads that copy, so on a
     pull request that edits the table every run until merge still follows the default
-    branch's. The readers of `env-config` below may only see a validated table.
+    branch's. `_bound_names` passes it to `env-config`, which may only see a validated table.
+
+    The read names no ref, which GitHub answers from the default branch: the same request
+    `env-config`'s `read_table` makes, so doctor judges exactly the copy execution reads.
 
     Read once per run and kept on `ctx`, so every probe judges the same copy.
     """
     if "default_branch_table" not in ctx:
-        ctx["default_branch_table"] = _read_default_branch_table(ctx)
+        text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}")
+        table = None
+        if text is not None:
+            with contextlib.suppress(SystemExit):
+                table = ec.validate_structure(ec.parse_table(text))
+        ctx["default_branch_table"] = table
     return ctx["default_branch_table"]
-
-
-def _read_default_branch_table(ctx):
-    ref = urllib.parse.quote(ctx["default_branch"], safe="")
-    text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}?ref={ref}")
-    if text is None:
-        return None
-    try:
-        return bm.ec.validate_structure(bm.ec.parse_table(text))
-    except SystemExit:
-        return None
-
-
-def _shared_envs(ctx):
-    """The environments the default branch's file shares, or `None` when
-    `_default_branch_table` has no table.
-
-    `None` is never read as "shares none": guessing split mode would probe environments no
-    job binds.
-    """
-    table = _default_branch_table(ctx)
-    return None if table is None else bm.ec.shared_envs(table)
 
 
 def _app_permission_warnings(ctx):
@@ -1921,24 +1842,24 @@ PROBES = (
     _plan_env_secret_warnings,
     _pin_warnings,
     _fork_trigger_warnings,
-    _shim_job_name_warnings,
-    _dispatch_wiring_warnings,
-    _routing_warnings,
+    _shipmate_yml_warnings,
     _config_warnings,
     _app_permission_warnings,
 )
 
 
 def _probe_label(probe):
-    """Reader-facing name of a probe, from its function name: `_pin_warnings`
-    -> "pin". Used by the degrade note below so a reader learns which probe was
-    skipped instead of being shown the `gh api` call that failed."""
-    return probe.__name__.strip("_").removesuffix("_warnings").replace("_", " ")
+    """Reader-facing name of a probe: its `label` attribute when set, else from its function
+    name: `_pin_warnings` -> "pin". Used by the degrade note below so a reader learns which
+    probe was skipped instead of being shown the `gh api` call that failed."""
+    return getattr(probe, "label", None) or (
+        probe.__name__.strip("_").removesuffix("_warnings").replace("_", " ")
+    )
 
 
 def _degrade_reason(e):
     """The failure reason, safe in a comment body or an annotation. Strips
-    `bm.gh_json`'s `::error::...: gh api <path>` wrapper -- the workflow-command
+    `ec.gh_json`'s `::error::...: gh api <path>` wrapper -- the workflow-command
     prefix would nest inside `::warning ...::` in annotate mode, and the
     endpoint is an internal detail no reader can act on."""
     return _one_line(str(e).removeprefix("::error::").split(": gh api ")[0], 120)
@@ -1949,7 +1870,7 @@ def warnings(ctx):
     for probe in PROBES:
         try:
             out.extend(probe(ctx))
-        # noqa: BLE001 - doctor must never fail the run. `bm.gh_json` raises
+        # noqa: BLE001 - doctor must never fail the run. `ec.gh_json` raises
         # SystemExit, not a plain Exception, so both are caught -- but never
         # bare BaseException, so KeyboardInterrupt still propagates.
         except (Exception, SystemExit) as e:  # noqa: BLE001
@@ -2026,7 +1947,10 @@ def _parse_check_run(line, app_id):
         return None
     if not isinstance(run, dict):
         return None
-    if run.get("app_slug") not in _HARVEST_APP_SLUGS and not (
+    # github-actions authors the check-runs carrying shipmate's ::warning:: emissions; the App
+    # is matched by id, its slug being org-dependent. A consumer's own workflows pass too,
+    # hence the generic "workflow runs".
+    if run.get("app_slug") != "github-actions" and not (
         app_id and str(run.get("app_id")) == str(app_id)
     ):
         return None
@@ -2052,7 +1976,7 @@ def latest_check_ids(lines, app_id=""):
         # An on-demand plan's mirrored cell checks share a name with the autoplan's
         # annotation-bearing ones and are created later, so ranking them together loses the
         # annotations: the mirror carries none. Only the apply checks are wanted from the App.
-        if run.get("app_slug") not in _HARVEST_APP_SLUGS and not name.startswith(ag.APPLY_PREFIX):
+        if run.get("app_slug") != "github-actions" and not name.startswith(ag.APPLY_PREFIX):
             continue
         prev = newest.get(name)
         if prev is None or (run.get("started_at") or "") >= (prev.get("started_at") or ""):
@@ -2200,6 +2124,18 @@ def _render_annotation_row(a):
     return f"  - {emoji} {title}: {msg}" if title else f"  - {emoji} {msg}"
 
 
+def _fit(out, rows, used, budget):
+    """Append to `out` each of `rows` that fits within `budget`, counting the newline.
+    Returns (new_used, rows_added, rows_dropped)."""
+    added = 0
+    for row in rows:
+        if used + len(row) + 1 <= budget:
+            out.append(row)
+            used += len(row) + 1
+            added += 1
+    return used, added, len(rows) - added
+
+
 def _emit_section(lines, name, rows, used, budget):
     """Append one check's header + as many of its rows as fit in the
     remaining budget. The header is emitted only when at least its first row
@@ -2211,16 +2147,7 @@ def _emit_section(lines, name, rows, used, budget):
     if used + len(header) + 1 + len(rendered[0]) + 1 > budget:
         return used, 0, len(rows)
     lines.append(header)
-    used += len(header) + 1
-    added, dropped = 0, 0
-    for row in rendered:
-        if used + len(row) + 1 <= budget:
-            lines.append(row)
-            used += len(row) + 1
-            added += 1
-        else:
-            dropped += 1
-    return used, added, dropped
+    return _fit(lines, rendered, used + len(header) + 1, budget)
 
 
 def _harvest_lines(sections, annotations, budget):
@@ -2249,14 +2176,8 @@ def _findings_lines(findings, budget):
     """Render settings-probe finding rows within `budget` chars. Returns
     (lines, dropped_count) -- the last-ditch fallback path (render_report,
     when even the harvest-less body still exceeds sc.HARD_CAP)."""
-    lines, used, dropped = [], 0, 0
-    for lvl, text in findings:
-        line = _finding_row(lvl, text)
-        if used + len(line) + 1 <= budget:
-            lines.append(line)
-            used += len(line) + 1
-        else:
-            dropped += 1
+    lines = []
+    _, _, dropped = _fit(lines, [_finding_row(lvl, text) for lvl, text in findings], 0, budget)
     return lines, dropped
 
 

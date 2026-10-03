@@ -315,7 +315,7 @@ creates all of them, including `shipmate-engine` and its branch policy:
   including what a changed value does to a pending apply.
 
   **The table has to be on the default branch before your first plan run.** The
-  engine reads it from `origin/<default>`, so a pull request that only adds the
+  engine reads it from the default branch, so a pull request that only adds the
   table is refused by the branch it is compared against. Put it in the same
   pull request as the workflow file. That pull request must change no stack:
   its merge pushes to the default branch and runs `deploy`, and a changed stack

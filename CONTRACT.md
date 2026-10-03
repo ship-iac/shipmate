@@ -400,17 +400,14 @@ Python, so `scripts/env-config` checks `sys.version_info` before the import and
 refuses with the required version, the version found and the contract clause.
 
 **The engine reads the file from the repository's default branch, never from the
-branch under test.** `scripts/env-config` runs `git show
-origin/<default-branch>:.github/shipmate.toml` and resolves each cell's
-environment identity and credential from what that returns. A pull request cannot change which role
+branch under test.** `scripts/env-config` reads `.github/shipmate.toml` through
+the contents API with no ref, which GitHub answers from the default branch, and
+resolves each cell's environment identity and credential from what that returns.
+A pull request cannot change which role
 its own plan assumes, which region it authenticates against, or which workspace
-it plans; changing any of those takes a merge to the default branch. `origin` is
-the base repository on every path — no checkout passes `repository:` — and a fork
-pull request is refused in `detect` before it plans.
-A job that checks out no consumer content reads the same file over the contents
-API instead — comment-ops, resolving the `gated = false` exemptions before it
-authorizes — with the same branch and the same refusal wording, so a consumer
-never gets two accounts of one problem depending on which job read it.
+it plans; changing any of those takes a merge to the default branch. The read
+names `GITHUB_REPOSITORY`, which is the base repository under both pull-request
+events, and a fork pull request is still refused in `detect` before it plans.
 
 **`needs`, `explicit` and `gated` come from the default branch too.**
 They are read from the same parsed mapping as the environment table, and a branch
@@ -422,9 +419,9 @@ request that only *adds* it is refused, because the branch its plan is compared
 against still has none. For a new consumer the file lands in the same commit as
 the workflow file, on the default branch.
 
-Every failure to read it refuses the run: unreachable `origin/<default>`, a
-failed `gh api` for the default-branch name, the file absent on the default
-branch, and a body that is not valid TOML — `tomllib`'s message, which carries a
+Every failure to read it refuses the run: a failed contents read (the file
+absent on the default branch, or a token without contents read), a file over
+1 MB, and a body that is not valid TOML — `tomllib`'s message, which carries a
 line number, is surfaced as the refusal. "This repository has no file" and "the
 file could not be read" cannot be told apart without reading it, so treating a
 read failure as absence would hand the decision back to branch content.
@@ -562,10 +559,9 @@ closed.
   *"Cannot declare ('identities', 'dev', 'aws') twice"*. Pick one notation per
   identity. Duplicate keys refuse the same way.
 
-A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and both read
-mechanisms — the cell paths' `git show`, and the contents-API read that
-`shipmate doctor` and comment-ops' gate resolve share — deliver those bytes and
-reach the same verdict rather than one of them stripping it.
+A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and the one
+read mechanism — the contents-API read that detect, comment-ops' gate resolve and
+`shipmate doctor` share — delivers those bytes rather than stripping them.
 
 **An identity is optional.** An environment naming none runs no credentials
 step — which is how the three credential-free sample repositories work. A file
@@ -1082,22 +1078,20 @@ and this run (`at an unknown commit in [run #<n>](<run url>)` when the commit
 is not a 40-character lowercase hex SHA). Each finding and harvested annotation
 carries the same circles. Under any verdict but 🟢 the report ends with the help
 hint ``Comment `shipmate help` for the available commands.``; a 🟢 report has
-no footer. It combines thirteen live settings probes (gate ruleset,
+no footer. It combines eleven live settings probes (gate ruleset,
 default-branch `pull_request` rule, environment existence, environment
 protection shape, plan-environment secrets, the `shipmate-engine`
 environment's own existence and default-branch scoping, `pull_request_target`
 triggers in the consumer's workflow files other than `shipmate.yml`, which uses
 that trigger by design, engine action-pin freshness,
-the plan-calling job name in the consumer's `shipmate.yml`, which must be
-`shipmate` or the plan cell checks are not `shipmate / <stack> / <env>` and
-every `plan` link in the plan comment falls back to the workflow-run page,
-the dispatch wiring of the consumer's `shipmate.yml` — the `workflow_dispatch`
-trigger every commented verb dispatches, the four inputs that dispatch sends,
-and its call of the engine's plan workflow, without which the dispatch starts a
-run that plans nothing; without the first two GitHub refuses the dispatch with an
-HTTP 422 and creates no run at all,
-the event routing of that same file — one job per engine reusable workflow,
-each carrying the `if:` that selects it, so a wrong one sends a verb nowhere,
+the consumer's `shipmate.yml`, read once for three checks — the plan-calling
+job's name, which must be `shipmate` or the plan cell checks are not
+`shipmate / <stack> / <env>` and every `plan` link in the plan comment falls
+back to the workflow-run page; the `workflow_dispatch` trigger every commented
+verb dispatches and the four inputs that dispatch sends, without which GitHub
+refuses the dispatch with an HTTP 422 and creates no run at all; and the event
+routing, one job per engine reusable workflow, each carrying the `if:` that
+selects it, so a wrong one sends a verb nowhere,
 the environment table at the commit under examination — `.github/shipmate.toml`
 parsed and checked against every rule a file can be judged on by itself, so a
 malformed or misplaced setting is reported before it merges to the branch
@@ -1113,7 +1107,7 @@ when the report was rendered, it says so and asks for the command again once
 they have, and if the harvest itself could not be read in full it says that
 too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
-plenty. Only twelve of the thirteen
+plenty. Only ten of the eleven
 probes can produce a finding from the plan path's own `annotate`-mode
 invocation: the
 App-permission-drift probe only has something to report when a
@@ -1321,14 +1315,14 @@ before it authorizes, and each apply form's detect resolves it again before it
 enforces —
 `scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
 three reading `.github/shipmate.toml` on the **default branch** through the same
-`env-config` reader. The comment-ops job checks out no consumer content, so it
-reads the file through the contents API rather than `git show`; same file, same
-branch, same refusal wording. What keeps the three from disagreeing is not a
-shared spelling but a shared reader: the strict top-level key check refuses a
-misspelled setting outright, and the boolean and entry-name checks refuse a value
-that would match nothing, so there is no value a consumer can write that one reader
-honours and another ignores. A pull request cannot grant itself the exemption,
-because its own edit to the file is not read until it merges.
+`env-config` reader. The comment-ops job checks out no consumer content, and
+that reader needs none: it reads the file through the contents API. What keeps
+the three from disagreeing is not a shared spelling but a shared reader: the
+strict top-level key check refuses a misspelled setting outright, and the
+boolean and entry-name checks refuse a value that would match nothing, so there
+is no value a consumer can write that one reader honours and another ignores. A
+pull request cannot grant itself the exemption, because its own edit to the file
+is not read until it merges.
 `scripts/tests/test_engine_comment_ops_workflow.py` pins the whole `with:` block
 of the step that resolves it, so a second source cannot be threaded back in as an
 input without failing there.

@@ -37,12 +37,13 @@ import sys
 import textwrap
 import urllib.parse
 
-from _shipmate import REPO_RE, _load, utf8_output
+from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
+from _shipmate import ENGINE_ENV, REPO_RE, _load, gate_check, review_count, utf8_output
+from _shipmate import approval_rules as _approval_rules
 from _shipmate import run as _run
 
 ec = _load("env-config")
 
-ENGINE_ENV = "shipmate-engine"
 GATE = "shipmate / gate"
 #: The one repository variable this script writes.
 APP_ID_VAR = "SHIPMATE_APP_ID"
@@ -231,10 +232,6 @@ def _variables():
     return {v["name"].upper(): v["value"] for v in listed}
 
 
-# Named `_APP_KEY_NAME`, not `..._SECRET`: ruff's S105 fires on a "SECRET" token in
-# the binding name, and this is a secret's *name*.
-_APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
-
 #: An apply environment -- and `shipmate-engine`, which is one -- is scoped to the
 #: default branch alone. A PUT naming only this key is additive: an environment
 #: carrying reviewers, `prevent_self_review` or a `wait_timer` keeps all three.
@@ -276,20 +273,6 @@ def _ensure_policy(ctx, name):
             f"also permits {', '.join(extra)}: a workflow on those branches can still "
             f"claim what `{name}` scopes. Remove them by hand if that is not intended.",
         )
-
-
-def _approval_rules(env):
-    """`env`'s protection rules that stop a job from starting.
-
-    GitHub synthesizes a `branch_policy` rule for any environment carrying a deployment
-    branch policy; that is the policy itself, not a second protection, and it stalls
-    nothing.
-    """
-    return sorted(
-        r.get("type") or "?"
-        for r in env.get("protection_rules") or []
-        if r.get("type") != "branch_policy"
-    )
 
 
 def _plan_drift(env):
@@ -563,22 +546,7 @@ def _gate_entry(ctx):
     """
     branch = urllib.parse.quote(ctx["default_branch"], safe="")
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
-    count = max(
-        (
-            (rule.get("parameters") or {}).get("required_approving_review_count") or 0
-            for rule in rules
-            if rule.get("type") == "pull_request"
-        ),
-        default=0,
-    )
-    for rule in rules:
-        if rule.get("type") != "required_status_checks":
-            continue
-        params = rule.get("parameters") or {}
-        for chk in params.get("required_status_checks") or []:
-            if chk.get("context") == GATE:
-                return chk, params, count
-    return None, None, count
+    return (*gate_check(rules, GATE), review_count(rules))
 
 
 def _post_failure(e):

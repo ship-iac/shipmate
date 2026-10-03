@@ -360,18 +360,13 @@ runs:
         # -R is required: this job checks out nothing, so the workspace holds no consumer git
         # remote for gh to infer the repo from, and `gh run download` would fail every time. One
         # directory per run, never a shared one: a cell replanned in a later run carries the same
-        # artifact name in both, and a shared directory would let extraction order decide which
-        # plan doctor reports on.
+        # artifact name in both, and one run's copy would overwrite the other's.
         mkdir -p doctor-cells
         while read -r rid; do
           [ -n "$rid" ] || continue
           gh run download "$rid" -R "$GITHUB_REPOSITORY" -p 'cell-summary.*' -D "doctor-cells/$rid" \
             || echo "::warning::the cell summaries of plan run $rid could not be downloaded; doctor's environment probes may be incomplete"
         done <<< "$run_ids"
-        if ! python3 "$GITHUB_ACTION_PATH/../../scripts/doctor-cells"
-        then
-          echo "::warning::the downloaded cell summaries could not be reconciled with this commit's plan records; doctor's environment probes may report a superseded plan"
-        fi
         echo "plan_run_ids=$(printf '%s' "$run_ids" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
 
     - name: "Doctor: render and upsert the sticky comment"

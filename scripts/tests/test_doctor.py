@@ -206,22 +206,20 @@ def _env(name, rules=(), branch_policy=None):
 
 def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment, plan-env-secret,
-    pin-freshness, fork-trigger, shim-job-name, dispatch-wiring and routing probes, so tests
-    exercising the older gate/environment probes through `warnings()` collect no incidental
-    noise from these eight. The config probe's read is here too, serving
-    the design's canonical file: a sound table is silent in `warnings()`, and its status lines
-    are rendered from `config_status` instead.
+    pin-freshness, fork-trigger and `shipmate.yml` probes, so tests exercising the older
+    gate/environment probes through `warnings()` collect no incidental noise from these six.
+    The config probe's read is here too, serving the design's canonical file: a sound table
+    is silent in `warnings()`, and its status lines are rendered from `config_status` instead.
 
-    The last five read the same workflow listing. `_SHIPMATE_WF`'s `uses:` lines are engine
+    The last three read the same workflow listing. `_SHIPMATE_WF`'s `uses:` lines are engine
     pins -- `_PIN` matches a `.github/workflows/` path as well as an `actions/` one -- so the
     pin probe has something to read and needs the release endpoints to agree with it: the
     pinned SHA and the SHA the release lookup returns are the same `_SHA`, or it reports
     staleness. That file is on `pull_request_target` and named `shipmate.yml`, which keeps the
     fork-trigger probe quiet: it is the exemption, not the absence of the trigger. Its
-    plan-calling job is named `shipmate`, keeping the shim-job-name probe quiet; its dispatch
-    leg -- the trigger, the four inputs, the verb options, the call of the engine's plan
-    workflow -- keeps the dispatch-wiring probe quiet; and its six jobs carry the six
-    documented `if:` expressions, keeping the routing probe quiet. The plan-env secret probe
+    plan-calling job is named `shipmate`, its dispatch leg -- the trigger, the four inputs,
+    the verb options -- is whole, and its six jobs carry the six documented `if:`
+    expressions, keeping the `shipmate.yml` probe quiet. The plan-env secret probe
     reads one listing per plan env; an empty one keeps the healthy path quiet."""
     return {
         f"repos/{_REPO}/environments/dev-eu-plan": _env("dev-eu-plan"),
@@ -247,8 +245,9 @@ def _quiet_new_probes():
 
 #: The config probe's read. `_quiet_new_probes` says why a sound table is silent here.
 _CONFIG_READ = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}{_REF}"
-#: The environment probes' read: execution binds from the default branch's copy.
-_CONFIG_ON_DEFAULT = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={_BRANCH}"
+#: The environment probes' read: no ref, the request `read_table` makes, which GitHub
+#: answers from the default branch. Hand-written so a re-added `?ref=` reddens.
+_CONFIG_ON_DEFAULT = "repos/o/r/contents/.github/shipmate.toml"
 
 
 def test_healthy_repo_emits_nothing(monkeypatch):
@@ -265,10 +264,10 @@ def test_healthy_repo_emits_nothing(monkeypatch):
 
 def test_one_run_reads_the_default_branch_table_once(monkeypatch):
     """Every probe that needs the default branch's table judges one read of it: the review
-    count-0 path and the three environment probes behind `_shared_envs`.
+    count-0 path and the three environment probes behind `_bound_names`.
 
-    Mutation: have `_default_branch_table` call `_read_default_branch_table` without the
-    `ctx` memo -- the file is read four times.
+    Mutation: have `_default_branch_table` read the file without the `ctx` memo -- the file
+    is read four times.
     """
     rules = [_gate_rule()[0], _pull_request_rule(count=0)]
     responses = {
@@ -411,9 +410,9 @@ def test_an_invalid_default_table_skips_the_environment_probes(monkeypatch):
     environment probes say they were skipped, once, beside the config probe's own finding
     about the examined commit's copy.
 
-    Mutation: have `_shared_envs` call `shared_envs` on the unvalidated `parse_table`
-    result -- the non-table entry raises inside every environment probe and `warnings()`
-    degrades them."""
+    Mutation: have `_default_branch_table` keep the unvalidated `parse_table` result, so
+    `_bound_names` calls `shared_envs` on it -- the non-table entry raises inside every
+    environment probe and `warnings()` degrades them."""
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu", "shipmate-engine"),
@@ -438,8 +437,8 @@ def test_an_unreadable_default_table_is_not_read_as_split(monkeypatch):
     """No naming is guessed when the default branch's table cannot be read: a split guess
     reports `dev-eu-plan`/`dev-eu-apply` missing on a repository whose runs bind `dev-eu`.
 
-    Mutation: have `_shared_envs` return `set()` when the read fails -- the split
-    existence findings replace the NOTICE."""
+    Mutation: have `_bound_names` take `set()` as the shared envs when the read fails -- the
+    split existence findings replace the NOTICE."""
 
     def gh(path):
         if path == _CONFIG_ON_DEFAULT:
@@ -516,19 +515,20 @@ def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("at_head", "branch", "ref"),
-    [(CANONICAL, "main", "main"), (_UNSHARED_TABLE, "release/v1", "release%2Fv1")],
-    ids=["key-absent-at-head", "shared-false-at-head-slashed-branch"],
+    "at_head",
+    [CANONICAL, _UNSHARED_TABLE],
+    ids=["key-absent-at-head", "shared-false-at-head"],
 )
-def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at_head, branch, ref):
+def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at_head):
     """Execution binds from the default branch's table, so on a pull request that removes
     `shared = true` every run until merge still binds the bare `dev-eu`: that is the
-    environment the probes inspect. The branch name is URL-quoted into `?ref=`.
+    environment the probes inspect. The table is read with no ref, as `read_table` reads it,
+    whatever the event payload names as the default branch.
 
     Mutation: read the table at `_contents_ref(ctx)` instead of the default branch -- the
-    probes inspect `dev-eu-plan`/`dev-eu-apply`; or interpolate the branch unquoted --
-    the second case reads `?ref=release/v1`."""
-    on_default = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}?ref={ref}"
+    probes inspect `dev-eu-plan`/`dev-eu-apply`; or re-add `?ref=<default branch>` to the
+    read -- the whole path differs."""
+    on_default = _CONFIG_ON_DEFAULT
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu"),
         _CONFIG_READ: _wf_file(at_head),
@@ -543,7 +543,7 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
-    ctx = _ctx(default_branch=branch)
+    ctx = _ctx(default_branch="release/v1")
     found = (
         doctor._environment_warnings(ctx)
         + doctor._env_protection_warnings(ctx)
@@ -661,7 +661,7 @@ def test_strict_policy_off_warned(monkeypatch):
 
 
 def test_probe_403_degrades_to_note_not_failure(monkeypatch):
-    """`bm.gh_json` hard-fails a nonzero `gh api` exit with `raise SystemExit`, which derives
+    """`ec.gh_json` hard-fails a nonzero `gh api` exit with `raise SystemExit`, which derives
     from BaseException, so a catch of only `except Exception` lets a 403 on `rules/branches`
     propagate past `warnings()`. The environments probe still succeeds and its own finding
     must surface beside the degrade note: one probe failing may not swallow the other."""
@@ -711,7 +711,7 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
 
 def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
     """The degrade text renders verbatim into the sticky comment and into `::warning ...::`
-    annotation data, so echoing `bm.gh_json`'s `::error::command failed (N): gh api <path>`
+    annotation data, so echoing `ec.gh_json`'s `::error::command failed (N): gh api <path>`
     would put a literal workflow command in the comment body, nest one inside another in
     annotate mode, and leak the internal endpoint. Name the probe skipped; keep the reason."""
     quiet = _quiet_new_probes()
@@ -953,10 +953,10 @@ def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypat
 
 
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
-    """`bm.gh_json`'s exception carries no status code, so a 403 or 5xx on an environment
-    that IS in the listing is indistinguishable from a 404; swallowing it lets the report
-    say the settings probes found no problems. Listing first separates the two:
-    present-but-unreadable is a note that names the environment."""
+    """`ec.gh_json`'s exception carries `gh`'s stderr as free text doctor never parses, so a
+    403 or 5xx on an environment that IS in the listing is indistinguishable from a 404;
+    swallowing it lets the report say the settings probes found no problems. Listing first
+    separates the two: present-but-unreadable is a note that names the environment."""
     responses = _protection(_env("dev-eu-plan"), listed=["dev-eu-plan", "dev-eu-apply"])
 
     def gh(path):
@@ -1010,8 +1010,9 @@ def _engine_env_responses(env=None, policies=None, listed=True):
 
 def test_missing_engine_environment_warns(monkeypatch):
     """The headline case: `shipmate-engine` absent from the environments listing itself,
-    never a per-environment-read failure standing in for absence -- `bm.gh_json` cannot
-    tell that apart from a 403 or a 5xx on an environment that does exist."""
+    never a per-environment-read failure standing in for absence -- `ec.gh_json`'s
+    exception carries `gh`'s stderr as free text doctor never parses, so doctor cannot tell
+    that apart from a 403 or a 5xx on an environment that does exist."""
     monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(listed=False))
     out = doctor._engine_environment_warnings(_ctx())
     assert len(out) == 1
@@ -2691,35 +2692,31 @@ _WRONG_JOB_NAME_TEXT = (
 )
 
 
-def test_a_shim_whose_job_carries_the_contract_name_is_silent(monkeypatch):
-    responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+def test_a_shim_whose_job_carries_the_contract_name_is_silent():
+    assert doctor._shim_job_name_finding(_SHIPMATE_WF, "shipmate.yml") == []
 
 
-def test_a_shim_whose_job_is_named_something_else_is_reported(monkeypatch):
+def test_a_shim_whose_job_is_named_something_else_is_reported():
     """Mutation: `_shim_job_name_finding` returning [] unconditionally. This test passes
     vacuously if the probe reports nothing for everything, so it is paired with the silent
     case above."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == [(doctor.WARNING, _WRONG_JOB_NAME_TEXT)]
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == [
+        (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
+    ]
 
 
-def test_a_shim_with_no_job_name_takes_the_job_id_and_is_silent(monkeypatch):
+def test_a_shim_with_no_job_name_takes_the_job_id_and_is_silent():
     """GitHub uses the job id as the display name when `name:` is absent, so
     `jobs: { shipmate: { uses: ... } }` produces the same check names. Mutation: read the
     job id as unnamed and this documented-equivalent shape is reported."""
     text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
         "    name: shipmate\n", "", 1
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
 
 
-def test_a_job_name_beats_a_job_id_that_is_the_contract_name(monkeypatch):
+def test_a_job_name_beats_a_job_id_that_is_the_contract_name():
     """GitHub displays `name:` when there is one, so the id is read only in its absence. The
     uncovered shape is a consumer who copies the documented file and edits the display name
     alone: job id `shipmate`, `name: terraform`, and the checks become
@@ -2731,21 +2728,21 @@ def test_a_job_name_beats_a_job_id_that_is_the_contract_name(monkeypatch):
     text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
         "    name: shipmate\n", "    name: terraform\n", 1
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == [(doctor.WARNING, _WRONG_JOB_NAME_TEXT)]
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == [
+        (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
+    ]
 
 
-def test_a_job_id_that_is_not_the_contract_name_is_reported(monkeypatch):
+def test_a_job_id_that_is_not_the_contract_name_is_reported():
     """The other half of the job-id fallback: with no `name:` the id IS the display name, so
     an id that is not `shipmate` produces the wrong check names."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1)
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == [(doctor.WARNING, _WRONG_JOB_NAME_TEXT)]
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == [
+        (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
+    ]
 
 
-def test_a_name_below_the_uses_line_is_still_the_jobs_name(monkeypatch):
+def test_a_name_below_the_uses_line_is_still_the_jobs_name():
     """The whole job block is read, in both directions: the documented file writes `name:`
     above its `uses:` line, and either side of it is the same job's name. Mutation: end the
     region at the `uses:` line rather than at the end of the job block."""
@@ -2753,42 +2750,36 @@ def test_a_name_below_the_uses_line_is_still_the_jobs_name(monkeypatch):
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
         uses_line, uses_line + "    name: shipmate\n", 1
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
 
 
-def test_a_name_deeper_in_the_block_is_not_the_jobs_name(monkeypatch):
+def test_a_name_deeper_in_the_block_is_not_the_jobs_name():
     """Only a direct child of the job is its name. A `name:` under `with:` is an input, and
     taking it would silence the finding for a job called something else entirely."""
     anchor = "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
         anchor, f"{anchor}    with:\n      name: shipmate\n", 1
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == [(doctor.WARNING, _WRONG_JOB_NAME_TEXT)]
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == [
+        (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
+    ]
 
 
-def test_a_quoted_job_name_is_silent(monkeypatch):
+def test_a_quoted_job_name_is_silent():
     """Formatters quote scalars, so the value carries one layer of YAML quoting the comparison
     must strip. Mutation: drop the `.strip("\\"'")` on the matched value."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", '    name: "shipmate"\n', 1)
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
 
 
-def test_a_trailing_comment_after_the_job_name_is_silent(monkeypatch):
+def test_a_trailing_comment_after_the_job_name_is_silent():
     """The block is comment-stripped before it is read, so a trailing comment is not part of
     the name. A probe that fires on this shape fires on a correct repository. Mutation: read
     the raw text in `_call_region`."""
     text = _SHIPMATE_WF.replace(
         "    name: shipmate\n", "    name: shipmate  # the name the plan links resolve\n"
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
 
 
 def test_another_workflow_file_with_a_differently_named_job_is_not_reported(monkeypatch):
@@ -2797,45 +2788,52 @@ def test_another_workflow_file_with_a_differently_named_job_is_not_reported(monk
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
     responses = _fork_responses({"custom-plan.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+    assert doctor._shipmate_yml_warnings(_ctx()) == []
 
 
-def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent(monkeypatch):
-    """Nothing to name: the dispatch probe reports the missing call, and two findings for one
+def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent():
+    """Nothing to name: the routing finding reports the missing call, and two findings for one
     hole ask the reader's question twice."""
-    responses = _fork_responses({"shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n"})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+    assert (
+        doctor._shim_job_name_finding("on:\n  pull_request_target:\njobs:\n  x:\n", "shipmate.yml")
+        == []
+    )
 
 
-def test_an_unparseable_shim_reports_nothing_and_does_not_crash(monkeypatch):
+def test_an_unparseable_shim_reports_nothing_and_does_not_crash():
     """doctor reads consumer text with regexes precisely because a consumer file may not
     parse. A YAML parser raises here; this probe must return the finding it can see."""
     text = _SHIPMATE_WF.replace("  plan:\n", "  plan:\n    on: [ unbalanced\n", 1)
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
 
 
-def test_shim_job_name_probe_is_registered(monkeypatch):
-    """An unregistered probe runs nowhere while its own unit tests stay green --
-    assert it actually executes as part of `warnings()`."""
-    assert doctor._shim_job_name_warnings in doctor.PROBES
+def test_the_shipmate_yml_probe_is_registered_and_runs_its_three_finders_in_order(monkeypatch):
+    """An unregistered probe runs nowhere while its finders' unit tests stay green -- assert it
+    executes as part of `warnings()`, and that one file read feeds all three finders.
+
+    Mutation: drop any one finder from `_shipmate_yml_warnings` (its finding leaves the list),
+    or reorder them."""
+    text = _WF_NO_TRIGGER.replace("    name: shipmate\n", "    name: terraform\n", 1).replace(
+        " && inputs.verb == 'apply'\n", "\n", 1
+    )
     responses = {
         f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
-        **_quiet_new_probes(),
-        f"{_WF_DIR}/shipmate.yml{_REF}": _wf_file(
-            _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
         ),
+        **_quiet_new_probes(),
+        f"{_WF_DIR}/shipmate.yml{_REF}": _wf_file(text),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert (doctor.WARNING, _WRONG_JOB_NAME_TEXT) in doctor.warnings(_ctx())
+    assert doctor.warnings(_ctx()) == [
+        (doctor.WARNING, _WRONG_JOB_NAME_TEXT),
+        (doctor.WARNING, _NO_TRIGGER_TEXT),
+        (doctor.WARNING, _EDITED_IF_TEXT),
+    ]
 
 
-# The consumer `shipmate.yml` shapes the dispatch-wiring probe judges. Each bad one
-# isolates ONE finding: the four that carry the trigger also call the engine's plan
-# workflow, and the one that does not call it is otherwise correctly dispatchable.
+# The consumer `shipmate.yml` shapes the dispatch-wiring finding judges. Each bad one
+# isolates ONE finding.
 _WF_NO_TRIGGER = (
     _SHIPMATE_WF[: _SHIPMATE_WF.index("  workflow_dispatch:\n")]
     + _SHIPMATE_WF[_SHIPMATE_WF.index("permissions: {}\n") :]
@@ -2873,18 +2871,6 @@ _WF_REQUIRED_TAGS = _SHIPMATE_WF.replace(
 _WF_SHORT_OPTIONS = _SHIPMATE_WF.replace(
     "        options: [plan, apply, unlock, drift]\n", "        options: [plan, apply]\n", 1
 )
-# Dispatchable, and nothing in it plans: the call the file exists for is a `build-matrix`
-# step instead.
-_WF_NO_ENGINE_CALL = (
-    _SHIPMATE_WF[: _SHIPMATE_WF.index("jobs:\n")]
-    + "jobs:\n"
-    + "  plan:\n"
-    + "    name: shipmate\n"
-    + "    steps:\n"
-    + f"      - uses: {_ENGINE_REPO}/actions/build-matrix@{_SHA}\n"
-)
-
-
 # Hand-written, whole, and never derived from `scripts/doctor`: each finding is compared
 # in full rather than by substring, so a reworded message is a deliberate edit here and
 # the three cannot collapse into one another.
@@ -2925,35 +2911,24 @@ _SHORT_OPTIONS_TEXT = (
     "`if:` selects, and its run completes with every job skipped, which reads as success "
     "everywhere. Write `options: [plan, apply, unlock, drift]` (docs/getting-started.md)."
 )
-_NO_ENGINE_CALL_TEXT = (
-    "`shipmate.yml` does not call the engine's plan workflow, so the dispatch is accepted and the "
-    "run starts, with nothing in it that resolves the pull request, plans a cell or reports a "
-    "gate status, so a commented `shipmate plan` produces a green run and no plan. That call "
-    "is the whole `plan` job: `uses: <engine>/.github/workflows/plan.yml@<sha>` "
-    "(docs/getting-started.md)."
-)
 
 
-def test_a_workflow_file_without_the_dispatch_trigger_is_reported(monkeypatch):
-    responses = _fork_responses({"shipmate.yml": _WF_NO_TRIGGER})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._dispatch_wiring_warnings(_ctx())
+def test_a_workflow_file_without_the_dispatch_trigger_is_reported():
+    out = doctor._dispatch_wiring_finding(_WF_NO_TRIGGER, "shipmate.yml")
     assert out == [(doctor.WARNING, _NO_TRIGGER_TEXT)]
 
 
-def test_a_dispatch_trigger_without_pr_number_is_reported_on_its_own(monkeypatch):
+def test_a_dispatch_trigger_without_pr_number_is_reported_on_its_own():
     """Its own finding with its own text and its own remedy: the trigger is
     there, so a reader told only "the file cannot be dispatched" would add
     what it already has. The key is looked for inside the `on:` block, which is
     why this fixture also forwards `pr_number` from a `with:` block below."""
-    responses = _fork_responses({"shipmate.yml": _WF_NO_PR_NUMBER})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._dispatch_wiring_warnings(_ctx())
+    out = doctor._dispatch_wiring_finding(_WF_NO_PR_NUMBER, "shipmate.yml")
     assert out == [(doctor.WARNING, _NO_PR_NUMBER_TEXT)]
     assert _NO_PR_NUMBER_TEXT != _NO_TRIGGER_TEXT
 
 
-def test_the_dispatch_probe_reports_a_required_input_other_than_verb(monkeypatch):
+def test_the_dispatch_probe_reports_a_required_input_other_than_verb():
     """`verb` is the only required input the file may declare: every dispatch body omits at
     least one of the other three, and GitHub answers an omitted value for a required input
     with HTTP 422 and no run — which is how every `shipmate unlock` failed while the old
@@ -2961,38 +2936,38 @@ def test_the_dispatch_probe_reports_a_required_input_other_than_verb(monkeypatch
 
     Mutation: drop the `_required_inputs` finding, and a file that refuses every unlock
     passes."""
-    responses = _fork_responses({"shipmate.yml": _WF_REQUIRED_REF})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == [(doctor.WARNING, _REQUIRED_REF_TEXT)]
+    assert doctor._dispatch_wiring_finding(_WF_REQUIRED_REF, "shipmate.yml") == [
+        (doctor.WARNING, _REQUIRED_REF_TEXT)
+    ]
 
 
-def test_the_dispatch_probe_reports_a_required_input_the_consumer_declared(monkeypatch):
+def test_the_dispatch_probe_reports_a_required_input_the_consumer_declared():
     """Requiredness is judged over every input the `on:` block declares, not the four
     `actions/dispatch` names: a consumer may declare inputs of its own, and no dispatch body
     carries a value for one, so a required one answers HTTP 422 to every commented verb.
 
     Mutation: iterate `_DISPATCH_INPUTS[1:]` in `_required_inputs` again, and a consumer's
     own input is the one shape the probe cannot see."""
-    responses = _fork_responses({"shipmate.yml": _WF_REQUIRED_TAGS})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == [(doctor.WARNING, _REQUIRED_TAGS_TEXT)]
+    assert doctor._dispatch_wiring_finding(_WF_REQUIRED_TAGS, "shipmate.yml") == [
+        (doctor.WARNING, _REQUIRED_TAGS_TEXT)
+    ]
 
 
-def test_the_dispatch_probe_reports_a_changed_verb_option_list(monkeypatch):
+def test_the_dispatch_probe_reports_a_changed_verb_option_list():
     """The whole option list is compared, not the presence of an `options:` key: a list
     missing `unlock` refuses that verb at the dispatch form and at the API.
 
     Mutation: check only that `options:` is present."""
-    responses = _fork_responses({"shipmate.yml": _WF_SHORT_OPTIONS})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == [(doctor.WARNING, _SHORT_OPTIONS_TEXT)]
+    assert doctor._dispatch_wiring_finding(_WF_SHORT_OPTIONS, "shipmate.yml") == [
+        (doctor.WARNING, _SHORT_OPTIONS_TEXT)
+    ]
 
 
 @pytest.mark.parametrize(
     "options",
     ["[plan,apply,unlock,drift]", "[ plan, apply, unlock, drift ]", "[plan, apply,  unlock,drift]"],
 )
-def test_the_dispatch_probe_accepts_any_spacing_in_the_option_list(monkeypatch, options):
+def test_the_dispatch_probe_accepts_any_spacing_in_the_option_list(options):
     """All three are the same YAML sequence as the fence's, so all three route every verb. A
     probe that reported them would tell a healthy repository to write what its file already
     means, and the next finding from this probe would be read as noise too.
@@ -3005,27 +2980,30 @@ def test_the_dispatch_probe_accepts_any_spacing_in_the_option_list(monkeypatch, 
     text = _SHIPMATE_WF.replace(
         "        options: [plan, apply, unlock, drift]\n", f"        options: {options}\n", 1
     )
+    assert doctor._dispatch_wiring_finding(text, "shipmate.yml") == []
+
+
+def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported_once(monkeypatch):
+    """The fail-open leg: the published file without its `plan` job is dispatchable, so the
+    run starts with nothing in it that plans. The routing finding's zero count is the one
+    report; the job-name finder has no call to name.
+
+    Mutation: restore the dispatch finding's own "does not call the engine's plan workflow"
+    warning, and the list gains a second entry."""
+    fence = _documented_workflow_file()
+    text = fence[: fence.index("  plan:\n")] + fence[fence.index("  comment-ops:\n") :]
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == []
+    assert doctor._shipmate_yml_warnings(_ctx()) == [
+        (doctor.WARNING, _wrong_count_text("plan.yml", 0))
+    ]
 
 
-def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported(monkeypatch):
-    """The fail-open leg: this file is dispatchable, so the other two findings are
-    silent and the run starts — with nothing in it that plans."""
-    responses = _fork_responses({"shipmate.yml": _WF_NO_ENGINE_CALL})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._dispatch_wiring_warnings(_ctx())
-    assert out == [(doctor.WARNING, _NO_ENGINE_CALL_TEXT)]
+def test_a_dispatchable_workflow_file_is_silent():
+    assert doctor._dispatch_wiring_finding(_SHIPMATE_WF, "shipmate.yml") == []
 
 
-def test_a_dispatchable_workflow_file_is_silent(monkeypatch):
-    responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == []
-
-
-def test_an_input_of_the_consumers_own_is_not_read_as_the_verbs(monkeypatch):
+def test_an_input_of_the_consumers_own_is_not_read_as_the_verbs():
     """A consumer may declare inputs beside the four, and one written above `verb` carries
     its own `options:`. The verb list is read from `verb`'s own
     block, so this file is healthy.
@@ -3042,25 +3020,22 @@ def test_an_input_of_the_consumers_own_is_not_read_as_the_verbs(monkeypatch):
         "      verb:\n",
         1,
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == []
+    assert doctor._dispatch_wiring_finding(text, "shipmate.yml") == []
 
 
 def test_the_documented_workflow_file_is_dispatchable_and_correctly_named(monkeypatch):
-    """The oracle for false positives and for the page: the file consumers paste,
-    verbatim, through both probes that read `shipmate.yml`.
+    """The oracle for false positives and for the page: the file consumers paste, verbatim,
+    through the probe that reads `shipmate.yml`.
 
-    Mutations: rename the fence's job `name:` away from `shipmate` (the job-name half reddens),
-    and delete its `workflow_dispatch:` trigger (the dispatch half reddens).
+    Mutations: rename the fence's job `name:` away from `shipmate`; delete its
+    `workflow_dispatch:` trigger; edit one routing `if:`.
     """
     responses = _fork_responses({"shipmate.yml": _documented_workflow_file()})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == []
-    assert doctor._shim_job_name_warnings(_ctx()) == []
+    assert doctor._shipmate_yml_warnings(_ctx()) == []
 
 
-def test_a_flow_style_on_value_is_silent(monkeypatch):
+def test_a_flow_style_on_value_is_silent():
     """The whole `on:` value as one flow mapping, with no line start in front of either key;
     the documented block-style fence cannot cover it. A line-anchored regex sees neither, and
     because ABSENCE is this probe's finding it reports a correctly wired file as declaring
@@ -3080,12 +3055,10 @@ def test_a_flow_style_on_value_is_silent(monkeypatch):
         "    name: shipmate\n"
         f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == []
+    assert doctor._dispatch_wiring_finding(text, "shipmate.yml") == []
 
 
-def test_a_workflow_dispatch_line_under_jobs_does_not_satisfy_the_trigger(monkeypatch):
+def test_a_workflow_dispatch_line_under_jobs_does_not_satisfy_the_trigger():
     """The reason the trigger is looked for inside the `on:` block: no such key
     exists under `jobs:`, but a whole-file regex is satisfied by any line that
     spells it, and the file is then reported healthy while `shipmate plan`
@@ -3093,36 +3066,40 @@ def test_a_workflow_dispatch_line_under_jobs_does_not_satisfy_the_trigger(monkey
     text = _WF_NO_TRIGGER.replace(
         "  plan:\n", "  plan:\n    env:\n      workflow_dispatch: yes\n", 1
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._dispatch_wiring_warnings(_ctx())
+    out = doctor._dispatch_wiring_finding(text, "shipmate.yml")
     assert out == [(doctor.WARNING, _NO_TRIGGER_TEXT)]
 
 
-def test_the_filename_filter_lives_in_the_dispatch_wiring_dispatcher(monkeypatch):
+def test_the_filename_filter_lives_in_the_shipmate_yml_probe(monkeypatch):
     """A direct call of the finding function reports whatever file it is handed:
     the caller bypassed the exemption, and silence there reads as a false
-    positive that is not one. Only the dispatcher skips another file's name."""
+    positive that is not one. Only the probe skips another file's name.
+
+    Mutation: drop the `if name != "shipmate.yml"` filter."""
     assert doctor._dispatch_wiring_finding(_WF_NO_TRIGGER, "drift.yml") == [
         (doctor.WARNING, _NO_TRIGGER_TEXT.replace("`shipmate.yml`", "`drift.yml`"))
     ]
     responses = _fork_responses({"drift.yml": _WF_NO_TRIGGER})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._dispatch_wiring_warnings(_ctx()) == []
+    assert doctor._shipmate_yml_warnings(_ctx()) == []
 
 
-def test_dispatch_wiring_probe_is_registered(monkeypatch):
-    """An unregistered probe runs nowhere while its own unit tests stay green --
-    assert it actually executes as part of `warnings()`."""
-    assert doctor._dispatch_wiring_warnings in doctor.PROBES
-    responses = {
-        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
-        **_quiet_new_probes(),
-        f"{_WF_DIR}/shipmate.yml{_REF}": _wf_file(_WF_NO_TRIGGER),
-    }
+def test_a_failing_shipmate_yml_probe_degrades_naming_the_file(monkeypatch):
+    """Mutation: drop the probe's `label` -- the note names "the shipmate yml settings"."""
+
+    def boom(text, name):
+        raise RuntimeError("boom")
+
+    responses = _fork_responses({"shipmate.yml": _WF_NO_TRIGGER})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert (doctor.WARNING, _NO_TRIGGER_TEXT) in doctor.warnings(_ctx())
+    monkeypatch.setattr(doctor, "_routing_finding", boom)
+    monkeypatch.setattr(doctor, "PROBES", (doctor._shipmate_yml_warnings,))
+    assert doctor.warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "doctor could not verify the `shipmate.yml` settings (boom): probe skipped.",
+        )
+    ]
 
 
 # The routing findings, hand-written and whole, never derived from `scripts/doctor` or from
@@ -3171,29 +3148,25 @@ def test_the_routing_table_matches_the_documented_workflow_file():
     )
 
 
-def test_the_routing_probe_is_silent_on_the_documented_file(monkeypatch):
+def test_the_routing_probe_is_silent_on_the_documented_file():
     """The floor under the three reporting cases below, and the oracle for false positives:
     the file consumers paste, verbatim, through the whole probe.
 
     Mutation: edit any one of the six `ROUTING_IFS` expressions."""
-    responses = _fork_responses({"shipmate.yml": _documented_workflow_file()})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._routing_warnings(_ctx()) == []
+    assert doctor._routing_finding(_documented_workflow_file(), "shipmate.yml") == []
 
 
-def test_the_routing_probe_reports_a_job_whose_if_was_edited(monkeypatch):
+def test_the_routing_probe_reports_a_job_whose_if_was_edited():
     """One clause dropped from the apply job's `if:` and every dispatched verb, `plan`, `unlock`
     and `drift` included, starts an apply as well.
 
     Mutation: compare the found expression as a prefix of the expected one instead of whole,
     and this edit passes."""
     text = _SHIPMATE_WF.replace(" && inputs.verb == 'apply'\n", "\n", 1)
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._routing_warnings(_ctx()) == [(doctor.WARNING, _EDITED_IF_TEXT)]
+    assert doctor._routing_finding(text, "shipmate.yml") == [(doctor.WARNING, _EDITED_IF_TEXT)]
 
 
-def test_the_routing_finding_row_keeps_the_expected_if_intact(monkeypatch):
+def test_the_routing_finding_row_keeps_the_expected_if_intact():
     """The remedy names the whole expected `if:` inside a code span, where an entity shows as
     written, so plan.yml's `||` must reach the report row unescaped.
 
@@ -3204,9 +3177,7 @@ def test_the_routing_finding_row_keeps_the_expected_if_intact(monkeypatch):
         "",
         1,
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    [(level, finding)] = doctor._routing_warnings(_ctx())
+    [(level, finding)] = doctor._routing_finding(text, "shipmate.yml")
     assert doctor._finding_row(level, finding) == (
         f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s job calling the engine's "
         "`plan.yml` declares no `if:`, so it then runs on every one of this file's triggers, so "
@@ -3216,20 +3187,18 @@ def test_the_routing_finding_row_keeps_the_expected_if_intact(monkeypatch):
     )
 
 
-def test_the_routing_probe_reports_a_missing_job(monkeypatch):
+def test_the_routing_probe_reports_a_missing_job():
     """A verb whose job is not in the file at all: the dispatch is accepted, every job is
     skipped, and the run is green.
 
     Mutation: skip a callee the file does not call (`if count == 0: continue`)."""
     text = _SHIPMATE_WF[: _SHIPMATE_WF.index("  unlock:\n")]
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._routing_warnings(_ctx()) == [
+    assert doctor._routing_finding(text, "shipmate.yml") == [
         (doctor.WARNING, _wrong_count_text("unlock.yml", 0))
     ]
 
 
-def test_the_routing_probe_reports_two_jobs_calling_one_callee(monkeypatch):
+def test_the_routing_probe_reports_two_jobs_calling_one_callee():
     """Two jobs on one callee means one of them is unreachable or the work runs twice, and the
     single-region reader would silently judge only the first.
 
@@ -3239,9 +3208,9 @@ def test_the_routing_probe_reports_two_jobs_calling_one_callee(monkeypatch):
         "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'\n"
         f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
     )
-    responses = _fork_responses({"shipmate.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._routing_warnings(_ctx()) == [(doctor.WARNING, _wrong_count_text("apply.yml", 2))]
+    assert doctor._routing_finding(text, "shipmate.yml") == [
+        (doctor.WARNING, _wrong_count_text("apply.yml", 2))
+    ]
 
 
 def test_the_routing_probe_ignores_every_other_workflow_file(monkeypatch):
@@ -3251,15 +3220,14 @@ def test_the_routing_probe_ignores_every_other_workflow_file(monkeypatch):
     Mutation: drop the `if name != "shipmate.yml"` filter."""
     responses = _fork_responses({"ci.yml": _SHIPMATE_WF[: _SHIPMATE_WF.index("  unlock:\n")]})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._routing_warnings(_ctx()) == []
+    assert doctor._shipmate_yml_warnings(_ctx()) == []
 
 
 # The workflow-directory probes whose two degrades share one shape. Without a commit, a
 # default-branch read would report the old state on the very pull request that fixes it, so
 # the `gh` stub pins that no read happens at all and a weaker read cannot stand in:
-# fork-trigger reports the trigger on the pull request that removes it, shim-job-name the old
-# name on the one that renames the job, dispatch-wiring the missing trigger on the one that
-# adds it, routing the old expression on the one that fixes it.
+# fork-trigger reports the trigger on the pull request that removes it, and the `shipmate.yml`
+# probe the old job name, missing trigger or old expression on the one that fixes it.
 _WORKFLOW_DIR_DEGRADES = [
     pytest.param(
         doctor._fork_trigger_warnings,
@@ -3268,22 +3236,10 @@ _WORKFLOW_DIR_DEGRADES = [
         id="fork_trigger",
     ),
     pytest.param(
-        doctor._shim_job_name_warnings,
-        doctor.SHIM_JOB_NO_COMMIT,
-        doctor.SHIM_JOB_UNREADABLE,
-        id="shim_job_name",
-    ),
-    pytest.param(
-        doctor._dispatch_wiring_warnings,
-        doctor.DISPATCH_WIRING_NO_COMMIT,
-        doctor.DISPATCH_WIRING_UNREADABLE,
-        id="dispatch_wiring",
-    ),
-    pytest.param(
-        doctor._routing_warnings,
-        doctor.ROUTING_NO_COMMIT,
-        doctor.ROUTING_UNREADABLE,
-        id="routing",
+        doctor._shipmate_yml_warnings,
+        doctor.SHIPMATE_YML_NO_COMMIT,
+        doctor.SHIPMATE_YML_UNREADABLE,
+        id="shipmate_yml",
     ),
 ]
 
@@ -3294,15 +3250,16 @@ def test_the_workflow_directory_degrades_read_as_written():
 
     Mutation: swap the two elements `_unverified` returns, or reword either sentence --
     this reddens."""
-    assert (doctor.ROUTING_UNREADABLE, doctor.ROUTING_NO_COMMIT) == (
+    assert (doctor.SHIPMATE_YML_UNREADABLE, doctor.SHIPMATE_YML_NO_COMMIT) == (
         (
             "notice",
-            "could not read `.github/workflows`: the workflow file's event routing not verified.",
+            "could not read `.github/workflows`: the workflow file's job name, dispatch wiring "
+            "and event routing not verified.",
         ),
         (
             "notice",
-            "the workflow file's event routing not verified: the commit under examination "
-            "could not be determined.",
+            "the workflow file's job name, dispatch wiring and event routing not verified: the "
+            "commit under examination could not be determined.",
         ),
     )
 
@@ -3330,22 +3287,6 @@ def test_unreadable_directory_degrades_to_a_note(monkeypatch, probe, _no_commit,
     assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
 
 
-def test_routing_probe_is_registered(monkeypatch):
-    """An unregistered probe runs nowhere while its own unit tests stay green --
-    assert it actually executes as part of `warnings()`."""
-    assert doctor._routing_warnings in doctor.PROBES
-    responses = {
-        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
-        f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan", "dev-eu-apply"),
-        **_quiet_new_probes(),
-        f"{_WF_DIR}/shipmate.yml{_REF}": _wf_file(
-            _SHIPMATE_WF[: _SHIPMATE_WF.index("  unlock:\n")]
-        ),
-    }
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert (doctor.WARNING, _wrong_count_text("unlock.yml", 0)) in doctor.warnings(_ctx())
-
-
 def test_the_probe_registry_is_exactly_this(monkeypatch):
     """The whole registry against a hand-written list, not its length: a length
     assertion cannot say WHICH entry changed, so a probe swapped for another
@@ -3359,9 +3300,7 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
         doctor._plan_env_secret_warnings,
         doctor._pin_warnings,
         doctor._fork_trigger_warnings,
-        doctor._shim_job_name_warnings,
-        doctor._dispatch_wiring_warnings,
-        doctor._routing_warnings,
+        doctor._shipmate_yml_warnings,
         doctor._config_warnings,
         doctor._app_permission_warnings,
     )
@@ -3862,7 +3801,7 @@ def test_no_probe_reads_a_repository_variable(monkeypatch):
 
 def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
     """`_APP_KEY_NAME in names` is a membership test over the names actually read, and
-    `bm.gh_json` does not multi-page, so on a truncated listing the key can sit outside
+    `ec.gh_json` does not multi-page, so on a truncated listing the key can sit outside
     the page and produce silence -- the one configuration no document blesses reading as a
     routine note. Absence is reportable only when the read was complete."""
     responses = {
@@ -4012,9 +3951,9 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
 
 def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
     """Existence comes from the environments *listing*, never from the per-environment
-    read's exception: `bm.gh_json` raises without a status code, so a 404 for a
-    declared-but-absent environment is indistinguishable from a 403, and the degrade note
-    would claim it exists. Asserted on the paths requested, since a probe that read the
+    read's exception: it carries `gh`'s stderr as free text doctor never parses, so a 404
+    for a declared-but-absent environment is indistinguishable from a 403, and the degrade
+    note would claim it exists. Asserted on the paths requested, since a probe that read the
     absent environment and swallowed the error also returns []."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
@@ -4094,7 +4033,7 @@ def test_plan_env_secret_listing_failure_propagates_to_the_degrade_note(monkeypa
 
 
 def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
-    """`bm.gh_json` does not multi-page, so an environment with more than 100 secrets
+    """`ec.gh_json` does not multi-page, so an environment with more than 100 secrets
     returns a partial list, and reporting `len(names)` understates it as the whole set.
     The same partial read also warns that the App-key check could not be completed."""
     responses = {
@@ -4135,6 +4074,20 @@ def test_declared_envs_reads_a_flat_single_artifact_download(tmp_path):
     # the nested layout empties the declared-env set, skipping every environment probe.
     (tmp_path / "cell.json").write_text(json.dumps({"environment": "dev-eu"}), encoding="utf-8")
     assert doctor._declared_envs(tmp_path) == {"dev-eu"}
+
+
+def test_declared_envs_reads_every_run_directory_of_comment_ops_download(tmp_path):
+    """comment-ops downloads each plan run into its own directory, so a summary sits at
+    `<run>/<artifact>/cell.json`, or at `<run>/cell.json` when the run had one artifact.
+    Mutation: `glob("*/cell.json")` reads only the flat layout and drops `dev-us`."""
+    for path, env in [
+        ("1281/cell-summary.dev-eu.stacks-app/cell.json", "dev-eu"),
+        ("1290/cell.json", "dev-eu"),
+        ("1302/cell-summary.dev-us.stacks-db/cell.json", "dev-us"),
+    ]:
+        (tmp_path / path).parent.mkdir(parents=True)
+        (tmp_path / path).write_text(json.dumps({"environment": env}), encoding="utf-8")
+    assert doctor._declared_envs(tmp_path) == {"dev-eu", "dev-us"}
 
 
 #: The refusal the misplaced control earns, whole: the probe's own framing plus the
@@ -4462,11 +4415,11 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
 
 
 def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
-    """Each defaults line is cut before the first env name that would pass 400 characters,
-    never inside one.
+    """Each defaults line shows the whole env names that fit 400 characters with the count of
+    the rest, never part of a name.
 
-    Mutations: render `shown` or the explicit list through `_one_line(..., 400)` again --
-    the last name shown is cut mid-text; drop the `…` -- the cut reads as the whole list.
+    Mutations: render `shown` or the explicit list through `_one_line(..., 400)` -- the last
+    name shown is cut mid-text; drop the count from the tail -- the line ends ` …`.
     """
     name = "environment-with-a-long-name-{:02d}".format
     table = {
@@ -4483,8 +4436,9 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
             "environment-with-a-long-name-02 after environment-with-a-long-name-01; "
             "environment-with-a-long-name-03 after environment-with-a-long-name-02; "
             "environment-with-a-long-name-04 after environment-with-a-long-name-03; "
-            "environment-with-a-long-name-05 after environment-with-a-long-name-04; "
-            "…: a bare `shipmate apply` applies one env-level fully before it starts the next.",
+            "environment-with-a-long-name-05 after environment-with-a-long-name-04"
+            " … and 14 more: a bare `shipmate apply` applies one env-level fully before it "
+            "starts the next.",
         ),
         (
             doctor.NOTICE,
@@ -4494,17 +4448,67 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
             "environment-with-a-long-name-04, environment-with-a-long-name-05, "
             "environment-with-a-long-name-06, environment-with-a-long-name-07, "
             "environment-with-a-long-name-08, environment-with-a-long-name-09, "
-            "environment-with-a-long-name-10, environment-with-a-long-name-11, "
-            "…: a bare `shipmate apply` skips those, and each needs its own "
+            "environment-with-a-long-name-10"
+            " … and 9 more: a bare `shipmate apply` skips those, and each needs its own "
             "`shipmate apply <env>`.",
         ),
     ]
 
 
-def test_a_first_item_over_the_budget_is_cut_inside_rather_than_dropped():
-    """Mutation: return `sep.join([*shown, "…"])` whatever `shown` holds -- the line is `…`."""
+class _SliceBudget(list):
+    """A row list that refuses a 64th slice, so a trim loop that never ends fails fast."""
+
+    slices = 0
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            self.slices += 1
+            assert self.slices < 64, "the trim loop did not stop"
+        return super().__getitem__(key)
+
+
+def test_a_first_item_over_the_limit_shows_only_the_count():
+    """Mutation: stop trimming at one item (`while ... and shown > 1`) -- the first item
+    shows, over the limit."""
     item = "a after " + ", ".join(f"predecessor-{i:02d}" for i in range(30))
-    assert doctor._whole_items([item, "b after a"], "; ") == item[:399] + "…"
+    assert doctor._fit_items([item, "b after a"], "; ", 400) == "… and 2 more"
+
+
+def test_a_defaults_notice_showing_only_the_count_has_one_space_before_it():
+    """Mutation: keep the leading space of ` … and N more` when no item is shown -- the
+    notice reads "orders  … and 1 more"."""
+    preds = [f"predecessor-{i:02d}" for i in range(30)]
+    table = {"environments": {"a": {"needs": preds}, **{p: {} for p in preds}}}
+    assert doctor._config_defaults(table)[0] == (
+        doctor.NOTICE,
+        "`needs` orders … and 1 more: a bare `shipmate apply` applies one env-level fully "
+        "before it starts the next.",
+    )
+
+
+def test_a_limit_shorter_than_the_count_shows_the_count_and_stops():
+    """A roles heading over the budget leaves a negative limit: trimming went on past zero
+    items, the count growing, and hung the report.
+
+    Mutation: drop `and shown` -- the 64th slice fails inside `_SliceBudget` instead of
+    hanging.
+    """
+    rows = _SliceBudget(["plan every cell: no role", "apply every cell: no role"])
+    assert doctor._fit_items(rows, "; ", -1) == "… and 2 more"
+
+
+def test_a_list_that_fits_the_limit_exactly_has_no_tail():
+    """Mutation: trim while the text is `>= limit` -- the 400-character list loses an item to
+    a ` … and 1 more` tail."""
+    items = ["a" * 198, "b" * 200]
+    assert doctor._fit_items(items, "; ", 400) == "a" * 198 + "; " + "b" * 200
+
+
+def test_rows_that_fill_the_budget_exactly_all_fit():
+    """Mutation: fit a row only while `used + len(row) + 1 < budget` -- the second row, which
+    ends exactly at the budget, is dropped."""
+    lines = []
+    assert (doctor._fit(lines, ["ab", "cd"], 0, 6), lines) == ((6, 2, 0), ["ab", "cd"])
 
 
 #: A varying identity with two workloads listed out of alphabetical order, an apply-only
@@ -4633,7 +4637,7 @@ def test_the_roles_section_stays_within_its_budget_and_keeps_the_harvest():
     environment's items -- the first notice alone is over budget, so both environments are
     only counted.
     """
-    table = doctor.bm.ec.validate_structure(_wide_roles_table("dev", "prod"))
+    table = doctor.ec.validate_structure(_wide_roles_table("dev", "prod"))
     roles = doctor._config_roles(table)
     body = doctor.render_report([], [_ann(title="stale codegen")], _ctx(), roles)
     assert (doctor.CONFIG_HEADING in body, "stale codegen" in body) == (True, True)
@@ -4656,32 +4660,27 @@ def test_the_roles_section_stays_within_its_budget_and_keeps_the_harvest():
     ]
 
 
-class _SliceBudget(list):
-    """A row list that refuses a 64th slice, so a trim loop that never ends fails fast."""
-
-    slices = 0
-
-    def __getitem__(self, key):
-        if isinstance(key, slice):
-            self.slices += 1
-            assert self.slices < 64, "the trim loop did not stop"
-        return super().__getitem__(key)
-
-
 def test_a_heading_over_the_budget_shows_no_items_and_stops():
     """A lowercase environment name of 8,000 characters is valid, and its heading alone is
-    over the budget: trimming went on past zero rows, the count growing, and hung the report.
-    Zero rows shown gives the heading and the count, over budget, for `_config_roles` to
-    count as not shown.
+    over the budget: it and every environment after it are counted, not shown.
 
-    Mutation: drop the `shown and` guard -- the 64th slice fails the assertion inside
-    `_SliceBudget` instead of hanging (observed).
+    Mutation: remove the `break` after the count notice -- `zz`'s notice follows it.
     """
-    env = "e" * 8000
-    rows = _SliceBudget(["plan every cell: no role", "apply every cell: no role"])
-    assert doctor._roles_notice(env, rows, doctor.ROLE_LINES_BUDGET) == (
-        f"`{env}` resolves these roles at the commit under examination:  … and 2 more."
-    )
+    narrow = {"aws": {"account": "222222222222", "plan": "zz-plan"}}
+    table = {
+        "layout": "folder",
+        "identities": {"narrow": narrow},
+        "environments": {
+            env: {"region": "eu-west-1", "identity": "narrow"} for env in ("e" * 8000, "zz")
+        },
+    }
+    assert doctor._config_roles(doctor.ec.validate_structure(table)) == [
+        (
+            doctor.NOTICE,
+            "roles for 2 more environment(s) not shown, to keep this report under GitHub's "
+            "comment limit; `CONTRACT.md` §Resolution lists how each cell resolves.",
+        )
+    ]
 
 
 def test_the_contract_states_the_roles_budget_doctor_applies():
@@ -4700,7 +4699,7 @@ def test_a_later_environment_over_the_budget_is_cut_against_what_is_left():
     table = _wide_roles_table("dev")
     table["identities"]["narrow"] = {"aws": {"account": "222222222222", "plan": "aa-plan"}}
     table["environments"]["aa"] = {"region": "eu-west-1", "identity": "narrow"}
-    roles = doctor._config_roles(doctor.bm.ec.validate_structure(table))
+    roles = doctor._config_roles(doctor.ec.validate_structure(table))
     arn = f"`arn:aws:iam::111111111111:role/{_LONG_ROLE}`"
     items = [f"plan w{i:03}: {arn}" for i in range(256)] + [
         f"apply w{i:03}: {arn}" for i in range(256)
@@ -4778,8 +4777,8 @@ def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
     def forbidden(*a, **kw):
         pytest.fail("the config probe reached the execution path")
 
-    monkeypatch.setattr(doctor.bm.ec, "read_table", forbidden)
-    monkeypatch.setattr(doctor.bm.ec, "resolve", forbidden)
+    monkeypatch.setattr(doctor.ec, "read_table", forbidden)
+    monkeypatch.setattr(doctor.ec, "resolve", forbidden)
     for text in (CANONICAL, MISPLACED_CONTROL):
         responses = _config_responses(text)
         monkeypatch.setattr(doctor, "_gh_json", lambda path, r=responses: r[path])
@@ -4792,7 +4791,7 @@ def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
 
 def test_a_byte_order_mark_is_reported_the_way_a_run_sees_it(monkeypatch):
     """`tomllib` refuses a leading U+FEFF, and the execution reader hands it the bytes
-    `git show` printed. Stripping the BOM here would report a table valid that every run
+    the contents API returned. Stripping the BOM here would report a table valid that every run
     reading it refuses -- two readers of one file disagreeing, which is the class this
     check exists to remove.
 

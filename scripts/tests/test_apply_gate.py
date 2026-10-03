@@ -465,7 +465,7 @@ def test_plan_hashes_missing_key_is_absent():
 
 
 def test_plan_runs_is_identical_with_and_without_a_digest():
-    """authorize and doctor-cells read plan_runs_by_name's membership; a name must not drop
+    """authorize reads plan_runs_by_name's membership; a name must not drop
     out of it because its record carries no digest, or an operator is told their plan does not
     exist. Both mappings are compared whole against the same hand-written literal."""
     expected = {"apply / stacks/app / dev-eu": "111"}

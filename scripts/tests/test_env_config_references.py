@@ -7,7 +7,6 @@ of the table free to be rewritten. Each docstring names the mutation its test re
 import base64
 import json
 import tomllib
-import types
 
 import pytest
 from _loader import load_script
@@ -240,22 +239,6 @@ def test_read_table_resolves_references(monkeypatch):
     """Reddens on `read_table` calling `load_toml` instead of `parse_table`."""
     monkeypatch.setenv("GITHUB_REPOSITORY", "an-org/a-repo")
     monkeypatch.setenv("SHIPMATE_GITHUB_VARS", _ENUMERATION)
-    git = types.SimpleNamespace(returncode=0, stdout=_ROLE_REF, stderr="")
-
-    def run(args, check=True):
-        return "trunk\n" if args[0] == "gh" else git
-
-    assert ec.read_table(run=run) == _ROLE_RESOLVED
-
-
-def test_read_table_at_default_branch_resolves_references(monkeypatch):
-    """Reddens on `read_table_at_default_branch` calling `load_toml` instead of
-    `parse_table`."""
-    monkeypatch.setenv("GITHUB_REPOSITORY", "an-org/a-repo")
-    monkeypatch.setenv("SHIPMATE_GITHUB_VARS", _ENUMERATION)
     blob = {"encoding": "base64", "content": base64.b64encode(_ROLE_REF.encode()).decode()}
-
-    def run(args, check=True):
-        return "trunk\n" if "--jq" in args else json.dumps(blob)
-
-    assert ec.read_table_at_default_branch(run=run) == _ROLE_RESOLVED
+    monkeypatch.setattr(ec, "_run", lambda args: json.dumps(blob))
+    assert ec.read_table() == _ROLE_RESOLVED

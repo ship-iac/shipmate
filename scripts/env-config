@@ -2,9 +2,9 @@
 """Read the environment table from the repository's default branch.
 
 Branch content cannot rewrite these values because they are not read from the
-branch: the table is `git show`n out of `origin/<default>`. `origin` is the base
-repository on every path -- no checkout passes `repository:` -- and a fork pull
-request is refused before it plans.
+branch: the table comes through the contents API with no ref, which GitHub answers
+from the default branch. The read names `GITHUB_REPOSITORY`, the base repository
+under both pull-request events, and a fork pull request is refused before it plans.
 """
 
 import base64
@@ -13,9 +13,10 @@ import graphlib
 import json
 import os
 import re
-import subprocess
 import sys
 import types
+
+from _shipmate import run
 
 #: The file the engine reads its settings from, and the interpreter floor that reading it
 #: needs. The floor is CONTRACT.md section Runner prerequisites, which every runner already
@@ -25,34 +26,18 @@ CONFIG_PATH = ".github/shipmate.toml"
 _MIN_PYTHON = (3, 11)
 
 
-def _run(args, check=True):
-    """stdout of `args`, raising ::error:: on a nonzero exit. `check=False` returns the
-    CompletedProcess instead, for the caller that reports the failure itself.
+def _run(args):
+    """stdout of `args` through `_shipmate.run`, its failure re-raised as an ::error::
+    annotation. `_shipmate.run` stays unprefixed for the hand-run scripts that share it.
 
     `build-matrix` aliases this rather than keeping its own copy: this module `_load`s
     nothing, so reaching it from there terminates. The reverse would not -- `_shipmate.py`
     caches nothing and re-executes a module on every `_load`.
     """
-    # args is a code-controlled tool invocation (gh/git/terramate by PATH name),
-    # never user input, and shell=False -- safe.
-    p = subprocess.run(args, capture_output=True, text=True)  # noqa: S603
-    if not check:
-        return p
-    if p.returncode != 0:
-        # Surface the tool's own error; a swallowed stderr makes CI opaque.
-        sys.stderr.write(p.stderr)
-        raise SystemExit(f"::error::command failed ({p.returncode}): {' '.join(args)}")
-    return p.stdout
-
-
-def _default_branch(run):
-    """The default branch name, from the API rather than the event payload.
-
-    `github.event.repository.default_branch` is not reliably populated under
-    `schedule`; drift.yml resolves it this way for the same reason.
-    """
-    repo = os.environ["GITHUB_REPOSITORY"]
-    return run(["gh", "api", f"repos/{repo}", "--jq", ".default_branch"]).strip()
+    try:
+        return run(args)
+    except SystemExit as e:
+        raise SystemExit(f"::error::{e}") from None
 
 
 def interpreter_refusal():
@@ -82,9 +67,9 @@ def load_toml(text):
     would raise `ModuleNotFoundError` before any caller could report the real cause -- an
     older runner image than CONTRACT.md requires.
 
-    A leading U+FEFF is refused, not stripped: `tomllib` rejects it, `git show` and the
-    contents API both deliver it, and every reader must reach the same verdict on the same
-    file. Adding a strip here reddens test_a_byte_order_mark_is_reported_the_way_a_run_sees_it.
+    A leading U+FEFF is refused, not stripped: `tomllib` rejects it, the contents API
+    delivers it, and every reader must reach the same verdict on the same file. Adding a
+    strip here reddens test_a_byte_order_mark_is_reported_the_way_a_run_sees_it.
     """
     refusal = interpreter_refusal()
     if refusal:
@@ -186,10 +171,9 @@ def parse_table(text, variables=None):
     """The table parsed from `text`, each `{ vars = "NAME" }` replaced by that GitHub
     variable's value, or `SystemExit`.
 
-    Shared by every reader: `read_table` below reads the file with `git show`, while
-    `contents_text` reads the same bytes through the contents API for the jobs that check
-    out no consumer content. Resolving here and nowhere else is what makes every reader see
-    the same values.
+    Shared by every reader: `read_table` below reads the default branch's file, and
+    `doctor` reads a branch's copy to report on it. Resolving here and nowhere else is what
+    makes every reader see the same values.
 
     `variables` maps uppercase names to values. `None` reads `SHIPMATE_GITHUB_VARS`, and
     only when the file holds a reference: a file without one never touches it. An unset,
@@ -204,33 +188,47 @@ def parse_table(text, variables=None):
     return {key: _replace(value, key, variables) for key, value in parsed.items()}
 
 
-def _unreadable(where):
-    """The refusal both default-branch readers raise when the table cannot be read."""
-    return SystemExit(
-        f"::error::{CONFIG_PATH} could not be read from the default branch "
-        f"({where}). The engine reads the environment table from the default "
-        "branch, never from this branch, so the file must be merged there "
-        "before the first plan."
-    )
+#: The one refusal `read_table` raises when the table cannot be read.
+_UNREADABLE = (
+    f"::error::{CONFIG_PATH} could not be read from the default branch. The engine reads "
+    "the environment table from the default branch, never from this branch, so the file "
+    "must be merged there before the first plan."
+)
 
 
-def read_table(run=None):
-    """The table from the default branch. Every failure here refuses."""
-    run = run or _run
-    ref = f"origin/{_default_branch(run)}:{CONFIG_PATH}"
-    p = run(["git", "show", ref], check=False)
-    if p.returncode != 0:
-        sys.stderr.write(p.stderr)
-        raise _unreadable(ref)
-    return parse_table(p.stdout)
+def _reporting_fetch(path):
+    """`gh_json`, writing a failed call's reason to stderr before re-raising it.
+
+    `contents_text` swallows every exception, so this is the only place a 404, a 403, a
+    missing `gh` or a non-JSON answer is seen. The `::error::` prefix is cut so the
+    refusal stays the step's one annotation.
+    """
+    try:
+        return gh_json(path)
+    except (Exception, SystemExit) as e:
+        sys.stderr.write(f"{str(e).removeprefix('::error::')}\n")
+        raise
+
+
+def read_table():
+    """The table from the default branch. Every failure here refuses.
+
+    The contents API read names no ref, which GitHub answers from the default branch;
+    a parameter or a `?ref=` here would let a caller point it at branch content.
+    """
+    path = f"repos/{os.environ['GITHUB_REPOSITORY']}/contents/{CONFIG_PATH}"
+    text = contents_text(path, fetch=_reporting_fetch)
+    if text is None:
+        raise SystemExit(_UNREADABLE)
+    return parse_table(text)
 
 
 def gh_json(path, run=None):
-    """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit surfaces the tool's
-    stderr then raises ::error:: from a single definition. Callers alias it as `_gh_json`
-    rather than repeating the `json.loads(_run(...))` pair.
+    """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit raises ::error::
+    with the tool's stderr in the message, from a single definition. Callers alias it as
+    `_gh_json` rather than repeating the `json.loads(_run(...))` pair.
 
-    Homed here for the reason `_run` gives: `build-matrix` aliases it, and this module
+    Homed beside `_run` for the same reason: `build-matrix` aliases it, and this module
     cannot alias upward.
     """
     return json.loads((run or _run)(["gh", "api", path]))
@@ -239,10 +237,9 @@ def gh_json(path, run=None):
 def contents_text(path, fetch=None):
     """One file's decoded text from the contents API, or None when it cannot be read.
 
-    The read for a job that checks out no consumer content, which is every job that decides
-    something before a cell runs: `doctor`'s probes and comment-ops' gate resolve. Neither has
-    a consumer working tree for `git show`, and an engine job holding the GitHub App key
-    executes no consumer repository content on purpose.
+    The one read mechanism for the file: `read_table` and `doctor`'s probes both read
+    through it. An engine job holding the GitHub App key executes no consumer repository
+    content on purpose, so the read never needs a checkout.
 
     Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file answers with
     `encoding: "none"` and empty `content`, which would otherwise decode to a readable
@@ -263,22 +260,6 @@ def contents_text(path, fetch=None):
     if not isinstance(blob, dict) or blob.get("encoding") != "base64":
         return None
     return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
-
-
-def read_table_at_default_branch(run=None):
-    """The table from the default branch, read without a consumer checkout. Every failure refuses.
-
-    The twin of `read_table`: same file, same branch, same refusal wording, because a
-    consumer must not get two accounts of one problem depending on which job read it.
-    """
-    run = run or _run
-    branch = _default_branch(run)
-    repo = os.environ["GITHUB_REPOSITORY"]
-    path = f"repos/{repo}/contents/{CONFIG_PATH}?ref={branch}"
-    text = contents_text(path, fetch=lambda p: gh_json(p, run))
-    if text is None:
-        raise _unreadable(branch)
-    return parse_table(text)
 
 
 #: The layouts a repository may declare, and the environment-level keys an entry may hold.

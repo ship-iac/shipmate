@@ -2,8 +2,8 @@
 """Resolve the gate settings the comment-ops authorization path runs on.
 
 The environments whose entry holds `gated = false`, from `.github/shipmate.toml` on the
-default branch, and from nowhere else. The comment-ops job checks out no consumer content,
-so the file is read through the contents API.
+default branch, and from nowhere else, read through the contents API: the comment-ops job
+checks out no consumer content, and that read needs none.
 
 `validate_structure` is not optional: the resolvers document a validated table and do not
 enforce it, and an unvalidated `gated = "false"` resolves as gated, exempting nothing while
@@ -18,7 +18,7 @@ ec = _load("env-config")
 
 
 def main():
-    table = ec.validate_structure(ec.read_table_at_default_branch())
+    table = ec.validate_structure(ec.read_table())
     ungated = ec.ungated_envs(table)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         # Sorted, so two runs over one file cannot produce two different output strings.
