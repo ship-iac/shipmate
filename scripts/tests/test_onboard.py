@@ -1977,8 +1977,8 @@ todo          CODEOWNERS entry covering /.github/workflows/
 todo          Provider lock files
     1 of 1 stack(s) have no git-tracked `.terraform.lock.hcl`,
     so the provider cache serves none of them. Remove any `.gitignore` entry for the
-    file first, since git refuses to add an ignored path, then run `tofu providers lock`
-    in each and commit the file:
+    file first, since git refuses to add an ignored path, then run
+    `tofu init -backend=false` in each and commit the file:
       stacks/app
 
 todo          adoption pull request
@@ -2373,8 +2373,8 @@ def test_the_lock_item_names_each_stack_without_a_tracked_lock(monkeypatch, tmp_
         [
             "2 of 3 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
-            "in each and commit the file:",
+            "file first, since git refuses to add an ignored path, then run",
+            "`tofu init -backend=false` in each and commit the file:",
             "  a",
             "  c",
         ],
@@ -2392,8 +2392,8 @@ def test_the_lock_item_names_ten_stacks_and_counts_the_rest(monkeypatch, tmp_pat
         [
             "12 of 12 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
-            "in each and commit the file:",
+            "file first, since git refuses to add an ignored path, then run",
+            "`tofu init -backend=false` in each and commit the file:",
             "  s00",
             "  s01",
             "  s02",
@@ -2425,8 +2425,8 @@ def test_the_lock_item_resolves_stacks_against_the_working_directory(monkeypatch
         [
             "1 of 2 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
-            "in each and commit the file:",
+            "file first, since git refuses to add an ignored path, then run",
+            "`tofu init -backend=false` in each and commit the file:",
             "  app",
         ],
     )
@@ -2451,8 +2451,8 @@ def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, caps
         [
             "2 of 2 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
-            "in each and commit the file:",
+            "file first, since git refuses to add an ignored path, then run",
+            "`tofu init -backend=false` in each and commit the file:",
             "  a",
             "  b",
         ],
