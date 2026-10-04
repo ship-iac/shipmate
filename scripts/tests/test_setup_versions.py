@@ -127,7 +127,9 @@ def _resolve(tmp_path, versions=_FIXTURE_VERSIONS):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     awk = bin_dir / "awk"
-    real_awk = Path(shutil.which("awk")).as_posix()
+    real_awk = shutil.which("awk")
+    assert real_awk, "awk is not on PATH"
+    real_awk = Path(real_awk).as_posix()
     awk.write_text(
         f'#!/bin/sh\nexec "{real_awk}" -v BINMODE=1 "$@"\n', encoding="utf-8", newline="\n"
     )
