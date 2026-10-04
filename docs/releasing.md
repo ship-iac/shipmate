@@ -190,9 +190,10 @@ the release commit, from `repo-example-stacks-aws`:
    Then run § Re-pin a consumer with `<consumer>` set to `../repo-example-stacks-aws` and
    `<release-sha>` set to the release commit.
 
-   **The scratch branch carries the whole re-pin commit**, including the table and
-   consumer-file edits § Re-pin a consumer names: a new pin under an old body is the
-   load-time rejection described below, not a smoke result.
+   **The scratch branch carries the whole re-pin commit.** Its workflow-file edits are
+   what the dispatch loads: a new pin under an old body is the load-time rejection
+   described below, not a smoke result. Its table edits are never read: every path reads
+   `.github/shipmate.toml` from the default branch, which still holds the old table.
 
    The same gap has a second form the re-pin cannot reach at all: a consumer's
    allowed-actions list is a repository setting, not a file. Under
@@ -250,7 +251,10 @@ tag. Nor does it cover the comment leg — parse, authorize, route — which by
 construction runs the sample's default-branch workflows and so is only
 exercised after the re-pin.
 
-A `verb=plan` dispatch on the scratch branch runs the cells and stops at
+When the release refuses a key the default branch's table still holds, a `verb=plan`
+or `verb=drift` dispatch on the scratch branch stops at detect on that key: expected,
+and that release's smoke is the `verb=apply` dispatch alone. Otherwise a `verb=plan`
+dispatch on the scratch branch runs the cells and stops at
 `plan.yml`'s `summary`, the only job holding the App key. It binds the
 `shipmate-engine` environment, whose deployment branch policy allows the
 default branch only, so the job fails at startup: zero steps, no log, and the
