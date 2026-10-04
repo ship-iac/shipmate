@@ -33,12 +33,12 @@ GUARD_IF = "${{ !endsWith(github.actor, '[bot]') }}"
 #: single shared constant.
 GUARD_ERROR_LINE = {
     "apply.yml": (
-        "::error::apply must be dispatched by the shipmate App via comment-ops, "
-        "not by a direct workflow_dispatch"
+        "::error::apply refused: the dispatching actor is not a [bot]; comment 'shipmate apply' "
+        "on the pull request instead of running a direct workflow_dispatch"
     ),
     "unlock.yml": (
-        "::error::unlock must be dispatched by the shipmate App via comment-ops, "
-        "not by a direct workflow_dispatch"
+        "::error::unlock refused: the dispatching actor is not a [bot]; comment "
+        "'shipmate unlock <env>' on the pull request instead of running a direct workflow_dispatch"
     ),
 }
 #: The whole `needs:` list each dispatched workflow's `detect` carries. The apply path waits on
