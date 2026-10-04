@@ -729,7 +729,8 @@ accessible by integration`; a mint that adds the `administration: read` these
 endpoints are documented to need is itself refused, with `The permissions
 requested are not granted to this installation.`, because an installation token
 cannot request a permission the App manifest does not declare — granting it
-would mean a manifest bump plus a re-approval by every installation; and the
+would mean every registered App adding it in its settings and every installation
+accepting it; and the
 workflow `permissions:` key has no `administration` scope at any value, so
 `GITHUB_TOKEN` cannot substitute. No token a workflow run can obtain from the
 platform reads them (a repository-admin PAT stored as a secret would, but an

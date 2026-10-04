@@ -974,7 +974,8 @@ _REPLIES = {
         "SHIPMATE_REPLY_TEXT": (
             "could not mint a GitHub App token. Is the shipmate App installed on this "
             "repository, with every permission it requests accepted? Ask an org admin to "
-            "install it or accept its pending permission request, then re-run "
+            "install it, or to add any permission the App's settings lack and accept the "
+            "request (docs/github-app.md, Re-approve after permission changes), then re-run "
             "`shipmate doctor`."
         ),
     },
