@@ -44,7 +44,7 @@ def _write_cell(cells_dir, env, slug, cell):
 def _row(**kw):
     base = {
         "environment": "dev-eu",
-        "stack": "app",
+        "stack": "stacks/app",
         "status": "applied",
         "reason": "",
         "apply_text": "Apply complete! Resources: 1 added, 0 changed, 0 destroyed.",
@@ -184,7 +184,7 @@ def test_a_blocked_reason_renders_escaped_on_its_bare_line():
     row = _row(status="blocked", reason='<a href="https://evil">x</a>', apply_text=None)
     assert _comment([row]) == (
         f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n"
-        '⚪ app (dev-eu): blocked: &lt;a href="https://evil"&gt;x&lt;/a&gt; '
+        '⚪ stacks/app (dev-eu): blocked: &lt;a href="https://evil"&gt;x&lt;/a&gt; '
         '<a href="https://gh/run/1">logs</a>\n\n' + HINT
     )
 
@@ -200,18 +200,18 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
     Mutation: append a `gate: pending until every environment is applied` line to
     `_footer_parts` -- red."""
     jobs = [
-        _job("wave0 / apply / app / dev-eu", "https://gh/job/app-eu"),
-        _job("wave0 / apply / db / dev-eu", "https://gh/job/db-eu"),
+        _job("wave0 / apply / stacks/app / dev-eu", "https://gh/job/app-eu"),
+        _job("wave0 / apply / stacks/db / dev-eu", "https://gh/job/db-eu"),
     ]
     rows = [
         _row(),
         _row(
-            stack="auth",
+            stack="stacks/auth",
             status="blocked",
             reason="state restore failed",
             apply_text=None,
         ),
-        _row(stack="db", status="failed", apply_text="Error: boom"),
+        _row(stack="stacks/db", status="failed", apply_text="Error: boom"),
         _row(
             environment="prod",
             status="unrecorded",
@@ -228,18 +228,18 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
     assert body == (
         "### shipmate apply\n\n"
         f"🔴 1 failed, 1 not recorded, 1 not attempted, 1 blocked, 1 applied {AT}\n\n"
-        '<details><summary>🟢 app (dev-eu): +1 ~0 -0 <a href="https://gh/job/app-eu">logs</a>'
+        '<details><summary>🟢 stacks/app (dev-eu): +1 ~0 -0 <a href="https://gh/job/app-eu">logs</a>'
         "</summary>\n\n```\nApply complete! Resources: 1 added, 0 changed, 0 destroyed.\n```\n"
         "</details>\n\n"
-        '⚪ auth (dev-eu): blocked: state restore failed <a href="https://gh/run/1">logs</a>\n\n'
-        '<details><summary>🔴 db (dev-eu): failed <a href="https://gh/job/db-eu">logs</a>'
+        '⚪ stacks/auth (dev-eu): blocked: state restore failed <a href="https://gh/run/1">logs</a>\n\n'
+        '<details><summary>🔴 stacks/db (dev-eu): failed <a href="https://gh/job/db-eu">logs</a>'
         "</summary>\n\n```\nError: boom\n```\n</details>\n\n"
-        '<details><summary>🟠 app (prod): +0 ~2 -0, not recorded <a href="https://gh/run/1">logs</a>'
+        '<details><summary>🟠 stacks/app (prod): +0 ~2 -0, not recorded <a href="https://gh/run/1">logs</a>'
         "</summary>\n\n```\nApply complete! Resources: 0 added, 2 changed, 0 destroyed.\n```\n"
         "</details>\n\n"
         '🟡 stacks/dns (prod): not attempted <a href="https://gh/run/1">logs</a>\n\n'
-        "not recorded: **app (prod)**. The apply succeeded but its apply check is not recorded "
-        "as complete (it failed, was cancelled, or a newer plan re-created it), so "
+        "not recorded: **stacks/app (prod)**. The apply succeeded but its apply check is not "
+        "recorded as complete (it failed, was cancelled, or a newer plan re-created it), so "
         "`shipmate / gate` stays pending. Re-plan and re-apply.\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply`.\n\n" + HINT
     )
@@ -469,7 +469,8 @@ def test_the_lock_note_names_the_cell_the_lock_and_the_release_command_whole():
     Mutation: name the cell `**<stack> / <env>**` in `_lock_cell` -- red."""
     rows = [_row(status="failed", apply_text=_fixture_text("lock_error_s3.txt"))]
     assert ac._lock_note(rows, "dev-eu") == (
-        "state lock held: **app (dev-eu)** (lock **0f866bdc-d621-7230-876f-fa7398eff1f8**, held "
+        "state lock held: **stacks/app (dev-eu)** "
+        "(lock **0f866bdc-d621-7230-876f-fa7398eff1f8**, held "
         "since **2026-08-20 19:53:19.7388258 +0000 UTC**). An earlier apply was cancelled or "
         "killed before releasing the lock, so nothing in these cells was applied. Per-cell "
         "concurrency admits one apply at a time, so the holder was that cell's most recent apply "
@@ -495,7 +496,8 @@ def test_the_notes_read_lock_then_unrecorded_then_not_attempted():
     ]
     sections = _comment(rows, env="").split("\n\n")
     assert sections[-2] == (
-        "state lock held: **app (dev-eu)** (lock **0f866bdc-d621-7230-876f-fa7398eff1f8**, held "
+        "state lock held: **stacks/app (dev-eu)** "
+        "(lock **0f866bdc-d621-7230-876f-fa7398eff1f8**, held "
         "since **2026-08-20 19:53:19.7388258 +0000 UTC**). An earlier apply was cancelled or "
         "killed before releasing the lock, so nothing in these cells was applied. Per-cell "
         "concurrency admits one apply at a time, so the holder was that cell's most recent apply "
@@ -525,7 +527,7 @@ def test_a_truncated_fold_out_keeps_the_tail_at_a_line_boundary():
     lines = [f"line {i}" for i in range(5_000)]
     s = ac.render_apply_section(ac._cell_line(_row(), RUN_URL), "\n".join(lines), RUN_URL, 3_000)
     head = (
-        '<details><summary>🟢 app (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">logs</a>'
+        '<details><summary>🟢 stacks/app (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">logs</a>'
         "</summary>\n\n```\n"
     )
     trailer = (
@@ -545,10 +547,10 @@ def test_a_row_degrades_to_its_bare_line():
 
     Mutation: drop the `limit < sc.MIN_PLAN_CHARS` guard -- the spent-budget case renders a
     fold-out, red."""
-    bare = '🟢 app (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">logs</a>'
+    bare = '🟢 stacks/app (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">logs</a>'
     unread = ac._cell_line(_row(apply_text=None), RUN_URL)
     assert ac.render_apply_section(unread, None, RUN_URL, 10_000) == (
-        '🟢 app (dev-eu): applied <a href="https://gh/run/1">logs</a>'
+        '🟢 stacks/app (dev-eu): applied <a href="https://gh/run/1">logs</a>'
     )
     line = ac._cell_line(_row(), RUN_URL)
     assert ac.render_apply_section(line, "x" * 5_000, RUN_URL, 3_000) == bare

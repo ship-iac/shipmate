@@ -16,7 +16,7 @@ _EDGE = re.compile(r"^\s*(\w+)\s*->\s*(\w+)")
 
 
 def parse_dot(text):
-    """Return {stack: set(paths-that-run-before-it)} from run-graph dot.
+    """Return {stack: set(stacks-that-run-before-it)} from run-graph dot.
 
     Generated with `terramate experimental run-graph --label stack.dir`: node
     ids (nN) carry `label="/stacks/app"` (absolute-from-root dir). Normalize to
