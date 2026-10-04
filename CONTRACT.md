@@ -1382,9 +1382,10 @@ The GitHub App carries this permission set: `actions: write`,
 `shipmate doctor`'s plan-environment secret listing (names only; no GitHub REST
 path returns a secret's value, and this permission cannot write one).
 Beyond minting the `workflow_dispatch`
-token for comment-ops (events created with the default `GITHUB_TOKEN` never
-trigger other workflows, so a private App is the only way to kick off the
-apply workflow from a comment) and reading the apply checks that name the
+token for comment-ops (a dispatch needs `actions: write`; the `ops` job in
+`comment-ops.yml` grants its `GITHUB_TOKEN` only `actions: read`, and
+`actions/dispatch` mints the App token with `actions: write` in a step that runs
+only once the command is authorized) and reading the apply checks that name the
 reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
@@ -1410,9 +1411,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
   sequence stays visible across separate comments — an audit trail.
 - **Drift issues** — `actions/drift-cell` holds no App token and authors
   nothing; it only plans each stack × env and uploads a drift-summary
-  artifact. A separate `issues` job, bound to `shipmate-engine`, downloads
-  those artifacts and opens/updates/closes the drift Issues via
-  `actions/drift-issues` under an App token.
+  artifact. A separate `issues` job, bound to `shipmate-engine`, calls
+  `actions/drift-issues`, which downloads those artifacts and, under an App
+  token, opens/updates/closes the drift Issues.
 
 The plan matrix job's own `shipmate / <stack> / <env>` auto check-run is the one
 exception: it's the job's own check-run (GitHub creates it for the job
@@ -1583,12 +1584,13 @@ The four jobs:
   drift path (`all-stacks`) is unaffected because engine `drift.yml` states that
   it has no pull request (`no-pull-request: "true"`), which is the only opt-out
   and appears in no other engine workflow.
-- **`summary`** (engine, `environment: shipmate-engine`) — it downloads this
-  same run's cell summaries and calls `actions/summary` under an App token
-  minted inside that environment. This is what creates the pending
-  `apply / <stack> / <env>` checks, the sticky plan comment, and the
-  `shipmate / gate` status, and — on an `on-demand` run — the mirror of this
-  run's completed `shipmate / ` checks onto the pull request's head.
+- **`summary`** (engine, `environment: shipmate-engine`) — it calls
+  `actions/summary`, which downloads this same run's cell summaries and, under
+  an App token minted inside that environment, publishes the results. This is
+  what creates the pending `apply / <stack> / <env>` checks, the sticky plan
+  comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
+  mirror of this run's completed `shipmate / ` checks onto the pull request's
+  head.
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
@@ -1625,12 +1627,12 @@ to that literal filename, naming the verb in the dispatch body, so a renamed
 file is dispatched nowhere, and the pull request is told only that the dispatch
 failed, with the API's refusal left in the comment-handling run that comment
 links; and doctor keys on the exact name for its `pull_request_target`
-exemption and for its `shipmate.yml` probe, whose job-name, dispatch and
-routing checks all report nothing on a file called anything else.
-Rename the file and planning is refused from that commit on, and the renamed
-file starts drawing doctor's own `pull_request_target` warning. Each symptom
-surfaces on its own — the refusal names the path it looked for — but none of
-them names the rename.
+exemption and for its `shipmate.yml` probe, which reads that one path.
+Rename the file and planning is refused from that commit on, the `shipmate.yml`
+probe reports it could not read `.github/workflows/shipmate.yml`, and the
+renamed file starts drawing doctor's own `pull_request_target` warning. Each
+symptom surfaces on its own — the refusal names the path it looked for — but
+none of them names the rename.
 
 No apply path matches on it to find work already planned: a dispatched, bare or
 post-merge apply reads each cell's plan run from that cell's own apply check, so

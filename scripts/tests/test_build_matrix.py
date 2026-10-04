@@ -640,10 +640,10 @@ def test_plan_workflow_at_the_contract_path_is_planned(monkeypatch, tmp_path):
 
 def test_a_renamed_plan_workflow_is_refused(monkeypatch, tmp_path):
     """This refusal makes the path load-bearing: no plan-run lookup matches it literally any
-    more, so a rename would merge green while doctor's `shipmate.yml` probe went quiet. The
-    whole message is hand-written, and names only consequences still true now that the plan
-    run id rides on each apply check and `actions/dispatch` aims every verb at this one file;
-    a clause about plan-run discovery coming back here would be a falsehood."""
+    more, so a rename would merge green with doctor's `shipmate.yml` probe reduced to a
+    notice. The whole message is hand-written, and names only consequences still true now
+    that the plan run id rides on each apply check and `actions/dispatch` aims every verb at
+    this one file; a clause about plan-run discovery coming back here would be a falsehood."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "shipmate-plan.yml").write_text("", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -653,8 +653,8 @@ def test_a_renamed_plan_workflow_is_refused(monkeypatch, tmp_path):
         "enforces it. That exact filename is matched literally by `shipmate doctor`, whose "
         "`shipmate.yml` probe checks its job name, dispatch wiring and event routing, and by "
         "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
-        "under any other name silently loses that probe, draws doctor's own "
-        "`pull_request_target` warning instead, and is reached by no `shipmate` command at "
+        "under any other name draws that probe's could-not-read notice and doctor's own "
+        "`pull_request_target` warning, and is reached by no `shipmate` command at "
         "all. Move the consumer's workflow back to `.github/workflows/shipmate.yml`."
     )
 
