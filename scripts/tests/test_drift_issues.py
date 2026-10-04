@@ -181,8 +181,7 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     """A rate limit on one cell must not leave every later cell unprocessed: a stack that has
     gone clean would keep an open Issue saying it drifts. The run still fails, naming every
     cell that failed, and annotates the failed cell. Mutation: delete the per-cell
-    `::error::drift issue update failed` print in `main()`; delete the loaded-count print, which
-    tells a clean sweep from a sweep that loaded no cell."""
+    `::error::drift issue update failed` print in `main()`."""
     for name in ("a", "b", "c"):
         _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", stack_name=name, drifted=True))
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
@@ -247,10 +246,13 @@ def test_main_leaves_a_plan_not_ok_cells_open_issue_untouched(tmp_path, monkeypa
     ]
 
 
-def test_main_with_no_cells_never_lists_issues(tmp_path, monkeypatch):
+def test_main_with_no_cells_never_lists_issues(tmp_path, monkeypatch, capsys):
+    """The count line tells a sweep that loaded no cell from a clean one. Mutation: move the
+    loaded-count print in `main()` below `if not cells: return`."""
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
     monkeypatch.setattr(di, "_run", lambda args: pytest.fail(f"unexpected gh call: {args}"))
     di.main()  # It returns early, with no env or gh access at all.
+    assert capsys.readouterr().out == "loaded 0 drift cell summaries\n"
 
 
 def test_action_names_the_repository_for_gh():

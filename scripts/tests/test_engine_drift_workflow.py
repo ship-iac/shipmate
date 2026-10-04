@@ -4,8 +4,8 @@ handoff that must fail rather than go quiet.
 Two properties carried most of the risk when this graph lived in consumer YAML. The two jobs
 that run cells and mint tokens gate on the API-resolved default branch, not on
 `github.event.repository.default_branch` -- whether that field is populated under `schedule` is
-the question the gate must not depend on. And the `issues` job's `if:` distinguishes an empty
-matrix (skip) from a lost artifact (fail); collapsing the two greens a run that opened no Issue.
+the question the gate must not depend on. And the `issues` job's `if:` skips an empty sweep, so
+the App key is never minted for a run with no cell to report.
 """
 
 import yaml
@@ -77,7 +77,7 @@ def test_the_cell_and_issue_jobs_gate_on_the_api_resolved_default_branch():
     clause; read `github.event.repository.default_branch` instead; turn a `&&` into `||`.
     On `issues` also: dropping `always()` leaves no status function, so GHA adds the implicit
     `success()` and a failed cell skips the job -- exactly when an Issue is owed; dropping the
-    emptiness clause instead turns a lost artifact into a silent success.
+    emptiness clause runs the job on an empty sweep, minting the App token to download nothing.
     """
     jobs = workflow_yaml(WF)["jobs"]
     assert {j: " ".join(jobs[j]["if"].split()) for j in _GATED_IF} == _GATED_IF

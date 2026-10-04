@@ -1411,9 +1411,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
   sequence stays visible across separate comments — an audit trail.
 - **Drift issues** — `actions/drift-cell` holds no App token and authors
   nothing; it only plans each stack × env and uploads a drift-summary
-  artifact. A separate `issues` job, bound to `shipmate-engine`, downloads
-  those artifacts and opens/updates/closes the drift Issues via
-  `actions/drift-issues` under an App token.
+  artifact. A separate `issues` job, bound to `shipmate-engine`, calls
+  `actions/drift-issues`, which downloads those artifacts and, under an App
+  token, opens/updates/closes the drift Issues.
 
 The plan matrix job's own `shipmate / <stack> / <env>` auto check-run is the one
 exception: it's the job's own check-run (GitHub creates it for the job
@@ -1584,12 +1584,13 @@ The four jobs:
   drift path (`all-stacks`) is unaffected because engine `drift.yml` states that
   it has no pull request (`no-pull-request: "true"`), which is the only opt-out
   and appears in no other engine workflow.
-- **`summary`** (engine, `environment: shipmate-engine`) — it downloads this
-  same run's cell summaries and calls `actions/summary` under an App token
-  minted inside that environment. This is what creates the pending
-  `apply / <stack> / <env>` checks, the sticky plan comment, and the
-  `shipmate / gate` status, and — on an `on-demand` run — the mirror of this
-  run's completed `shipmate / ` checks onto the pull request's head.
+- **`summary`** (engine, `environment: shipmate-engine`) — it calls
+  `actions/summary`, which downloads this same run's cell summaries and, under
+  an App token minted inside that environment, publishes the results. This is
+  what creates the pending `apply / <stack> / <env>` checks, the sticky plan
+  comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
+  mirror of this run's completed `shipmate / ` checks onto the pull request's
+  head.
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the

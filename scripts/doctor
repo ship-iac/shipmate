@@ -735,7 +735,7 @@ def _unverified(subject, path=_WORKFLOWS_DIR):
     reading `path`.
 
     Both NOTICE, never the generic WARNING degrade in warnings(): an unreadable path is
-    not a misconfiguration, for the reasons `_scan_workflow_texts` states, and an unknown
+    not a misconfiguration, for the reasons each caller states, and an unknown
     commit may not be silently substituted with a weaker read.
     """
     return (
@@ -1555,8 +1555,9 @@ def _shipmate_yml_warnings(ctx):
 
     `shipmate.yml` is the file `actions/dispatch` targets for every verb and the one whose
     cells produce the linked checks, so it is read by path, not found in a listing: another
-    unreadable workflow file cannot hide it. A missing file is reported as unreadable, since
-    the contents read cannot tell a 404 from any other failure, and a repository without it
+    unreadable workflow file cannot hide it. A missing file is reported as unreadable, a
+    NOTICE rather than a WARNING: the contents read cannot tell a 404 from a permission or
+    API failure, neither of which is a misconfiguration. A repository without the file
     receives no dispatch."""
     ref = _contents_ref(ctx)
     if ref is None:

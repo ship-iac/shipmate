@@ -73,9 +73,9 @@ jobs:
   # from the downloaded cell artifacts, and holds the only App key on this path.
   issues:
     needs: [detect, drift]
-    # `empty == 'false'` replaces a `continue-on-error` on drift-issues' download: an empty matrix
-    # downloads nothing and drift-issues returns silently, indistinguishable from a LOST artifact.
-    # detect tells the two apart, so an empty matrix skips the job and a failed download fails it.
+    # `empty == 'false'` skips the job, App-key mint included, on an empty sweep. An artifact-API
+    # error fails drift-issues' download; a missing artifact is not detected here, since a
+    # zero-match pattern download succeeds.
     if: ${{ always() && needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
     runs-on: ${{ inputs.runs_on }}
     environment: shipmate-engine
