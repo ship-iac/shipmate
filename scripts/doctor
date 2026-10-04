@@ -1820,7 +1820,7 @@ def _app_permission_warnings(ctx):
     """The comment path attempts an installation-token mint requesting every
     permission app/manifest.json declares. A failed mint is not a definitive
     signal -- it usually means the installation is missing a permission
-    (typical after a manifest bump nobody re-approved), but a transient API
+    (typical after a release adds one the App's settings lack), but a transient API
     error or rate limit produces the exact same failed-mint outcome, so the
     finding is worded as a hedge rather than a claim. Skipped where no such
     attempt was made."""
@@ -1830,9 +1830,10 @@ def _app_permission_warnings(ctx):
         (
             WARNING,
             f"{_one_line(ctx['app_permission_error'])}, which usually means the shipmate App "
-            "installation is missing a permission the manifest declares. Re-accept the App's "
-            "permission request in the installation settings (or retry if the API was "
-            "transiently failing).",
+            "installation is missing a permission the manifest declares. Add it in the App's "
+            "settings if they lack it, then accept the request in the installation settings "
+            "(docs/github-app.md, Re-approve after permission changes), or retry if the API "
+            "was transiently failing.",
         )
     ]
 
