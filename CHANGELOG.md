@@ -20,6 +20,8 @@ section below names the SHA the release tags.
 - **A listed workload that no stack tags is warned about on the paths that scan the whole tree.**
 - **`apply.yml` called without `environment` runs a bare apply of every environment the review decision allows, in `needs` order.**
 - **The drift run's log names how many drift cell summaries it loaded.**
+- **`actions/setup` checks the Terramate and OpenTofu downloads against sha256 digests pinned in `VERSIONS`, and refuses a mismatch or a runner other than Linux `x86_64` or `arm64`.**
+- **The drift run closes an open `drift: <env> / <stack>` Issue whose stack or environment left the drift sweep.**
 
 ### Changed
 

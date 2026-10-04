@@ -1,2 +1,6 @@
 terramate=0.17.1
 tofu=1.12.4
+fe97e0a5e6416a4fc901bef547a44306bb3507e1c3cd0a1384f56b28a0845049  terramate_0.17.1_linux_x86_64.tar.gz
+f15eafa2cdc0f372f485cefe2a5002323497e56cbab7c5b68aef2be020ba8969  terramate_0.17.1_linux_arm64.tar.gz
+f5d2ae8a0efcddd3722546b3e0f2f2f0648ce5e5a3e411176041adcb7dccc1e8  tofu_1.12.4_linux_amd64.zip
+a3b01db857c7c650768ffa8ad9119dc2db82fe1b98125b7238392a160aca7f8a  tofu_1.12.4_linux_arm64.zip

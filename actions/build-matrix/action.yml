@@ -45,6 +45,9 @@ outputs:
   count:
     description: How many cells the plan matrix has. Read by the trusted summary job to check that every planned cell produced a summary.
     value: ${{ steps.build.outputs.count }}
+  cells:
+    description: 'JSON [{environment,stack},...] in matrix order: the cell names alone, small enough for an env var at 256 cells. Read by drift-issues.'
+    value: ${{ steps.build.outputs.cells }}
 runs:
   using: composite
   steps:

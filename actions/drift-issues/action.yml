@@ -7,6 +7,16 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
+  cells:
+    description: >-
+      The drift matrix's cells as JSON [{environment,stack},...], from build-matrix's `cells`
+      output. An open drift Issue naming no cell in it is closed. Empty or unparseable is refused.
+    required: true
+  default-branch:
+    description: >-
+      The repository's default branch. Issues of cells absent from `cells` are closed only when
+      this run's commit is that branch's live head.
+    required: true
 runs:
   using: composite
   steps:
@@ -41,6 +51,10 @@ runs:
         # job checks out nothing, so without GH_REPO every call fails with "failed to determine
         # base repository".
         GH_REPO: ${{ github.repository }}
+        SHIPMATE_MATRIX_CELLS: ${{ inputs.cells }}
+        SHIPMATE_DEFAULT_BRANCH: ${{ inputs.default-branch }}
+        # The App token holds issues: write alone; the default branch head is read with this.
+        SHIPMATE_READ_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/drift-issues"

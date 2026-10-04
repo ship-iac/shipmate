@@ -405,6 +405,8 @@ def main():
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
         fh.write(f"count={len(cells)}\n")
+        names = [{"environment": c["environment"], "stack": c["stack"]} for c in cells]
+        fh.write(f"cells={json.dumps(names)}\n")
     listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
     print(f"{len(cells)} cell(s): {listing}")
 
