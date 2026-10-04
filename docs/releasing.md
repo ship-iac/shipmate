@@ -69,7 +69,7 @@ extra key named for the tail of the sentence and accepts the file, while
 `GitHub.DistributedTask.ObjectTemplating` refuses it outright. `v0.16.0` shipped
 that and every apply and deploy job died in `Set up job`, before its first step.
 
-The workflow is one job of 21 steps, each `if: false` and each `uses:` one action
+The workflow is one job of 20 steps, each `if: false` and each `uses:` one action
 at the remote ref `ship-iac/shipmate/actions/<name>@main`. Both halves are
 load-bearing, measured 2026-08-22:
 
@@ -103,10 +103,10 @@ Three limits, all deliberate:
   fail there.
 - **The engine repository cannot enable SHA-pinning enforcement.** Measured
   2026-08-30: with "require actions to be pinned to a full-length commit SHA"
-  on, this job fails in `Set up job` with `The action
-  ship-iac/shipmate/actions/apply-all-detect@main is not allowed in
-  ship-iac/shipmate because all actions must be pinned to a full-length commit
-  SHA`. GitHub documents exemptions for `./path` actions and for reusable
+  on, this job failed in `Set up job`; that run's error named an action since
+  removed: `The action ship-iac/shipmate/actions/apply-all-detect@main is not
+  allowed in ship-iac/shipmate because all actions must be pinned to a
+  full-length commit SHA`. GitHub documents exemptions for `./path` actions and for reusable
   workflows referenced by tag; neither covers this run, whose error names the
   same repository as owner and as consumer — so a self-referencing
   `owner/repo/path@ref` is not exempt. And `uses:` takes no expressions, so the
@@ -190,10 +190,9 @@ the release commit, from `repo-example-stacks-aws`:
    Then run § Re-pin a consumer with `<consumer>` set to `../repo-example-stacks-aws` and
    `<release-sha>` set to the release commit.
 
-   **The re-pin rewrites pins and nothing else.** When a release
-   changes the consumer file's declared input contract, make those body edits on
-   the scratch branch too — a new pin under an old body is the load-time
-   rejection described below, not a smoke result.
+   **The scratch branch carries the whole re-pin commit**, including the table and
+   consumer-file edits § Re-pin a consumer names: a new pin under an old body is the
+   load-time rejection described below, not a smoke result.
 
    The same gap has a second form the re-pin cannot reach at all: a consumer's
    allowed-actions list is a repository setting, not a file. Under
@@ -315,8 +314,8 @@ Run § Re-pin a consumer with `<consumer>` set to `../repo-example-stacks-aws`. 
 ancestor check refuses a target not reachable from `origin/main`, so it cannot re-pin a
 sample to a branch commit.
 
-**A re-pin pull request is always pins-only.** Bump `global.version` in its own
-pull request afterwards, whose plan runs the new engine. Under
+**A re-pin pull request changes no stack and no `global.version`.** Bump
+`global.version` in its own pull request afterwards, whose plan runs the new engine. Under
 `pull_request_target` a plan run takes its workflow definition from the **base**
 branch, which still carries the old pin, so a re-pin pull request's own plan runs
 the *previous* engine, and a fail-closed check the new engine adds on data a plan
