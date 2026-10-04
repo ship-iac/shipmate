@@ -98,7 +98,7 @@ FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 def _step_line(tmp_path, monkeypatch, plan_text, changed):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "plan.txt").write_text(plan_text, encoding="utf-8")
-    monkeypatch.setenv("STACK_NAME", "stacks/<app>")
+    monkeypatch.setenv("STACK", "stacks/<app>")
     monkeypatch.setenv("ENV", "dev-eu")
     monkeypatch.setenv("CHANGED", changed)
     return pcs.step_line()
@@ -131,7 +131,6 @@ def test_any_other_argument_is_refused_before_cell_json_is_written(tmp_path):
     (tmp_path / "fingerprint.txt").write_text("fp\n", encoding="utf-8")
     env = {
         **os.environ,
-        "STACK_NAME": "app",
         "STACK": "stacks/app",
         "ENV": "dev",
         "CHANGED": "true",
@@ -158,7 +157,7 @@ def test_step_summary_env_is_exactly_the_cell_names_and_changed():
     step = step_by("plan-cell", name="Step summary (plan text, 64KiB cap)")
     assert step["env"] == {
         "ENV": "${{ inputs.env }}",
-        "STACK_NAME": "${{ inputs.stack }}",
+        "STACK": "${{ inputs.stack }}",
         "CHANGED": "${{ steps.plan.outputs.changed }}",
     }
 
@@ -173,7 +172,7 @@ def _run_summary(tmp_path, python3_body, plan_text):
     summary = tmp_path / "summary.md"
     env = {
         **os.environ,
-        "STACK_NAME": "stacks/app",
+        "STACK": "stacks/app",
         "ENV": "dev-eu",
         "GITHUB_ACTION_PATH": str(tmp_path),
         "GITHUB_STEP_SUMMARY": str(summary),
@@ -184,7 +183,7 @@ def _run_summary(tmp_path, python3_body, plan_text):
 
 @bash_only
 def test_step_summary_heads_the_plan_with_the_step_line_whole(tmp_path):
-    """Mutations: write `## $STACK_NAME / $ENV` in place of `## $line`; drop `--step-line`; call
+    """Mutations: write `## $STACK / $ENV` in place of `## $line`; drop `--step-line`; call
     `scripts/plan-cell-summaries` (a wrong path would fall back silently forever)."""
     r, summary = _run_summary(tmp_path, "echo '🟡 stacks/app (dev-eu): +1 ~0 -0'", "plan text\n")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
@@ -196,7 +195,7 @@ def test_step_summary_heads_the_plan_with_the_step_line_whole(tmp_path):
 @bash_only
 def test_a_failing_step_line_falls_back_and_a_long_plan_is_truncated_whole(tmp_path):
     """The heading is cosmetic, so a failure to compute it must not fail the plan. Mutations:
-    drop `|| line="$STACK_NAME ($ENV)"` (the step fails); put the dash back in the truncation
+    drop `|| line="$STACK ($ENV)"` (the step fails); put the dash back in the truncation
     line."""
     plan = "x" * 65537
     r, summary = _run_summary(tmp_path, "return 1", plan)

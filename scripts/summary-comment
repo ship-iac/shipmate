@@ -41,7 +41,7 @@ FOOTER_HINT = "Comment `shipmate help` for the available commands."
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
-CELL_KEYS = ("stack", "stack_path", "environment", "changed")
+CELL_KEYS = ("stack", "environment", "changed")
 
 #: The consumer names its plan-calling job `shipmate`, and GitHub names a called workflow's
 #: check runs `<caller job> / <callee job>`. A plan cell's callee job name is already
@@ -209,11 +209,11 @@ def command_data(s):
 def check_url(cell, checks, run_url):
     """Link target for a cell: the latest `shipmate / <stack-path> / <env>` plan-job check run.
 
-    Name is built FORWARD from the cell's (stack_path, environment) — the CONTRACT check-name
+    Name is built FORWARD from the cell's (stack, environment) — the CONTRACT check-name
     grammar; never parsed back. Falls back to the workflow-run URL when the name is absent
     (a consumer file whose plan-calling job is not named `shipmate`).
     """
-    run = checks.get(f"{PLAN_CHECK_PREFIX}{cell['stack_path']} / {cell['environment']}")
+    run = checks.get(f"{PLAN_CHECK_PREFIX}{cell['stack']} / {cell['environment']}")
     return run["html_url"] if run and run.get("html_url") else run_url
 
 
@@ -324,7 +324,7 @@ def build_comment(cells, checks, run_url, head_sha):
     return body
 
 
-_STR_KEYS = ("stack", "stack_path", "environment")
+_STR_KEYS = ("stack", "environment")
 _TALLY = re.compile(
     r"Plan: (?:(?P<import>\d+) to import, )?(?P<add>\d+) to add, (?P<change>\d+) to change, "
     r"(?P<destroy>\d+) to destroy(?:, (?P<forget>\d+) to forget)?\."
@@ -383,7 +383,7 @@ def load_cells(cells_dir):
         txt = pathlib.Path(p).with_name("plan.txt")
         tally = counts(txt)
         if tally is None:
-            name = f"{cell['stack_path']} / {cell['environment']}"
+            name = f"{cell['stack']} / {cell['environment']}"
             print(
                 f"::warning::plan text for {command_data(name)} has no single OpenTofu tally line; "
                 "its counts render as ?"

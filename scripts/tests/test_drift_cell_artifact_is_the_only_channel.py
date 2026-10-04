@@ -11,8 +11,10 @@ namesakes, whose artifact carries only comment data. Asserted on the parsed acti
 `continue-on-error: true` inside a comment satisfies no parsed check.
 """
 
+import json
+
 import pytest
-from _loader import run_lines, step_by
+from _loader import load_script, run_lines, step_by
 
 LOAD_BEARING = ("Compose cell summary", "Upload drift summary")
 
@@ -39,3 +41,31 @@ def test_the_cell_artifact_path_runs_even_after_a_failed_plan(name):
     # `if: always()` is the other half: drift-issues needs a result for every attempted-or-blocked
     # cell, so it never auto-closes an Issue for a stack x env whose plan attempt did not succeed.
     assert step_by("drift-cell", name=name).get("if") == "always()"
+
+
+def test_the_writer_emits_exactly_the_drift_cell_keys(monkeypatch, tmp_path):
+    """drift-issues reads this cell, and names the stack in an Issue title that is that Issue's
+    identity across engine releases. Mutation: write `"name": os.environ["STACK"]` beside
+    `stack` in drift-cell-summary."""
+    env = {
+        "STACK": "stacks/app",
+        "ENV": "dev-eu",
+        "PLAN_OUTCOME": "success",
+        "DRIFTED": "true",
+        "ADD": "1",
+        "CHANGE": "2",
+        "DESTROY": "3",
+        "RUNNER_TEMP": str(tmp_path),
+    }
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    load_script("drift-cell-summary").main()
+    assert json.loads((tmp_path / "cell.json").read_text(encoding="utf-8")) == {
+        "stack": "stacks/app",
+        "environment": "dev-eu",
+        "plan_ok": True,
+        "drifted": True,
+        "add": 1,
+        "change": 2,
+        "destroy": 3,
+    }

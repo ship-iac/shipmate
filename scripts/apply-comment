@@ -42,7 +42,7 @@ li = _load("lock-info")
 # `_load("env-order")`, which would widen this renderer's pin closure.
 MAX_ENV_LEVELS = 4
 
-CELL_KEYS = ("stack", "stack_path", "environment", "result", "reason")
+CELL_KEYS = ("stack", "environment", "result", "reason")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
 # (circle, verdict word) per display status, in verdict token order. A SUPERSET of cell.json's
 # `result` enum: `unrecorded` is derived at render time (apply_check_state), never written,
@@ -282,10 +282,10 @@ def build_rows(expected, downloaded):
     to the stack path for display."""
     by_key = {}
     for cell, text in downloaded:
-        key = (cell["environment"], cell["stack_path"])
+        key = (cell["environment"], cell["stack"])
         by_key[key] = {
             "environment": cell["environment"],
-            "stack_path": cell["stack_path"],
+            "stack_path": cell["stack"],
             "stack_display": cell["stack"],
             "status": cell["result"],
             "reason": cell["reason"],

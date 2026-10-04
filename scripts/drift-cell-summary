@@ -17,7 +17,6 @@ def main():
     plan_ok = os.environ["PLAN_OUTCOME"] == "success"
     cell = {
         "stack": os.environ["STACK"],
-        "stack_name": os.environ["STACK_NAME"],
         "environment": os.environ["ENV"],
         "plan_ok": plan_ok,
         "drifted": plan_ok and os.environ["DRIFTED"] == "true",

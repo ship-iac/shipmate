@@ -18,7 +18,6 @@ def _fresh_label_cache():
 def _cell(**over):
     base = {
         "stack": "stacks/app",
-        "stack_name": "app",
         "environment": "dev-eu",
         "plan_ok": True,
         "drifted": False,
@@ -45,15 +44,16 @@ def test_load_cells_reads_every_downloaded_cell_sorted(tmp_path):
 
 def test_load_cells_missing_key_fails_loud(tmp_path):
     """The whole refusal, so the pin-skew sentence the caller passes to `cell_summaries` is
-    checked too. Mutation: drop `{skew}` from `cell_summaries`' message."""
+    checked too. Mutations: drop `{skew}` from `cell_summaries`' message; drop `"stack"` from
+    `CELL_KEYS`."""
     d = tmp_path / "drift-summary.dev-eu.app"
     d.mkdir(parents=True)
-    (d / "cell.json").write_text(json.dumps({"stack": "stacks/app"}), encoding="utf-8")
+    (d / "cell.json").write_text(json.dumps({}), encoding="utf-8")
     with pytest.raises(SystemExit) as exc:
         di.load_cells(str(tmp_path))
     path = os.path.join(str(tmp_path), "drift-summary.dev-eu.app", "cell.json")
     assert str(exc.value) == (
-        f"::error::cell summary {path} missing keys ['stack_name', 'environment', 'plan_ok', "
+        f"::error::cell summary {path} missing keys ['stack', 'environment', 'plan_ok', "
         "'drifted', 'add', 'change', 'destroy'] -- drift-cell and this script must be pinned "
         "at the same engine SHA"
     )
@@ -64,19 +64,21 @@ def test_load_cells_on_missing_directory_is_empty(tmp_path):
 
 
 def test_title_and_body_carry_the_counts_and_run_link():
+    """The title is the Issue's identity: an Issue opened under an earlier engine is found by it,
+    so it names the whole stack path. Mutation: `_title` uses `cell['stack'].split('/')[-1]`."""
     cell = _cell(drifted=True, add=1, change=2, destroy=3)
-    assert di._title(cell) == "drift: dev-eu / app"
+    assert di._title(cell) == "drift: dev-eu / stacks/app"
     body = di._body(cell, "https://example.invalid/run/1")
     assert "+1 ~2 -3" in body
     assert "https://example.invalid/run/1" in body
-    assert "`app`" in body and "`dev-eu`" in body
+    assert "`stacks/app`" in body and "`dev-eu`" in body
 
 
 def test_body_is_exactly_the_expected_text():
     """The whole Issue body, including an auto-close promise a scoped sweep keeps."""
     cell = _cell(drifted=True, add=1, change=2, destroy=3)
     assert di._body(cell, "https://example.invalid/run/1") == (
-        "Drift detected in `app` @ `dev-eu`: +1 ~2 -3. "
+        "Drift detected in `stacks/app` @ `dev-eu`: +1 ~2 -3. "
         "[Drift run](https://example.invalid/run/1) "
         "-- plan output is in that run's log. "
         "Auto-closed on the next clean drift run that covers this stack and environment."
@@ -96,7 +98,7 @@ def test_plan_not_ok_cell_is_skipped_entirely(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(plan_ok=False, drifted=True)
-    di.upsert_or_close(cell, {"drift: dev-eu / app": 7}, "url")
+    di.upsert_or_close(cell, {"drift: dev-eu / stacks/app": 7}, "url")
     assert rec.calls == []  # An existing open issue is left untouched.
 
 
@@ -123,8 +125,8 @@ def test_two_new_issues_create_the_label_once(monkeypatch):
         "subprocess.run",
         lambda *a, **k: label_calls.append(a) or type("R", (), {"returncode": 0})(),
     )
-    di.upsert_or_close(_cell(drifted=True, stack_name="app"), {}, "url")
-    di.upsert_or_close(_cell(drifted=True, stack_name="db"), {}, "url")
+    di.upsert_or_close(_cell(drifted=True, stack="stacks/app"), {}, "url")
+    di.upsert_or_close(_cell(drifted=True, stack="stacks/db"), {}, "url")
     assert len(label_calls) == 1
 
 
@@ -132,7 +134,7 @@ def test_drifted_with_existing_issue_edits_it(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=True)
-    di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
+    di.upsert_or_close(cell, {"drift: dev-eu / stacks/app": 42}, "url")
     assert rec.calls == [["gh", "issue", "edit", "42", "--body", di._body(cell, "url")]]
 
 
@@ -140,7 +142,7 @@ def test_clean_with_existing_issue_closes_it(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
     cell = _cell(drifted=False)
-    di.upsert_or_close(cell, {"drift: dev-eu / app": 42}, "url")
+    di.upsert_or_close(cell, {"drift: dev-eu / stacks/app": 42}, "url")
     assert rec.calls[0][:3] == ["gh", "issue", "close"]
 
 
@@ -183,7 +185,7 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     cell that failed, and annotates the failed cell. Mutation: delete the per-cell
     `::error::drift issue update failed` print in `main()`."""
     for name in ("a", "b", "c"):
-        _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", stack_name=name, drifted=True))
+        _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", drifted=True))
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
@@ -194,7 +196,7 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
         if args[:3] == ["gh", "issue", "list"]:
             return "[]"
         title = args[args.index("--title") + 1]
-        if title.endswith("/ b"):
+        if title.endswith("/ stacks/b"):
             raise SystemExit("::error::command failed (1): gh issue create")
         created.append(title)
         return ""
@@ -203,12 +205,12 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     monkeypatch.setattr("subprocess.run", lambda *a, **k: type("R", (), {"returncode": 0})())
     with pytest.raises(SystemExit) as exc:
         di.main()
-    assert created == ["drift: dev-eu / a", "drift: dev-eu / c"]
-    assert "dev-eu / b" in str(exc.value)
-    assert "dev-eu / a" not in str(exc.value)
+    assert created == ["drift: dev-eu / stacks/a", "drift: dev-eu / stacks/c"]
+    assert "dev-eu / stacks/b" in str(exc.value)
+    assert "dev-eu / stacks/a" not in str(exc.value)
     assert capsys.readouterr().out == (
         "loaded 3 drift cell summaries\n"
-        "::error::drift issue update failed for dev-eu / b: "
+        "::error::drift issue update failed for dev-eu / stacks/b: "
         "::error::command failed (1): gh issue create\n"
     )
 
@@ -225,7 +227,7 @@ def test_main_leaves_a_plan_not_ok_cells_open_issue_untouched(tmp_path, monkeypa
 
     def fake_run(args):
         calls.append(args)
-        return json.dumps([{"number": 7, "title": "drift: dev-eu / app"}])
+        return json.dumps([{"number": 7, "title": "drift: dev-eu / stacks/app"}])
 
     monkeypatch.setattr(di, "_run", fake_run)
     di.main()

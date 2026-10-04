@@ -44,13 +44,11 @@ def _run_compose(
     plan_digest="skipped",
     apply="skipped",
     stack="stacks/app",
-    stack_name="app",
     env="dev-eu",
 ):
     """Run the real script with os.environ patched to a given outcome combination and
     RUNNER_TEMP pointed at a tmp dir, then return the resulting cell.json as a dict."""
     monkeypatch.setenv("STACK", stack)
-    monkeypatch.setenv("STACK_NAME", stack_name)
     monkeypatch.setenv("ENV", env)
     monkeypatch.setenv("DOWNLOAD_OUTCOME", download)
     monkeypatch.setenv("PLANNED_HEAD_OUTCOME", planned_head)
@@ -209,12 +207,13 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
         {},
     ],
 )
-def test_cell_json_carries_exactly_the_five_contract_keys_all_strings(
+def test_cell_json_carries_exactly_the_four_contract_keys_all_strings(
     monkeypatch, tmp_path, kwargs
 ):
-    """The renderer's contract: `scripts/apply-comment`'s CELL_KEYS is this same five-key set."""
+    """The renderer's contract: `scripts/apply-comment`'s CELL_KEYS is this same four-key set.
+    Mutation: write `"path": os.environ["STACK"]` beside `stack` in apply-cell-summary."""
     cell = _run_compose(monkeypatch, tmp_path, **kwargs)
-    assert set(cell.keys()) == {"stack", "stack_path", "environment", "result", "reason"}
+    assert set(cell.keys()) == {"stack", "environment", "result", "reason"}
     for key, value in cell.items():
         assert isinstance(value, str), f"{key} is {type(value).__name__}, not str: {value!r}"
     assert cell["result"] in ("applied", "failed", "blocked")

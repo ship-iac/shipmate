@@ -5,7 +5,7 @@ Used by actions/plan-cell's `Write cell summary` step. Built from env vars rathe
 interpolation so an author-controlled stack/env cannot inject shell or break the JSON.
 
 `--step-line` prints the cell's line for the `Step summary` step: the plan comment's cell line
-without a link, from `STACK_NAME`, `ENV`, `CHANGED` and the counts in `plan.txt`.
+without a link, from `STACK`, `ENV`, `CHANGED` and the counts in `plan.txt`.
 """
 
 import json
@@ -24,7 +24,7 @@ def step_line():
     # name one state.
     tally = sc.counts(pathlib.Path("plan.txt")) or ("?",) * 5
     cell["add"], cell["change"], cell["destroy"], cell["import"], cell["forget"] = tally
-    return sc.cell_line(sc.emoji(cell), os.environ["STACK_NAME"], os.environ["ENV"], sc.state(cell))
+    return sc.cell_line(sc.emoji(cell), os.environ["STACK"], os.environ["ENV"], sc.state(cell))
 
 
 def main():
@@ -33,8 +33,7 @@ def main():
     with open("cell.json", "w") as fh:
         json.dump(
             {
-                "stack": os.environ["STACK_NAME"],
-                "stack_path": os.environ["STACK"],
+                "stack": os.environ["STACK"],
                 "environment": os.environ["ENV"],
                 "changed": os.environ["CHANGED"] == "true",
                 "fingerprint": fingerprint,

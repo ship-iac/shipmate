@@ -89,7 +89,7 @@ def _run_step(tmp_path, *, record=None, observed=_PLANNED):
         (work / "planned-head.txt").write_text(record, encoding="utf-8", newline="\n")
     runner_temp = tmp_path / "rt"
     runner_temp.mkdir()
-    env = {**os.environ, "RUNNER_TEMP": str(runner_temp), "ENV": "dev-eu", "STACK_NAME": "app"}
+    env = {**os.environ, "RUNNER_TEMP": str(runner_temp), "ENV": "dev-eu", "STACK": "stacks/app"}
     return run_step(tmp_path, harness, env, cwd=work), work
 
 
@@ -102,7 +102,7 @@ def test_an_absent_record_aborts_and_says_to_re_plan(tmp_path):
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     out = r.stdout + r.stderr
     assert out.strip() == (
-        "::error::apply aborted for dev-eu/app: this reviewed plan records no planned "
+        "::error::apply aborted for dev-eu/stacks/app: this reviewed plan records no planned "
         "commit, so there is nothing to compare against this checkout and the apply is "
         "refused. Re-plan this stack "
         "on its pull request and apply the fresh plan; if that pull request has already "

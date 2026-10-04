@@ -25,8 +25,7 @@ def _run_context(monkeypatch):
 
 def _cell(**kw):
     base = {
-        "stack": "app",
-        "stack_path": "stacks/app",
+        "stack": "stacks/app",
         "environment": "dev-eu",
         "result": "applied",
         "reason": "",
@@ -68,7 +67,7 @@ def test_build_rows_statuses_and_not_attempted_for_missing_artifact():
     downloaded = [
         (_cell(result="applied"), "Apply complete! Resources: 1 added, 0 changed, 0 destroyed."),
         (
-            _cell(stack="db", stack_path="stacks/db", environment="dev-us", result="failed"),
+            _cell(stack="stacks/db", environment="dev-us", result="failed"),
             "Error: boom",
         ),
     ]
@@ -92,15 +91,15 @@ def test_build_rows_downloaded_cell_outside_expected_set_still_rendered():
 
 def test_build_rows_sorted_by_environment_then_stack():
     downloaded = [
-        (_cell(stack="z", stack_path="stacks/z", environment="dev-eu"), "t"),
-        (_cell(stack="a", stack_path="stacks/a", environment="dev-eu"), "t"),
-        (_cell(stack="a", stack_path="stacks/a", environment="dev-us"), "t"),
+        (_cell(stack="stacks/z", environment="dev-eu"), "t"),
+        (_cell(stack="stacks/a", environment="dev-eu"), "t"),
+        (_cell(stack="stacks/a", environment="dev-us"), "t"),
     ]
     rows = ac.build_rows(set(), downloaded)
     assert [(r["environment"], r["stack_display"]) for r in rows] == [
-        ("dev-eu", "a"),
-        ("dev-eu", "z"),
-        ("dev-us", "a"),
+        ("dev-eu", "stacks/a"),
+        ("dev-eu", "stacks/z"),
+        ("dev-us", "stacks/a"),
     ]
 
 
@@ -120,7 +119,8 @@ def _comment(rows, env="dev-eu", results="success", **kw):
 
 
 def _capture(tmp_path, name):
-    """`name` copied byte-for-byte into an `app (dev-eu)` applied cell, loaded as in production."""
+    """`name` copied byte-for-byte into a `stacks/app (dev-eu)` applied cell, loaded as in
+    production."""
     d = _write_cell(tmp_path, "dev-eu", "stacks-app", _cell())
     (d / "apply.txt").write_bytes((FIXTURES / name).read_bytes())
     return ac.build_rows(set(), ac.load_cells(str(tmp_path)))
@@ -140,8 +140,8 @@ def test_an_import_and_forget_capture_renders_its_whole_fold_out(tmp_path):
     rows = _capture(tmp_path, "import-forget.apply.txt")
     assert ac.build_comment(rows, [], RUN_URL, [], [], "dev-eu", "success", head_sha=SHA) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {AT}\n\n"
-        '<details><summary>🟢 app (dev-eu): +1 ~0 -0, 1 import, 1 forget <a href="https://gh/run/1">'
-        "logs</a></summary>\n\n```\n"
+        "<details><summary>🟢 stacks/app (dev-eu): +1 ~0 -0, 1 import, 1 forget "
+        '<a href="https://gh/run/1">logs</a></summary>\n\n```\n'
         "random_id.c: Importing... [id=p-9hUg]\n"
         "random_id.c: Import complete [id=p-9hUg]\n"
         "random_id.d: Creating...\n"
@@ -157,11 +157,11 @@ def test_an_import_and_forget_capture_renders_its_whole_fold_out(tmp_path):
     [
         (
             "import-only.apply.txt",
-            '🟢 app (dev-eu): +0 ~0 -0, 1 import <a href="https://gh/run/1">logs</a>',
+            '🟢 stacks/app (dev-eu): +0 ~0 -0, 1 import <a href="https://gh/run/1">logs</a>',
         ),
         (
             "forget-only.apply.txt",
-            '🟢 app (dev-eu): +0 ~0 -0, 1 forget <a href="https://gh/run/1">logs</a>',
+            '🟢 stacks/app (dev-eu): +0 ~0 -0, 1 forget <a href="https://gh/run/1">logs</a>',
         ),
     ],
 )
@@ -1032,12 +1032,10 @@ def test_load_cells_reads_apply_text_only_when_present(tmp_path):
         tmp_path,
         "dev-us",
         "stacks-db",
-        _cell(
-            stack="db", stack_path="stacks/db", environment="dev-us", result="blocked", reason="x"
-        ),
+        _cell(stack="stacks/db", environment="dev-us", result="blocked", reason="x"),
     )
     cells = ac.load_cells(str(tmp_path))
-    texts = {c["stack_path"]: t for c, t in cells}
+    texts = {c["stack"]: t for c, t in cells}
     assert texts["stacks/app"] == "output here"
     assert texts["stacks/db"] is None
 
@@ -1610,7 +1608,7 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
     Mutation: drop `apply_check_state`'s result in main -- the row reads applied, red.
     Mutation: read the head SHA from `HEAD_SHA` in main -- `at an unknown commit`, red."""
     cells = tmp_path / "cells"
-    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
+    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="stacks/app"))
     checks = tmp_path / "checks.jsonl"
     checks.write_text(
         "\n".join(
@@ -1622,9 +1620,9 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
     _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟠 1 not recorded {_MAIN_AT}\n\n"
-        f'🟠 app (dev-eu): applied, not recorded <a href="{_MAIN_RUN}">logs</a>\n\n'
-        "not recorded: **app (dev-eu)**. The apply succeeded but its apply check is not recorded "
-        "as complete (it failed, was cancelled, or a newer plan re-created it), so "
+        f'🟠 stacks/app (dev-eu): applied, not recorded <a href="{_MAIN_RUN}">logs</a>\n\n'
+        "not recorded: **stacks/app (dev-eu)**. The apply succeeded but its apply check is not "
+        "recorded as complete (it failed, was cancelled, or a newer plan re-created it), so "
         "`shipmate / gate` stays pending. Re-plan and re-apply.\n\n" + HINT
     )
 
@@ -1652,12 +1650,12 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
 
     Mutation: treat an absent check name as pending in `apply_check_state` -- red."""
     cells = tmp_path / "cells"
-    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
+    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="stacks/app"))
     waves = json.dumps({"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]})
     _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
-        f'🟢 app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>'
+        f'🟢 stacks/app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>'
     )
 
 
@@ -1668,7 +1666,7 @@ def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
     Mutation: read the expected cells from `range(1, MAX_ENV_LEVELS)` in `_expected_cells` --
     the db row and its note are gone, red."""
     cells = tmp_path / "cells"
-    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="app", stack_path="stacks/app"))
+    _write_cell(cells, "dev-eu", "stacks-app", _cell(stack="stacks/app"))
     waves = json.dumps(
         {
             "wave0": [{"stack": "stacks/app", "environment": "dev-eu"}],
@@ -1678,7 +1676,7 @@ def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
     _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟡 1 not attempted, 1 applied {_MAIN_AT}\n\n"
-        f'🟢 app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>\n'
+        f'🟢 stacks/app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>\n'
         f'🟡 stacks/db (dev-eu): not attempted <a href="{_MAIN_RUN}">logs</a>\n\n'
         "not attempted: the apply checks stay pending; retry with `shipmate apply dev-eu`.\n\n"
         + HINT
@@ -1686,7 +1684,7 @@ def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
 
 
 def _all_envs_main_env(monkeypatch, tmp_path, row_env, ungated, no_review):
-    """`_main_env` for the all-environments form with one applied `app` cell in `row_env`, an
+    """`_main_env` for the all-environments form with one applied `stacks/app` cell in `row_env`, an
     empty (readable) checks file so stdout holds only what `main` prints, and the five env sets:
     `sbx` explicit, `stg` skipped, `prod` held, then `ungated` and `no_review`."""
     cells = tmp_path / "cells"
@@ -1705,7 +1703,7 @@ def _all_envs_main_env(monkeypatch, tmp_path, row_env, ungated, no_review):
 def _all_envs_body(row_env):
     return (
         f"### shipmate apply\n\n🟢 1 applied {_MAIN_AT}\n\n"
-        f'🟢 app ({row_env}): applied <a href="{_MAIN_RUN}">logs</a>\n\n'
+        f'🟢 stacks/app ({row_env}): applied <a href="{_MAIN_RUN}">logs</a>\n\n'
         "🟡 sbx: left pending (explicit), comment `shipmate apply sbx`\n"
         "⚪ stg: skipped, ordered after an environment not applying this run\n"
         "⚪ prod: held, the review state does not permit applying\n"

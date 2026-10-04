@@ -100,7 +100,7 @@ def _run_step(
     before running its body, because "init never ran" and "the apply never ran" are the orderings
     the refusal tests turn on, and an exit code alone shows neither.
 
-    `PLAN_SHA256`, `ENV` and `STACK_NAME` are exported for every caller: under `set -u` an unset
+    `PLAN_SHA256`, `ENV` and `STACK` are exported for every caller: under `set -u` an unset
     one aborts the script before it reaches the behaviour under test, which would green a refusal
     test for the wrong reason. The default is a well-formed digest of the default `tofu` stub's
     output, so the callers testing the `tee` contract still run all the way to the apply.
@@ -131,7 +131,6 @@ def _run_step(
         "RUNNER_TEMP": str(runner_temp),
         "PLAN_SHA256": plan_sha256,
         "ENV": "dev-eu",
-        "STACK_NAME": "app",
     }
     return run_step(tmp_path, harness, env, cwd=checkout)
 

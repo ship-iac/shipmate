@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import pathlib
 
 import pytest
@@ -28,7 +29,6 @@ def _bare_app(url):
 def _cell(**kw):
     base = {
         "stack": "stacks/app",
-        "stack_path": "stacks/app",
         "environment": "dev-eu",
         "add": 1,
         "change": 0,
@@ -168,7 +168,7 @@ def test_check_url_ignores_an_unprefixed_check_and_falls_back_to_the_run_url():
     The old two-segment name is not a match, so this reddens on `PLAN_CHECK_PREFIX = ""`
     for the reason the constant exists, not on a plain absent-name miss.
     """
-    cell = _cell(stack="a", stack_path="a", environment="dev")
+    cell = _cell(stack="a", environment="dev")
     assert sc.check_url(cell, {"shipmate / a / dev": {"html_url": "https://ck/a"}}, RUN_URL) == (
         "https://ck/a"
     )
@@ -304,8 +304,8 @@ def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
     `footer(run_url)` as the body's last part reddens it: a plan comment has no footer."""
     cells = [
         (_cell(), "  + one"),
-        (_cell(changed=False, stack="stacks/db", stack_path="stacks/db"), None),
-        (_cell(changed=False, stack="stacks/dns", stack_path="stacks/dns"), None),
+        (_cell(changed=False, stack="stacks/db"), None),
+        (_cell(changed=False, stack="stacks/dns"), None),
     ]
     assert sc.build_comment(cells, CHECKS, RUN_URL, SHA) == (
         HEAD + f"🟡 1 of 3 cells change {AT}\n\n"
@@ -324,7 +324,7 @@ def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
     )
     _write_cell(
         tmp_path,
-        _cell(stack="stacks/db", stack_path="stacks/db", environment="dev", changed=False),
+        _cell(stack="stacks/db", environment="dev", changed=False),
         "No changes. Your infrastructure matches the configuration.\n",
     )
     checks = {"shipmate / stacks/app / prod": {"html_url": "https://ck/app-prod"}}
@@ -361,7 +361,7 @@ def test_a_256_cell_fan_out_of_oversized_plans_keeps_every_cell_line():
     dropping `reserve` from `render_section`'s limit lets cell 0 take the whole budget, and
     the 255 bare lines after it push the body past the hard cap."""
     giant = "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)
-    cells = [(_cell(stack=f"s{i:03}", stack_path=f"s{i:03}"), giant) for i in range(256)]
+    cells = [(_cell(stack=f"s{i:03}"), giant) for i in range(256)]
     body = sc.build_comment(cells, {}, RUN_URL, SHA)
     assert len(body) <= sc.SIZE_BUDGET
     rows, rest = _fold_out_rows(body, f"🟡 256 of 256 cells change {AT}")
@@ -373,9 +373,9 @@ def test_an_early_giant_plan_cannot_drop_a_later_cells_line():
     """Mutation: dropping `reserve` from `render_section`'s limit sizes cell 0 to the whole
     budget, and the later lines push the body past SIZE_BUDGET."""
     cells = [
-        (_cell(stack="s000", stack_path="s000"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)),
-        (_cell(stack="s001", stack_path="s001"), "  + x"),
-        (_cell(stack="s002", stack_path="s002", changed=False), None),
+        (_cell(stack="s000"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)),
+        (_cell(stack="s001"), "  + x"),
+        (_cell(stack="s002", changed=False), None),
     ]
     body = sc.build_comment(cells, {}, RUN_URL, SHA)
     assert len(body) <= sc.SIZE_BUDGET
@@ -398,17 +398,14 @@ def test_no_line_of_the_comment_is_itself_a_shipmate_command():
     shipmate command; the `[bot]` loop guard would ignore it, but relying on that alone is one
     deletion away from a retrigger loop."""
     cp = load_script("comment-parse")
-    cells = [(_cell(), "  + one"), (_cell(changed=False, stack="b", stack_path="b"), None)]
+    cells = [(_cell(), "  + one"), (_cell(changed=False, stack="b"), None)]
     for line in sc.build_comment(cells, {}, RUN_URL, SHA).splitlines():
         assert not cp._SHIPMATE_LINE.match(line.strip()), line
 
 
 def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
     long_name = "s" * 400
-    cells = [
-        (_cell(stack=f"stacks/{long_name}{i:03}", stack_path=f"stacks/{long_name}{i:03}"), "  + r")
-        for i in range(300)
-    ]
+    cells = [(_cell(stack=f"stacks/{long_name}{i:03}"), "  + r") for i in range(300)]
     with pytest.raises(SystemExit, match="comment cap"):
         sc.build_comment(cells, {}, RUN_URL, SHA)
 
@@ -416,9 +413,7 @@ def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
 def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
     a = tmp_path / "cell-summary.dev-us.stacks-db"
     a.mkdir()
-    (a / "cell.json").write_text(
-        json.dumps(_cell(stack="stacks/db", stack_path="stacks/db", environment="dev-us"))
-    )
+    (a / "cell.json").write_text(json.dumps(_cell(stack="stacks/db", environment="dev-us")))
     (a / "plan.txt").write_text("  + db")
     b = tmp_path / "cell-summary.dev-eu.stacks-app"
     b.mkdir()
@@ -435,10 +430,15 @@ def test_load_cells_fails_loud_on_missing_schema_keys(tmp_path):
     d = tmp_path / "cell-summary.x.y"
     d.mkdir()
     legacy = _cell()
-    del legacy["stack_path"]
+    del legacy["stack"]
     (d / "cell.json").write_text(json.dumps(legacy))
-    with pytest.raises(SystemExit, match="stack_path"):
+    with pytest.raises(SystemExit) as exc:
         sc.load_cells(str(tmp_path))
+    path = os.path.join(str(tmp_path), "cell-summary.x.y", "cell.json")
+    assert str(exc.value) == (
+        f"::error::cell summary {path} missing keys ['stack'] "
+        "(plan-cell and summary must be pinned at the same engine SHA)"
+    )
 
 
 def test_load_cells_empty_dir_ok(tmp_path):
@@ -587,7 +587,7 @@ def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path
 
 def test_the_warning_escapes_a_newline_in_an_untrusted_name(tmp_path, capsys):
     """Mutation: dropping the workflow-command escaping lets the name start a second command."""
-    _write_cell(tmp_path, _cell(stack_path="a\n::error::forged"))
+    _write_cell(tmp_path, _cell(stack="a\n::error::forged"))
     sc.load_cells(str(tmp_path))
     assert capsys.readouterr().out == (
         "::warning::plan text for a%0A::error::forged / dev-eu has no single OpenTofu tally line; "
@@ -613,13 +613,12 @@ def test_load_cells_still_fails_loud_without_changed(tmp_path):
 
 
 def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeypatch):
-    """Reddens when plan-cell-summary writes a key back (`"add": int(os.environ["ADD"])`) or
-    drops one summary-comment requires, when the step stops invoking it, or when the step's
-    env gains a key back (`ADD: ${{ steps.plan.outputs.add }}`)."""
+    """Reddens when plan-cell-summary writes a key back (`"add": int(os.environ["ADD"])`,
+    `"path": os.environ["STACK"]`) or drops one summary-comment requires, when the step stops
+    invoking it, or when the step's env gains a key back (`ADD: ${{ steps.plan.outputs.add }}`)."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "fingerprint.txt").write_text("fp\n", encoding="utf-8")
     for k, v in {
-        "STACK_NAME": "app",
         "STACK": "stacks/app",
         "ENV": "dev",
         "CHANGED": "true",
@@ -630,8 +629,7 @@ def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeyp
     load_script("plan-cell-summary").main()
     written = json.loads((tmp_path / "cell.json").read_text(encoding="utf-8"))
     assert written == {
-        "stack": "app",
-        "stack_path": "stacks/app",
+        "stack": "stacks/app",
         "environment": "dev",
         "changed": True,
         "fingerprint": "fp",
@@ -644,7 +642,6 @@ def test_cell_schema_guard_plan_cell_writes_every_required_key(tmp_path, monkeyp
     assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary"' in run_lines(step)
     assert step["env"] == {
         "STACK": "${{ inputs.stack }}",
-        "STACK_NAME": "${{ inputs.stack }}",
         "ENV": "${{ inputs.env }}",
         "CHANGED": "${{ steps.plan.outputs.changed }}",
     }

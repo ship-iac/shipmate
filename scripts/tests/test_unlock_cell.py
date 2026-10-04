@@ -43,8 +43,10 @@ _EXPECTED_RUNS = [
 #: keeps the destructive command both possible and conditional.
 _RELEASE_IF = "${{ steps.probe.outputs.held == 'true' }}"
 
-_NO_LOCK = "::notice::no state lock held for app / dev-eu"
-_UNDETERMINED = "::error::could not determine whether a lock is held for app / dev-eu, see the log"
+_NO_LOCK = "::notice::no state lock held for stacks/app / dev-eu"
+_UNDETERMINED = (
+    "::error::could not determine whether a lock is held for stacks/app / dev-eu, see the log"
+)
 
 
 def _live_lines():
@@ -129,7 +131,7 @@ def _run_body(tmp_path, step_id, env, *, terramate_body="return 0"):
     return run_step(tmp_path, body, full), summary.read_text(encoding="utf-8")
 
 
-_REPORT_ENV = {"STACK_NAME": "app", "ENV": "dev-eu"}
+_REPORT_ENV = {"STACK": "stacks/app", "ENV": "dev-eu"}
 
 
 @bash_only
@@ -152,7 +154,6 @@ def test_a_failed_probe_with_no_lock_reports_undetermined_never_no_lock(tmp_path
 
 _RELEASE_ENV = {
     "STACK": "stacks/app",
-    "STACK_NAME": "app",
     "ENV": "dev-eu",
     "LOCK_ID": "0123abcd-4567-89ef-0123-456789abcdef",
 }
@@ -190,13 +191,13 @@ def test_the_release_notice_omits_the_optional_fields_when_blank(tmp_path):
 
 @bash_only
 def test_the_release_summary_heads_with_the_cell_line_whole(tmp_path):
-    """Mutation: write `## $STACK_NAME / $ENV: state lock released` as the heading."""
+    """Mutation: write `## $STACK / $ENV: state lock released` as the heading."""
     r, summary = _run_body(
         tmp_path, "release", {**_RELEASE_ENV, "LOCK_CREATED": "", "LOCK_OPERATION": ""}
     )
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert summary == (
-        "## 🟢 app (dev-eu): state lock released\n"
+        "## 🟢 stacks/app (dev-eu): state lock released\n"
         "\n"
         "Released lock `0123abcd-4567-89ef-0123-456789abcdef`.\n"
         "\n"

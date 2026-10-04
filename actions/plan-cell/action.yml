@@ -170,12 +170,12 @@ runs:
       shell: bash
       env:
         ENV: ${{ inputs.env }}
-        STACK_NAME: ${{ inputs.stack }}
+        STACK: ${{ inputs.stack }}
         CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
         # The heading is cosmetic: a failure to compute it falls back to the cell's names rather
         # than failing the plan.
-        line=$(python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary" --step-line) || line="$STACK_NAME ($ENV)"
+        line=$(python3 "$GITHUB_ACTION_PATH/../../scripts/plan-cell-summary" --step-line) || line="$STACK ($ENV)"
         {
           echo "## $line"
           echo '```'
@@ -220,7 +220,6 @@ runs:
       # cannot inject shell or break the JSON.
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         CHANGED: ${{ steps.plan.outputs.changed }}
       run: |
