@@ -848,8 +848,8 @@ def _lock_files_item(ctx):
     lines = [
         f"{len(missing)} of {len(stacks)} stack(s) have no git-tracked `.terraform.lock.hcl`,",
         "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-        "file first, since git refuses to add an ignored path, then run `tofu providers lock`",
-        "in each and commit the file:",
+        "file first, since git refuses to add an ignored path, then run",
+        "`tofu init -backend=false` in each and commit the file:",
     ]
     lines += [f"  {s}" for s in missing[:10]]
     if len(missing) > 10:
