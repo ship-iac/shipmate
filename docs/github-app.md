@@ -5,9 +5,10 @@ A prerequisite of [`getting-started.md`](getting-started.md#required--plan)
 token, so no gate status and no apply checks.
 
 shipmate's comment-ops path (`shipmate apply <env>` in a PR comment) needs a
-private GitHub App to mint a short-lived `workflow_dispatch` token. Events
-created with `GITHUB_TOKEN` never trigger other workflows, so the manual
-pre-merge apply cannot be kicked off with the default token. The same App
+private GitHub App to mint a short-lived `workflow_dispatch` token. A dispatch
+needs `actions: write`, and the engine's comment-ops job grants its
+`GITHUB_TOKEN` only `actions: read`: the write permission exists only in the
+App token the dispatch step mints once the command is authorized. The same App
 also authors every apply check, the `shipmate / gate` commit status, the
 sticky plan/result comments, and drift issues — installation tokens minted
 fresh per job, never a long-lived credential in the workflow. The bot

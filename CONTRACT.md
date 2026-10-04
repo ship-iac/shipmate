@@ -1382,9 +1382,10 @@ The GitHub App carries this permission set: `actions: write`,
 `shipmate doctor`'s plan-environment secret listing (names only; no GitHub REST
 path returns a secret's value, and this permission cannot write one).
 Beyond minting the `workflow_dispatch`
-token for comment-ops (events created with the default `GITHUB_TOKEN` never
-trigger other workflows, so a private App is the only way to kick off the
-apply workflow from a comment) and reading the apply checks that name the
+token for comment-ops (a dispatch needs `actions: write`; the `ops` job in
+`comment-ops.yml` grants its `GITHUB_TOKEN` only `actions: read`, and
+`actions/dispatch` mints the App token with `actions: write` in a step that runs
+only once the command is authorized) and reading the apply checks that name the
 reviewed plan run for authorization, the App authors every
 check/status/comment/issue that crosses a workflow-run boundary:
 
