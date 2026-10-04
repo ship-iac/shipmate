@@ -676,6 +676,21 @@ The `Install Terramate` step in `actions/setup` failed. Every annotation starts
 | "tar could not extract terramate from <url>." | The downloaded archive did not unpack. |
 | "the binary from <url> failed to run terramate --version." | The unpacked binary did not run. |
 | "<url> delivered version <got>; check VERSIONS and the release asset." | The binary reports another version than the pinned one. |
+| "VERSIONS pins no sha256 for <asset>; shipmate installs on Linux x86_64 and arm64." | The runner's OS or architecture has no pinned digest, so nothing was downloaded. Run the job on a Linux `x86_64` or `arm64` runner. |
+| "<url> has sha256 <got>, not the <pinned> VERSIONS pins; the release asset differs from the pinned one." | The downloaded archive is not the one the engine release pinned. A re-run downloads the same asset: report it, and do not install it by hand. |
+
+### `carries no sha256 line` or `Failed to validate OpenTofu CLI zip checksum`
+
+The `Resolve versions` step in `actions/setup` fails with "<path>/VERSIONS carries
+no sha256 line for <tool> <version>; paste the release's checksum lines." when the
+engine's `VERSIONS` names a version without that release's checksum lines. It
+happens only on an engine commit whose tool-version bump left them out
+(`docs/releasing.md` §Bump Terramate or OpenTofu); pin a released engine commit.
+
+The `Install OpenTofu` step fails with "Failed to validate OpenTofu CLI zip
+checksum" when the downloaded zip's sha256 is not among the two `VERSIONS` pins
+for that version: the asset differs from the pinned one, or the runner is not
+Linux `amd64` or `arm64`. A re-run downloads the same asset.
 
 curl retries HTTP 408, 429, 500, 502, 503 and 504 responses, timeouts and stalls
 three times before the step fails. curl 7.71 and newer also retries connection

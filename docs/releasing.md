@@ -116,6 +116,20 @@ Three limits, all deliberate:
   cost of a second repository; consumer repositories enable it
   (`docs/hardening.md` row 20) and this one does not.
 
+## Bump Terramate or OpenTofu
+
+`VERSIONS` holds each tool's version and the sha256 of its Linux release assets.
+`actions/setup` refuses a version with no checksum lines, so change both in one commit:
+
+1. Set `terramate=` or `tofu=` to the new version.
+2. Replace that tool's two checksum lines with the new release's, copied verbatim from its
+   checksum file, and check that each printed line names the new version:
+
+   ```bash
+   gh release download v<terramate-version> -R terramate-io/terramate -p checksums.txt -O - | grep -E '_linux_(x86_64|arm64)\.tar\.gz$'
+   gh release download v<tofu-version> -R opentofu/opentofu -p 'tofu_<tofu-version>_SHA256SUMS' -O - | grep -E '_linux_(amd64|arm64)\.zip$'
+   ```
+
 ## Publishing the release
 
 After `manifest-load` is green on `main`,

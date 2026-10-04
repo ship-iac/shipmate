@@ -1725,7 +1725,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - shipmate's actions are composite actions: their steps run under `bash`
   and call standard-library-only Python scripts, `git`, `curl`, `jq`, `openssl`,
   and the `gh` CLI. A runner must therefore provide: `bash`, `python3`
-  (Python ≥ 3.11), `git`, `curl`, `jq`, `openssl`, and `gh`.
+  (Python ≥ 3.11), `git`, `curl`, `jq`, `openssl`, `gh`, and GNU coreutils
+  (`setup` hashes the Terramate download with `sha256sum`).
 - Every GitHub-hosted Ubuntu image satisfies this, including the minimal
   `ubuntu-slim` image, whose
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
@@ -1754,7 +1755,11 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   root-level `VERSIONS` file, read at the commit the consumer pins. Moving to
   other versions is a pin bump; the action takes no version input. A missing
   file or line fails the step rather than falling back to the installer's
-  latest.
+  latest. `VERSIONS` also pins the sha256 of each tool's Linux `x86_64`/`amd64`
+  and `arm64` release asset, as `sha256sum` lines copied from the release's own
+  checksum file. Each download is checked against its pin: a mismatch, or a
+  version or platform with no pin, fails the step rather than installing
+  unverified.
 
 ## Fan-out
 

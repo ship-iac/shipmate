@@ -1,7 +1,7 @@
 """actions/setup downloads the pinned Terramate release with one curl and fails closed.
 
-The `Install Terramate` body runs here against stub `curl`, `tar`, `terramate` and `uname`
-binaries. The stubs record their argv, so curl's whole command line is compared to a
+The `Install Terramate` body runs here against stub `curl`, `sha256sum`, `tar`, `terramate`
+and `uname` binaries. The stubs record their argv, so curl's whole command line is compared to a
 hand-written constant per curl version: a dropped `-L` or timeout, `--retry-all-errors`
 passed to a curl older than 7.71 or withheld from a newer one, or an added `--fail`, reds it.
 """
@@ -22,6 +22,12 @@ _URL = (
     "v0.17.1/terramate_0.17.1_linux_x86_64.tar.gz"
 )
 _PREFIX = f"::error title=Terramate install failed::Terramate {_VERSION} did not install: "
+_ASSET = "terramate_0.17.1_linux_x86_64.tar.gz"
+_DIGEST = "a" * 64
+
+#: The `terramate_sha256` resolve output: the `sha256sum` lines pinned for this version.
+_PINNED = f"{_DIGEST}  {_ASSET}\n{'b' * 64}  terramate_0.17.1_linux_arm64.tar.gz"
+_VERIFIED = f"Verified {_ASSET} sha256 {_DIGEST}.\n"
 
 
 def _annotation(code, rc):
@@ -35,14 +41,24 @@ def _stub(bin_dir, name, body):
 
 
 def _install(
-    tmp_path, curl_output, curl_rc, curl_version, binary_version=_VERSION, tar_rc=0, terramate_rc=0
+    tmp_path,
+    curl_output,
+    curl_rc,
+    curl_version,
+    binary_version=_VERSION,
+    tar_rc=0,
+    terramate_rc=0,
+    digest=_DIGEST,
+    machine="x86_64",
 ):
     """Run the step's body with a curl that answers `-V` as `curl_version`, and otherwise prints
-    `curl_output` and exits `curl_rc`.
+    `curl_output` and exits `curl_rc`, and a `uname -m` that prints `machine`.
 
-    The tar stub exits `tar_rc` when non-zero; otherwise it writes a `terramate` stub where the
-    real extract would, and that stub records its argv, prints `binary_version` and exits
-    `terramate_rc` when run. Return (result, runner_temp, the logs dir holding each stub's argv).
+    The sha256sum stub prints `digest` for its file; it and the tar stub append their names to
+    the shared `order` log. The tar stub exits `tar_rc` when non-zero; otherwise it writes a
+    `terramate` stub where the real extract would, and that stub records its argv, prints
+    `binary_version` and exits `terramate_rc` when run. Return (result, runner_temp, the logs
+    dir holding each stub's argv).
     """
     bin_dir = tmp_path / "bin"
     logs = tmp_path / "logs"
@@ -59,7 +75,7 @@ def _install(
     _stub(
         bin_dir,
         "tar",
-        f"printf '%s\\n' \"$@\" > '{log}/tar'\n"
+        f"echo tar >> '{log}/order'\nprintf '%s\\n' \"$@\" > '{log}/tar'\n"
         f"[ {tar_rc} = 0 ] || exit {tar_rc}\n"
         f'printf \'#!/usr/bin/env bash\\nprintf "%%s\\\\n" "$@" > {log}/terramate\\n'
         f'echo "$STUB_TERRAMATE_VERSION"\\nexit {terramate_rc}\\n\''
@@ -67,8 +83,14 @@ def _install(
     )
     _stub(
         bin_dir,
+        "sha256sum",
+        f"echo sha256sum >> '{log}/order'\nprintf '%s\\n' \"$@\" > '{log}/sha256sum'\n"
+        f'echo "{digest}  $1"',
+    )
+    _stub(
+        bin_dir,
         "uname",
-        'if [ "$1" = -s ]; then echo Linux; elif [ "$1" = -m ]; then echo x86_64; fi',
+        f'if [ "$1" = -s ]; then echo Linux; elif [ "$1" = -m ]; then echo {machine}; fi',
     )
     github_path = tmp_path / "github_path"
     github_path.write_text("", encoding="utf-8")
@@ -81,6 +103,7 @@ def _install(
             "RUNNER_TEMP": runner_temp.as_posix(),
             "GITHUB_PATH": str(github_path),
             "SHIPMATE_TERRAMATE_VERSION": _VERSION,
+            "SHIPMATE_TERRAMATE_SHA256": _PINNED,
             "STUB_TERRAMATE_VERSION": binary_version,
         },
     )
@@ -115,16 +138,21 @@ _CURL_ARGV = {
 
 @pytest.mark.parametrize("curl_version", sorted(_CURL_ARGV))
 @bash_only
-def test_a_200_extracts_checks_the_binary_and_adds_the_directory_to_path(tmp_path, curl_version):
+def test_a_200_verifies_extracts_checks_the_binary_and_adds_the_directory_to_path(
+    tmp_path, curl_version
+):
     """Mutations: `-ge 71` -> `-gt 71` (7.71.0 row); pass `--retry-all-errors` unconditionally
     (7.68.0 row); drop `-L` or `--speed-time`, or add `--fail` (every row); drop the
-    `terramate --version` line (terramate argv).
+    `terramate --version` line (terramate argv); move the sha256 comparison after `tar` (order).
     """
     r, runner_temp, logs = _install(tmp_path, "200", 0, curl_version)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     tarball = f"{runner_temp}/terramate/terramate.tar.gz"
     expected = [tarball if a == "{tarball}" else a for a in _CURL_ARGV[curl_version]]
     assert _argv(logs, "curl") == expected
+    assert _argv(logs, "sha256sum") == [tarball]
+    assert _argv(logs, "order") == ["sha256sum", "tar"]
+    assert r.stdout == _VERIFIED
     assert _argv(logs, "tar") == ["-xzf", tarball, "-C", f"{runner_temp}/terramate", "terramate"]
     assert _argv(logs, "terramate") == ["--version"]
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == f"{runner_temp}/terramate\n"
@@ -181,7 +209,7 @@ def test_a_failed_extract_or_binary_fails_the_step_with_one_annotation(
 ):
     r, _, _ = _install(tmp_path, "200", 0, _CURL, tar_rc=tar_rc, terramate_rc=terramate_rc)
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert r.stdout == f"{_PREFIX}{message}\n"
+    assert r.stdout == f"{_VERIFIED}{_PREFIX}{message}\n"
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
 
 
@@ -191,8 +219,38 @@ def test_a_binary_of_another_version_fails_the_step_with_one_annotation(tmp_path
     r, _, _ = _install(tmp_path, "200", 0, _CURL, binary_version="0.17.0")
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stdout == (
-        f"{_PREFIX}{_URL} delivered version 0.17.0; check VERSIONS and the release asset.\n"
+        f"{_VERIFIED}{_PREFIX}{_URL} delivered version 0.17.0; "
+        "check VERSIONS and the release asset.\n"
     )
+    assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+
+
+@bash_only
+def test_a_digest_mismatch_fails_the_step_before_tar_runs(tmp_path):
+    """The asset differs from the pinned one, so the annotation names no re-run.
+
+    Mutation: drop the sha256 comparison.
+    """
+    r, _, logs = _install(tmp_path, "200", 0, _CURL, digest="c" * 64)
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == (
+        f"{_PREFIX}{_URL} has sha256 {'c' * 64}, not the {_DIGEST} VERSIONS pins; "
+        "the release asset differs from the pinned one.\n"
+    )
+    assert _argv(logs, "tar") is None
+    assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
+
+
+@bash_only
+def test_an_unpinned_platform_fails_the_step_before_curl_runs(tmp_path):
+    """Mutation: drop the `|| fail` after the digest lookup."""
+    r, _, logs = _install(tmp_path, "200", 0, _CURL, machine="riscv64")
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stdout == (
+        f"{_PREFIX}VERSIONS pins no sha256 for terramate_0.17.1_linux_riscv64.tar.gz; "
+        "shipmate installs on Linux x86_64 and arm64.\n"
+    )
+    assert _argv(logs, "curl") is None
     assert (tmp_path / "github_path").read_text(encoding="utf-8") == ""
 
 
@@ -225,6 +283,7 @@ def test_a_runner_without_curl_fails_the_step_with_one_annotation(tmp_path):
             "RUNNER_TEMP": (tmp_path / "runner-temp").as_posix(),
             "GITHUB_PATH": str(github_path),
             "SHIPMATE_TERRAMATE_VERSION": _VERSION,
+            "SHIPMATE_TERRAMATE_SHA256": _PINNED,
         },
     )
     assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
