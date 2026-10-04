@@ -18,6 +18,13 @@ restore or `terramate plan` failed, or the composite action aborted before
 it says nothing reliable about drift, so an existing open Issue for that
 stack x env is left untouched rather than being auto-closed as if the
 environment were clean.
+
+An open Issue titled `drift: ` that names no cell of this run's matrix is
+closed: its stack or environment left the drift sweep. The matrix, passed in
+`SHIPMATE_MATRIX_CELLS`, says which cells exist, not the loaded artifacts -- a
+lost artifact or a cell job that died before uploading must not read as a
+removed cell. An unset, unparseable or empty matrix is refused before any Issue
+call, since an empty "present" set would close every drift Issue.
 """
 
 import functools
@@ -40,6 +47,7 @@ CELL_KEYS = (
 )
 
 LABEL = "drift"
+PREFIX = "drift: "
 
 
 def load_cells(cells_dir):
@@ -51,17 +59,29 @@ def load_cells(cells_dir):
     return [cell for _, cell in cell_summaries(cells_dir, CELL_KEYS, skew)]
 
 
-def existing_issue_numbers():
-    """{title: number} for every OPEN issue labelled `drift` -- one list call
+def matrix_titles():
+    """The Issue title of every cell in this run's matrix, from `SHIPMATE_MATRIX_CELLS`.
+    Refuses an unset, unparseable or empty value: every open drift Issue would read as
+    naming a removed cell and be closed."""
+    raw = os.environ.get("SHIPMATE_MATRIX_CELLS", "")
+    try:
+        cells = json.loads(raw)
+    except ValueError:
+        cells = None
+    if not isinstance(cells, list) or not cells:
+        raise SystemExit(
+            "::error::drift-issues needs the drift matrix's cells as a non-empty JSON list "
+            f"in SHIPMATE_MATRIX_CELLS, got {raw!r}"
+        )
+    return {_title(cell) for cell in cells}
+
+
+def open_issues():
+    """[{number, title}, ...] for every OPEN issue labelled `drift` -- one list call
     for the whole run, not one per cell. --limit caps how many are scanned,
     kept well above the realistic count of simultaneously-drifting stack x
-    envs so an existing issue is never missed (which would open a duplicate).
-
-    The LOWEST number wins when two open issues share a title, because gh
-    guarantees no particular listing order. Picking arbitrarily would leave the
-    other one permanently unreachable by title lookup -- never edited, never
-    auto-closed."""
-    rows = json.loads(
+    envs so an existing issue is never missed (which would open a duplicate)."""
+    return json.loads(
         _run(
             [
                 "gh",
@@ -78,6 +98,15 @@ def existing_issue_numbers():
             ]
         )
     )
+
+
+def existing_issue_numbers(rows):
+    """{title: number} over `open_issues()` rows.
+
+    The LOWEST number wins when two open issues share a title, because gh
+    guarantees no particular listing order. Picking arbitrarily would leave the
+    other one unreachable by title lookup: never edited, and closed only once its
+    cell leaves the drift sweep."""
     out = {}
     for row in rows:
         title, number = row["title"], row["number"]
@@ -87,7 +116,7 @@ def existing_issue_numbers():
 
 
 def _title(cell):
-    return f"drift: {cell['environment']} / {cell['stack']}"
+    return f"{PREFIX}{cell['environment']} / {cell['stack']}"
 
 
 def _body(cell, run_url):
@@ -95,7 +124,8 @@ def _body(cell, run_url):
         f"Drift detected in `{cell['stack']}` @ `{cell['environment']}`: "
         f"+{cell['add']} ~{cell['change']} -{cell['destroy']}. [Drift run]({run_url}) "
         "-- plan output is in that run's log. "
-        "Auto-closed on the next clean drift run that covers this stack and environment."
+        "Auto-closed on the next clean drift run of this stack and environment, "
+        "or when the stack or environment leaves the drift sweep."
     )
 
 
@@ -129,10 +159,10 @@ def upsert_or_close(cell, existing, run_url):
 def main():
     cells = load_cells(os.environ.get("SHIPMATE_CELLS_DIR", "drift"))
     print(f"loaded {len(cells)} drift cell summaries")
-    if not cells:
-        return
+    present = matrix_titles()
     url = current_run_url()
-    existing = existing_issue_numbers()
+    rows = open_issues()
+    existing = existing_issue_numbers(rows)
     # Failures are collected here, not raised: one cell's failure must not abandon the rest,
     # and the run still exits nonzero at the end. The module docstring says why.
     failed = []
@@ -140,6 +170,20 @@ def main():
         label = f"{cell['environment']} / {cell['stack']}"
         try:
             upsert_or_close(cell, existing, url)
+        except SystemExit as exc:
+            print(f"::error::drift issue update failed for {label}: {exc}")
+            failed.append(label)
+    # The raw rows, not `existing`, so every duplicate-titled Issue of a removed cell closes.
+    for row in rows:
+        title = row["title"]
+        if not title.startswith(PREFIX) or title in present:
+            continue
+        label = title.removeprefix(PREFIX)
+        comment = (
+            f"`{label}` left the drift sweep: [drift run]({url}) has no such stack and environment."
+        )
+        try:
+            _run(["gh", "issue", "close", str(row["number"]), "--comment", comment])
         except SystemExit as exc:
             print(f"::error::drift issue update failed for {label}: {exc}")
             failed.append(label)

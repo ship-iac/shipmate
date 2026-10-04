@@ -18,6 +18,7 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
+      cells: ${{ steps.m.outputs.cells }}
       empty: ${{ steps.m.outputs.empty }}
       default_branch: ${{ steps.default_branch.outputs.default_branch }}
     steps:
@@ -85,3 +86,4 @@ jobs:
         with:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          cells: ${{ needs.detect.outputs.cells }}

@@ -55,16 +55,29 @@ def test_the_workflow_call_secrets_are_exactly_these():
 def test_the_issues_job_is_one_drift_issues_step_with_the_app_id_and_key():
     """The download lives in the action. Mutations: re-add the drift-summary download step ahead
     of the action; re-add `slack-webhook: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}`; point
-    `private-key` at `vars.`, which every plan cell exports and the run log prints."""
+    `private-key` at `vars.`, which every plan cell exports and the run log prints; drop
+    `cells`, which `actions/drift-issues` then refuses as unset."""
     assert _job("issues")["steps"] == [
         {
             "uses": local_action("drift-issues"),
             "with": {
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                 "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+                "cells": "${{ needs.detect.outputs.cells }}",
             },
         }
     ]
+
+
+def test_the_detect_job_outputs_exactly_these_expressions():
+    """Mutation: drop `cells` from detect's `outputs:`, and the issues job receives an empty
+    string."""
+    assert _job("detect")["outputs"] == {
+        "matrix": "${{ steps.m.outputs.matrix }}",
+        "cells": "${{ steps.m.outputs.cells }}",
+        "empty": "${{ steps.m.outputs.empty }}",
+        "default_branch": "${{ steps.default_branch.outputs.default_branch }}",
+    }
 
 
 def test_the_jobs_are_exactly_these():

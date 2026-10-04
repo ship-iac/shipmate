@@ -8,8 +8,12 @@ A nightly cron fans out over all stacks × environments — not the changed set
 — and plans each one. A separate `issues` job then turns
 those results into GitHub Issues: one labelled `drift` Issue per drifted stack ×
 environment, titled `drift: <env> / <stack>`, updated in place while the drift
-persists and closed with a "Drift resolved" comment on the next clean run that
-covers it. The lookup is over open Issues only, so drift that returns later
+persists and closed with a "Drift resolved" comment on the next clean run of
+its cell. An open `drift` Issue titled `drift: ` that names no cell of the
+sweep is closed too, with a comment that its stack or environment left the
+sweep; an Issue titled any other way is never closed. A sweep with no cells at
+all skips the `issues` job, so after deleting every stack close its Issues by
+hand. The lookup is over open Issues only, so drift that returns later
 opens a fresh Issue rather than reopening the closed one.
 To reach Slack, subscribe GitHub's Slack app
 (`/github subscribe <owner>/<repo> issues workflows`): it posts Issue opens and

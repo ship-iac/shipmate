@@ -752,7 +752,27 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "matrix": "${{ steps.build.outputs.matrix }}",
         "empty": "${{ steps.build.outputs.empty }}",
         "count": "${{ steps.build.outputs.count }}",
+        "cells": "${{ steps.build.outputs.cells }}",
     }
+
+
+def test_the_cells_output_is_the_cell_names_in_matrix_order(monkeypatch, tmp_path):
+    """The names alone: a stamped row carries `tf_vars` and roles, and 256 of them in one env
+    var can pass Linux's single-argument limit. Mutation: emit the stamped rows as `cells`."""
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "schedule",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_NO_PULL_REQUEST": "true",
+        },
+        cells=(("stacks/db", "prod-eu"), ("stacks/app", "dev-eu")),
+    )
+    assert outputs["cells"] == (
+        '[{"environment": "prod-eu", "stack": "stacks/db"}, '
+        '{"environment": "dev-eu", "stack": "stacks/app"}]'
+    )
 
 
 def test_rejects_stacks_that_slug_to_one_artifact_name():

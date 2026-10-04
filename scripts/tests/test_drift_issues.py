@@ -4,7 +4,7 @@ import json
 import os
 
 import pytest
-from _loader import action_steps, load_script, step_by
+from _loader import action_steps, action_yaml, load_script, step_by
 
 di = load_script("drift-issues")
 
@@ -81,8 +81,59 @@ def test_body_is_exactly_the_expected_text():
         "Drift detected in `stacks/app` @ `dev-eu`: +1 ~2 -3. "
         "[Drift run](https://example.invalid/run/1) "
         "-- plan output is in that run's log. "
-        "Auto-closed on the next clean drift run that covers this stack and environment."
+        "Auto-closed on the next clean drift run of this stack and environment, "
+        "or when the stack or environment leaves the drift sweep."
     )
+
+
+_LIST = [
+    "gh",
+    "issue",
+    "list",
+    "--label",
+    "drift",
+    "--state",
+    "open",
+    "--limit",
+    "1000",
+    "--json",
+    "number,title",
+]
+
+_RUN_URL = "https://example.invalid/acme/demo/actions/runs/1"
+
+
+def _main_env(monkeypatch, cells_dir, matrix):
+    """`main()`'s environment: the artifact directory, the run, and the matrix cells as
+    `(environment, stack)` pairs."""
+    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(cells_dir))
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    cells = [{"environment": e, "stack": st} for e, st in matrix]
+    monkeypatch.setenv("SHIPMATE_MATRIX_CELLS", json.dumps(cells))
+
+
+def _gh(monkeypatch, rows):
+    """Patch `_run`: the listing answers `rows`, every other call is recorded and succeeds."""
+    calls = []
+
+    def fake_run(args):
+        if args == _LIST:
+            return json.dumps(rows)
+        calls.append(args)
+        return ""
+
+    monkeypatch.setattr(di, "_run", fake_run)
+    return calls
+
+
+def _left(number, label):
+    comment = (
+        f"`{label}` left the drift sweep: [drift run]({_RUN_URL}) has no such stack and "
+        "environment."
+    )
+    return ["gh", "issue", "close", str(number), "--comment", comment]
 
 
 class _Recorder:
@@ -160,7 +211,7 @@ def test_existing_issue_numbers_parses_the_listing(monkeypatch):
         "_run",
         lambda args: json.dumps([{"number": 5, "title": "drift: dev-eu / app"}]),
     )
-    assert di.existing_issue_numbers() == {"drift: dev-eu / app": 5}
+    assert di.existing_issue_numbers(di.open_issues()) == {"drift: dev-eu / app": 5}
 
 
 def test_existing_issue_numbers_keeps_the_lowest_on_a_title_collision(monkeypatch):
@@ -172,11 +223,8 @@ def test_existing_issue_numbers_keeps_the_lowest_on_a_title_collision(monkeypatc
         {"number": 3, "title": "drift: dev-eu / app"},
         {"number": 7, "title": "drift: dev-eu / app"},
     ]
-    monkeypatch.setattr(di, "_run", lambda args: json.dumps(rows))
-    assert di.existing_issue_numbers() == {"drift: dev-eu / app": 3}
-
-    monkeypatch.setattr(di, "_run", lambda args: json.dumps(list(reversed(rows))))
-    assert di.existing_issue_numbers() == {"drift: dev-eu / app": 3}
+    assert di.existing_issue_numbers(rows) == {"drift: dev-eu / app": 3}
+    assert di.existing_issue_numbers(list(reversed(rows))) == {"drift: dev-eu / app": 3}
 
 
 def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, capsys):
@@ -186,10 +234,7 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     `::error::drift issue update failed` print in `main()`."""
     for name in ("a", "b", "c"):
         _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", drifted=True))
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
-    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
-    monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    _main_env(monkeypatch, tmp_path, [("dev-eu", f"stacks/{n}") for n in ("a", "b", "c")])
     created = []
 
     def fake_run(args):
@@ -216,13 +261,12 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
 
 
 def test_main_leaves_a_plan_not_ok_cells_open_issue_untouched(tmp_path, monkeypatch):
-    """A failed plan says nothing about drift, so its open Issue is neither edited nor closed.
-    Mutation: in `upsert_or_close`, close the open Issue for a `plan_ok` false cell."""
+    """A failed plan says nothing about drift, so its open Issue is neither edited nor closed,
+    and the cell is still in the matrix, so it is no removed cell either. Mutations: in
+    `upsert_or_close`, close the open Issue for a `plan_ok` false cell; build `present` in
+    `main()` from the loaded `plan_ok` cells instead of the matrix."""
     _write_cell(tmp_path, "app", _cell(plan_ok=False, drifted=False))
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
-    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
-    monkeypatch.setenv("GITHUB_RUN_ID", "1")
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
     calls = []
 
     def fake_run(args):
@@ -231,43 +275,135 @@ def test_main_leaves_a_plan_not_ok_cells_open_issue_untouched(tmp_path, monkeypa
 
     monkeypatch.setattr(di, "_run", fake_run)
     di.main()
-    assert calls == [
+    assert calls == [_LIST]
+
+
+def test_main_closes_only_the_issues_of_cells_that_left_the_sweep(tmp_path, monkeypatch):
+    """An Issue whose title names no matrix cell closes with the whole comment. A matrix
+    cell's Issue, and a `drift`-labelled Issue a human titled freely, stay open. Mutations:
+    skip the removed-cell close in `main()`; drop its `startswith(PREFIX)` check."""
+    _write_cell(tmp_path, "app", _cell(drifted=True))
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
+    calls = _gh(
+        monkeypatch,
         [
-            "gh",
-            "issue",
-            "list",
-            "--label",
-            "drift",
-            "--state",
-            "open",
-            "--limit",
-            "1000",
-            "--json",
-            "number,title",
-        ]
+            {"number": 4, "title": "drift: dev-eu / stacks/app"},
+            {"number": 5, "title": "drift: dev-eu / stacks/old"},
+            {"number": 6, "title": "Investigate prod drift"},
+        ],
+    )
+    di.main()
+    body = di._body(_cell(drifted=True), _RUN_URL)
+    assert calls == [
+        ["gh", "issue", "edit", "4", "--body", body],
+        _left(5, "dev-eu / stacks/old"),
     ]
 
 
-def test_main_with_no_cells_never_lists_issues(tmp_path, monkeypatch, capsys):
-    """The count line tells a sweep that loaded no cell from a clean one. Mutation: move the
-    loaded-count print in `main()` below `if not cells: return`."""
-    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
-    monkeypatch.setattr(di, "_run", lambda args: pytest.fail(f"unexpected gh call: {args}"))
-    di.main()  # It returns early, with no env or gh access at all.
+def test_main_closes_every_duplicate_titled_issue_of_a_removed_cell(tmp_path, monkeypatch):
+    """Mutation: iterate `existing` instead of the raw listing rows in the removed-cell close."""
+    _write_cell(tmp_path, "app", _cell())
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
+    rows = [
+        {"number": 9, "title": "drift: prod-eu / stacks/app"},
+        {"number": 3, "title": "drift: prod-eu / stacks/app"},
+    ]
+    calls = _gh(monkeypatch, rows)
+    di.main()
+    assert calls == [_left(9, "prod-eu / stacks/app"), _left(3, "prod-eu / stacks/app")]
+
+
+def test_main_keeps_the_issue_of_a_matrix_cell_whose_artifact_is_missing(tmp_path, monkeypatch):
+    """A lost artifact, or a cell job that died before uploading, is not a removed cell.
+    Mutation: build `present` in `main()` from the loaded cells instead of the matrix."""
+    _write_cell(tmp_path, "app", _cell())
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app"), ("dev-eu", "stacks/db")])
+    calls = _gh(monkeypatch, [{"number": 8, "title": "drift: dev-eu / stacks/db"}])
+    di.main()
+    assert calls == []
+
+
+def test_main_with_no_loaded_cells_still_closes_a_removed_cells_issue(
+    tmp_path, monkeypatch, capsys
+):
+    """The removed-cell close depends on the matrix alone, and the count line still comes
+    first. Mutation: restore `if not cells: return` above the removed-cell close."""
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
+    calls = _gh(monkeypatch, [{"number": 5, "title": "drift: dev-eu / stacks/old"}])
+    di.main()
+    assert calls == [_left(5, "dev-eu / stacks/old")]
     assert capsys.readouterr().out == "loaded 0 drift cell summaries\n"
 
 
-def test_action_names_the_repository_for_gh():
-    """`gh issue list/create/edit/close` and `gh label` are repository-scoped and otherwise
-    resolve their repository from a checkout's git remote. The job running this checks out
-    nothing, so the workspace has no consumer remote to infer from: without GH_REPO every one of
-    those calls fails with "failed to determine base repository" and `_run` raises, killing the
-    first nightly drift run."""
+def test_a_failing_removed_cell_close_is_collected_and_fails_the_run(tmp_path, monkeypatch, capsys):
+    """The other closes still run, then the run exits nonzero naming the failed one.
+    Mutation: let the `SystemExit` from the removed-cell close escape its `try`."""
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
+    rows = [
+        {"number": 5, "title": "drift: dev-eu / stacks/a"},
+        {"number": 6, "title": "drift: dev-eu / stacks/b"},
+    ]
+    calls = []
+
+    def fake_run(args):
+        if args == _LIST:
+            return json.dumps(rows)
+        calls.append(args)
+        if args[3] == "5":
+            raise SystemExit("::error::command failed (1): gh issue close")
+        return ""
+
+    monkeypatch.setattr(di, "_run", fake_run)
+    with pytest.raises(SystemExit) as exc:
+        di.main()
+    assert calls == [_left(5, "dev-eu / stacks/a"), _left(6, "dev-eu / stacks/b")]
+    assert str(exc.value) == "::error::drift reporting failed for: dev-eu / stacks/a"
+    assert capsys.readouterr().out == (
+        "loaded 0 drift cell summaries\n"
+        "::error::drift issue update failed for dev-eu / stacks/a: "
+        "::error::command failed (1): gh issue close\n"
+    )
+
+
+@pytest.mark.parametrize("value", [None, "", "[]", "not json"], ids=["unset", "empty", "[]", "bad"])
+def test_main_refuses_a_missing_or_empty_matrix_before_any_gh_call(tmp_path, monkeypatch, value):
+    """An empty `present` set would close every drift Issue. Mutations: in `matrix_titles`,
+    return the empty set for an unset, empty or `[]` input (reddens three cases), or for an
+    unparseable one (reddens `unset`, `empty` and `bad`)."""
+    _write_cell(tmp_path, "app", _cell(drifted=True))
+    _main_env(monkeypatch, tmp_path, [])
+    if value is None:
+        monkeypatch.delenv("SHIPMATE_MATRIX_CELLS")
+    else:
+        monkeypatch.setenv("SHIPMATE_MATRIX_CELLS", value)
+    monkeypatch.setattr(di, "_run", lambda args: pytest.fail(f"unexpected gh call: {args}"))
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("unexpected gh call"))
+    with pytest.raises(SystemExit) as exc:
+        di.main()
+    assert str(exc.value) == (
+        "::error::drift-issues needs the drift matrix's cells as a non-empty JSON list in "
+        f"SHIPMATE_MATRIX_CELLS, got {value or ''!r}"
+    )
+
+
+def test_the_script_step_hands_the_script_exactly_these_names():
+    """The whole `env:`, the whole `run:` and the `cells` input's `required`. `gh issue` and
+    `gh label` resolve their repository from a checkout's git remote, and this job checks out
+    nothing, so without GH_REPO every call fails. The matrix cells travel through `env:`,
+    never interpolated into `run:`. Mutations: drop GH_REPO; move the `SHIPMATE_MATRIX_CELLS`
+    binding into `run:` as `SHIPMATE_MATRIX_CELLS='${{ inputs.cells }}' python3 ...`; set the
+    `cells` input to `required: false`."""
     steps = action_steps("drift-issues")
     step = next(s for s in steps if "scripts/drift-issues" in str(s.get("run", "")))
-    assert step.get("env", {}).get("GH_REPO") == "${{ github.repository }}", (
-        f"drift-issues' script step must export GH_REPO, got {step.get('env')!r}"
+    assert step["env"] == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "GH_REPO": "${{ github.repository }}",
+        "SHIPMATE_MATRIX_CELLS": "${{ inputs.cells }}",
+    }
+    assert step["run"] == (
+        'set -euo pipefail\npython3 "$GITHUB_ACTION_PATH/../../scripts/drift-issues"\n'
     )
+    assert action_yaml("drift-issues")["inputs"]["cells"]["required"] is True
 
 
 def test_the_download_fails_the_job_on_an_artifact_api_error():
