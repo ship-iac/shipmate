@@ -9,7 +9,7 @@ matrix (skip) from a lost artifact (fail); collapsing the two greens a run that 
 """
 
 import yaml
-from _loader import WORKFLOWS, workflow_yaml
+from _loader import WORKFLOWS, local_action, workflow_yaml
 
 WF = WORKFLOWS / "drift.yml"
 
@@ -52,13 +52,19 @@ def test_the_workflow_call_secrets_are_exactly_these():
     }
 
 
-def test_drift_issues_gets_the_app_id_and_key():
-    """Mutations: re-add `slack-webhook: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}`; point
+def test_the_issues_job_is_one_drift_issues_step_with_the_app_id_and_key():
+    """The download lives in the action. Mutations: re-add the drift-summary download step ahead
+    of the action; re-add `slack-webhook: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}`; point
     `private-key` at `vars.`, which every plan cell exports and the run log prints."""
-    assert _step("issues", "actions/drift-issues")["with"] == {
-        "app-id": "${{ vars.SHIPMATE_APP_ID }}",
-        "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-    }
+    assert _job("issues")["steps"] == [
+        {
+            "uses": local_action("drift-issues"),
+            "with": {
+                "app-id": "${{ vars.SHIPMATE_APP_ID }}",
+                "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+            },
+        }
+    ]
 
 
 def test_the_jobs_are_exactly_these():
@@ -81,17 +87,6 @@ def test_the_detect_job_is_deliberately_ungated():
     """It runs no consumer code and holds no secret. A gate here would make a feature-branch
     dispatch silently do nothing instead of failing visibly at the two jobs below."""
     assert "if" not in workflow_yaml(WF)["jobs"]["detect"]
-
-
-def test_the_artifact_download_has_no_continue_on_error():
-    """Mutation: add `continue-on-error: true`. The gate for the empty case is the job's `if:`;
-    degrading the download too makes a lost artifact indistinguishable from no drift."""
-    step = next(
-        s
-        for s in workflow_yaml(WF)["jobs"]["issues"]["steps"]
-        if "actions/download-artifact" in str(s.get("uses", ""))
-    )
-    assert "continue-on-error" not in step
 
 
 def test_the_sweep_states_no_pull_request_and_no_head():

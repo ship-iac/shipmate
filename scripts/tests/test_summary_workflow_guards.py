@@ -18,7 +18,7 @@ A draft is not refused here: it reaches the job, and gate-state writes its gate 
 reason.
 """
 
-from _loader import WORKFLOWS, local_action, workflow_yaml
+from _loader import WORKFLOWS, local_action, step_by, workflow_yaml
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -31,10 +31,7 @@ EXPECTED_IF = (
 #: The whole job, as an ordered list of what each step runs. A checkout step, a `run:`
 #: step, or any extra step at all changes this list, where a substring scan would miss every one
 #: of those.
-EXPECTED_STEP_USES = [
-    "actions/download-artifact",
-    local_action("summary"),
-]
+EXPECTED_STEP_USES = [local_action("summary")]
 EXPECTED_SUMMARY_WITH = {
     "pr-number": "${{ needs.facts.outputs.pr-number }}",
     "head-sha": "${{ needs.facts.outputs.head-sha }}",
@@ -86,7 +83,8 @@ def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():
     """It runs at the base ref holding the App key. A checkout of the pull request head here
     would make it the canonical pull_request_target vulnerability, and so would any step that
     executes repository content by another route, which is why the step list is compared whole:
-    any checkout step at all reddens it."""
+    any checkout step at all reddens it. Mutation: re-add the cell-summary download step ahead of
+    the action."""
     job, _ = _summary_job()
     assert [str(s["uses"]).split("@")[0] for s in job["steps"]] == EXPECTED_STEP_USES
 
@@ -97,3 +95,25 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1
     assert call[0]["with"] == EXPECTED_SUMMARY_WITH
+
+
+#: The whole download step, as `yaml.safe_load` returns it. Any extra key reddens the comparison:
+#: an `if:` or a `github-token`, which the job's `contents: read` grant would not cover.
+EXPECTED_DOWNLOAD_STEP = {
+    "name": "Download plan cell summaries",
+    "uses": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    "continue-on-error": True,
+    "with": {"pattern": "cell-summary.*", "path": "cells"},
+}
+
+
+def test_the_summary_action_always_downloads_and_tolerates_a_failed_download():
+    """Unconditional, because skipping the download when zero cells were planned makes
+    gate-state's "more cells than planned" branch unreachable. `continue-on-error`, because a
+    failed download must reach gate-state as a shortfall that holds the gate, not end the job
+    before any gate is written. `path` is the readers' default directory.
+
+    Mutations: drop `continue-on-error`; change `path`; add `github-token`; add
+    `if: ${{ inputs.planned-cells != '0' }}`.
+    """
+    assert step_by("summary", name="Download plan cell summaries") == EXPECTED_DOWNLOAD_STEP

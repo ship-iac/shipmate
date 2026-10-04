@@ -129,6 +129,7 @@ def upsert_or_close(cell, existing, run_url):
 
 def main():
     cells = load_cells(os.environ.get("SHIPMATE_CELLS_DIR", "drift"))
+    print(f"loaded {len(cells)} drift cell summaries")
     if not cells:
         return
     url = current_run_url()

@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Mint a shipmate App installation token and, as the App, create the pending apply checks, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment, and create/refresh the shipmate / gate check.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, create the pending apply checks, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment, and create/refresh the shipmate / gate check.
 inputs:
   pr-number:
     description: Pull request number.
@@ -52,6 +52,16 @@ runs:
       with:
         app-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
+    - name: Download plan cell summaries
+      # No `if:`: skipping it when zero cells were planned would make gate-state's "more cells
+      # than planned" branch unreachable. A `pattern:` matching nothing succeeds.
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      # A failed download must reach gate-state as a cell-summary shortfall that holds the gate,
+      # not end the job before `Create/refresh gate` writes any gate.
+      continue-on-error: true
+      with:
+        pattern: cell-summary.*
+        path: cells
     - name: Mint App installation token
       id: token
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0

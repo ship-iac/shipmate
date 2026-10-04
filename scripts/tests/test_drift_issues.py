@@ -4,7 +4,7 @@ import json
 import os
 
 import pytest
-from _loader import action_steps, load_script
+from _loader import action_steps, load_script, step_by
 
 di = load_script("drift-issues")
 
@@ -181,7 +181,8 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     """A rate limit on one cell must not leave every later cell unprocessed: a stack that has
     gone clean would keep an open Issue saying it drifts. The run still fails, naming every
     cell that failed, and annotates the failed cell. Mutation: delete the per-cell
-    `::error::drift issue update failed` print in `main()`."""
+    `::error::drift issue update failed` print in `main()`; delete the loaded-count print, which
+    tells a clean sweep from a sweep that loaded no cell."""
     for name in ("a", "b", "c"):
         _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", stack_name=name, drifted=True))
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
@@ -207,6 +208,7 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     assert "dev-eu / b" in str(exc.value)
     assert "dev-eu / a" not in str(exc.value)
     assert capsys.readouterr().out == (
+        "loaded 3 drift cell summaries\n"
         "::error::drift issue update failed for dev-eu / b: "
         "::error::command failed (1): gh issue create\n"
     )
@@ -262,3 +264,17 @@ def test_action_names_the_repository_for_gh():
     assert step.get("env", {}).get("GH_REPO") == "${{ github.repository }}", (
         f"drift-issues' script step must export GH_REPO, got {step.get('env')!r}"
     )
+
+
+def test_the_download_fails_the_job_on_an_artifact_api_error():
+    """The whole step: no `continue-on-error`, no `github-token`, and `path` is the script's
+    default directory. The gate for the empty case is the calling job's `if:`; degrading the
+    download too makes an artifact-API error read as no drift.
+
+    Mutations: add `continue-on-error: true`; change `path`.
+    """
+    assert step_by("drift-issues", name="Download drift cell summaries") == {
+        "name": "Download drift cell summaries",
+        "uses": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "with": {"pattern": "drift-summary.*", "path": "drift"},
+    }
