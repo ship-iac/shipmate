@@ -61,11 +61,11 @@ def _run_block(tmp_path, undownloadable=()):
     for run, artifacts in _ARTIFACTS.items():
         if run in undownloadable:
             continue
-        for name, stack_path, env, add in artifacts:
+        for name, stack, env, add in artifacts:
             d = tmp_path / "artifacts" / run / name
             d.mkdir(parents=True)
             (d / "cell.json").write_text(
-                json.dumps({"stack_path": stack_path, "environment": env, "add": add}),
+                json.dumps({"stack": stack, "environment": env, "add": add}),
                 encoding="utf-8",
             )
     (tmp_path / "check-runs.jsonl").write_text(

@@ -138,7 +138,6 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         PLAN_OUTCOME: ${{ steps.plan.outcome }}
         DRIFTED: ${{ steps.plan.outputs.changed }}

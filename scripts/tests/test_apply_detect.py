@@ -253,7 +253,7 @@ def _stub_apply(monkeypatch, deps, checks):
     return urls
 
 
-def test_workset_never_resolves_a_slug_back_to_a_stack_path():
+def test_workset_never_resolves_a_slug_back_to_a_stack():
     """`a/b` and `a-b` slug identically, and only `a-b` carries an apply check, so only `a-b`
     is in the workset. A pull request adding `a-b` beside an unchanged `a/b` never shows the
     pair to build-matrix's plan-time collision guard, since `a/b` is not in `terramate list

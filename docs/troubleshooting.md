@@ -332,8 +332,9 @@ acquiring it. See §A state lock is held.
 **No supported route aims an apply at a superseded plan.** That is why this
 error normally means the state moved rather than that the wrong plan was chosen.
 The dispatched apply workflow refuses in its `guard` job any dispatch whose
-actor is not a `[bot]` — a hand-run one fails with `apply must be dispatched by
-the shipmate App via comment-ops, not by a direct workflow_dispatch` — and
+actor is not a `[bot]` — a hand-run one fails with `apply refused: the
+dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request
+instead of running a direct workflow_dispatch` — and
 comment-ops reads the plan run each `apply / <stack> / <env>` check on the pull
 request's current head records, refusing the command when that head names none.
 These fail-safes are defence in depth behind that control, not the only thing

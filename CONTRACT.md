@@ -829,10 +829,10 @@ commit, whose backend block was part of the review.
 **On the state key.** Where the consumer's backend derives a key per stack,
 derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
 is unique by construction across the whole tree. A key built from
-`${workload}/${stack_name}` is not: a stack's default name is its directory's
-basename, so `accounts/sandbox/network` and `stacks/prod/network` both name
-`network` and, when both carry the same `workload/<name>` tag, render one key
-and share one state file.
+`${global.workload}/${terramate.stack.name}` is not: a stack's default name is
+its directory's basename, so `accounts/sandbox/network` and
+`stacks/prod/network` both name `network` and, when both carry the same
+`workload/<name>` tag, render one key and share one state file.
 
 Nothing else differs between a local and a non-local backend. The exact-plan
 `.otplan` artifact flow, the fingerprint verification, the wave ordering, and the
@@ -1831,8 +1831,8 @@ still reports); `actions/apply-summary` downloads every `apply-summary.*`
 artifact for the run with the glob pattern `apply-summary.*`. It contains
 verbatim:
 
-- `cell.json` — always present, keys `stack` (the stack path as displayed),
-  `stack_path` (Terramate stack path, feeds the check-name construction), `environment`,
+- `cell.json` — always present, keys `stack` (the Terramate stack path, displayed
+  and fed to the check-name construction), `environment`,
   `result` (one of `applied`, `failed`, `blocked`), `reason` (which fail-safe
   blocked it, or why an earlier step failed first; the empty string for
   `applied`/`failed`).
@@ -1933,8 +1933,8 @@ The data feeding the comment ships in the per-cell artifact
 exactly like the plan artifact, never reverse-parsed). Consumers download it
 with the glob pattern `cell-summary.*`. It contains verbatim:
 
-- `cell.json` — keys `stack` (the stack path as displayed), `stack_path` (Terramate stack
-  path, feeds the check-name construction), `environment`, `changed`
+- `cell.json` — keys `stack` (the Terramate stack path, displayed and fed to the
+  check-name construction), `environment`, `changed`
   (boolean), `fingerprint`; written by `plan-cell` at plan time. `changed`
   comes from `scripts/plan-classify`; the cell line's add, change, destroy,
   import and forget counts come from `plan.txt`'s single column-0 OpenTofu

@@ -38,7 +38,7 @@ def bodies(cells_dir, head_sha):
     out = []
     for cj, cell in cell_summaries(
         cells_dir,
-        ("stack_path", "environment", "changed", "fingerprint"),
+        ("stack", "environment", "changed", "fingerprint"),
         "-- plan-cell and the summary job must run the same engine revision; re-run the plan",
     ):
         txt = pathlib.Path(cj).with_name("plan.txt")
@@ -50,7 +50,7 @@ def bodies(cells_dir, head_sha):
             )
         plan_sha256 = hashlib.sha256(txt.read_bytes()).hexdigest()
         body = {
-            "name": ag.check_name(cell["stack_path"], cell["environment"]),
+            "name": ag.check_name(cell["stack"], cell["environment"]),
             "head_sha": head_sha,
             "status": "queued",
             "external_id": json.dumps(

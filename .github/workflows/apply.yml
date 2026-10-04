@@ -27,7 +27,7 @@ jobs:
       - name: Reject dispatches that did not come from a bot actor
         if: ${{ !endsWith(github.actor, '[bot]') }}
         run: |
-          echo "::error::apply must be dispatched by the shipmate App via comment-ops, not by a direct workflow_dispatch"
+          echo "::error::apply refused: the dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request instead of running a direct workflow_dispatch"
           exit 1
 
   review:

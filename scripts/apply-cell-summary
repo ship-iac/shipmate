@@ -68,8 +68,7 @@ def main():
     with open(cell_path, "w") as fh:
         json.dump(
             {
-                "stack": os.environ["STACK_NAME"],
-                "stack_path": os.environ["STACK"],
+                "stack": os.environ["STACK"],
                 "environment": os.environ["ENV"],
                 "result": result,
                 "reason": reason,

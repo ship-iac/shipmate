@@ -72,7 +72,7 @@ runs:
       if: ${{ steps.probe.outputs.held != 'true' }}
       shell: bash
       env:
-        STACK_NAME: ${{ inputs.stack }}
+        STACK: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         PROBE_STATUS: ${{ steps.probe.outputs.probe_status }}
       run: |
@@ -81,12 +81,12 @@ runs:
         # lock dies with the process that took it, so this action is structurally a graceful
         # no-op there, and that path succeeds.
         if [ "$PROBE_STATUS" = "0" ]; then
-          echo "::notice::no state lock held for $STACK_NAME / $ENV"
+          echo "::notice::no state lock held for $STACK / $ENV"
         else
           # A failed probe with no parsable lock proves nothing, so it must never read as "no lock
           # held" while the cell may still be locked. Fatal, not an annotation: failing to look is
           # not a success, and a warning on a green run across dozens of cells is easy to miss.
-          echo "::error::could not determine whether a lock is held for $STACK_NAME / $ENV, see the log"
+          echo "::error::could not determine whether a lock is held for $STACK / $ENV, see the log"
           exit 1
         fi
 
@@ -98,7 +98,6 @@ runs:
       # and an unclosed group collapses it.
       env:
         STACK: ${{ inputs.stack }}
-        STACK_NAME: ${{ inputs.stack }}
         ENV: ${{ inputs.env }}
         LOCK_ID: ${{ steps.probe.outputs.lock_id }}
         LOCK_CREATED: ${{ steps.probe.outputs.lock_created }}
@@ -109,7 +108,7 @@ runs:
         # TTY. The id comes from the probe's own output via env and reaches an argv, which is
         # why lock-info charset-pins it.
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu force-unlock -force "$LOCK_ID"
-        msg="released state lock $LOCK_ID for $STACK_NAME / $ENV"
+        msg="released state lock $LOCK_ID for $STACK / $ENV"
         # `created` and `operation` are rendered only when non-empty: lock-info blanks a value
         # that fails its charset guard rather than rejecting an otherwise-usable lock, so
         # neither field may be rendered unconditionally.
@@ -117,7 +116,7 @@ runs:
         if [ -n "$LOCK_OPERATION" ]; then msg="$msg, operation $LOCK_OPERATION"; fi
         echo "::notice::$msg"
         {
-          echo "## 🟢 $STACK_NAME ($ENV): state lock released"
+          echo "## 🟢 $STACK ($ENV): state lock released"
           echo ""
           echo "Released lock \`$LOCK_ID\`."
           echo ""
