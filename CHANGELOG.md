@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.42.0] — 2026-10-04
 
+Tags `1120418`.
+
 ### Added
 
 - **`shipmate doctor` names each gated environment at 0 required approvals: a note while code-owner review is on, a warning while it is off.**
