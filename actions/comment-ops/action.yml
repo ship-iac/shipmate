@@ -258,7 +258,7 @@ runs:
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_REPLY_VERB: doctor
         SHIPMATE_REPLY_OUTCOME: failed
-        SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository, with every permission it requests accepted? Ask an org admin to install it or accept its pending permission request, then re-run `shipmate doctor`."
+        SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository, with every permission it requests accepted? Ask an org admin to install it, or to add any permission the App's settings lack and accept the request (docs/github-app.md, Re-approve after permission changes), then re-run `shipmate doctor`."
       run: |
         set -euo pipefail
         body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
@@ -268,8 +268,8 @@ runs:
       id: fullmint
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' && steps.doctortoken.outcome == 'success' }}
       # A mint requesting every permission app/manifest.json declares fails when the
-      # installation is missing one, which is typical after a manifest bump nobody
-      # re-approved. The failure IS the probe result, so it is never fatal.
+      # installation is missing one, which is typical after a release adds one the App's
+      # settings lack. The failure IS the probe result, so it is never fatal.
       continue-on-error: true
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:

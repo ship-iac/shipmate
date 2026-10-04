@@ -281,9 +281,10 @@ as above, and step 5 runs in every consumer repository.
 
 ## Re-approve after permission changes
 
-Expanding `default_permissions` in `app/manifest.json` does not take
-effect immediately for an already-installed App. GitHub puts the wider grant in
-a pending request that an org owner must approve:
+`app/manifest.json` is read once, when `scripts/register-app` creates the App.
+When a release adds a permission to its `default_permissions`, add the same
+permission in the registered App's settings (Permissions & events) and save.
+GitHub puts the wider grant in a pending request that an org owner must approve:
 
 ```
 https://github.com/organizations/<org>/settings/apps/shipmate/installations
