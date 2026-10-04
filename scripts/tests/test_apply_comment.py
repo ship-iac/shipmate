@@ -44,8 +44,7 @@ def _write_cell(cells_dir, env, slug, cell):
 def _row(**kw):
     base = {
         "environment": "dev-eu",
-        "stack_path": "stacks/app",
-        "stack_display": "app",
+        "stack": "app",
         "status": "applied",
         "reason": "",
         "apply_text": "Apply complete! Resources: 1 added, 0 changed, 0 destroyed.",
@@ -63,6 +62,9 @@ def _fixture_text(name):
 
 
 def test_build_rows_statuses_and_not_attempted_for_missing_artifact():
+    """A downloaded cell and an expected cell for one (environment, stack) merge into one row.
+
+    Mutation: key `by_key` on `cell["stack"] + "/"` in `build_rows` -- red."""
     expected = {("dev-eu", "stacks/app"), ("dev-eu", "stacks/missing")}
     downloaded = [
         (_cell(result="applied"), "Apply complete! Resources: 1 added, 0 changed, 0 destroyed."),
@@ -72,12 +74,13 @@ def test_build_rows_statuses_and_not_attempted_for_missing_artifact():
         ),
     ]
     rows = ac.build_rows(expected, downloaded)
-    by_key = {(r["environment"], r["stack_path"]): r for r in rows}
+    assert len(rows) == 3
+    by_key = {(r["environment"], r["stack"]): r for r in rows}
     assert by_key[("dev-eu", "stacks/app")]["status"] == "applied"
     assert by_key[("dev-us", "stacks/db")]["status"] == "failed"
     missing = by_key[("dev-eu", "stacks/missing")]
     assert missing["status"] == "not_attempted"
-    assert missing["stack_display"] == "stacks/missing"  # No artifact arrived, so no display name.
+    assert missing["stack"] == "stacks/missing"
 
 
 def test_build_rows_downloaded_cell_outside_expected_set_still_rendered():
@@ -96,7 +99,7 @@ def test_build_rows_sorted_by_environment_then_stack():
         (_cell(stack="stacks/a", environment="dev-us"), "t"),
     ]
     rows = ac.build_rows(set(), downloaded)
-    assert [(r["environment"], r["stack_display"]) for r in rows] == [
+    assert [(r["environment"], r["stack"]) for r in rows] == [
         ("dev-eu", "stacks/a"),
         ("dev-eu", "stacks/z"),
         ("dev-us", "stacks/a"),
@@ -197,19 +200,18 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
     Mutation: append a `gate: pending until every environment is applied` line to
     `_footer_parts` -- red."""
     jobs = [
-        _job("wave0 / apply / stacks/app / dev-eu", "https://gh/job/app-eu"),
-        _job("wave0 / apply / stacks/db / dev-eu", "https://gh/job/db-eu"),
+        _job("wave0 / apply / app / dev-eu", "https://gh/job/app-eu"),
+        _job("wave0 / apply / db / dev-eu", "https://gh/job/db-eu"),
     ]
     rows = [
         _row(),
         _row(
-            stack_display="auth",
-            stack_path="stacks/auth",
+            stack="auth",
             status="blocked",
             reason="state restore failed",
             apply_text=None,
         ),
-        _row(stack_display="db", stack_path="stacks/db", status="failed", apply_text="Error: boom"),
+        _row(stack="db", status="failed", apply_text="Error: boom"),
         _row(
             environment="prod",
             status="unrecorded",
@@ -217,8 +219,7 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
         ),
         _row(
             environment="prod",
-            stack_display="stacks/dns",
-            stack_path="stacks/dns",
+            stack="stacks/dns",
             status="not_attempted",
             apply_text=None,
         ),
@@ -454,10 +455,7 @@ def test_the_unrecorded_note_is_capped_and_summarizes_the_rest():
 
     Mutation: name every cell in `_named` -- red.
     Mutation: name a cell `**<stack> / <env>**` in `_unrecorded_note` -- red."""
-    rows = [
-        _row(status="unrecorded", stack_display=f"s{i}", stack_path=f"stacks/s{i}")
-        for i in range(7)
-    ]
+    rows = [_row(status="unrecorded", stack=f"s{i}") for i in range(7)]
     assert ac._unrecorded_note(rows) == (
         "not recorded: **s0 (dev-eu)**, **s1 (dev-eu)**, **s2 (dev-eu)**, **s3 (dev-eu)**, "
         "**s4 (dev-eu)**, and 2 more. The apply succeeded but its apply check is not recorded "
@@ -487,11 +485,10 @@ def test_the_notes_read_lock_then_unrecorded_then_not_attempted():
     Mutation: swap the lock and unrecorded notes in `build_comment` -- red."""
     rows = [
         _row(status="failed", apply_text=_fixture_text("lock_error_s3.txt")),
-        _row(environment="prod", stack_display="db", stack_path="stacks/db", status="unrecorded"),
+        _row(environment="prod", stack="db", status="unrecorded"),
         _row(
             environment="prod",
-            stack_display="stacks/dns",
-            stack_path="stacks/dns",
+            stack="stacks/dns",
             status="not_attempted",
             apply_text=None,
         ),
@@ -516,7 +513,7 @@ def test_a_fold_out_holds_the_whole_output_in_a_plain_fence_under_an_escaped_sum
     """A stack name is author-controlled; an unescaped `</summary>` would close the tag early.
 
     Mutation: fence with the default `diff` language -- red."""
-    row = _row(stack_display="x</summary><b>evil")
+    row = _row(stack="x</summary><b>evil")
     assert ac.render_apply_section(ac._cell_line(row, RUN_URL), "hello", RUN_URL, 10_000) == (
         "<details><summary>🟢 x&lt;/summary&gt;&lt;b&gt;evil (dev-eu): +1 ~0 -0 "
         '<a href="https://gh/run/1">logs</a></summary>\n\n```\nhello\n```\n</details>'
@@ -584,10 +581,7 @@ def test_a_256_cell_fan_out_of_oversized_applies_keeps_every_cell_line():
 
     Mutation: drop `reserve` from `render_apply_section`'s limit -- row 0 takes the whole budget
     and the 255 bare lines after it push the body past the hard cap, red."""
-    rows = [
-        _row(stack_display=f"s{i:03}", stack_path=f"stacks/s{i:03}", apply_text=_GIANT)
-        for i in range(256)
-    ]
+    rows = [_row(stack=f"s{i:03}", apply_text=_GIANT) for i in range(256)]
     body = _comment(rows)
     assert len(body) <= ac.sc.SIZE_BUDGET
     kept, rest = _first_fold_out(body, f"🟢 256 applied {AT}")
@@ -599,11 +593,10 @@ def test_an_early_giant_apply_cannot_drop_a_later_cells_line():
     """Mutation: drop `reserve` from `render_apply_section`'s limit -- row 0 is sized to the whole
     budget and the later lines push the body past SIZE_BUDGET, red."""
     rows = [
-        _row(stack_display="s000", stack_path="stacks/s000", apply_text=_GIANT),
-        _row(stack_display="s001", stack_path="stacks/s001"),
+        _row(stack="s000", apply_text=_GIANT),
+        _row(stack="s001"),
         _row(
-            stack_display="s002",
-            stack_path="stacks/s002",
+            stack="s002",
             status="blocked",
             reason="upstream failed",
             apply_text=None,
@@ -628,10 +621,7 @@ _OVER_CAP = (
 def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
     """Mutation: delete the HARD_CAP check -- no SystemExit, red."""
     long_name = "s" * 400
-    rows = [
-        _row(stack_display=f"{long_name}{i:03}", stack_path=f"stacks/{long_name}{i:03}")
-        for i in range(300)
-    ]
+    rows = [_row(stack=f"{long_name}{i:03}") for i in range(300)]
     with pytest.raises(SystemExit) as exc:
         _comment(rows)
     assert exc.value.code == _OVER_CAP
@@ -646,8 +636,7 @@ def test_build_comment_fails_loud_when_even_the_compact_form_overflows():
     long_name = "s" * 300
     rows = [
         _row(
-            stack_display=f"{long_name}{i:03}",
-            stack_path=f"stacks/{long_name}{i:03}",
+            stack=f"{long_name}{i:03}",
             status="blocked",
             reason="upstream failed",
             apply_text=None,
@@ -675,8 +664,7 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
         rows.append(
             _row(
                 environment=env,
-                stack_path=path,
-                stack_display=path,
+                stack=path,
                 status="blocked",
                 reason=_PLANNED_HEAD,
                 apply_text=None,
@@ -725,10 +713,7 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
     Mutation: append a `gate: complete` line to `_footer_parts` -- red."""
     envs = [f"env-{i}" for i in range(256)]
     explicit = [f"explicit-environment-{i:03}-eu-west-1-prod" for i in range(256)]
-    rows = [
-        _row(environment=e, stack_path="stacks/app", stack_display="stacks/app", apply_text=None)
-        for e in envs
-    ]
+    rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
         _job(f"wave0 / apply / stacks/app / {e}", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
@@ -1041,13 +1026,13 @@ def test_load_cells_reads_apply_text_only_when_present(tmp_path):
 
 
 def test_job_url_suffix_match_against_caller_prefixed_job_name():
-    row = _row(environment="dev-eu", stack_path="stacks/app")
+    row = _row(environment="dev-eu", stack="stacks/app")
     jobs = [_job("wave0 (matrix) / apply / stacks/app / dev-eu", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
 def test_job_url_falls_back_to_run_url_when_no_job_matches():
-    row = _row(environment="dev-eu", stack_path="stacks/app")
+    row = _row(environment="dev-eu", stack="stacks/app")
     jobs = [_job("wave0 / apply / stacks/db / dev-us", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
@@ -1056,7 +1041,7 @@ def test_job_url_does_not_false_match_on_bare_endswith():
     # A job named "...reapply / stacks/app / dev-eu" must not match the target
     # "apply / stacks/app / dev-eu" through a naive str.endswith; only a `/`-boundary
     # suffix counts.
-    row = _row(environment="dev-eu", stack_path="stacks/app")
+    row = _row(environment="dev-eu", stack="stacks/app")
     jobs = [_job("reapply / stacks/app / dev-eu", "https://gh/job/should-not-match")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
@@ -1165,7 +1150,7 @@ def test_load_check_maps_empty_app_id_warns_and_returns_no_data(tmp_path, capsys
 def test_apply_check_state_applied_with_done_check_stays_applied():
     """A done check is not a pending one, though its name is in both sets. Mutation: drop
     `and name not in done` from apply_check_state."""
-    rows = [_row(status="applied", stack_path="stacks/app")]
+    rows = [_row(status="applied", stack="stacks/app")]
     ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
     assert rows[0]["status"] == "applied"
 
@@ -1174,7 +1159,7 @@ def test_apply_check_state_applied_with_pending_check_becomes_unrecorded():
     # tofu apply succeeded, but Save state, the completion token mint or Complete the
     # apply check failed (or the job was cancelled) after the cell summary was composed
     # and uploaded.
-    rows = [_row(status="applied", stack_path="stacks/app")]
+    rows = [_row(status="applied", stack="stacks/app")]
     ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
     assert rows[0]["status"] == "unrecorded"
 
@@ -1183,7 +1168,7 @@ def test_apply_check_state_not_attempted_with_done_check_becomes_applied():
     # The mirror image: the apply landed and completed its check, but the
     # cosmetic (continue-on-error) artifact upload dropped, so no cell.json
     # arrived and the row would otherwise claim the check stays pending.
-    rows = [_row(status="not_attempted", stack_path="stacks/app", apply_text=None)]
+    rows = [_row(status="not_attempted", stack="stacks/app", apply_text=None)]
     ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, {"apply / stacks/app / dev-eu"})
     assert rows[0]["status"] == "applied"
     assert rows[0]["apply_text"] is None  # No output to show, so it renders its bare line.
@@ -1193,8 +1178,8 @@ def test_apply_check_state_leaves_rows_alone_when_check_state_is_unknown():
     # Degradation contract: no data (scan failed, empty file) must
     # render byte-identically to the artifact-only behaviour.
     rows = [
-        _row(status="applied", stack_path="stacks/app"),
-        _row(status="not_attempted", stack_path="stacks/db", apply_text=None),
+        _row(status="applied", stack="stacks/app"),
+        _row(status="not_attempted", stack="stacks/db", apply_text=None),
     ]
     ac.apply_check_state(rows, set(), set())
     assert [r["status"] for r in rows] == ["applied", "not_attempted"]
@@ -1206,8 +1191,8 @@ def test_apply_check_state_never_downgrades_failed_or_blocked():
     # run's green check hide a real failure in this one.
     done = {"apply / stacks/app / dev-eu", "apply / stacks/db / dev-eu"}
     rows = [
-        _row(status="failed", stack_path="stacks/app"),
-        _row(status="blocked", stack_path="stacks/db", reason="state restore failed"),
+        _row(status="failed", stack="stacks/app"),
+        _row(status="blocked", stack="stacks/db", reason="state restore failed"),
     ]
     ac.apply_check_state(rows, done, done)
     assert [r["status"] for r in rows] == ["failed", "blocked"]
@@ -1268,21 +1253,21 @@ def test_unrecorded_note_empty_when_no_unrecorded_row():
 
 def test_unrecorded_note_lists_every_affected_cell():
     rows = [
-        _row(status="unrecorded", stack_display="db", environment="prod"),
-        _row(status="unrecorded", stack_display="auth", environment="prod"),
+        _row(status="unrecorded", stack="db", environment="prod"),
+        _row(status="unrecorded", stack="auth", environment="prod"),
     ]
     note = ac._unrecorded_note(rows)
     assert "**db (prod)**" in note and "**auth (prod)**" in note
 
 
 def test_unrecorded_note_escapes_evil_stack_and_env_names():
-    # stack_display and environment are author-controlled (a Terramate tag, a GitHub
+    # The stack and environment names are author-controlled (a Terramate tag, a GitHub
     # Environment name, apply-cell's stack input). Bold, not a backtick code span:
     # _md_escape does not escape a backtick, so a span could be broken out of.
     rows = [
         _row(
             status="unrecorded",
-            stack_display="x</summary><b>evil",
+            stack="x</summary><b>evil",
             environment="e</summary>vil",
         )
     ]
@@ -1294,10 +1279,7 @@ def test_unrecorded_note_escapes_evil_stack_and_env_names():
 
 
 def test_unrecorded_note_names_every_cell_when_under_the_cap():
-    rows = [
-        _row(status="unrecorded", stack_display=f"s{i}", stack_path=f"stacks/s{i}")
-        for i in range(ac._UNRECORDED_NAMED)
-    ]
+    rows = [_row(status="unrecorded", stack=f"s{i}") for i in range(ac._UNRECORDED_NAMED)]
     note = ac._unrecorded_note(rows)
     assert "more" not in note
     for i in range(ac._UNRECORDED_NAMED):
@@ -1311,8 +1293,7 @@ def test_build_comment_wide_unrecorded_run_still_produces_a_comment():
     rows = [
         _row(
             status="unrecorded",
-            stack_display=f"{long_name}{i:03}",
-            stack_path=f"stacks/{long_name}{i:03}",
+            stack=f"{long_name}{i:03}",
             apply_text="x" * 400,
         )
         for i in range(200)
@@ -1366,7 +1347,7 @@ def test_check_name_grammar_matches_apply_cells_construction():
     waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]}
     run = {"id": 7, "name": "apply / stacks/app / dev-eu", "app": {"id": int(APP_ID)}}
     assert snap.snapshot(waves, [run], APP_ID) == {"stacks/app\x00dev-eu": [7]}
-    row = _row(environment="dev-eu", stack_path="stacks/app")
+    row = _row(environment="dev-eu", stack="stacks/app")
     assert ac._check_name(row) == "apply / stacks/app / dev-eu"
 
 
@@ -1412,7 +1393,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     )
     # The reader's half, exercised: a nested-display job name built from that grammar
     # must resolve, for the same row `_check_name` builds.
-    row = _row(environment="dev-eu", stack_path="stacks/app")
+    row = _row(environment="dev-eu", stack="stacks/app")
     jobs = [_job("post-merge / L0 / apply / stacks/app / dev-eu", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
@@ -1442,7 +1423,7 @@ def test_lock_note_names_the_cell_the_lock_and_the_release_command():
     rows = [
         _row(
             status="failed",
-            stack_display="app",
+            stack="app",
             environment="dev-eu",
             apply_text=_fixture_text("lock_error_s3.txt"),
         )
@@ -1458,7 +1439,7 @@ def test_lock_note_is_empty_without_a_lock():
     rows = [
         _row(
             status="failed",
-            stack_display="app",
+            stack="app",
             environment="dev-eu",
             apply_text="Error: AccessDenied\n",
         )
@@ -1472,7 +1453,7 @@ def test_lock_note_ignores_a_lock_in_a_cell_that_did_not_fail():
     rows = [
         _row(
             status="applied",
-            stack_display="app",
+            stack="app",
             environment="dev-eu",
             apply_text=_fixture_text("lock_error_local.txt"),
         )
@@ -1484,7 +1465,7 @@ def test_lock_note_promises_no_run_attribution():
     rows = [
         _row(
             status="failed",
-            stack_display="app",
+            stack="app",
             environment="dev-eu",
             apply_text=_fixture_text("lock_error_s3.txt"),
         )
@@ -1499,8 +1480,7 @@ def test_lock_note_caps_the_named_cells():
     rows = [
         _row(
             status="failed",
-            stack_display=f"s{i}",
-            stack_path=f"stacks/s{i}",
+            stack=f"s{i}",
             environment="dev-eu",
             apply_text=_fixture_text("lock_error_s3.txt"),
         )
@@ -1512,13 +1492,13 @@ def test_lock_note_caps_the_named_cells():
 
 
 def test_lock_note_escapes_author_controlled_names():
-    # Same reasoning as the unrecorded note: stack_display and environment are
+    # Same reasoning as the unrecorded note: the stack and environment names are
     # author-controlled, so bold plus _md_escape, never a backtick code span, because
     # _md_escape does not escape a backtick.
     rows = [
         _row(
             status="failed",
-            stack_display="x</summary><b>evil",
+            stack="x</summary><b>evil",
             environment="e</summary>vil",
             apply_text=_fixture_text("lock_error_s3.txt"),
         )
@@ -1543,7 +1523,7 @@ def test_lock_note_omits_held_since_when_the_created_value_was_refused():
     rows = [
         _row(
             status="failed",
-            stack_display="app",
+            stack="app",
             environment="dev-eu",
             apply_text=_lock_text("x</summary><b>evil **and** bold"),
         )
@@ -1563,8 +1543,7 @@ def test_lock_note_cannot_blow_the_comment_cap():
     rows = [
         _row(
             status="failed",
-            stack_display=f"s{i}",
-            stack_path=f"stacks/s{i}",
+            stack=f"s{i}",
             environment="dev-eu",
             apply_text=_lock_text("2" * 59_900),
         )
@@ -1579,7 +1558,7 @@ def test_lock_note_bare_form_stays_bare():
     rows = [
         _row(
             status="failed",
-            stack_display="app",
+            stack="app",
             environment="dev-eu",
             apply_text=_fixture_text("lock_error_s3.txt"),
         )

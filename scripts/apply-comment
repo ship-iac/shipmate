@@ -99,7 +99,7 @@ def _unrecorded_note(rows):
     is precisely the run that needs the comment most. The cell lines still name
     every affected cell."""
     cells = [
-        f"**{sc._md_escape(r['stack_display'])} ({sc._md_escape(r['environment'])})**"
+        f"**{sc._md_escape(r['stack'])} ({sc._md_escape(r['environment'])})**"
         for r in rows
         if r["status"] == "unrecorded"
     ]
@@ -118,7 +118,7 @@ def _lock_cell(row, lock):
     value (unbounded runtime output), so the sentence stays grammatical."""
     held = f", held since **{sc._md_escape(lock['created'])}**" if lock["created"] else ""
     return (
-        f"**{sc._md_escape(row['stack_display'])} ({sc._md_escape(row['environment'])})** "
+        f"**{sc._md_escape(row['stack'])} ({sc._md_escape(row['environment'])})** "
         f"(lock **{sc._md_escape(lock['id'])}**{held})"
     )
 
@@ -257,7 +257,7 @@ def load_cells(cells_dir):
 def _expected_cells():
     """Union of every wave array in the SHIPMATE_ENVLEVEL{0..N}_WAVES inputs (a
     targeted apply fills level 0 alone); '' contributes nothing. Cell identity is
-    (environment, stack_path) -- a wave element is
+    (environment, stack) -- a wave element is
     `{"stack": "<stack path>", "environment": "<env>"}`."""
     raw_values = [
         os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") or "" for i in range(MAX_ENV_LEVELS)
@@ -277,33 +277,29 @@ def build_rows(expected, downloaded):
     """Merge the expected cell set with downloaded cells into row dicts, sorted
     by (environment, stack). An expected cell with no downloaded artifact is
     'not attempted'. A downloaded cell outside the expected set is still
-    rendered (never silently drop evidence that an apply ran) -- it has no
-    display name in the wave element schema, so 'not attempted' rows fall back
-    to the stack path for display."""
+    rendered (never silently drop evidence that an apply ran)."""
     by_key = {}
     for cell, text in downloaded:
         key = (cell["environment"], cell["stack"])
         by_key[key] = {
             "environment": cell["environment"],
-            "stack_path": cell["stack"],
-            "stack_display": cell["stack"],
+            "stack": cell["stack"],
             "status": cell["result"],
             "reason": cell["reason"],
             "apply_text": text,
         }
-    for env, stack_path in expected:
-        key = (env, stack_path)
+    for env, stack in expected:
+        key = (env, stack)
         if key not in by_key:
             by_key[key] = {
                 "environment": env,
-                "stack_path": stack_path,
-                "stack_display": stack_path,
+                "stack": stack,
                 "status": "not_attempted",
                 "reason": "",
                 "apply_text": None,
             }
     rows = list(by_key.values())
-    rows.sort(key=lambda r: (r["environment"], r["stack_display"]))
+    rows.sort(key=lambda r: (r["environment"], r["stack"]))
     return rows
 
 
@@ -346,7 +342,7 @@ def load_check_maps(path, app_id):
 def _check_name(row):
     """This row's apply check name, forward-built per the CONTRACT grammar
     `apply / <stack> / <env>` -- never reverse-parsed."""
-    return ag.check_name(row["stack_path"], row["environment"])
+    return ag.check_name(row["stack"], row["environment"])
 
 
 def apply_check_state(rows, present, done):
@@ -410,7 +406,7 @@ def _state(row):
 def _cell_line(row, url):
     return sc.cell_line(
         _STATUS[row["status"]][0],
-        row["stack_display"],
+        row["stack"],
         row["environment"],
         _state(row),
         url,
@@ -419,7 +415,7 @@ def _cell_line(row, url):
 
 
 def _job_url(row, jobs, run_url):
-    """Per-cell log link: the FORWARD-built `apply / <stack_path> / <env>`
+    """Per-cell log link: the FORWARD-built `apply / <stack> / <env>`
     CONTRACT name, matched as a suffix of the listed job name — every caller
     level prepends its own job name and the prefix differs per route. Matched on
     a ` / ` boundary, not a bare `endswith`, so `reapply / ...` cannot
@@ -644,7 +640,7 @@ def _compact(head, rows, urls, bares, notes, parts, hint):
         notes = (_BLOCKED_NOTE, *notes)
     circle, word = _STATUS["blocked"]
     lines = [
-        sc.cell_line(circle, r["stack_display"], r["environment"], word, u, "logs")
+        sc.cell_line(circle, r["stack"], r["environment"], word, u, "logs")
         if r["status"] == "blocked"
         else b
         for r, u, b in zip(rows, urls, bares, strict=True)
