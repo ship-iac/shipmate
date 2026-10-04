@@ -211,16 +211,17 @@ def _quiet_new_probes():
     The config probe's read is here too, serving the design's canonical file: a sound table
     is silent in `warnings()`, and its status lines are rendered from `config_status` instead.
 
-    The last three read the same workflow listing. `_SHIPMATE_WF`'s `uses:` lines are engine
-    pins -- `_PIN` matches a `.github/workflows/` path as well as an `actions/` one -- so the
-    pin probe has something to read and needs the release endpoints to agree with it: the
-    pinned SHA and the SHA the release lookup returns are the same `_SHA`, or it reports
-    staleness. That file is on `pull_request_target` and named `shipmate.yml`, which keeps the
-    fork-trigger probe quiet: it is the exemption, not the absence of the trigger. Its
-    plan-calling job is named `shipmate`, its dispatch leg -- the trigger, the four inputs,
-    the verb options -- is whole, and its six jobs carry the six documented `if:`
-    expressions, keeping the `shipmate.yml` probe quiet. The plan-env secret probe
-    reads one listing per plan env; an empty one keeps the healthy path quiet."""
+    The pin and fork-trigger probes read the workflow listing, and the `shipmate.yml` probe
+    one file of it. `_SHIPMATE_WF`'s `uses:` lines are engine pins -- `_PIN` matches a
+    `.github/workflows/` path as well as an `actions/` one -- so the pin probe has something
+    to read and needs the release endpoints to agree with it: the pinned SHA and the SHA the
+    release lookup returns are the same `_SHA`, or it reports staleness. That file is on
+    `pull_request_target` and named `shipmate.yml`, which keeps the fork-trigger probe quiet:
+    it is the exemption, not the absence of the trigger. Its plan-calling job is named
+    `shipmate`, its dispatch leg -- the trigger, the four inputs, the verb options -- is
+    whole, and its six jobs carry the six documented `if:` expressions, keeping the
+    `shipmate.yml` probe quiet. The plan-env secret probe reads one listing per plan env; an
+    empty one keeps the healthy path quiet."""
     return {
         f"repos/{_REPO}/environments/dev-eu-plan": _env("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
@@ -2796,15 +2797,6 @@ def test_a_trailing_comment_after_the_job_name_is_silent():
     assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
 
 
-def test_another_workflow_file_with_a_differently_named_job_is_not_reported(monkeypatch):
-    """Exact name, like the fork-trigger exemption's: a `custom-plan.yml` is not the file whose
-    cells produce the linked checks. Mutation: drop the `if name != "shipmate.yml"` filter."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
-    responses = _fork_responses({"custom-plan.yml": text})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shipmate_yml_warnings(_ctx()) == []
-
-
 def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent():
     """Nothing to name: the routing finding reports the missing call, and two findings for one
     hole ask the reader's question twice."""
@@ -3084,20 +3076,6 @@ def test_a_workflow_dispatch_line_under_jobs_does_not_satisfy_the_trigger():
     assert out == [(doctor.WARNING, _NO_TRIGGER_TEXT)]
 
 
-def test_the_filename_filter_lives_in_the_shipmate_yml_probe(monkeypatch):
-    """A direct call of the finding function reports whatever file it is handed:
-    the caller bypassed the exemption, and silence there reads as a false
-    positive that is not one. Only the probe skips another file's name.
-
-    Mutation: drop the `if name != "shipmate.yml"` filter."""
-    assert doctor._dispatch_wiring_finding(_WF_NO_TRIGGER, "drift.yml") == [
-        (doctor.WARNING, _NO_TRIGGER_TEXT.replace("`shipmate.yml`", "`drift.yml`"))
-    ]
-    responses = _fork_responses({"drift.yml": _WF_NO_TRIGGER})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shipmate_yml_warnings(_ctx()) == []
-
-
 def test_a_failing_shipmate_yml_probe_degrades_naming_the_file(monkeypatch):
     """Mutation: drop the probe's `label` -- the note names "the shipmate yml settings"."""
 
@@ -3246,17 +3224,43 @@ def test_the_routing_probe_reports_two_jobs_calling_one_callee():
     ]
 
 
-def test_the_routing_probe_ignores_every_other_workflow_file(monkeypatch):
-    """Exact name, like the other consumer-file probes: nothing routes a verb but the one file
-    `actions/dispatch` targets.
+def test_the_shipmate_yml_probe_reads_that_file_alone(monkeypatch):
+    """An unreadable workflow file listed before `shipmate.yml` cannot hide it: the probe
+    reads the one file by path, never the directory listing or another file.
 
-    Mutation: drop the `if name != "shipmate.yml"` filter."""
-    responses = _fork_responses({"ci.yml": _SHIPMATE_WF[: _SHIPMATE_WF.index("  unlock:\n")]})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shipmate_yml_warnings(_ctx()) == []
+    Mutation: call `_scan_workflow_texts` again, and the result is the unreadable notice."""
+    responses = {
+        **_fork_responses({"aaa.yml": "", "shipmate.yml": _WF_NO_TRIGGER}),
+        f"{_WF_DIR}/aaa.yml{_REF}": {"encoding": "none", "content": ""},
+    }
+    reads = []
+
+    def gh(path):
+        reads.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._shipmate_yml_warnings(_ctx()) == [(doctor.WARNING, _NO_TRIGGER_TEXT)]
+    assert reads == [f"{_WF_DIR}/shipmate.yml{_REF}"]
 
 
-# The workflow-directory probes whose two degrades share one shape. Without a commit, a
+def test_a_repository_without_shipmate_yml_draws_the_unreadable_notice(monkeypatch):
+    """No file means no verb reaches anything, and the contents read cannot tell a 404 from
+    any other failure, so the probe says it could not read the file rather than nothing.
+
+    Mutation: return `[]` when `_workflow_text` returns None."""
+    responses = _fork_responses({"ci.yml": _SHIPMATE_WF})
+
+    def gh(path):
+        if path not in responses:
+            raise SystemExit(f"::error::command failed (1): gh api {path}")
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._shipmate_yml_warnings(_ctx()) == [doctor.SHIPMATE_YML_UNREADABLE]
+
+
+# The workflow probes whose two degrades share one shape. Without a commit, a
 # default-branch read would report the old state on the very pull request that fixes it, so
 # the `gh` stub pins that no read happens at all and a weaker read cannot stand in:
 # fork-trigger reports the trigger on the pull request that removes it, and the `shipmate.yml`
@@ -3286,8 +3290,8 @@ def test_the_workflow_directory_degrades_read_as_written():
     assert (doctor.SHIPMATE_YML_UNREADABLE, doctor.SHIPMATE_YML_NO_COMMIT) == (
         (
             "notice",
-            "could not read `.github/workflows`: the workflow file's job name, dispatch wiring "
-            "and event routing not verified.",
+            "could not read `.github/workflows/shipmate.yml`: the workflow file's job name, "
+            "dispatch wiring and event routing not verified.",
         ),
         (
             "notice",

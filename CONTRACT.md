@@ -1626,12 +1626,12 @@ to that literal filename, naming the verb in the dispatch body, so a renamed
 file is dispatched nowhere, and the pull request is told only that the dispatch
 failed, with the API's refusal left in the comment-handling run that comment
 links; and doctor keys on the exact name for its `pull_request_target`
-exemption and for its `shipmate.yml` probe, whose job-name, dispatch and
-routing checks all report nothing on a file called anything else.
-Rename the file and planning is refused from that commit on, and the renamed
-file starts drawing doctor's own `pull_request_target` warning. Each symptom
-surfaces on its own — the refusal names the path it looked for — but none of
-them names the rename.
+exemption and for its `shipmate.yml` probe, which reads that one path.
+Rename the file and planning is refused from that commit on, the `shipmate.yml`
+probe reports it could not read `.github/workflows/shipmate.yml`, and the
+renamed file starts drawing doctor's own `pull_request_target` warning. Each
+symptom surfaces on its own — the refusal names the path it looked for — but
+none of them names the rename.
 
 No apply path matches on it to find work already planned: a dispatched, bare or
 post-merge apply reads each cell's plan run from that cell's own apply check, so

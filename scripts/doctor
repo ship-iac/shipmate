@@ -730,15 +730,16 @@ _SHA40 = re.compile(r"[0-9a-fA-F]{40}")
 _WORKFLOWS_DIR = ".github/workflows"
 
 
-def _unverified(subject):
-    """The (UNREADABLE, NO_COMMIT) degrade pair of a workflow-directory probe checking `subject`.
+def _unverified(subject, path=_WORKFLOWS_DIR):
+    """The (UNREADABLE, NO_COMMIT) degrade pair of a workflow probe checking `subject` by
+    reading `path`.
 
-    Both NOTICE, never the generic WARNING degrade in warnings(): an unreadable directory is
+    Both NOTICE, never the generic WARNING degrade in warnings(): an unreadable path is
     not a misconfiguration, for the reasons `_scan_workflow_texts` states, and an unknown
     commit may not be silently substituted with a weaker read.
     """
     return (
-        (NOTICE, f"could not read `{_WORKFLOWS_DIR}`: {subject} not verified."),
+        (NOTICE, f"could not read `{path}`: {subject} not verified."),
         (
             NOTICE,
             f"{subject} not verified: the commit under examination could not be determined.",
@@ -828,9 +829,7 @@ def _scan_workflow_texts(ctx, ref, per_file, unreadable):
 
     Each probe calls this with its own reads rather than sharing one — a
     module-level cache would outlive a single probe run and couple two probes'
-    failure modes — so each costs one listing plus one read per file. The
-    `shipmate.yml` probe is the deliberate exception: its three findings judge one
-    file, so they share one pass and degrade together.
+    failure modes — so each costs one listing plus one read per file.
 
     Every caller's `unreadable` constant is a NOTICE, never a WARNING: the
     directory may not exist on the ref being read — the first shipmate pull
@@ -1543,8 +1542,9 @@ def _routing_finding(text, name):
     return out
 
 
+_SHIPMATE_YML = f"{_WORKFLOWS_DIR}/shipmate.yml"
 SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
-    "the workflow file's job name, dispatch wiring and event routing"
+    "the workflow file's job name, dispatch wiring and event routing", _SHIPMATE_YML
 )
 
 
@@ -1553,24 +1553,23 @@ def _shipmate_yml_warnings(ctx):
     alone, in that order, from one read at the commit under examination (`_contents_ref`): a
     pull request that fixes the file must not still be reported for the old state.
 
-    Exact name: `shipmate.yml` is the file `actions/dispatch` targets for every verb and the
-    one whose cells produce the linked checks. The filter lives here rather than in each
-    `_finding` function so that a direct call of one with another file's name still reports —
-    silence there would read as a false positive that is not one."""
+    `shipmate.yml` is the file `actions/dispatch` targets for every verb and the one whose
+    cells produce the linked checks, so it is read by path, not found in a listing: another
+    unreadable workflow file cannot hide it. A missing file is reported as unreadable, since
+    the contents read cannot tell a 404 from any other failure, and a repository without it
+    receives no dispatch."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [SHIPMATE_YML_NO_COMMIT]
-
-    def finding(text, name):
-        if name != "shipmate.yml":
-            return []
-        return [
-            *_shim_job_name_finding(text, name),
-            *_dispatch_wiring_finding(text, name),
-            *_routing_finding(text, name),
-        ]
-
-    return _scan_workflow_texts(ctx, ref, finding, SHIPMATE_YML_UNREADABLE)
+    text = _workflow_text(f"repos/{ctx['repo']}/contents/{_SHIPMATE_YML}{ref}")
+    if text is None:
+        return [SHIPMATE_YML_UNREADABLE]
+    name = "shipmate.yml"
+    return [
+        *_shim_job_name_finding(text, name),
+        *_dispatch_wiring_finding(text, name),
+        *_routing_finding(text, name),
+    ]
 
 
 _shipmate_yml_warnings.label = "`shipmate.yml`"
