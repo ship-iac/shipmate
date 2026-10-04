@@ -757,8 +757,9 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
 
 
 def test_the_cells_output_is_the_cell_names_in_matrix_order(monkeypatch, tmp_path):
-    """The names alone: a stamped row carries `tf_vars` and roles, and 256 of them in one env
-    var can pass Linux's single-argument limit. Mutation: emit the stamped rows as `cells`."""
+    """The names alone, in the matrix's `include` order: a stamped row carries `tf_vars` and
+    roles, and 256 of them in one env var can pass Linux's single-argument limit. Mutations:
+    emit the stamped rows as `cells`; emit the names reversed."""
     outputs, _ = _run_main(
         monkeypatch,
         tmp_path,
@@ -769,10 +770,10 @@ def test_the_cells_output_is_the_cell_names_in_matrix_order(monkeypatch, tmp_pat
         },
         cells=(("stacks/db", "prod-eu"), ("stacks/app", "dev-eu")),
     )
-    assert outputs["cells"] == (
-        '[{"environment": "prod-eu", "stack": "stacks/db"}, '
-        '{"environment": "dev-eu", "stack": "stacks/app"}]'
-    )
+    include = json.loads(outputs["matrix"])["include"]
+    names = [{"environment": c["environment"], "stack": c["stack"]} for c in include]
+    assert len(names) == 2
+    assert outputs["cells"] == json.dumps(names)
 
 
 def test_rejects_stacks_that_slug_to_one_artifact_name():

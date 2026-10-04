@@ -9,9 +9,12 @@ A nightly cron fans out over all stacks × environments — not the changed set
 those results into GitHub Issues: one labelled `drift` Issue per drifted stack ×
 environment, titled `drift: <env> / <stack>`, updated in place while the drift
 persists and closed with a "Drift resolved" comment on the next clean run of
-its cell. An open `drift` Issue titled `drift: ` that names no cell of the
-sweep is closed too, with a comment that its stack or environment left the
-sweep; an Issue titled any other way is never closed. A sweep with no cells at
+its cell. An open `drift` Issue whose title starts with `drift: ` and names no
+cell of the sweep is closed too, with a comment that its stack or environment
+left the sweep; an Issue titled any other way is never closed. That close runs
+only when the sweep planned the default branch's current head: a re-run of an
+old sweep, or an older sweep finishing after a newer one, leaves those Issues
+open with a notice, and a head it cannot read fails the run. A sweep with no cells at
 all skips the `issues` job, so after deleting every stack close its Issues by
 hand. The lookup is over open Issues only, so drift that returns later
 opens a fresh Issue rather than reopening the closed one.
@@ -41,11 +44,11 @@ state is restored from the path `tofu init` records before each drift cell
 plans; a remote backend owns its state and the restore is skipped
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
-**`id-token: write` and `actions: read` are both required** on the `drift` job,
-cloud credentials or not. A called workflow's permissions are capped at the
-`uses:` boundary: the engine's `drift` matrix job requests the first, its
-`issues` job the second, and a calling job granting less kills the run at startup
-with no job and no log.
+**`contents: read`, `id-token: write` and `actions: read` are all required** on
+the `drift` job, cloud credentials or not. A called workflow's permissions are
+capped at the `uses:` boundary: the engine's `drift` matrix job requests the
+first two, its `issues` job the first and the third, and a calling job granting
+less kills the run at startup with no job and no log.
 
 **The credential split is the point.** The engine's `drift` matrix job binds the
 plan environment of the cell it is planning — the bare `<env>` for an env

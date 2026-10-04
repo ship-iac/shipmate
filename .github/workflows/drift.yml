@@ -80,10 +80,11 @@ jobs:
     if: ${{ always() && needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
     runs-on: ${{ inputs.runs_on }}
     environment: shipmate-engine
-    permissions: { actions: read }
+    permissions: { actions: read, contents: read }
     steps:
       - uses: $/actions/drift-issues
         with:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           cells: ${{ needs.detect.outputs.cells }}
+          default-branch: ${{ needs.detect.outputs.default_branch }}

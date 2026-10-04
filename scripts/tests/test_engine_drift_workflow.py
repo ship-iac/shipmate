@@ -56,7 +56,8 @@ def test_the_issues_job_is_one_drift_issues_step_with_the_app_id_and_key():
     """The download lives in the action. Mutations: re-add the drift-summary download step ahead
     of the action; re-add `slack-webhook: ${{ secrets.SHIPMATE_SLACK_WEBHOOK }}`; point
     `private-key` at `vars.`, which every plan cell exports and the run log prints; drop
-    `cells`, which `actions/drift-issues` then refuses as unset."""
+    `cells`, which `actions/drift-issues` then refuses as unset; drop `default-branch`, and no
+    Issue of a removed cell is ever closed."""
     assert _job("issues")["steps"] == [
         {
             "uses": local_action("drift-issues"),
@@ -64,6 +65,7 @@ def test_the_issues_job_is_one_drift_issues_step_with_the_app_id_and_key():
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                 "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
                 "cells": "${{ needs.detect.outputs.cells }}",
+                "default-branch": "${{ needs.detect.outputs.default_branch }}",
             },
         }
     ]
@@ -131,12 +133,13 @@ def test_only_the_issues_job_holds_the_app_key():
 
 
 def test_every_job_declares_its_own_permissions():
-    """Whole map. Mutation: delete the `drift` job's block, and it silently gets the floor
-    instead of the `id-token: write` its OIDC step needs."""
+    """Whole map. Mutations: delete the `drift` job's block, and it silently gets the floor
+    instead of the `id-token: write` its OIDC step needs; drop `contents: read` from `issues`,
+    and its read of the default branch head fails on a private repository."""
     assert {j: v.get("permissions") for j, v in workflow_yaml(WF)["jobs"].items()} == {
         "detect": {"contents": "read"},
         "drift": {"contents": "read", "id-token": "write"},
-        "issues": {"actions": "read"},
+        "issues": {"actions": "read", "contents": "read"},
     }
 
 

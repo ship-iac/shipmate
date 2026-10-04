@@ -102,6 +102,9 @@ _LIST = [
 
 _RUN_URL = "https://example.invalid/acme/demo/actions/runs/1"
 
+_SHA = "a" * 40
+_NEWER = "b" * 40
+
 
 def _main_env(monkeypatch, cells_dir, matrix):
     """`main()`'s environment: the artifact directory, the run, and the matrix cells as
@@ -112,6 +115,14 @@ def _main_env(monkeypatch, cells_dir, matrix):
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
     cells = [{"environment": e, "stack": st} for e, st in matrix]
     monkeypatch.setenv("SHIPMATE_MATRIX_CELLS", json.dumps(cells))
+    monkeypatch.setenv("GITHUB_SHA", _SHA)
+    monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", "main")
+    _head(monkeypatch, _SHA)
+
+
+def _head(monkeypatch, head):
+    """The default branch head `main()` reads: `head` for `main`, unreadable for any other."""
+    monkeypatch.setattr(di, "default_branch_head", lambda b: head if b == "main" else None)
 
 
 def _gh(monkeypatch, rows):
@@ -301,7 +312,7 @@ def test_main_closes_only_the_issues_of_cells_that_left_the_sweep(tmp_path, monk
 
 
 def test_main_closes_every_duplicate_titled_issue_of_a_removed_cell(tmp_path, monkeypatch):
-    """Mutation: iterate `existing` instead of the raw listing rows in the removed-cell close."""
+    """Mutation: hand `close_removed` the entries of `existing` instead of the raw rows."""
     _write_cell(tmp_path, "app", _cell())
     _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
     rows = [
@@ -333,6 +344,100 @@ def test_main_with_no_loaded_cells_still_closes_a_removed_cells_issue(
     di.main()
     assert calls == [_left(5, "dev-eu / stacks/old")]
     assert capsys.readouterr().out == "loaded 0 drift cell summaries\n"
+
+
+def test_a_stale_sweep_closes_no_removed_cells_issue(tmp_path, monkeypatch, capsys):
+    """A re-run of an old sweep, or an older sweep finishing after a newer one, would close the
+    Issue of a cell added since. Per-cell closes still run. Mutations: drop the freshness check;
+    compare the head against itself instead of `GITHUB_SHA`."""
+    _write_cell(tmp_path, "app", _cell())
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
+    _head(monkeypatch, _NEWER)
+    calls = _gh(
+        monkeypatch,
+        [
+            {"number": 4, "title": "drift: dev-eu / stacks/app"},
+            {"number": 5, "title": "drift: dev-eu / stacks/new"},
+        ],
+    )
+    di.main()
+    assert calls == [
+        [
+            "gh",
+            "issue",
+            "close",
+            "4",
+            "--comment",
+            "Drift resolved -- clean plan for dev-eu / stacks/app.",
+        ]
+    ]
+    assert capsys.readouterr().out == (
+        "loaded 1 drift cell summaries\n"
+        f"::notice::this sweep planned {_SHA} but the default branch is at {_NEWER}, so no "
+        "Issue of a cell that left the drift sweep was closed\n"
+    )
+
+
+def test_an_unread_head_closes_no_removed_cells_issue_and_fails_the_run(
+    tmp_path, monkeypatch, capsys
+):
+    """An unknown head is not a fresh one. Mutation: treat a `None` head as `GITHUB_SHA`."""
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
+    _head(monkeypatch, None)
+    calls = _gh(monkeypatch, [{"number": 5, "title": "drift: dev-eu / stacks/old"}])
+    with pytest.raises(SystemExit) as exc:
+        di.main()
+    assert calls == []
+    assert str(exc.value) == "::error::drift reporting failed for: the default branch head"
+    assert capsys.readouterr().out == (
+        "loaded 0 drift cell summaries\n"
+        "::error::could not read the default branch head, so no Issue of a cell that left the "
+        "drift sweep was closed\n"
+    )
+
+
+class _Proc:
+    def __init__(self, returncode, stdout):
+        self.returncode, self.stdout = returncode, stdout
+
+
+def test_default_branch_head_reads_the_branch_with_the_workflow_token(monkeypatch):
+    """The whole argv, and `GH_TOKEN` swapped for the workflow token: the App token cannot read
+    contents on a private repository. Mutation: drop the `GH_TOKEN` override from `env`."""
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setenv("GH_TOKEN", "app-token")
+    monkeypatch.setenv("SHIPMATE_READ_TOKEN", "workflow-token")
+    seen = []
+
+    def fake(args, **kw):
+        seen.append((args, kw["env"]["GH_TOKEN"]))
+        return _Proc(0, _SHA + "\n")
+
+    monkeypatch.setattr("subprocess.run", fake)
+    assert di.default_branch_head("main") == _SHA
+    assert seen == [
+        (["gh", "api", "repos/acme/demo/branches/main", "--jq", ".commit.sha"], "workflow-token")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout"),
+    [(1, _SHA + "\n"), (0, ""), (0, "null\n")],
+    ids=["failed", "empty", "not-a-sha"],
+)
+def test_default_branch_head_is_none_when_unreadable(monkeypatch, returncode, stdout):
+    """Mutations: ignore the exit code (reddens `failed`); return the stripped stdout whatever
+    its shape (reddens `empty` and `not-a-sha`)."""
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setattr("subprocess.run", lambda args, **kw: _Proc(returncode, stdout))
+    assert di.default_branch_head("main") is None
+
+
+def test_default_branch_head_is_none_for_an_empty_branch(monkeypatch):
+    """Mutation: drop the empty-branch check, and the read asks for `branches/`."""
+    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
+    monkeypatch.setattr("subprocess.run", lambda args, **kw: _Proc(0, _SHA))
+    assert di.default_branch_head("") is None
 
 
 def test_a_failing_removed_cell_close_is_collected_and_fails_the_run(tmp_path, monkeypatch, capsys):
@@ -392,18 +497,22 @@ def test_the_script_step_hands_the_script_exactly_these_names():
     nothing, so without GH_REPO every call fails. The matrix cells travel through `env:`,
     never interpolated into `run:`. Mutations: drop GH_REPO; move the `SHIPMATE_MATRIX_CELLS`
     binding into `run:` as `SHIPMATE_MATRIX_CELLS='${{ inputs.cells }}' python3 ...`; set the
-    `cells` input to `required: false`."""
+    `cells` input to `required: false`; bind `SHIPMATE_READ_TOKEN` to the App token."""
     steps = action_steps("drift-issues")
     step = next(s for s in steps if "scripts/drift-issues" in str(s.get("run", "")))
     assert step["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "GH_REPO": "${{ github.repository }}",
         "SHIPMATE_MATRIX_CELLS": "${{ inputs.cells }}",
+        "SHIPMATE_DEFAULT_BRANCH": "${{ inputs.default-branch }}",
+        "SHIPMATE_READ_TOKEN": "${{ github.token }}",
     }
     assert step["run"] == (
         'set -euo pipefail\npython3 "$GITHUB_ACTION_PATH/../../scripts/drift-issues"\n'
     )
-    assert action_yaml("drift-issues")["inputs"]["cells"]["required"] is True
+    inputs = action_yaml("drift-issues")["inputs"]
+    assert inputs["cells"]["required"] is True
+    assert inputs["default-branch"]["required"] is True
 
 
 def test_the_download_fails_the_job_on_an_artifact_api_error():
