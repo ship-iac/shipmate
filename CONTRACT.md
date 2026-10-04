@@ -829,7 +829,7 @@ commit, whose backend block was part of the review.
 **On the state key.** Where the consumer's backend derives a key per stack,
 derive it from `terramate.stack.path.absolute` (as `docs/aws.md` does), which
 is unique by construction across the whole tree. A key built from
-`${workload}/${stack_name}` is not: a stack's default name is its directory's
+`${workload}/${terramate.stack.name}` is not: a stack's default name is its directory's
 basename, so `accounts/sandbox/network` and `stacks/prod/network` both name
 `network` and, when both carry the same `workload/<name>` tag, render one key
 and share one state file.

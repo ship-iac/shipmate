@@ -755,7 +755,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     }
 
 
-def test_rejects_stack_paths_that_slug_to_one_artifact_name():
+def test_rejects_stacks_that_slug_to_one_artifact_name():
     # `a/b` and `a-b` both slug to `a-b`, so both cells' plan artifact is
     # `plan.dev-eu.a-b` and an apply downloads whichever landed last.
     stacks = ["a/b", "a-b"]

@@ -19,6 +19,7 @@ section below names the SHA the release tags.
 - **`shipmate doctor` lists the role each environment resolves, per path and workload.**
 - **A listed workload that no stack tags is warned about on the paths that scan the whole tree.**
 - **`apply.yml` called without `environment` runs a bare apply of every environment the review decision allows, in `needs` order.**
+- **The drift run's log names how many drift cell summaries it loaded.**
 
 ### Changed
 
@@ -45,6 +46,8 @@ section below names the SHA the release tags.
 - **Every path reads `.github/shipmate.toml` through the contents API from the default branch; the could-not-be-read refusal no longer names a ref, and a failed `gh`, `git` or `terramate` call in CI annotates with its stderr below the error line.**
 - **`shipmate doctor` checks `shipmate.yml`'s job name, dispatch wiring and routing as one probe, so one unreadable file degrades all three together, and a file that calls no engine plan workflow is reported once.**
 - **`shipmate doctor`'s `needs` and `explicit` notices end a cut list with ` … and N more` and never cut an item inside.**
+- **The `apply` and `unlock` guard refusal names the check it makes: the dispatching actor is not a `[bot]`.**
+- **`shipmate doctor` reads `.github/workflows/shipmate.yml` by path, and a missing one draws the unreadable notice.**
 
 ### Removed
 
@@ -53,6 +56,7 @@ section below names the SHA the release tags.
 - **`scripts/onboard` takes no `--vars-at-org`; it always writes the repository `SHIPMATE_APP_ID`.**
 - **The deploy and drift workflows take no `SHIPMATE_SLACK_WEBHOOK` secret and post nothing to Slack; GitHub's Slack app (`/github subscribe <owner>/<repo> issues workflows`) posts workflow runs and drift Issue opens and closes, and does not re-post an Issue that stays open. In the re-pin commit, delete the secret's mapping from the workflow file's `deploy` and `drift` jobs, because a secret the callee does not declare fails the whole workflow file at load; the secret on `shipmate-engine` can be deleted. `scripts/onboard` no longer lists the secret, and no job refuses a variable of that name: one left set is skipped silently while its URL stays readable, so delete it and rotate the webhook.**
 - **`shipmate doctor` no longer prunes older copies of a replanned cell before reading its environments, and drops the two warnings that pruning raised; the environments it reports are unchanged, except that a failed download no longer drops one.**
+- **`cell.json` in `cell-summary.*`, `apply-summary.*` and `drift-summary.*` has no `stack_path` (plan, apply) or `stack_name` (drift) key; read `stack`.**
 
 ### Fixed
 

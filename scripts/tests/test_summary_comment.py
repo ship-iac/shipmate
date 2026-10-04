@@ -156,7 +156,7 @@ def test_plan_check_prefix_is_the_shim_job_name():
     assert sc.PLAN_CHECK_PREFIX == "shipmate / "
 
 
-def test_check_url_resolves_by_env_and_stack_path_with_run_url_fallback():
+def test_check_url_resolves_by_env_and_stack_with_run_url_fallback():
     """Reddens on `PLAN_CHECK_PREFIX = ""` or `"shipmate/"`: the prefixed name misses."""
     assert sc.check_url(_cell(), CHECKS, RUN_URL) == "https://ck/app-eu"
     assert sc.check_url(_cell(environment="prod"), CHECKS, RUN_URL) == RUN_URL
