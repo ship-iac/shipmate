@@ -1278,6 +1278,58 @@ def test_a_drift_file_whose_call_is_commented_out_is_not_overwritten(tmp_path):
     assert onboard._exit_code() == 2
 
 
+def test_a_drift_call_on_the_docs_placeholder_is_never_pinned(tmp_path):
+    """A call still reading `drift.yml@<engine-sha>` resolves to nothing, so it sweeps nothing
+    and is not `ok`: `differs` with the never-pinned remedy, exit 2, and no file written.
+
+    Mutation: drop the placeholder check in `_drift_callers` -- the call counts and reports
+    `ok`.
+    """
+    text = _DRIFT_CALL.replace("c" * 40, "<engine-sha>")
+    path = _write_workflow(tmp_path, "sweeps.yml", text)
+    onboard._reconcile_drift(_drift_ctx(tmp_path))
+    assert onboard.REPORT == [
+        ("differs", "sweeps.yml", "the published fence, never pinned: delete it and run again")
+    ]
+    assert sorted(p.name for p in path.parent.iterdir()) == ["sweeps.yml"]
+    assert onboard._exit_code() == 2
+
+
+def test_a_workflow_file_that_is_not_utf8_is_still_scanned(tmp_path):
+    """A Latin-1 byte in a comment elsewhere in the file does not stop the scan or hide the
+    ASCII call.
+
+    Mutation: read with a strict UTF-8 decode -- `UnicodeDecodeError`.
+    """
+    path = tmp_path / ".github" / "workflows" / "sweeps.yml"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"# caf\xe9\n" + _DRIFT_CALL.encode("ascii"))
+    onboard._reconcile_drift(_drift_ctx(tmp_path))
+    assert onboard.REPORT == [("ok", "shipmate-drift.yml", "called from sweeps.yml")]
+
+
+def test_an_unreadable_workflow_file_is_reported_and_nothing_is_written(tmp_path, monkeypatch):
+    """A file that cannot be read may hold the call, so with no other caller nothing is
+    written, and the file is named as `differs`.
+
+    Mutation: drop the `OSError` handler -- the read raises out of `_reconcile_drift`.
+    """
+    _write_workflow(tmp_path, "locked.yml", "name: locked\n")
+    real = pathlib.Path.read_text
+
+    def read_text(self, *args, **kwargs):
+        if self.name == "locked.yml":
+            raise PermissionError(13, "Permission denied")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", read_text)
+    onboard._reconcile_drift(_drift_ctx(tmp_path))
+    assert onboard.REPORT == [
+        ("differs", "locked.yml", "cannot be read (Permission denied), not overwritten")
+    ]
+    assert sorted(p.name for p in (tmp_path / ".github" / "workflows").iterdir()) == ["locked.yml"]
+
+
 def test_a_whole_run_writes_only_the_workflow_files(monkeypatch, tmp_path):
     """`onboard` moves no pin -- `_reconcile_shim` reports `pin-only` and leaves it, and that
     status never reaches `_exit_code`. A `.github/shipmate.toml` written here could therefore

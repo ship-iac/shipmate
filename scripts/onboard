@@ -732,6 +732,30 @@ def _reconcile_shim(ctx, name, filename):
         report("differs", filename, "differs beyond its pin, not overwritten")
 
 
+def _drift_callers(workflows):
+    """([workflow files calling the engine's `drift.yml`], [(file, detail)] for each file whose
+    call never resolves or that cannot be read), by name. Undecodable bytes are replaced:
+    the call is ASCII, so a stray Latin-1 byte elsewhere cannot hide it."""
+    call = _engine_call("drift.yml")
+    unpinned = re.compile(call.pattern + "<engine-sha>")
+    callers, unsweeping = [], []
+    for p in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
+        if not p.is_file():
+            continue
+        try:
+            text = _stripped_text(p.read_text(encoding="utf-8", errors="replace"))
+        except OSError as e:
+            unsweeping.append((p.name, f"cannot be read ({e.strerror}), not overwritten"))
+            continue
+        if unpinned.search(text):
+            unsweeping.append(
+                (p.name, "the published fence, never pinned: delete it and run again")
+            )
+        elif call.search(text):
+            callers.append(p.name)
+    return callers, unsweeping
+
+
 def _reconcile_drift(ctx):
     """Write `shipmate-drift.yml` from the `shipmate drift` fence when no workflow file in the
     checkout calls the engine's `drift.yml`.
@@ -739,18 +763,20 @@ def _reconcile_drift(ctx):
     Matched by the call, never by file name or content: a consumer adds a `tags` query to the
     drift file, splits it into several sweeps, or renames it. Comments are stripped first, as
     doctor's drift-file probe strips them, so a commented-out call is no sweep to either.
-    A `shipmate-drift.yml` without a call is the consumer's file and is not overwritten.
+    A `shipmate-drift.yml` without a call is the consumer's file and is not overwritten. A
+    call still on the docs' `<engine-sha>` placeholder resolves to nothing, so it is no sweep
+    either: it is reported `differs`, and so is a file that cannot be read, since its call is
+    unknown. Either one, with no other caller, leads to no write.
     """
     workflows = pathlib.Path(ctx["root"]) / ".github" / "workflows"
-    call = _engine_call("drift.yml")
-    callers = [
-        p.name
-        for p in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")])
-        if p.is_file() and call.search(_stripped_text(p.read_text(encoding="utf-8")))
-    ]
+    callers, unsweeping = _drift_callers(workflows)
     path = workflows / "shipmate-drift.yml"
+    for name, detail in unsweeping:
+        report("differs", name, detail)
     if callers:
         report("ok", path.name, "" if path.name in callers else f"called from {', '.join(callers)}")
+    elif unsweeping:
+        return
     elif path.is_file():
         report("differs", path.name, "calls no engine `drift.yml`, not overwritten")
     else:
