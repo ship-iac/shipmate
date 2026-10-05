@@ -77,7 +77,8 @@ def test_whole_tree_sweep_above_256_cells_names_drift_files(monkeypatch):
 def test_the_matrix_limit_counts_the_cells_a_query_keeps(monkeypatch):
     """257 tree cells and a query keeping 10 plan those 10.
 
-    Mutation: cap the tree before the filter in `compute_cells` -- the 257-cell tree refuses."""
+    Mutations: cap the tree before the filter in `compute_cells` -- the 257-cell tree refuses;
+    return the filtered cells as the tree -- the tree comparison reddens."""
     stacks = [f"stacks/s{i:03}" for i in range(257)]
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
     monkeypatch.setattr(
@@ -87,7 +88,7 @@ def test_the_matrix_limit_counts_the_cells_a_query_keeps(monkeypatch):
     )
     _, cells, tree = bm.compute_cells(all_stacks=True, tags="workload/keep")
     assert [c["stack"] for c in cells] == [f"stacks/s{i:03}" for i in range(10)]
-    assert len(tree) == 257
+    assert tree == [{"environment": "dev-eu", "stack": f"stacks/s{i:03}"} for i in range(257)]
 
 
 def test_stack_at_engine_reserved_word_paths_plans():
