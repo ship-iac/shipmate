@@ -39,8 +39,10 @@ def _step(job_id, needle):
 
 
 def test_the_workflow_call_inputs_are_exactly_these():
+    """`tags` is an input so each drift file carries its own query. Mutation: drop `tags`."""
     assert workflow_yaml(WF)[True]["workflow_call"]["inputs"] == {
         "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
+        "tags": {"required": False, "default": "", "type": "string"},
     }
 
 
@@ -105,8 +107,9 @@ def test_the_detect_job_is_deliberately_ungated():
 
 
 def test_the_sweep_states_no_pull_request_and_no_head():
-    """A sweep has no pull request. Mutation: drop `no-pull-request`, and build-matrix refuses
-    every drift run."""
+    """A sweep has no pull request, and carries its file's query to build-matrix.
+    Mutations: drop `no-pull-request`, and build-matrix refuses every drift run; drop
+    `tags: ${{ inputs.tags }}`, and every drift file sweeps every cell."""
     step = next(
         s
         for s in workflow_yaml(WF)["jobs"]["detect"]["steps"]
@@ -115,6 +118,7 @@ def test_the_sweep_states_no_pull_request_and_no_head():
     assert step["with"] == {
         "base-sha": "",
         "all-stacks": "true",
+        "tags": "${{ inputs.tags }}",
         "no-pull-request": "true",
         "github-vars": "${{ toJSON(vars) }}",
     }

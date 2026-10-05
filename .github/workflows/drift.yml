@@ -3,6 +3,9 @@ on:
   workflow_call:
     inputs:
       runs_on: { required: false, default: ubuntu-latest, type: string }
+      # An input, not a repository variable: a consumer may spread the sweep across several
+      # drift files with one literal tag query each, and a variable cannot differ per file.
+      tags: { required: false, default: "", type: string }
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
@@ -37,6 +40,7 @@ jobs:
         with:
           base-sha: ""
           all-stacks: "true"
+          tags: ${{ inputs.tags }}
           # Skips build-matrix's head-repository and head-commit refusals. A sweep has no pull
           # request; a plan workflow must never set this.
           no-pull-request: "true"

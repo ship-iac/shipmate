@@ -10,9 +10,10 @@ pinned, and the engine's own nested workflows, `apply-env-level.yml` and
 
 ## Consumers move every engine ref in one change
 
-The six reusable workflows share inputs and secrets across a release, so a consumer re-pins
-all six `uses:` lines in one commit (§ Re-pin a consumer) and never
-merges a Dependabot pull request that bumps one line alone.
+The engine's reusable workflows share inputs and secrets across a release, so a consumer
+re-pins every `uses:` line in one commit — the five in `shipmate.yml` and the one in each drift
+workflow file (§ Re-pin a consumer) — and never merges a Dependabot pull request that bumps
+one line alone.
 
 ### Re-pin a consumer
 
@@ -252,8 +253,10 @@ construction runs the sample's default-branch workflows and so is only
 exercised after the re-pin.
 
 When the release refuses a key the default branch's table still holds, a `verb=plan`
-or `verb=drift` dispatch on the scratch branch stops at detect on that key: expected,
-and that release's smoke is the `verb=apply` dispatch alone. Otherwise a `verb=plan`
+dispatch on the scratch branch, or a dispatch of its drift file
+(`gh workflow run shipmate-drift.yml --ref smoke/vX.Y.Z`, once that file is on the sample's
+default branch), stops at detect on that key: expected, and that release's smoke is the
+`verb=apply` dispatch alone. Otherwise a `verb=plan`
 dispatch on the scratch branch runs the cells and stops at
 `plan.yml`'s `summary`, the only job holding the App key. It binds the
 `shipmate-engine` environment, whose deployment branch policy allows the

@@ -19,12 +19,13 @@ it says nothing reliable about drift, so an existing open Issue for that
 stack x env is left untouched rather than being auto-closed as if the
 environment were clean.
 
-An open Issue titled `drift: ` that names no cell of this run's matrix is
-closed: its stack or environment left the drift sweep. The matrix, passed in
-`SHIPMATE_MATRIX_CELLS`, says which cells exist, not the loaded artifacts -- a
-lost artifact or a cell job that died before uploading must not read as a
-removed cell. An unset, unparseable or empty matrix is refused before any Issue
-call, since an empty "present" set would close every drift Issue.
+An open Issue titled `drift: ` that names no cell of the scanned tree is
+closed: its stack or environment left the repository. Every cell of the tree,
+passed in `SHIPMATE_TREE_CELLS`, says which cells exist, not the loaded artifacts
+or this sweep's matrix: a sweep filtered by a tag query must not close another
+sweep's Issues, and a lost artifact or a cell job that died before uploading must
+not read as a removed cell. An unset, unparseable or empty list is refused before
+any Issue call, since an empty "present" set would close every drift Issue.
 
 That close runs only when this run planned the default branch's live head. A
 re-run of an old sweep keeps its original commit, and an overlapping older
@@ -68,19 +69,19 @@ def load_cells(cells_dir):
     return [cell for _, cell in cell_summaries(cells_dir, CELL_KEYS, skew)]
 
 
-def matrix_titles():
-    """The Issue title of every cell in this run's matrix, from `SHIPMATE_MATRIX_CELLS`.
+def tree_titles():
+    """The Issue title of every cell of the scanned tree, from `SHIPMATE_TREE_CELLS`.
     Refuses an unset, unparseable or empty value: every open drift Issue would read as
     naming a removed cell and be closed."""
-    raw = os.environ.get("SHIPMATE_MATRIX_CELLS", "")
+    raw = os.environ.get("SHIPMATE_TREE_CELLS", "")
     try:
         cells = json.loads(raw)
     except ValueError:
         cells = None
     if not isinstance(cells, list) or not cells:
         raise SystemExit(
-            "::error::drift-issues needs the drift matrix's cells as a non-empty JSON list "
-            f"in SHIPMATE_MATRIX_CELLS, got {raw!r}"
+            "::error::drift-issues needs every cell of the scanned tree as a non-empty JSON "
+            f"list in SHIPMATE_TREE_CELLS, got {raw!r}"
         )
     return {_title(cell) for cell in cells}
 
@@ -115,7 +116,7 @@ def existing_issue_numbers(rows):
     The LOWEST number wins when two open issues share a title, because gh
     guarantees no particular listing order. Picking arbitrarily would leave the
     other one unreachable by title lookup: never edited, and closed only once its
-    cell leaves the drift sweep."""
+    cell leaves the repository."""
     out = {}
     for row in rows:
         title, number = row["title"], row["number"]
@@ -133,8 +134,8 @@ def _body(cell, run_url):
         f"Drift detected in `{cell['stack']}` @ `{cell['environment']}`: "
         f"+{cell['add']} ~{cell['change']} -{cell['destroy']}. [Drift run]({run_url}) "
         "-- plan output is in that run's log. "
-        "Auto-closed on the next clean drift run of this stack and environment, "
-        "or when the stack or environment leaves the drift sweep."
+        "Auto-closed when a sweep finds it clean or the stack or environment leaves the "
+        "repository."
     )
 
 
@@ -191,7 +192,8 @@ def close_removed(rows, present, url):
             continue
         label = title.removeprefix(PREFIX)
         comment = (
-            f"`{label}` left the drift sweep: [drift run]({url}) has no such stack and environment."
+            f"`{label}` left the repository: [drift run]({url}) found no such stack and "
+            "environment."
         )
         try:
             _run(["gh", "issue", "close", str(row["number"]), "--comment", comment])
@@ -204,7 +206,7 @@ def close_removed(rows, present, url):
 def main():
     cells = load_cells(os.environ.get("SHIPMATE_CELLS_DIR", "drift"))
     print(f"loaded {len(cells)} drift cell summaries")
-    present = matrix_titles()
+    present = tree_titles()
     url = current_run_url()
     rows = open_issues()
     existing = existing_issue_numbers(rows)
@@ -223,13 +225,13 @@ def main():
     if head is None:
         print(
             "::error::could not read the default branch head, so no Issue of a cell that "
-            "left the drift sweep was closed"
+            "left the repository was closed"
         )
         failed.append("the default branch head")
     elif head != sha:
         print(
             f"::notice::this sweep planned {sha} but the default branch is at {head}, so no "
-            "Issue of a cell that left the drift sweep was closed"
+            "Issue of a cell that left the repository was closed"
         )
     else:
         failed += close_removed(rows, present, url)

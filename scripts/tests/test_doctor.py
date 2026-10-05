@@ -206,8 +206,9 @@ def _env(name, rules=(), branch_policy=None):
 
 def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment, plan-env-secret,
-    pin-freshness, fork-trigger and `shipmate.yml` probes, so tests exercising the older
-    gate/environment probes through `warnings()` collect no incidental noise from these six.
+    pin-freshness, fork-trigger, `shipmate.yml` and drift-file probes, so tests exercising the
+    older gate/environment probes through `warnings()` collect no incidental noise from these
+    seven.
     The config probe's read is here too, serving the design's canonical file: a sound table
     is silent in `warnings()`, and its status lines are rendered from `config_status` instead.
 
@@ -219,8 +220,9 @@ def _quiet_new_probes():
     `pull_request_target` and named `shipmate.yml`, which keeps the fork-trigger probe quiet:
     it is the exemption, not the absence of the trigger. Its plan-calling job is named
     `shipmate`, its dispatch leg -- the trigger, the four inputs, the verb options -- is
-    whole, and its six jobs carry the six documented `if:` expressions, keeping the
-    `shipmate.yml` probe quiet. The plan-env secret probe reads one listing per plan env; an
+    whole, and its five jobs carry the five documented `if:` expressions, keeping the
+    `shipmate.yml` probe quiet. `shipmate-drift.yml` calls the engine's `drift.yml`, keeping
+    the drift-file probe quiet. The plan-env secret probe reads one listing per plan env; an
     empty one keeps the healthy path quiet."""
     return {
         f"repos/{_REPO}/environments/dev-eu-plan": _env("dev-eu-plan"),
@@ -235,8 +237,9 @@ def _quiet_new_probes():
         f"repos/{_REPO}/environments/shipmate-engine/deployment-branch-policies": {
             "branch_policies": [{"name": _BRANCH}]
         },
-        f"{_WF_DIR}{_REF}": _wf_listing("shipmate.yml"),
+        f"{_WF_DIR}{_REF}": _wf_listing("shipmate.yml", "shipmate-drift.yml"),
         f"{_WF_DIR}/shipmate.yml{_REF}": _wf_file(_SHIPMATE_WF),
+        f"{_WF_DIR}/shipmate-drift.yml{_REF}": _wf_file(_SHIPMATE_DRIFT_WF),
         f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v9.9.9"},
         f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
         _CONFIG_READ: _wf_file(CANONICAL),
@@ -1216,7 +1219,7 @@ _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
 #: The consumer workflow file `_quiet_new_probes()` serves, in the shipped shape, and the
-#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: six jobs, one per
+#: canonical fixture wherever a correct consumer `shipmate.yml` is needed: five jobs, one per
 #: engine reusable workflow, each with the `if:` that routes its event. Hand-written rather
 #: than read from the page, so a drifting page reddens the fence guard and not every test
 #: here. Defined here rather than beside that fixture because interpolating `_SHA` happens at
@@ -1230,14 +1233,12 @@ _SHIPMATE_WF = (
     "    types: [created]\n"
     "  push:\n"
     "    branches: [main]\n"
-    "  schedule:\n"
-    '    - cron: "17 3 * * *"\n'
     "  workflow_dispatch:\n"
     "    inputs:\n"
     "      verb:\n"
-    "        description: What to run (plan, apply, unlock or drift)\n"
+    "        description: What to run (plan, apply or unlock)\n"
     "        type: choice\n"
-    "        options: [plan, apply, unlock, drift]\n"
+    "        options: [plan, apply, unlock]\n"
     "        required: true\n"
     "      environment:\n"
     "        description: Target environment\n"
@@ -1270,17 +1271,26 @@ _SHIPMATE_WF = (
     "    name: post-merge\n"
     "    if: github.event_name == 'push'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/deploy.yml@{_SHA}\n"
-    "  drift:\n"
-    "    name: shipmate\n"
-    "    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' "
-    "&& github.event.inputs.verb == 'drift')\n"
-    f"    uses: {_ENGINE_REPO}/.github/workflows/drift.yml@{_SHA}\n"
     "  apply:\n"
     "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
     "  unlock:\n"
     "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/unlock.yml@{_SHA}\n"
+)
+#: The drift workflow file `_quiet_new_probes()` serves beside `_SHIPMATE_WF`, in the shipped
+#: shape: pinned at `_SHA` like the rest, so the pin probe stays quiet over it too.
+_SHIPMATE_DRIFT_WF = (
+    "name: shipmate drift\n"
+    "on:\n"
+    "  schedule:\n"
+    '    - cron: "17 3 * * *"\n'
+    "  workflow_dispatch:\n"
+    "permissions: {}\n"
+    "jobs:\n"
+    "  drift:\n"
+    "    name: shipmate\n"
+    f"    uses: {_ENGINE_REPO}/.github/workflows/drift.yml@{_SHA}\n"
 )
 
 
@@ -2875,7 +2885,7 @@ _WF_REQUIRED_TAGS = _SHIPMATE_WF.replace(
     1,
 )
 _WF_SHORT_OPTIONS = _SHIPMATE_WF.replace(
-    "        options: [plan, apply, unlock, drift]\n", "        options: [plan, apply]\n", 1
+    "        options: [plan, apply, unlock]\n", "        options: [plan, apply]\n", 1
 )
 # Hand-written, whole, and never derived from `scripts/doctor`: each finding is compared
 # in full rather than by substring, so a reworded message is a deliberate edit here and
@@ -2911,11 +2921,11 @@ _REQUIRED_TAGS_TEXT = (
     "and `default: ''` (docs/getting-started.md)."
 )
 _SHORT_OPTIONS_TEXT = (
-    "`shipmate.yml`'s `verb` input does not offer `[plan, apply, unlock, drift]`, which is "
+    "`shipmate.yml`'s `verb` input does not offer `[plan, apply, unlock]`, which is "
     "the whole set of verbs this file routes. A missing option is refused at the dispatch "
     "form and at the API, so that verb reaches nothing; an extra one offers a verb no job's "
     "`if:` selects, and its run completes with every job skipped, which reads as success "
-    "everywhere. Write `options: [plan, apply, unlock, drift]` (docs/getting-started.md)."
+    "everywhere. Write `options: [plan, apply, unlock]` (docs/getting-started.md)."
 )
 
 
@@ -2971,7 +2981,7 @@ def test_the_dispatch_probe_reports_a_changed_verb_option_list():
 
 @pytest.mark.parametrize(
     "options",
-    ["[plan,apply,unlock,drift]", "[ plan, apply, unlock, drift ]", "[plan, apply,  unlock,drift]"],
+    ["[plan,apply,unlock]", "[ plan, apply, unlock ]", "[plan, apply,  unlock]"],
 )
 def test_the_dispatch_probe_accepts_any_spacing_in_the_option_list(options):
     """All three are the same YAML sequence as the fence's, so all three route every verb. A
@@ -2980,11 +2990,11 @@ def test_the_dispatch_probe_accepts_any_spacing_in_the_option_list(options):
 
     Mutation: compare the whitespace-collapsed `options:` text against `_VERB_OPTIONS`
     instead of the parsed options against `_VERB_OPTION_LIST`."""
-    assert yaml.safe_load(options) == ["plan", "apply", "unlock", "drift"], (
+    assert yaml.safe_load(options) == ["plan", "apply", "unlock"], (
         "the fixture must be the same sequence the fence declares, or it proves nothing"
     )
     text = _SHIPMATE_WF.replace(
-        "        options: [plan, apply, unlock, drift]\n", f"        options: {options}\n", 1
+        "        options: [plan, apply, unlock]\n", f"        options: {options}\n", 1
     )
     assert doctor._dispatch_wiring_finding(text, "shipmate.yml") == []
 
@@ -3053,7 +3063,7 @@ def test_a_flow_style_on_value_is_silent():
     text = (
         "name: shipmate\n"
         "on:{ pull_request_target: , workflow_dispatch: { inputs: { verb: { type: choice, "
-        "options: [plan, apply, unlock, drift], required: true }, environment: "
+        "options: [plan, apply, unlock], required: true }, environment: "
         "{ required: false, default: '' }, ref: { required: false, default: '' }, "
         "pr_number: { required: false, default: '' } } } }\n"
         "jobs:\n"
@@ -3163,13 +3173,13 @@ def test_the_routing_probe_is_silent_on_the_documented_file():
     """The floor under the three reporting cases below, and the oracle for false positives:
     the file consumers paste, verbatim, through the whole probe.
 
-    Mutation: edit any one of the six `ROUTING_IFS` expressions."""
+    Mutation: edit any one of the five `ROUTING_IFS` expressions."""
     assert doctor._routing_finding(_documented_workflow_file(), "shipmate.yml") == []
 
 
 def test_the_routing_probe_reports_a_job_whose_if_was_edited():
-    """One clause dropped from the apply job's `if:` and every dispatched verb, `plan`, `unlock`
-    and `drift` included, starts an apply as well.
+    """One clause dropped from the apply job's `if:` and every dispatched verb, `plan` and
+    `unlock` included, starts an apply as well.
 
     Mutation: compare the found expression as a prefix of the expected one instead of whole,
     and this edit passes."""
@@ -3278,6 +3288,12 @@ _WORKFLOW_DIR_DEGRADES = [
         doctor.SHIPMATE_YML_UNREADABLE,
         id="shipmate_yml",
     ),
+    pytest.param(
+        doctor._drift_file_warnings,
+        doctor.DRIFT_FILE_NO_COMMIT,
+        doctor.DRIFT_FILE_UNREADABLE,
+        id="drift_file",
+    ),
 ]
 
 
@@ -3291,12 +3307,12 @@ def test_the_workflow_directory_degrades_read_as_written():
         (
             "notice",
             "could not read `.github/workflows/shipmate.yml`: the workflow file's job name, "
-            "dispatch wiring and event routing not verified.",
+            "dispatch wiring, event routing and leftover drift call not verified.",
         ),
         (
             "notice",
-            "the workflow file's job name, dispatch wiring and event routing not verified: the "
-            "commit under examination could not be determined.",
+            "the workflow file's job name, dispatch wiring, event routing and leftover drift "
+            "call not verified: the commit under examination could not be determined.",
         ),
     )
 
@@ -3324,6 +3340,107 @@ def test_unreadable_directory_degrades_to_a_note(monkeypatch, probe, _no_commit,
     assert "::error::" not in out[0][1] and "gh api" not in out[0][1]
 
 
+#: Hand-written, never derived from `scripts/doctor`.
+_NO_DRIFT_FILE = (
+    "warning",
+    "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
+    "Add a drift workflow file (docs/drift.md).",
+)
+_DRIFT_FILE_UNREADABLE = (
+    "notice",
+    "could not read `.github/workflows`: whether a workflow file calls the engine's drift.yml "
+    "not verified.",
+)
+
+
+def _drift_probe(monkeypatch, files):
+    responses = _fork_responses(files)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    return doctor._drift_file_warnings(_ctx())
+
+
+def test_a_drift_call_in_a_file_of_any_name_satisfies_the_drift_probe(monkeypatch):
+    """The call is found by content: a sweep in `sweeps.yml` is a drift file, and a
+    `shipmate-drift.yml` calling only `plan.yml` is not.
+
+    Mutation: match by file name (`"drift" in name`) instead of the `uses:` content."""
+    sweeps = _SHIPMATE_DRIFT_WF.replace("name: shipmate drift\n", "name: sweeps\n", 1)
+    assert _drift_probe(monkeypatch, {"shipmate.yml": _SHIPMATE_WF, "sweeps.yml": sweeps}) == []
+    plan_only = _SHIPMATE_DRIFT_WF.replace("/drift.yml@", "/plan.yml@", 1)
+    assert _drift_probe(monkeypatch, {"shipmate-drift.yml": plan_only}) == [_NO_DRIFT_FILE]
+
+
+def test_a_commented_out_drift_call_draws_the_drift_warning(monkeypatch):
+    """A call only inside a `#` comment sweeps nothing.
+
+    Mutation: search the raw text instead of `_stripped_text(text)`."""
+    commented = _SHIPMATE_DRIFT_WF.replace("    uses: ", "    # uses: ", 1)
+    assert "# uses: acme/engine/.github/workflows/drift.yml@" in commented
+    assert _drift_probe(monkeypatch, {"shipmate-drift.yml": commented}) == [_NO_DRIFT_FILE]
+
+
+def test_a_partial_drift_scan_reports_only_the_unreadable_notice(monkeypatch):
+    """The scan stops at the unreadable `b.yml`, so the call in `shipmate-drift.yml` is never
+    read: absence is unknown, and the WARNING would be a false report.
+
+    Mutation: emit the WARNING whenever no call was found, beside the notice."""
+    responses = {
+        **_fork_responses(
+            {"a.yml": "name: a\n", "b.yml": "", "shipmate-drift.yml": _SHIPMATE_DRIFT_WF}
+        ),
+        f"{_WF_DIR}/b.yml{_REF}": {"encoding": "none", "content": ""},
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._drift_file_warnings(_ctx()) == [_DRIFT_FILE_UNREADABLE]
+
+
+def test_drift_is_not_a_verb_shipmate_yml_offers():
+    """Drift runs from its own workflow file, so `shipmate.yml` offers the three dispatched
+    verbs and an option list still carrying `drift` offers one no job selects.
+
+    Mutation: re-add `"drift"` to `_VERB_OPTION_LIST` -- both assertions redden."""
+    assert doctor._dispatch_wiring_finding(_SHIPMATE_WF, "shipmate.yml") == []
+    old = _SHIPMATE_WF.replace(
+        "        options: [plan, apply, unlock]\n",
+        "        options: [plan, apply, unlock, drift]\n",
+    )
+    assert doctor._dispatch_wiring_finding(old, "shipmate.yml") == [
+        (doctor.WARNING, _SHORT_OPTIONS_TEXT)
+    ]
+
+
+def test_shipmate_yml_without_a_drift_job_draws_no_routing_finding():
+    """Mutation: re-add the `drift.yml` entry to `ROUTING_IFS` -- a zero-count finding."""
+    assert "drift.yml" not in _SHIPMATE_WF
+    assert doctor._routing_finding(_SHIPMATE_WF, "shipmate.yml") == []
+
+
+_SHIPMATE_YML_CALLS_DRIFT_TEXT = (
+    "`shipmate.yml` still calls the engine's `drift.yml`: move the drift job to its own "
+    "workflow file and delete it, the `schedule` trigger and the `drift` verb option from "
+    "`shipmate.yml` (docs/drift.md)."
+)
+
+
+def test_a_drift_job_left_in_shipmate_yml_is_warned(monkeypatch):
+    """A `shipmate.yml` still carrying the drift job sweeps beside the drift file, so every
+    sweep runs twice, and `scripts/onboard` counts it as the repository's drift file. One
+    WARNING names the move; the published file draws none.
+
+    Mutation: drop the drift-call check from `_shipmate_yml_warnings` -- the first assertion
+    reddens."""
+    old = _SHIPMATE_WF + _SHIPMATE_DRIFT_WF.split("jobs:\n", 1)[1]
+    assert old.count("/drift.yml@") == 1
+    responses = _fork_responses({"shipmate.yml": old})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx()) == [
+        (doctor.WARNING, _SHIPMATE_YML_CALLS_DRIFT_TEXT)
+    ]
+    responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx()) == []
+
+
 def test_the_probe_registry_is_exactly_this(monkeypatch):
     """The whole registry against a hand-written list, not its length: a length
     assertion cannot say WHICH entry changed, so a probe swapped for another
@@ -3340,6 +3457,7 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
         doctor._shipmate_yml_warnings,
         doctor._config_warnings,
         doctor._app_permission_warnings,
+        doctor._drift_file_warnings,
     )
     assert expected == doctor.PROBES
 

@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
+shipmate:doctor -->`, upserted in place like the plan comment) combining twelve
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -78,8 +78,8 @@ live probes.
   from any hardcoded slug — another org's shared action is not shipmate's to
   report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
-  the commit under examination, feeds three checks, so an unreadable file
-  leaves all three unverified together:
+  the commit under examination, feeds four checks, so an unreadable file
+  leaves all four unverified together:
   - Whether its plan-calling job is named `shipmate`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
     makes the plan cell checks `shipmate / <stack> / <env>`. Under another name
@@ -98,8 +98,8 @@ live probes.
     at dispatch time with an HTTP 422 and no run created; the pull request gets
     a comment saying the dispatch failed and linking the comment-handling run
     that carries the error.
-  - Whether each of its jobs is selected by the `if:` its event needs. One file
-    gates six jobs, one per engine reusable workflow, and the probe compares
+  - Whether each of its jobs is selected by the `if:` its event needs. The file
+    gates five jobs, one per engine reusable workflow other than `drift.yml`, and the probe compares
     each job's whole `if:` against the expression that file's published fence
     carries. Each finding identifies the job by the engine workflow it calls —
     "the job calling the engine's `apply.yml`", which is the fence's `apply` —
@@ -112,6 +112,11 @@ live probes.
     completes green with nothing done, and a job whose `if:` is too wide runs on
     an event it was never meant to see. The fence in
     [`getting-started.md`](getting-started.md) has every expression.
+  - Whether it still calls the engine's `drift.yml`. Drift runs from its own
+    workflow file; a drift job left in `shipmate.yml` sweeps beside it, and
+    `scripts/onboard` counts it as the repository's drift file. Move the job to
+    its own file and delete it, the `schedule` trigger and the `drift` verb
+    option from `shipmate.yml` ([`drift.md`](drift.md)).
 - **Whether `.github/shipmate.toml` at the commit under examination is valid.**
   Read through the API at that commit, never from the default branch and never
   substituted by it, so a malformed or misplaced setting is reported on the pull
@@ -130,13 +135,19 @@ live probes.
   nothing a run uses.
 - **Whether the shipmate App installation still grants the manifest's full
   permission set.**
+- **Whether any workflow file calls the engine's `drift.yml`.** Read at the
+  commit under examination, like the pin probe. A file counts by the call in
+  its text, not by its name, and a call only inside a `#` comment does not
+  count. With none, no stack is ever checked for drift, which is a warning.
+  An unreadable file leaves the question unverified, a note, since the call
+  may sit in a file the probe could not read.
 
 The report carries those findings together with the warning and failure
 annotations GitHub already recorded on this commit's workflow runs — shipmate's
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only ten of the eleven probes can produce a finding from the plan path's
+Only eleven of the twelve probes can produce a finding from the plan path's
 own `annotate`-mode run (`actions/summary`). The App-permission-drift probe
 only has something to report when a full-manifest permission-set mint was
 actually attempted, which only `shipmate doctor` does. It is effectively
@@ -242,9 +253,9 @@ The verbs:
 
 | Verb | Meaning |
 | --- | --- |
-| `ok` | already as shipmate needs it; nothing was written. |
+| `ok` | already as shipmate needs it; nothing was written. For `shipmate-drift.yml`, some workflow file calls the engine's `drift.yml`; a detail names the files when that file is not one of them. |
 | `create` / `update` / `set` / `delete` | the write it just performed. |
-| `created` | the workflow file it just wrote to `.github/workflows/`. |
+| `created` | a workflow file it just wrote to `.github/workflows/`: `shipmate.yml` or `shipmate-drift.yml`. |
 | `deferred` | the gate ruleset is not created yet, because `.github/workflows/shipmate.yml` is not on the remote default branch, or the token cannot read it (a private repository answers 404 for both), and no pull request could produce `shipmate / gate`. Merge the pull request that adds the file, then run the script again. Not drift; it does not affect the exit code. |
 | `pin-only` | the file matches except for the engine pin. Not drift, and it does not affect the exit code — move every engine ref to this engine's SHA in one commit ([`releasing.md`](releasing.md) § Re-pin a consumer). |
 | `would …` | `--dry-run`: the write that a real run would perform. |
@@ -266,8 +277,10 @@ mandate. Each one names what to do.
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
 | `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
 | `gate ruleset` — `shipmate / gate` is already required, but `.github/workflows/shipmate.yml` is not on `<branch>` yet | the gate is required while the workflow file is not on the default branch, or this token cannot read it and GitHub answered 404. `pull_request_target` runs the default branch's copy, so the pull request adding the file cannot produce the gate. Disable the gate rule until that pull request merges, or merge it through a bypass actor. |
-| `<file>.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which the re-pin in [`releasing.md`](releasing.md) cannot move. Delete the file and run the script again. |
-| `<file>.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
+| `<file>.yml` — the published fence, never pinned | `shipmate.yml`, or a workflow file calling `drift.yml`, holds the `@<engine-sha>` placeholder from the docs rather than a pin, which the re-pin in [`releasing.md`](releasing.md) cannot move. Delete the file and run the script again. |
+| `shipmate.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
+| `shipmate-drift.yml` — calls no engine `drift.yml`, not overwritten | no workflow file calls the engine's `drift.yml` outside a comment, and `shipmate-drift.yml` exists, so nothing sweeps for drift. Restore the call, or delete the file and run again to take the published one. |
+| `<file>.yml` — cannot be read (`<reason>`), not overwritten | a workflow file could not be read, so whether it calls `drift.yml` is unknown and no drift file is written. Fix the file's permissions and run again. |
 
 The closing checklist marks each item with one of three verdicts. None of them
 affects the exit code: every item is yours to do, so a first run exits 0 over

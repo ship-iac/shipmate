@@ -305,17 +305,19 @@ creates all of them, including `shipmate-engine` and its branch policy:
 
 ### The workflow file
 
-`scripts/onboard` writes this one file, pinned, from the fence below. It is a
-shim: five triggers, and one job per thing shipmate does, each calling an engine
-reusable workflow SHA-pinned. The jobs behind those calls — `facts`, `detect`,
-`plan` and `summary` in engine `plan.yml`, and their equivalents on the other
-paths — live in the engine, so none of what they decide is wiring you can get
+`scripts/onboard` writes two files, pinned, from the two fences below:
+`shipmate.yml` and the drift sweep, `shipmate-drift.yml`. `shipmate.yml` is a
+shim: four triggers and five jobs, each job calling an engine reusable workflow
+SHA-pinned. The drift file is one job calling engine `drift.yml` on its cron or
+a dispatch. The jobs behind those calls — `facts`, `detect`, `plan` and
+`summary` in engine `plan.yml`, and their equivalents on the other paths — live
+in the engine, so none of what they decide is wiring you can get
 wrong.
 
-The whole file goes in at tier 1, and three of its jobs are this tier's:
-`plan`, `comment-ops` and `drift`, which need `<env>-plan`, `shipmate-engine`
-and the App key and nothing else. `deploy` runs from the start too: on every
-push to the default branch it applies the merged pull request's cells still
+Both files go in at tier 1, and three of their jobs are this tier's:
+`plan`, `comment-ops` and the drift file's `drift`, which need `<env>-plan`,
+`shipmate-engine` and the App key and nothing else. `deploy` runs from the
+start too: on every push to the default branch it applies the merged pull request's cells still
 pending, in the `<env>-apply` this tier has you create (a shared env's bare
 `<env>`). The other two, `apply` and `unlock`, wait for the
 environments and secrets the apply tier creates.
@@ -336,17 +338,22 @@ pending with the draft reason. Mark the pull request ready, or comment
 **`name: shipmate` on a calling job is a contract literal, not decoration.**
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 that name is what makes the plan cells `shipmate / <stack> / <env>` and lets the
-plan comment's `plan` links resolve to them. The `plan`, `comment-ops` and
-`drift` jobs all carry it. Rename one and the run still happens; every one of
-those links falls back to the workflow-run page instead. `shipmate doctor`
-reports it.
+plan comment's `plan` links resolve to them. The `plan` and `comment-ops` jobs
+and the drift file's `drift` job all carry it. Rename the `plan` job and its run
+still happens, but every one of those links falls back to the workflow-run page
+instead; `shipmate doctor` reports it. Renaming `comment-ops` or `drift` changes
+only their own check-run names: no link resolves through them, and doctor does
+not check them.
 
 **The filename is load-bearing too.** `actions/build-matrix` refuses to plan a
 repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
 input it sends; and `shipmate doctor` keys its `shipmate.yml` probe, which checks
-the job name, dispatch wiring and event routing, on it. A file under another
-name is reached by nothing.
+the job name, dispatch wiring, event routing and a leftover drift job, on it. A
+file under another name is reached by nothing. The drift file's name matters to
+nothing: nothing dispatches it, and `scripts/onboard` and doctor both find a
+drift file by its call of `drift.yml`. `scripts/onboard` writes
+`shipmate-drift.yml` only when no workflow file makes that call.
 
 Which trigger reaches which job, and which engine workflow it calls:
 
@@ -355,14 +362,13 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `pull_request_target`, or `verb: plan` | `plan` | `plan.yml` |
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` to the default branch | `deploy` | `deploy.yml` |
-| `schedule`, or `verb: drift` | `drift` | `drift.yml` |
 | `verb: apply` | `apply` | `apply.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
-Only the `plan` and `drift` jobs accept a `runs_on:` input. Behind every other
-call the engine's detect jobs and cells run on `ubuntu-latest` and its control
-jobs on `ubuntu-slim` ([`aws.md`](aws.md) §Runner choice). The fence below
-omits it, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
+Only the `plan` job and the drift file's `drift` job accept a `runs_on:`
+input. Behind every other call the engine's detect jobs and cells run on
+`ubuntu-latest` and its control jobs on `ubuntu-slim` ([`aws.md`](aws.md)
+§Runner choice). The fences below omit it, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
 `ubuntu-latest` too. Pass it only for a different label your plan actually
 offers; one it does not leaves every job of that call waiting for a runner that
 never arrives.
@@ -373,7 +379,6 @@ run-name: >-
   shipmate · ${{ github.event_name == 'pull_request_target' && 'plan'
   || github.event_name == 'issue_comment' && 'comment'
   || github.event_name == 'push' && 'deploy'
-  || github.event_name == 'schedule' && 'drift'
   || inputs.verb }}
 on:
   pull_request_target:
@@ -382,18 +387,16 @@ on:
     types: [created]
   push:
     branches: [main]
-  schedule:
-    - cron: "17 3 * * *"   # nightly, off-peak
   workflow_dispatch:
     inputs:
       # Every input is optional except the verb, and that is deliberate: one schema serves
-      # four verbs, and GitHub reads an empty value for a `required: true` input as not
+      # three verbs, and GitHub reads an empty value for a `required: true` input as not
       # provided and answers HTTP 422 before the run starts. The engine validates instead —
       # `pr-facts` refuses a plan with no number, `apply-detect` an apply with no ref.
       verb:
-        description: What to run (plan, apply, unlock or drift)
+        description: What to run (plan, apply or unlock)
         type: choice
-        options: [plan, apply, unlock, drift]
+        options: [plan, apply, unlock]
         required: true
       environment:
         description: Target environment (apply and unlock; empty apply = every non-explicit environment)
@@ -417,7 +420,7 @@ jobs:
   plan:
     name: shipmate
     # `github.event.inputs` is the form readable under either trigger, unlike the `inputs`
-    # context, and `plan` and `drift` also run under one that is not `workflow_dispatch`; the
+    # context, and `plan` also runs under one that is not `workflow_dispatch`; the
     # concurrency group below relies on the same thing. `apply` and `unlock` are
     # dispatch-only and keep `inputs.`, because only that form applies a declared default,
     # which is what makes an omitted `environment` key read as the empty string.
@@ -467,17 +470,6 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-  drift:
-    name: shipmate
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')
-    uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
-    permissions:
-      contents: read
-      id-token: write
-      actions: read
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
   apply:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
@@ -504,6 +496,30 @@ jobs:
 On a repository whose default branch is not `main`, change `branches: [main]`
 to that branch; `scripts/onboard` writes the file that way.
 
+`scripts/onboard` writes the drift sweep from this second fence as
+`.github/workflows/shipmate-drift.yml`; [`drift.md`](drift.md) §Scoping a sweep
+covers splitting it across several files:
+
+```yaml
+name: shipmate drift
+on:
+  schedule:
+    - cron: "17 3 * * *"   # nightly, off-peak
+  workflow_dispatch:
+permissions: {}
+jobs:
+  drift:
+    name: shipmate
+    uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+```
+
 **The `permissions:` block on each calling job is not optional.** A called
 workflow's permissions are capped at the `uses:` boundary, so each block above
 has to grant every scope the callee's own jobs request. Grant less and the run
@@ -517,10 +533,10 @@ what a job declares is what its callee is capped at, and a job that loses its
 block gets nothing.
 
 **`verb` is the one required input, and every other is optional with an explicit
-default.** One schema serves four verbs, and GitHub reads an empty value for a
+default.** One schema serves three verbs, and GitHub reads an empty value for a
 `required: true` input as not provided, answering HTTP 422 before the run starts
 — so requiring `pr_number` would refuse every `unlock`, whose dispatch body does
-not carry one, and every hand-dispatched `drift`. No human
+not carry one. No human
 fills a form here either — `actions/dispatch` mints an App token and sends a body
 the engine builds — so `required: true` protects no real caller.
 
@@ -845,15 +861,19 @@ and what masking does and does not cover.
 
 ### Drift detection
 
-The `drift` job plans every stack × environment nightly against real state,
-then opens, updates and closes drift Issues from what those cells report. The
-engine jobs behind it that hold a credential run only at the default-branch
-ref; it needs the `shipmate-engine` environment from the plan
-tier. It is part of the `shipmate.yml` above, so a repository `scripts/onboard`
-reconciled already has it — delete the job and the file's `schedule:` trigger if
-you do not want a nightly run, and the reconciler then reports the file as
-`differs` rather than overwriting your edit. What it costs is in
-[`drift.md`](drift.md).
+The drift file's `drift` job plans every stack × environment, or the cells its
+`tags` query selects, nightly against real state, then opens, updates and closes drift Issues from what those cells
+report. The engine jobs behind it that hold a credential run only at the
+default-branch ref; it needs the `shipmate-engine` environment from the plan
+tier. `scripts/onboard` writes it as `.github/workflows/shipmate-drift.yml`, so a
+repository it reconciled already has it. Edit, split or rename the file — a
+`tags` query, other crons — and the reconciler reports `ok` as long as some
+workflow file calls `drift.yml`, without comparing its content. Remove every
+such call and `shipmate doctor` warns that no workflow file calls `drift.yml`.
+If `shipmate-drift.yml` is deleted, the next `scripts/onboard` run writes it
+again; if it is kept without a call, the run reports it `differs` and exits 2
+without overwriting it. Scoping a sweep
+and what it costs are in [`drift.md`](drift.md).
 
 ### Recipe: automerge after apply
 
@@ -921,7 +941,7 @@ The `comment-ops` and `apply` jobs must pin one engine commit:
 `comment-ops.yml` authorizes an apply that `apply.yml`
 enforces, so at different commits an apply authorized under one engine's rule is
 enforced by another's, or by none. [`releasing.md`](releasing.md) § Re-pin a consumer
-moves all six pins together.
+moves every pin together.
 
 What the exemption does and does not cover, including a bare `shipmate apply`
 on an unreviewed pull request, is in [`../CONTRACT.md`](../CONTRACT.md)

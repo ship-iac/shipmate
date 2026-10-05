@@ -8,6 +8,25 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Added
+
+- **Each drift workflow file can pass engine `drift.yml` a `tags` query, so one file sweeps only the cells it selects (`docs/drift.md` §Scoping a sweep).**
+- **`shipmate doctor` warns when no workflow file calls the engine's `drift.yml`, and when `shipmate.yml` still does.**
+- **`scripts/onboard` writes `.github/workflows/shipmate-drift.yml` beside `shipmate.yml` when no workflow file calls the engine's `drift.yml`, and never compares or overwrites a drift file.**
+
+### Changed
+
+- **Drift moves out of `shipmate.yml` into its own workflow file: delete the `drift` job, the `schedule` trigger and the `drift` verb option from `shipmate.yml`, and add `shipmate-drift.yml` from the `shipmate drift` fence in `docs/getting-started.md`, in the re-pin commit.**
+- **`shipmate doctor` expects `shipmate.yml`'s `verb` options to be `[plan, apply, unlock]`.**
+- **A drift Issue closed because its cell is gone says the stack or environment left the repository.**
+
+### Fixed
+
+- **`shipmate doctor`'s failed-mint reply and App-permission warning, and `docs/github-app.md`, name the step a release adding an App permission needs: add it in the registered App's settings, then accept the request.**
+- **`scripts/onboard`'s lock-file checklist item names `tofu init -backend=false`, which works before a stack's modules are installed.**
+
 ## [0.42.0] — 2026-10-04
 
 Tags `1120418`.

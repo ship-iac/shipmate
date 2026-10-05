@@ -226,7 +226,7 @@ def test_an_unknown_verb_dispatches_nothing_and_says_so_on_the_pull_request(tmp_
 def test_every_verb_dispatches_the_one_consumer_file(tmp_path, verb):
     """One entry point for every verb: the file is fixed, and the body's `verb` selects the
     job. What kept the verbs apart before was the filename; what keeps them apart now is the
-    six `if:` expressions `shipmate doctor`'s `shipmate.yml` probe compares whole.
+    five `if:` expressions `shipmate doctor`'s `shipmate.yml` probe compares whole.
 
     Mutation: make the `case` resolve a per-verb filename again.
     """

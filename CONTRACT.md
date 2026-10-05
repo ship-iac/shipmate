@@ -43,7 +43,7 @@ reports a plan-calling job carrying another name; until it is fixed,
 `shipmate / <stack> / <env>` lookup across every check run on the head SHA —
 finds no match and every `plan` link falls back to the workflow-run URL.
 
-The consumer's one workflow file gates six jobs on the event (§Post-plan
+The consumer's `shipmate.yml` gates five jobs on the event (§Post-plan
 topology), so every run also carries one one-segment check-run per job that did
 not run, named by that job's display name — `shipmate`, `post-merge`,
 `apply`, `unlock` — with conclusion `skipped`. They are display
@@ -123,11 +123,12 @@ free of lookalike characters. A required context that differs from the posted
 one by an invisible character is never satisfied, so every pull request is
 unmergeable while the status itself renders green.
 
-The middot is reserved for the consumer file's `run-name` (`shipmate · plan`,
-`shipmate · comment`, `shipmate · deploy`, `shipmate · drift`, and the verb of
-a dispatched run) — a run title GitHub renders and nothing matches on, where it
-says which event or verb this run serves. The workflow's own `name:` is plain
-`shipmate`.
+The middot is reserved for `shipmate.yml`'s `run-name` (`shipmate · plan`,
+`shipmate · comment`, `shipmate · deploy`, and the verb of a dispatched run) — a
+run title GitHub renders and nothing matches on, where it says which event or
+verb this run serves. That file's own `name:` is plain `shipmate`. The
+published drift fence sets no `run-name`, so a sweep's run is titled by the
+file's own `name:` (`shipmate drift` in the published fence).
 
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
@@ -953,8 +954,8 @@ An `env/<name>` tag is mandatory for every stack a run inspects, and an
 untagged one fails the whole run rather than being skipped. Which stacks
 are inspected differs by path: the changed set on the plan and deploy
 paths, so untagged stacks elsewhere in the tree do not fail a plan run until
-one of them changes; every stack on the drift path, which is therefore the
-repo-wide backstop that catches the rest; and none on the checks-sourced
+one of them changes; every stack on the drift path, whatever a sweep's `tags`
+query, which is therefore the repo-wide backstop that catches the rest; and none on the checks-sourced
 bare-apply `detect`, which exempts the check deliberately — an untagged stack
 carries no apply check and so contributes no cell anyway, and an unrelated
 one must not abort an apply. Failing the whole run rather than the one stack is
@@ -962,6 +963,36 @@ deliberate too: a silently skipped stack plans and applies nothing while the
 gate goes green over it, which is the one failure this contract will not trade
 for convenience. The failure names every untagged stack it found, so they are
 tagged from that list rather than found one re-run per stack.
+
+**A drift sweep's `tags` query narrows what the sweep plans, never what it
+scans.** Engine `drift.yml` takes it as an input, one literal query per drift
+workflow file:
+
+- `,` separates OR clauses and `:` separates the terms of one clause, which
+  must all match, so `:` binds tighter. Terramate forbids `:` inside a tag, so a
+  `:` in a query is always the operator.
+- A term is a tag in its on-disk form, stripped of surrounding whitespace and
+  matched exactly. A cell matches against its stack's tags minus every `env/*`
+  tag other than its own, so a stack tagged for two environments matches a
+  one-environment query in that environment's cell alone.
+- An empty term refuses the run. A clause matching no cell, such as one naming
+  a tag no stack carries, matches nothing on its own; one notice names every
+  such clause and the terms no stack carries. A query matching no cell is an
+  empty sweep with a notice, not a refusal.
+- `build-matrix` refuses a query on any run that does not pass
+  `no-pull-request: true`, which only engine `drift.yml` passes: on a plan run
+  it would drop changed stacks, and a dropped stack gets no apply check while
+  `shipmate / gate` greens.
+
+The repo-wide checks run over the full tree every sweep scans, before the query
+applies: untagged stacks, slug collisions, two `workload/*` tags on one stack,
+`tf_vars`-layout coverage of every tagged environment, and the unused-entry
+warnings. The 256-cell matrix limit counts the cells the query keeps.
+
+Three checks run per selected cell, after the query, so a cell it drops escapes
+them: resolving the cell's row from the environment table, the refusal of a row
+whose `env_binding` names no GitHub Environment, and the refusal of a
+`workload/*` tag its environment's `workloads` list does not name.
 
 ## Comment-ops
 
@@ -994,9 +1025,9 @@ or saying the permission could not be read. `help` answers anyone.
 Every dispatching verb dispatches the same file,
 `.github/workflows/shipmate.yml`, and the `verb` input in the dispatch body
 selects the job: `plan` → the `plan` job, `apply` → the `apply` job, `unlock` → the `unlock`
-job. That file carries five triggers; `workflow_dispatch` is the one a
-commented verb reaches, and the other four (`pull_request_target`,
-`issue_comment`, `push`, `schedule`) fire from their own events. `doctor` and
+job. That file carries four triggers; `workflow_dispatch` is the one a
+commented verb reaches, and the other three (`pull_request_target`,
+`issue_comment`, `push`) fire from their own events. `doctor` and
 `help` dispatch nothing: both are answered inside the comment-ops run itself. A
 repository with no `.github/workflows/shipmate.yml`, or one that declares no
 `workflow_dispatch` trigger or not the inputs a verb's dispatch sends, fails at
@@ -1079,12 +1110,12 @@ and this run (`at an unknown commit in [run #<n>](<run url>)` when the commit
 is not a 40-character lowercase hex SHA). Each finding and harvested annotation
 carries the same circles. Under any verdict but 🟢 the report ends with the help
 hint ``Comment `shipmate help` for the available commands.``; a 🟢 report has
-no footer. It combines eleven live settings probes, listed in
+no footer. It combines twelve live settings probes, listed in
 `docs/troubleshooting.md` §shipmate doctor with their scopes and degrade paths,
 and a harvest of the warning and failure annotations GitHub already recorded on
 this commit's workflow runs (shipmate's own and any other Actions workflow run
 on that commit; third-party-app-authored check runs are excluded).
-Only ten of the eleven probes can produce a finding from the plan path's own
+Only eleven of the twelve probes can produce a finding from the plan path's own
 `annotate`-mode invocation: the App-permission-drift probe reports only on a
 full-manifest permission-set mint, which only `shipmate doctor` attempts. An
 empty harvest is
@@ -1447,8 +1478,8 @@ is then refused by the exact-plan fail-safe if the first advanced the state.
 
 ## Post-plan topology
 
-The consumer's workflow is one file, `.github/workflows/shipmate.yml`: five
-triggers, and six jobs each gated on the event with an `if:` and each calling
+The consumer's workflow is one file, `.github/workflows/shipmate.yml`: four
+triggers, and five jobs each gated on the event with an `if:` and each calling
 one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
 declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY`,
 `SHIPMATE_PLAN_PASSPHRASE` and `SHIPMATE_SECRETS` by name (never
@@ -1461,14 +1492,17 @@ SHA-pinned YAML.
 | `pull_request_target`, or `workflow_dispatch` with `verb: plan` | `plan` | `plan.yml` |
 | `issue_comment` | `comment-ops` | `comment-ops.yml` |
 | `push` | `deploy` | `deploy.yml` |
-| `schedule`, or `workflow_dispatch` with `verb: drift` | `drift` | `drift.yml` |
 | `workflow_dispatch` with `verb: apply` | `apply` | `apply.yml` |
 | `workflow_dispatch` with `verb: unlock` | `unlock` | `unlock.yml` |
 
 Each of those `if:` expressions is a contract literal, not a style choice:
-`shipmate doctor`'s `shipmate.yml` probe holds all six and compares each one whole,
+`shipmate doctor`'s `shipmate.yml` probe holds all five and compares each one whole,
 because a wrong expression sends a verb nowhere and produces a dispatched run
 that completes with every job skipped — green, and no work done.
+
+The drift sweep is not in that file. Each drift workflow file holds one job,
+`drift`, with no `if:`, calling engine `drift.yml` from the file's own
+`schedule` and `workflow_dispatch` triggers (`docs/drift.md`).
 
 Engine `plan.yml` is four jobs: `facts`, `detect`, `plan`, `summary`. `facts`
 is `actions/pr-facts`, the single producer of every pull-request fact the other
@@ -1480,9 +1514,10 @@ issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
 satisfies its default-branch-only policy for a different reason.
 
-**The calling job's name is a contract literal.** `plan`, `comment-ops` and
-`drift` carry `name: shipmate`; `deploy` carries `name: post-merge`; the other
-three carry no `name:` and display as their job id.
+**The calling job's name is a contract literal.** `plan` and `comment-ops`
+carry `name: shipmate`, as does a drift file's `drift` job; `deploy` carries
+`name: post-merge`; `apply` and `unlock` carry no `name:` and display as their
+job id.
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 only a plan job named `shipmate` produces `shipmate / <stack> / <env>` plan
 cells and the `shipmate / summary`, `shipmate / facts` and `shipmate / detect`
@@ -1607,18 +1642,19 @@ The four jobs:
   authorization and for the `workflow_dispatch` that kicks off an apply.
   `issue_comment` evaluates at the default branch's tip, never a PR head, so it
   satisfies the policy the same way `push` does.
-- **`drift.yml`**'s `issues` job (engine, reached through the consumer's
-  `drift` job on the nightly `schedule` or a `workflow_dispatch`) — binds
+- **`drift.yml`**'s `issues` job (engine, reached through a drift workflow
+  file's `drift` job on its `schedule` or a `workflow_dispatch`) — binds
   `shipmate-engine` to author the drift Issues, and a scheduled or manually
   dispatched run evaluates at the default branch.
 
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
-workflow files for three probes — stale engine pins, `pull_request_target`
-triggers, and `shipmate.yml`'s wiring, whose checks of the plan-calling job
+workflow files for four probes — stale engine pins, `pull_request_target`
+triggers, whether any file calls engine `drift.yml`, and `shipmate.yml`'s
+wiring, whose checks of the plan-calling job
 name, dispatch wiring and event routing observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
-and whether the job it reaches is the one that verb names — and they report
-rather than fail.
+and whether the job it reaches is the one that verb names, and whose fourth
+check reports a drift job left in it — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
@@ -1775,9 +1811,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   smaller matrix. Splitting cannot help when the fan-out comes from a one-line
   edit to a shared local module — that correctly marks every dependent stack
   changed and is one atomic change by nature — and there the only lever is to
-  reduce the number of environments in play. A drift sweep enumerates the whole
-  tree, covers every stack and environment cell and cannot be split; its only
-  lever is fewer environments or fewer env-tagged stacks. A targeted `shipmate apply <env>`
+  reduce the number of environments in play. A drift sweep's limit counts the
+  cells its `tags` query keeps, so the way past it is more drift workflow files
+  with narrower queries (§Tag grammar). A targeted `shipmate apply <env>`
   is not a way past it: the ceiling is enforced in the plan fan-out, so a run
   that trips it produces no reviewed plan artifact for any apply path to use.
 - Plans fan out flat: all applicable plan units for a pull request run

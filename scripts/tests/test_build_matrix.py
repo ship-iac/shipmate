@@ -56,8 +56,8 @@ def test_raises_above_256_cells():
     )
 
 
-def test_whole_tree_sweep_above_256_cells_names_no_split(monkeypatch):
-    """A whole-tree run (drift) cannot be split across pull requests.
+def test_whole_tree_sweep_above_256_cells_names_drift_files(monkeypatch):
+    """A drift sweep is split across drift files, not pull requests.
 
     Reddens when the `all_stacks` branch is dropped, or `compute_cells` stops forwarding
     `all_stacks`, and the changed-set message returns.
@@ -69,9 +69,26 @@ def test_whole_tree_sweep_above_256_cells_names_no_split(monkeypatch):
         bm.compute_cells(all_stacks=True)
     assert str(exc_info.value) == (
         "::error::257 plan cells exceeds the GitHub Actions matrix limit of 256. "
-        "A whole-tree sweep covers every stack and environment cell and cannot be split; "
-        "the only lever is fewer environments or fewer env-tagged stacks."
+        "A drift sweep is one matrix; split it across more drift files, each calling "
+        "drift.yml with a narrower `tags` query (docs/drift.md)."
     )
+
+
+def test_the_matrix_limit_counts_the_cells_a_query_keeps(monkeypatch):
+    """257 tree cells and a query keeping 10 plan those 10.
+
+    Mutations: cap the tree before the filter in `compute_cells` -- the 257-cell tree refuses;
+    return the filtered cells as the tree -- the tree comparison reddens."""
+    stacks = [f"stacks/s{i:03}" for i in range(257)]
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
+    monkeypatch.setattr(
+        bm,
+        "_tags",
+        lambda s: ["env/dev-eu", "workload/keep" if s < "stacks/s010" else "workload/drop"],
+    )
+    _, cells, tree = bm.compute_cells(all_stacks=True, tags="workload/keep")
+    assert [c["stack"] for c in cells] == [f"stacks/s{i:03}" for i in range(10)]
+    assert tree == [{"environment": "dev-eu", "stack": f"stacks/s{i:03}"} for i in range(257)]
 
 
 def test_stack_at_engine_reserved_word_paths_plans():
@@ -171,7 +188,7 @@ def test_compute_cells_fans_out_multi_env(monkeypatch):
     # Happy path only -- does NOT exercise the untagged-stack guard.
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu", "env/dev-us", "workload/app"])
-    _, cells = bm.compute_cells(all_stacks=True)
+    _, cells, _ = bm.compute_cells(all_stacks=True)
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
         {"stack": "stacks/app", "environment": "dev-us", "workload": "app"},
@@ -275,15 +292,16 @@ _NOT_OPTED_OUT = [
 
 
 @pytest.mark.parametrize("value", _NOT_OPTED_OUT)
-def test_only_the_bool_true_skips_the_two_refusals(monkeypatch, value):
+def test_only_the_bool_true_skips_the_three_refusals(monkeypatch, value):
     """main() parses the input to a bool, so a raw string here is a caller that forgot to parse.
     A truthy check would skip the fork refusal for "false".
 
-    Mutation: `if no_pull_request is True:` -> `if no_pull_request:` in either helper -- its
-    str-false, str-true and one rows redden."""
+    Mutation: `if no_pull_request is True:` -> `if no_pull_request:` in any of the three
+    helpers -- its str-false, str-true and one rows redden."""
     monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
     assert bm.fork_pr_error("acme/iac", "outsider/iac", value).startswith("::error::")
     assert bm.head_checkout_error("cafe1234", value).startswith("::error::")
+    assert bm.tag_filter_error("env/dev-eu", value).startswith("::error::")
 
 
 def test_the_opt_out_plans_whatever_the_head_repository():
@@ -307,13 +325,15 @@ def _run_main(
     head_sha=None,
     table=None,
     stacks=None,
+    tree=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
     never having run. Pass `called` to keep that record readable when main() raises.
 
-    `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
-    the double, and leaves `called` and `cells` unused.
+    The double returns `tree` as the scanned tree's cell names, or the names of `cells` when
+    it is None. `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that
+    tree instead of the double, and leaves `called`, `cells` and `tree` unused.
 
     `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
     run past the head-checkout refusal looks like; without it the run states no head and is
@@ -336,6 +356,7 @@ def _run_main(
         "SHIPMATE_HEAD_REPO",
         "SHIPMATE_HEAD_SHA",
         "SHIPMATE_NO_PULL_REQUEST",
+        "SHIPMATE_TAGS",
     ):
         monkeypatch.delenv(k, raising=False)
     if head_sha is not None:
@@ -345,14 +366,15 @@ def _run_main(
         monkeypatch.setenv(k, v)
     called = [] if called is None else called
 
-    def fake_compute(all_stacks=False, base=""):
-        called.append((all_stacks, base))
+    def fake_compute(all_stacks=False, base="", tags=""):
+        called.append((all_stacks, base, tags))
         # The whole row `build_matrix` emits, `workload` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.
         rows = [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
+        names = [{"environment": e, "stack": s} for s, e in cells] if tree is None else tree
         # The real `compute_cells` returns the env->workloads map beside the rows, and `main`
         # forwards it as `tagged` only under `all_stacks`. The rows tag no workload.
-        return {e: frozenset() for _, e in cells}, rows
+        return {e: frozenset() for _, e in cells}, rows, names
 
     if stacks is None:
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
@@ -475,7 +497,7 @@ def test_main_plans_a_same_repository_pull_request(monkeypatch, tmp_path):
         head_sha="cafe1234",
     )
     assert outputs["empty"] == "false"
-    assert called == [(False, "")]
+    assert called == [(False, "", "")]
 
 
 def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
@@ -492,7 +514,7 @@ def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
         },
     )
     assert outputs["empty"] == "false"
-    assert called == [(True, "")]
+    assert called == [(True, "", "")]
 
 
 def test_a_stated_head_equal_to_the_checkout_is_planned(monkeypatch):
@@ -549,7 +571,7 @@ def test_the_opt_out_skips_the_head_checkout_check(monkeypatch):
         pytest.param("no-pull-request", False, id="input-name"),
     ],
 )
-def test_main_parses_the_opt_out_once_for_both_guards(monkeypatch, tmp_path, value, opted_out):
+def test_main_parses_the_opt_out_once_for_all_three_guards(monkeypatch, tmp_path, value, opted_out):
     """Case- and whitespace-insensitive, so a `no-pull-request: True` does not redden a nightly
     over YAML capitalisation. Only "true" opts out: the manifest default is the non-empty string
     "false", so anything that treats a non-empty value as the opt-out would plan every unstated
@@ -559,12 +581,13 @@ def test_main_parses_the_opt_out_once_for_both_guards(monkeypatch, tmp_path, val
     reddens; parse with `bool(...)` -- every non-empty `False` row reddens; pass the raw variable
     to one guard -- that guard records a string."""
     seen = []
-    for name in ("fork_pr_error", "head_checkout_error"):
+    for name in ("fork_pr_error", "head_checkout_error", "tag_filter_error"):
         monkeypatch.setattr(bm, name, lambda *args, _n=name: seen.append((_n, args[-1])) or "")
     _run_main(monkeypatch, tmp_path, {"SHIPMATE_NO_PULL_REQUEST": value})
     assert seen == [
         ("fork_pr_error", opted_out),
         ("head_checkout_error", opted_out),
+        ("tag_filter_error", opted_out),
     ]
 
 
@@ -651,7 +674,8 @@ def test_a_renamed_plan_workflow_is_refused(monkeypatch, tmp_path):
         "::error::this repository has no `.github/workflows/shipmate.yml`, the one path "
         "`CONTRACT.md` lets the consumer's workflow file live at, and this refusal is what "
         "enforces it. That exact filename is matched literally by `shipmate doctor`, whose "
-        "`shipmate.yml` probe checks its job name, dispatch wiring and event routing, and by "
+        "`shipmate.yml` probe checks its job name, dispatch wiring, event routing and leftover "
+        "drift call, and by "
         "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
         "under any other name draws that probe's could-not-read notice and doctor's own "
         "`pull_request_target` warning, and is reached by no `shipmate` command at "
@@ -706,10 +730,10 @@ def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
 def test_build_matrix_action_declares_its_inputs():
     """No input here can turn a refusal off: `head-repo` and `head-sha` are what the two
     refusals key on and an empty value refuses either, while `no-pull-request` only states
-    that there is no pull request at all. All are settable only by this repository's own
-    default-branch workflow, which a pull-request author cannot edit, and the direction is
-    chosen so a forgotten input refuses (plan wrapper) or reddens the nightly (drift), never
-    plans a fork.
+    that there is no pull request at all, and `tags` is refused unless the run states that
+    too. All are settable only by this repository's own default-branch workflow, which a
+    pull-request author cannot edit, and the direction is chosen so a forgotten input
+    refuses (plan wrapper) or reddens the nightly (drift), never plans a fork.
 
     Hand-written, name -> default; descriptions are prose and not pinned."""
     from _loader import action_yaml
@@ -721,6 +745,7 @@ def test_build_matrix_action_declares_its_inputs():
         "head-repo": "",
         "head-sha": "",
         "no-pull-request": "false",
+        "tags": "",
         "github-vars": "",
     }
 
@@ -738,6 +763,7 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
         "SHIPMATE_HEAD_REPO": "${{ inputs.head-repo }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_NO_PULL_REQUEST": "${{ inputs.no-pull-request }}",
+        "SHIPMATE_TAGS": "${{ inputs.tags }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
         "GH_TOKEN": "${{ github.token }}",
     }
@@ -756,10 +782,11 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     }
 
 
-def test_the_cells_output_is_the_cell_names_in_matrix_order(monkeypatch, tmp_path):
-    """The names alone, in the matrix's `include` order: a stamped row carries `tf_vars` and
-    roles, and 256 of them in one env var can pass Linux's single-argument limit. Mutations:
-    emit the stamped rows as `cells`; emit the names reversed."""
+def test_the_cells_output_is_the_scanned_tree_not_the_matrix(monkeypatch, tmp_path):
+    """`cells` is the tree `compute_cells` returns, names alone, in its order: drift-issues closes
+    the Issue of every cell missing from it, so the filtered matrix there would close the Issues
+    of every cell outside the query. Mutations: write `cells` from the matrix rows' names;
+    emit the tree reversed."""
     outputs, _ = _run_main(
         monkeypatch,
         tmp_path,
@@ -768,12 +795,16 @@ def test_the_cells_output_is_the_cell_names_in_matrix_order(monkeypatch, tmp_pat
             "GITHUB_REPOSITORY": "acme/iac",
             "SHIPMATE_NO_PULL_REQUEST": "true",
         },
-        cells=(("stacks/db", "prod-eu"), ("stacks/app", "dev-eu")),
+        cells=(("stacks/app", "dev-eu"),),
+        tree=[
+            {"environment": "dev-eu", "stack": "stacks/app"},
+            {"environment": "prod-eu", "stack": "stacks/db"},
+        ],
     )
-    include = json.loads(outputs["matrix"])["include"]
-    names = [{"environment": c["environment"], "stack": c["stack"]} for c in include]
-    assert len(names) == 2
-    assert outputs["cells"] == json.dumps(names)
+    assert json.loads(outputs["cells"]) == [
+        {"environment": "dev-eu", "stack": "stacks/app"},
+        {"environment": "prod-eu", "stack": "stacks/db"},
+    ]
 
 
 def test_rejects_stacks_that_slug_to_one_artifact_name():
@@ -1063,3 +1094,479 @@ def test_a_cell_the_table_no_longer_lists_stamps_with_no_role():
             "env_binding": "dev-eu-apply",
         }
     ]
+
+
+_EMPTY_TERM_ERROR = (
+    "::error::the `tags` filter has an empty term: '{query}'. Terms are separated "
+    "by ',' (OR) and ':' (AND), and each must be a tag in its on-disk form -- "
+    "'env/dev-eu,env/dev-us' or 'env/dev-eu:workload/app'."
+)
+_NO_MATCH_NOTICE = (
+    "::notice::the drift tags query '{query}' matches no stack x environment cell, so this "
+    "sweep is empty."
+)
+_ON_DISK = " Tags match in their on-disk form, such as 'env/dev-eu'."
+
+
+def _filtered(envs, stacks_by_env, tags_by_stack, query):
+    return bm.filter_cells(bm.full_tree(envs, stacks_by_env, tags_by_stack), tags_by_stack, query)
+
+
+def test_tag_filter_matches_a_cell_against_its_own_env_only():
+    """A stack in two envs, filtered by one of them, yields that env's cell alone.
+
+    Mutation: `_cell_tags` returns the raw `tags_by_stack` entry -- the prod-eu cell then
+    carries `env/dev-eu` too and both cells survive.
+    """
+    cells = _filtered(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/app"], "prod-eu": ["stacks/app"]},
+        {"stacks/app": ["env/dev-eu", "env/prod-eu"]},
+        "env/dev-eu",
+    )
+    assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
+
+
+def test_tag_filter_on_a_non_env_tag_keeps_every_env_of_that_stack():
+    """`workload/app` is not narrowed by the cell's env, so both cells survive.
+
+    Mutation: `_cell_tags` keeps only the cell's own `env/*` tag -- nothing then carries
+    `workload/app` and the sweep is empty.
+    """
+    cells = _filtered(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/app"], "prod-eu": ["stacks/app"]},
+        {"stacks/app": ["env/dev-eu", "env/prod-eu", "workload/app"]},
+        "workload/app",
+    )
+    assert [(c["environment"], c["stack"]) for c in cells] == [
+        ("dev-eu", "stacks/app"),
+        ("prod-eu", "stacks/app"),
+    ]
+
+
+def test_colon_binds_tighter_than_comma():
+    """`a:b,c` is `(a AND b) OR c`, not `a OR (b AND c)`.
+
+    Mutation: split on ':' outermost and ',' within -- the clauses become `[{a}, {b, c}]`,
+    which keeps the a-only stack and drops the c-only one.
+    """
+    cells = _filtered(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/bare", "stacks/app"], "prod-eu": ["stacks/other"]},
+        {
+            "stacks/bare": ["env/dev-eu"],
+            "stacks/app": ["env/dev-eu", "workload/app"],
+            "stacks/other": ["env/prod-eu"],
+        },
+        "env/dev-eu:workload/app,env/prod-eu",
+    )
+    assert [(c["environment"], c["stack"]) for c in cells] == [
+        ("dev-eu", "stacks/app"),
+        ("prod-eu", "stacks/other"),
+    ]
+
+
+def test_comma_is_or_across_clauses():
+    """A cell matching either clause is kept.
+
+    Mutation: `all` replaces `any` over the clauses -- no stack carries both workloads, so
+    the sweep is empty.
+    """
+    cells = _filtered(
+        ["dev-eu"],
+        {"dev-eu": ["stacks/a", "stacks/b"]},
+        {
+            "stacks/a": ["env/dev-eu", "workload/a"],
+            "stacks/b": ["env/dev-eu", "workload/b"],
+        },
+        "workload/a,workload/b",
+    )
+    assert [c["stack"] for c in cells] == ["stacks/a", "stacks/b"]
+
+
+def test_colon_is_and_within_a_clause():
+    """A two-term clause keeps only a stack carrying both terms.
+
+    Mutation: test the clause by intersection rather than subset -- the stack carrying
+    `workload/app` alone then matches too.
+    """
+    cells = _filtered(
+        ["dev-eu"],
+        {"dev-eu": ["stacks/both", "stacks/one"]},
+        {
+            "stacks/both": ["env/dev-eu", "workload/app", "team/core"],
+            "stacks/one": ["env/dev-eu", "workload/app"],
+        },
+        "workload/app:team/core",
+    )
+    assert [c["stack"] for c in cells] == ["stacks/both"]
+
+
+def test_spaces_around_terms_match_as_without_them():
+    """Terms are stripped, so a query written with spaces after its commas sweeps the same cells.
+
+    Mutation: drop `.strip()` in `_parse_tag_query` -- `env/dev-eu ` is carried by no stack and
+    the spaced query sweeps nothing.
+    """
+    args = (
+        ["dev-eu", "dev-us", "prod-eu"],
+        {"dev-eu": ["stacks/app"], "dev-us": ["stacks/app"], "prod-eu": ["stacks/app"]},
+        {"stacks/app": ["env/dev-eu", "env/dev-us", "env/prod-eu"]},
+    )
+    expected = [("dev-eu", "stacks/app"), ("dev-us", "stacks/app")]
+    for query in ("env/dev-eu , env/dev-us", "env/dev-eu,env/dev-us"):
+        assert [(c["environment"], c["stack"]) for c in _filtered(*args, query)] == expected
+
+
+def test_a_term_no_stack_carries_drops_only_its_own_clause(monkeypatch, tmp_path, capsys):
+    """`env/dev-eu,env/nope` sweeps the dev-eu cells, and one notice names `env/nope`: a query
+    written before an environment's first stack still sweeps the environments that exist.
+
+    Mutations: return `[]` whenever a term is unknown -- the matrix is empty; drop the notice
+    on the matching path -- stdout lacks it.
+    """
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu,env/nope"},
+        stacks=_MULTI_ENV_TREE,
+    )
+    include = json.loads(outputs["matrix"])["include"]
+    assert [(c["environment"], c["stack"]) for c in include] == [
+        ("dev-eu", "stacks/app"),
+        ("dev-eu", "stacks/db"),
+    ]
+    assert capsys.readouterr().out.splitlines() == [
+        "::notice::the drift tags query 'env/dev-eu,env/nope' has clause(s) matching no cell: "
+        "env/nope. No stack carries: env/nope." + _ON_DISK,
+        "2 cell(s): dev-eu/stacks/app, dev-eu/stacks/db",
+    ]
+
+
+def test_conceptual_tag_form_names_both_halves_as_carried_by_no_stack(capsys):
+    """`env:dev-eu` is the documentation form; on disk the tag is `env/dev-eu`.
+
+    Mutation: translate ':' to '/' before matching -- the typo then silently sweeps.
+    """
+    cells = _filtered(
+        ["dev-eu"], {"dev-eu": ["stacks/app"]}, {"stacks/app": ["env/dev-eu"]}, "env:dev-eu"
+    )
+    assert cells == []
+    assert capsys.readouterr().out.splitlines() == [
+        _NO_MATCH_NOTICE.format(query="env:dev-eu") + " No stack carries: dev-eu, env." + _ON_DISK
+    ]
+
+
+@pytest.mark.parametrize("query", ["env/dev-eu,", "env/dev-eu::workload/app", "env/dev-eu,   "])
+def test_empty_term_is_refused(query):
+    """A trailing comma, a doubled separator and a whitespace-only clause abort.
+
+    Mutation: drop the `"" in terms` check -- `env/dev-eu,` reaches the matcher with the term
+    `""` and returns an empty sweep instead of refusing.
+    """
+    with pytest.raises(SystemExit) as exc_info:
+        _filtered(
+            ["dev-eu"],
+            {"dev-eu": ["stacks/app"]},
+            {"stacks/app": ["env/dev-eu", "workload/app"]},
+            query,
+        )
+    assert str(exc_info.value) == _EMPTY_TERM_ERROR.format(query=query)
+
+
+def test_known_terms_that_co_occur_nowhere_empty_the_sweep(capsys):
+    """Every term exists, but no cell carries the conjunction: an empty sweep and a notice
+    naming the query, with no `No stack carries` clause.
+
+    Mutation: append the clause unconditionally -- the notice gains ` No stack carries: .`.
+    """
+    cells = _filtered(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/db"], "prod-eu": ["stacks/app"]},
+        {
+            "stacks/db": ["env/dev-eu", "workload/db"],
+            "stacks/app": ["env/prod-eu", "workload/app"],
+        },
+        "env/dev-eu:workload/app",
+    )
+    assert cells == []
+    assert capsys.readouterr().out.splitlines() == [
+        _NO_MATCH_NOTICE.format(query="env/dev-eu:workload/app")
+    ]
+
+
+def test_a_clause_of_known_terms_matching_no_cell_is_named_beside_a_live_one(capsys):
+    """`env/prod-eu` and `workload/app` both exist but never share a cell, so the first clause
+    sweeps nothing while `env/dev-eu` sweeps its cells. The dead clause is named, with no `No
+    stack carries` sentence, because every term is carried.
+
+    Mutation: notice only when a term is unknown -- stdout is empty.
+    """
+    cells = _filtered(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/app", "stacks/db"], "prod-eu": ["stacks/net"]},
+        {
+            "stacks/app": ["env/dev-eu", "workload/app"],
+            "stacks/db": ["env/dev-eu"],
+            "stacks/net": ["env/prod-eu"],
+        },
+        "env/prod-eu:workload/app,env/dev-eu",
+    )
+    assert [(c["environment"], c["stack"]) for c in cells] == [
+        ("dev-eu", "stacks/app"),
+        ("dev-eu", "stacks/db"),
+    ]
+    assert capsys.readouterr().out.splitlines() == [
+        "::notice::the drift tags query 'env/prod-eu:workload/app,env/dev-eu' has clause(s) "
+        "matching no cell: env/prod-eu:workload/app."
+    ]
+
+
+def test_a_repeated_dead_clause_is_named_once(capsys):
+    """Mutation: drop the `dict.fromkeys` dedupe -- the notice names `env/nope` twice."""
+    cells = _filtered(
+        ["dev-eu"],
+        {"dev-eu": ["stacks/app"]},
+        {"stacks/app": ["env/dev-eu"]},
+        "env/nope,env/nope,env/dev-eu",
+    )
+    assert [(c["environment"], c["stack"]) for c in cells] == [("dev-eu", "stacks/app")]
+    assert capsys.readouterr().out.splitlines() == [
+        "::notice::the drift tags query 'env/nope,env/nope,env/dev-eu' has clause(s) matching "
+        "no cell: env/nope. No stack carries: env/nope." + _ON_DISK
+    ]
+
+
+@pytest.mark.parametrize("query", ["", "   "])
+def test_an_empty_query_is_no_filter_at_all(query):
+    """An absent `tags` input is not an empty term.
+
+    Mutation: let an empty query fall through to the parser -- it refuses with the empty-term
+    error instead of returning the unfiltered cells.
+    """
+    args = (
+        ["dev-eu"],
+        {"dev-eu": ["stacks/app", "stacks/db"]},
+        {"stacks/app": ["env/dev-eu"], "stacks/db": ["env/dev-eu"]},
+    )
+    assert _filtered(*args, query) == bm.full_tree(*args)
+
+
+#: `stacks/app` sits in both environments; `stacks/db` only in dev-eu, `stacks/web` only in
+#: dev-us.
+_MULTI_ENV_TREE = {
+    "stacks/app": ["env/dev-eu", "env/dev-us"],
+    "stacks/db": ["env/dev-eu"],
+    "stacks/web": ["env/dev-us"],
+}
+#: The full tree of `_MULTI_ENV_TREE`, hand-written in matrix order.
+_MULTI_ENV_CELLS = [
+    {"environment": "dev-eu", "stack": "stacks/app"},
+    {"environment": "dev-eu", "stack": "stacks/db"},
+    {"environment": "dev-us", "stack": "stacks/app"},
+    {"environment": "dev-us", "stack": "stacks/web"},
+]
+
+
+def test_a_one_env_query_plans_that_env_and_outputs_the_whole_tree(monkeypatch, tmp_path):
+    """`env/dev-eu` plans the dev-eu cells alone, and `cells` still names the dev-us ones, so
+    drift-issues does not close their Issues.
+
+    Mutations: write `cells` from the filtered list in `main`; build the tree from the filtered
+    cells in `compute_cells`; `_cell_tags` returns the raw stack tags (the dev-us `stacks/app`
+    cell enters the matrix).
+    """
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu"},
+        stacks=_MULTI_ENV_TREE,
+    )
+    include = json.loads(outputs["matrix"])["include"]
+    assert [(c["environment"], c["stack"]) for c in include] == [
+        ("dev-eu", "stacks/app"),
+        ("dev-eu", "stacks/db"),
+    ]
+    assert json.loads(outputs["cells"]) == _MULTI_ENV_CELLS
+
+
+def test_a_query_matching_no_cell_is_an_empty_sweep_with_a_notice(monkeypatch, tmp_path, capsys):
+    """Exit 0 with an empty matrix: a drift file may precede its first tagged stack. `cells`
+    stays the whole tree, so no Issue is closed for a cell the query never planned.
+
+    Mutations: refuse a no-match query with `SystemExit` as before; drop the ` No stack carries`
+    clause. The whole stdout is compared, so a second notice or a lost sentence reddens too.
+    """
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu:workload/nope"},
+        stacks=_MULTI_ENV_TREE,
+    )
+    assert outputs["empty"] == "true"
+    assert outputs["count"] == "0"
+    assert json.loads(outputs["cells"]) == _MULTI_ENV_CELLS
+    assert capsys.readouterr().out.splitlines() == [
+        _NO_MATCH_NOTICE.format(query="env/dev-eu:workload/nope")
+        + " No stack carries: workload/nope."
+        + _ON_DISK,
+        "0 cell(s): (none)",
+    ]
+
+
+def test_a_filtered_sweep_still_checks_every_environment_against_a_tf_vars_table(
+    monkeypatch, tmp_path
+):
+    """The table covers dev-eu alone and the query sweeps dev-eu alone, yet a dev-us stack is
+    still refused: the coverage check runs over the whole tree.
+
+    Mutation: `env_config(cells, ...)` in `main` -- the dev-eu sweep plans.
+    """
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu"},
+            table={"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}},
+            stacks=_MULTI_ENV_TREE,
+        )
+    assert str(exc.value) == (
+        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
+        "environment table, and dev-us has no entry in it."
+    )
+
+
+def test_a_filtered_sweep_still_refuses_a_slug_collision_outside_it(monkeypatch):
+    """`a/b` and `a-b` collide in dev-us only, and the query sweeps dev-eu: still refused.
+
+    Mutation: run `guard_slug_collisions` over the filtered cells instead of the tree.
+    """
+    tree = {"stacks/app": ["env/dev-eu"], "a/b": ["env/dev-us"], "a-b": ["env/dev-us"]}
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
+    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    with pytest.raises(SystemExit) as exc_info:
+        bm.compute_cells(all_stacks=True, tags="env/dev-eu")
+    assert str(exc_info.value) == (
+        "::error::a-b, a/b all map to the plan artifact 'plan.dev-us.a-b': distinct "
+        "stack paths sharing one artifact name would make an apply download another "
+        "stack's plan. Rename one so the path->'-' slug is unique."
+    )
+
+
+def test_a_filtered_sweep_still_refuses_two_workload_tags_outside_it(monkeypatch):
+    """stacks/dns is outside the `env/dev-eu` sweep, and its two workload tags still refuse it.
+
+    Mutation: stamp `workload` on the filtered cells instead of the tree -- the sweep plans.
+    """
+    tree = {
+        "stacks/app": ["env/dev-eu"],
+        "stacks/dns": ["env/prod-eu", "workload/network", "workload/net"],
+    }
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
+    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    with pytest.raises(SystemExit) as exc_info:
+        bm.compute_cells(all_stacks=True, tags="env/dev-eu")
+    assert exc_info.value.code == _TWO_WORKLOADS_ERROR
+
+
+def test_a_tag_filter_does_not_hide_a_workload_from_drift(monkeypatch, tmp_path, capsys):
+    """The filter drops `stacks/net`, the only stack tagging `workload/net`, from the cells; the
+    tag still exists, so drift must not report `net` as untagged every night.
+
+    Mutation: derive `tagged` from the filtered cells in `compute_cells` -- the warning names
+    `net`."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "workload/app"},
+        table=_LISTING_TABLE,
+        stacks=_WORKLOAD_TREE,
+    )
+    assert capsys.readouterr().out.splitlines() == ["1 cell(s): dev-eu/stacks/app"]
+
+
+_TAG_FILTER_ERROR = (
+    "::error::the `tags` filter is only for a workflow with no pull request at all "
+    "(nightly drift), and this run did not pass `no-pull-request: true`. In a plan "
+    "job it would drop changed stacks from the matrix: a dropped stack gets no plan "
+    "cell and no apply check, `shipmate / gate` greens over it, and the change merges "
+    "and never applies. Remove the input from the plan job."
+)
+
+
+def test_main_refuses_a_tag_filter_on_a_plan_run_and_does_not_enumerate(monkeypatch, tmp_path):
+    """A `tags` value with no `no-pull-request` aborts before the stacks are listed.
+
+    Mutation: drop `tag_filter_error` from `main`'s `or` chain -- the run plans a narrowed
+    matrix and `called` records the enumeration.
+    """
+    called = []
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+                "SHIPMATE_TAGS": "env/dev-eu",
+            },
+            called=called,
+            head_sha="cafe1234",
+        )
+    assert str(exc_info.value) == _TAG_FILTER_ERROR
+    assert called == []
+
+
+def test_all_stacks_does_not_exempt_the_tag_filter_refusal(monkeypatch, tmp_path):
+    """`all-stacks: true` plus `tags` on a plan run is still refused.
+
+    Mutation: add `all_stacks` to the exemption -- a plan wrapper setting both would drop
+    changed stacks from the matrix, so they get no plan cell and no apply check,
+    `shipmate / gate` greens, and the change merges unapplied.
+    """
+    called = []
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "pull_request",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_HEAD_REPO": "acme/iac",
+                "SHIPMATE_ALL_STACKS": "true",
+                "SHIPMATE_TAGS": "env/dev-eu",
+            },
+            called=called,
+            head_sha="cafe1234",
+        )
+    assert str(exc_info.value) == _TAG_FILTER_ERROR
+    assert called == []
+
+
+def test_the_tag_filter_refusal_is_keyed_on_the_value():
+    """A composite action's `required:`/`default:` is not enforced by GitHub Actions, so the
+    refusal reads the value: any non-empty query outside a no-pull-request run is refused,
+    and an absent input arrives as "" and is no filter at all.
+
+    Mutation: `tag_filter_error` returns "" unconditionally -- the first case reddens."""
+    assert bm.tag_filter_error("env/dev-eu", False) == _TAG_FILTER_ERROR
+    assert bm.tag_filter_error("", False) == ""
+    assert bm.tag_filter_error("   ", False) == ""
+    assert bm.tag_filter_error("env/dev-eu", True) == ""
+
+
+def test_a_drift_run_passes_the_query_through_verbatim(monkeypatch, tmp_path):
+    """`compute_cells` is handed the query exactly as the input stated it.
+
+    Mutation: hard-code `""` as main's `compute_cells` query, or strip the query there --
+    the surrounding and inner whitespace here is the parser's to strip, and a second reading
+    of the grammar is a second grammar.
+    """
+    _, called = _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": " env/dev-eu ,workload/app"},
+    )
+    assert called == [(True, "", " env/dev-eu ,workload/app")]

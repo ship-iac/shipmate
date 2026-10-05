@@ -122,10 +122,14 @@ def _run_main(
     order=None,
     table=None,
     reads=None,
+    stacks=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
     into `urls` are the ones the work set itself asks for.
+
+    `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
+    the double, and leaves `cells` unused.
 
     `order` is folded into the stubbed table rather than stubbed on `eo`: the ordering map is
     a field of the mapping this path loads, so a double on the reader would mask a caller
@@ -153,16 +157,21 @@ def _run_main(
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: HEAD)
-    # `compute_cells` returns (env->workloads map, rows); a double returning rows alone
-    # unpacks into two names and fails somewhere unrelated.
-    monkeypatch.setattr(
-        dd.bm,
-        "compute_cells",
-        lambda all_stacks=False, base="": (
-            {c["environment"]: frozenset({c["workload"]} - {""}) for c in cells},
-            cells,
-        ),
-    )
+    # `compute_cells` returns (env->workloads map, rows, tree names); a double returning fewer
+    # unpacks into the wrong names and fails somewhere unrelated.
+    if stacks is None:
+        monkeypatch.setattr(
+            dd.bm,
+            "compute_cells",
+            lambda all_stacks=False, base="", tags="": (
+                {c["environment"]: frozenset({c["workload"]} - {""}) for c in cells},
+                cells,
+                [{"environment": c["environment"], "stack": c["stack"]} for c in cells],
+            ),
+        )
+    else:
+        monkeypatch.setattr(dd.bm, "_list_stacks", lambda all_stacks, base: list(stacks))
+        monkeypatch.setattr(dd.bm, "_tags", lambda s: stacks[s])
     # deploy-detect and the apply-detect it loads hold separate build-matrix instances, and
     # the check-run listing is fetched through apply-detect's. Both are stubbed so a `gh api`
     # call from either module lands in `urls`.
@@ -378,6 +387,24 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
         reads=reads,
     )
     assert len(reads) == 1
+
+
+def test_main_unpacks_the_real_compute_cells_return(tmp_path, monkeypatch):
+    """Every other test here doubles `compute_cells`; this one runs the real one, so a change to
+    its return shape cannot pass behind a double that changed with it.
+
+    Mutation: `compute_cells` returns `(tagged, cells)` -- main's unpack raises `ValueError`."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[],
+        checks=[_apply_check("stacks/app")],
+        stacks={"stacks/app": ["env/dev-eu"]},
+        deps={"stacks/app": set()},
+    )
+    assert [(c["environment"], c["stack"]) for c in _wave_cells(parsed)] == [
+        ("dev-eu", "stacks/app")
+    ]
 
 
 def test_deploy_passes_no_workload_map(tmp_path, monkeypatch):
