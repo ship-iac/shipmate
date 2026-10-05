@@ -339,16 +339,18 @@ pending with the draft reason. Mark the pull request ready, or comment
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 that name is what makes the plan cells `shipmate / <stack> / <env>` and lets the
 plan comment's `plan` links resolve to them. The `plan` and `comment-ops` jobs
-and the drift file's `drift` job all carry it. Rename one and the run still happens; every one of
-those links falls back to the workflow-run page instead. `shipmate doctor`
-reports it.
+and the drift file's `drift` job all carry it. Rename the `plan` job and its run
+still happens, but every one of those links falls back to the workflow-run page
+instead; `shipmate doctor` reports it. Renaming `comment-ops` or `drift` changes
+only their own check-run names: no link resolves through them, and doctor does
+not check them.
 
 **The filename is load-bearing too.** `actions/build-matrix` refuses to plan a
 repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
 input it sends; and `shipmate doctor` keys its `shipmate.yml` probe, which checks
-the job name, dispatch wiring, event routing and a leftover drift job, on it. A file under another
-name is reached by nothing. The drift file's name matters to
+the job name, dispatch wiring, event routing and a leftover drift job, on it. A
+file under another name is reached by nothing. The drift file's name matters to
 nothing: nothing dispatches it, and `scripts/onboard` and doctor both find a
 drift file by its call of `drift.yml`. `scripts/onboard` writes
 `shipmate-drift.yml` only when no workflow file makes that call.

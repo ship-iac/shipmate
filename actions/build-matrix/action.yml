@@ -31,13 +31,15 @@ inputs:
     default: "false"
   tags:
     description: >-
-      Terramate tag query narrowing the cells this run covers, in the on-disk tag
-      form: ',' is OR and ':' is AND, so 'env/dev-eu,env/dev-us' is either environment and
-      'env/dev-eu:workload/app' is both. Empty (the default) covers every cell. Allowed only
-      alongside no-pull-request (nightly drift), because narrowing a plan run would leave
-      changed stacks with no plan cell and no apply check. A term no stack carries matches
-      nothing in its own clause and is named in a notice; a query matching no cell leaves the
-      run empty with a notice; an empty term fails the run.
+      Tag query narrowing the cells this run covers, over Terramate's on-disk tag form; not
+      a Terramate query. ',' is OR and ':' is AND, so 'env/dev-eu,env/dev-us' is either
+      environment and 'env/dev-eu:workload/app' is both. A cell matches against its stack's
+      tags with every other `env/*` tag removed, so 'env/a:env/b' matches nothing. Empty (the
+      default) covers every cell. Allowed only alongside no-pull-request (nightly drift),
+      because narrowing a plan run would leave changed stacks with no plan cell and no apply
+      check. Every clause matching no cell is named in a notice, with the terms no stack
+      carries; a query matching no cell leaves the run empty with a notice; an empty term
+      fails the run.
     required: false
     default: ""
   github-vars:
@@ -57,7 +59,7 @@ outputs:
     description: How many cells the plan matrix has. Read by the trusted summary job to check that every planned cell produced a summary.
     value: ${{ steps.build.outputs.count }}
   cells:
-    description: 'JSON [{environment,stack},...]: every cell of the scanned tree before the `tags` filter, in matrix order, as names alone to keep an env var small; not capped at 256 like the matrix. Read by drift-issues to close the Issues of removed cells.'
+    description: 'JSON [{environment,stack},...]: every cell of the scanned tree before the `tags` filter, in matrix order, as names alone to keep an env var small; not capped at 256 like the matrix. Read by drift-issues to close the Issues of removed cells. The list reaches drift-issues in one environment variable: past about 2,000 cells (128 KiB, Linux''s per-string limit) every sweep''s `issues` step fails before its script starts, after every cell has planned.'
     value: ${{ steps.build.outputs.cells }}
 runs:
   using: composite

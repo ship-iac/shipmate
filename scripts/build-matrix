@@ -261,9 +261,11 @@ def compute_cells(all_stacks=False, base="", tags=""):
 
     The map is returned beside the cells because a caller that scanned the whole tree feeds it
     to `env_config` as `tagged`, and re-scanning would be a second source that can disagree
-    with this one. Every repo-wide check runs over the whole tree; `tags` narrows only the
-    cells to plan, and the matrix limit counts those. The tree is `[{environment, stack}]` in
-    matrix order, uncapped."""
+    with this one. The tree-wide checks here -- untagged stacks, slug collisions, two
+    `workload/*` tags on one stack -- run over the whole tree; `tags` narrows only the cells to
+    plan, and the matrix limit counts those. The caller's per-cell checks (`stamp_rows`'
+    resolution and `env_binding` refusal, `refuse_workload_gaps`) see only the returned cells.
+    The tree is `[{environment, stack}]` in matrix order, uncapped."""
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
     full = full_tree(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
     cells = cap_cells(filter_cells(full, tags_by_stack, tags), all_stacks)

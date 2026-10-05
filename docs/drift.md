@@ -120,6 +120,11 @@ drift files. A sweep is one matrix, held to the same 256-cell limit as a plan
 run, counted after its `tags` query: above it `detect` refuses the sweep before
 any cell starts and names the remedy, splitting it across more drift files.
 
+Splitting does not lift the tree's own ceiling. Every sweep hands drift-issues
+the full tree's cell list in one environment variable. Past about 2,000 cells
+(128 KiB, Linux's per-string limit) every sweep's `issues` step fails before its
+script starts, after every cell has planned.
+
 ## Scoping a sweep
 
 One drift workflow file is one sweep, with its own crons, its own matrix and its
@@ -149,11 +154,14 @@ The query grammar:
   matched exactly and case-sensitively. Whitespace around a term is dropped.
 - A cell matches against its stack's tags minus every `env/*` tag other than its
   own. A stack tagged `env/dev-eu` and `env/dev-us` under the query `env/dev-eu`
-  sweeps only its `dev-eu` cell.
+  sweeps only its `dev-eu` cell, and `env/dev-eu:env/dev-us` matches nothing.
+  The query is not a Terramate query: it is matched by shipmate over Terramate's
+  on-disk tag form.
 - An empty term (a trailing `,` or a doubled separator) fails the run.
-- A term no stack carries makes its own clause match nothing, and a notice names
-  it; the other clauses still sweep. A query matching no cell is an empty sweep
-  with a notice, so a drift file can precede its first tagged stack.
+- A clause matching no cell, such as one naming a tag no stack carries, matches
+  nothing on its own; one notice names every such clause and the terms no stack
+  carries, and the other clauses still sweep. A query matching no cell is an
+  empty sweep with a notice, so a drift file can precede its first tagged stack.
 
 Keep the queries disjoint. A cell two queries select is planned by both sweeps,
 which update the same Issue, and two sweeps starting in the same minute can race
@@ -177,3 +185,11 @@ selects:
   environment table fails the sweep.
 - The unused-entry warnings above name what the table declares and no stack
   tags.
+
+Three checks run only over the cells the query selects, so a cell it drops
+escapes them:
+
+- Resolving the cell's row from the environment table.
+- The refusal of a row whose `env_binding` names no GitHub Environment.
+- The refusal of a `workload/*` tag the environment's `workloads` list does not
+  name.

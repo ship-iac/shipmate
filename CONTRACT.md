@@ -126,9 +126,9 @@ unmergeable while the status itself renders green.
 The middot is reserved for `shipmate.yml`'s `run-name` (`shipmate · plan`,
 `shipmate · comment`, `shipmate · deploy`, and the verb of a dispatched run) — a
 run title GitHub renders and nothing matches on, where it says which event or
-verb this run serves. That file's own `name:` is plain `shipmate`. A drift
-workflow file carries no `run-name`, so a sweep's run is titled by the file's
-own `name:` (`shipmate drift` in the published fence).
+verb this run serves. That file's own `name:` is plain `shipmate`. The
+published drift fence sets no `run-name`, so a sweep's run is titled by the
+file's own `name:` (`shipmate drift` in the published fence).
 
 The gate is a commit status rather than a check-run deliberately: a check-run
 is bound to a check-suite, and an imperatively-created one attaches to an
@@ -975,8 +975,9 @@ workflow file:
   matched exactly. A cell matches against its stack's tags minus every `env/*`
   tag other than its own, so a stack tagged for two environments matches a
   one-environment query in that environment's cell alone.
-- An empty term refuses the run. A term no stack carries makes only its own
-  clause match nothing, and a notice names it. A query matching no cell is an
+- An empty term refuses the run. A clause matching no cell, such as one naming
+  a tag no stack carries, matches nothing on its own; one notice names every
+  such clause and the terms no stack carries. A query matching no cell is an
   empty sweep with a notice, not a refusal.
 - `build-matrix` refuses a query on any run that does not pass
   `no-pull-request: true`, which only engine `drift.yml` passes: on a plan run
@@ -987,6 +988,11 @@ The repo-wide checks run over the full tree every sweep scans, before the query
 applies: untagged stacks, slug collisions, two `workload/*` tags on one stack,
 `tf_vars`-layout coverage of every tagged environment, and the unused-entry
 warnings. The 256-cell matrix limit counts the cells the query keeps.
+
+Three checks run per selected cell, after the query, so a cell it drops escapes
+them: resolving the cell's row from the environment table, the refusal of a row
+whose `env_binding` names no GitHub Environment, and the refusal of a
+`workload/*` tag its environment's `workloads` list does not name.
 
 ## Comment-ops
 
