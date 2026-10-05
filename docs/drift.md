@@ -135,9 +135,10 @@ with:
 Write the query in block form, as above: in a `{ }` flow mapping the comma
 splits the value, and GitHub refuses the file.
 
-`scripts/onboard` reconciles only `shipmate-drift.yml`: it writes that file
-again when it is missing, and reports it `differs` once you add a query. Keep
-that file as one of your sweeps; the other drift files are yours.
+`scripts/onboard` writes `shipmate-drift.yml` only when no workflow file calls
+the engine's `drift.yml`, and reports `ok` once any file does, whatever its name
+or query. It never compares or overwrites a drift file: edit, split or rename
+your sweeps freely.
 
 The query grammar:
 

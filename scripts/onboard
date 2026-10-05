@@ -38,7 +38,16 @@ import textwrap
 import urllib.parse
 
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
-from _shipmate import ENGINE_ENV, REPO_RE, _load, gate_check, review_count, utf8_output
+from _shipmate import (
+    ENGINE_ENV,
+    REPO_RE,
+    _engine_call,
+    _load,
+    _stripped_text,
+    gate_check,
+    review_count,
+    utf8_output,
+)
 from _shipmate import approval_rules as _approval_rules
 from _shipmate import run as _run
 
@@ -723,6 +732,34 @@ def _reconcile_shim(ctx, name, filename):
         report("differs", filename, "differs beyond its pin, not overwritten")
 
 
+def _reconcile_drift(ctx):
+    """Write `shipmate-drift.yml` from the `shipmate drift` fence when no workflow file in the
+    checkout calls the engine's `drift.yml`.
+
+    Matched by the call, never by file name or content: a consumer adds a `tags` query to the
+    drift file, splits it into several sweeps, or renames it. Comments are stripped first, as
+    doctor's drift-file probe strips them, so a commented-out call is no sweep to either.
+    A `shipmate-drift.yml` without a call is the consumer's file and is not overwritten.
+    """
+    workflows = pathlib.Path(ctx["root"]) / ".github" / "workflows"
+    call = _engine_call("drift.yml")
+    callers = [
+        p.name
+        for p in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")])
+        if p.is_file() and call.search(_stripped_text(p.read_text(encoding="utf-8")))
+    ]
+    path = workflows / "shipmate-drift.yml"
+    if callers:
+        report("ok", path.name, "" if path.name in callers else f"called from {', '.join(callers)}")
+    elif path.is_file():
+        report("differs", path.name, "calls no engine `drift.yml`, not overwritten")
+    else:
+        text = _render(
+            ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"], "shipmate drift"
+        )
+        write_file(path, text, path.name)
+
+
 #: GitHub's own search order for the file.
 _CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 
@@ -1014,7 +1051,7 @@ def main(argv=None):
     _reconcile_variables(ctx)
     _reconcile_ruleset(ctx)
     _reconcile_shim(ctx, "shipmate", "shipmate.yml")
-    _reconcile_shim(ctx, "shipmate drift", "shipmate-drift.yml")
+    _reconcile_drift(ctx)
     _checklist(ctx)
 
     sys.exit(_exit_code())

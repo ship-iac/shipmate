@@ -348,9 +348,10 @@ repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
 input it sends; and `shipmate doctor` keys its `shipmate.yml` probe, which checks
 the job name, dispatch wiring and event routing, on it. A file under another
-name is reached by nothing. The drift file's name matters only to
-`scripts/onboard`, which reconciles `shipmate-drift.yml` alone: nothing
-dispatches it, and doctor finds any drift file by its call of `drift.yml`.
+name is reached by nothing. The drift file's name matters to
+nothing: nothing dispatches it, and `scripts/onboard` and doctor both find a
+drift file by its call of `drift.yml`. `scripts/onboard` writes
+`shipmate-drift.yml` only when no workflow file makes that call.
 
 Which trigger reaches which job, and which engine workflow it calls:
 
@@ -863,10 +864,11 @@ The drift file's `drift` job plans every stack × environment, or the cells its
 report. The engine jobs behind it that hold a credential run only at the
 default-branch ref; it needs the `shipmate-engine` environment from the plan
 tier. `scripts/onboard` writes it as `.github/workflows/shipmate-drift.yml`, so a
-repository it reconciled already has it. Edit the file — a `tags` query, other
-crons — and the reconciler reports it as `differs` rather than overwriting your
-edit. Delete it and `shipmate doctor` warns that no workflow file calls
-`drift.yml`, and the next `scripts/onboard` run writes it again. Scoping a sweep
+repository it reconciled already has it. Edit, split or rename the file — a
+`tags` query, other crons — and the reconciler reports `ok` as long as some
+workflow file calls `drift.yml`, without comparing its content. Delete every
+such call and `shipmate doctor` warns that no workflow file calls `drift.yml`,
+and the next `scripts/onboard` run writes `shipmate-drift.yml` again. Scoping a sweep
 and what it costs are in [`drift.md`](drift.md).
 
 ### Recipe: automerge after apply

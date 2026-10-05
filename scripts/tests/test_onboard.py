@@ -534,7 +534,7 @@ def test_main_calls_every_stage_in_order():
         "_reconcile_variables(ctx)",
         "_reconcile_ruleset(ctx)",
         "_reconcile_shim(ctx, 'shipmate', 'shipmate.yml')",
-        "_reconcile_shim(ctx, 'shipmate drift', 'shipmate-drift.yml')",
+        "_reconcile_drift(ctx)",
         "_checklist(ctx)",
         "sys.exit(_exit_code())",
         "_exit_code()",
@@ -1067,9 +1067,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx(shim_on_default=True))
     onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE), "shipmate", "shipmate.yml")
-    onboard._reconcile_shim(
-        ctx(root=tmp_path, engine=ENGINE), "shipmate drift", "shipmate-drift.yml"
-    )
+    onboard._reconcile_drift(ctx(root=tmp_path, engine=ENGINE))
     onboard._checklist(ctx(root=tmp_path))
     assert list(tmp_path.iterdir()) == []
     assert fake.calls == [
@@ -1182,8 +1180,7 @@ def test_a_whole_run_writes_both_workflow_files_and_a_second_run_reports_them_ok
     pinned from the `shipmate drift` fence beside a `shipmate.yml` that calls no `drift.yml`.
     A second run reads both back unchanged.
 
-    Mutation: delete the `_reconcile_shim(ctx, "shipmate drift", "shipmate-drift.yml")` call
-    from `main`.
+    Mutation: delete the `_reconcile_drift(ctx)` call from `main`.
     """
     run_main(monkeypatch, tmp_path, {}, [])
     workflows = tmp_path / ".github" / "workflows"
@@ -1197,6 +1194,88 @@ def test_a_whole_run_writes_both_workflow_files_and_a_second_run_reports_them_ok
         ("ok", "shipmate.yml", ""),
         ("ok", "shipmate-drift.yml", ""),
     ]
+
+
+def _drift_ctx(tmp_path):
+    return {**_shim_ctx(tmp_path), "default_branch": "main"}
+
+
+def _write_workflow(tmp_path, name, text):
+    path = tmp_path / ".github" / "workflows" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+    return path
+
+
+_DRIFT_CALL = (
+    "jobs:\n  drift:\n    uses: ship-iac/shipmate/.github/workflows/drift.yml@" + "c" * 40 + "\n"
+)
+
+
+def test_a_drift_file_edited_with_a_tags_query_reports_ok(tmp_path):
+    """The drift file is matched by its call, not its content: a consumer adding a `tags`
+    query to the published fence has done what docs/drift.md asks, so it is `ok` and exit 0,
+    and the file is left as it is.
+
+    Mutation: compare the drift file's content to the rendered fence, reporting `differs`
+    on a mismatch.
+    """
+    rendered = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main", "shipmate drift")
+    edited = rendered.replace("    secrets:\n", "    with:\n      tags: env/dev-eu\n    secrets:\n")
+    assert edited != rendered
+    path = _write_workflow(tmp_path, "shipmate-drift.yml", edited)
+    onboard._reconcile_drift(_drift_ctx(tmp_path))
+    assert onboard.REPORT == [("ok", "shipmate-drift.yml", "")]
+    assert path.read_text(encoding="utf-8") == edited
+    assert onboard._exit_code() == 0
+
+
+def test_a_drift_call_left_in_shipmate_yml_writes_no_drift_file(tmp_path):
+    """A `shipmate.yml` still holding the drift job sweeps already. Writing a second file would
+    run every sweep twice; doctor names the job to move instead.
+
+    Mutation: count only files named `shipmate-drift.yml`.
+    """
+    _write_workflow(tmp_path, "shipmate.yml", _DRIFT_CALL)
+    onboard._reconcile_drift(_drift_ctx(tmp_path))
+    assert onboard.REPORT == [("ok", "shipmate-drift.yml", "called from shipmate.yml")]
+    assert sorted(p.name for p in (tmp_path / ".github" / "workflows").iterdir()) == [
+        "shipmate.yml"
+    ]
+
+
+def test_a_drift_call_in_any_named_file_counts(tmp_path):
+    """A sweep may live in any file: two sweeps split across `sweeps.yml` and `nightly.yaml`
+    are the repository's drift files and nothing is written beside them.
+
+    Mutation: count only files named `shipmate-drift.yml`.
+    """
+    _write_workflow(tmp_path, "sweeps.yml", _DRIFT_CALL)
+    _write_workflow(tmp_path, "nightly.yaml", _DRIFT_CALL)
+    onboard._reconcile_drift(_drift_ctx(tmp_path))
+    assert onboard.REPORT == [("ok", "shipmate-drift.yml", "called from nightly.yaml, sweeps.yml")]
+    assert sorted(p.name for p in (tmp_path / ".github" / "workflows").iterdir()) == [
+        "nightly.yaml",
+        "sweeps.yml",
+    ]
+
+
+def test_a_drift_file_whose_call_is_commented_out_is_not_overwritten(tmp_path):
+    """A commented-out call sweeps nothing, as doctor's drift-file probe reads it, so no sweep
+    is found; but `shipmate-drift.yml` is the consumer's file, and replacing it is this script
+    exceeding its mandate. It is reported `differs`, exit 2, and left alone.
+
+    Mutations: search the raw text instead of the comment-stripped text (reports `ok`);
+    write the rendered fence on that branch (overwrites the file).
+    """
+    text = _DRIFT_CALL.replace("    uses:", "    # uses:")
+    path = _write_workflow(tmp_path, "shipmate-drift.yml", text)
+    onboard._reconcile_drift(_drift_ctx(tmp_path))
+    assert onboard.REPORT == [
+        ("differs", "shipmate-drift.yml", "calls no engine `drift.yml`, not overwritten")
+    ]
+    assert path.read_text(encoding="utf-8") == text
+    assert onboard._exit_code() == 2
 
 
 def test_a_whole_run_writes_only_the_workflow_files(monkeypatch, tmp_path):
