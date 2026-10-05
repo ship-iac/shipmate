@@ -114,11 +114,14 @@ def filter_cells(cells, tags_by_stack, query):
     clauses = _parse_tag_query(query)
     cell_tags = [(c, _cell_tags(c, tags_by_stack)) for c in cells]
     kept = [c for c, tags in cell_tags if any(clause <= tags for clause in clauses)]
-    dead = [
-        ":".join(sorted(clause))
-        for clause in clauses
-        if not any(clause <= tags for _, tags in cell_tags)
-    ]
+    # dict.fromkeys: a clause repeated in the query is named once, in first-occurrence order.
+    dead = list(
+        dict.fromkeys(
+            ":".join(sorted(clause))
+            for clause in clauses
+            if not any(clause <= tags for _, tags in cell_tags)
+        )
+    )
     if not dead:
         return kept
     if kept:
@@ -459,7 +462,7 @@ def plan_workflow_error(event_name):
         f"::error::this repository has no `{PLAN_WORKFLOW}`, the one path `CONTRACT.md` "
         "lets the consumer's workflow file live at, and this refusal is what enforces it. "
         "That exact filename is matched literally by `shipmate doctor`, whose `shipmate.yml` "
-        "probe checks its job name, dispatch wiring and event routing, and by "
+        "probe checks its job name, dispatch wiring, event routing and leftover drift call, and by "
         "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
         "under any other name draws that probe's could-not-read notice and doctor's own "
         "`pull_request_target` warning, and is reached by no `shipmate` command at "

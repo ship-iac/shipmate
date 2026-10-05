@@ -674,7 +674,8 @@ def test_a_renamed_plan_workflow_is_refused(monkeypatch, tmp_path):
         "::error::this repository has no `.github/workflows/shipmate.yml`, the one path "
         "`CONTRACT.md` lets the consumer's workflow file live at, and this refusal is what "
         "enforces it. That exact filename is matched literally by `shipmate doctor`, whose "
-        "`shipmate.yml` probe checks its job name, dispatch wiring and event routing, and by "
+        "`shipmate.yml` probe checks its job name, dispatch wiring, event routing and leftover "
+        "drift call, and by "
         "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
         "under any other name draws that probe's could-not-read notice and doctor's own "
         "`pull_request_target` warning, and is reached by no `shipmate` command at "
@@ -1319,6 +1320,21 @@ def test_a_clause_of_known_terms_matching_no_cell_is_named_beside_a_live_one(cap
     assert capsys.readouterr().out.splitlines() == [
         "::notice::the drift tags query 'env/prod-eu:workload/app,env/dev-eu' has clause(s) "
         "matching no cell: env/prod-eu:workload/app."
+    ]
+
+
+def test_a_repeated_dead_clause_is_named_once(capsys):
+    """Mutation: drop the `dict.fromkeys` dedupe -- the notice names `env/nope` twice."""
+    cells = _filtered(
+        ["dev-eu"],
+        {"dev-eu": ["stacks/app"]},
+        {"stacks/app": ["env/dev-eu"]},
+        "env/nope,env/nope,env/dev-eu",
+    )
+    assert [(c["environment"], c["stack"]) for c in cells] == [("dev-eu", "stacks/app")]
+    assert capsys.readouterr().out.splitlines() == [
+        "::notice::the drift tags query 'env/nope,env/nope,env/dev-eu' has clause(s) matching "
+        "no cell: env/nope. No stack carries: env/nope." + _ON_DISK
     ]
 
 
