@@ -1099,7 +1099,7 @@ def _fork_trigger_warnings(ctx):
     misconfiguration on that page an outside contributor can reach without push
     access.
 
-    The consumer's one workflow file is on this trigger by design and stays exempt with the
+    The consumer's `shipmate.yml` is on this trigger by design and stays exempt with the
     comment-ops, deploy, apply and unlock jobs in it: every one of those `if:`
     expressions is false under `pull_request_target`, so those jobs do not run, and a job
     that does not run binds no environment and is handed no token. `_shipmate_yml_warnings`

@@ -640,7 +640,7 @@ def _reconcile_ruleset(ctx):
 
 
 #: `scripts/tests/test_docs_yaml_parses.py` imports this rather than keeping a second copy:
-#: the workflow file is rendered from a fence that guard parses, and an indented fence must
+#: each workflow file is rendered from a fence that guard parses, and an indented fence must
 #: be dedented rather than missed.
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
 _DOC_PIN = re.compile(

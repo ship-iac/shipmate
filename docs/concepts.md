@@ -122,8 +122,8 @@ Terramate `after` DAG ([`CONTRACT.md`](../CONTRACT.md) §Fan-out, §Env apply
 order), and a comment-triggered apply and a post-merge deploy share one
 concurrency group per stack × environment, so they never race on the same cell.
 
-The nightly `drift` job plans every stack × environment and opens one GitHub
-Issue per drifted cell; setup is in [drift.md](drift.md).
+The nightly `drift` job, in its own workflow file, plans every stack ×
+environment and opens one GitHub Issue per drifted cell; setup is in [drift.md](drift.md).
 
 **Remote state and cloud credentials.** Nothing configures state. A local
 backend's state is cached at the path `tofu init` records; a remote backend (for

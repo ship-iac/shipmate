@@ -64,10 +64,10 @@ fork refusal above, which only governs the plan path. That is the shape a
 labeler or commenter workflow usually takes — don't add one to a repository that
 holds the App key. `shipmate doctor` warns for every workflow file declaring the
 trigger except `shipmate.yml`, matched by exact name. Every trigger the engine
-uses lives in that one file, so what separates them is not which file holds
-which trigger but each job's `if:` — a `pull_request_target` event selects the
-`plan` job and no other. doctor's `shipmate.yml` probe compares all six of those
-expressions, whole, against the fence `getting-started.md` publishes. See
+uses but the drift sweep's lives in that one file, so what separates them is not
+which file holds which trigger but each job's `if:` — a `pull_request_target`
+event selects the `plan` job and no other. doctor's `shipmate.yml` probe
+compares all five of those expressions, whole, against the fence `getting-started.md` publishes. See
 "Contributors without push access" for the trade-off that follows.
 
 ## Checklist
@@ -92,7 +92,7 @@ expressions, whole, against the fence `getting-started.md` publishes. See
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
 | 18 | An identity named by each environment you want cloud access from, with separate `aws.plan` and `aws.apply` roles in `.github/shipmate.toml` (§7–9) | Environment table | Opting in per environment. An identity is a role named once and picked up by every environment that names it, so one edit to `[identities.<name>]` retargets every environment carrying `identity = "<name>"`; `shipmate doctor`'s roles lines show what the branch's table resolves for each environment, and in them a referenced role shows the value comment-ops resolves, where a `shipmate-engine` Environment variable of the same name wins; a cell never reads that variable. What each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate.toml` (`branch-protection.md`) |
-| 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops` | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
+| 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops`, and on each drift file's `drift` job | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the

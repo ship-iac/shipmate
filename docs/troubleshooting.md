@@ -98,8 +98,8 @@ live probes.
     at dispatch time with an HTTP 422 and no run created; the pull request gets
     a comment saying the dispatch failed and linking the comment-handling run
     that carries the error.
-  - Whether each of its jobs is selected by the `if:` its event needs. One file
-    gates six jobs, one per engine reusable workflow, and the probe compares
+  - Whether each of its jobs is selected by the `if:` its event needs. The file
+    gates five jobs, one per engine reusable workflow but `drift.yml`, and the probe compares
     each job's whole `if:` against the expression that file's published fence
     carries. Each finding identifies the job by the engine workflow it calls —
     "the job calling the engine's `apply.yml`", which is the fence's `apply` —
@@ -250,7 +250,7 @@ The verbs:
 | --- | --- |
 | `ok` | already as shipmate needs it; nothing was written. |
 | `create` / `update` / `set` / `delete` | the write it just performed. |
-| `created` | the workflow file it just wrote to `.github/workflows/`. |
+| `created` | a workflow file it just wrote to `.github/workflows/`: `shipmate.yml` or `shipmate-drift.yml`. |
 | `deferred` | the gate ruleset is not created yet, because `.github/workflows/shipmate.yml` is not on the remote default branch, or the token cannot read it (a private repository answers 404 for both), and no pull request could produce `shipmate / gate`. Merge the pull request that adds the file, then run the script again. Not drift; it does not affect the exit code. |
 | `pin-only` | the file matches except for the engine pin. Not drift, and it does not affect the exit code — move every engine ref to this engine's SHA in one commit ([`releasing.md`](releasing.md) § Re-pin a consumer). |
 | `would …` | `--dry-run`: the write that a real run would perform. |

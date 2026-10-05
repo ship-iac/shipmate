@@ -223,8 +223,9 @@ prefix.
 
 ## Runner choice
 
-Only the `plan` and `drift` jobs accept `runs_on:`. The documented fence in
-[`getting-started.md`](getting-started.md) passes none, so those jobs run on
+Only `shipmate.yml`'s `plan` job and the drift file's `drift` job accept
+`runs_on:`. The documented fences in [`getting-started.md`](getting-started.md)
+pass none, so those jobs run on
 the `ubuntu-latest` default. Outside them the
 runner is fixed:
 
