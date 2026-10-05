@@ -334,7 +334,7 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     `shipmate unlock` dispatch failed that way while the wrapper still declared the plan-run
     input the engine has since retired, because unlock applies no plan and so carried no run id.
     The engine validates instead, where the verb is known. `verb` is the one required input: one
-    schema serves four verbs, every body `actions/dispatch` sends carries a verb, and a run with
+    schema serves three verbs, every body `actions/dispatch` sends carries a verb, and a run with
     none has no job to route to.
 
     Keyed by the fence's own workflow `name:` as well as the page, so that a second documented
@@ -382,6 +382,6 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
             True,
             None,
             "choice",
-            ("plan", "apply", "unlock", "drift"),
+            ("plan", "apply", "unlock"),
         ),
     ], f"documented workflow_dispatch inputs changed: {found}"

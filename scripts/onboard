@@ -666,25 +666,27 @@ def _fence(page_text, name):
     if len(bodies) != 1:
         raise SystemExit(
             f"{len(bodies)} documented fences are named {name!r}; expected exactly one. "
-            "The workflow file is rendered from the docs, so its fence name must agree."
+            "The workflow files are rendered from the docs, so each fence name must agree."
         )
     return bodies[0]
 
 
-def _render(engine, sha, version, default_branch):
-    """The full text of one consumer workflow file, LF-delimited and newline-terminated,
-    with its `push` trigger on `default_branch`."""
+def _render(engine, sha, version, default_branch, name):
+    """The full text of the consumer workflow file rendered from the fence `name`,
+    LF-delimited and newline-terminated. The `shipmate` fence's `push` trigger is retargeted
+    to `default_branch`; no other fence has one."""
     text = _fence(
         (pathlib.Path(engine) / "docs" / "getting-started.md").read_text(encoding="utf-8"),
-        "shipmate",
+        name,
     )
-    trigger = "    branches: [main]\n"
-    if text.count(trigger) != 1:
-        raise SystemExit(
-            f"the documented shipmate fence holds {text.count(trigger)} `branches: [main]` "
-            "lines; expected exactly one, the push trigger this script retargets."
-        )
-    text = text.replace(trigger, f"    branches: [{default_branch}]\n")
+    if name == "shipmate":
+        trigger = "    branches: [main]\n"
+        if text.count(trigger) != 1:
+            raise SystemExit(
+                f"the documented shipmate fence holds {text.count(trigger)} `branches: [main]` "
+                "lines; expected exactly one, the push trigger this script retargets."
+            )
+        text = text.replace(trigger, f"    branches: [{default_branch}]\n")
     return _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
 
 
@@ -693,15 +695,15 @@ def _depin(text):
     return _ANY_PIN.sub(r"\g<ref>@<pin>", text)
 
 
-def _reconcile_shim(ctx):
-    """Write the consumer workflow file, reporting anything already there.
+def _reconcile_shim(ctx, name, filename):
+    """Write the consumer workflow file `filename` from the fence `name`, reporting anything
+    already there.
 
     `pin-only` is not drift: moving a pin is the re-pin procedure in docs/releasing.md, so
     it does not reach `_exit_code`.
     """
-    filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
-    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"])
+    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"], name)
     if not path.is_file():
         write_file(path, text, filename)
         return
@@ -866,7 +868,7 @@ def _adoption_item(ctx):
         "todo",
         item,
         [
-            f"{verb} the workflow file and the table together,",
+            f"{verb} both workflow files and the table together,",
             "in a pull request that changes no stack. The table is read from the default",
             "branch, so the first plan needs it merged.",
         ],
@@ -1011,7 +1013,8 @@ def main(argv=None):
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
     _reconcile_ruleset(ctx)
-    _reconcile_shim(ctx)
+    _reconcile_shim(ctx, "shipmate", "shipmate.yml")
+    _reconcile_shim(ctx, "shipmate drift", "shipmate-drift.yml")
     _checklist(ctx)
 
     sys.exit(_exit_code())

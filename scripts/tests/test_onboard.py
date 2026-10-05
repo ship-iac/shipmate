@@ -498,8 +498,8 @@ def test_main_calls_every_stage_in_order():
     Mutations, each proven: delete `_reconcile_env(ctx, ENGINE_ENV, "apply")`; delete
     `_reconcile_key(ctx)`; swap those two, which writes the key to an environment that
     does not exist yet; delete `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`;
-    delete `_reconcile_ruleset(ctx)`; delete `_reconcile_shim(ctx)`; delete `_checklist(ctx)`;
-    `_repo_root()` back to `pathlib.Path.cwd()`; delete
+    delete `_reconcile_ruleset(ctx)`; delete either `_reconcile_shim` call; delete
+    `_checklist(ctx)`; `_repo_root()` back to `pathlib.Path.cwd()`; delete
     `_refuse_diverging_app_id(args.app_id, variables)`, which is the only guard against a
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
     swap two reconcilers; move the `"shim_on_default"` read into
@@ -533,7 +533,8 @@ def test_main_calls_every_stage_in_order():
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
         "_reconcile_ruleset(ctx)",
-        "_reconcile_shim(ctx)",
+        "_reconcile_shim(ctx, 'shipmate', 'shipmate.yml')",
+        "_reconcile_shim(ctx, 'shipmate drift', 'shipmate-drift.yml')",
         "_checklist(ctx)",
         "sys.exit(_exit_code())",
         "_exit_code()",
@@ -1065,7 +1066,10 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     onboard._reconcile_envs(ctx())
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx(shim_on_default=True))
-    onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE))
+    onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE), "shipmate", "shipmate.yml")
+    onboard._reconcile_shim(
+        ctx(root=tmp_path, engine=ENGINE), "shipmate drift", "shipmate-drift.yml"
+    )
     onboard._checklist(ctx(root=tmp_path))
     assert list(tmp_path.iterdir()) == []
     assert fake.calls == [
@@ -1086,6 +1090,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         "would create",
         "would create",
         "would set",
+        "would create",
         "would create",
         "would create",
     ]
@@ -1170,7 +1175,31 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, key=True, membership=ONE
     return fake, excinfo.value
 
 
-def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path):
+def test_a_whole_run_writes_both_workflow_files_and_a_second_run_reports_them_ok(
+    monkeypatch, tmp_path
+):
+    """Drift runs from its own file, so a fresh run writes `shipmate-drift.yml` rendered and
+    pinned from the `shipmate drift` fence beside a `shipmate.yml` that calls no `drift.yml`.
+    A second run reads both back unchanged.
+
+    Mutation: delete the `_reconcile_shim(ctx, "shipmate drift", "shipmate-drift.yml")` call
+    from `main`.
+    """
+    run_main(monkeypatch, tmp_path, {}, [])
+    workflows = tmp_path / ".github" / "workflows"
+    drift = (workflows / "shipmate-drift.yml").read_text(encoding="utf-8")
+    assert drift == onboard._render(ENGINE, "a" * 40, "v0.26.0", "main", "shipmate drift")
+    assert "/drift.yml@" + "a" * 40 + " # v0.26.0" in drift
+    assert "drift.yml" not in (workflows / "shipmate.yml").read_text(encoding="utf-8")
+    onboard.REPORT.clear()
+    run_main(monkeypatch, tmp_path, {}, [])
+    assert [r for r in onboard.REPORT if r[1].endswith(".yml")] == [
+        ("ok", "shipmate.yml", ""),
+        ("ok", "shipmate-drift.yml", ""),
+    ]
+
+
+def test_a_whole_run_writes_only_the_workflow_files(monkeypatch, tmp_path):
     """`onboard` moves no pin -- `_reconcile_shim` reports `pin-only` and leaves it, and that
     status never reaches `_exit_code`. A `.github/shipmate.toml` written here could therefore
     hand a repository still pinned to an older engine a file that engine refuses, silently,
@@ -1186,7 +1215,7 @@ def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path)
     run_main(monkeypatch, tmp_path, {}, [])
     assert sorted(
         p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()
-    ) == [".github/workflows/shipmate.yml", "key.pem"]
+    ) == [".github/workflows/shipmate-drift.yml", ".github/workflows/shipmate.yml", "key.pem"]
 
 
 KEY = "SHIPMATE_APP_PRIVATE_KEY"
@@ -1498,7 +1527,9 @@ def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monk
     shim = tmp_path / ".github" / "workflows" / "shipmate.yml"
     shim.parent.mkdir(parents=True)
     shim.write_text(
-        onboard._render(ENGINE, "a" * 40, "v0.26.0", "main"), encoding="utf-8", newline="\n"
+        onboard._render(ENGINE, "a" * 40, "v0.26.0", "main", "shipmate"),
+        encoding="utf-8",
+        newline="\n",
     )
     fake, exit_ = run_main(monkeypatch, tmp_path, {}, [])
     assert exit_.code == 0
@@ -1745,11 +1776,20 @@ _EXPECTED_CALLEES = {
         "plan.yml",
         "comment-ops.yml",
         "deploy.yml",
-        "drift.yml",
         "apply.yml",
         "unlock.yml",
     ],
+    "shipmate-drift.yml": ["drift.yml"],
 }
+#: The fence each shim is rendered from, as `main` passes it to `_reconcile_shim`.
+_SHIM_FENCES = {"shipmate.yml": "shipmate", "shipmate-drift.yml": "shipmate drift"}
+
+
+def _rendered_shims():
+    return {
+        filename: onboard._render(ENGINE, "c" * 40, "v9.9.9", "main", fence)
+        for filename, fence in _SHIM_FENCES.items()
+    }
 
 
 def _callees(text):
@@ -1763,10 +1803,10 @@ def _callees(text):
 
 
 def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflows():
-    """The locator reads the workflow file's body out of the docs rather than carrying a
-    copy. It must find exactly one fence, and that fence must call every engine reusable
-    workflow the file routes to, in document order -- six jobs, six pin sites, and a
-    locator that found only the first would ship five unpinned calls.
+    """The locator reads each workflow file's body out of the docs rather than carrying a
+    copy. It must find exactly one fence per file, and that fence must call every engine
+    reusable workflow the file routes to, in document order -- five jobs, five pin sites, and
+    a locator that found only the first would ship four unpinned calls.
 
     The expected callee list is hand-written here, never read out of the docs, and the
     whole mapping is compared with `==`.
@@ -1775,15 +1815,15 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     - edit the fence's top-level `name:` line -> the locator matches zero fences and refuses;
     - edit a `uses:` filename in the fence -> the callee list differs.
     """
-    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"))}
+    found = {filename: _callees(text) for filename, text in _rendered_shims().items()}
     assert found == _EXPECTED_CALLEES
 
 
-_EXPECTED_PINS = {"shipmate.yml": 6}
+_EXPECTED_PINS = {"shipmate.yml": 5, "shipmate-drift.yml": 1}
 
 
 def test_every_shim_is_pinned_at_every_site():
-    """One file, six pins, and a file shipped still carrying `@<engine-sha>` resolves to
+    """Two files, six pins, and a file shipped still carrying `@<engine-sha>` resolves to
     nothing.
 
     Nothing else can see a missed rewrite: `_callees` splits before the `@`, so a surviving
@@ -1801,7 +1841,7 @@ def test_every_shim_is_pinned_at_every_site():
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """
-    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")}
+    rendered = _rendered_shims()
     assert {name: text.count(f"@{'c' * 40} # v9.9.9") for name, text in rendered.items()} == (
         _EXPECTED_PINS
     )
@@ -1816,7 +1856,7 @@ def _plan_shim(tmp_path):
     """(path to the consumer's shipmate.yml, the text this script would render for it)."""
     path = tmp_path / ".github" / "workflows" / "shipmate.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
+    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "main", "shipmate")
 
 
 def test_the_rendered_push_trigger_names_the_default_branch():
@@ -1826,8 +1866,8 @@ def test_the_rendered_push_trigger_names_the_default_branch():
 
     Mutation: drop the substitution from `_render`.
     """
-    main = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
-    assert onboard._render(ENGINE, "c" * 40, "v9.9.9", "develop") == main.replace(
+    main = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main", "shipmate")
+    assert onboard._render(ENGINE, "c" * 40, "v9.9.9", "develop", "shipmate") == main.replace(
         "    branches: [main]\n", "    branches: [develop]\n"
     )
 
@@ -1844,7 +1884,9 @@ def test_a_file_rendered_for_the_default_branch_reports_ok(tmp_path):
         encoding="utf-8",
         newline="\n",
     )
-    onboard._reconcile_shim({**_shim_ctx(tmp_path), "default_branch": "develop"})
+    onboard._reconcile_shim(
+        {**_shim_ctx(tmp_path), "default_branch": "develop"}, "shipmate", "shipmate.yml"
+    )
     assert onboard.REPORT == [("ok", "shipmate.yml", "")]
 
 
@@ -1858,7 +1900,7 @@ def test_an_identical_file_reports_ok_through_crlf(tmp_path):
     path, text = _plan_shim(tmp_path)
     on_disk = text.replace("\n", "\r\n").encode("utf-8")
     path.write_bytes(on_disk)
-    onboard._reconcile_shim(_shim_ctx(tmp_path))
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
     assert onboard.REPORT == [("ok", "shipmate.yml", "")]
     assert path.read_bytes() == on_disk
 
@@ -1872,9 +1914,9 @@ def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     reads as `differs`.
     """
     path, _text = _plan_shim(tmp_path)
-    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "main")
+    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "main", "shipmate")
     path.write_text(older, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path))
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
     assert onboard.REPORT == [
         (
             "pin-only",
@@ -1895,7 +1937,7 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     path, text = _plan_shim(tmp_path)
     edited = text + "# a local edit\n"
     path.write_text(edited, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path))
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
     assert onboard.REPORT == [
         ("differs", "shipmate.yml", "differs beyond its pin, not overwritten")
     ]
@@ -1923,7 +1965,7 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pathlib.Path, "write_text", fake)
     path, text = _plan_shim(tmp_path)
-    onboard._reconcile_shim(_shim_ctx(tmp_path))
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
     assert onboard.REPORT == [("created", "shipmate.yml", "")]
     assert seen["kwargs"] == {"encoding": "utf-8", "newline": "\n"}
     assert path.read_bytes().decode("utf-8") == text
@@ -1940,7 +1982,7 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
     path, _text = _plan_shim(tmp_path)
     page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
     path.write_text(onboard._fence(page, "shipmate"), encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path))
+    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
     assert onboard.REPORT == [
         ("differs", "shipmate.yml", "the published fence, never pinned: delete it and run again")
     ]
@@ -1982,7 +2024,7 @@ todo          Provider lock files
       stacks/app
 
 todo          adoption pull request
-    Re-run without --dry-run, then commit the workflow file and the table together,
+    Re-run without --dry-run, then commit both workflow files and the table together,
     in a pull request that changes no stack. The table is read from the default
     branch, so the first plan needs it merged.
 

@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining eleven
+shipmate:doctor -->`, upserted in place like the plan comment) combining twelve
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -130,13 +130,19 @@ live probes.
   nothing a run uses.
 - **Whether the shipmate App installation still grants the manifest's full
   permission set.**
+- **Whether any workflow file calls the engine's `drift.yml`.** Read at the
+  commit under examination, like the pin probe. A file counts by the call in
+  its text, not by its name, and a call only inside a `#` comment does not
+  count. With none, no stack is ever checked for drift, which is a warning.
+  An unreadable file leaves the question unverified, a note, since the call
+  may sit in a file the probe could not read.
 
 The report carries those findings together with the warning and failure
 annotations GitHub already recorded on this commit's workflow runs — shipmate's
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only ten of the eleven probes can produce a finding from the plan path's
+Only eleven of the twelve probes can produce a finding from the plan path's
 own `annotate`-mode run (`actions/summary`). The App-permission-drift probe
 only has something to report when a full-manifest permission-set mint was
 actually attempted, which only `shipmate doctor` does. It is effectively

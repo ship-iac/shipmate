@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the eleven live probes'
+- report: render the sticky PR comment on demand — the twelve live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -39,6 +39,7 @@ Probes:
   parses and passes the checks a file can be judged on by itself, before it merges
   to the default branch execution reads it from.
 - GitHub App installation permission drift.
+- a workflow file at the commit under examination that calls the engine's `drift.yml`.
 """
 
 import collections
@@ -1099,10 +1100,10 @@ def _fork_trigger_warnings(ctx):
     access.
 
     The consumer's one workflow file is on this trigger by design and stays exempt with the
-    comment-ops, deploy, drift, apply and unlock jobs in it: every one of those `if:`
+    comment-ops, deploy, apply and unlock jobs in it: every one of those `if:`
     expressions is false under `pull_request_target`, so those jobs do not run, and a job
     that does not run binds no environment and is handed no token. `_shipmate_yml_warnings`
-    is what watches those six `if:` expressions.
+    is what watches those five `if:` expressions.
 
     Reads the consumer's workflow files at the commit under examination
     (`_contents_ref`): a pull request that *removes* the trigger must not still
@@ -1141,9 +1142,14 @@ def _fork_trigger_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
 
 
+def _engine_call(callee):
+    """The `uses:` selector for a call of the engine reusable workflow `callee`."""
+    return re.compile(rf"/\.github/workflows/{re.escape(callee)}@")
+
+
 # The shim's call of the engine's plan workflow, whose block the job-name finding judges. Its
 # absence is `_routing_finding`'s zero-count finding for `plan.yml`.
-_PLAN_WORKFLOW_CALL = re.compile(r"/\.github/workflows/plan\.yml@")
+_PLAN_WORKFLOW_CALL = _engine_call("plan.yml")
 # Line-anchored, and matched only against a direct child of the calling job: a `name:` or `if:`
 # deeper in the block belongs to something else. Read through `_job_key`.
 _JOB_KEY = re.compile(r"^[ \t]*(?P<key>name|if)[ \t]*:(?P<value>.*)$")
@@ -1262,15 +1268,15 @@ def _input_key(name):
 #: omits is `Required input not provided` (HTTP 422, no run) — which is why every input the
 #: file declares beside `verb`, a consumer's own included, must be optional.
 _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
-#: The whole option list `actions/dispatch` and the `drift` job between them can send, compared
+#: The whole option list `actions/dispatch` can send, compared
 #: in order and as parsed options: a list missing `unlock` refuses that verb, one carrying an
 #: extra offers a verb no `if:` selects, and a text comparison would report
-#: `[plan,apply,unlock,drift]` — the same sequence — and tell the consumer to write what their
+#: `[plan,apply,unlock]` — the same sequence — and tell the consumer to write what their
 #: file already means. Read from `verb`'s own block (`_input_block`), never the first `options:`
 #: in the trigger, or a consumer's own input declared above `verb` becomes the list compared.
 #: KNOWN GAP: the flow form only, so a block-style `options:` reports as differing — the safe
 #: direction, and the published file writes the flow form.
-_VERB_OPTION_LIST = ["plan", "apply", "unlock", "drift"]
+_VERB_OPTION_LIST = ["plan", "apply", "unlock"]
 #: The same list as the findings render it. Derived, so there is one hand-written copy.
 _VERB_OPTIONS = f"[{', '.join(_VERB_OPTION_LIST)}]"
 _VERB_OPTIONS_KEY = re.compile(r"[\s{,]options[ \t]*:[ \t]*(?P<value>\[[^\]]*\])")
@@ -1450,7 +1456,7 @@ def _dispatch_wiring_finding(text, name):
 
 
 #: The whole `if:` of each job of `shipmate.yml`, keyed by the engine reusable workflow it
-#: calls. The consumer owns these six expressions and `docs/getting-started.md` publishes
+#: calls. The consumer owns these five expressions and `docs/getting-started.md` publishes
 #: them; a wrong one routes a verb nowhere and its dispatched run completes with every job
 #: skipped, which reads as success everywhere. Compared whole — normalised only for an
 #: enclosing quote pair, the optional `${{ }}` wrapper and whitespace — because a subset check
@@ -1463,10 +1469,6 @@ ROUTING_IFS = {
     ),
     "comment-ops.yml": "github.event_name == 'issue_comment'",
     "deploy.yml": "github.event_name == 'push'",
-    "drift.yml": (
-        "github.event_name == 'schedule' || "
-        "(github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')"
-    ),
     "apply.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'",
     "unlock.yml": "github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'",
 }
@@ -1480,7 +1482,7 @@ def _normalize_if(value):
     so a consumer who writes `if: ${{ ... }}` — the shape `docs/getting-started.md` shipped
     before this file existed — must not be reported for a difference that is not one.
 
-    Only a MATCHING enclosing pair of quotes is dropped: four of the six expressions end
+    Only a MATCHING enclosing pair of quotes is dropped: four of the five expressions end
     in a `'`, and stripping quote characters off both ends would mangle every one of them
     on both sides of the comparison, which stays green while the message is wrong."""
     v = value.strip()
@@ -1494,15 +1496,15 @@ def _normalize_if(value):
 def _routing_finding(text, name):
     """One finding per `ROUTING_IFS` entry the file does not satisfy.
 
-    One file gates six jobs on the event, and a wrong gate is silent in both directions: a
+    One file gates five jobs on the event, and a wrong gate is silent in both directions: a
     dispatched verb whose job never runs completes green with nothing done, and a job whose
     `if:` is too wide runs on an event it was never meant to see. Nothing else observes this.
-    `actions/dispatch` sees an accepted dispatch; the run page shows five skipped jobs beside
+    `actions/dispatch` sees an accepted dispatch; the run page shows four skipped jobs beside
     the one that ran, which is what a healthy run also shows."""
     out = []
     stripped = _stripped_text(text)
     for callee, expected in ROUTING_IFS.items():
-        pattern = re.compile(rf"/\.github/workflows/{re.escape(callee)}@")
+        pattern = _engine_call(callee)
         count = len(pattern.findall(stripped))
         if count != 1:
             out.append(
@@ -1838,6 +1840,44 @@ def _app_permission_warnings(ctx):
     ]
 
 
+DRIFT_FILE_UNREADABLE, DRIFT_FILE_NO_COMMIT = _unverified(
+    "whether a workflow file calls the engine's drift.yml"
+)
+DRIFT_FILE_MISSING = (
+    WARNING,
+    "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
+    "Add a drift workflow file (docs/drift.md).",
+)
+
+
+def _drift_file_warnings(ctx):
+    """A WARNING when no workflow file at the commit under examination calls the engine's
+    `drift.yml`, so nothing ever sweeps the repository for drift.
+
+    Matched by the call in the comment-stripped text, never by file name: a sweep may live in
+    any file, and a commented-out call sweeps nothing. A scan that stopped at an unreadable
+    file reports only that NOTICE, never the WARNING: the call may sit in a file it never read.
+    """
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [DRIFT_FILE_NO_COMMIT]
+    call = _engine_call("drift.yml")
+    callers = []
+
+    def per_file(text, name):
+        if call.search(_stripped_text(text)):
+            callers.append(name)
+        return []
+
+    out = _scan_workflow_texts(ctx, ref, per_file, DRIFT_FILE_UNREADABLE)
+    if out:
+        return out
+    return [] if callers else [DRIFT_FILE_MISSING]
+
+
+_drift_file_warnings.label = "drift workflow files"
+
+
 PROBES = (
     _gate_rule_warnings,
     _review_rule_warnings,
@@ -1850,6 +1890,7 @@ PROBES = (
     _shipmate_yml_warnings,
     _config_warnings,
     _app_permission_warnings,
+    _drift_file_warnings,
 )
 
 

@@ -373,7 +373,6 @@ run-name: >-
   shipmate · ${{ github.event_name == 'pull_request_target' && 'plan'
   || github.event_name == 'issue_comment' && 'comment'
   || github.event_name == 'push' && 'deploy'
-  || github.event_name == 'schedule' && 'drift'
   || inputs.verb }}
 on:
   pull_request_target:
@@ -382,18 +381,16 @@ on:
     types: [created]
   push:
     branches: [main]
-  schedule:
-    - cron: "17 3 * * *"   # nightly, off-peak
   workflow_dispatch:
     inputs:
       # Every input is optional except the verb, and that is deliberate: one schema serves
-      # four verbs, and GitHub reads an empty value for a `required: true` input as not
+      # three verbs, and GitHub reads an empty value for a `required: true` input as not
       # provided and answers HTTP 422 before the run starts. The engine validates instead —
       # `pr-facts` refuses a plan with no number, `apply-detect` an apply with no ref.
       verb:
-        description: What to run (plan, apply, unlock or drift)
+        description: What to run (plan, apply or unlock)
         type: choice
-        options: [plan, apply, unlock, drift]
+        options: [plan, apply, unlock]
         required: true
       environment:
         description: Target environment (apply and unlock; empty apply = every non-explicit environment)
@@ -417,7 +414,7 @@ jobs:
   plan:
     name: shipmate
     # `github.event.inputs` is the form readable under either trigger, unlike the `inputs`
-    # context, and `plan` and `drift` also run under one that is not `workflow_dispatch`; the
+    # context, and `plan` also runs under one that is not `workflow_dispatch`; the
     # concurrency group below relies on the same thing. `apply` and `unlock` are
     # dispatch-only and keep `inputs.`, because only that form applies a declared default,
     # which is what makes an omitted `environment` key read as the empty string.
@@ -467,17 +464,6 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-  drift:
-    name: shipmate
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'drift')
-    uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
-    permissions:
-      contents: read
-      id-token: write
-      actions: read
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
   apply:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
@@ -503,6 +489,26 @@ jobs:
 
 On a repository whose default branch is not `main`, change `branches: [main]`
 to that branch; `scripts/onboard` writes the file that way.
+
+```yaml
+name: shipmate drift
+on:
+  schedule:
+    - cron: "17 3 * * *"   # nightly, off-peak
+  workflow_dispatch:
+permissions: {}
+jobs:
+  drift:
+    name: shipmate
+    uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+```
 
 **The `permissions:` block on each calling job is not optional.** A called
 workflow's permissions are capped at the `uses:` boundary, so each block above
