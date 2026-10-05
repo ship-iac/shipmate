@@ -20,7 +20,7 @@ EXPECTED_INPUTS = {
     "ci.yml": {},
     "comment-ops.yml": {},
     "deploy.yml": {},
-    "drift.yml": {"workflow_call": ["runs_on"]},
+    "drift.yml": {"workflow_call": ["runs_on", "tags"]},
     "manifest-load.yml": {},
     "plan.yml": {"workflow_call": ["runs_on"]},
     "unlock.yml": {"workflow_call": ["environment", "ref"]},

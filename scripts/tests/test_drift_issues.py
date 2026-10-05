@@ -75,14 +75,16 @@ def test_title_and_body_carry_the_counts_and_run_link():
 
 
 def test_body_is_exactly_the_expected_text():
-    """The whole Issue body, including an auto-close promise a scoped sweep keeps."""
+    """The whole Issue body, including an auto-close promise a scoped sweep keeps: a cell
+    that leaves a query stays in the tree, so only a clean plan or leaving the repository closes
+    its Issue. Mutation: restore "leaves the drift sweep"."""
     cell = _cell(drifted=True, add=1, change=2, destroy=3)
     assert di._body(cell, "https://example.invalid/run/1") == (
         "Drift detected in `stacks/app` @ `dev-eu`: +1 ~2 -3. "
         "[Drift run](https://example.invalid/run/1) "
         "-- plan output is in that run's log. "
-        "Auto-closed on the next clean drift run of this stack and environment, "
-        "or when the stack or environment leaves the drift sweep."
+        "Auto-closed when a sweep finds it clean or the stack or environment leaves the "
+        "repository."
     )
 
 
@@ -106,15 +108,15 @@ _SHA = "a" * 40
 _NEWER = "b" * 40
 
 
-def _main_env(monkeypatch, cells_dir, matrix):
-    """`main()`'s environment: the artifact directory, the run, and the matrix cells as
-    `(environment, stack)` pairs."""
+def _main_env(monkeypatch, cells_dir, tree):
+    """`main()`'s environment: the artifact directory, the run, and every cell of the scanned
+    tree as `(environment, stack)` pairs."""
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(cells_dir))
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
-    cells = [{"environment": e, "stack": st} for e, st in matrix]
-    monkeypatch.setenv("SHIPMATE_MATRIX_CELLS", json.dumps(cells))
+    cells = [{"environment": e, "stack": st} for e, st in tree]
+    monkeypatch.setenv("SHIPMATE_TREE_CELLS", json.dumps(cells))
     monkeypatch.setenv("GITHUB_SHA", _SHA)
     monkeypatch.setenv("SHIPMATE_DEFAULT_BRANCH", "main")
     _head(monkeypatch, _SHA)
@@ -141,7 +143,7 @@ def _gh(monkeypatch, rows):
 
 def _left(number, label):
     comment = (
-        f"`{label}` left the drift sweep: [drift run]({_RUN_URL}) has no such stack and "
+        f"`{label}` left the repository: [drift run]({_RUN_URL}) found no such stack and "
         "environment."
     )
     return ["gh", "issue", "close", str(number), "--comment", comment]
@@ -273,9 +275,9 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
 
 def test_main_leaves_a_plan_not_ok_cells_open_issue_untouched(tmp_path, monkeypatch):
     """A failed plan says nothing about drift, so its open Issue is neither edited nor closed,
-    and the cell is still in the matrix, so it is no removed cell either. Mutations: in
+    and the cell is still in the tree, so it is no removed cell either. Mutations: in
     `upsert_or_close`, close the open Issue for a `plan_ok` false cell; build `present` in
-    `main()` from the loaded `plan_ok` cells instead of the matrix."""
+    `main()` from the loaded `plan_ok` cells instead of the tree."""
     _write_cell(tmp_path, "app", _cell(plan_ok=False, drifted=False))
     _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
     calls = []
@@ -289,8 +291,8 @@ def test_main_leaves_a_plan_not_ok_cells_open_issue_untouched(tmp_path, monkeypa
     assert calls == [_LIST]
 
 
-def test_main_closes_only_the_issues_of_cells_that_left_the_sweep(tmp_path, monkeypatch):
-    """An Issue whose title names no matrix cell closes with the whole comment. A matrix
+def test_main_closes_only_the_issues_of_cells_that_left_the_repository(tmp_path, monkeypatch):
+    """An Issue whose title names no cell of the tree closes with the whole comment. A tree
     cell's Issue, and a `drift`-labelled Issue a human titled freely, stay open. Mutations:
     skip the removed-cell close in `main()`; drop its `startswith(PREFIX)` check."""
     _write_cell(tmp_path, "app", _cell(drifted=True))
@@ -324,9 +326,9 @@ def test_main_closes_every_duplicate_titled_issue_of_a_removed_cell(tmp_path, mo
     assert calls == [_left(9, "prod-eu / stacks/app"), _left(3, "prod-eu / stacks/app")]
 
 
-def test_main_keeps_the_issue_of_a_matrix_cell_whose_artifact_is_missing(tmp_path, monkeypatch):
+def test_main_keeps_the_issue_of_a_tree_cell_whose_artifact_is_missing(tmp_path, monkeypatch):
     """A lost artifact, or a cell job that died before uploading, is not a removed cell.
-    Mutation: build `present` in `main()` from the loaded cells instead of the matrix."""
+    Mutation: build `present` in `main()` from the loaded cells instead of the tree."""
     _write_cell(tmp_path, "app", _cell())
     _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app"), ("dev-eu", "stacks/db")])
     calls = _gh(monkeypatch, [{"number": 8, "title": "drift: dev-eu / stacks/db"}])
@@ -334,10 +336,28 @@ def test_main_keeps_the_issue_of_a_matrix_cell_whose_artifact_is_missing(tmp_pat
     assert calls == []
 
 
+def test_a_filtered_sweep_leaves_another_sweeps_issue_open(tmp_path, monkeypatch):
+    """A sweep whose query selects only `dev-eu` loads only that cell, while the tree also holds
+    `dev-us`, which another drift file sweeps. That cell's Issue stays open; an Issue naming a
+    cell in neither closes. Mutation: hand `close_removed` the titles of the loaded cells instead
+    of `tree_titles()`."""
+    _write_cell(tmp_path, "app", _cell())
+    _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app"), ("dev-us", "stacks/app")])
+    calls = _gh(
+        monkeypatch,
+        [
+            {"number": 4, "title": "drift: dev-us / stacks/app"},
+            {"number": 5, "title": "drift: dev-eu / stacks/old"},
+        ],
+    )
+    di.main()
+    assert calls == [_left(5, "dev-eu / stacks/old")]
+
+
 def test_main_with_no_loaded_cells_still_closes_a_removed_cells_issue(
     tmp_path, monkeypatch, capsys
 ):
-    """The removed-cell close depends on the matrix alone, and the count line still comes
+    """The removed-cell close depends on the tree alone, and the count line still comes
     first. Mutation: restore `if not cells: return` above the removed-cell close."""
     _main_env(monkeypatch, tmp_path, [("dev-eu", "stacks/app")])
     calls = _gh(monkeypatch, [{"number": 5, "title": "drift: dev-eu / stacks/old"}])
@@ -374,7 +394,7 @@ def test_a_stale_sweep_closes_no_removed_cells_issue(tmp_path, monkeypatch, caps
     assert capsys.readouterr().out == (
         "loaded 1 drift cell summaries\n"
         f"::notice::this sweep planned {_SHA} but the default branch is at {_NEWER}, so no "
-        "Issue of a cell that left the drift sweep was closed\n"
+        "Issue of a cell that left the repository was closed\n"
     )
 
 
@@ -392,7 +412,7 @@ def test_an_unread_head_closes_no_removed_cells_issue_and_fails_the_run(
     assert capsys.readouterr().out == (
         "loaded 0 drift cell summaries\n"
         "::error::could not read the default branch head, so no Issue of a cell that left the "
-        "drift sweep was closed\n"
+        "repository was closed\n"
     )
 
 
@@ -471,39 +491,39 @@ def test_a_failing_removed_cell_close_is_collected_and_fails_the_run(tmp_path, m
 
 
 @pytest.mark.parametrize("value", [None, "", "[]", "not json"], ids=["unset", "empty", "[]", "bad"])
-def test_main_refuses_a_missing_or_empty_matrix_before_any_gh_call(tmp_path, monkeypatch, value):
-    """An empty `present` set would close every drift Issue. Mutations: in `matrix_titles`,
+def test_main_refuses_a_missing_or_empty_tree_before_any_gh_call(tmp_path, monkeypatch, value):
+    """An empty `present` set would close every drift Issue. Mutations: in `tree_titles`,
     return the empty set for an unset, empty or `[]` input (reddens three cases), or for an
     unparseable one (reddens `unset`, `empty` and `bad`)."""
     _write_cell(tmp_path, "app", _cell(drifted=True))
     _main_env(monkeypatch, tmp_path, [])
     if value is None:
-        monkeypatch.delenv("SHIPMATE_MATRIX_CELLS")
+        monkeypatch.delenv("SHIPMATE_TREE_CELLS")
     else:
-        monkeypatch.setenv("SHIPMATE_MATRIX_CELLS", value)
+        monkeypatch.setenv("SHIPMATE_TREE_CELLS", value)
     monkeypatch.setattr(di, "_run", lambda args: pytest.fail(f"unexpected gh call: {args}"))
     monkeypatch.setattr("subprocess.run", lambda *a, **k: pytest.fail("unexpected gh call"))
     with pytest.raises(SystemExit) as exc:
         di.main()
     assert str(exc.value) == (
-        "::error::drift-issues needs the drift matrix's cells as a non-empty JSON list in "
-        f"SHIPMATE_MATRIX_CELLS, got {value or ''!r}"
+        "::error::drift-issues needs every cell of the scanned tree as a non-empty JSON list "
+        f"in SHIPMATE_TREE_CELLS, got {value or ''!r}"
     )
 
 
 def test_the_script_step_hands_the_script_exactly_these_names():
     """The whole `env:`, the whole `run:` and the `cells` input's `required`. `gh issue` and
     `gh label` resolve their repository from a checkout's git remote, and this job checks out
-    nothing, so without GH_REPO every call fails. The matrix cells travel through `env:`,
-    never interpolated into `run:`. Mutations: drop GH_REPO; move the `SHIPMATE_MATRIX_CELLS`
-    binding into `run:` as `SHIPMATE_MATRIX_CELLS='${{ inputs.cells }}' python3 ...`; set the
+    nothing, so without GH_REPO every call fails. The tree cells travel through `env:`,
+    never interpolated into `run:`. Mutations: drop GH_REPO; move the `SHIPMATE_TREE_CELLS`
+    binding into `run:` as `SHIPMATE_TREE_CELLS='${{ inputs.cells }}' python3 ...`; set the
     `cells` input to `required: false`; bind `SHIPMATE_READ_TOKEN` to the App token."""
     steps = action_steps("drift-issues")
     step = next(s for s in steps if "scripts/drift-issues" in str(s.get("run", "")))
     assert step["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "GH_REPO": "${{ github.repository }}",
-        "SHIPMATE_MATRIX_CELLS": "${{ inputs.cells }}",
+        "SHIPMATE_TREE_CELLS": "${{ inputs.cells }}",
         "SHIPMATE_DEFAULT_BRANCH": "${{ inputs.default-branch }}",
         "SHIPMATE_READ_TOKEN": "${{ github.token }}",
     }
