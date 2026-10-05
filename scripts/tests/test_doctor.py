@@ -3307,12 +3307,12 @@ def test_the_workflow_directory_degrades_read_as_written():
         (
             "notice",
             "could not read `.github/workflows/shipmate.yml`: the workflow file's job name, "
-            "dispatch wiring and event routing not verified.",
+            "dispatch wiring, event routing and leftover drift call not verified.",
         ),
         (
             "notice",
-            "the workflow file's job name, dispatch wiring and event routing not verified: the "
-            "commit under examination could not be determined.",
+            "the workflow file's job name, dispatch wiring, event routing and leftover drift "
+            "call not verified: the commit under examination could not be determined.",
         ),
     )
 

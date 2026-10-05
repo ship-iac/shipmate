@@ -1538,7 +1538,8 @@ def _routing_finding(text, name):
 
 _SHIPMATE_YML = f"{_WORKFLOWS_DIR}/shipmate.yml"
 SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
-    "the workflow file's job name, dispatch wiring and event routing", _SHIPMATE_YML
+    "the workflow file's job name, dispatch wiring, event routing and leftover drift call",
+    _SHIPMATE_YML,
 )
 
 

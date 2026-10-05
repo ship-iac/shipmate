@@ -1653,8 +1653,8 @@ triggers, whether any file calls engine `drift.yml`, and `shipmate.yml`'s
 wiring, whose checks of the plan-calling job
 name, dispatch wiring and event routing observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
-and whether the job it reaches is the one that verb names — and they report
-rather than fail.
+and whether the job it reaches is the one that verb names, and whose fourth
+check reports a drift job left in it — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
