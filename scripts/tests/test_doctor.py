@@ -3415,6 +3415,32 @@ def test_shipmate_yml_without_a_drift_job_draws_no_routing_finding():
     assert doctor._routing_finding(_SHIPMATE_WF, "shipmate.yml") == []
 
 
+_SHIPMATE_YML_CALLS_DRIFT_TEXT = (
+    "`shipmate.yml` still calls the engine's `drift.yml`: move the drift job to its own "
+    "workflow file and delete it, the `schedule` trigger and the `drift` verb option from "
+    "`shipmate.yml` (docs/drift.md)."
+)
+
+
+def test_a_drift_job_left_in_shipmate_yml_is_warned(monkeypatch):
+    """A `shipmate.yml` still carrying the drift job sweeps beside the drift file, so every
+    sweep runs twice, and `scripts/onboard` counts it as the repository's drift file. One
+    WARNING names the move; the published file draws none.
+
+    Mutation: drop the drift-call check from `_shipmate_yml_warnings` -- the first assertion
+    reddens."""
+    old = _SHIPMATE_WF + _SHIPMATE_DRIFT_WF.split("jobs:\n", 1)[1]
+    assert old.count("/drift.yml@") == 1
+    responses = _fork_responses({"shipmate.yml": old})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx()) == [
+        (doctor.WARNING, _SHIPMATE_YML_CALLS_DRIFT_TEXT)
+    ]
+    responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._shipmate_yml_warnings(_ctx()) == []
+
+
 def test_the_probe_registry_is_exactly_this(monkeypatch):
     """The whole registry against a hand-written list, not its length: a length
     assertion cannot say WHICH entry changed, so a probe swapped for another

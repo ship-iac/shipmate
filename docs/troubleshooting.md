@@ -78,8 +78,8 @@ live probes.
   from any hardcoded slug — another org's shared action is not shipmate's to
   report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
-  the commit under examination, feeds three checks, so an unreadable file
-  leaves all three unverified together:
+  the commit under examination, feeds four checks, so an unreadable file
+  leaves all four unverified together:
   - Whether its plan-calling job is named `shipmate`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
     makes the plan cell checks `shipmate / <stack> / <env>`. Under another name
@@ -99,7 +99,7 @@ live probes.
     a comment saying the dispatch failed and linking the comment-handling run
     that carries the error.
   - Whether each of its jobs is selected by the `if:` its event needs. The file
-    gates five jobs, one per engine reusable workflow but `drift.yml`, and the probe compares
+    gates five jobs, one per engine reusable workflow other than `drift.yml`, and the probe compares
     each job's whole `if:` against the expression that file's published fence
     carries. Each finding identifies the job by the engine workflow it calls —
     "the job calling the engine's `apply.yml`", which is the fence's `apply` —
@@ -112,6 +112,11 @@ live probes.
     completes green with nothing done, and a job whose `if:` is too wide runs on
     an event it was never meant to see. The fence in
     [`getting-started.md`](getting-started.md) has every expression.
+  - Whether it still calls the engine's `drift.yml`. Drift runs from its own
+    workflow file; a drift job left in `shipmate.yml` sweeps beside it, and
+    `scripts/onboard` counts it as the repository's drift file. Move the job to
+    its own file and delete it, the `schedule` trigger and the `drift` verb
+    option from `shipmate.yml` ([`drift.md`](drift.md)).
 - **Whether `.github/shipmate.toml` at the commit under examination is valid.**
   Read through the API at that commit, never from the default branch and never
   substituted by it, so a malformed or misplaced setting is reported on the pull

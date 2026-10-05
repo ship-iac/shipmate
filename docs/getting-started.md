@@ -347,7 +347,7 @@ reports it.
 repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
 input it sends; and `shipmate doctor` keys its `shipmate.yml` probe, which checks
-the job name, dispatch wiring and event routing, on it. A file under another
+the job name, dispatch wiring, event routing and a leftover drift job, on it. A file under another
 name is reached by nothing. The drift file's name matters to
 nothing: nothing dispatches it, and `scripts/onboard` and doctor both find a
 drift file by its call of `drift.yml`. `scripts/onboard` writes

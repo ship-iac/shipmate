@@ -34,7 +34,8 @@ Probes:
   cell checks are not `shipmate / <stack> / <env>`; the `workflow_dispatch` trigger
   every commented verb needs, with its four inputs; and one job per engine reusable
   workflow, each with the `if:` that selects it — a wrong one sends a verb nowhere
-  and its run completes green with every job skipped.
+  and its run completes green with every job skipped; and no call of `drift.yml`,
+  which runs from its own workflow file.
 - the environment table at the commit under examination: `.github/shipmate.toml`
   parses and passes the checks a file can be judged on by itself, before it merges
   to the default branch execution reads it from.
@@ -1541,10 +1542,19 @@ SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
 )
 
 
+SHIPMATE_YML_CALLS_DRIFT = (
+    WARNING,
+    "`shipmate.yml` still calls the engine's `drift.yml`: move the drift job to its own "
+    "workflow file and delete it, the `schedule` trigger and the `drift` verb option from "
+    "`shipmate.yml` (docs/drift.md).",
+)
+
+
 def _shipmate_yml_warnings(ctx):
-    """The job-name, dispatch-wiring and routing findings over the consumer's `shipmate.yml`
-    alone, in that order, from one read at the commit under examination (`_contents_ref`): a
-    pull request that fixes the file must not still be reported for the old state.
+    """The job-name, dispatch-wiring, routing and leftover-drift-job findings over the
+    consumer's `shipmate.yml` alone, in that order, from one read at the commit under
+    examination (`_contents_ref`): a pull request that fixes the file must not still be
+    reported for the old state.
 
     `shipmate.yml` is the file `actions/dispatch` targets for every verb and the one whose
     cells produce the linked checks, so it is read by path, not found in a listing: another
@@ -1563,6 +1573,11 @@ def _shipmate_yml_warnings(ctx):
         *_shim_job_name_finding(text, name),
         *_dispatch_wiring_finding(text, name),
         *_routing_finding(text, name),
+        *(
+            [SHIPMATE_YML_CALLS_DRIFT]
+            if _engine_call("drift.yml").search(_stripped_text(text))
+            else []
+        ),
     ]
 
 
