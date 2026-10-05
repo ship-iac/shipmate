@@ -59,7 +59,7 @@ outputs:
     description: How many cells the plan matrix has. Read by the trusted summary job to check that every planned cell produced a summary.
     value: ${{ steps.build.outputs.count }}
   cells:
-    description: 'JSON [{environment,stack},...]: every cell of the scanned tree before the `tags` filter, in matrix order, as names alone to keep an env var small; not capped at 256 like the matrix. Read by drift-issues to close the Issues of removed cells. The list reaches drift-issues in one environment variable: past about 2,000 cells (128 KiB, Linux''s per-string limit) every sweep''s `issues` step fails before its script starts, after every cell has planned.'
+    description: 'JSON [{environment,stack},...]: every cell of the scanned tree before the `tags` filter, in matrix order, as names alone to keep an env var small; not capped at 256 like the matrix. Read by drift-issues to close the Issues of removed cells. The list reaches drift-issues in one environment variable: past about 2,000 cells (128 KiB, Linux''s per-string limit) every sweep''s `issues` job fails at its "Upsert / close drift issues" step before the script starts, after every cell has planned.'
     value: ${{ steps.build.outputs.cells }}
 runs:
   using: composite

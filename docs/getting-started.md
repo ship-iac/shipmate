@@ -868,9 +868,11 @@ default-branch ref; it needs the `shipmate-engine` environment from the plan
 tier. `scripts/onboard` writes it as `.github/workflows/shipmate-drift.yml`, so a
 repository it reconciled already has it. Edit, split or rename the file — a
 `tags` query, other crons — and the reconciler reports `ok` as long as some
-workflow file calls `drift.yml`, without comparing its content. Delete every
-such call and `shipmate doctor` warns that no workflow file calls `drift.yml`,
-and the next `scripts/onboard` run writes `shipmate-drift.yml` again. Scoping a sweep
+workflow file calls `drift.yml`, without comparing its content. Remove every
+such call and `shipmate doctor` warns that no workflow file calls `drift.yml`.
+If `shipmate-drift.yml` is deleted, the next `scripts/onboard` run writes it
+again; if it is kept without a call, the run reports it `differs` and exits 2
+without overwriting it. Scoping a sweep
 and what it costs are in [`drift.md`](drift.md).
 
 ### Recipe: automerge after apply

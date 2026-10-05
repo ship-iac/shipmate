@@ -122,8 +122,9 @@ any cell starts and names the remedy, splitting it across more drift files.
 
 Splitting does not lift the tree's own ceiling. Every sweep hands drift-issues
 the full tree's cell list in one environment variable. Past about 2,000 cells
-(128 KiB, Linux's per-string limit) every sweep's `issues` step fails before its
-script starts, after every cell has planned.
+(128 KiB, Linux's per-string limit) every sweep's `issues` job fails at its
+"Upsert / close drift issues" step before the script starts, after every cell
+has planned.
 
 ## Scoping a sweep
 
