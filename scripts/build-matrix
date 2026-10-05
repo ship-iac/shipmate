@@ -104,27 +104,32 @@ def _cell_tags(cell, tags_by_stack):
 def filter_cells(cells, tags_by_stack, query):
     """`cells` narrowed to those matching `query`, or all of them when it is empty.
 
-    An empty term refuses (`_parse_tag_query`). A term no stack in `tags_by_stack` carries
-    empties the sweep even when another clause matches, so a typo cannot quietly shrink it; that
-    and a query matching no cell both return `[]` and print one `::notice::` naming the query
-    and any such terms. A notice, not a refusal: a drift file may precede its first tagged
-    stack."""
+    An empty term refuses (`_parse_tag_query`). A term no stack in `tags_by_stack` carries makes
+    only its own clause match nothing, so `env/prod-eu,env/prod-us` written before the first
+    prod-us stack still sweeps prod-eu. Such terms are named in one `::notice::`, and a query
+    matching no cell returns `[]` with one. Notices, not refusals: a drift file may precede its
+    first tagged stack."""
     if not query.strip():
         return cells
     clauses = _parse_tag_query(query)
     observed = {t for tags in tags_by_stack.values() for t in tags}
     unknown = sorted({t for clause in clauses for t in clause} - observed)
     kept = [c for c in cells if any(clause <= _cell_tags(c, tags_by_stack) for clause in clauses)]
-    if unknown or not kept:
-        notice = (
-            f"::notice::the drift tags query '{query}' matches no stack x environment cell, "
-            "so this sweep is empty."
-        )
+    if kept:
         if unknown:
-            notice += f" No stack carries: {', '.join(unknown)}."
-        print(notice)
-        return []
-    return kept
+            print(
+                f"::notice::the drift tags query '{query}' names tag(s) no stack carries: "
+                f"{', '.join(unknown)}; their clauses match no cell."
+            )
+        return kept
+    notice = (
+        f"::notice::the drift tags query '{query}' matches no stack x environment cell, "
+        "so this sweep is empty."
+    )
+    if unknown:
+        notice += f" No stack carries: {', '.join(unknown)}."
+    print(notice)
+    return []
 
 
 def _matrix_limit_error(count, all_stacks):

@@ -35,8 +35,9 @@ inputs:
       form: ',' is OR and ':' is AND, so 'env/dev-eu,env/dev-us' is either environment and
       'env/dev-eu:workload/app' is both. Empty (the default) covers every cell. Allowed only
       alongside no-pull-request (nightly drift), because narrowing a plan run would leave
-      changed stacks with no plan cell and no apply check. A term no stack carries, and a
-      query matching no cell, leave the run empty with a notice; an empty term fails the run.
+      changed stacks with no plan cell and no apply check. A term no stack carries matches
+      nothing in its own clause and is named in a notice; a query matching no cell leaves the
+      run empty with a notice; an empty term fails the run.
     required: false
     default: ""
   github-vars:

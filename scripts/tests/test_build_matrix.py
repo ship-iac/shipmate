@@ -1216,23 +1216,28 @@ def test_spaces_around_terms_match_as_without_them():
         assert [(c["environment"], c["stack"]) for c in _filtered(*args, query)] == expected
 
 
-def test_a_term_no_stack_carries_empties_the_sweep_naming_it(capsys):
-    """A term no stack carries empties the sweep even when another clause matches, with one
-    notice naming it: a typo'd slice would otherwise drop out of every sweep unnoticed.
+def test_a_term_no_stack_carries_drops_only_its_own_clause(monkeypatch, tmp_path, capsys):
+    """`env/dev-eu,env/nope` sweeps the dev-eu cells, and one notice names `env/nope`: a query
+    written before an environment's first stack still sweeps the environments that exist.
 
-    Mutations: drop the unknown-term check (the known clause plans `stacks/app`); drop the
-    ` No stack carries` clause (the notice no longer names the term).
+    Mutations: return `[]` whenever a term is unknown -- the matrix is empty; drop the notice
+    on the matching path -- stdout lacks it.
     """
-    cells = _filtered(
-        ["dev-eu"],
-        {"dev-eu": ["stacks/app"]},
-        {"stacks/app": ["env/dev-eu", "workload/app"]},
-        "env/dev-eu,workload/nope",
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu,env/nope"},
+        stacks=_MULTI_ENV_TREE,
     )
-    assert cells == []
+    include = json.loads(outputs["matrix"])["include"]
+    assert [(c["environment"], c["stack"]) for c in include] == [
+        ("dev-eu", "stacks/app"),
+        ("dev-eu", "stacks/db"),
+    ]
     assert capsys.readouterr().out.splitlines() == [
-        _NO_MATCH_NOTICE.format(query="env/dev-eu,workload/nope")
-        + " No stack carries: workload/nope."
+        "::notice::the drift tags query 'env/dev-eu,env/nope' names tag(s) no stack carries: "
+        "env/nope; their clauses match no cell.",
+        "2 cell(s): dev-eu/stacks/app, dev-eu/stacks/db",
     ]
 
 
