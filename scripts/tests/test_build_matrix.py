@@ -1103,6 +1103,7 @@ _NO_MATCH_NOTICE = (
     "::notice::the drift tags query '{query}' matches no stack x environment cell, so this "
     "sweep is empty."
 )
+_ON_DISK = " Tags match in their on-disk form, such as 'env/dev-eu'."
 
 
 def _filtered(envs, stacks_by_env, tags_by_stack, query):
@@ -1235,8 +1236,8 @@ def test_a_term_no_stack_carries_drops_only_its_own_clause(monkeypatch, tmp_path
         ("dev-eu", "stacks/db"),
     ]
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::the drift tags query 'env/dev-eu,env/nope' names tag(s) no stack carries: "
-        "env/nope; their clauses match no cell.",
+        "::notice::the drift tags query 'env/dev-eu,env/nope' has clause(s) matching no cell: "
+        "env/nope. No stack carries: env/nope." + _ON_DISK,
         "2 cell(s): dev-eu/stacks/app, dev-eu/stacks/db",
     ]
 
@@ -1251,7 +1252,7 @@ def test_conceptual_tag_form_names_both_halves_as_carried_by_no_stack(capsys):
     )
     assert cells == []
     assert capsys.readouterr().out.splitlines() == [
-        _NO_MATCH_NOTICE.format(query="env:dev-eu") + " No stack carries: dev-eu, env."
+        _NO_MATCH_NOTICE.format(query="env:dev-eu") + " No stack carries: dev-eu, env." + _ON_DISK
     ]
 
 
@@ -1290,6 +1291,33 @@ def test_known_terms_that_co_occur_nowhere_empty_the_sweep(capsys):
     assert cells == []
     assert capsys.readouterr().out.splitlines() == [
         _NO_MATCH_NOTICE.format(query="env/dev-eu:workload/app")
+    ]
+
+
+def test_a_clause_of_known_terms_matching_no_cell_is_named_beside_a_live_one(capsys):
+    """`env/prod-eu` and `workload/app` both exist but never share a cell, so the first clause
+    sweeps nothing while `env/dev-eu` sweeps its cells. The dead clause is named, with no `No
+    stack carries` sentence, because every term is carried.
+
+    Mutation: notice only when a term is unknown -- stdout is empty.
+    """
+    cells = _filtered(
+        ["dev-eu", "prod-eu"],
+        {"dev-eu": ["stacks/app", "stacks/db"], "prod-eu": ["stacks/net"]},
+        {
+            "stacks/app": ["env/dev-eu", "workload/app"],
+            "stacks/db": ["env/dev-eu"],
+            "stacks/net": ["env/prod-eu"],
+        },
+        "env/prod-eu:workload/app,env/dev-eu",
+    )
+    assert [(c["environment"], c["stack"]) for c in cells] == [
+        ("dev-eu", "stacks/app"),
+        ("dev-eu", "stacks/db"),
+    ]
+    assert capsys.readouterr().out.splitlines() == [
+        "::notice::the drift tags query 'env/prod-eu:workload/app,env/dev-eu' has clause(s) "
+        "matching no cell: env/prod-eu:workload/app."
     ]
 
 
@@ -1351,7 +1379,7 @@ def test_a_query_matching_no_cell_is_an_empty_sweep_with_a_notice(monkeypatch, t
     stays the whole tree, so no Issue is closed for a cell the query never planned.
 
     Mutations: refuse a no-match query with `SystemExit` as before; drop the ` No stack carries`
-    clause.
+    clause. The whole stdout is compared, so a second notice or a lost sentence reddens too.
     """
     outputs, _ = _run_main(
         monkeypatch,
@@ -1362,10 +1390,12 @@ def test_a_query_matching_no_cell_is_an_empty_sweep_with_a_notice(monkeypatch, t
     assert outputs["empty"] == "true"
     assert outputs["count"] == "0"
     assert json.loads(outputs["cells"]) == _MULTI_ENV_CELLS
-    assert (
+    assert capsys.readouterr().out.splitlines() == [
         _NO_MATCH_NOTICE.format(query="env/dev-eu:workload/nope")
         + " No stack carries: workload/nope."
-    ) in capsys.readouterr().out.splitlines()
+        + _ON_DISK,
+        "0 cell(s): (none)",
+    ]
 
 
 def test_a_filtered_sweep_still_checks_every_environment_against_a_tf_vars_table(
