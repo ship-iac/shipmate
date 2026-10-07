@@ -131,7 +131,7 @@ def write_file(path, text, subject):
 def _env_membership():
     """Terramate env membership for this checkout. Its own function so tests can
     replace it without a terramate binary on PATH."""
-    return _load("build-matrix").env_membership(all_stacks=True)
+    return bm.env_membership(all_stacks=True)
 
 
 def _derive_envs(names):

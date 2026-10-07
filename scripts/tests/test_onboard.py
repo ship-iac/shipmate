@@ -2029,7 +2029,8 @@ todo          gate ruleset
 """
 
 #: Hand-written: a configured public repository with the `repo-example-folders` drift file.
-#: Every item this run can read is `ok`; the two it cannot read stay `cannot check`.
+#: Every item this run can read is `ok`; the App installation and CODEOWNERS items stay
+#: `cannot check`.
 CONFIGURED_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
@@ -2652,11 +2653,8 @@ def test_an_untagged_stack_is_adopted_through_the_real_membership(monkeypatch, t
 
     Mutation: restore the refusal of an untagged stack in build-matrix's `env_membership`.
     """
-    bm = load_script("build-matrix")
-    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["a", "b"])
-    monkeypatch.setattr(bm, "_tags", lambda s: {"a": ["env/dev-eu"], "b": []}[s])
-    real = onboard._load
-    monkeypatch.setattr(onboard, "_load", lambda name: bm if name == "build-matrix" else real(name))
+    monkeypatch.setattr(onboard.bm, "_list_stacks", lambda all_stacks, base: ["a", "b"])
+    monkeypatch.setattr(onboard.bm, "_tags", lambda s: {"a": ["env/dev-eu"], "b": []}[s])
     _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=None)
     assert exc.code == 0
     assert (

@@ -312,7 +312,7 @@ that causes it merges:
 | --- | --- |
 | `unmanaged stacks` | a stack carries no `env/*` tag. It names them; shipmate runs none of them, which needs nothing if deliberate. |
 | `stack tags` | a stack carries two `workload/*` tags, two stack paths in one environment slug alike, a stack's `workload/*` tag is outside its environment's `workloads` list, or that list names a workload no stack in the environment tags. |
-| `drift sweeps` | no workflow file calls the engine's `drift.yml`; a stack × environment cell is in no drift file's `tags` query; a query has an empty term; a query, or one clause of it, matches no cell; or a query selects more than 256 cells, which the sweep refuses, so its cells count as unswept. |
+| `drift sweeps` | no workflow file calls the engine's `drift.yml`; a stack × environment cell is in no drift file's `tags` query; a query, or one clause of it, matches no cell; or a query has an empty term or selects more than 256 cells. The sweep refuses either of the last two, so that file's cells count as unswept. |
 
 `drift sweeps` reads every `.yml` and `.yaml` file in `.github/workflows/` and
 treats one as a drift file when it calls the engine's `drift.yml`, as

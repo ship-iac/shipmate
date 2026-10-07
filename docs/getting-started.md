@@ -180,7 +180,8 @@ each item `ok`, `todo` or `cannot check` from what the run read, and only a
 installation, which only an App JWT can read; once a `CODEOWNERS` file
 exists, whether an entry in it covers `/.github/workflows/`, which is GitHub's
 matching; and `drift sweeps`, when a drift file's `tags` query cannot be read,
-or a stack-tag refusal leaves no whole tree to cover
+or a stack carrying two `workload/*` tags or two stack paths that slug alike
+leave no whole tree to cover
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
 
 The checklist reads the working tree: stack tags, `.github/shipmate.toml` and

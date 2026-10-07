@@ -245,6 +245,23 @@ def test_every_listed_workload_tagged_says_nothing(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_a_listed_workload_is_untagged_per_environment():
+    """A workload `dev-eu` lists and only a `prod` stack tags is untagged in `dev-eu`.
+
+    Mutation: diff each list against the workloads tagged in any environment -- `net` is
+    tagged in `prod`, so nothing is reported.
+    """
+    table = {
+        "layout": "folder",
+        "environments": {
+            "dev-eu": {"workloads": ["core", "net"]},
+            "prod": {"workloads": ["net"]},
+        },
+    }
+    tagged = _scan(**{"dev-eu": {"core"}, "prod": {"net"}})
+    assert env_config.untagged_workloads(table, tagged) == [("dev-eu", ["net"])]
+
+
 def test_a_listed_workload_warns_only_under_a_whole_tree_scan(capsys):
     """A plan scans only changed stacks, so a listed workload on an unchanged one is untagged
     there. Mutation: call `_report_unused(table, tagged or {})` when `tagged` is None -- the

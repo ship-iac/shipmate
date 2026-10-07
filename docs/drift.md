@@ -5,7 +5,8 @@ on it. A repository with no drift workflow file never has a stack checked
 against real infrastructure, and `shipmate doctor` reports a note about it.
 That note keeps doctor's verdict at ⚪ with the help hint, never 🟢 no problems
 found. `scripts/onboard --dry-run` marks its `drift sweeps` checklist item
-`todo` for it, and once drift files exist, names the cells none of them sweeps. Read [What it costs](#what-it-costs) before you add one.
+`todo` when no drift workflow file exists, and once one does, names the cells no
+drift file sweeps. Read [What it costs](#what-it-costs) before you add one.
 
 Each drift workflow file is one sweep: its cron fans out over the stack ×
 environment cells its `tags` query selects, every cell when it sets none — not
