@@ -707,8 +707,12 @@ a path the identity grants nothing on. An identity that does not vary shows
 because a tag outside the list resolves no role. The notices share an 8,000-character
 budget, so the report stays under GitHub's comment limit: an environment over it
 alone has its items cut and counted, and one final notice counts the
-environments left out. It reads the branch's table, so it is the audit read for
-an identity edit before it merges. A referenced role shows the value comment-ops resolves: a
+environments left out. One notice per GitHub Environment the roles bind then
+names the distinct AWS accounts its roles reach: the OIDC subject is per
+environment, so every cell bound to it can assume each of those roles. A subject
+with no role prints none. The account notices share their own 4,000-character
+budget, cut and counted as the roles notices are. Doctor reads the branch's
+table, so it is the audit read for an identity edit before it merges. A referenced role shows the value comment-ops resolves: a
 `shipmate-engine` Environment variable of the same name wins there, and never in
 a cell (§Variable references).
 

@@ -15,6 +15,7 @@ section below names the SHA the release tags.
 - **Each drift workflow file can pass engine `drift.yml` a `tags` query, so one file sweeps only the cells it selects (`docs/drift.md` §Scoping a sweep).**
 - **`shipmate doctor` reports a notice when no workflow file calls the engine's `drift.yml`, and warns when `shipmate.yml` still does.**
 - **The plan comment names the changed stacks that carry no `env/*` tag, and a pull request changing only such stacks gets a comment.**
+- **`shipmate doctor` names the AWS accounts each environment's OIDC subject reaches.**
 
 ### Changed
 

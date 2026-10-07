@@ -4648,6 +4648,25 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         ),
         (
             doctor.NOTICE,
+            "`dev-eu-plan` reaches these AWS accounts at the commit under examination: "
+            "981781037707.",
+        ),
+        (
+            doctor.NOTICE,
+            "`dev-eu-apply` reaches these AWS accounts at the commit under examination: "
+            "981781037707.",
+        ),
+        (
+            doctor.NOTICE,
+            "`prod-plan` reaches these AWS accounts at the commit under examination: 981781037707.",
+        ),
+        (
+            doctor.NOTICE,
+            "`prod-apply` reaches these AWS accounts at the commit under examination: "
+            "981781037707.",
+        ),
+        (
+            doctor.NOTICE,
             "`needs` orders dev-us after dev-eu: a bare `shipmate apply` applies "
             "one env-level fully before it starts the next.",
         ),
@@ -4713,6 +4732,14 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
             "`dev` resolves these roles at the commit under examination: plan every cell: "
             "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
             "`arn:aws:iam::981781037707:role/shipmate-apply`.",
+        ),
+        (
+            doctor.NOTICE,
+            "`dev-plan` reaches these AWS accounts at the commit under examination: 981781037707.",
+        ),
+        (
+            doctor.NOTICE,
+            "`dev-apply` reaches these AWS accounts at the commit under examination: 981781037707.",
         ),
         (
             doctor.NOTICE,
@@ -4871,7 +4898,8 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
     requested path rather than `apply` for a shared environment in `resolved_roles` (the
     `ops` plan row reads `no role`); skip rows whose `role_arn` is empty (the `stage` plan
     row vanishes); print `every cell` whatever the entry writes (the `tools` rows, whose list
-    leaves a tag outside it with no role, read `every cell`).
+    leaves a tag outside it with no role, read `every cell`); append the account notices
+    after `_config_defaults` in `config_status`.
     """
     responses = {_CONFIG_READ: _wf_file(_ROLES_TABLE)}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -4901,6 +4929,28 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
             "`tools` resolves these roles at the commit under examination: plan untagged and "
             "listed cells: no role; apply untagged and listed cells: "
             "`arn:aws:iam::333333333333:role/ops-apply`.",
+        ),
+        (
+            doctor.NOTICE,
+            "`dev-plan` reaches these AWS accounts at the commit under examination: 111111111111.",
+        ),
+        (
+            doctor.NOTICE,
+            "`dev-apply` reaches these AWS accounts at the commit under examination: 111111111111.",
+        ),
+        (
+            doctor.NOTICE,
+            "`ops` reaches these AWS accounts at the commit under examination: 333333333333.",
+        ),
+        (
+            doctor.NOTICE,
+            "`stage-apply` reaches these AWS accounts at the commit under examination: "
+            "333333333333.",
+        ),
+        (
+            doctor.NOTICE,
+            "`tools-apply` reaches these AWS accounts at the commit under examination: "
+            "333333333333.",
         ),
         (
             doctor.NOTICE,
@@ -5030,6 +5080,156 @@ def test_a_later_environment_over_the_budget_is_cut_against_what_is_left():
             + " … and 440 more.",
         ),
     ]
+
+
+def _accounts_line(subject, accounts):
+    return (
+        doctor.NOTICE,
+        f"`{subject}` reaches these AWS accounts at the commit under examination: {accounts}.",
+    )
+
+
+def test_each_subject_names_the_accounts_its_roles_reach_once_and_sorted():
+    """Four listed workloads, two of them in one account: the apply subject can assume every
+    workload's role, so its line names the three accounts, each once, sorted.
+
+    Mutations: drop the dedupe (`111111111111` twice); keep written order through
+    `dict.fromkeys` instead of sorting (`333333333333` first); read only the first workload's
+    role (one account).
+    """
+    arn = "arn:aws:iam::{}:role/apply"
+    table = {
+        "layout": "folder",
+        "identities": {
+            "app": {
+                "aws": {
+                    "plan": "arn:aws:iam::999999999999:role/plan",
+                    "apply": {
+                        "a": arn.format("333333333333"),
+                        "b": arn.format("111111111111"),
+                        "c": arn.format("222222222222"),
+                        "d": arn.format("111111111111"),
+                    },
+                }
+            }
+        },
+        "environments": {
+            "dev": {"region": "eu-west-1", "identity": "app", "workloads": ["a", "b", "c", "d"]}
+        },
+    }
+    assert doctor._subject_accounts(doctor.ec.validate_structure(table)) == [
+        _accounts_line("dev-plan", "999999999999"),
+        _accounts_line("dev-apply", "111111111111, 222222222222, 333333333333"),
+    ]
+
+
+def test_a_shared_environment_has_one_subject_reaching_the_apply_accounts():
+    """A shared environment binds the bare name on both paths and runs the apply role on
+    both. The table is hand-built and never validated: `validate_structure` refuses
+    `aws.plan` on a shared identity, but a plan role written there must still not appear.
+
+    Mutations: read `identity["aws"]["plan"]` for the plan path (`888888888888` appears);
+    key the subject as `<env>-plan` / `<env>-apply` whatever the entry says (two lines).
+    """
+    table = {
+        "layout": "folder",
+        "identities": {
+            "ops": {
+                "aws": {
+                    "plan": "arn:aws:iam::888888888888:role/plan",
+                    "apply": "arn:aws:iam::777777777777:role/apply",
+                }
+            }
+        },
+        "environments": {"ops": {"region": "eu-west-1", "identity": "ops", "shared": True}},
+    }
+    assert doctor._subject_accounts(table) == [_accounts_line("ops", "777777777777")]
+
+
+def test_a_subject_with_no_role_gets_no_accounts_line():
+    """Mutation: keep subjects whose account set is empty (a `dev-plan` line with nothing
+    after the colon)."""
+    table = {
+        "layout": "folder",
+        "identities": {"app": {"aws": {"apply": "arn:aws:iam::111111111111:role/apply"}}},
+        "environments": {"dev": {"region": "eu-west-1", "identity": "app"}},
+    }
+    assert doctor._subject_accounts(doctor.ec.validate_structure(table)) == [
+        _accounts_line("dev-apply", "111111111111")
+    ]
+
+
+def test_an_arn_without_an_account_field_contributes_no_account():
+    """`validate_structure` checks only the `arn:` prefix, and `config_status` must not raise.
+
+    Mutations: drop the field-count check (IndexError); drop the non-empty check (an empty
+    account leads the line).
+    """
+    table = {
+        "layout": "folder",
+        "identities": {
+            "app": {
+                "aws": {
+                    "apply": {
+                        "a": "arn:aws:iam",
+                        "b": "arn:aws:iam:::role/x",
+                        "c": "arn:aws:iam::111111111111:role/apply",
+                    }
+                }
+            }
+        },
+        "environments": {
+            "dev": {"region": "eu-west-1", "identity": "app", "workloads": ["a", "b", "c"]}
+        },
+    }
+    assert doctor._subject_accounts(doctor.ec.validate_structure(table)) == [
+        _accounts_line("dev-apply", "111111111111")
+    ]
+
+
+def test_the_account_lines_keep_their_own_budget():
+    """Three environments whose apply subjects each reach 256 accounts: the first line fits
+    whole, the second is cut against what is left, and the third is counted.
+
+    Mutation: bound the account notices by `ROLE_LINES_BUDGET` (the second line is whole and
+    the third cut).
+    """
+    workloads = [f"w{i:03}" for i in range(256)]
+    accounts = [f"{100000000000 + i}" for i in range(256)]
+    table = {
+        "layout": "folder",
+        "identities": {
+            "wide": {
+                "aws": {
+                    "apply": {
+                        w: f"arn:aws:iam::{a}:role/apply"
+                        for w, a in zip(workloads, accounts, strict=True)
+                    }
+                }
+            }
+        },
+        "environments": {
+            env: {"region": "eu-west-1", "identity": "wide", "workloads": workloads}
+            for env in ("dev", "prod", "stage")
+        },
+    }
+    assert doctor._subject_accounts(doctor.ec.validate_structure(table)) == [
+        _accounts_line("dev-apply", ", ".join(accounts)),
+        _accounts_line("prod-apply", ", ".join(accounts[:18]) + " … and 238 more"),
+        (
+            doctor.NOTICE,
+            "accounts for 1 more subject(s) not shown, to keep this report under GitHub's "
+            "comment limit.",
+        ),
+    ]
+
+
+def test_the_contract_states_the_account_budget_doctor_applies():
+    """Mutations: set `ACCOUNT_LINES_BUDGET` to 5000; set it to 8000 (the roles sentence must
+    not satisfy it)."""
+    contract = " ".join((ENGINE / "CONTRACT.md").read_text(encoding="utf-8").split())
+    budget = f"The account notices share their own {doctor.ACCOUNT_LINES_BUDGET:,}-character budget"
+    assert budget in contract
 
 
 def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
