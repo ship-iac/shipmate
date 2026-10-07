@@ -435,12 +435,10 @@ def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verd
     )
 
 
-def test_summary_comment_caps_at_build_matrix_s_name_count():
-    """One cap: summary-comment reads build-matrix's `UNMANAGED_NAMES`, so the shape check and
-    the producer cannot disagree. Mutation: `UNMANAGED_NAMES = 9` in build-matrix -- the
-    ten-path value is refused."""
-    raw = json.dumps({"count": 12, "paths": [f"s{i:02}" for i in range(10)]})
-    assert sc._unmanaged(raw) == json.loads(raw)
+def test_the_two_unmanaged_name_caps_are_equal():
+    """The producer's cap and the shape check's cap are one value written twice. Mutation:
+    `UNMANAGED_NAMES = 9` in either script."""
+    assert sc.UNMANAGED_NAMES == load_script("build-matrix").UNMANAGED_NAMES == 10
 
 
 def test_the_unmanaged_line_names_ten_paths_and_counts_the_rest():
