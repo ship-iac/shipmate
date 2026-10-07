@@ -1012,7 +1012,8 @@ def _drift_files(root):
     """[(file name, `tags` query or None, why None)] for each `.yml`/`.yaml` file in the
     working tree's `.github/workflows/` whose comment-stripped text calls the engine's
     `drift.yml`, by doctor's own selector, so the two cannot disagree on what a drift file is.
-    The query is read from the calling job alone (`_call_region`)."""
+    The query is read from the calling job alone (`_call_region`). A file that is not UTF-8
+    may be one, so it is listed with None."""
     workflows = pathlib.Path(root) / ".github" / "workflows"
     if not workflows.is_dir():
         return []
@@ -1022,7 +1023,11 @@ def _drift_files(root):
     for path in sorted(workflows.iterdir()):
         if path.suffix not in (".yml", ".yaml") or not path.is_file():
             continue
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            found.append((path.name, None, "it is not UTF-8 text, so it was not read"))
+            continue
         if call.search(dr._stripped_text(text)):
             found.append((path.name, *_drift_query(dr._call_region(text, call))))
     return found
@@ -1052,8 +1057,9 @@ def _drift_sweeps_item(ctx):
         errors, notices = [], io.StringIO()
         with ec._gather(errors), contextlib.redirect_stdout(notices):
             kept = bm.filter_cells(ctx["cells"], ctx["tags_by_stack"], query)
-            covered |= {(c["stack"], c["environment"]) for c in kept}
+            # After `cap_cells`: a sweep above the limit refuses before any cell plans.
             bm.cap_cells(kept, True)
+            covered |= {(c["stack"], c["environment"]) for c in kept}
         found = [n.removeprefix("::notice::") for n in notices.getvalue().splitlines()]
         lines += [f"{name}: {m.removeprefix('::error::')}" for m in [*found, *errors]]
     uncovered = [

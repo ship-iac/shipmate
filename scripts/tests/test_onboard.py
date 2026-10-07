@@ -3272,6 +3272,10 @@ def test_the_drift_query_is_parsed_by_build_matrix(tmp_path, monkeypatch):
                     "drift.yml: 257 plan cells exceeds the GitHub Actions matrix limit of 256. "
                     "A drift sweep is one matrix; split it across more drift files, each calling "
                     "drift.yml with a narrower `tags` query (docs/drift.md).",
+                    "257 cell(s) no drift file sweeps:",
+                    *[f"  s{i:03} (dev-eu)" for i in range(10)],
+                    "  and 247 more",
+                    "Widen a `tags` query, or add a drift file for them.",
                     _read_line("drift.yml"),
                 ],
             ),
@@ -3279,10 +3283,11 @@ def test_the_drift_query_is_parsed_by_build_matrix(tmp_path, monkeypatch):
     ],
 )
 def test_a_sweep_above_the_matrix_limit_is_listed(tmp_path, count, expected):
-    """Both boundaries, through `build-matrix`'s own `cap_cells`.
+    """Both boundaries, through `build-matrix`'s own `cap_cells`. A sweep above the limit
+    refuses before any cell plans, so it covers none of its cells.
 
     Mutations: `> MATRIX_LIMIT + 1` in `cap_cells` -- 257 is `ok`; `>= MATRIX_LIMIT` -- 256
-    is listed.
+    is listed; count the cells before `cap_cells` -- 257 lists no uncovered cell.
     """
     cells, tags = _tree(*[(f"s{i:03}", "dev-eu") for i in range(count)])
     context = _drift_ctx(tmp_path, {"drift.yml": FOLDERS_DRIFT}, cells=cells, tags_by_stack=tags)
@@ -3293,12 +3298,15 @@ def test_a_dead_clause_and_an_empty_sweep_are_each_listed(tmp_path):
     """`filter_cells`' own notices, one line each, its `::notice::` prefix removed. The block
     value `env/dev-eu,env/ghost` is one OR query, comma included.
 
+    `dead.yaml` pins the second suffix a workflow file may carry.
+
     Mutations: drop the captured-notice lines -- `ok`; cut a block value at `,` like a flow
-    value (`elif True:` for `elif m["flow"]:`) -- the dead-clause line is gone.
+    value (`elif True:` for `elif m["flow"]:`) -- the dead-clause line is gone; drop `".yaml"`
+    from `_drift_files`' suffixes -- `dead.yaml` is not read.
     """
     cells, tags = _tree(("a", "dev-eu"))
     files = {
-        "dead.yml": _drift_job("    with:\n      tags: env/dev-eu,env/ghost\n"),
+        "dead.yaml": _drift_job("    with:\n      tags: env/dev-eu,env/ghost\n"),
         "ghost.yml": _drift_job("    with:\n      tags: env/ghost\n"),
     }
     context = _drift_ctx(tmp_path, files, cells=cells, tags_by_stack=tags)
@@ -3306,13 +3314,13 @@ def test_a_dead_clause_and_an_empty_sweep_are_each_listed(tmp_path):
         "todo",
         DRIFT_ITEM,
         [
-            "dead.yml: the drift tags query 'env/dev-eu,env/ghost' has clause(s) matching no "
+            "dead.yaml: the drift tags query 'env/dev-eu,env/ghost' has clause(s) matching no "
             "cell: env/ghost. No stack carries: env/ghost. Tags match in their on-disk form, "
             "such as 'env/dev-eu'.",
             "ghost.yml: the drift tags query 'env/ghost' matches no stack x environment cell, "
             "so this sweep is empty. No stack carries: env/ghost. Tags match in their on-disk "
             "form, such as 'env/dev-eu'.",
-            _read_line("dead.yml", "ghost.yml"),
+            _read_line("dead.yaml", "ghost.yml"),
         ],
     )
 
@@ -3381,6 +3389,25 @@ def test_a_drift_call_split_across_lines_is_cannot_check(tmp_path):
             "  drift.yml: its `uses:` value starts on a later line, which this reader does not "
             "follow.",
             _read_line("drift.yml"),
+        ],
+    )
+
+
+def test_a_workflow_file_that_is_not_utf8_is_cannot_check(tmp_path):
+    """It may call `drift.yml`, so coverage is unknown rather than a crash with exit 1.
+
+    Mutation: drop the `UnicodeDecodeError` handler -- the item raises.
+    """
+    cells, tags = _tree(("a", "dev-eu"))
+    files = {"drift.yml": FOLDERS_DRIFT, "latin.yml": b"name: caf\xe9\n"}
+    context = _drift_ctx(tmp_path, files, cells=cells, tags_by_stack=tags)
+    assert onboard._drift_sweeps_item(context) == (
+        "cannot check",
+        DRIFT_ITEM,
+        [
+            "Coverage was not computed:",
+            "  latin.yml: it is not UTF-8 text, so it was not read.",
+            _read_line("drift.yml", "latin.yml"),
         ],
     )
 
