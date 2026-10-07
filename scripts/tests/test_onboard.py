@@ -1780,6 +1780,25 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     assert found == _EXPECTED_CALLEES
 
 
+def test_the_published_drift_fence_calls_drift_yml_on_the_placeholder():
+    """The consumer saves the `shipmate drift` fence by hand, so nothing renders or pins it,
+    and only this test reads it. Exactly one fence carries the name (`_fence` refuses
+    otherwise), and its `uses:` lines, compared whole against a hand-written list, are one
+    call of engine `drift.yml` on the placeholder the re-pin in docs/releasing.md rewrites.
+
+    Mutation: `@main` in place of `@<engine-sha>` in the fence.
+    """
+    page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    uses = [
+        line.strip()
+        for line in onboard._fence(page, "shipmate drift").splitlines()
+        if line.strip().startswith("uses:")
+    ]
+    assert uses == [
+        "uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release"
+    ]
+
+
 _EXPECTED_PINS = {"shipmate.yml": 5}
 
 
@@ -1987,6 +2006,11 @@ todo          adoption pull request
     in a pull request that changes no stack. The table is read from the default
     branch, so the first plan needs it merged.
 
+todo          drift workflow file
+    Add one workflow file per drift sweep from the `shipmate drift` fence in
+    docs/getting-started.md, under any name in `.github/workflows/`, with the same
+    pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).
+
 todo          gate ruleset
     Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because
     the workflows that produce it are not on the default branch (CONTRACT.md
@@ -2013,6 +2037,10 @@ cannot check  CODEOWNERS entry covering /.github/workflows/
 
 ok            Provider lock files
 ok            adoption pull request
+todo          drift workflow file
+    Add one workflow file per drift sweep from the `shipmate drift` fence in
+    docs/getting-started.md, under any name in `.github/workflows/`, with the same
+    pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).
 """
 
 REVIEWERS_RULE = {
@@ -2049,7 +2077,9 @@ def test_the_checklist_of_a_fresh_repository_in_a_dry_run(monkeypatch, tmp_path,
     The environments are all absent, so `apply_envs` holds `None` for each: a dry run must
     not read that as reviewed.
 
-    Mutation: delete the passphrase item from `_checklist`.
+    The drift-file item is `todo` on every run, since a drift file may have any name.
+
+    Mutations: delete the passphrase item from `_checklist`; delete `_DRIFT_ITEM` from it.
     """
     _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
     assert exit_.code == 0

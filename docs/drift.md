@@ -130,7 +130,7 @@ has planned.
 
 One drift workflow file is one sweep, with its own crons, its own matrix and its
 own 256-cell limit. To spread the tree across several sweeps, or past the limit,
-copy the `shipmate drift` fence under another filename and `name:`, set its
+save another copy of the fence under its own file name and `name:`, set its
 crons, and give its `drift` job a `tags` query:
 
 ```yaml

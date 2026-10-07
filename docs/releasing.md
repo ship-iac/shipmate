@@ -254,7 +254,7 @@ exercised after the re-pin.
 
 When the release refuses a key the default branch's table still holds, a `verb=plan`
 dispatch on the scratch branch, or a dispatch of one of its drift files
-(`gh workflow run <drift-file> --ref smoke/vX.Y.Z`, once that file is on the sample's
+(`gh workflow run <drift-file>.yml --ref smoke/vX.Y.Z`, once that file is on the sample's
 default branch), stops at detect on that key: expected, and that release's smoke is the
 `verb=apply` dispatch alone. Otherwise a `verb=plan`
 dispatch on the scratch branch runs the cells and stops at

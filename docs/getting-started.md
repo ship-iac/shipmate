@@ -315,9 +315,9 @@ engine reusable workflow SHA-pinned. A drift file is one job calling engine
 in the engine, so none of what they decide is wiring you can get
 wrong.
 
-Both go in at tier 1, and three of their jobs are this tier's:
-`plan`, `comment-ops` and the drift file's `drift`, which need `<env>-plan`,
-`shipmate-engine` and the App key and nothing else. `deploy` runs from the
+`shipmate.yml` and every drift file go in at tier 1, and three kinds of job are
+this tier's: `plan`, `comment-ops` and each drift file's `drift`, which need
+`<env>-plan`, `shipmate-engine` and the App key and nothing else. `deploy` runs from the
 start too: on every push to the default branch it applies the merged pull request's cells still
 pending, in the `<env>-apply` this tier has you create (a shared env's bare
 `<env>`). The other two, `apply` and `unlock`, wait for the
@@ -340,7 +340,7 @@ pending with the draft reason. Mark the pull request ready, or comment
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 that name is what makes the plan cells `shipmate / <stack> / <env>` and lets the
 plan comment's `plan` links resolve to them. The `plan` and `comment-ops` jobs
-and the drift file's `drift` job all carry it. Rename the `plan` job and its run
+and each drift file's `drift` job carry it. Rename the `plan` job and its run
 still happens, but every one of those links falls back to the workflow-run page
 instead; `shipmate doctor` reports it. Renaming `comment-ops` or `drift` changes
 only their own check-run names: no link resolves through them, and doctor does
@@ -365,7 +365,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: apply` | `apply` | `apply.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
-Only the `plan` job and the drift file's `drift` job accept a `runs_on:`
+Only the `plan` job and each drift file's `drift` job accept a `runs_on:`
 input. Behind every other call the engine's detect jobs and cells run on
 `ubuntu-latest` and its control jobs on `ubuntu-slim` ([`aws.md`](aws.md)
 §Runner choice). The fences below omit it, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
@@ -497,9 +497,10 @@ On a repository whose default branch is not `main`, change `branches: [main]`
 to that branch; `scripts/onboard` writes the file that way.
 
 Save the drift sweep from this second fence under any file name in
-`.github/workflows/`, with `<engine-sha>` replaced by the same pin as
-`shipmate.yml`. Each sweep is its own file; [`drift.md`](drift.md) §Scoping a
-sweep covers splitting the cells across several:
+`.github/workflows/`, with `@<engine-sha>  # see the latest release` replaced by
+`@<sha> # vX.Y.Z`, as `shipmate.yml`'s pin reads. Each sweep is its own file;
+[`drift.md`](drift.md) §Scoping a sweep covers splitting the cells across
+several:
 
 ```yaml
 name: shipmate drift

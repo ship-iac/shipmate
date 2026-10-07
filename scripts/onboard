@@ -873,6 +873,18 @@ def _adoption_item(ctx):
     )
 
 
+#: Always `todo`: a drift file may have any name, so this script cannot find one to mark.
+_DRIFT_ITEM = (
+    "todo",
+    "drift workflow file",
+    [
+        "Add one workflow file per drift sweep from the `shipmate drift` fence in",
+        "docs/getting-started.md, under any name in `.github/workflows/`, with the same",
+        "pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).",
+    ],
+)
+
+
 _RULESET_ITEM = (
     "todo",
     "gate ruleset",
@@ -906,7 +918,7 @@ def _checklist(ctx):
     items.append(_app_item(ctx))
     if gated:
         items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))
-    items += [_codeowners_item(ctx), _lock_files_item(ctx), _adoption_item(ctx)]
+    items += [_codeowners_item(ctx), _lock_files_item(ctx), _adoption_item(ctx), _DRIFT_ITEM]
     if ctx["ruleset_deferred"]:
         items.append(_RULESET_ITEM)
     out = ["", "Still yours, each item marked from what this run read:", ""]
