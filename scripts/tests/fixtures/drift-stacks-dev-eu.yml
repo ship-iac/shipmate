@@ -1,0 +1,20 @@
+name: shipmate drift dev-eu
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+permissions: {}
+jobs:
+  drift:
+    name: shipmate
+    uses: ship-iac/shipmate/.github/workflows/drift.yml@main
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    secrets:
+      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+    with:
+      runs_on: ubuntu-slim
+      tags: env/dev-eu

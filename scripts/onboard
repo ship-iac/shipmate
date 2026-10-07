@@ -28,9 +28,20 @@ Terramate env/* tags and the `environments` entries of the checkout's
 `.github/shipmate.toml`. Those bound as
 one bare `<env>` instead of the `<env>-plan` / `<env>-apply` pair are the entries
 holding `shared = true` in the checkout's `.github/shipmate.toml`.
+
+The closing checklist also reads the whole Terramate tree: stacks carrying no env/*
+tag, the tag refusals a plan would raise (two workload/* tags on one stack, two stack
+paths sharing one plan artifact name, a workload tag its environment's `workloads` list
+does not name), listed workloads no stack tags, and `needs` naming an environment that is
+neither an entry nor tagged. It reads the working tree's `.github/workflows/` too: each
+file calling the engine's `drift.yml` has its `tags` query run against the tree as a drift
+run's detect does, naming cells no sweep covers, a clause or query matching no cell, and a
+sweep that run refuses. Each is a checklist item; none changes the exit code.
 """
 
 import argparse
+import contextlib
+import io
 import json
 import pathlib
 import re
@@ -44,6 +55,8 @@ from _shipmate import approval_rules as _approval_rules
 from _shipmate import run as _run
 
 ec = _load("env-config")
+bm = _load("build-matrix")
+dr = _load("doctor")
 
 GATE = "shipmate / gate"
 #: The one repository variable this script writes.
@@ -119,7 +132,7 @@ def write_file(path, text, subject):
 def _env_membership():
     """Terramate env membership for this checkout. Its own function so tests can
     replace it without a terramate binary on PATH."""
-    return _load("build-matrix").env_membership(all_stacks=True)
+    return bm.env_membership(all_stacks=True)
 
 
 def _derive_envs(names):
@@ -631,14 +644,15 @@ def _reconcile_ruleset(ctx):
 #: the workflow file is rendered from a fence that guard parses, and an indented fence must
 #: be dedented rather than missed.
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
+ENGINE_SLUG = "ship-iac/shipmate"
 _DOC_PIN = re.compile(
-    r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
+    rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
 )
 #: Only a 40-hex pin, matching what the docs/releasing.md re-pin rewrites: a file still carrying
 #: the docs placeholder must not be reported `pin-only`, because that names a remedy which would
 #: then find no engine reference to move.
 _ANY_PIN = re.compile(
-    r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@[0-9a-f]{40}[^\S\n]*(#[^\n]*)?"
+    rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@[0-9a-f]{{40}}[^\S\n]*(#[^\n]*)?"
 )
 
 
@@ -741,22 +755,32 @@ def _table_item(ctx):
         return "todo", item, [ln.removeprefix("::error::") for ln in str(e).splitlines()]
     # Not env-config's unused-entry warning: it says to remove an entry that onboard asks the
     # consumer to declare before tagging, and removing it reopens the auto-created environment.
-    untagged = [e for e in ctx["envs"] if e not in ctx["tagged_envs"]]
-    if not untagged:
-        return "ok", item, []
+    lines = []
+    untagged = [e for e in ctx["envs"] if e not in ctx["tagged"]]
     if len(untagged) == 1:
-        sentence = (
+        lines = textwrap.wrap(
             f"Provisioned for {untagged[0]}, which no stack tags yet: its first tagging pull "
             "request deploys under that environment's protection. If the name is a typo, fix "
-            "the entry."
+            "the entry.",
+            width=80,
         )
-    else:
-        sentence = (
+    elif untagged:
+        lines = textwrap.wrap(
             f"Provisioned for {', '.join(untagged)}, which no stack tags yet: the first pull "
             "request tagging a stack into each deploys under that environment's protection. If "
-            "a name is a typo, fix the entry."
+            "a name is a typo, fix the entry.",
+            width=80,
         )
-    return "ok", item, textwrap.wrap(sentence, width=80)
+    # A declared, untagged predecessor is the provisioned-ahead order named above; only a
+    # name that is neither an entry nor tagged orders nothing while reading as ordering.
+    stale = ec.stale_needs(ctx["table"], set(ctx["tagged"]) | set(ctx["table"]["environments"]))
+    if stale:
+        lines += textwrap.wrap(
+            f"`needs` names {', '.join(stale)}, which no entry declares and no stack tags, so "
+            "it orders nothing. If a name is a typo, fix it.",
+            width=80,
+        )
+    return ("todo" if stale else "ok"), item, lines
 
 
 def _app_item(ctx):
@@ -896,6 +920,44 @@ def _lock_files_item(ctx):
     return "todo", item, lines
 
 
+def _unmanaged_item(ctx):
+    item = "unmanaged stacks"
+    unmanaged = bm.unmanaged_stacks(ctx["tags_by_stack"])
+    if not unmanaged:
+        return "ok", item, []
+    return (
+        "todo",
+        item,
+        [
+            f"{len(unmanaged)} stack(s) carry no `env/*` tag:",
+            *_stack_list(unmanaged),
+            "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
+            "needs nothing.",
+        ],
+    )
+
+
+def _stack_tags_item(ctx):
+    """The stack-tag refusals a plan would raise over the whole tree, and each entry's
+    listed workloads no stack in it tags. `ctx["cells"]` is None when a slug collision lost
+    the tree, and the table checks are skipped when there is no table."""
+    item = "stack tags"
+    errors = list(ctx["tree_errors"])
+    table = ctx["table"]
+    if table is not None and ctx["cells"] is not None:
+        with ec._gather(errors):
+            bm.refuse_workload_gaps(ctx["cells"], table)
+    lines = [e.removeprefix("::error::") for e in errors]
+    if table is not None:
+        for env, names in ec.untagged_workloads(table, ctx["tagged"]):
+            lines += textwrap.wrap(
+                f"`environments.{env}.workloads` lists {', '.join(names)}, which no stack in "
+                f"{env} tags. Tag a stack with each, or remove it from the list.",
+                width=80,
+            )
+    return ("todo" if lines else "ok"), item, lines
+
+
 def _adoption_item(ctx):
     item = "adoption pull request"
     if ctx["shim_on_default"]:
@@ -912,16 +974,161 @@ def _adoption_item(ctx):
     )
 
 
-#: Always `todo`: a drift file may have any name, so this script cannot find one to mark.
-_DRIFT_ITEM = (
-    "todo",
-    "drift workflow file",
-    [
-        "Add one workflow file per drift sweep from the `shipmate drift` fence in",
-        "docs/getting-started.md, under any name in `.github/workflows/`, with the same",
-        "pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).",
-    ],
-)
+_NO_DRIFT_FILE = [
+    "Add one workflow file per drift sweep from the `shipmate drift` fence in",
+    "docs/getting-started.md, under any name in `.github/workflows/`, with the same",
+    "pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).",
+]
+
+#: A `tags:` key at the start of a line (block form) or after `{` or `,` (flow form).
+_TAGS_KEY = re.compile(r"""(?:^[ \t]*|(?P<flow>[{,])[ \t]*)["']?tags["']?[ \t]*:""", re.M)
+
+
+def _tags_value(rest, flow):
+    """The value written after one `tags:` key (`rest`, the stripped remainder of its line),
+    or None when it starts on a later line: empty, or a `>`/`|` block scalar."""
+    if rest[:1] in ("'", '"'):
+        return rest[1:].partition(rest[0])[0]
+    if flow:
+        return re.split(r"[,}]", rest, maxsplit=1)[0].rstrip()
+    if not rest or rest[0] in ">|":
+        return None
+    return rest
+
+
+def _drift_query(region):
+    """(the `tags` query of the drift job `region`, "") or (None, why it cannot be read).
+    `region` is None when the selector matched a call `_call_region` cannot find line by line.
+
+    No key is "", which sweeps every cell. A block value runs to the end of the line, so
+    `env/a,env/b` is one OR query; a flow value stops at `,` or `}` unless quoted. A value on
+    a later line or a flow mapping split across lines is unread, never "".
+    """
+    if region is None:
+        return None, "its `uses:` value starts on a later line, which this reader does not follow"
+    if any(line.count("{") > line.count("}") for line in region.splitlines()):
+        return (
+            None,
+            "its drift job splits a flow mapping across lines, which this reader does not follow",
+        )
+    values = [
+        _tags_value(region[m.end() :].partition("\n")[0].strip(), m["flow"])
+        for m in _TAGS_KEY.finditer(region)
+    ]
+    if None in values:
+        return None, "its `tags` value is not on the key's line, which this reader does not follow"
+    if len(values) > 1:
+        return None, "its drift job sets `tags` more than once"
+    if values and "${{" in values[0]:
+        return None, "its `tags` is a `${{ }}` expression, which only a run resolves"
+    return (values[0] if values else ""), ""
+
+
+def _drift_file(path, call):
+    """`_drift_files`' entry for one workflow file, or None when it is no drift file."""
+    try:
+        if not path.is_file():
+            return None
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.name, None, "it is not UTF-8 text, so it was not read"
+    except OSError as exc:
+        return path.name, None, f"it could not be read: {exc}"
+    calls = len(list(call.finditer(dr._stripped_text(text))))
+    if calls > 1:
+        return path.name, None, "it calls `drift.yml` more than once"
+    if calls:
+        return path.name, *_drift_query(dr._call_region(text, call))
+    return None
+
+
+def _drift_files(root):
+    """[(file name, `tags` query or None, why None)] for each `.yml`/`.yaml` file in the
+    working tree's `.github/workflows/` whose comment-stripped text calls the engine's
+    `drift.yml`, by doctor's own selector, so the two cannot disagree on what a drift file is.
+    The query is read from the calling job alone (`_call_region`). A file that cannot be
+    read, or calls `drift.yml` more than once, is listed with None; so is the directory when
+    it cannot be listed."""
+    workflows = pathlib.Path(root) / ".github" / "workflows"
+    call = dr._engine_call(ENGINE_SLUG, "drift.yml")
+    # Python 3.11-3.13 re-raise a `stat` PermissionError from `is_dir`/`is_file`.
+    try:
+        if not workflows.is_dir():
+            return []
+        paths = sorted(workflows.iterdir())
+    except OSError as exc:
+        return [(".github/workflows/", None, f"it could not be listed: {exc}")]
+    found = [_drift_file(path, call) for path in paths if path.suffix in (".yml", ".yaml")]
+    return [entry for entry in found if entry is not None]
+
+
+def _coverage_blockers(ctx, files):
+    """Why coverage cannot be computed, one indented line each; [] when it can."""
+    why = [f"  {name}: {reason}." for name, query, reason in files if query is None]
+    if ctx["cells"] is None:
+        why.append("  a slug collision loses the tree; see `stack tags`.")
+    elif ctx["tree_errors"]:
+        why.append("  a stack with two `workload/*` tags has its cells dropped; see `stack tags`.")
+    if ctx["table"] is None:
+        why.append(
+            f"  `{ec.CONFIG_PATH}` is absent, and a drift run refuses without it; see its item."
+        )
+    else:
+        try:
+            ec.validate(ctx["table"], ctx["envs"])
+        except SystemExit:
+            why.append(f"  `{ec.CONFIG_PATH}` fails validation; see its item.")
+    return why
+
+
+def _sweep(ctx, name, query):
+    """(the lines one drift file's sweep reports, the (stack, env) cells it runs): the calls a
+    drift run's detect makes, a refusal by any of them running no cell."""
+    errors, notices, swept = [], io.StringIO(), set()
+    with ec._gather(errors), contextlib.redirect_stdout(notices):
+        kept = bm.filter_cells(ctx["cells"], ctx["tags_by_stack"], query)
+        bm.cap_cells(kept, True)
+        bm.refuse_workload_gaps(bm.stamp_rows(kept, ctx["table"], "plan"), ctx["table"])
+        # Assigned last: a refusal above leaves the sweep running no cell.
+        swept = {(c["stack"], c["environment"]) for c in kept}
+    found = [n.removeprefix("::notice::") for n in notices.getvalue().splitlines()]
+    return [f"{name}: {m.removeprefix('::error::')}" for m in [*found, *errors]], swept
+
+
+def _drift_sweeps_item(ctx):
+    """Each drift file's `tags` query run over the whole tree through `filter_cells` and
+    `cap_cells`, then `stamp_rows` and `refuse_workload_gaps` (`_sweep`). Their notices and
+    refusals are listed, then the cells no file sweeps; a refused sweep covers none. Coverage
+    is computed only when every query was read, the tree is whole and the table is present
+    and validates: a drift run refuses without one."""
+    item = "drift sweeps"
+    files = _drift_files(ctx["root"])
+    if not files:
+        return "todo", item, _NO_DRIFT_FILE
+    read = (
+        f"Read {', '.join(name for name, _q, _r in files)} in this working tree; a drift run "
+        "reads the default branch's copy."
+    )
+    why = _coverage_blockers(ctx, files)
+    if why:
+        return "cannot check", item, ["Coverage was not computed:", *why, read]
+    lines, covered = [], set()
+    for name, query, _reason in files:
+        found, swept = _sweep(ctx, name, query)
+        lines += found
+        covered |= swept
+    uncovered = [
+        f"{c['stack']} ({c['environment']})"
+        for c in ctx["cells"]
+        if (c["stack"], c["environment"]) not in covered
+    ]
+    if uncovered:
+        lines += [
+            f"{len(uncovered)} cell(s) no drift file sweeps:",
+            *_stack_list(uncovered),
+            "Widen a `tags` query, or add a drift file for them.",
+        ]
+    return ("todo" if lines else "ok"), item, [*lines, read]
 
 
 _RULESET_ITEM = (
@@ -957,7 +1164,14 @@ def _checklist(ctx):
     items.append(_app_item(ctx))
     if gated:
         items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))
-    items += [_codeowners_item(ctx), _lock_files_item(ctx), _adoption_item(ctx), _DRIFT_ITEM]
+    items += [
+        _codeowners_item(ctx),
+        _lock_files_item(ctx),
+        _unmanaged_item(ctx),
+        _stack_tags_item(ctx),
+        _drift_sweeps_item(ctx),
+        _adoption_item(ctx),
+    ]
     if ctx["ruleset_deferred"]:
         items.append(_RULESET_ITEM)
     out = ["", "Still yours, each item marked from what this run read:", ""]
@@ -1021,7 +1235,7 @@ def main(argv=None):
     sha, version = _engine_pin(engine)
     root = _repo_root()
     repo, default_branch, is_private = _repo_facts()
-    stacks_by_env, _ = _env_membership()
+    stacks_by_env, tags_by_stack = _env_membership()
     variables = _variables()
     _refuse_diverging_app_id(args.app_id, variables)
     table, shared = _resolve_shared(root, repo, variables)
@@ -1035,7 +1249,6 @@ def main(argv=None):
         "key": key,
         "envs": envs,
         "stacks": sorted({s for stacks in stacks_by_env.values() for s in stacks}),
-        "tagged_envs": set(stacks_by_env),
         "table": table,
         "shared": shared,
         "unresolved": set(),
@@ -1050,7 +1263,16 @@ def main(argv=None):
         "ruleset_deferred": False,
         "apply_envs": {},
         "review_count": 0,
+        "tags_by_stack": tags_by_stack,
+        "tagged": bm.tagged_workloads(stacks_by_env, tags_by_stack),
+        "tree_errors": [],
+        "cells": None,
     }
+    # A slug collision raises after the per-stack collection, so on that path the tree is lost.
+    with ec._gather(ctx["tree_errors"]):
+        ctx["cells"] = bm.full_tree(
+            sorted(stacks_by_env), stacks_by_env, tags_by_stack, ctx["tree_errors"]
+        )
     # Read before the first write, so `_refuse_missing_key` refuses while nothing exists.
     ctx["engine_secrets"] = _engine_secrets(repo)
     ctx["repo_secrets"] = _repo_secrets()

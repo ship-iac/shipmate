@@ -962,7 +962,8 @@ it, and plan, deploy and drift print a notice counting the unmanaged stacks they
 scanned (the changed set on plan and deploy, the whole tree on drift) and naming
 the first ten, then `, and M more`. A bare
 `shipmate apply`, `shipmate unlock` and `scripts/onboard` print it too, over the
-whole tree. The plan
+whole tree, and `scripts/onboard` also lists the stacks on its `unmanaged stacks`
+checklist item. The plan
 comment names the unmanaged stacks a pull request changes, under its verdict. A
 `workload/*` tag on an unmanaged stack is never checked. An `env/<name>` tag
 whose environment has no entry in the environment table still refuses the run
