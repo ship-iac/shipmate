@@ -283,7 +283,8 @@ whenever code-owner review is off, whatever the count is. Count `0` with
 still gates the merge wherever a `CODEOWNERS` entry covers the changed files,
 which is why doctor reports that combination as a note rather than a warning,
 naming any gated environments in it. Count `0` with `require_last_push_approval`
-on warns whatever else is set, and replaces that note.
+on warns whatever else is set, and omits the sole-maintainer note; the
+gated-environments note still appears.
 Either way, a `CHANGES_REQUESTED` review still blocks an apply until it is
 resolved or dismissed (`authorize` passes only on `NONE` or `APPROVED`; see
 `docs/branch-protection.md` §"Review policy").

@@ -88,11 +88,11 @@ def _evidence_gap(*, cell_count, planned):
 def _detect_gap(detect_result, refusal):
     """The hold description for a `detect` that did not succeed.
 
-    A `detect` that refused is named by its refusal, cut here to the 140 characters the
-    statuses API accepts; an empty one (a fmt or codegen failure, a crash) keeps the generic
-    text."""
+    A `detect` that failed with a `::error::` line (a refusal or a failed tool or API call) is
+    named by that line, cut here to the 140 characters the statuses API accepts; an empty one
+    (a fmt or codegen failure, a crash with no `::error::` line) keeps the generic text."""
     if refusal:
-        return f"detect refused: {refusal}"[:140]
+        return f"detect failed: {refusal}"[:140]
     return (
         f"change detection did not succeed ({detect_result}); fix the "
         "shipmate / detect job before merging"

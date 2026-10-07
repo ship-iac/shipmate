@@ -37,8 +37,8 @@ section below names the SHA the release tags.
 - **`shipmate doctor`'s report shows the engine placeholders `<env>`, `<stack>`, `<caller job>` and `<callee job>` with their angle brackets instead of as `&lt;env&gt;`.**
 - **`scripts/onboard` flags a committed lock that lacks the registry's `zh:` hashes, as a `tofu init` through a plugin cache writes it, and its remedy and `docs/getting-started.md` add `tofu providers lock -platform=linux_amd64` after `tofu init -backend=false`.**
 - **`scripts/onboard`'s App installation item links the organization's App installations page instead of a URL with an `<org>` placeholder.**
-- **A plan or drift detect names every stack carrying two `workload/*` tags, and any environment-table or `workloads` list refusal after them, in one run instead of stopping at the first stack.**
-- **A `shipmate / gate` failed by a detect refusal names the refusal in its description, as `detect refused: <the refusal's first line>`, instead of the generic "change detection did not succeed" text.**
+- **A plan or drift detect names every stack carrying two `workload/*` tags, and any environment-table or `workloads` list refusal after them, in one run instead of stopping at the first stack, while a stack-path collision or the matrix cell cap still refuses on its own.**
+- **A `shipmate / gate` failed by detect names the first `::error::` line in its description, as `detect failed: <that line>`, instead of the generic "change detection did not succeed" text.**
 - **The environment table refuses a `needs` chain deeper than the four env levels a deploy applies, naming the chain, instead of validating and failing at deploy.**
 
 ## [0.42.0] — 2026-10-04

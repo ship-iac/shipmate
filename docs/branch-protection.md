@@ -27,8 +27,8 @@ resolves to:
 
 | State | gate | Merge |
 |-------|-----------|-------|
-| `detect` refused | `failure` — "detect refused: <first refusal line>", cut to 140 characters | blocked |
-| `detect` did not succeed without a refusal (a fmt or codegen failure, a crash) | `failure` — "change detection did not succeed" | blocked |
+| `detect` failed with an `::error::` line (a refusal or a failed tool or API call) | `failure` — "detect failed: <first `::error::` line>", cut to 140 characters | blocked |
+| `detect` failed without an `::error::` line (a fmt or codegen failure, a crash with none) | `failure` — "change detection did not succeed" | blocked |
 | A plan cell failed | `failure` — "plan incomplete" | blocked |
 | The plan job was cancelled | no status written at all | blocked (the required check never arrives) |
 | Plans succeeded, applies still pending | `pending` | blocked |

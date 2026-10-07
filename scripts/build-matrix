@@ -534,6 +534,7 @@ def main():
     except SystemExit as exc:
         if isinstance(exc.code, str) and exc.code.startswith("::error::"):
             refusal = exc.code.splitlines()[0].removeprefix("::error::")
+            # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
             with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
                 fh.write(f"refusal={refusal}\n")
         raise

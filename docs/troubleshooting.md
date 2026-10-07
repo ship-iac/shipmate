@@ -33,8 +33,9 @@ live probes.
   only where a code-owner review is required for the changed files. Count 0
   with code-owner review off leaves no unforgeable merge-time control at all
   and warns, and names the gated environments in a second warning. Count 0
-  with `require_last_push_approval` on warns, and replaces the note: a sole
-  maintainer cannot approve their own last push, so cannot merge. The
+  with `require_last_push_approval` on warns, and omits the sole-maintainer
+  note; the gated-environments note still appears. A sole maintainer cannot
+  approve their own last push, so cannot merge. The
   booleans are unioned across every
   `pull_request` rule on the branch, since GitHub enforces the union across
   layered rulesets.

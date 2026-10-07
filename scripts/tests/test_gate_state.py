@@ -86,13 +86,13 @@ def test_detect_failure_is_a_red_gate_not_a_silent_skip():
 def test_a_detect_refusal_names_itself_in_the_gate():
     """Mutation: return the generic text when a refusal exists -- the refusal is not named."""
     got = d(detect_result="failure", refusal="stack 'x' carries 2 workload tags")
-    assert got == ("failure", "detect refused: stack 'x' carries 2 workload tags", "hold")
+    assert got == ("failure", "detect failed: stack 'x' carries 2 workload tags", "hold")
 
 
 def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
     """A fmt or codegen failure writes no refusal.
 
-    Mutation: write `detect refused: ` for an empty refusal -- the description changes."""
+    Mutation: write `detect failed: ` for an empty refusal -- the description changes."""
     got = d(detect_result="failure", refusal="")
     assert got == (
         "failure",
@@ -116,7 +116,7 @@ def test_main_cuts_a_long_refusal_to_the_statuses_limit(tmp_path, monkeypatch, c
     )
     assert (body["state"], body["description"]) == (
         "failure",
-        'detect refused: stack "a/b" ' + "x" * 112,
+        'detect failed: stack "a/b" ' + "x" * 113,
     )
 
 
