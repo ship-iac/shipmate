@@ -430,9 +430,10 @@ a repository configured by a drifted loop looks onboarded while the App key sits
 on an environment that admits any ref.
 
 Each run needs the engine checkout on a `vX.Y.Z` release tag, `terramate` on
-`PATH` in the consumer checkout — its `env/<name>` tags are where the
-environment set comes from — and `gh` authenticated with admin on that
-repository. It refuses rather than half-configuring when one of those is missing.
+`PATH` in the consumer checkout — the environment set is its `env/<name>` tags
+together with the `environments` entries of its `.github/shipmate.toml` — and
+`gh` authenticated with admin on that repository. It refuses rather than
+half-configuring when one of those is missing.
 
 ```bash
 ENGINE=<path-to-engine-checkout>    # on a release tag

@@ -171,6 +171,24 @@ Beyond the schema:
   `[identities.dev]` then retargets all of them; `shipmate doctor`'s roles lines
   list what each environment resolves ([`../CONTRACT.md`](../CONTRACT.md)
   §Resolution).
+- **A stack that exists once is an environment of its own.** A management
+  account's stack gets an identity and an environment naming it, and its one
+  stack is tagged `env/mgmt`:
+
+  ```toml
+  layout = "tf_vars"
+
+  [identities.management]
+  aws.plan  = "arn:aws:iam::4402:role/shipmate-plan"
+  aws.apply = "arn:aws:iam::4402:role/shipmate-apply"
+
+  [environments.mgmt]
+  region   = "eu-west-1"
+  identity = "management"
+  ```
+
+  A stack with no `env/*` tag is unmanaged instead: shipmate never plans or
+  applies it ([`../CONTRACT.md`](../CONTRACT.md) §Tag grammar).
 - **A shared environment resolves `aws.apply` on both paths**
   ([`hardening.md`](hardening.md) §7–9 has the cost).
 - **Adding or removing an environment takes two pull requests**

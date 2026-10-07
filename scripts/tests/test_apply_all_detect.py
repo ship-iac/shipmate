@@ -121,6 +121,14 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
     assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
 
 
+def test_membership_is_read_over_the_whole_tree_with_no_other_keyword(tmp_path, monkeypatch):
+    """Mutations: leave `require_env_tag=False` at the `env_membership` call -- TypeError;
+    pass `all_stacks=False`."""
+    membership = []
+    _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", membership=membership)
+    assert membership == [((), {"all_stacks": True})]
+
+
 def test_reuses_single_sourced_helpers():
     """The `is not None` halves pin only that these functions still exist in the modules this
     script reaches them through, not that main() calls them rather than a private copy. What
@@ -194,6 +202,22 @@ def test_main_holds_everything_unreviewed_when_no_env_is_ungated(
     assert json.loads(parsed["review_held_envs"]) == expected
 
 
+def _membership_double(tree, tags, calls):
+    """`env_membership` returning `(tree, tags)`, appending each call's `(args, kwargs)` to
+    `calls` when one is given. The real signature, so a keyword `env_membership` no longer
+    takes raises here as it would on a runner."""
+
+    def _membership(all_stacks=False, base=""):
+        return tree, tags
+
+    def _record(*args, **kwargs):
+        if calls is not None:
+            calls.append((args, kwargs))
+        return _membership(*args, **kwargs)
+
+    return _record
+
+
 def _run_main(
     tmp_path,
     monkeypatch,
@@ -209,6 +233,7 @@ def _run_main(
     urls=None,
     table=None,
     reads=None,
+    membership=None,
 ):
     """main() over the head's apply checks, with everything the script reaches from GitHub or
     Terramate stubbed. Defaults to one pending `stacks/app` check per env in `envs`. Returns
@@ -218,7 +243,8 @@ def _run_main(
     `order`, `explicit` and `ungated` are folded into the stubbed table rather than stubbed
     on `eo`: all three are fields of the mapping this path loads, so a double on any reader
     would mask a caller that stopped passing the table. One entry is appended to `reads` per
-    `read_table` call."""
+    `read_table` call. Each `env_membership` call appends its `(args, kwargs)` to `membership`
+    when one is given."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -254,7 +280,9 @@ def _run_main(
     deps = {p: set() for ps in tree.values() for p in ps}
     monkeypatch.setattr(aad.ad, "run_graph_deps", lambda: deps)
     monkeypatch.setattr(aad.ad.bm, "_run", _run)
-    monkeypatch.setattr(aad.bm, "env_membership", lambda **kw: (tree, tags or {"stacks/app": []}))
+    monkeypatch.setattr(
+        aad.bm, "env_membership", _membership_double(tree, tags or {"stacks/app": []}, membership)
+    )
     stub_read_table(monkeypatch, (aad.bm.ec,), table, order, explicit, reads)
     aad.main()
     return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())

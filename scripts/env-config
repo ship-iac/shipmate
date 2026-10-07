@@ -305,6 +305,12 @@ _TOP_KEYS = ("layout", "identities", "environments")
 _ENV_ENTRY = re.compile(r"[a-z0-9][a-z0-9_-]*")
 
 
+def is_env_name(name):
+    """Whether `name` is in the environment-name charset: lowercase letters, digits, `-` and
+    `_`, starting with a letter or digit. It holds no space, so no ` / `."""
+    return bool(_ENV_ENTRY.fullmatch(name))
+
+
 def _mapping(value, where):
     if not isinstance(value, dict):
         raise SystemExit(f"::error::{where} must be a mapping, got {type(value).__name__}.")
@@ -450,7 +456,7 @@ def _not_a_workload(where):
 
 def _is_workload(name):
     """The environment-name charset, because a workload name is a Terramate tag too."""
-    return bool(_ENV_ENTRY.fullmatch(name)) and name not in _RESERVED_WORKLOADS
+    return is_env_name(name) and name not in _RESERVED_WORKLOADS
 
 
 def _empty(name, where):
@@ -846,7 +852,7 @@ def _check_env_name(e, label, matched):
     Charset before suffix: a suffixed name passes the charset, so the two are separate
     checks, and this order gives `"dev eu-plan"` the message about its space.
     """
-    if not _ENV_ENTRY.fullmatch(e):
+    if not is_env_name(e):
         raise SystemExit(
             f"::error::{label} is not an environment name; entries are bare "
             f"logical env names (lowercase letters, digits, '-' and '_'), with no "

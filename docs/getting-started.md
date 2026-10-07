@@ -6,29 +6,25 @@ does with that wiring.
 
 ## Before you start
 
-- **A repository with Terramate stacks, each tagged `env/<name>`.** The tag is
-  how a stack declares its environment membership — no environment name ever
-  appears in workflow YAML. Tag grammar:
+- **A repository with Terramate stacks, every stack shipmate is to run tagged
+  `env/<name>`.** The tag is how a stack declares its environment membership —
+  no environment name ever appears in workflow YAML. Tag grammar:
   [`../CONTRACT.md`](../CONTRACT.md) §Tag grammar.
 
-  For an existing repository this is the largest item on the page, not a
-  checkbox. `build-matrix` derives environment membership solely from
-  `env/<name>` tags, and Terramate tags are otherwise free-form. So a
-  repository that predates shipmate is almost certainly using them for
-  something else entirely, and every stack ends up re-tagged. The work is
-  additive, mechanical and reviewable, but it is repo-wide.
+  `build-matrix` derives environment membership solely from `env/<name>` tags,
+  and Terramate tags are otherwise free-form. So a repository that predates
+  shipmate is almost certainly using them for something else entirely.
 
-  Merge a retag pull request that tags every stack before the adoption pull
-  request. `scripts/onboard` derives the environments from the checkout's tags
-  and refuses while any stack in the repository is untagged, listing each one.
-  The retag cannot ride in the adoption pull request, because that one must
-  change no stack (§"The table has to be on the default branch before your
-  first plan run").
-
-  After adoption, a stack added later is tagged in the pull request that adds
-  it. `detect` refuses an untagged stack as soon as it is in a run's changed
-  set, and the nightly drift run inspects every stack, so it fails until that
-  stack is tagged.
+  A repository may adopt with any number of stacks untagged. Each one is
+  unmanaged until a pull request tags it: shipmate never plans or applies it
+  ([`../CONTRACT.md`](../CONTRACT.md) §Tag grammar, which also covers taking a
+  stack out of CI). `scripts/onboard` provisions every environment the table
+  declares and every one a stack tags. So declare an environment in the table
+  and run `scripts/onboard` before the first pull request tagging a stack into
+  it merges: that merge deploys. Until a stack tags it, `scripts/onboard` names
+  it on its `.github/shipmate.toml` checklist item, and every whole-tree run (the
+  drift sweep, `shipmate unlock`, a bare `shipmate apply`) warns that the table
+  declares an environment no stack tags; that warning is expected.
 - **Nothing to set for the Terramate and OpenTofu versions.** They are in
   [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
   engine commit your workflow file pins. Moving to other versions is a pin bump
@@ -83,8 +79,8 @@ nothing about the graph. Before that point the equivalent is
 `terramate experimental run-graph --label stack.dir` run locally.
 
 **Tags.** Environment membership is derived from `env/<name>` tags and nothing
-else; [Before you start](#before-you-start) covers re-tagging an existing
-repository.
+else; [Before you start](#before-you-start) covers adopting a repository whose
+stacks carry no `env/*` tag yet.
 
 **A named AWS profile in generated HCL.** The apply path holds only the OIDC
 session, so a literal `profile` in a `provider` or `backend` block fails there
@@ -135,7 +131,8 @@ leave it off.
 
 It writes:
 
-- `shipmate-engine` and, for every environment your stacks' `env/<name>` tags
+- `shipmate-engine` and, for every environment the checkout's
+  `.github/shipmate.toml` declares and every one your stacks' `env/<name>` tags
   declare, an `<env>-plan` / `<env>-apply` pair — each apply environment scoped to
   the default branch, with the App key on `shipmate-engine` and any
   repository-level copy of that key deleted. An environment whose entry in the

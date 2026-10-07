@@ -44,6 +44,14 @@ inputs:
       environment table holds a variable reference; empty when unwired.
     required: false
     default: ""
+  unmanaged-stacks:
+    description: >-
+      build-matrix's `unmanaged` output: JSON {"count": N, "paths": [...]} for the changed
+      stacks that carry no env/* tag, at most ten paths named. The plan comment counts and names
+      them under its verdict. Empty (detect skipped) renders no line; a value not of that shape,
+      or one naming other than min(N, 10) paths, renders none and warns.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -169,6 +177,9 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
+        # Reviewer-facing only, so it degrades: empty (draft autoplan, detect skipped) renders no
+        # line, invalid renders none and warns. Neither touches `count`, `pending` or the gate.
+        SHIPMATE_UNMANAGED: ${{ inputs.unmanaged-stacks }}
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
@@ -206,6 +217,7 @@ runs:
         MODE: ${{ steps.gate.outputs.comment_mode }}
         PLAN_RESULT: ${{ inputs.plan-result }}
         DOCTOR_WARNED: ${{ steps.doctor.outputs.warned }}
+        UNMANAGED: ${{ steps.build.outputs.unmanaged }}
       run: |
         set -euo pipefail
         # A draft autoplan planned nothing, so an existing comment still describes a head
@@ -241,10 +253,10 @@ runs:
         if [ "$MODE" = "nothing-changed" ]; then
           nothing_changed=true
         fi
-        # Nothing changed and no comment to keep current: post nothing. A doctor warning still
-        # posts, since the comment links the run page its annotations live on. An existing
-        # comment is kept current, or it would keep showing applies that no longer exist.
-        if [ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$DOCTOR_WARNED" != "true" ]; then
+        # Nothing changed and no comment to keep current: post nothing. A doctor warning (the comment
+        # links the run page its annotations live on) or an unmanaged stacks line still posts. An
+        # existing comment is kept current, or it would keep showing applies that no longer exist.
+        if [ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ]; then
           echo "nothing changed, no existing plan comment, no doctor findings; nothing to post"
           exit 0
         fi

@@ -950,19 +950,28 @@ table's own keys and each `needs` item are held to that charset and to the
 `-plan`/`-apply` suffix rule, and an uppercase name is refused rather than left to
 match nothing.
 
-An `env/<name>` tag is mandatory for every stack a run inspects, and an
-untagged one fails the whole run rather than being skipped. Which stacks
-are inspected differs by path: the changed set on the plan and deploy
-paths, so untagged stacks elsewhere in the tree do not fail a plan run until
-one of them changes; every stack on the drift path, whatever a sweep's `tags`
-query, which is therefore the repo-wide backstop that catches the rest; and none on the checks-sourced
-bare-apply `detect`, which exempts the check deliberately — an untagged stack
-carries no apply check and so contributes no cell anyway, and an unrelated
-one must not abort an apply. Failing the whole run rather than the one stack is
-deliberate too: a silently skipped stack plans and applies nothing while the
-gate goes green over it, which is the one failure this contract will not trade
-for convenience. The failure names every untagged stack it found, so they are
-tagged from that list rather than found one re-run per stack.
+A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip
+it, and plan, deploy and drift print a notice counting the unmanaged stacks they
+scanned (the changed set on plan and deploy, the whole tree on drift) and naming
+the first ten, then `, and M more`. A bare
+`shipmate apply`, `shipmate unlock` and `scripts/onboard` print it too, over the
+whole tree. The plan
+comment names the unmanaged stacks a pull request changes, under its verdict. A
+`workload/*` tag on an unmanaged stack is never checked. An `env/<name>` tag
+whose environment has no entry in the environment table still refuses the run
+under `layout = "tf_vars"`. The trade-off is accepted: a forgotten tag on a new
+stack is a notice and a line in the plan comment, not a refusal, and the gate
+goes green over a stack that plans nothing. A deploy refuses when its merged
+pull request holds an open apply check for a stack and environment the merge
+no longer pairs: the stack, changed by that pull request, lost that `env/*` tag
+(or every one) after the pull request was planned, so no cell would ever apply
+its reviewed change. The refusal applies nothing, so it also names every other
+open apply check of that merge. A new pull request that retags each stranded
+stack and changes every other named stack plans the current default branch, and
+its deploy applies all of them; re-running the refused deploy checks out the
+same commit and refuses again
+([`docs/troubleshooting.md`](docs/troubleshooting.md) §A deploy refused an
+apply check on a stack that lost its env tag).
 
 **A drift sweep's `tags` query narrows what the sweep plans, never what it
 scans.** Engine `drift.yml` takes it as an input, one literal query per drift
@@ -985,7 +994,7 @@ workflow file:
   `shipmate / gate` greens.
 
 The repo-wide checks run over the full tree every sweep scans, before the query
-applies: untagged stacks, slug collisions, two `workload/*` tags on one stack,
+applies: slug collisions, two `workload/*` tags on one stack,
 `tf_vars`-layout coverage of every tagged environment, and the unused-entry
 warnings. The 256-cell matrix limit counts the cells the query keeps.
 
@@ -993,6 +1002,27 @@ Three checks run per selected cell, after the query, so a cell it drops escapes
 them: resolving the cell's row from the environment table, the refusal of a row
 whose `env_binding` names no GitHub Environment, and the refusal of a
 `workload/*` tag its environment's `workloads` list does not name.
+
+### Taking a stack out of CI
+
+1. Remove every `env/*` tag from the stack in a pull request. Its plan comment
+   names the stack as unmanaged, and merging deploys nothing for it.
+2. Work on the stack by hand.
+3. Retag the stack in a later pull request to bring it back, or delete it.
+
+Every plan's `detect` still runs `terramate fmt --check` and
+`terramate generate --detailed-exit-code` over the whole repository, unmanaged
+stacks included. Keep an unmanaged stack formatted and its generated code
+current, or every plan's `detect` fails.
+
+The stack's open drift Issues close on the next sweep that plans at least one
+cell and planned the default branch's current head, as Issues of a cell no
+longer managed. A sweep left with no cell skips its
+`issues` job ([`docs/drift.md`](docs/drift.md)), so close them by hand then.
+
+A stack that exists once, such as one in a management account, is a
+single-stack environment, not an unmanaged stack: give it an environment of its
+own ([`docs/aws.md`](docs/aws.md) §The environment table).
 
 ## Comment-ops
 
@@ -1908,13 +1938,16 @@ Where the zero *does* mean no stacks changed, the suppression is create-only:
 an existing comment is always updated to the no-changes body, because a pull
 request that planned changes and then pushed them away must not keep displaying
 applies that no longer exist. With no comment yet, none is posted — a docs-only
-or engine-pin-bump pull request carries no shipmate comment — with one
-exception: a run where `doctor` emitted a warning still posts. Doctor's
+or engine-pin-bump pull request carries no shipmate comment — with two
+exceptions. A run where `doctor` emitted a warning still posts: doctor's
 findings are annotations with no file/line, so they render only on the run page
 (see §Comment-ops), and this comment's verdict links that run from the
 pull request. `::notice::`
 findings do not trigger the exception: they are informational, and would put a
-comment on every quiet run.
+comment on every quiet run. A run whose comment carries the unmanaged line also
+posts: a pull request that changes only stacks with no `env/*` tag plans nothing,
+and the comment is where it says so. When the line is left out for size (below),
+this exception does not apply.
 
 An existing comment is edited in place on every plan run (comment lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
@@ -1923,11 +1956,14 @@ App name, which a consumer org may have had to slug differently than
 trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
-line, the verdict line, a blank line, one line or fold-out per planned stack ×
-environment, sorted by environment then stack. There is no footer and no help
+line, the verdict line, a blank line, the unmanaged line and a blank line when
+the pull request changes an unmanaged stack, one line or fold-out per planned
+stack × environment, sorted by environment then stack. There is no footer and no help
 hint, whether or not `doctor` warned: both verdicts are normal results and the
 verdict links the run. The doctor step records its decision once, as its
-`warned` output, which the post-or-skip rule reads.
+`warned` output, which the post-or-skip rule reads; the build step records
+whether the unmanaged line rendered, as its `unmanaged` output, which the same
+rule reads.
 
 - **Verdict line.** `🟢 no changes` when no cell changes (zero cells
   included), else `🟡 N of M cells change`, then
@@ -1938,6 +1974,11 @@ verdict links the run. The doctor step records its decision once, as its
   hex SHA the line ends `at an unknown commit in [run #<n>](<run url>)`. The
   line reads the cells only: every failed plan job holds the gate, and a held
   run posts no comment.
+- **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
+  managed by shipmate: <paths>`, naming at most ten paths within 1,000
+  characters, then `, and M more`. When not even the first path fits, it ends
+  `; their paths are too long to list here.` When the cell lines leave it no
+  room under the 65,536-character cap, it is left out with a warning.
 - **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the

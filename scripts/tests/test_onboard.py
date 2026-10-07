@@ -88,6 +88,7 @@ def ctx(**over):
         "key": "-----BEGIN-----\npem\n",
         "envs": ["dev-eu"],
         "stacks": [],
+        "tagged_envs": {"dev-eu"},
         "shared": set(),
         "unresolved": set(),
         "root": None,
@@ -169,15 +170,13 @@ def test_empty_key_file_is_refused(tmp_path):
     assert "empty" in str(e.value)
 
 
-def test_zero_environments_is_refused():
-    """A repository whose stacks carry no env tag has nothing to bind; creating
-    zero environments and reporting success is the fail-open form.
+def test_no_environment_name_derives_no_environment():
+    """A repository adopted before any stack carries an env tag, with no table entry yet,
+    has nothing to bind, and that is not an error.
 
-    Mutation: return an empty list instead of raising.
+    Mutation: restore the refusal of an empty set.
     """
-    with pytest.raises(SystemExit) as e:
-        onboard._derive_envs({})
-    assert "no environment" in str(e.value)
+    assert onboard._derive_envs(set()) == []
 
 
 def test_dry_run_issues_no_write(monkeypatch):
@@ -204,19 +203,17 @@ def write_table(root, entry):
     )
 
 
-def test_shared_name_outside_the_derived_environments_is_refused(tmp_path):
-    """A shared name no stack tags binds nothing and reports success.
+def test_a_shared_entry_no_stack_tags_is_provisioned(monkeypatch, tmp_path, capsys):
+    """A `shared = true` entry is provisioned like any other, tagged or not: its bare
+    environment exists before the first pull request tagging a stack into it merges.
 
-    Mutation: drop the membership check, so `dev-eu` is returned and every reconciler
-    skips it.
+    Mutation: restore the loop refusing a shared name outside the tag-derived environments.
     """
     write_table(tmp_path, "shared = true\n")
-    with pytest.raises(SystemExit) as e:
-        onboard._resolve_shared(tmp_path, ["dev-us"], "o/r", {})
-    assert str(e.value) == (
-        "[environments.dev-eu] in .github/shipmate.toml holds `shared = true`, but no stack "
-        "declares 'dev-eu'. Its environments are: dev-us."
-    )
+    policies = {"repos/o/r/environments/dev-eu/deployment-branch-policies": ABSENT}
+    _, exc = run_main(monkeypatch, tmp_path, policies, ["--dry-run"], membership=({}, {}))
+    assert exc.code == 0
+    assert _would_create("dev-eu") == ["dev-eu", "dev-eu branch policy"]
 
 
 def test_derived_environment_failing_the_regex_is_refused():
@@ -520,10 +517,10 @@ def test_main_calls_every_stage_in_order():
         "_repo_root()",
         "_repo_facts()",
         "_env_membership()",
-        "_derive_envs(stacks_by_env)",
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
-        "_resolve_shared(root, envs, repo, variables)",
+        "_resolve_shared(root, repo, variables)",
+        "_derive_envs(set(stacks_by_env) | set((table or {}).get('environments', {})))",
         "_shim_on_default(repo, default_branch)",
         "_engine_secrets(repo)",
         "_repo_secrets()",
@@ -1154,14 +1151,16 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, key=True, membership=ONE
     Only the reads `main` does before its first reconciler are stubbed -- the git, terramate
     and `gh repo view` reads, each with its own test. Everything below them runs for real
     against the fake, which is what makes the order of the reads and writes observable.
-    `key=False` passes no `--key`. The run starts in `tmp_path`, the checkout root.
+    `key=False` passes no `--key`; `membership=None` leaves `_env_membership` real. The run
+    starts in `tmp_path`, the checkout root.
     """
     fake = make_gh({**FRESH_ROUTES, **extra_routes})
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_engine_pin", lambda engine: ("a" * 40, "v0.26.0"))
     monkeypatch.setattr(onboard, "_repo_root", lambda: tmp_path)
     monkeypatch.setattr(onboard, "_repo_facts", lambda: ("o/r", "main", False))
-    monkeypatch.setattr(onboard, "_env_membership", lambda: membership)
+    if membership is not None:
+        monkeypatch.setattr(onboard, "_env_membership", lambda: membership)
     monkeypatch.chdir(tmp_path)
     pem = tmp_path / "key.pem"
     pem.write_text("-----BEGIN-----\npem\n", encoding="utf-8", newline="\n")
@@ -1244,6 +1243,11 @@ def test_a_dry_run_without_key_refuses_too(monkeypatch, tmp_path):
     assert fake.calls == READS_BEFORE_KEY_REFUSAL
 
 
+def _would_create(prefix):
+    """The subjects `--dry-run` reported it would create, of those starting with `prefix`."""
+    return [s for verb, s, _ in onboard.REPORT if verb == "would create" and s.startswith(prefix)]
+
+
 def _environment_puts(fake):
     return [c[4] for c in fake.calls if c[:4] == ["gh", "api", "-X", "PUT"]]
 
@@ -1321,7 +1325,7 @@ def test_a_repository_variable_resolves_a_reference(monkeypatch, tmp_path):
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh({ORG_VARS: NO_ORG_VARS}))
     write_referencing_table(tmp_path)
-    _, shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    _, shared = onboard._resolve_shared(tmp_path, "o/r", {"DEV_EU_REGION": "eu-west-1"})
     assert shared == {"dev-eu"}
 
 
@@ -1331,7 +1335,7 @@ def test_an_organization_variable_resolves_a_reference(monkeypatch, tmp_path):
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh(org_region("eu-west-1")))
     write_referencing_table(tmp_path)
-    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {})[1] == {"dev-eu"}
+    assert onboard._resolve_shared(tmp_path, "o/r", {})[1] == {"dev-eu"}
 
 
 def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp_path):
@@ -1340,7 +1344,7 @@ def test_the_repository_variable_wins_over_the_organization_one(monkeypatch, tmp
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
     monkeypatch.setattr(onboard, "_run", make_gh(org_region("")))
     write_referencing_table(tmp_path)
-    _, shared = onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+    _, shared = onboard._resolve_shared(tmp_path, "o/r", {"DEV_EU_REGION": "eu-west-1"})
     assert shared == {"dev-eu"}
 
 
@@ -1353,7 +1357,7 @@ def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_p
     )
     write_referencing_table(tmp_path)
     with pytest.raises(SystemExit) as excinfo:
-        onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {"DEV_EU_REGION": "eu-west-1"})
+        onboard._resolve_shared(tmp_path, "o/r", {"DEV_EU_REGION": "eu-west-1"})
     assert str(excinfo.value) == (
         "could not read the organization variables reaching o/r: gh: Forbidden (HTTP 403)\n"
         "A fine-grained token needs this repository's Variables read permission, and "
@@ -1366,9 +1370,9 @@ def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_p
 def test_resolve_shared_returns_the_table_it_validated(tmp_path):
     """`main` keeps the table for the checklist. Mutation: return `{}, set()` when there is
     no file, which reads as a table declaring nothing."""
-    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == (None, set())
+    assert onboard._resolve_shared(tmp_path, "o/r", {}) == (None, set())
     write_table(tmp_path, "shared = true\n")
-    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {}) == (
+    assert onboard._resolve_shared(tmp_path, "o/r", {}) == (
         {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1", "shared": True}}},
         {"dev-eu"},
     )
@@ -1382,7 +1386,7 @@ def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
 
     monkeypatch.setattr(onboard, "_run", refuse)
     write_table(tmp_path, "shared = true\n")
-    assert onboard._resolve_shared(tmp_path, ["dev-eu"], "o/r", {})[1] == {"dev-eu"}
+    assert onboard._resolve_shared(tmp_path, "o/r", {})[1] == {"dev-eu"}
 
 
 def test_the_shared_flag_is_gone(monkeypatch, tmp_path, capsys):
@@ -2464,11 +2468,15 @@ def test_the_lock_item_resolves_stacks_against_the_working_directory(monkeypatch
 
 
 def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, capsys):
-    """The item reads the stacks from `_env_membership`'s stack map, where each appears once.
+    """The item names each managed stack once, whatever the number of environments tagging it.
 
-    Mutation: build `ctx["stacks"]` from the `stacks_by_env` values, which lists `a` twice.
+    Mutation: build `ctx["stacks"]` from the `stacks_by_env` values without deduplicating,
+    which lists `a` twice.
     """
-    membership = ({"dev-eu": ["a", "b"], "dev-us": ["a"]}, {"a": [], "b": []})
+    membership = (
+        {"dev-eu": ["a", "b"], "dev-us": ["a"]},
+        {"a": ["env/dev-eu", "env/dev-us"], "b": ["env/dev-eu"]},
+    )
     dev_us = {
         "repos/o/r/environments/dev-us": ABSENT,
         "repos/o/r/environments/dev-us-plan": ABSENT,
@@ -2488,6 +2496,144 @@ def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, caps
             "  b",
         ],
     )
+
+
+def test_the_lock_item_names_managed_stacks_only(monkeypatch, tmp_path, capsys):
+    """An untagged stack is never planned, so its lock file is not this run's to ask for.
+
+    Mutation: build `ctx["stacks"]` from `tags_by_stack`, which names `b` too.
+    """
+    membership = ({"dev-eu": ["a"]}, {"a": ["env/dev-eu"], "b": []})
+    run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=membership)
+    items = checklist_items(checklist_of(capsys.readouterr().out))
+    assert items[LOCK_ITEM] == (
+        "todo",
+        [
+            "1 of 1 stack(s) have no git-tracked `.terraform.lock.hcl`,",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path, then run",
+            "`tofu init -backend=false` in each and commit the file:",
+            "  a",
+        ],
+    )
+
+
+def test_an_untagged_stack_is_adopted_through_the_real_membership(monkeypatch, tmp_path, capsys):
+    """`onboard` scans the whole tree through build-matrix's own `env_membership`: an
+    untagged stack beside a tagged one is named in the notice, and the run goes on.
+
+    Mutation: restore the refusal of an untagged stack in build-matrix's `env_membership`.
+    """
+    bm = load_script("build-matrix")
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["a", "b"])
+    monkeypatch.setattr(bm, "_tags", lambda s: {"a": ["env/dev-eu"], "b": []}[s])
+    real = onboard._load
+    monkeypatch.setattr(onboard, "_load", lambda name: bm if name == "build-matrix" else real(name))
+    _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=None)
+    assert exc.code == 0
+    assert (
+        "::notice::1 stack(s) carry no env/* tag and are not managed by shipmate: b"
+        in capsys.readouterr().out.splitlines()
+    )
+
+
+PRDO_ROUTES = {
+    "repos/o/r/environments/prdo": ABSENT,
+    "repos/o/r/environments/prdo-plan": ABSENT,
+    "repos/o/r/environments/prdo-apply": ABSENT,
+    "repos/o/r/environments/prdo-apply/deployment-branch-policies": ABSENT,
+}
+
+
+def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp_path, capsys):
+    """The union provisions a mistyped entry too, so the table item names it. env-config's
+    unused-entry warning stays silent: it says to remove an entry the docs ask the consumer to
+    declare before tagging.
+
+    Mutation: drop the table-only detail line -- the item has no details.
+    Mutation: always render the several-name wording -- the one-name lines differ.
+    Mutation: pass `tagged` to `_table_item`'s `ec.validate` again -- the warning prints.
+    """
+    write_table(tmp_path, '\n[environments.prdo]\nregion = "eu-west-1"\n')
+    run_main(monkeypatch, tmp_path, PRDO_ROUTES, ["--dry-run"])
+    out = capsys.readouterr().out
+    assert checklist_items(checklist_of(out))["`.github/shipmate.toml`"] == (
+        "ok",
+        [
+            "Provisioned for prdo, which no stack tags yet: its first tagging pull request",
+            "deploys under that environment's protection. If the name is a typo, fix the",
+            "entry.",
+        ],
+    )
+    assert not [ln for ln in out.splitlines() if ln.startswith("::warning::")]
+
+
+def _table_only_detail(*names):
+    """`_table_item`'s detail for a tagged `dev-eu` plus table-only `names`."""
+    entries = "".join(f'\n[environments.{n}]\nregion = "eu-west-1"\n' for n in ("dev-eu", *names))
+    table = ec.parse_table(f'layout = "tf_vars"\n{entries}')
+    verdict, _, details = onboard._table_item(ctx(table=table, envs=sorted(["dev-eu", *names])))
+    assert verdict == "ok"
+    return details
+
+
+@pytest.mark.parametrize(
+    ("names", "sentence"),
+    [
+        (
+            ("production-eu-central",),
+            "Provisioned for production-eu-central, which no stack tags yet: its first tagging "
+            "pull request deploys under that environment's protection. If the name is a typo, "
+            "fix the entry.",
+        ),
+        (
+            ("prdo", "production-eu-central", "qa"),
+            "Provisioned for prdo, production-eu-central, qa, which no stack tags yet: the first "
+            "pull request tagging a stack into each deploys under that environment's "
+            "protection. If a name is a typo, fix the entry.",
+        ),
+    ],
+    ids=["one", "several"],
+)
+def test_the_table_only_detail_wraps_the_whole_sentence_at_80(names, sentence):
+    """Mutation: always render the one-name wording -- `several` reddens. Mutation: always the
+    several-name wording -- `one` reddens. Mutation: `width=100` -- both redden."""
+    details = _table_only_detail(*names)
+    assert all(len(line) <= 80 for line in details)
+    assert " ".join(details) == sentence
+
+
+def test_a_table_whose_entries_are_all_tagged_has_no_detail():
+    """Mutation: name every environment, tagged or not -- `dev-eu` is listed."""
+    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n')
+    assert onboard._table_item(ctx(table=table)) == ("ok", "`.github/shipmate.toml`", [])
+
+
+def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_path, capsys):
+    """Its `<env>-apply` must carry the default-branch policy before the first pull request
+    tagging a stack into it merges, or that merge deploys into an environment GitHub
+    auto-creates with none.
+
+    Mutation: derive `envs` from `stacks_by_env` alone.
+    """
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "shipmate.toml").write_text(
+        'layout = "tf_vars"\n\n[environments.prod]\nregion = "eu-west-1"\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    routes = {k.replace("prdo", "prod"): v for k, v in PRDO_ROUTES.items()}
+    _, exc = run_main(monkeypatch, tmp_path, routes, ["--dry-run"], membership=({}, {}))
+    assert exc.code == 0
+    assert "environments: prod" in capsys.readouterr().out.splitlines()
+    assert _would_create("prod") == ["prod-plan", "prod-apply", "prod-apply branch policy"]
+
+
+def test_no_tagged_stack_and_no_table_binds_nothing(monkeypatch, tmp_path, capsys):
+    """Mutation: print the empty join, `environments: `."""
+    _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=({}, {"a": []}))
+    assert exc.code == 0
+    assert "environments: (none)" in capsys.readouterr().out.splitlines()
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):

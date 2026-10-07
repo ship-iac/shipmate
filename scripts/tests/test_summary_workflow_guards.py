@@ -43,6 +43,14 @@ EXPECTED_SUMMARY_WITH = {
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
     "github-vars": "${{ toJSON(vars) }}",
+    "unmanaged-stacks": "${{ needs.detect.outputs.unmanaged }}",
+}
+#: `detect`'s whole outputs map: `unmanaged` is what the `with:` above passes on.
+EXPECTED_DETECT_OUTPUTS = {
+    "matrix": "${{ steps.matrix.outputs.matrix }}",
+    "empty": "${{ steps.matrix.outputs.empty }}",
+    "count": "${{ steps.matrix.outputs.count }}",
+    "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
 }
 EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary"]
 
@@ -90,11 +98,14 @@ def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():
 
 
 def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
-    """Mutation: drop the `is-draft:` line -> gate-state never sees a draft."""
+    """Mutation: drop the `is-draft:` line -> gate-state never sees a draft.
+    Mutation: drop the `unmanaged-stacks:` line -> the comment never names an unmanaged stack.
+    Mutation: drop `detect`'s `unmanaged` output -> the same, silently."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1
     assert call[0]["with"] == EXPECTED_SUMMARY_WITH
+    assert workflow_yaml(WF)["jobs"]["detect"]["outputs"] == EXPECTED_DETECT_OUTPUTS
 
 
 #: The whole download step, as `yaml.safe_load` returns it. Any extra key reddens the comparison:

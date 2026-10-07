@@ -4,6 +4,7 @@ import os
 import pathlib
 
 import pytest
+import yaml
 from _loader import ENGINE as _ENGINE
 from _loader import action_steps, load_script, run_lines, step_by
 
@@ -307,7 +308,7 @@ def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
         (_cell(changed=False, stack="stacks/db"), None),
         (_cell(changed=False, stack="stacks/dns"), None),
     ]
-    assert sc.build_comment(cells, CHECKS, RUN_URL, SHA) == (
+    assert sc.build_comment(cells, CHECKS, RUN_URL, SHA)[0] == (
         HEAD + f"🟡 1 of 3 cells change {AT}\n\n"
         f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   one\n```\n</details>\n\n"
         '🟢 stacks/db (dev-eu): no changes <a href="https://gh/run/1">plan</a>\n'
@@ -328,7 +329,7 @@ def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
         "No changes. Your infrastructure matches the configuration.\n",
     )
     checks = {"shipmate / stacks/app / prod": {"html_url": "https://ck/app-prod"}}
-    body = sc.build_comment(sc.load_cells(str(tmp_path)), checks, RUN_URL, SHA)
+    body = sc.build_comment(sc.load_cells(str(tmp_path)), checks, RUN_URL, SHA)[0]
     assert body == (
         HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
         '🟢 stacks/db (dev): no changes <a href="https://gh/run/1">plan</a>\n\n'
@@ -340,7 +341,7 @@ def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
 
 def test_zero_cells_render_header_and_verdict_only():
     """Mutation: appending `footer(run_url)` reddens it."""
-    assert sc.build_comment([], {}, RUN_URL, SHA) == HEAD + f"🟢 no changes {AT}"
+    assert sc.build_comment([], {}, RUN_URL, SHA)[0] == HEAD + f"🟢 no changes {AT}"
 
 
 def _bare(i):
@@ -362,7 +363,7 @@ def test_a_256_cell_fan_out_of_oversized_plans_keeps_every_cell_line():
     the 255 bare lines after it push the body past the hard cap."""
     giant = "  + r\n" * (sc.SIZE_BUDGET // 6 + 1)
     cells = [(_cell(stack=f"s{i:03}"), giant) for i in range(256)]
-    body = sc.build_comment(cells, {}, RUN_URL, SHA)
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
     rows, rest = _fold_out_rows(body, f"🟡 256 of 256 cells change {AT}")
     assert set(rows) == {"+   r"}
@@ -377,7 +378,7 @@ def test_an_early_giant_plan_cannot_drop_a_later_cells_line():
         (_cell(stack="s001"), "  + x"),
         (_cell(stack="s002", changed=False), None),
     ]
-    body = sc.build_comment(cells, {}, RUN_URL, SHA)
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
     rows, rest = _fold_out_rows(body, f"🟡 2 of 3 cells change {AT}")
     assert set(rows) == {"+   r"}
@@ -399,7 +400,7 @@ def test_no_line_of_the_comment_is_itself_a_shipmate_command():
     deletion away from a retrigger loop."""
     cp = load_script("comment-parse")
     cells = [(_cell(), "  + one"), (_cell(changed=False, stack="b"), None)]
-    for line in sc.build_comment(cells, {}, RUN_URL, SHA).splitlines():
+    for line in sc.build_comment(cells, {}, RUN_URL, SHA)[0].splitlines():
         assert not cp._SHIPMATE_LINE.match(line.strip()), line
 
 
@@ -407,7 +408,103 @@ def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
     long_name = "s" * 400
     cells = [(_cell(stack=f"stacks/{long_name}{i:03}"), "  + r") for i in range(300)]
     with pytest.raises(SystemExit, match="comment cap"):
-        sc.build_comment(cells, {}, RUN_URL, SHA)
+        sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+
+
+_LEAD = "⚪ {} changed stack(s) carry no env/* tag and are not managed by shipmate"
+
+
+def _named(count, *paths):
+    """build-matrix's `unmanaged` output, parsed."""
+    return {"count": count, "paths": list(paths)}
+
+
+_NO_ROOM = (
+    "::warning::the plan comment's cell lines leave no room under the 65,536-char comment cap "
+    "for the unmanaged stacks line; it was left out\n"
+)
+
+
+def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verdict():
+    """Zero cells still render the line, each path escaped as a cell line's stack is.
+
+    Mutation: dropping the line when `cells` is empty reddens it."""
+    assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/[new]")) == (
+        HEAD + f"🟢 no changes {AT}\n\n" + _LEAD.format(1) + ": stacks/&#91;new&#93;",
+        True,
+    )
+
+
+def test_the_two_unmanaged_name_caps_are_equal():
+    """The producer's cap and the shape check's cap are one value written twice. Mutation:
+    `UNMANAGED_NAMES = 9` in either script."""
+    assert sc.UNMANAGED_NAMES == load_script("build-matrix").UNMANAGED_NAMES == 10
+
+
+def test_the_unmanaged_line_names_ten_paths_and_counts_the_rest():
+    """The count comes from `count`, not from the ten paths carried.
+    Mutation: `more = len(paths) - len(names)` reddens it."""
+    assert sc.unmanaged_line(_named(12, *(f"s{i:02}" for i in range(10)))) == (
+        _LEAD.format(12) + ": s00, s01, s02, s03, s04, s05, s06, s07, s08, s09, and 2 more"
+    )
+    assert sc.unmanaged_line(_named(0)) == ""
+    assert sc.unmanaged_line(None) == ""
+
+
+def test_the_unmanaged_line_counts_the_paths_build_matrix_left_out():
+    """`count` covers paths the output does not carry. Mutation: count `paths` instead of
+    reading `count` -- the line says 3 and names no rest."""
+    assert sc.unmanaged_line(_named(25, "a", "b", "c")) == (
+        _LEAD.format(25) + ": a, b, c, and 22 more"
+    )
+
+
+def test_the_unmanaged_line_stops_at_its_character_cap():
+    """Mutation: removing the character cap reddens it."""
+    line = sc.unmanaged_line(_named(11, "a" * 400, "b" * 400, *["c" * 3000] * 8))
+    assert line == _LEAD.format(11) + ": " + "a" * 400 + ", " + "b" * 400 + ", and 9 more"
+    assert len(line) <= sc.UNMANAGED_LINE_CAP
+
+
+def test_the_unmanaged_line_names_no_path_when_none_fits():
+    """Mutation: joining the empty name list (renders `: , and 10 more`) reddens it."""
+    assert sc.unmanaged_line(_named(10, *["p" * 3000] * 10)) == (
+        _LEAD.format(10) + "; their paths are too long to list here."
+    )
+
+
+def test_the_unmanaged_line_is_counted_before_a_fold_out_is_sized():
+    """The line sits in the head, so `used` holds it before any fold-out is sized: the truncated
+    fold-out's limit shrinks by exactly `len(line) + 2`, the length the body gains, and
+    `render_section` cuts the plan at a row boundary (six characters a row here). The two bodies
+    therefore differ by less than one row.
+
+    Mutation: leaving the line out of `used` reddens it (the bodies differ by `len(line) + 2`)."""
+    cells = [(_cell(stack="s000"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1))]
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged"))[0]
+    line = _LEAD.format(1) + ": stacks/unmanaged"
+    assert body.startswith(HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n<details>")
+    assert len(without) <= sc.SIZE_BUDGET and len(body) <= sc.SIZE_BUDGET
+    assert abs(len(body) - len(without)) < 6
+
+
+def test_the_unmanaged_line_yields_to_cell_lines_near_the_hard_cap(capsys):
+    """The line is omitted with one warning, so "cell lines alone exceed" keeps one cause.
+
+    Mutation: always adding the line raises that refusal."""
+    cells = [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(130)]
+    pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
+    assert pad > 0
+    cells[0][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert len(without) == sc.HARD_CAP - 10
+    capsys.readouterr()
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged")) == (
+        without,
+        False,
+    )
+    assert capsys.readouterr().out == _NO_ROOM
 
 
 def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
@@ -463,7 +560,7 @@ def test_load_cells_caps_plan_text_read_at_size_budget(tmp_path):
     cells = sc.load_cells(str(tmp_path))
     assert sc.state(cells[0][0]) == "+1 ~2 -2"
     assert len(cells[0][1]) == sc.SIZE_BUDGET
-    body = sc.build_comment(cells, {}, RUN_URL, SHA)
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert "Truncated" in body
 
 
@@ -565,7 +662,7 @@ def test_the_comment_counts_come_from_plan_text_not_cell_json(tmp_path):
         _cell(add=99, change=99, destroy=99),
         "  + resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n",
     )
-    body = sc.build_comment(sc.load_cells(str(tmp_path)), {}, RUN_URL, SHA)
+    body = sc.build_comment(sc.load_cells(str(tmp_path)), {}, RUN_URL, SHA)[0]
     assert f"<details><summary>{_bare_app(RUN_URL)}</summary>" in body.splitlines()
     assert "99" not in body
 
@@ -579,7 +676,7 @@ def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path
         "::warning::plan text for stacks/app / dev-eu has no single OpenTofu tally line; "
         "its counts render as ?\n"
     )
-    body = sc.build_comment(cells, {}, RUN_URL, SHA)
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert '🟡 stacks/app (dev-eu): +? ~? -? <a href="https://gh/run/1">plan</a>' in (
         body.splitlines()
     )
@@ -682,7 +779,7 @@ def test_the_sticky_upsert_anchors_the_marker_at_the_body_start():
     block = _upsert_step()
     assert "startswith" in block
     assert "contains" not in block
-    assert sc.build_comment([], {}, "u", SHA).splitlines()[0] == sc.MARKER
+    assert sc.build_comment([], {}, "u", SHA)[0].splitlines()[0] == sc.MARKER
 
 
 def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
@@ -753,21 +850,24 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     doctor's `warned` output: findings render only as run-page annotations, so a run with a
     warning still posts. Behaviour lives in the action's shell, so this is source-derived.
 
+    It yields to the unmanaged stacks line the same way: a pull request changing only stacks
+    with no env/* tag gets a comment naming them.
+
     Mutation: test `"$DOCTOR_WARNED" = "true"` in the skip condition -- red.
-    Mutation: bind `DOCTOR_WARNED` to another step's output -- red."""
+    Mutation: bind `DOCTOR_WARNED` to another step's output -- red.
+    Mutation: drop the `"$UNMANAGED" != "true"` clause from the skip condition -- red.
+    Mutation: bind `UNMANAGED` to another output of step `build` -- red."""
     bodies = _guard_bodies()
-    quiet = next(
-        c
-        for c in bodies
-        if '"$nothing_changed" = "true"' in c
-        and '-z "$id"' in c
-        and '"$DOCTOR_WARNED" != "true"' in c
+    quiet = (
+        '[ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$DOCTOR_WARNED" != "true" ] '
+        '&& [ "$UNMANAGED" != "true" ]'
     )
+    assert quiet in bodies
     assert "exit 0" in bodies[quiet]
     assert not any("gh api" in line for line in bodies[quiet])
-    assert step_by("summary", name="Upsert sticky comment")["env"]["DOCTOR_WARNED"] == (
-        "${{ steps.doctor.outputs.warned }}"
-    )
+    env = step_by("summary", name="Upsert sticky comment")["env"]
+    assert env["DOCTOR_WARNED"] == "${{ steps.doctor.outputs.warned }}"
+    assert env["UNMANAGED"] == "${{ steps.build.outputs.unmanaged }}"
 
 
 #: The doctor step's whole shell body, hand-written: doctor's result is read here once, as the
@@ -847,10 +947,79 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     )
     # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`. Mutation:
     # binding `SHIPMATE_DOCTOR_WARNED` again -- a plan comment reads nothing from doctor.
+    # Mutation: mapping `unmanaged-stacks` to another env name.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
+        "SHIPMATE_UNMANAGED": "${{ inputs.unmanaged-stacks }}",
     }
+    # Mutation: `required: true` (GitHub does not enforce it, but it misdocuments a draft run).
+    decl = yaml.safe_load(src)["inputs"]["unmanaged-stacks"]
+    assert {k: v for k, v in decl.items() if k != "description"} == {
+        "required": False,
+        "default": "",
+    }
+
+
+_BAD_UNMANAGED = (
+    '::warning::unmanaged-stacks is not a JSON object {"count": N, "paths": [strings]} '
+    "naming min(N, 10) paths; the plan comment names no unmanaged stack\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "out", "flag"),
+    [
+        ("", "", "false"),
+        ("not json", _BAD_UNMANAGED, "false"),
+        ('["stacks/x"]', _BAD_UNMANAGED, "false"),
+        ('{"count": 1, "paths": ["stacks/x", 1]}', _BAD_UNMANAGED, "false"),
+        ('{"count": "1", "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"count": true, "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"count": 0, "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"count": 3, "paths": []}', _BAD_UNMANAGED, "false"),
+        ('{"count": -1, "paths": []}', _BAD_UNMANAGED, "false"),
+        ('{"paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"count": 0, "paths": []}', "", "false"),
+        ('{"count": 1, "paths": ["stacks/x"]}', "", "true"),
+    ],
+)
+def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
+    tmp_path, monkeypatch, capsys, raw, out, flag
+):
+    """An empty or invalid value renders no line and leaves `pending` and `count` as they were;
+    `unmanaged` says whether the line rendered, which the upsert's create-skip reads.
+
+    Mutation: `json.loads` without a guard crashes the invalid cases.
+    Mutation: always writing `unmanaged=false` reddens the last case.
+    Mutation: `isinstance(count, int)` accepts the `true` count.
+    Mutation: dropping the `len(paths) == min(count, ...)` check accepts the zero count over
+    one path, the count of 3 over none and the count of -1."""
+    monkeypatch.setenv("SHIPMATE_UNMANAGED", raw)
+    assert _run_main(tmp_path, monkeypatch, []) == f"pending=false\ncount=0\nunmanaged={flag}\n"
+    assert capsys.readouterr().out == out
+    line = "\n\n" + _LEAD.format(1) + ": stacks/x" if flag == "true" else ""
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + line
+
+
+def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monkeypatch, capsys):
+    """The line yields to cell lines near HARD_CAP, so `unmanaged=false` and the upsert's
+    create-skip is not bypassed for a line the body does not carry.
+
+    Mutation: `named = bool(line)` in `main` (the rendered-or-not ignored) reddens it."""
+    cells = [_cell(stack=f"stacks/{'s' * 400}{i:03}") for i in range(130)]
+    _run_main(tmp_path, monkeypatch, cells)
+    pad = sc.HARD_CAP - 10 - len((tmp_path / "comment.md").read_text(encoding="utf-8"))
+    assert pad > 0
+    first = tmp_path / "cell-summary.dev-eu.s0" / "cell.json"
+    first.write_text(json.dumps(_cell(stack=cells[0]["stack"] + "p" * pad)), encoding="utf-8")
+    monkeypatch.setenv("SHIPMATE_UNMANAGED", '{"count": 1, "paths": ["stacks/unmanaged"]}')
+    (tmp_path / "out.txt").unlink()
+    capsys.readouterr()
+    assert _run_main(tmp_path, monkeypatch, []) == "pending=true\ncount=130\nunmanaged=false\n"
+    assert capsys.readouterr().out == _NO_ROOM
+    assert len((tmp_path / "comment.md").read_text(encoding="utf-8")) == sc.HARD_CAP - 10
 
 
 def test_main_reports_zero_count_when_no_cell_summaries_arrived(tmp_path, monkeypatch):
@@ -879,7 +1048,7 @@ def test_marker_round_trip_guard_summary_action_matches_script():
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     assert src.count(sc.MARKER) >= 1, "upsert step no longer greps the script's marker"
     assert "scripts/summary-comment" in src, "summary action no longer calls summary-comment"
-    assert sc.build_comment([], {}, "u", SHA).startswith(sc.MARKER)
+    assert sc.build_comment([], {}, "u", SHA)[0].startswith(sc.MARKER)
 
 
 @pytest.mark.parametrize("warned", ["true", "false", ""])

@@ -302,7 +302,7 @@ its `todo` items.
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.
 
-There are three. The first is the `SHIPMATE_APP_ID` repository variable
+There are two. The first is the `SHIPMATE_APP_ID` repository variable
 differing from `--app-id`. `--app-id` does not only set that variable: it pins
 the gate ruleset's `integration_id` and selects whose private key is stored on
 `shipmate-engine`. Reconciling the two separately would require a
@@ -311,9 +311,7 @@ variable — can never post, and the default branch would stay blocked until an
 admin deleted the ruleset. Re-run with the variable's value, or change the
 variable first. The second is a run without `--key` while `shipmate-engine`
 holds no `SHIPMATE_APP_PRIVATE_KEY`, or does not exist yet: there is no key to
-place. Re-run with `--key <path to the App's PEM private key>`. The third is a
-`shared = true` entry naming an environment no stack's `env/<name>` tag
-declares: it would bind nothing. Tag the stacks or drop the entry.
+place. Re-run with `--key <path to the App's PEM private key>`.
 
 ## Common failures
 
@@ -859,12 +857,18 @@ An environment that must never apply unreviewed must not hold `gated = false`.
 
 No `shipmate / <stack> / <env>` checks appear, no plan comment is posted — unless
 there is
-already a plan comment to keep current, or `doctor` raised a warning on that
-run, either of which still posts one — and the gate goes green over no work.
+already a plan comment to keep current, `doctor` raised a warning on that
+run, or the pull request changes a stack with no `env/*` tag, any of which still
+posts one — and the gate goes green over no work.
 
 Change detection is `terramate list --changed`, so a pull request that touches
 no stack's own files and changes no generated `.tf` — an engine-pin bump, a docs
 edit — plans nothing. This is expected, not a fault.
+
+A changed stack with no `env/*` tag is unmanaged and plans nothing either. The
+plan comment names it under the verdict, and the `detect` log carries a notice
+naming it. Tag it `env/<name>` to bring it under shipmate ([`../CONTRACT.md`](../CONTRACT.md) §Tag
+grammar).
 
 The same rule drops a stack whose change was applied before merge and then
 reverted on the branch. The branch matches the default branch again, so no
@@ -915,6 +919,39 @@ policy naming a nonexistent branch fails closed: the completion job is denied
 check. Fix the policy per `github-app.md` §5, which reads each repository's own
 default branch rather than hardcoding one. `shipmate doctor` probes both that
 the environment exists and that its policy actually names the default branch.
+
+### A deploy refused an apply check on a stack that lost its env tag
+
+```text
+::error::deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
+after this pull request was planned, so its reviewed change was not applied. This deploy
+applies nothing, so these open checks of this merge are not applied either:
+apply / <other stack> / <env>. Open a new pull request that retags each stranded stack
+and changes every other listed stack (any edit that `terramate list --changed` marks,
+such as a comment line); its plan and deploy apply the current default branch for all of
+them, this merged change included. Re-running this deploy checks out the same commit and
+refuses again. This deploy's apply checks are never read again and stay open on the
+merged pull request.
+```
+
+The message is one line; it is wrapped here. The not-applied-either sentence is
+present only when the merge has other open checks. The merged pull request
+changed a stack, and another pull request removed that stack's `env/*` tag, or
+one of them, and merged first. The merged change reached the default branch,
+but no cell of this deploy carries it. The refusal makes the stranded change
+visible instead of skipping it with a notice on a path no operator watches, and
+because it applies nothing, every other open check of the merge stays
+unapplied too.
+
+1. Open a new pull request that retags each stranded stack and changes every
+   other listed stack, for example with a comment line.
+2. Review its plan: it plans the current default branch, this merged change
+   included.
+3. Merge it. Its deploy applies all of them.
+
+The refused deploy's apply checks stay open on the merged pull request and are
+never read again. Do not re-run the refused deploy: it checks out the same
+commit and refuses again.
 
 ### The post-merge deploy was dropped as superseded
 
