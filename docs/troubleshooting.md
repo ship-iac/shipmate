@@ -924,26 +924,33 @@ the environment exists and that its policy actually names the default branch.
 
 ```text
 ::error::deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
-after this pull request was planned, so its reviewed change was not applied. Open a new
-pull request that retags the stack (or otherwise changes it); that pull request plans the
-current default branch, this merged change included, and its deploy applies it. This
-run's apply checks are never read again and stay pending on the merged pull request;
-re-running this deploy refuses again.
+after this pull request was planned, so its reviewed change was not applied. This deploy
+applies nothing, so these open checks of this merge are not applied either:
+apply / <other stack> / <env>. Open a new pull request that retags each stranded stack
+and changes every other listed stack (any edit that `terramate list --changed` marks,
+such as a comment line); its plan and deploy apply the current default branch for all of
+them, this merged change included. Re-running this deploy checks out the same commit and
+refuses again. This deploy's apply checks are never read again and stay open on the
+merged pull request.
 ```
 
-The message is one line; it is wrapped here. The merged pull request changed a
-stack, and another pull request removed that stack's `env/*` tag and merged
-first. The merged change reached the default branch, but no cell of this deploy
-carries it, so the deploy refuses rather than leave the apply check open with
-nothing applied.
+The message is one line; it is wrapped here. The not-applied-either sentence is
+present only when the merge has other open checks. The merged pull request
+changed a stack, and another pull request removed that stack's `env/*` tag, or
+one of them, and merged first. The merged change reached the default branch,
+but no cell of this deploy carries it. The refusal makes the stranded change
+visible instead of skipping it with a notice on a path no operator watches, and
+because it applies nothing, every other open check of the merge stays
+unapplied too.
 
-1. Open a new pull request that retags the stack, or otherwise changes it.
+1. Open a new pull request that retags each stranded stack and changes every
+   other listed stack, for example with a comment line.
 2. Review its plan: it plans the current default branch, this merged change
    included.
-3. Merge it. Its deploy applies the change.
+3. Merge it. Its deploy applies all of them.
 
-The refused deploy's apply checks stay pending on the merged pull request and
-are never read again. Do not re-run the refused deploy: it checks out the same
+The refused deploy's apply checks stay open on the merged pull request and are
+never read again. Do not re-run the refused deploy: it checks out the same
 commit and refuses again.
 
 ### The post-merge deploy was dropped as superseded

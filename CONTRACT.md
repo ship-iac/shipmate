@@ -644,9 +644,8 @@ tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
 Every condition below refuses at detect, before any cell starts, and one
 refusal names every structural error the file holds. `shipmate doctor` reports
 every structural row, the ones judged on the file alone, on the pull request that
-introduces it. The absent-file, interpreter, `tf_vars` coverage, workload-tag,
-variable and stranded-apply-check rows depend on the run as well as the file, so
-they are not structural.
+introduces it. The absent-file, interpreter, `tf_vars` coverage, workload-tag and
+variable rows depend on the run as well as the file, so they are not structural.
 
 | Condition | Why |
 |---|---|
@@ -683,7 +682,6 @@ they are not structural.
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 | A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
-| On a deploy, an open apply check on the merged pull request whose stack lost its `env/*` tag after it was planned | no cell of the deploy carries that stack's reviewed change, so nothing would ever complete the check; the refusal names each check and the remedy, a new pull request retagging the stack ([`docs/troubleshooting.md`](docs/troubleshooting.md)) |
 | A file holding a reference, read by a step whose variables input is absent or empty | the engine did not pass `github-vars` to that step, or the repository reaches no variables at all; named as such rather than blamed on one variable |
 
 ### Resolution
@@ -967,9 +965,11 @@ goes green over a stack that plans nothing. A deploy refuses when its merged
 pull request holds an open apply check for a stack and environment the merge
 no longer pairs: the stack, changed by that pull request, lost that `env/*` tag
 (or every one) after the pull request was planned, so no cell would ever apply
-its reviewed change. A new pull request that retags the stack
-plans the current default branch and its deploy applies the change; re-running
-the refused deploy refuses again
+its reviewed change. The refusal applies nothing, so it also names every other
+open apply check of that merge. A new pull request that retags each stranded
+stack and changes every other named stack plans the current default branch, and
+its deploy applies all of them; re-running the refused deploy checks out the
+same commit and refuses again
 ([`docs/troubleshooting.md`](docs/troubleshooting.md) §A deploy refused an
 apply check on a stack that lost its env tag).
 

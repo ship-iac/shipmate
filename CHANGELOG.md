@@ -22,7 +22,7 @@ section below names the SHA the release tags.
 - **`shipmate doctor` expects `shipmate.yml`'s `verb` options to be `[plan, apply, unlock]`.**
 - **A drift Issue closed because its cell is no longer managed says the stack or environment left the repository, or the stack carries no `env/*` tag.**
 - **A stack with no `env/*` tag is unmanaged: it is skipped with a notice that counts the unmanaged stacks and names up to ten, instead of failing the run (`CONTRACT.md` §Tag grammar).**
-- **A deploy refuses when its merged pull request holds an open apply check on a stack that lost its `env/*` tag after it was planned: open a new pull request that retags the stack, whose deploy applies the merged change; re-running the refused deploy refuses again (`docs/troubleshooting.md`).**
+- **A deploy refuses when its merged pull request holds an open apply check on a stack that lost its `env/*` tag after it was planned, and names every other open check of that merge, which it does not apply either: open a new pull request that retags each stranded stack and changes every other named stack; its deploy applies all of them. Re-running the refused deploy refuses again (`docs/troubleshooting.md`).**
 - **`scripts/onboard` no longer refuses a stack with no `env/*` tag, and provisions every environment the checkout's `.github/shipmate.toml` declares as well as every one a stack tags, and names a declared entry no stack tags on its `.github/shipmate.toml` checklist item.**
 - **`scripts/onboard` no longer refuses a `shared = true` entry that no stack tags; it provisions the bare `<env>` like any other entry.**
 
