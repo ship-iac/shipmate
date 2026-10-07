@@ -701,18 +701,21 @@ GitHub Environment the cell's job binds: the bare `<env>` when shared,
 
 **`shipmate doctor` lists the role each environment resolves**, one notice per
 environment naming an identity: `` `<env>` resolves these roles at the commit
-under examination: … ``, one item per path and listed workload, and `no role` for
-a path the identity grants nothing on. An identity that does not vary shows
+under examination: … ``, one item per path and listed workload, and `no role`
+for a path the identity grants nothing on. An identity that does not vary shows
 `every cell`, or `untagged and listed cells` when the entry writes `workloads`,
-because a tag outside the list resolves no role. The notices share an 8,000-character
-budget, so the report stays under GitHub's comment limit: an environment over it
-alone has its items cut and counted, and one final notice counts the
-environments left out. One notice per GitHub Environment the roles bind then
-names the distinct AWS accounts its roles reach: the OIDC subject is per
-environment, so every cell bound to it can assume each of those roles. A subject
-with no role prints none. The account notices share their own 4,000-character
-budget, cut and counted as the roles notices are. Doctor reads the branch's
-table, so it is the audit read for an identity edit before it merges. A referenced role shows the value comment-ops resolves: a
+because a tag outside the list resolves no role. The notices share an
+8,000-character budget, so the report stays under GitHub's comment limit: an
+environment over it alone has its items cut and counted, and one final notice
+counts the environments left out. One notice per GitHub Environment the roles
+bind then names the distinct AWS accounts its roles reach: `` `<subject>`
+reaches these AWS accounts at the commit under examination: … ``. The OIDC
+subject is per environment, so every cell bound to it can assume each of those
+roles. A subject with no role gets no notice. The account notices share their
+own 4,000-character budget, cut and counted as the roles notices are, and their
+final notice points back to the roles notices. Doctor reads the branch's table,
+so it is the audit read for an identity edit before it merges. Both notices show
+a referenced role as comment-ops resolves it, and the account drawn from it: a
 `shipmate-engine` Environment variable of the same name wins there, and never in
 a cell (§Variable references).
 

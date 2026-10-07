@@ -5219,8 +5219,24 @@ def test_the_account_lines_keep_their_own_budget():
         (
             doctor.NOTICE,
             "accounts for 1 more subject(s) not shown, to keep this report under GitHub's "
-            "comment limit.",
+            "comment limit; the roles notices above list each environment's roles.",
         ),
+    ]
+
+
+def test_a_notice_that_fits_its_budget_exactly_is_whole_and_one_less_is_cut():
+    """The full stop counts against the budget: one character short, the items are cut and
+    the notice still shows, rather than running one past the budget and being counted.
+
+    Mutations: drop the `- 1` reserved for the full stop (the shorter budget gives only the
+    overflow notice); reserve two characters (the exact budget cuts the items).
+    """
+    groups = {"k": ["a" * 20, "b" * 20]}
+    whole = "k: " + "a" * 20 + ", " + "b" * 20 + "."
+    assert len(whole) == 46
+    assert doctor._budgeted(groups, "{}: ", ", ", 46, "over {}") == [(doctor.NOTICE, whole)]
+    assert doctor._budgeted(groups, "{}: ", ", ", 45, "over {}") == [
+        (doctor.NOTICE, "k: " + "a" * 20 + " … and 1 more.")
     ]
 
 

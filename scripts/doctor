@@ -1648,7 +1648,8 @@ CONFIG_ERROR_LINES = 10
 #: fallback for that drops this section and every harvested annotation.
 ROLE_LINES_BUDGET = 8000
 #: The characters all account notices may take together, apart from the roles notices'
-#: budget so a long roles section cannot hide which accounts a subject reaches.
+#: budget so a long roles section cannot hide which accounts a subject reaches. One subject
+#: reaching 256 accounts (the matrix's 256-cell limit) takes about 3,650 and fits whole.
 ACCOUNT_LINES_BUDGET = 4000
 
 # NOTICE: a branch need not carry the file at all, so an unreadable one is not a
@@ -1729,7 +1730,7 @@ def _subject_accounts(table):
         ", ",
         ACCOUNT_LINES_BUDGET,
         "accounts for {} more subject(s) not shown, to keep this report under GitHub's "
-        "comment limit.",
+        "comment limit; the roles notices above list each environment's roles.",
     )
 
 
