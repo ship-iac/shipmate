@@ -104,6 +104,10 @@ def ctx(**over):
         "ruleset_deferred": False,
         "apply_envs": {},
         "review_count": 0,
+        "tags_by_stack": {},
+        "tagged": {"dev-eu": frozenset()},
+        "tree_errors": [],
+        "cells": [],
     }
     base.update(over)
     return base
@@ -2006,6 +2010,8 @@ todo          Provider lock files
     In each, run `tofu init -backend=false`, then
     `tofu providers lock -platform=linux_amd64`, and commit the file.
 
+ok            unmanaged stacks
+ok            stack tags
 todo          adoption pull request
     Re-run without --dry-run, then commit the workflow file and the table together,
     in a pull request that changes no stack. The table is read from the default
@@ -2041,6 +2047,8 @@ cannot check  CODEOWNERS entry covering /.github/workflows/
     `.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's.
 
 ok            Provider lock files
+ok            unmanaged stacks
+ok            stack tags
 ok            adoption pull request
 todo          drift workflow file
     Add one workflow file per drift sweep from the `shipmate drift` fence in
@@ -2753,6 +2761,194 @@ def test_no_tagged_stack_and_no_table_binds_nothing(monkeypatch, tmp_path, capsy
     _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=({}, {"a": []}))
     assert exc.code == 0
     assert "environments: (none)" in capsys.readouterr().out.splitlines()
+
+
+UNMANAGED_ITEM = "unmanaged stacks"
+STACK_TAGS_ITEM = "stack tags"
+
+
+def test_an_untagged_stack_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, capsys):
+    """Mutation: `_unmanaged_item` also calls `report("differs", ...)` -- the run exits 2."""
+    membership = ({"dev-eu": ["a"]}, {"a": ["env/dev-eu"], "b": []})
+    _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=membership)
+    assert exc.code == 0
+    assert checklist_items(checklist_of(capsys.readouterr().out))[UNMANAGED_ITEM] == (
+        "todo",
+        [
+            "1 stack(s) carry no `env/*` tag:",
+            "  b",
+            "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
+            "needs nothing.",
+        ],
+    )
+
+
+def test_more_than_ten_unmanaged_stacks_name_ten_and_count_the_rest():
+    """Mutation: `_stack_list`'s slice `[:10]` to `[:11]` -- `s10` is named."""
+    tags_by_stack = {f"s{i:02}": [] for i in range(12)}
+    assert onboard._unmanaged_item(ctx(tags_by_stack=tags_by_stack)) == (
+        "todo",
+        UNMANAGED_ITEM,
+        [
+            "12 stack(s) carry no `env/*` tag:",
+            *[f"  s{i:02}" for i in range(10)],
+            "  and 2 more",
+            "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
+            "needs nothing.",
+        ],
+    )
+
+
+def test_a_stack_with_two_workload_tags_is_a_stack_tags_line(monkeypatch, tmp_path, capsys):
+    """`full_tree` collects the refusal into `ctx["tree_errors"]` and drops only that stack's
+    cells, so `b`'s workload gap is still checked.
+
+    Mutations: call `full_tree` without the errors list -- the tree is lost and `b`'s line is
+    gone; that and remove the `ec._gather` wrapper -- the refusal raises into `main`.
+    """
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "shipmate.toml").write_text(
+        'layout = "tf_vars"\n\n[identities.dev.aws]\n'
+        'apply = "arn:aws:iam::111111111111:role/apply"\n\n'
+        '[environments.dev-eu]\nregion = "eu-west-1"\nidentity = "dev"\nworkloads = ["core"]\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    membership = (
+        {"dev-eu": ["a", "b"]},
+        {"a": ["env/dev-eu", "workload/x", "workload/y"], "b": ["env/dev-eu", "workload/net"]},
+    )
+    _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=membership)
+    assert exc.code == 0
+    assert checklist_items(checklist_of(capsys.readouterr().out))[STACK_TAGS_ITEM] == (
+        "todo",
+        [
+            "stack 'a' carries 2 workload tags (workload/x, workload/y), and a stack carries at "
+            "most one `workload/<name>` tag. Keep one in the stack's `tags` and remove the rest.",
+            "1 cell(s) carry a workload tag their environment's workloads list does not name: "
+            "b in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
+            "the default branch grants a role to. Retag the stack, or add the workload to "
+            "environments.<env>.workloads in .github/shipmate.toml on the default branch, which "
+            "is where this table is read from: merge it there on its own pull request first.",
+            "`environments.dev-eu.workloads` lists core, which no stack in dev-eu tags. Tag a",
+            "stack with each, or remove it from the list.",
+        ],
+    )
+
+
+def test_a_slug_collision_is_a_stack_tags_line(monkeypatch, tmp_path, capsys):
+    """`guard_slug_collisions` raises after the per-stack collection, so the tree is lost and
+    the workload-gap check is skipped.
+
+    Mutation: remove the `ec._gather` wrapper around `full_tree` in `main` -- the refusal
+    raises into `main`.
+    """
+    membership = ({"dev-eu": ["a/b", "a-b"]}, {"a/b": ["env/dev-eu"], "a-b": ["env/dev-eu"]})
+    _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=membership)
+    assert exc.code == 0
+    assert checklist_items(checklist_of(capsys.readouterr().out))[STACK_TAGS_ITEM] == (
+        "todo",
+        [
+            "a-b, a/b all map to the plan artifact 'plan.dev-eu.a-b': distinct stack paths "
+            "sharing one artifact name would make an apply download another stack's plan. "
+            "Rename one so the path->'-' slug is unique."
+        ],
+    )
+
+
+def _listing(**workloads):
+    """A table whose entries each name an identity and list `workloads[env]`."""
+    return {
+        "layout": "folder",
+        "identities": {"dev": {"aws": {"apply": "arn:aws:iam::111111111111:role/apply"}}},
+        "environments": {
+            env: {"region": "eu-west-1", "identity": "dev", "workloads": names}
+            for env, names in workloads.items()
+        },
+    }
+
+
+def test_a_cell_whose_workload_its_list_does_not_name_is_listed():
+    """Mutation: drop the `refuse_workload_gaps` call from `_stack_tags_item` -- `ok`."""
+    context = ctx(
+        table=_listing(**{"dev-eu": ["core"]}),
+        cells=[{"stack": "a", "environment": "dev-eu", "workload": "net"}],
+        tagged={"dev-eu": frozenset({"core", "net"})},
+    )
+    assert onboard._stack_tags_item(context) == (
+        "todo",
+        STACK_TAGS_ITEM,
+        [
+            "1 cell(s) carry a workload tag their environment's workloads list does not name: "
+            "a in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
+            "the default branch grants a role to. Retag the stack, or add the workload to "
+            "environments.<env>.workloads in .github/shipmate.toml on the default branch, which "
+            "is where this table is read from: merge it there on its own pull request first."
+        ],
+    )
+
+
+def test_a_listed_workload_no_stack_in_its_environment_tags_is_listed():
+    """`api` is tagged, but only on a `dev-us` stack.
+
+    Mutation: `untagged_workloads` diffs against the workloads tagged anywhere in the tree
+    instead of `tagged[env]` -- `ok`.
+    """
+    context = ctx(
+        table=_listing(**{"dev-eu": ["api"], "dev-us": ["api"]}),
+        tagged={"dev-eu": frozenset(), "dev-us": frozenset({"api"})},
+    )
+    assert onboard._stack_tags_item(context) == (
+        "todo",
+        STACK_TAGS_ITEM,
+        [
+            "`environments.dev-eu.workloads` lists api, which no stack in dev-eu tags. Tag a",
+            "stack with each, or remove it from the list.",
+        ],
+    )
+
+
+def test_a_needs_predecessor_no_stack_tags_is_named_on_the_table_item():
+    """`staging` is an entry, so it is in `ctx["envs"]`, and no stack tags it.
+
+    Mutation: pass `ctx["envs"]` to `stale_needs` -- the `needs` line is gone.
+    """
+    table = {"layout": "folder", "environments": {"prod": {"needs": ["staging"]}, "staging": {}}}
+    context = ctx(
+        table=table,
+        envs=["prod", "staging"],
+        tagged_envs={"prod"},
+        tagged={"prod": frozenset()},
+    )
+    assert onboard._table_item(context) == (
+        "ok",
+        "`.github/shipmate.toml`",
+        [
+            "Provisioned for staging, which no stack tags yet: its first tagging pull request",
+            "deploys under that environment's protection. If the name is a typo, fix the",
+            "entry.",
+            "`needs` names staging, which no stack tags, so it orders nothing until a stack",
+            "is tagged into each.",
+        ],
+    )
+
+
+def test_onboard_and_env_config_share_one_table_rule(monkeypatch):
+    """Both items render what env-config's functions return.
+
+    Mutation: a local copy of either rule in onboard -- the sentinel is not shown.
+    """
+    monkeypatch.setattr(onboard.ec, "untagged_workloads", lambda table, tagged: [("e", ["SEN"])])
+    monkeypatch.setattr(onboard.ec, "stale_needs", lambda table, envs: ["SENTINEL"])
+    context = ctx(table={"layout": "folder", "environments": {"dev-eu": {}}})
+    assert onboard._stack_tags_item(context)[2] == [
+        "`environments.e.workloads` lists SEN, which no stack in e tags. Tag a stack with",
+        "each, or remove it from the list.",
+    ]
+    assert onboard._table_item(context)[2] == [
+        "`needs` names SENTINEL, which no stack tags, so it orders nothing until a stack",
+        "is tagged into each.",
+    ]
 
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):

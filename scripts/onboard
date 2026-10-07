@@ -28,6 +28,12 @@ Terramate env/* tags and the `environments` entries of the checkout's
 `.github/shipmate.toml`. Those bound as
 one bare `<env>` instead of the `<env>-plan` / `<env>-apply` pair are the entries
 holding `shared = true` in the checkout's `.github/shipmate.toml`.
+
+The closing checklist also reads the whole Terramate tree: stacks carrying no env/*
+tag, the tag refusals a plan would raise (two workload/* tags on one stack, two stack
+paths sharing one plan artifact name, a workload tag its environment's `workloads` list
+does not name), listed workloads no stack tags, and `needs` naming an environment no
+stack tags. Each is a checklist item; none changes the exit code.
 """
 
 import argparse
@@ -44,6 +50,7 @@ from _shipmate import approval_rules as _approval_rules
 from _shipmate import run as _run
 
 ec = _load("env-config")
+bm = _load("build-matrix")
 
 GATE = "shipmate / gate"
 #: The one repository variable this script writes.
@@ -741,22 +748,31 @@ def _table_item(ctx):
         return "todo", item, [ln.removeprefix("::error::") for ln in str(e).splitlines()]
     # Not env-config's unused-entry warning: it says to remove an entry that onboard asks the
     # consumer to declare before tagging, and removing it reopens the auto-created environment.
+    lines = []
     untagged = [e for e in ctx["envs"] if e not in ctx["tagged_envs"]]
-    if not untagged:
-        return "ok", item, []
     if len(untagged) == 1:
-        sentence = (
+        lines = textwrap.wrap(
             f"Provisioned for {untagged[0]}, which no stack tags yet: its first tagging pull "
             "request deploys under that environment's protection. If the name is a typo, fix "
-            "the entry."
+            "the entry.",
+            width=80,
         )
-    else:
-        sentence = (
+    elif untagged:
+        lines = textwrap.wrap(
             f"Provisioned for {', '.join(untagged)}, which no stack tags yet: the first pull "
             "request tagging a stack into each deploys under that environment's protection. If "
-            "a name is a typo, fix the entry."
+            "a name is a typo, fix the entry.",
+            width=80,
         )
-    return "ok", item, textwrap.wrap(sentence, width=80)
+    # `ctx["envs"]` holds every table key, so it would hide a predecessor no stack tags.
+    stale = ec.stale_needs(ctx["table"], set(ctx["tagged"]))
+    if stale:
+        lines += textwrap.wrap(
+            f"`needs` names {', '.join(stale)}, which no stack tags, so it orders nothing "
+            "until a stack is tagged into each.",
+            width=80,
+        )
+    return "ok", item, lines
 
 
 def _app_item(ctx):
@@ -896,6 +912,44 @@ def _lock_files_item(ctx):
     return "todo", item, lines
 
 
+def _unmanaged_item(ctx):
+    item = "unmanaged stacks"
+    unmanaged = bm.unmanaged_stacks(ctx["tags_by_stack"])
+    if not unmanaged:
+        return "ok", item, []
+    return (
+        "todo",
+        item,
+        [
+            f"{len(unmanaged)} stack(s) carry no `env/*` tag:",
+            *_stack_list(unmanaged),
+            "shipmate runs no stack without an `env/*` tag. A stack kept out on purpose",
+            "needs nothing.",
+        ],
+    )
+
+
+def _stack_tags_item(ctx):
+    """The stack-tag refusals a plan would raise over the whole tree, and each entry's
+    listed workloads no stack in it tags. `ctx["cells"]` is None when a slug collision lost
+    the tree, and the table checks are skipped when there is no table."""
+    item = "stack tags"
+    errors = list(ctx["tree_errors"])
+    table = ctx["table"]
+    if table is not None and ctx["cells"] is not None:
+        with ec._gather(errors):
+            bm.refuse_workload_gaps(ctx["cells"], table)
+    lines = [e.removeprefix("::error::") for e in errors]
+    if table is not None:
+        for env, names in ec.untagged_workloads(table, ctx["tagged"]):
+            lines += textwrap.wrap(
+                f"`environments.{env}.workloads` lists {', '.join(names)}, which no stack in "
+                f"{env} tags. Tag a stack with each, or remove it from the list.",
+                width=80,
+            )
+    return ("todo" if lines else "ok"), item, lines
+
+
 def _adoption_item(ctx):
     item = "adoption pull request"
     if ctx["shim_on_default"]:
@@ -957,7 +1011,14 @@ def _checklist(ctx):
     items.append(_app_item(ctx))
     if gated:
         items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))
-    items += [_codeowners_item(ctx), _lock_files_item(ctx), _adoption_item(ctx), _DRIFT_ITEM]
+    items += [
+        _codeowners_item(ctx),
+        _lock_files_item(ctx),
+        _unmanaged_item(ctx),
+        _stack_tags_item(ctx),
+        _adoption_item(ctx),
+        _DRIFT_ITEM,
+    ]
     if ctx["ruleset_deferred"]:
         items.append(_RULESET_ITEM)
     out = ["", "Still yours, each item marked from what this run read:", ""]
@@ -1021,7 +1082,7 @@ def main(argv=None):
     sha, version = _engine_pin(engine)
     root = _repo_root()
     repo, default_branch, is_private = _repo_facts()
-    stacks_by_env, _ = _env_membership()
+    stacks_by_env, tags_by_stack = _env_membership()
     variables = _variables()
     _refuse_diverging_app_id(args.app_id, variables)
     table, shared = _resolve_shared(root, repo, variables)
@@ -1050,7 +1111,16 @@ def main(argv=None):
         "ruleset_deferred": False,
         "apply_envs": {},
         "review_count": 0,
+        "tags_by_stack": tags_by_stack,
+        "tagged": bm.tagged_workloads(stacks_by_env, tags_by_stack),
+        "tree_errors": [],
+        "cells": None,
     }
+    # A slug collision raises after the per-stack collection, so on that path the tree is lost.
+    with ec._gather(ctx["tree_errors"]):
+        ctx["cells"] = bm.full_tree(
+            sorted(stacks_by_env), stacks_by_env, tags_by_stack, ctx["tree_errors"]
+        )
     # Read before the first write, so `_refuse_missing_key` refuses while nothing exists.
     ctx["engine_secrets"] = _engine_secrets(repo)
     ctx["repo_secrets"] = _repo_secrets()

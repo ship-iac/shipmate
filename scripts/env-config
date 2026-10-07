@@ -764,7 +764,7 @@ def _report_unused(table, tagged):
             f"::warning::the environment table declares {', '.join(unused)}, which no stack "
             "tags. Remove the entry, or tag the stacks that belong to it. " + _TWO_PULL_REQUESTS
         )
-    stale = sorted({p for preds in env_order(table).values() for p in preds} - envs)
+    stale = stale_needs(table, envs)
     if stale:
         print(
             f"::warning::needs names {', '.join(stale)}, which no stack tags, so it orders "
@@ -777,19 +777,34 @@ def _report_untagged_workloads(table, tagged):
     """Name each entry's listed workloads no stack in that environment tags. A workload is
     listed before the branch tagging it merges and dropped after the branch untagging it. An
     environment no stack tags is skipped: the unused-entry warning already names it."""
-    for env, entry in sorted(table.get("environments", {}).items()):
-        if env not in tagged:
-            continue
-        untagged = sorted(set(entry.get("workloads", ())).difference(tagged[env]))
-        if untagged:
-            print(
-                f"::warning::environments.{env}.workloads lists {', '.join(untagged)}, which "
-                f"no stack in {env} tags. Tag a stack with each, or remove it from the list "
-                "once the pull request that drops its last tag has merged. This is a warning "
-                "rather than a refusal because the table is read from the default branch and "
-                "the tags from this branch, so a workload arrives and leaves over two pull "
-                "requests."
-            )
+    for env, untagged in untagged_workloads(table, tagged):
+        print(
+            f"::warning::environments.{env}.workloads lists {', '.join(untagged)}, which "
+            f"no stack in {env} tags. Tag a stack with each, or remove it from the list "
+            "once the pull request that drops its last tag has merged. This is a warning "
+            "rather than a refusal because the table is read from the default branch and "
+            "the tags from this branch, so a workload arrives and leaves over two pull "
+            "requests."
+        )
+
+
+def stale_needs(table, envs):
+    """The sorted `needs` predecessor names not in `envs`. `scripts/onboard` reports from
+    this function too, so the two cannot disagree."""
+    return sorted({p for preds in env_order(table).values() for p in preds} - set(envs))
+
+
+def untagged_workloads(table, tagged):
+    """`[(env, sorted names)]` in entry-name order: each entry's listed workloads no stack in
+    that environment tags, per `tagged` (`{env: workload names}`). An environment absent from
+    `tagged` is skipped, and so is one whose list is fully tagged. `scripts/onboard` reports
+    from this function too."""
+    return [
+        (env, untagged)
+        for env, entry in sorted(table.get("environments", {}).items())
+        if env in tagged
+        and (untagged := sorted(set(entry.get("workloads", ())).difference(tagged[env])))
+    ]
 
 
 def env_order(table):
