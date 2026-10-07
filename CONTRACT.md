@@ -951,8 +951,9 @@ table's own keys and each `needs` item are held to that charset and to the
 match nothing.
 
 A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip
-it, and plan, deploy and drift print a notice naming every unmanaged stack they
-scanned (the changed set on plan and deploy, the whole tree on drift). A bare
+it, and plan, deploy and drift print a notice counting the unmanaged stacks they
+scanned (the changed set on plan and deploy, the whole tree on drift) and naming
+the first ten, then `, and M more`. A bare
 `shipmate apply`, `shipmate unlock` and `scripts/onboard` print it too, over the
 whole tree. The plan
 comment names the unmanaged stacks a pull request changes, under its verdict. A

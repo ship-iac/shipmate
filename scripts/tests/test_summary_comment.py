@@ -412,6 +412,13 @@ def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
 
 
 _LEAD = "⚪ {} changed stack(s) carry no env/* tag and are not managed by shipmate"
+
+
+def _named(count, *paths):
+    """build-matrix's `unmanaged` output, parsed."""
+    return {"count": count, "paths": list(paths)}
+
+
 _NO_ROOM = (
     "::warning::the plan comment's cell lines leave no room under the 65,536-char comment cap "
     "for the unmanaged stacks line; it was left out\n"
@@ -422,7 +429,7 @@ def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verd
     """Zero cells still render the line, each path escaped as a cell line's stack is.
 
     Mutation: dropping the line when `cells` is empty reddens it."""
-    assert sc.build_comment([], {}, RUN_URL, SHA, ["stacks/[new]"]) == (
+    assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/[new]")) == (
         HEAD + f"🟢 no changes {AT}\n\n" + _LEAD.format(1) + ": stacks/&#91;new&#93;",
         True,
     )
@@ -430,22 +437,31 @@ def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verd
 
 def test_the_unmanaged_line_names_ten_paths_and_counts_the_rest():
     """Mutation: naming every path reddens it."""
-    assert sc.unmanaged_line([f"s{i:02}" for i in range(12)]) == (
+    assert sc.unmanaged_line(_named(12, *(f"s{i:02}" for i in range(12)))) == (
         _LEAD.format(12) + ": s00, s01, s02, s03, s04, s05, s06, s07, s08, s09, and 2 more"
     )
-    assert sc.unmanaged_line([]) == ""
+    assert sc.unmanaged_line(_named(0)) == ""
+    assert sc.unmanaged_line(None) == ""
+
+
+def test_the_unmanaged_line_counts_the_paths_build_matrix_left_out():
+    """`count` covers paths the output does not carry. Mutation: count `paths` instead of
+    reading `count` -- the line says 3 and names no rest."""
+    assert sc.unmanaged_line(_named(25, "a", "b", "c")) == (
+        _LEAD.format(25) + ": a, b, c, and 22 more"
+    )
 
 
 def test_the_unmanaged_line_stops_at_its_character_cap():
     """Mutation: removing the character cap reddens it."""
-    line = sc.unmanaged_line(["a" * 400, "b" * 400] + ["c" * 3000] * 9)
+    line = sc.unmanaged_line(_named(11, "a" * 400, "b" * 400, *["c" * 3000] * 9))
     assert line == _LEAD.format(11) + ": " + "a" * 400 + ", " + "b" * 400 + ", and 9 more"
     assert len(line) <= sc.UNMANAGED_LINE_CAP
 
 
 def test_the_unmanaged_line_names_no_path_when_none_fits():
     """Mutation: joining the empty name list (renders `: , and 10 more`) reddens it."""
-    assert sc.unmanaged_line(["p" * 3000] * 10) == (
+    assert sc.unmanaged_line(_named(10, *["p" * 3000] * 10)) == (
         _LEAD.format(10) + "; their paths are too long to list here."
     )
 
@@ -459,7 +475,7 @@ def test_the_unmanaged_line_is_counted_before_a_fold_out_is_sized():
     Mutation: leaving the line out of `used` reddens it (the bodies differ by `len(line) + 2`)."""
     cells = [(_cell(stack="s000"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1))]
     without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
-    body = sc.build_comment(cells, {}, RUN_URL, SHA, ["stacks/unmanaged"])[0]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged"))[0]
     line = _LEAD.format(1) + ": stacks/unmanaged"
     assert body.startswith(HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n<details>")
     assert len(without) <= sc.SIZE_BUDGET and len(body) <= sc.SIZE_BUDGET
@@ -477,7 +493,10 @@ def test_the_unmanaged_line_yields_to_cell_lines_near_the_hard_cap(capsys):
     without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(without) == sc.HARD_CAP - 10
     capsys.readouterr()
-    assert sc.build_comment(cells, {}, RUN_URL, SHA, ["stacks/unmanaged"]) == (without, False)
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged")) == (
+        without,
+        False,
+    )
     assert capsys.readouterr().out == _NO_ROOM
 
 
@@ -936,8 +955,8 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
 
 
 _BAD_UNMANAGED = (
-    "::warning::unmanaged-stacks is not a JSON list of strings; the plan comment names no "
-    "unmanaged stack\n"
+    '::warning::unmanaged-stacks is not a JSON object {"count": N, "paths": [strings]} with N '
+    "at least the number of paths; the plan comment names no unmanaged stack\n"
 )
 
 
@@ -946,9 +965,14 @@ _BAD_UNMANAGED = (
     [
         ("", "", "false"),
         ("not json", _BAD_UNMANAGED, "false"),
-        ('["stacks/x", 1]', _BAD_UNMANAGED, "false"),
-        ("[]", "", "false"),
-        ('["stacks/x"]', "", "true"),
+        ('["stacks/x"]', _BAD_UNMANAGED, "false"),
+        ('{"count": 1, "paths": ["stacks/x", 1]}', _BAD_UNMANAGED, "false"),
+        ('{"count": "1", "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"count": true, "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"count": 0, "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"count": 0, "paths": []}', "", "false"),
+        ('{"count": 1, "paths": ["stacks/x"]}', "", "true"),
     ],
 )
 def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
@@ -958,7 +982,9 @@ def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
     `unmanaged` says whether the line rendered, which the upsert's create-skip reads.
 
     Mutation: `json.loads` without a guard crashes the invalid cases.
-    Mutation: always writing `unmanaged=false` reddens the last case."""
+    Mutation: always writing `unmanaged=false` reddens the last case.
+    Mutation: `isinstance(count, int)` accepts the `true` count.
+    Mutation: dropping `count >= len(paths)` accepts the zero count over one path."""
     monkeypatch.setenv("SHIPMATE_UNMANAGED", raw)
     assert _run_main(tmp_path, monkeypatch, []) == f"pending=false\ncount=0\nunmanaged={flag}\n"
     assert capsys.readouterr().out == out
@@ -978,7 +1004,7 @@ def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monke
     assert pad > 0
     first = tmp_path / "cell-summary.dev-eu.s0" / "cell.json"
     first.write_text(json.dumps(_cell(stack=cells[0]["stack"] + "p" * pad)), encoding="utf-8")
-    monkeypatch.setenv("SHIPMATE_UNMANAGED", '["stacks/unmanaged"]')
+    monkeypatch.setenv("SHIPMATE_UNMANAGED", '{"count": 1, "paths": ["stacks/unmanaged"]}')
     (tmp_path / "out.txt").unlink()
     capsys.readouterr()
     assert _run_main(tmp_path, monkeypatch, []) == "pending=true\ncount=130\nunmanaged=false\n"

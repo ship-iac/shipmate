@@ -284,18 +284,20 @@ def verdict(cells, head_sha, run_url):
     return f"{circle} {n} of {len(cells)} cells change {provenance(head_sha, run_url)}"
 
 
-def unmanaged_line(paths):
-    """`⚪ N changed stack(s) carry no env/* tag ...` naming the first of `paths` (each
-    `_md_escape`d) that fit in `UNMANAGED_NAMES` names and `UNMANAGED_LINE_CAP` characters, then
-    `, and M more` for the rest. When not even the first fits, a fixed sentence names none. Empty
-    for no paths."""
-    if not paths:
+def unmanaged_line(unmanaged):
+    """`⚪ N changed stack(s) carry no env/* tag ...` for build-matrix's `unmanaged` output
+    `{"count": N, "paths": [...]}`, naming the first of `paths` (each `_md_escape`d) that fit in
+    `UNMANAGED_NAMES` names and `UNMANAGED_LINE_CAP` characters, then `, and M more` for the
+    other `count - named`. When not even the first fits, a fixed sentence names none. Empty for
+    `None` or a zero count."""
+    if not unmanaged or not unmanaged["count"]:
         return ""
-    lead = f"⚪ {len(paths)} changed stack(s) carry no env/* tag and are not managed by shipmate"
+    count, paths = unmanaged["count"], unmanaged["paths"]
+    lead = f"⚪ {count} changed stack(s) carry no env/* tag and are not managed by shipmate"
     line, names = "", []
     for path in paths[:UNMANAGED_NAMES]:
         names.append(_md_escape(path))
-        more = len(paths) - len(names)
+        more = count - len(names)
         candidate = f"{lead}: {', '.join(names)}" + (f", and {more} more" if more else "")
         if len(candidate) > UNMANAGED_LINE_CAP:
             break
@@ -315,14 +317,14 @@ def _join(sections):
     return "".join(out)
 
 
-def build_comment(cells, checks, run_url, head_sha, unmanaged=()):
+def build_comment(cells, checks, run_url, head_sha, unmanaged=None):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `unmanaged_line` of
-    `unmanaged` when it has paths, every cell in order (a fold-out for a changed cell with plan
-    text, else its bare line). No footer: the verdict links the run, and neither plan verdict
-    asks anything. Every cell is guaranteed its bare line: the space all remaining cells' bare
-    lines need is reserved up front, so an early giant plan cannot starve a later cell. The
-    unmanaged line yields, with a warning, when the bare lines leave it no room under HARD_CAP.
-    Returns `(body, named)`; `named` says whether the unmanaged line is in `body`."""
+    `unmanaged` when its count is not zero, every cell in order (a fold-out for a changed cell
+    with plan text, else its bare line). No footer: the verdict links the run, and neither plan
+    verdict asks anything. Every cell is guaranteed its bare line: the space all remaining
+    cells' bare lines need is reserved up front, so an early giant plan cannot starve a later
+    cell. The unmanaged line yields, with a warning, when the bare lines leave it no room under
+    HARD_CAP. Returns `(body, named)`; `named` says whether the unmanaged line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     urls = [check_url(c, checks, run_url) for c in meta]
@@ -440,21 +442,28 @@ def load_cells(cells_dir):
 
 
 def _unmanaged(raw):
-    """The paths `SHIPMATE_UNMANAGED` lists: none when empty, none with one warning when it is
-    not a JSON list of strings."""
+    """build-matrix's `{"count": N, "paths": [...]}` from `SHIPMATE_UNMANAGED`: `None` when
+    empty, `None` with one warning when it is not that shape with `N >= len(paths)`."""
     if not raw:
-        return []
+        return None
     try:
-        paths = json.loads(raw)
+        value = json.loads(raw)
     except json.JSONDecodeError:
-        paths = None
-    if isinstance(paths, list) and all(isinstance(p, str) for p in paths):
-        return paths
+        value = None
+    if isinstance(value, dict):
+        count, paths = value.get("count"), value.get("paths")
+        if (
+            type(count) is int
+            and isinstance(paths, list)
+            and all(isinstance(p, str) for p in paths)
+            and count >= len(paths)
+        ):
+            return value
     print(
-        "::warning::unmanaged-stacks is not a JSON list of strings; the plan comment names no "
-        "unmanaged stack"
+        '::warning::unmanaged-stacks is not a JSON object {"count": N, "paths": [strings]} with '
+        "N at least the number of paths; the plan comment names no unmanaged stack"
     )
-    return []
+    return None
 
 
 def main():

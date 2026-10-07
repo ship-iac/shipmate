@@ -211,6 +211,7 @@ _UNMANAGED_TREE = {
     "stacks/zeta": ["workload/net"],
     "stacks/alpha": [],
 }
+_TWENTY_UNMANAGED = {"stacks/app": ["env/dev-eu"], **{f"stacks/u{i:02}": [] for i in range(20)}}
 
 
 def test_env_membership_skips_untagged_stacks_with_a_whole_tree_notice(monkeypatch, capsys):
@@ -235,6 +236,18 @@ def test_the_changed_set_scan_names_its_scope_in_the_notice(monkeypatch, capsys)
     assert capsys.readouterr().out == (
         "::notice::2 changed stack(s) carry no env/* tag and are not managed by shipmate: "
         "stacks/alpha, stacks/zeta\n"
+    )
+
+
+def test_the_notice_names_ten_paths_and_counts_the_rest(monkeypatch, capsys):
+    """Mutation: name every path -- the notice lists all twenty."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_TWENTY_UNMANAGED))
+    monkeypatch.setattr(bm, "_tags", lambda s: _TWENTY_UNMANAGED[s])
+    bm.env_membership(all_stacks=True)
+    assert capsys.readouterr().out == (
+        "::notice::20 stack(s) carry no env/* tag and are not managed by shipmate: "
+        + ", ".join(f"stacks/u{i:02}" for i in range(10))
+        + ", and 10 more\n"
     )
 
 
@@ -1607,15 +1620,44 @@ def test_an_env_tag_naming_no_table_entry_still_refuses_under_tf_vars(monkeypatc
     [
         (
             {"stacks/app": ["env/dev-eu"], "stacks/z": [], "stacks/a": ["workload/x"]},
-            '["stacks/a", "stacks/z"]',
+            {"count": 2, "paths": ["stacks/a", "stacks/z"]},
         ),
-        ({"stacks/app": ["env/dev-eu"]}, "[]"),
+        ({"stacks/app": ["env/dev-eu"]}, {"count": 0, "paths": []}),
+        (
+            _TWENTY_UNMANAGED,
+            {"count": 20, "paths": [f"stacks/u{i:02}" for i in range(10)]},
+        ),
     ],
-    ids=["two", "none"],
+    ids=["two", "none", "twenty"],
 )
-def test_main_writes_the_unmanaged_stacks_as_a_sorted_json_list(
+def test_main_writes_the_unmanaged_count_and_the_first_ten_paths(
     monkeypatch, tmp_path, stacks, expected
 ):
-    """Written on every run, `[]` when none. Mutation: omit the line when the list is empty."""
+    """Written on every run, `{"count": 0, "paths": []}` when none; the paths are capped so the
+    value stays small enough for one environment variable. Mutation: omit the line when there
+    are none. Mutation: emit every path -- `twenty` gets twenty."""
     outputs, _ = _run_main(monkeypatch, tmp_path, _DRIFT_ENV, stacks=stacks)
-    assert outputs["unmanaged"] == expected
+    assert json.loads(outputs["unmanaged"]) == expected
+
+
+def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tmp_path):
+    """The plan path (`all_stacks=False`) is what the comment line reads. Mutation: write
+    `unmanaged` only under `all_stacks` -- the key is missing."""
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "acme/iac",
+            "SHIPMATE_HEAD_REPO": "acme/iac",
+        },
+        head_sha="cafe1234",
+        stacks={"stacks/app": ["env/dev-eu"], "stacks/new": []},
+    )
+    assert [c["stack"] for c in json.loads(outputs.pop("matrix"))["include"]] == ["stacks/app"]
+    assert outputs == {
+        "empty": "false",
+        "count": "1",
+        "cells": '[{"environment": "dev-eu", "stack": "stacks/app"}]',
+        "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
+    }

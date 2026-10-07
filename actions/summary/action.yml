@@ -46,9 +46,10 @@ inputs:
     default: ""
   unmanaged-stacks:
     description: >-
-      JSON list of the changed stack paths that carry no env/* tag (build-matrix's `unmanaged`
-      output). The plan comment names them under its verdict. Empty (detect skipped) renders no
-      line; a value that is not a JSON list of strings renders none and warns.
+      build-matrix's `unmanaged` output: JSON {"count": N, "paths": [...]} for the changed
+      stacks that carry no env/* tag, at most ten paths named. The plan comment counts and names
+      them under its verdict. Empty (detect skipped) renders no line; a value not of that shape,
+      or with N below the number of paths, renders none and warns.
     required: false
     default: ""
 runs:
