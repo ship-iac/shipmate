@@ -171,12 +171,21 @@ yours: `SHIPMATE_PLAN_PASSPHRASE`, the table with the
 cloud role, region and env identity your layout injects,
 adding the repository to the App installation, an approving review before apply,
 a `CODEOWNERS` entry, a git-tracked `.terraform.lock.hcl` in each stack, and
-the pull request carrying the workflow file. It marks
+the pull request carrying the workflow file. Three items check the whole tree
+before a run does: `unmanaged stacks` names the stacks with no `env/*` tag,
+`stack tags` the tag refusals a plan would raise and the workload tags that
+disagree with the table, and `drift sweeps` the cells no drift file sweeps. It marks
 each item `ok`, `todo` or `cannot check` from what the run read, and only a
-`todo` prints what to do. Two items are `cannot check`: the App
-installation, which only an App JWT can read, and, once a `CODEOWNERS` file
+`todo` prints what to do. Three items can be `cannot check`: the App
+installation, which only an App JWT can read; once a `CODEOWNERS` file
 exists, whether an entry in it covers `/.github/workflows/`, which is GitHub's
-matching.
+matching; and `drift sweeps`, when a drift file's `tags` query cannot be read,
+or a stack-tag refusal leaves no whole tree to cover
+([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
+
+The checklist reads the working tree: stack tags, `.github/shipmate.toml` and
+`.github/workflows/`. Re-run `scripts/onboard --dry-run` after retagging a stack
+or adding, editing or deleting a drift file.
 
 Branch, commit, push and pull request are yours: the script writes files and
 stops. The tier sections below are the spec it implements — read them to know
@@ -871,7 +880,11 @@ default-branch ref; it needs the `shipmate-engine` environment from the plan
 tier. `scripts/onboard` does not write it: save it from the `shipmate drift`
 fence in §The workflow file. Name, edit and split drift files freely — a `tags`
 query, other crons. When no workflow file calls `drift.yml`, `shipmate doctor`
-reports a notice. Scoping a sweep and what it costs are in [`drift.md`](drift.md).
+reports a notice. `scripts/onboard --dry-run` reads the drift files in the
+working tree and names the cells none of them sweeps, a query or clause matching
+no cell, and a sweep above the 256-cell limit; re-run it after adding, editing or
+deleting a drift file. Scoping a sweep and what it costs are in
+[`drift.md`](drift.md).
 
 ### Recipe: automerge after apply
 

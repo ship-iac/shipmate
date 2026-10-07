@@ -4,7 +4,8 @@ Drift detection is recommended, not required: nothing else in shipmate depends
 on it. A repository with no drift workflow file never has a stack checked
 against real infrastructure, and `shipmate doctor` reports a note about it.
 That note keeps doctor's verdict at ⚪ with the help hint, never 🟢 no problems
-found. Read [What it costs](#what-it-costs) before you add one.
+found. `scripts/onboard --dry-run` marks its `drift sweeps` checklist item
+`todo` for it, and once drift files exist, names the cells none of them sweeps. Read [What it costs](#what-it-costs) before you add one.
 
 Each drift workflow file is one sweep: its cron fans out over the stack ×
 environment cells its `tags` query selects, every cell when it sets none — not
@@ -110,7 +111,9 @@ way: it is inert, and the warning names what it therefore fails to do. It also
 names a workload an environment's `workloads` lists and no stack in that
 environment tags. A pull request introducing that typo says nothing about it:
 the plan path sees only the changed set
-([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
+([`../CONTRACT.md`](../CONTRACT.md) §Environment table). `scripts/onboard
+--dry-run` reports the same facts over a checkout, before the pull request
+merges.
 
 ## What it costs
 
@@ -167,7 +170,10 @@ Keep the queries disjoint. A cell two queries select is planned by both sweeps,
 which update the same Issue, and two sweeps starting in the same minute can race
 and open a duplicate.
 
-A cell outside every query is never checked. Narrowing a query strands the open
+A cell outside every query is never checked. `scripts/onboard --dry-run` reads
+the checkout's drift files and names those cells, every query or clause matching
+no cell, and every sweep above the 256-cell limit; re-run it after adding,
+editing or deleting a drift file. Narrowing a query strands the open
 Issues of the cells it drops: no sweep plans those cells and they are still in
 the repository, so nothing closes the Issues. Close them by hand.
 

@@ -16,6 +16,7 @@ section below names the SHA the release tags.
 - **`shipmate doctor` reports a notice when no workflow file calls the engine's `drift.yml`, and warns when `shipmate.yml` still does.**
 - **The plan comment names the changed stacks that carry no `env/*` tag, and a pull request changing only such stacks gets a comment.**
 - **`shipmate doctor` names the AWS accounts each environment's OIDC subject reaches.**
+- **`scripts/onboard`'s checklist reports the working tree's stacks with no `env/*` tag, the stack-tag refusals a plan would raise, workload tags against the table, and the cells no drift file sweeps, with drift queries or clauses matching no cell and sweeps above 256 cells (`docs/troubleshooting.md` §What `scripts/onboard` reports). Its `.github/shipmate.toml` item is `todo` when a `needs` entry names an environment no stack tags. None changes the exit code.**
 
 ### Changed
 

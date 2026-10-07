@@ -302,7 +302,30 @@ its `todo` items.
 | --- | --- |
 | `ok` | what the run read already satisfies the item. |
 | `todo` | the item is not done; what to do follows. |
-| `cannot check` | the run cannot read it: the App installation needs an App JWT, and whether a `CODEOWNERS` entry covers `/.github/workflows/` is GitHub's matching. Confirm it by hand. |
+| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether a `CODEOWNERS` entry covers `/.github/workflows/` is GitHub's matching, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
+
+Three items check the working tree's stacks and drift files the way a run
+would, so a run that would refuse or skip shows up before the pull request
+that causes it merges:
+
+| Item | `todo` when |
+| --- | --- |
+| `unmanaged stacks` | a stack carries no `env/*` tag. It names them; shipmate runs none of them, which needs nothing if deliberate. |
+| `stack tags` | a stack carries two `workload/*` tags, two stack paths in one environment slug alike, a stack's `workload/*` tag is outside its environment's `workloads` list, or that list names a workload no stack in the environment tags. |
+| `drift sweeps` | no workflow file calls the engine's `drift.yml`; a stack × environment cell is in no drift file's `tags` query; a query has an empty term; a query, or one clause of it, matches no cell; or a query selects more than 256 cells, which the sweep refuses, so its cells count as unswept. |
+
+`drift sweeps` reads every `.yml` and `.yaml` file in `.github/workflows/` and
+treats one as a drift file when it calls the engine's `drift.yml`, as
+`shipmate doctor` does. It reads this checkout's copies; a drift run reads the
+default branch's. It reports `cannot check` and computes no coverage when a
+drift file's `tags` is a `${{ }}` expression or is set more than once, when its
+`uses:` value is on the line after the key, when a file is not UTF-8, or when
+`stack tags` reports a two-tag stack or a slug collision, which leaves the tree
+incomplete.
+
+The `.github/shipmate.toml` item is `todo` when the table is absent or fails
+validation, or when a `needs` entry names an environment no stack tags, which
+orders nothing.
 
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.
