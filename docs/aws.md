@@ -163,6 +163,15 @@ Beyond the schema:
   differ only in punctuation are two workloads. `{workload}` in a role string is
   the other way to vary: `shipmate-apply-{workload}` names one role per listed
   workload.
+- **Workloads in one repository share one OIDC subject per environment**, even
+  when their roles sit in different accounts. Every apply cell of `dev-eu` can
+  assume every listed workload's apply role, and every plan cell every plan role;
+  in a `shared` environment every cell, plan or apply, can assume every apply
+  role, since a shared identity holds no `aws.plan`. Isolation between
+  workloads inside one repository rests on review and `CODEOWNERS`; across
+  repositories the subject's repository part separates them. `shipmate doctor`
+  names the AWS accounts each environment's subject reaches
+  ([`../CONTRACT.md`](../CONTRACT.md) §Resolution).
 - **A tag outside `workloads` is refused at detect**, and an untagged stack in
   `dev-eu` runs with no credential, because its identity varies. Add and remove
   a workload in the order [`../CONTRACT.md`](../CONTRACT.md) §Adding and

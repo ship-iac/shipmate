@@ -1647,6 +1647,10 @@ CONFIG_ERROR_LINES = 10
 #: names reach 70,000, past GitHub's 65,536-character comment limit, and the report's
 #: fallback for that drops this section and every harvested annotation.
 ROLE_LINES_BUDGET = 8000
+#: The characters all account notices may take together, apart from the roles notices'
+#: budget so a long roles section cannot hide which accounts a subject reaches. One subject
+#: reaching 256 accounts (the matrix's 256-cell limit) takes about 3,650 and fits whole.
+ACCOUNT_LINES_BUDGET = 4000
 
 # NOTICE: a branch need not carry the file at all, so an unreadable one is not a
 # misconfiguration. Never an all-clear, and never a read of another revision in its place.
@@ -1695,16 +1699,52 @@ def _config_roles(table):
         written = "workloads" in table["environments"][env]
         cells = workload or ("untagged and listed cells" if written else "every cell")
         items.setdefault(env, []).append(f"{path} {cells}: {shown}")
-    notices, left = [], ROLE_LINES_BUDGET
-    for done, (env, rows) in enumerate(items.items()):
-        head = f"`{env}` resolves these roles at the commit under examination: "
-        text = head + _fit_items(rows, "; ", left - len(head) - 1) + "."
+    return _budgeted(
+        items,
+        "`{}` resolves these roles at the commit under examination: ",
+        "; ",
+        ROLE_LINES_BUDGET,
+        "roles for {} more environment(s) not shown, to keep this report under GitHub's "
+        "comment limit; `CONTRACT.md` §Resolution lists how each cell resolves.",
+    )
+
+
+def _subject_accounts(table):
+    """One notice per GitHub Environment the roles bind, naming the distinct AWS accounts its
+    roles reach, sorted. The OIDC subject is per environment, so every cell bound to it can
+    assume each of those roles. A subject with no role, or only roles whose ARN holds no
+    account field, gets no notice.
+
+    Bounded by ACCOUNT_LINES_BUDGET as `_config_roles` is by its own.
+    """
+    shared, accounts = ec.shared_envs(table), {}
+    for env, path, _, role in ec.resolved_roles(table):
+        names = {kind: name for name, kind in ec.env_names(env, shared)}
+        found = accounts.setdefault(names.get("shared") or names[path], set())
+        fields = role.split(":")
+        if len(fields) > 4 and fields[4]:
+            found.add(fields[4])
+    return _budgeted(
+        {subject: sorted(found) for subject, found in accounts.items() if found},
+        "`{}` reaches these AWS accounts at the commit under examination: ",
+        ", ",
+        ACCOUNT_LINES_BUDGET,
+        "accounts for {} more subject(s) not shown, to keep this report under GitHub's "
+        "comment limit; the roles notices above list each environment's roles.",
+    )
+
+
+def _budgeted(groups, head, sep, budget, overflow):
+    """One notice per `groups` key: `head` filled with the key, its items joined by `sep`,
+    and a full stop, while the notices fit in `budget` characters. A notice over what is left
+    has its items cut by `_fit_items`; one that still does not fit ends the list with
+    `overflow` filled with the count of keys left out, which the budget does not count."""
+    notices, left = [], budget
+    for done, (key, rows) in enumerate(groups.items()):
+        text = head.format(key)
+        text += _fit_items(rows, sep, left - len(text) - 1) + "."
         if len(text) > left:
-            notices.append(
-                f"roles for {len(items) - done} more environment(s) not shown, to keep this "
-                "report under GitHub's comment limit; `CONTRACT.md` §Resolution lists how each "
-                "cell resolves."
-            )
+            notices.append(overflow.format(len(groups) - done))
             break
         notices.append(text)
         left -= len(text)
@@ -1817,9 +1857,10 @@ def _config_warnings(ctx):
 
 def config_status(ctx):
     """The report's environment-table section: the verdict, the variable-references notice,
-    the resolved roles and the tolerant defaults, or nothing when there is no sound table to
-    describe — `_config_warnings` reports that case instead, and a status section beside a
-    refusal would read as a second opinion.
+    the resolved roles, the AWS accounts each GitHub Environment's subject reaches and the
+    tolerant defaults, or nothing when there is no sound table to describe —
+    `_config_warnings` reports that case instead, and a status section beside a refusal
+    would read as a second opinion.
 
     The examined commit's table is read a second time rather than shared with the probe:
     `ctx` holds only the default branch's (`_default_branch_table`) and cannot carry this one
@@ -1836,7 +1877,13 @@ def config_status(ctx):
         return []
     if table is None:
         return []
-    return [(NOTICE, CONFIG_VALID), *notes, *_config_roles(table), *_config_defaults(table)]
+    return [
+        (NOTICE, CONFIG_VALID),
+        *notes,
+        *_config_roles(table),
+        *_subject_accounts(table),
+        *_config_defaults(table),
+    ]
 
 
 def _default_branch_table(ctx):
