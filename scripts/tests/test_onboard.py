@@ -3183,14 +3183,40 @@ def _drift_job(with_lines=""):
     return f"on:\n  workflow_dispatch:\njobs:\n  drift:\n{DRIFT_CALL}{with_lines}"
 
 
+#: A table every drift test's `ctx()` validates against; a drift run refuses without one.
+DRIFT_TABLE = {"layout": "folder", "environments": {"dev-eu": {}, "dev-us": {}}}
+
+
 def _drift_ctx(tmp_path, files, **over):
-    """`ctx` rooted at `tmp_path`, with `files` ({name: bytes or str}) in its workflows."""
+    """`ctx` rooted at `tmp_path`, with `files` ({name: bytes or str}) in its workflows and
+    `DRIFT_TABLE` unless `over` names a table."""
     workflows = tmp_path / ".github" / "workflows"
     workflows.mkdir(parents=True)
     for name, body in files.items():
         data = body if isinstance(body, bytes) else body.encode("utf-8")
         (workflows / name).write_bytes(data)
-    return ctx(root=tmp_path, **over)
+    return ctx(root=tmp_path, **{"table": DRIFT_TABLE, **over})
+
+
+def test_an_absent_table_leaves_coverage_uncomputed(tmp_path):
+    """A drift run reads the table before any cell and refuses when it is absent.
+
+    Mutation: drop the absent-table blocker from `_coverage_blockers` -- `ok`.
+    """
+    cells, tags = _tree(("a", "dev-eu"))
+    context = _drift_ctx(
+        tmp_path, {"drift.yml": FOLDERS_DRIFT}, table=None, cells=cells, tags_by_stack=tags
+    )
+    assert onboard._drift_sweeps_item(context) == (
+        "cannot check",
+        DRIFT_ITEM,
+        [
+            "Coverage was not computed:",
+            "  `.github/shipmate.toml` is absent, and a drift run refuses without it; see its "
+            "item.",
+            _read_line("drift.yml"),
+        ],
+    )
 
 
 def _tree(*cells):
@@ -3471,6 +3497,9 @@ def test_the_drift_query_is_read_without_yaml(with_lines, expected):
 def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, capsys):
     """Mutation: the item calls `report("differs", ...)` on a finding -- the run exits 2."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "shipmate.toml").write_text(
+        'layout = "folder"\n\n[environments.dev-eu]\n', encoding="utf-8", newline="\n"
+    )
     (tmp_path / ".github" / "workflows" / "ghost.yml").write_text(
         _drift_job("    with:\n      tags: env/ghost\n"), encoding="utf-8", newline="\n"
     )
@@ -3601,8 +3630,12 @@ def test_a_table_failing_validation_leaves_coverage_uncomputed(tmp_path):
 def test_an_unreadable_workflow_file_or_directory_is_cannot_check(tmp_path, monkeypatch):
     """An `OSError` comes after the run's writes, so it must not stop the run with exit 1.
 
-    Mutations: drop the `OSError` handler in `_drift_file` -- the item raises
-    `PermissionError`; drop the one around `iterdir` -- the same.
+    Python 3.11-3.13 re-raise a `stat` `PermissionError` from `is_dir` and `is_file`, so
+    those calls sit inside the same handlers.
+
+    Mutations: drop the `OSError` handler in `_drift_file`, or move its `is_file` call out of
+    the `try` -- the item raises `PermissionError`; drop the one around `iterdir`, or move the
+    `is_dir` call out of it -- the same.
     """
     context = _drift_ctx(tmp_path, {"drift.yml": FOLDERS_DRIFT, "locked.yml": b"x\n"})
     real = pathlib.Path.read_text
@@ -3612,17 +3645,28 @@ def test_an_unreadable_workflow_file_or_directory_is_cannot_check(tmp_path, monk
             raise PermissionError(13, "Permission denied")
         return real(self, *args, **kwargs)
 
-    monkeypatch.setattr(pathlib.Path, "read_text", read_text)
-    assert onboard._drift_sweeps_item(context)[2][:2] == [
+    locked = [
         "Coverage was not computed:",
         "  locked.yml: it could not be read: [Errno 13] Permission denied.",
     ]
+    monkeypatch.setattr(pathlib.Path, "read_text", read_text)
+    assert onboard._drift_sweeps_item(context)[2][:2] == locked
+    monkeypatch.undo()
+    real_is_file = pathlib.Path.is_file
 
-    def iterdir(self):
+    def is_file(self):
+        if self.name == "locked.yml":
+            raise PermissionError(13, "Permission denied")
+        return real_is_file(self)
+
+    monkeypatch.setattr(pathlib.Path, "is_file", is_file)
+    assert onboard._drift_sweeps_item(context)[2][:2] == locked
+    monkeypatch.undo()
+
+    def denied(self):
         raise PermissionError(13, "Permission denied")
 
-    monkeypatch.setattr(pathlib.Path, "iterdir", iterdir)
-    assert onboard._drift_sweeps_item(context) == (
+    listed = (
         "cannot check",
         DRIFT_ITEM,
         [
@@ -3631,3 +3675,7 @@ def test_an_unreadable_workflow_file_or_directory_is_cannot_check(tmp_path, monk
             _read_line(".github/workflows/"),
         ],
     )
+    for method in ("iterdir", "is_dir"):
+        monkeypatch.setattr(pathlib.Path, method, denied)
+        assert onboard._drift_sweeps_item(context) == listed, method
+        monkeypatch.undo()

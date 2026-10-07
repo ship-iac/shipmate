@@ -1027,6 +1027,8 @@ def _drift_query(region):
 def _drift_file(path, call):
     """`_drift_files`' entry for one workflow file, or None when it is no drift file."""
     try:
+        if not path.is_file():
+            return None
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         return path.name, None, "it is not UTF-8 text, so it was not read"
@@ -1048,18 +1050,15 @@ def _drift_files(root):
     read, or calls `drift.yml` more than once, is listed with None; so is the directory when
     it cannot be listed."""
     workflows = pathlib.Path(root) / ".github" / "workflows"
-    if not workflows.is_dir():
-        return []
     call = dr._engine_call(ENGINE_SLUG, "drift.yml")
+    # Python 3.11-3.13 re-raise a `stat` PermissionError from `is_dir`/`is_file`.
     try:
+        if not workflows.is_dir():
+            return []
         paths = sorted(workflows.iterdir())
     except OSError as exc:
         return [(".github/workflows/", None, f"it could not be listed: {exc}")]
-    found = [
-        _drift_file(path, call)
-        for path in paths
-        if path.suffix in (".yml", ".yaml") and path.is_file()
-    ]
+    found = [_drift_file(path, call) for path in paths if path.suffix in (".yml", ".yaml")]
     return [entry for entry in found if entry is not None]
 
 
@@ -1070,7 +1069,11 @@ def _coverage_blockers(ctx, files):
         why.append("  a slug collision loses the tree; see `stack tags`.")
     elif ctx["tree_errors"]:
         why.append("  a stack with two `workload/*` tags has its cells dropped; see `stack tags`.")
-    if ctx["table"] is not None:
+    if ctx["table"] is None:
+        why.append(
+            f"  `{ec.CONFIG_PATH}` is absent, and a drift run refuses without it; see its item."
+        )
+    else:
         try:
             ec.validate(ctx["table"], ctx["envs"])
         except SystemExit:
@@ -1085,8 +1088,7 @@ def _sweep(ctx, name, query):
     with ec._gather(errors), contextlib.redirect_stdout(notices):
         kept = bm.filter_cells(ctx["cells"], ctx["tags_by_stack"], query)
         bm.cap_cells(kept, True)
-        if ctx["table"] is not None:
-            bm.refuse_workload_gaps(bm.stamp_rows(kept, ctx["table"], "plan"), ctx["table"])
+        bm.refuse_workload_gaps(bm.stamp_rows(kept, ctx["table"], "plan"), ctx["table"])
         # Assigned last: a refusal above leaves the sweep running no cell.
         swept = {(c["stack"], c["environment"]) for c in kept}
     found = [n.removeprefix("::notice::") for n in notices.getvalue().splitlines()]
@@ -1095,10 +1097,10 @@ def _sweep(ctx, name, query):
 
 def _drift_sweeps_item(ctx):
     """Each drift file's `tags` query run over the whole tree through `filter_cells` and
-    `cap_cells`, then, with a table, `stamp_rows` and `refuse_workload_gaps` (`_sweep`). Their
-    notices and refusals are listed, then the cells no file sweeps; a refused sweep covers
-    none. Coverage is computed only when every query was read, the tree is whole and the
-    table validates."""
+    `cap_cells`, then `stamp_rows` and `refuse_workload_gaps` (`_sweep`). Their notices and
+    refusals are listed, then the cells no file sweeps; a refused sweep covers none. Coverage
+    is computed only when every query was read, the tree is whole and the table is present
+    and validates: a drift run refuses without one."""
     item = "drift sweeps"
     files = _drift_files(ctx["root"])
     if not files:
