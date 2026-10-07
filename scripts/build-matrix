@@ -526,9 +526,9 @@ def tag_filter_error(tags, no_pull_request: bool):
 
 
 def main():
-    """`_detect`, and on a `::error::` refusal also the `refusal` output: its first line without
-    the prefix, which the summary job writes into the gate description. The refusal re-raises,
-    so the step still fails."""
+    """`_detect`, and on a `::error::` exit (a refusal or a failed tool or API call) also the
+    `refusal` output: its first line without the prefix, which the summary job writes into the
+    gate description. The exit re-raises, so the step still fails."""
     try:
         _detect()
     except SystemExit as exc:

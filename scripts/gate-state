@@ -125,7 +125,7 @@ def decide(
     It returns before `planned_cells` is read, because a skipped `detect` reports
     no count.
 
-    `refusal` is the line `build-matrix` refused with (`_detect_gap`).
+    `refusal` is the first `::error::` line `build-matrix` failed with (`_detect_gap`).
     """
     if detect_result == "skipped" and is_draft and not on_demand:
         return "pending", DRAFT_DESCRIPTION, _DRAFT

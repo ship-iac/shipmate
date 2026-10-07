@@ -103,7 +103,7 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     """Mutation: drop the `is-draft:` line -> gate-state never sees a draft.
     Mutation: drop the `unmanaged-stacks:` line -> the comment never names an unmanaged stack.
     Mutation: drop `detect`'s `unmanaged` output -> the same, silently.
-    Mutation: drop `detect`'s `refusal` output -> the gate never names a detect refusal."""
+    Mutation: drop `detect`'s `refusal` output -> the gate never names a detect error."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1
