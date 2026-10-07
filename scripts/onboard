@@ -745,24 +745,18 @@ def _table_item(ctx):
     if not untagged:
         return "ok", item, []
     if len(untagged) == 1:
-        return (
-            "ok",
-            item,
-            [
-                f"Provisioned for {untagged[0]}, which no stack tags yet: its first tagging",
-                "pull request deploys under that environment's protection. If the name is a",
-                "typo, fix the entry.",
-            ],
+        sentence = (
+            f"Provisioned for {untagged[0]}, which no stack tags yet: its first tagging pull "
+            "request deploys under that environment's protection. If the name is a typo, fix "
+            "the entry."
         )
-    return (
-        "ok",
-        item,
-        [
-            f"Provisioned for {', '.join(untagged)}, which no stack tags yet: the first",
-            "pull request tagging a stack into each deploys under that environment's",
-            "protection. If a name is a typo, fix the entry.",
-        ],
-    )
+    else:
+        sentence = (
+            f"Provisioned for {', '.join(untagged)}, which no stack tags yet: the first pull "
+            "request tagging a stack into each deploys under that environment's protection. If "
+            "a name is a typo, fix the entry."
+        )
+    return "ok", item, textwrap.wrap(sentence, width=80)
 
 
 def _app_item(ctx):

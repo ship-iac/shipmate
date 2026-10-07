@@ -2560,30 +2560,47 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
     assert checklist_items(checklist_of(out))["`.github/shipmate.toml`"] == (
         "ok",
         [
-            "Provisioned for prdo, which no stack tags yet: its first tagging",
-            "pull request deploys under that environment's protection. If the name is a",
-            "typo, fix the entry.",
+            "Provisioned for prdo, which no stack tags yet: its first tagging pull request",
+            "deploys under that environment's protection. If the name is a typo, fix the",
+            "entry.",
         ],
     )
     assert not [ln for ln in out.splitlines() if ln.startswith("::warning::")]
 
 
-def test_several_table_entries_no_stack_tags_are_named_in_the_plural():
-    """Mutation: always render the one-name wording -- it names only `prdo`."""
-    table = ec.parse_table(
-        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n'
-        '\n[environments.prdo]\nregion = "eu-west-1"\n'
-        '\n[environments.qa]\nregion = "eu-west-1"\n'
-    )
-    assert onboard._table_item(ctx(table=table, envs=["dev-eu", "prdo", "qa"])) == (
-        "ok",
-        "`.github/shipmate.toml`",
-        [
-            "Provisioned for prdo, qa, which no stack tags yet: the first",
-            "pull request tagging a stack into each deploys under that environment's",
+def _table_only_detail(*names):
+    """`_table_item`'s detail for a tagged `dev-eu` plus table-only `names`."""
+    entries = "".join(f'\n[environments.{n}]\nregion = "eu-west-1"\n' for n in ("dev-eu", *names))
+    table = ec.parse_table(f'layout = "tf_vars"\n{entries}')
+    verdict, _, details = onboard._table_item(ctx(table=table, envs=sorted(["dev-eu", *names])))
+    assert verdict == "ok"
+    return details
+
+
+@pytest.mark.parametrize(
+    ("names", "sentence"),
+    [
+        (
+            ("production-eu-central",),
+            "Provisioned for production-eu-central, which no stack tags yet: its first tagging "
+            "pull request deploys under that environment's protection. If the name is a typo, "
+            "fix the entry.",
+        ),
+        (
+            ("prdo", "production-eu-central", "qa"),
+            "Provisioned for prdo, production-eu-central, qa, which no stack tags yet: the first "
+            "pull request tagging a stack into each deploys under that environment's "
             "protection. If a name is a typo, fix the entry.",
-        ],
-    )
+        ),
+    ],
+    ids=["one", "several"],
+)
+def test_the_table_only_detail_wraps_the_whole_sentence_at_80(names, sentence):
+    """Mutation: always render the one-name wording -- `several` reddens. Mutation: always the
+    several-name wording -- `one` reddens. Mutation: `width=100` -- both redden."""
+    details = _table_only_detail(*names)
+    assert all(len(line) <= 80 for line in details)
+    assert " ".join(details) == sentence
 
 
 def test_a_table_whose_entries_are_all_tagged_has_no_detail():
