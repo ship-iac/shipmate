@@ -13,7 +13,7 @@ section below names the SHA the release tags.
 ### Added
 
 - **Each drift workflow file can pass engine `drift.yml` a `tags` query, so one file sweeps only the cells it selects (`docs/drift.md` §Scoping a sweep).**
-- **`shipmate doctor` warns when no workflow file calls the engine's `drift.yml`, and when `shipmate.yml` still does.**
+- **`shipmate doctor` reports a notice when no workflow file calls the engine's `drift.yml`, and warns when `shipmate.yml` still does.**
 
 ### Changed
 

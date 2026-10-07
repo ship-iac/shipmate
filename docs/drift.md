@@ -1,8 +1,8 @@
 # Drift detection
 
-Nothing else in shipmate depends on drift detection, but a repository with no
-drift workflow file never has a stack checked against real infrastructure, and
-`shipmate doctor` warns about it. Read [What it costs](#what-it-costs) before
+Drift detection is recommended, not required: nothing else in shipmate depends
+on it. A repository with no drift workflow file never has a stack checked
+against real infrastructure, and `shipmate doctor` reports a notice about it. Read [What it costs](#what-it-costs) before
 you add one.
 
 Each drift workflow file is one sweep: its cron fans out over the stack ×

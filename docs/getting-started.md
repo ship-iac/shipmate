@@ -870,7 +870,7 @@ default-branch ref; it needs the `shipmate-engine` environment from the plan
 tier. `scripts/onboard` does not write it: save it from the `shipmate drift`
 fence in §The workflow file. Name, edit and split drift files freely — a `tags`
 query, other crons. When no workflow file calls `drift.yml`, `shipmate doctor`
-warns. Scoping a sweep and what it costs are in [`drift.md`](drift.md).
+reports a notice. Scoping a sweep and what it costs are in [`drift.md`](drift.md).
 
 ### Recipe: automerge after apply
 

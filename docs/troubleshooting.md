@@ -137,7 +137,8 @@ live probes.
 - **Whether any workflow file calls the engine's `drift.yml`.** Read at the
   commit under examination, like the pin probe. A file counts by the call in
   its text, not by its name, and a call only inside a `#` comment does not
-  count. With none, no stack is ever checked for drift, which is a warning.
+  count. With none, no stack is ever checked for drift, which is a notice:
+  a repository may decline drift on purpose.
   An unreadable file leaves the question unverified, a note, since the call
   may sit in a file the probe could not read.
 

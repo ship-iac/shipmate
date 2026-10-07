@@ -1860,19 +1860,21 @@ DRIFT_FILE_UNREADABLE, DRIFT_FILE_NO_COMMIT = _unverified(
     "whether a workflow file calls the engine's drift.yml"
 )
 DRIFT_FILE_MISSING = (
-    WARNING,
+    NOTICE,
     "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
-    "Add a drift workflow file (docs/drift.md).",
+    "Add one to check for drift (docs/drift.md).",
 )
 
 
 def _drift_file_warnings(ctx):
-    """A WARNING when no workflow file at the commit under examination calls the engine's
-    `drift.yml`, so nothing ever sweeps the repository for drift.
+    """A NOTICE when no workflow file at the commit under examination calls the engine's
+    `drift.yml`, so nothing ever sweeps the repository for drift. A NOTICE, not a WARNING: a
+    repository may decline drift on purpose.
 
     Matched by the call in the comment-stripped text, never by file name: a sweep may live in
     any file, and a commented-out call sweeps nothing. A scan that stopped at an unreadable
-    file reports only that NOTICE, never the WARNING: the call may sit in a file it never read.
+    file reports only the unreadable NOTICE, never the missing one: the call may sit in a file it
+    never read.
     """
     ref = _contents_ref(ctx)
     if ref is None:
