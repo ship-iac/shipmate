@@ -2551,6 +2551,7 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
     declare before tagging.
 
     Mutation: drop the table-only detail line -- the item has no details.
+    Mutation: always render the several-name wording -- the one-name lines differ.
     Mutation: pass `tagged` to `_table_item`'s `ec.validate` again -- the warning prints.
     """
     write_table(tmp_path, '\n[environments.prdo]\nregion = "eu-west-1"\n')
@@ -2559,12 +2560,30 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
     assert checklist_items(checklist_of(out))["`.github/shipmate.toml`"] == (
         "ok",
         [
-            "Provisioned for prdo, which no stack tags yet: its first",
-            "tagging pull request deploys under these environments' protection. If a name is",
-            "a typo, fix the entry.",
+            "Provisioned for prdo, which no stack tags yet: its first tagging",
+            "pull request deploys under that environment's protection. If the name is a",
+            "typo, fix the entry.",
         ],
     )
     assert not [ln for ln in out.splitlines() if ln.startswith("::warning::")]
+
+
+def test_several_table_entries_no_stack_tags_are_named_in_the_plural():
+    """Mutation: always render the one-name wording -- it names only `prdo`."""
+    table = ec.parse_table(
+        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n'
+        '\n[environments.prdo]\nregion = "eu-west-1"\n'
+        '\n[environments.qa]\nregion = "eu-west-1"\n'
+    )
+    assert onboard._table_item(ctx(table=table, envs=["dev-eu", "prdo", "qa"])) == (
+        "ok",
+        "`.github/shipmate.toml`",
+        [
+            "Provisioned for prdo, qa, which no stack tags yet: the first",
+            "pull request tagging a stack into each deploys under that environment's",
+            "protection. If a name is a typo, fix the entry.",
+        ],
+    )
 
 
 def test_a_table_whose_entries_are_all_tagged_has_no_detail():
