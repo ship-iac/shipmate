@@ -529,7 +529,7 @@ def test_a_needs_chain_deeper_than_the_env_levels_refuses_structurally():
     with pytest.raises(SystemExit) as excinfo:
         env_config.validate_structure(table)
     assert str(excinfo.value) == (
-        "::error::needs spans 5 env levels: a → b → c → d → e. A deploy applies at most "
+        "::error::needs spans 5 env levels: a -> b -> c -> d -> e. A deploy applies at most "
         "4 env levels. Shorten the chain in .github/shipmate.toml."
     )
 
@@ -554,7 +554,7 @@ def test_a_too_deep_needs_graph_names_one_chain_the_sorted_first_at_each_tie():
     with pytest.raises(SystemExit) as excinfo:
         env_config.validate_structure(table)
     assert str(excinfo.value) == (
-        "::error::needs spans 5 env levels: a → b → c → d → e. A deploy applies at most "
+        "::error::needs spans 5 env levels: a -> b -> c -> d -> e. A deploy applies at most "
         "4 env levels. Shorten the chain in .github/shipmate.toml."
     )
 

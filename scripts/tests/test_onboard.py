@@ -1988,7 +1988,7 @@ cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
     does not hold. Check it, or add the repository, at
     https://github.com/organizations/o/settings/installations
-    Open the App's `Configure` page there and add the repository (docs/github-app.md §4).
+    under the App's `Configure` button, in `Repository access`.
     The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
 todo          approving review before apply
@@ -2033,7 +2033,7 @@ cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
     does not hold. Check it, or add the repository, at
     https://github.com/organizations/o/settings/installations
-    Open the App's `Configure` page there and add the repository (docs/github-app.md §4).
+    under the App's `Configure` button, in `Repository access`.
     The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
 ok            approving review before apply

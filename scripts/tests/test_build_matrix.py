@@ -793,10 +793,10 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
 
 
 def test_build_matrix_action_declares_the_outputs_the_gate_reads():
+    """Mutation: delete the `refusal` output -- the gate never names a detect refusal."""
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
-    # name -> wiring; descriptions are prose and deliberately not pinned. Mutation: delete the
-    # `refusal` output -- the gate never names a detect refusal.
+    # name -> wiring; descriptions are prose and deliberately not pinned.
     doc = action_yaml("build-matrix")
     assert {name: spec["value"] for name, spec in doc["outputs"].items()} == {
         "matrix": "${{ steps.build.outputs.matrix }}",

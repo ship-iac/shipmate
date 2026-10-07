@@ -24,8 +24,10 @@ live probes.
   review is out of reach of a leaked App private key, and only for changed files
   an entry actually owns — the rule is a no-op for unowned paths, and the probe
   reads ruleset booleans only, so it cannot see that.
-  `required_approving_review_count: 0` *with* code-owner review on is the
-  supported sole-maintainer mode, reported as a note. While the default
+  `required_approving_review_count: 0` *with* code-owner review on is
+  reported as a note: the supported sole-maintainer mode, provided `CODEOWNERS`
+  covers none of the maintainer's changes and `require_last_push_approval` is
+  off. While the default
   branch's table is readable and an environment is gated, the note names the
   gated environments, which can apply without an approving review and are held
   only where a code-owner review is required for the changed files. Count 0
@@ -558,6 +560,7 @@ branch's** copy of the file — that is the only copy execution reads.
 | `<key> references GitHub variable '<name>', which is not a GitHub variable name` | the name is empty or holds a character GitHub refuses in a variable name. Names are `[A-Z_][A-Z0-9_]*` |
 | `<key> references GitHub variable <NAME>, but this step received no GitHub variables` | either the engine did not pass `github-vars` to the step reading the file, or no repository or organization variable reaches the repository at all. With variables set, report it as an engine defect |
 | `needs is cyclic: <a> -> <b> -> <a>` | the environments' `needs` order them in a loop, so none of them can go first. The path names the loop in apply order; an env listing itself is the one-node case. Drop one of the `needs` items |
+| `needs spans <n> env levels: <a> -> <b> -> …. A deploy applies at most 4 env levels` | the longest `needs` chain, named deepest-last, has more env levels than a deploy applies. Shorten the chain to at most 4 levels |
 
 **Trap 1: a top-level setting written below a `[table]` header.** TOML puts a
 scalar into whatever table header precedes it, so the line is well-formed and

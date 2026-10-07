@@ -833,7 +833,7 @@ def _check_depth(order, environments):
     while levels[chain[-1]]:
         chain.append(min(p for p in order[chain[-1]] if levels[p] == levels[chain[-1]] - 1))
     raise SystemExit(
-        f"::error::needs spans {depth + 1} env levels: {' → '.join(reversed(chain))}. "
+        f"::error::needs spans {depth + 1} env levels: {' -> '.join(reversed(chain))}. "
         f"A deploy applies at most {eo.MAX_ENV_LEVELS} env levels. Shorten the chain in "
         f"{CONFIG_PATH}."
     )

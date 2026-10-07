@@ -27,7 +27,8 @@ resolves to:
 
 | State | gate | Merge |
 |-------|-----------|-------|
-| `detect` did not succeed | `failure` — "change detection did not succeed" | blocked |
+| `detect` refused | `failure` — "detect refused: <first refusal line>", cut to 140 characters | blocked |
+| `detect` did not succeed without a refusal (a fmt or codegen failure, a crash) | `failure` — "change detection did not succeed" | blocked |
 | A plan cell failed | `failure` — "plan incomplete" | blocked |
 | The plan job was cancelled | no status written at all | blocked (the required check never arrives) |
 | Plans succeeded, applies still pending | `pending` | blocked |
@@ -89,9 +90,10 @@ JSON
 ```
 
 This body is the team posture. For a single maintainer, set
-`required_approving_review_count` to `0` and turn `require_last_push_approval`
-off, and `require_code_owner_review` too unless `CODEOWNERS` is narrowed (the
-single-maintainer paragraph below has why).
+`required_approving_review_count` to `0`, turn `require_last_push_approval` off,
+and narrow `CODEOWNERS`, which keeps code-owner review on (the single-maintainer
+paragraph below has why). Turning `require_code_owner_review` off instead makes
+`shipmate doctor` warn on every run; `docs/hardening.md` §3–5 names the cost.
 
 When `$id` is non-empty, replace that ruleset by its id. The `PUT` replaces the
 ruleset with the body, so carry any bypass actors it already holds into the
