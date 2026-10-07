@@ -736,10 +736,23 @@ def _table_item(ctx):
             ["Add one: copy the example in docs/getting-started.md §Environments for this tier."],
         )
     try:
-        ec.validate(ctx["table"], ctx["envs"], tagged=ctx["tagged"])
+        ec.validate(ctx["table"], ctx["envs"])
     except SystemExit as e:
         return "todo", item, [ln.removeprefix("::error::") for ln in str(e).splitlines()]
-    return "ok", item, []
+    # Not env-config's unused-entry warning: it says to remove an entry that onboard asks the
+    # consumer to declare before tagging, and removing it reopens the auto-created environment.
+    untagged = [e for e in ctx["envs"] if e not in ctx["tagged_envs"]]
+    if not untagged:
+        return "ok", item, []
+    return (
+        "ok",
+        item,
+        [
+            f"Provisioned for {', '.join(untagged)}, which no stack tags yet: its first tagging "
+            "pull request deploys under these environments' protection. If a name is a typo, "
+            "fix the entry."
+        ],
+    )
 
 
 def _app_item(ctx):
@@ -970,7 +983,7 @@ def main(argv=None):
     sha, version = _engine_pin(engine)
     root = _repo_root()
     repo, default_branch, is_private = _repo_facts()
-    stacks_by_env, tags_by_stack = _env_membership()
+    stacks_by_env, _ = _env_membership()
     variables = _variables()
     _refuse_diverging_app_id(args.app_id, variables)
     table, shared = _resolve_shared(root, repo, variables)
@@ -984,7 +997,7 @@ def main(argv=None):
         "key": key,
         "envs": envs,
         "stacks": sorted({s for stacks in stacks_by_env.values() for s in stacks}),
-        "tagged": _load("build-matrix").tagged_workloads(stacks_by_env, tags_by_stack),
+        "tagged_envs": set(stacks_by_env),
         "table": table,
         "shared": shared,
         "unresolved": set(),

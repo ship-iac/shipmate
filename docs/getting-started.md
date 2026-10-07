@@ -21,10 +21,10 @@ does with that wiring.
   stack out of CI). `scripts/onboard` provisions every environment the table
   declares and every one a stack tags. So declare an environment in the table
   and run `scripts/onboard` before the first pull request tagging a stack into
-  it merges: that merge deploys. Until a stack tags it, `scripts/onboard` and
-  every whole-tree run (the drift sweep, `shipmate unlock`, a bare
-  `shipmate apply`) warn that the table declares an environment no stack tags;
-  that warning is expected.
+  it merges: that merge deploys. Until a stack tags it, `scripts/onboard` names
+  it on its `.github/shipmate.toml` checklist item, and every whole-tree run (the
+  drift sweep, `shipmate unlock`, a bare `shipmate apply`) warns that the table
+  declares an environment no stack tags; that warning is expected.
 - **Nothing to set for the Terramate and OpenTofu versions.** They are in
   [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
   engine commit your workflow file pins. Moving to other versions is a pin bump

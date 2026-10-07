@@ -88,7 +88,7 @@ def ctx(**over):
         "key": "-----BEGIN-----\npem\n",
         "envs": ["dev-eu"],
         "stacks": [],
-        "tagged": {"dev-eu": frozenset()},
+        "tagged_envs": {"dev-eu"},
         "shared": set(),
         "unresolved": set(),
         "root": None,
@@ -521,8 +521,6 @@ def test_main_calls_every_stage_in_order():
         "_refuse_diverging_app_id(args.app_id, variables)",
         "_resolve_shared(root, repo, variables)",
         "_derive_envs(set(stacks_by_env) | set((table or {}).get('environments', {})))",
-        "_load('build-matrix').tagged_workloads(stacks_by_env, tags_by_stack)",
-        "_load('build-matrix')",
         "_shim_on_default(repo, default_branch)",
         "_engine_secrets(repo)",
         "_repo_secrets()",
@@ -2547,19 +2545,31 @@ PRDO_ROUTES = {
 }
 
 
-def test_a_table_entry_no_stack_tags_draws_the_unused_entry_warning(monkeypatch, tmp_path, capsys):
-    """The union provisions a mistyped entry too, so the warning is what makes it visible.
+def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp_path, capsys):
+    """The union provisions a mistyped entry too, so the table item names it. env-config's
+    unused-entry warning stays silent: it says to remove an entry the docs ask the consumer to
+    declare before tagging.
 
-    Mutation: drop `tagged` from `_table_item`'s `ec.validate` call.
+    Mutation: drop the table-only detail line -- the item has no details.
+    Mutation: pass `tagged` to `_table_item`'s `ec.validate` again -- the warning prints.
     """
     write_table(tmp_path, '\n[environments.prdo]\nregion = "eu-west-1"\n')
     run_main(monkeypatch, tmp_path, PRDO_ROUTES, ["--dry-run"])
-    assert (
-        "::warning::the environment table declares prdo, which no stack tags. Remove the "
-        "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
-        "because the table is read from the default branch and the tags from this branch, so "
-        "an environment arrives and leaves over two pull requests."
-    ) in capsys.readouterr().out.splitlines()
+    out = capsys.readouterr().out
+    assert checklist_items(checklist_of(out))["`.github/shipmate.toml`"] == (
+        "ok",
+        [
+            "Provisioned for prdo, which no stack tags yet: its first tagging pull request "
+            "deploys under these environments' protection. If a name is a typo, fix the entry."
+        ],
+    )
+    assert not [ln for ln in out.splitlines() if ln.startswith("::warning::")]
+
+
+def test_a_table_whose_entries_are_all_tagged_has_no_detail():
+    """Mutation: name every environment, tagged or not -- `dev-eu` is listed."""
+    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n')
+    assert onboard._table_item(ctx(table=table)) == ("ok", "`.github/shipmate.toml`", [])
 
 
 def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_path, capsys):
