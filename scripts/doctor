@@ -1699,8 +1699,8 @@ CONFIG_VALID = (
     "and a whole-tree environment scan: `tf_vars`-layout coverage of the planned "
     "environments, entries that no stack tags, workload tags outside an environment's "
     "`workloads` and listed workloads no stack tags. `detect` checks each of those on the "
-    "runs where it applies. Execution reads the default branch's copy of this file, never "
-    "this branch's."
+    "runs where it applies, and `scripts/onboard --dry-run` checks them over a checkout. "
+    "Execution reads the default branch's copy of this file, never this branch's."
 )
 CONFIG_REFERENCES = (
     f"`{CONFIG_PATH}` at the commit under examination takes these values from GitHub "

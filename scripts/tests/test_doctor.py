@@ -4752,7 +4752,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             "the planned environments, entries "
             "that no stack tags, workload tags outside an environment's `workloads` and listed "
             "workloads no stack tags. `detect` checks each of those on the runs where it "
-            "applies. "
+            "applies, and `scripts/onboard --dry-run` checks them over a checkout. "
             "Execution reads the default branch's copy of this file, never this branch's.",
         ),
         (
