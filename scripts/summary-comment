@@ -33,6 +33,7 @@ import sys
 from _shipmate import _load, cell_summaries, current_run_url
 
 ag = _load("apply-gate")
+bm = _load("build-matrix")
 
 MARKER = "<!-- shipmate:summary -->"
 # Phrased so the line does not itself match the comment grammar (`^shipmate <verb>`), which
@@ -44,7 +45,6 @@ HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
 #: Well below `HARD_CAP - SIZE_BUDGET`, so the unmanaged stacks line never eats the headroom.
 UNMANAGED_LINE_CAP = 1000
-UNMANAGED_NAMES = 10
 CELL_KEYS = ("stack", "environment", "changed")
 
 #: The consumer names its plan-calling job `shipmate`, and GitHub names a called workflow's
@@ -286,16 +286,16 @@ def verdict(cells, head_sha, run_url):
 
 def unmanaged_line(unmanaged):
     """`⚪ N changed stack(s) carry no env/* tag ...` for build-matrix's `unmanaged` output
-    `{"count": N, "paths": [...]}`, naming the first of `paths` (each `_md_escape`d) that fit in
-    `UNMANAGED_NAMES` names and `UNMANAGED_LINE_CAP` characters, then `, and M more` for the
-    other `count - named`. When not even the first fits, a fixed sentence names none. Empty for
-    `None` or a zero count."""
+    `{"count": N, "paths": [...]}`, naming the first of `paths` (each `_md_escape`d, at most
+    build-matrix's `UNMANAGED_NAMES` by `_unmanaged`'s shape check) that fit in
+    `UNMANAGED_LINE_CAP` characters, then `, and M more` for the other `count - named`. When
+    not even the first fits, a fixed sentence names none. Empty for `None` or a zero count."""
     if not unmanaged or not unmanaged["count"]:
         return ""
     count, paths = unmanaged["count"], unmanaged["paths"]
     lead = f"⚪ {count} changed stack(s) carry no env/* tag and are not managed by shipmate"
     line, names = "", []
-    for path in paths[:UNMANAGED_NAMES]:
+    for path in paths:
         names.append(_md_escape(path))
         more = count - len(names)
         candidate = f"{lead}: {', '.join(names)}" + (f", and {more} more" if more else "")
@@ -443,7 +443,8 @@ def load_cells(cells_dir):
 
 def _unmanaged(raw):
     """build-matrix's `{"count": N, "paths": [...]}` from `SHIPMATE_UNMANAGED`: `None` when
-    empty, `None` with one warning when it is not that shape with `N >= len(paths)`."""
+    empty, `None` with one warning when it is not that shape, with `N` a non-negative integer
+    and exactly `min(N, bm.UNMANAGED_NAMES)` string paths (so a negative `N` fails too)."""
     if not raw:
         return None
     try:
@@ -456,12 +457,12 @@ def _unmanaged(raw):
             type(count) is int
             and isinstance(paths, list)
             and all(isinstance(p, str) for p in paths)
-            and count >= len(paths)
+            and len(paths) == min(count, bm.UNMANAGED_NAMES)
         ):
             return value
     print(
-        '::warning::unmanaged-stacks is not a JSON object {"count": N, "paths": [strings]} with '
-        "N at least the number of paths; the plan comment names no unmanaged stack"
+        '::warning::unmanaged-stacks is not a JSON object {"count": N, "paths": [strings]} '
+        f"naming min(N, {bm.UNMANAGED_NAMES}) paths; the plan comment names no unmanaged stack"
     )
     return None
 

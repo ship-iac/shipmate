@@ -435,9 +435,18 @@ def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verd
     )
 
 
+def test_summary_comment_caps_at_build_matrix_s_name_count():
+    """One cap: summary-comment reads build-matrix's `UNMANAGED_NAMES`, so the shape check and
+    the producer cannot disagree. Mutation: `UNMANAGED_NAMES = 9` in build-matrix -- the
+    ten-path value is refused."""
+    raw = json.dumps({"count": 12, "paths": [f"s{i:02}" for i in range(10)]})
+    assert sc._unmanaged(raw) == json.loads(raw)
+
+
 def test_the_unmanaged_line_names_ten_paths_and_counts_the_rest():
-    """Mutation: naming every path reddens it."""
-    assert sc.unmanaged_line(_named(12, *(f"s{i:02}" for i in range(12)))) == (
+    """The count comes from `count`, not from the ten paths carried.
+    Mutation: `more = len(paths) - len(names)` reddens it."""
+    assert sc.unmanaged_line(_named(12, *(f"s{i:02}" for i in range(10)))) == (
         _LEAD.format(12) + ": s00, s01, s02, s03, s04, s05, s06, s07, s08, s09, and 2 more"
     )
     assert sc.unmanaged_line(_named(0)) == ""
@@ -454,7 +463,7 @@ def test_the_unmanaged_line_counts_the_paths_build_matrix_left_out():
 
 def test_the_unmanaged_line_stops_at_its_character_cap():
     """Mutation: removing the character cap reddens it."""
-    line = sc.unmanaged_line(_named(11, "a" * 400, "b" * 400, *["c" * 3000] * 9))
+    line = sc.unmanaged_line(_named(11, "a" * 400, "b" * 400, *["c" * 3000] * 8))
     assert line == _LEAD.format(11) + ": " + "a" * 400 + ", " + "b" * 400 + ", and 9 more"
     assert len(line) <= sc.UNMANAGED_LINE_CAP
 
@@ -955,8 +964,8 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
 
 
 _BAD_UNMANAGED = (
-    '::warning::unmanaged-stacks is not a JSON object {"count": N, "paths": [strings]} with N '
-    "at least the number of paths; the plan comment names no unmanaged stack\n"
+    '::warning::unmanaged-stacks is not a JSON object {"count": N, "paths": [strings]} '
+    "naming min(N, 10) paths; the plan comment names no unmanaged stack\n"
 )
 
 
@@ -970,6 +979,8 @@ _BAD_UNMANAGED = (
         ('{"count": "1", "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
         ('{"count": true, "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
         ('{"count": 0, "paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
+        ('{"count": 3, "paths": []}', _BAD_UNMANAGED, "false"),
+        ('{"count": -1, "paths": []}', _BAD_UNMANAGED, "false"),
         ('{"paths": ["stacks/x"]}', _BAD_UNMANAGED, "false"),
         ('{"count": 0, "paths": []}', "", "false"),
         ('{"count": 1, "paths": ["stacks/x"]}', "", "true"),
@@ -984,7 +995,8 @@ def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
     Mutation: `json.loads` without a guard crashes the invalid cases.
     Mutation: always writing `unmanaged=false` reddens the last case.
     Mutation: `isinstance(count, int)` accepts the `true` count.
-    Mutation: dropping `count >= len(paths)` accepts the zero count over one path."""
+    Mutation: dropping the `len(paths) == min(count, ...)` check accepts the zero count over
+    one path, the count of 3 over none and the count of -1."""
     monkeypatch.setenv("SHIPMATE_UNMANAGED", raw)
     assert _run_main(tmp_path, monkeypatch, []) == f"pending=false\ncount=0\nunmanaged={flag}\n"
     assert capsys.readouterr().out == out
