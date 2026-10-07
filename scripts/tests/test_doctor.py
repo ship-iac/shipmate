@@ -3344,7 +3344,7 @@ def test_unreadable_directory_degrades_to_a_note(monkeypatch, probe, _no_commit,
 _NO_DRIFT_FILE = (
     "notice",
     "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
-    "Add one to check for drift (docs/drift.md).",
+    "Add a drift workflow file to check for drift (docs/drift.md).",
 )
 _DRIFT_FILE_UNREADABLE = (
     "notice",
@@ -3377,6 +3377,41 @@ def test_a_commented_out_drift_call_draws_the_missing_drift_notice(monkeypatch):
     commented = _SHIPMATE_DRIFT_WF.replace("    uses: ", "    # uses: ", 1)
     assert "# uses: acme/engine/.github/workflows/drift.yml@" in commented
     assert _drift_probe(monkeypatch, {"shipmate-drift.yml": commented}) == [_NO_DRIFT_FILE]
+
+
+def test_annotate_mode_emits_the_missing_drift_file_as_a_notice_line(monkeypatch, capsys):
+    """Through `main()`, so the plan path's `warned` grep (`^::warning`) never sees it.
+
+    Mutation: restore `DRIFT_FILE_MISSING`'s level to WARNING."""
+    responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    monkeypatch.setattr(doctor, "ctx_from_env", _ctx)
+    monkeypatch.setattr(doctor, "PROBES", (doctor._drift_file_warnings,))
+    monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "annotate")
+    doctor.main()
+    assert capsys.readouterr().out == (
+        "::notice title=shipmate doctor::no workflow file calls the engine's `drift.yml`, so no "
+        "stack is ever checked for drift. Add a drift workflow file to check for drift "
+        "(docs/drift.md).\n"
+    )
+
+
+def test_a_failing_drift_probe_degrades_to_a_notice(monkeypatch):
+    """The probe's worst finding is a NOTICE, so its degrade is one too.
+
+    Mutation: drop `_drift_file_warnings.degrade_level`."""
+
+    def boom(*args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(doctor, "_contents_ref", boom)
+    monkeypatch.setattr(doctor, "PROBES", (doctor._drift_file_warnings,))
+    assert doctor.warnings(_ctx()) == [
+        (
+            doctor.NOTICE,
+            "doctor could not verify the drift workflow files settings (boom): probe skipped.",
+        )
+    ]
 
 
 def test_a_partial_drift_scan_reports_only_the_unreadable_notice(monkeypatch):
