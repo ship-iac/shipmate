@@ -61,6 +61,12 @@ sc = _load("summary-comment")
 ag = _load("apply-gate")
 _md_escape = sc._md_escape
 
+
+class _Rendered(str):
+    """Finding text whose repository parts are already escaped: `_finding_row` prints it as
+    is, so an engine literal such as `<env>` keeps its angle brackets in a code span."""
+
+
 GATE = "shipmate / gate"
 
 MODES = ("annotate", "report", "check-ids")
@@ -1272,15 +1278,18 @@ def _shim_job_name_finding(text, name, engine):
     )
     if job_name == _SHIM_JOB_NAME:
         return []
+    # `name` is the engine's own file name, never repository data.
     return [
         (
             WARNING,
-            f"`{name}`'s calling job is not named `{_SHIM_JOB_NAME}`. GitHub names a called "
-            "workflow's check runs `<caller job> / <callee job>`, so this repository's plan cell "
-            f"checks are not `{_SHIM_JOB_NAME} / <stack> / <env>`. The plan runs and the gate is "
-            "unaffected; what is lost is every `plan` link in the plan comment, which falls "
-            "back to the workflow-run page instead of the cell's own check. Rename the job "
-            f"`{_SHIM_JOB_NAME}` (docs/getting-started.md).",
+            _Rendered(
+                f"`{name}`'s calling job is not named `{_SHIM_JOB_NAME}`. GitHub names a called "
+                "workflow's check runs `<caller job> / <callee job>`, so this repository's plan "
+                f"cell checks are not `{_SHIM_JOB_NAME} / <stack> / <env>`. The plan runs and "
+                "the gate is unaffected; what is lost is every `plan` link in the plan comment, "
+                "which falls back to the workflow-run page instead of the cell's own check. "
+                f"Rename the job `{_SHIM_JOB_NAME}` (docs/getting-started.md)."
+            ),
         )
     ]
 
@@ -1795,8 +1804,10 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"`explicit = true` on {_fit_items(envs, ', ', 400)}: a bare "
-            "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
+            _Rendered(
+                f"`explicit = true` on {_md_escape(_fit_items(envs, ', ', 400))}: a bare "
+                "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
+            )
             if envs
             else "`explicit`: set on no environment, so every environment applies on a bare "
             "`shipmate apply`, production included.",
@@ -2403,8 +2414,9 @@ def _finding_row(lvl, text):
     Escaped because a finding interpolates repository data (a file name, an
     API error): an unescaped `<!-- shipmate:summary -->` in one would make
     actions/summary's marker upsert PATCH this comment with the plan comment's
-    body."""
-    return f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}"
+    body. A `_Rendered` finding escaped its repository parts itself and is
+    printed as is."""
+    return f"- {_LEVEL_EMOJI[lvl]} {text if isinstance(text, _Rendered) else _md_escape(text)}"
 
 
 def _findings_only_report(findings, ctx, circle, verdict):

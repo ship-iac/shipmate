@@ -2193,6 +2193,33 @@ def test_report_escapes_a_hostile_settings_finding():
     assert body.count(doctor.DOCTOR_MARKER) == 1
 
 
+def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
+    """The env names are repository data; `<env>` is the engine's own placeholder, inside a
+    code span where an entity shows as written.
+
+    Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;env&gt;` shows.
+    Mutation: drop the `_md_escape` around the env names -- `a<b` renders raw."""
+    [_, (level, text)] = doctor._config_defaults({"environments": {"a<b": {"explicit": True}}})
+    assert doctor._finding_row(level, text) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `explicit = true` on a&lt;b: a bare "
+        "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
+    )
+
+
+def test_the_shim_job_name_row_keeps_the_engine_placeholders():
+    """Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;stack&gt;` shows."""
+    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
+    [(level, finding)] = doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO)
+    assert doctor._finding_row(level, finding) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s calling job is not named "
+        "`shipmate`. GitHub names a called workflow's check runs `<caller job> / <callee job>`, "
+        "so this repository's plan cell checks are not `shipmate / <stack> / <env>`. The plan "
+        "runs and the gate is unaffected; what is lost is every `plan` link in the plan "
+        "comment, which falls back to the workflow-run page instead of the cell's own check. "
+        "Rename the job `shipmate` (docs/getting-started.md)."
+    )
+
+
 def test_findings_only_fallback_escapes_a_hostile_settings_finding():
     # Same escaping on the HARD_CAP fallback path: it renders the findings
     # through _findings_lines, a second renderer that must not bypass it.
