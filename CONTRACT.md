@@ -960,7 +960,10 @@ comment names the unmanaged stacks a pull request changes, under its verdict. A
 whose environment has no entry in the environment table still refuses the run
 under `layout = "tf_vars"`. The trade-off is accepted: a forgotten tag on a new
 stack is a notice and a line in the plan comment, not a refusal, and the gate
-goes green over a stack that plans nothing.
+goes green over a stack that plans nothing. A deploy refuses when its merged
+pull request holds an open apply check on a stack the merge leaves unmanaged:
+the stack lost its `env/*` tags after that pull request was planned, so no cell
+would ever apply its reviewed change.
 
 **A drift sweep's `tags` query narrows what the sweep plans, never what it
 scans.** Engine `drift.yml` takes it as an input, one literal query per drift

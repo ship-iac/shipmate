@@ -54,13 +54,28 @@ def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):
     return merge_sha
 
 
+def refuse_stranded_checks(unmanaged, open_names):
+    """Refuse when an open apply check belongs to a stack this scan found unmanaged: the stack
+    lost its `env/*` tags on the default branch after its pull request was planned, so no
+    cell carries its reviewed change and nothing else would ever complete the check. The
+    gate fails closed. Each stack's name prefix is built forward by `check_name`."""
+    prefixes = tuple(ad.ag.check_name(p, "") for p in unmanaged)
+    stranded = sorted(n for n in open_names if n.startswith(prefixes))
+    if stranded:
+        raise SystemExit(
+            f"::error::deploy aborted: {', '.join(stranded)}: the stack lost its env/* tags "
+            "after this pull request was planned; its reviewed change was not applied; retag "
+            "the stack and re-run this deploy, or apply it by hand and complete the check."
+        )
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
     head = _merged_head(repo, merge_sha)
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
-    _, cells, _, _ = bm.compute_cells(
+    _, cells, _, unmanaged = bm.compute_cells(
         all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", "")
     )
     table = bm.env_config(cells)
@@ -71,6 +86,7 @@ def main():
     # disagree — the name leaves `completed` and its cell re-queues on the earlier record.
     lines = ad._check_run_lines(repo, head)
     completed = ad.ag.app_done_names(lines, app_id)
+    refuse_stranded_checks(unmanaged, ad.apply_check_names(lines, app_id) - completed)
     # AFTER the pending filter, as on both pre-merge paths: an applied cell needs no record,
     # so a completed check that carries none never refuses the deploy.
     pending = ad.with_plan_runs(ad.filter_pending(cells, completed), lines, app_id)

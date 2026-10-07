@@ -437,3 +437,46 @@ def test_main_refuses_a_cyclic_needs_before_sorting_env_levels(tmp_path, monkeyp
         "next, so the ordering has no first environment and no apply path can sort it. Break "
         "the chain in .github/shipmate.toml."
     )
+
+
+def test_main_refuses_a_pending_apply_check_on_an_unmanaged_stack(tmp_path, monkeypatch):
+    """A pull request changed `stacks/gone`, which lost its `env/*` tags on the default branch
+    before this merge: the scan builds it no cell, so its pending reviewed apply check would
+    stay pending with nothing applied. The completed check on the same stack is not named, and
+    the managed stack's pending check is not either.
+
+    Mutation: drop the `refuse_stranded_checks` call from `main` -- the deploy writes waves."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[],
+            checks=[
+                _apply_check("stacks/app"),
+                _apply_check("stacks/gone", "dev-eu"),
+                _apply_check("stacks/gone", "dev-us"),
+                _check(name="apply / stacks/gone / prod"),
+            ],
+            stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
+            deps={"stacks/app": set(), "stacks/gone": set()},
+        )
+    assert str(exc_info.value) == (
+        "::error::deploy aborted: apply / stacks/gone / dev-eu, apply / stacks/gone / dev-us: "
+        "the stack lost its env/* tags after this pull request was planned; its reviewed "
+        "change was not applied; retag the stack and re-run this deploy, or apply it by hand "
+        "and complete the check."
+    )
+
+
+def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path, monkeypatch):
+    """An unmanaged stack the pull request changed, whose only apply check completed, does not
+    refuse the deploy. Mutation: `stranded = sorted(unmanaged)` -- this run raises."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[],
+        checks=[_apply_check("stacks/app"), _check(name="apply / stacks/gone / dev-eu")],
+        stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
+        deps={"stacks/app": set(), "stacks/gone": set()},
+    )
+    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
