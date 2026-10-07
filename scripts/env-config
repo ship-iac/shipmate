@@ -31,8 +31,8 @@ def _run(args):
     annotation. `_shipmate.run` stays unprefixed for the hand-run scripts that share it.
 
     `build-matrix` aliases this rather than keeping its own copy: this module `_load`s
-    nothing, so reaching it from there terminates. The reverse would not -- `_shipmate.py`
-    caches nothing and re-executes a module on every `_load`.
+    nothing at import, so reaching it from there terminates. The reverse would not --
+    `_shipmate.py` caches nothing and re-executes a module on every `_load`.
     """
     try:
         return run(args)
@@ -818,6 +818,27 @@ def _check_cycle(order):
         ) from exc
 
 
+def _check_depth(order, environments):
+    """`SystemExit` naming one longest chain when acyclic `order` spans more env levels
+    than a deploy applies: the deepest env, then a predecessor one level lower each step,
+    the sorted-first at every tie."""
+    from _shipmate import _load
+
+    eo = _load("env-order")
+    levels = eo.env_levels(order, sorted(set(environments).union(*order.values())))
+    depth = max(levels.values(), default=0)
+    if depth < eo.MAX_ENV_LEVELS:
+        return
+    chain = [min(e for e, lv in levels.items() if lv == depth)]
+    while levels[chain[-1]]:
+        chain.append(min(p for p in order[chain[-1]] if levels[p] == levels[chain[-1]] - 1))
+    raise SystemExit(
+        f"::error::needs spans {depth + 1} env levels: {' → '.join(reversed(chain))}. "
+        f"A deploy applies at most {eo.MAX_ENV_LEVELS} env levels. Shorten the chain in "
+        f"{CONFIG_PATH}."
+    )
+
+
 def validate_env_name_list(envs, key):
     """`envs`, or `SystemExit` unless it is a list of bare env-name strings.
 
@@ -869,8 +890,9 @@ def _check_env_name(e, label, matched):
 
 def _check_entries(environments, errors, identities):
     """Every entry name, then every entry, then each `needs` list, then the order they
-    declare -- the cycle check only when every list passed. A non-mapping entry's `needs`
-    is not read. `identities` is as `_check_environment` takes it."""
+    declare -- the cycle check only when every list passed, the depth check only when the
+    order is acyclic. A non-mapping entry's `needs` is not read. `identities` is as
+    `_check_environment` takes it."""
     for env in sorted(environments):
         with _gather(errors):
             _check_env_name(env, f"environments.{env}", "an entry name")
@@ -885,8 +907,11 @@ def _check_entries(environments, errors, identities):
                 validate_env_name_list(entry["needs"], f"environments.{env}.needs")
             lists_ok = lists_ok and listed.ok
     if lists_ok:
-        with _gather(errors):
+        with _gather(errors) as acyclic:
             _check_cycle(order)
+        if acyclic.ok:
+            with _gather(errors):
+                _check_depth(order, environments)
 
 
 def validate_structure(table):
@@ -897,8 +922,9 @@ def validate_structure(table):
     non-mapping `identities` skips every identity check and every entry's `identity` and
     `workloads` checks, a refused identity the role checks of each entry naming it, a
     non-mapping `environments` skips every entry, a non-mapping entry its own checks and its
-    `needs`, a non-mapping `tf_vars` its per-name checks, and a refused `needs` list the cycle
-    check. The role checks of one workload stop at its first refusal.
+    `needs`, a non-mapping `tf_vars` its per-name checks, a refused `needs` list the cycle
+    check, and a cyclic `needs` graph the depth check. The role checks of one workload stop
+    at its first refusal.
 
     Identities are checked before entries, each once, whatever the number of entries naming it.
 

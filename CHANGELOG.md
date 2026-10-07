@@ -39,6 +39,7 @@ section below names the SHA the release tags.
 - **`scripts/onboard`'s App installation item links the organization's App installations page instead of a URL with an `<org>` placeholder.**
 - **A plan or drift detect names every stack carrying two `workload/*` tags, and any environment-table or `workloads` list refusal after them, in one run instead of stopping at the first stack.**
 - **A `shipmate / gate` failed by a detect refusal names the refusal in its description, as `detect refused: <the refusal's first line>`, instead of the generic "change detection did not succeed" text.**
+- **The environment table refuses a `needs` chain deeper than the four env levels a deploy applies, naming the chain, instead of validating and failing at deploy.**
 
 ## [0.42.0] — 2026-10-04
 

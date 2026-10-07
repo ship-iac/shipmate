@@ -493,8 +493,8 @@ def test_a_cycle_across_needs_refuses_structurally(order, cycle):
 
 def test_a_deep_acyclic_needs_chain_still_validates():
     """The other half of the cycle rule: a legitimate chain must keep validating. A check that
-    refuses a valid ordering is worse than the defect it fixes, and three levels is what the
-    engine's own `MAX_ENV_LEVELS` cap allows.
+    refuses a valid ordering is worse than the defect it fixes, and four levels, `dev` to
+    `prod-us`, is what the engine's own `MAX_ENV_LEVELS` cap allows.
 
     Mutation: refuse any env that is both a key and a predecessor rather than a cycle --
     `stage` is both, and this legitimate chain then refuses.
@@ -508,6 +508,55 @@ def test_a_deep_acyclic_needs_chain_still_validates():
         },
     }
     assert env_config.validate_structure(table) is table
+
+
+def test_a_needs_chain_deeper_than_the_env_levels_refuses_structurally():
+    """Five levels: the deploy applies four, so without this check the table validates and
+    refuses only at deploy, once a cell is pending in `e`. `a` is no entry, so the chain walks
+    through a dangling predecessor.
+
+    Mutation: compare the depth with `>` instead of `>=` -- this chain validates.
+    """
+    table = {
+        "layout": "folder",
+        "environments": {
+            "b": {"needs": ["a"]},
+            "c": {"needs": ["b"]},
+            "d": {"needs": ["c"]},
+            "e": {"needs": ["d"]},
+        },
+    }
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(table)
+    assert str(excinfo.value) == (
+        "::error::needs spans 5 env levels: a → b → c → d → e. A deploy applies at most "
+        "4 env levels. Shorten the chain in .github/shipmate.toml."
+    )
+
+
+def test_a_too_deep_needs_graph_names_one_chain_the_sorted_first_at_each_tie():
+    """`f` ties `e` for deepest and `x` ties `d` as `e`'s predecessor; one chain is named.
+
+    Mutation: pick `max` instead of `min` for the deepest env or for the predecessor -- the
+    message names `f` or `x`.
+    """
+    table = {
+        "layout": "folder",
+        "environments": {
+            "b": {"needs": ["a"]},
+            "c": {"needs": ["b"]},
+            "d": {"needs": ["c"]},
+            "x": {"needs": ["c"]},
+            "e": {"needs": ["x", "d"]},
+            "f": {"needs": ["d"]},
+        },
+    }
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(table)
+    assert str(excinfo.value) == (
+        "::error::needs spans 5 env levels: a → b → c → d → e. A deploy applies at most "
+        "4 env levels. Shorten the chain in .github/shipmate.toml."
+    )
 
 
 def test_env_order_reads_needs_off_every_entry_holding_it():
