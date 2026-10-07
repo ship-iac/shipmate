@@ -3424,8 +3424,7 @@ _SHIPMATE_YML_CALLS_DRIFT_TEXT = (
 
 def test_a_drift_job_left_in_shipmate_yml_is_warned(monkeypatch):
     """A `shipmate.yml` still carrying the drift job sweeps beside the drift file, so every
-    sweep runs twice, and `scripts/onboard` counts it as the repository's drift file. One
-    WARNING names the move; the published file draws none.
+    sweep runs twice. One WARNING names the move; the published file draws none.
 
     Mutation: drop the drift-call check from `_shipmate_yml_warnings` -- the first assertion
     reddens."""

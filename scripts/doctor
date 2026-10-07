@@ -53,17 +53,7 @@ import sys
 
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
 from _shipmate import ENGINE_ENV as _ENGINE_ENV
-from _shipmate import (
-    _engine_call,
-    _load,
-    _strip_comment,
-    _stripped_text,
-    approval_rules,
-    current_run_url,
-    gate_check,
-    review_count,
-    utf8_output,
-)
+from _shipmate import _load, approval_rules, current_run_url, gate_check, review_count, utf8_output
 
 ec = _load("env-config")
 _gh_json = ec.gh_json
@@ -970,6 +960,25 @@ _UNSAFE_CHECKOUT = re.compile(
 
 # `on` at column 0 only, optionally quoted; the anchoring is `_on_block`'s match, see there.
 _ON_KEY = re.compile(r"""["']?on["']?[ \t]*:(?P<rest>.*)$""")
+
+
+def _strip_comment(line):
+    """`line` up to its YAML comment marker: a `#` at the start of the line or
+    preceded by whitespace. A `#` inside a token (`branch#1`) is not a comment."""
+    for i, ch in enumerate(line):
+        if ch == "#" and (i == 0 or line[i - 1] in " \t"):
+            return line[:i]
+    return line
+
+
+def _stripped_text(text):
+    """`text` with every YAML comment removed, line structure intact."""
+    return "\n".join(_strip_comment(ln) for ln in text.splitlines())
+
+
+def _engine_call(callee):
+    """The `uses:` selector for a call of the engine reusable workflow `callee`."""
+    return re.compile(rf"/\.github/workflows/{re.escape(callee)}@")
 
 
 def _on_block(text):

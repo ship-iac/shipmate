@@ -32,11 +32,11 @@ leaving any open Issue for it untouched rather than auto-closing it.
 
 ## The workflow
 
-The sweep is the `drift` job of `.github/workflows/shipmate-drift.yml`
-([`getting-started.md`](getting-started.md) §The workflow file), which
-`scripts/onboard` writes pinned beside `shipmate.yml`. Two things reach it:
+A sweep is the `drift` job of a workflow file you save from the
+`shipmate drift` fence ([`getting-started.md`](getting-started.md) §The
+workflow file), under any name in `.github/workflows/`. Two things reach it:
 that file's `schedule` trigger, and a `workflow_dispatch` of that file
-(`gh workflow run shipmate-drift.yml`), which takes no input.
+(`gh workflow run <drift-file>.yml`), which takes no input.
 
 The engine's jobs run on `ubuntu-latest` unless the `drift` job passes a
 `runs_on:` input — the published fence omits it, as
@@ -130,7 +130,7 @@ has planned.
 
 One drift workflow file is one sweep, with its own crons, its own matrix and its
 own 256-cell limit. To spread the tree across several sweeps, or past the limit,
-copy the `shipmate drift` fence under another filename and `name:`, set its
+save another copy of the fence under its own file name and `name:`, set its
 crons, and give its `drift` job a `tags` query:
 
 ```yaml
@@ -140,11 +140,6 @@ with:
 
 Write the query in block form, as above: in a `{ }` flow mapping the comma
 splits the value, and GitHub refuses the file.
-
-`scripts/onboard` writes `shipmate-drift.yml` only when no workflow file calls
-the engine's `drift.yml`, and reports `ok` once any file does, whatever its name
-or query. It never compares or overwrites a drift file: edit, split or rename
-your sweeps freely.
 
 The query grammar:
 

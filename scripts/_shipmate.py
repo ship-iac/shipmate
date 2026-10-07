@@ -8,8 +8,7 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 Also holds the subprocess runner, which ``env-config`` wraps for the CI scripts, the secret
 scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
 switch for their console output. It also holds the ruleset and environment readers and the
-names ``doctor`` and ``onboard`` share, including the YAML comment stripper and the engine-call
-selector both scan workflow files with, reads the per-cell ``cell.json`` summaries and builds
+names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json`` summaries and builds
 this run's page link.
 """
 
@@ -148,22 +147,3 @@ def _load(fname):
     mod = importlib.util.module_from_spec(spec)  # ty: ignore[invalid-argument-type]
     loader.exec_module(mod)
     return mod
-
-
-def _strip_comment(line):
-    """`line` up to its YAML comment marker: a `#` at the start of the line or
-    preceded by whitespace. A `#` inside a token (`branch#1`) is not a comment."""
-    for i, ch in enumerate(line):
-        if ch == "#" and (i == 0 or line[i - 1] in " \t"):
-            return line[:i]
-    return line
-
-
-def _stripped_text(text):
-    """`text` with every YAML comment removed, line structure intact."""
-    return "\n".join(_strip_comment(ln) for ln in text.splitlines())
-
-
-def _engine_call(callee):
-    """The `uses:` selector for a call of the engine reusable workflow `callee`."""
-    return re.compile(rf"/\.github/workflows/{re.escape(callee)}@")

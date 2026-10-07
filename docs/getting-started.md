@@ -305,18 +305,19 @@ creates all of them, including `shipmate-engine` and its branch policy:
 
 ### The workflow file
 
-`scripts/onboard` writes two files, pinned, from the two fences below:
-`shipmate.yml` and the drift sweep, `shipmate-drift.yml`. `shipmate.yml` is a
-shim: four triggers and five jobs, each job calling an engine reusable workflow
-SHA-pinned. The drift file is one job calling engine `drift.yml` on its cron or
-a dispatch. The jobs behind those calls — `facts`, `detect`, `plan` and
+A repository holds `shipmate.yml` and one drift file per sweep, from the two
+fences below. `scripts/onboard` writes `shipmate.yml`, pinned; you save each
+drift file yourself, under any name in `.github/workflows/`, and pin it.
+`shipmate.yml` is a shim: four triggers and five jobs, each job calling an
+engine reusable workflow SHA-pinned. A drift file is one job calling engine
+`drift.yml` on its cron or a dispatch. The jobs behind those calls — `facts`, `detect`, `plan` and
 `summary` in engine `plan.yml`, and their equivalents on the other paths — live
 in the engine, so none of what they decide is wiring you can get
 wrong.
 
-Both files go in at tier 1, and three of their jobs are this tier's:
-`plan`, `comment-ops` and the drift file's `drift`, which need `<env>-plan`,
-`shipmate-engine` and the App key and nothing else. `deploy` runs from the
+`shipmate.yml` and every drift file go in at tier 1, and three kinds of job are
+this tier's: `plan`, `comment-ops` and each drift file's `drift`, which need
+`<env>-plan`, `shipmate-engine` and the App key and nothing else. `deploy` runs from the
 start too: on every push to the default branch it applies the merged pull request's cells still
 pending, in the `<env>-apply` this tier has you create (a shared env's bare
 `<env>`). The other two, `apply` and `unlock`, wait for the
@@ -339,7 +340,7 @@ pending with the draft reason. Mark the pull request ready, or comment
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
 that name is what makes the plan cells `shipmate / <stack> / <env>` and lets the
 plan comment's `plan` links resolve to them. The `plan` and `comment-ops` jobs
-and the drift file's `drift` job all carry it. Rename the `plan` job and its run
+and each drift file's `drift` job carry it. Rename the `plan` job and its run
 still happens, but every one of those links falls back to the workflow-run page
 instead; `shipmate doctor` reports it. Renaming `comment-ops` or `drift` changes
 only their own check-run names: no link resolves through them, and doctor does
@@ -350,10 +351,9 @@ repository that has no `.github/workflows/shipmate.yml`; `actions/dispatch`
 dispatches that one filename for every verb, choosing the job by the `verb`
 input it sends; and `shipmate doctor` keys its `shipmate.yml` probe, which checks
 the job name, dispatch wiring, event routing and a leftover drift job, on it. A
-file under another name is reached by nothing. The drift file's name matters to
-nothing: nothing dispatches it, and `scripts/onboard` and doctor both find a
-drift file by its call of `drift.yml`. `scripts/onboard` writes
-`shipmate-drift.yml` only when no workflow file makes that call.
+file under another name is reached by nothing. A drift file's name matters to
+nothing: nothing dispatches it, and doctor finds a drift file by its call of
+`drift.yml`.
 
 Which trigger reaches which job, and which engine workflow it calls:
 
@@ -365,7 +365,7 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: apply` | `apply` | `apply.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
-Only the `plan` job and the drift file's `drift` job accept a `runs_on:`
+Only the `plan` job and each drift file's `drift` job accept a `runs_on:`
 input. Behind every other call the engine's detect jobs and cells run on
 `ubuntu-latest` and its control jobs on `ubuntu-slim` ([`aws.md`](aws.md)
 §Runner choice). The fences below omit it, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
@@ -496,9 +496,11 @@ jobs:
 On a repository whose default branch is not `main`, change `branches: [main]`
 to that branch; `scripts/onboard` writes the file that way.
 
-`scripts/onboard` writes the drift sweep from this second fence as
-`.github/workflows/shipmate-drift.yml`; [`drift.md`](drift.md) §Scoping a sweep
-covers splitting it across several files:
+Save the drift sweep from this second fence under any file name in
+`.github/workflows/`, with `@<engine-sha>  # see the latest release` replaced by
+`@<sha> # vX.Y.Z`, as `shipmate.yml`'s pin reads. Each sweep is its own file;
+[`drift.md`](drift.md) §Scoping a sweep covers splitting the cells across
+several:
 
 ```yaml
 name: shipmate drift
@@ -861,19 +863,14 @@ and what masking does and does not cover.
 
 ### Drift detection
 
-The drift file's `drift` job plans every stack × environment, or the cells its
+Each drift file's `drift` job plans every stack × environment, or the cells its
 `tags` query selects, nightly against real state, then opens, updates and closes drift Issues from what those cells
 report. The engine jobs behind it that hold a credential run only at the
 default-branch ref; it needs the `shipmate-engine` environment from the plan
-tier. `scripts/onboard` writes it as `.github/workflows/shipmate-drift.yml`, so a
-repository it reconciled already has it. Edit, split or rename the file — a
-`tags` query, other crons — and the reconciler reports `ok` as long as some
-workflow file calls `drift.yml`, without comparing its content. Remove every
-such call and `shipmate doctor` warns that no workflow file calls `drift.yml`.
-If `shipmate-drift.yml` is deleted, the next `scripts/onboard` run writes it
-again; if it is kept without a call, the run reports it `differs` and exits 2
-without overwriting it. Scoping a sweep
-and what it costs are in [`drift.md`](drift.md).
+tier. `scripts/onboard` does not write it: save it from the `shipmate drift`
+fence in §The workflow file. Name, edit and split drift files freely — a `tags`
+query, other crons. When no workflow file calls `drift.yml`, `shipmate doctor`
+warns. Scoping a sweep and what it costs are in [`drift.md`](drift.md).
 
 ### Recipe: automerge after apply
 

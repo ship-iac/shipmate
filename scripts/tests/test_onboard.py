@@ -498,8 +498,8 @@ def test_main_calls_every_stage_in_order():
     Mutations, each proven: delete `_reconcile_env(ctx, ENGINE_ENV, "apply")`; delete
     `_reconcile_key(ctx)`; swap those two, which writes the key to an environment that
     does not exist yet; delete `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`;
-    delete `_reconcile_ruleset(ctx)`; delete either `_reconcile_shim` call; delete
-    `_checklist(ctx)`; `_repo_root()` back to `pathlib.Path.cwd()`; delete
+    delete `_reconcile_ruleset(ctx)`; delete `_reconcile_shim(ctx)`; delete `_checklist(ctx)`;
+    `_repo_root()` back to `pathlib.Path.cwd()`; delete
     `_refuse_diverging_app_id(args.app_id, variables)`, which is the only guard against a
     ruleset pinned to an App the workflows do not use; delete `sys.exit(_exit_code())`;
     swap two reconcilers; move the `"shim_on_default"` read into
@@ -533,8 +533,7 @@ def test_main_calls_every_stage_in_order():
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
         "_reconcile_ruleset(ctx)",
-        "_reconcile_shim(ctx, 'shipmate', 'shipmate.yml')",
-        "_reconcile_drift(ctx)",
+        "_reconcile_shim(ctx)",
         "_checklist(ctx)",
         "sys.exit(_exit_code())",
         "_exit_code()",
@@ -1066,8 +1065,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     onboard._reconcile_envs(ctx())
     onboard._reconcile_variables(ctx())
     onboard._reconcile_ruleset(ctx(shim_on_default=True))
-    onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE), "shipmate", "shipmate.yml")
-    onboard._reconcile_drift(ctx(root=tmp_path, engine=ENGINE))
+    onboard._reconcile_shim(ctx(root=tmp_path, engine=ENGINE))
     onboard._checklist(ctx(root=tmp_path))
     assert list(tmp_path.iterdir()) == []
     assert fake.calls == [
@@ -1088,7 +1086,6 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         "would create",
         "would create",
         "would set",
-        "would create",
         "would create",
         "would create",
     ]
@@ -1173,164 +1170,7 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, key=True, membership=ONE
     return fake, excinfo.value
 
 
-def test_a_whole_run_writes_both_workflow_files_and_a_second_run_reports_them_ok(
-    monkeypatch, tmp_path
-):
-    """Drift runs from its own file, so a fresh run writes `shipmate-drift.yml` rendered and
-    pinned from the `shipmate drift` fence beside a `shipmate.yml` that calls no `drift.yml`.
-    A second run reads both back unchanged.
-
-    Mutation: delete the `_reconcile_drift(ctx)` call from `main`.
-    """
-    run_main(monkeypatch, tmp_path, {}, [])
-    workflows = tmp_path / ".github" / "workflows"
-    drift = (workflows / "shipmate-drift.yml").read_text(encoding="utf-8")
-    assert drift == onboard._render(ENGINE, "a" * 40, "v0.26.0", "main", "shipmate drift")
-    assert "/drift.yml@" + "a" * 40 + " # v0.26.0" in drift
-    assert "drift.yml" not in (workflows / "shipmate.yml").read_text(encoding="utf-8")
-    onboard.REPORT.clear()
-    run_main(monkeypatch, tmp_path, {}, [])
-    assert [r for r in onboard.REPORT if r[1].endswith(".yml")] == [
-        ("ok", "shipmate.yml", ""),
-        ("ok", "shipmate-drift.yml", ""),
-    ]
-
-
-def _drift_ctx(tmp_path):
-    return {**_shim_ctx(tmp_path), "default_branch": "main"}
-
-
-def _write_workflow(tmp_path, name, text):
-    path = tmp_path / ".github" / "workflows" / name
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
-    return path
-
-
-_DRIFT_CALL = (
-    "jobs:\n  drift:\n    uses: ship-iac/shipmate/.github/workflows/drift.yml@" + "c" * 40 + "\n"
-)
-
-
-def test_a_drift_file_edited_with_a_tags_query_reports_ok(tmp_path):
-    """The drift file is matched by its call, not its content: a consumer adding a `tags`
-    query to the published fence has done what docs/drift.md asks, so it is `ok` and exit 0,
-    and the file is left as it is.
-
-    Mutation: compare the drift file's content to the rendered fence, reporting `differs`
-    on a mismatch.
-    """
-    rendered = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main", "shipmate drift")
-    edited = rendered.replace("    secrets:\n", "    with:\n      tags: env/dev-eu\n    secrets:\n")
-    assert edited != rendered
-    path = _write_workflow(tmp_path, "shipmate-drift.yml", edited)
-    onboard._reconcile_drift(_drift_ctx(tmp_path))
-    assert onboard.REPORT == [("ok", "shipmate-drift.yml", "")]
-    assert path.read_text(encoding="utf-8") == edited
-    assert onboard._exit_code() == 0
-
-
-def test_a_drift_call_left_in_shipmate_yml_writes_no_drift_file(tmp_path):
-    """A `shipmate.yml` still holding the drift job sweeps already. Writing a second file would
-    run every sweep twice; doctor names the job to move instead.
-
-    Mutation: count only files named `shipmate-drift.yml`.
-    """
-    _write_workflow(tmp_path, "shipmate.yml", _DRIFT_CALL)
-    onboard._reconcile_drift(_drift_ctx(tmp_path))
-    assert onboard.REPORT == [("ok", "shipmate-drift.yml", "called from shipmate.yml")]
-    assert sorted(p.name for p in (tmp_path / ".github" / "workflows").iterdir()) == [
-        "shipmate.yml"
-    ]
-
-
-def test_a_drift_call_in_any_named_file_counts(tmp_path):
-    """A sweep may live in any file: two sweeps split across `sweeps.yml` and `nightly.yaml`
-    are the repository's drift files and nothing is written beside them.
-
-    Mutation: count only files named `shipmate-drift.yml`.
-    """
-    _write_workflow(tmp_path, "sweeps.yml", _DRIFT_CALL)
-    _write_workflow(tmp_path, "nightly.yaml", _DRIFT_CALL)
-    onboard._reconcile_drift(_drift_ctx(tmp_path))
-    assert onboard.REPORT == [("ok", "shipmate-drift.yml", "called from nightly.yaml, sweeps.yml")]
-    assert sorted(p.name for p in (tmp_path / ".github" / "workflows").iterdir()) == [
-        "nightly.yaml",
-        "sweeps.yml",
-    ]
-
-
-def test_a_drift_file_whose_call_is_commented_out_is_not_overwritten(tmp_path):
-    """A commented-out call sweeps nothing, as doctor's drift-file probe reads it, so no sweep
-    is found; but `shipmate-drift.yml` is the consumer's file, and replacing it is this script
-    exceeding its mandate. It is reported `differs`, exit 2, and left alone.
-
-    Mutations: search the raw text instead of the comment-stripped text (reports `ok`);
-    write the rendered fence on that branch (overwrites the file).
-    """
-    text = _DRIFT_CALL.replace("    uses:", "    # uses:")
-    path = _write_workflow(tmp_path, "shipmate-drift.yml", text)
-    onboard._reconcile_drift(_drift_ctx(tmp_path))
-    assert onboard.REPORT == [
-        ("differs", "shipmate-drift.yml", "calls no engine `drift.yml`, not overwritten")
-    ]
-    assert path.read_text(encoding="utf-8") == text
-    assert onboard._exit_code() == 2
-
-
-def test_a_drift_call_on_the_docs_placeholder_is_never_pinned(tmp_path):
-    """A call still reading `drift.yml@<engine-sha>` resolves to nothing, so it sweeps nothing
-    and is not `ok`: `differs` with the never-pinned remedy, exit 2, and no file written.
-
-    Mutation: drop the placeholder check in `_drift_callers` -- the call counts and reports
-    `ok`.
-    """
-    text = _DRIFT_CALL.replace("c" * 40, "<engine-sha>")
-    path = _write_workflow(tmp_path, "sweeps.yml", text)
-    onboard._reconcile_drift(_drift_ctx(tmp_path))
-    assert onboard.REPORT == [
-        ("differs", "sweeps.yml", "the published fence, never pinned: delete it and run again")
-    ]
-    assert sorted(p.name for p in path.parent.iterdir()) == ["sweeps.yml"]
-    assert onboard._exit_code() == 2
-
-
-def test_a_workflow_file_that_is_not_utf8_is_still_scanned(tmp_path):
-    """A Latin-1 byte in a comment elsewhere in the file does not stop the scan or hide the
-    ASCII call.
-
-    Mutation: read with a strict UTF-8 decode -- `UnicodeDecodeError`.
-    """
-    path = tmp_path / ".github" / "workflows" / "sweeps.yml"
-    path.parent.mkdir(parents=True)
-    path.write_bytes(b"# caf\xe9\n" + _DRIFT_CALL.encode("ascii"))
-    onboard._reconcile_drift(_drift_ctx(tmp_path))
-    assert onboard.REPORT == [("ok", "shipmate-drift.yml", "called from sweeps.yml")]
-
-
-def test_an_unreadable_workflow_file_is_reported_and_nothing_is_written(tmp_path, monkeypatch):
-    """A file that cannot be read may hold the call, so with no other caller nothing is
-    written, and the file is named as `differs`.
-
-    Mutation: drop the `OSError` handler -- the read raises out of `_reconcile_drift`.
-    """
-    _write_workflow(tmp_path, "locked.yml", "name: locked\n")
-    real = pathlib.Path.read_text
-
-    def read_text(self, *args, **kwargs):
-        if self.name == "locked.yml":
-            raise PermissionError(13, "Permission denied")
-        return real(self, *args, **kwargs)
-
-    monkeypatch.setattr(pathlib.Path, "read_text", read_text)
-    onboard._reconcile_drift(_drift_ctx(tmp_path))
-    assert onboard.REPORT == [
-        ("differs", "locked.yml", "cannot be read (Permission denied), not overwritten")
-    ]
-    assert sorted(p.name for p in (tmp_path / ".github" / "workflows").iterdir()) == ["locked.yml"]
-
-
-def test_a_whole_run_writes_only_the_workflow_files(monkeypatch, tmp_path):
+def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path):
     """`onboard` moves no pin -- `_reconcile_shim` reports `pin-only` and leaves it, and that
     status never reaches `_exit_code`. A `.github/shipmate.toml` written here could therefore
     hand a repository still pinned to an older engine a file that engine refuses, silently,
@@ -1339,14 +1179,16 @@ def test_a_whole_run_writes_only_the_workflow_files(monkeypatch, tmp_path):
 
     The whole set of files under the checkout is compared against a hand-written constant
     rather than the absence of one name: a write added under any other name reddens here.
-    `key.pem` is this harness's own input, not something the run created.
+    `key.pem` is this harness's own input, not something the run created. The drift file is
+    the consumer's to name, so `shipmate.yml` is the only workflow file a run writes.
 
-    Mutation: write a `.github/shipmate.toml` from `_checklist`.
+    Mutations: write a `.github/shipmate.toml` from `_checklist`; render the `shipmate drift`
+    fence to `.github/workflows/shipmate-drift.yml` from `main`.
     """
     run_main(monkeypatch, tmp_path, {}, [])
     assert sorted(
         p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*") if p.is_file()
-    ) == [".github/workflows/shipmate-drift.yml", ".github/workflows/shipmate.yml", "key.pem"]
+    ) == [".github/workflows/shipmate.yml", "key.pem"]
 
 
 KEY = "SHIPMATE_APP_PRIVATE_KEY"
@@ -1658,9 +1500,7 @@ def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monk
     shim = tmp_path / ".github" / "workflows" / "shipmate.yml"
     shim.parent.mkdir(parents=True)
     shim.write_text(
-        onboard._render(ENGINE, "a" * 40, "v0.26.0", "main", "shipmate"),
-        encoding="utf-8",
-        newline="\n",
+        onboard._render(ENGINE, "a" * 40, "v0.26.0", "main"), encoding="utf-8", newline="\n"
     )
     fake, exit_ = run_main(monkeypatch, tmp_path, {}, [])
     assert exit_.code == 0
@@ -1910,17 +1750,7 @@ _EXPECTED_CALLEES = {
         "apply.yml",
         "unlock.yml",
     ],
-    "shipmate-drift.yml": ["drift.yml"],
 }
-#: The fence each shim is rendered from, as `main` passes it to `_reconcile_shim`.
-_SHIM_FENCES = {"shipmate.yml": "shipmate", "shipmate-drift.yml": "shipmate drift"}
-
-
-def _rendered_shims():
-    return {
-        filename: onboard._render(ENGINE, "c" * 40, "v9.9.9", "main", fence)
-        for filename, fence in _SHIM_FENCES.items()
-    }
 
 
 def _callees(text):
@@ -1934,10 +1764,10 @@ def _callees(text):
 
 
 def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflows():
-    """The locator reads each workflow file's body out of the docs rather than carrying a
-    copy. It must find exactly one fence per file, and that fence must call every engine
-    reusable workflow the file routes to, in document order -- five jobs, five pin sites, and
-    a locator that found only the first would ship four unpinned calls.
+    """The locator reads the workflow file's body out of the docs rather than carrying a
+    copy. It must find exactly one fence, and that fence must call every engine reusable
+    workflow the file routes to, in document order -- five jobs, five pin sites, and a
+    locator that found only the first would ship four unpinned calls.
 
     The expected callee list is hand-written here, never read out of the docs, and the
     whole mapping is compared with `==`.
@@ -1946,15 +1776,34 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     - edit the fence's top-level `name:` line -> the locator matches zero fences and refuses;
     - edit a `uses:` filename in the fence -> the callee list differs.
     """
-    found = {filename: _callees(text) for filename, text in _rendered_shims().items()}
+    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"))}
     assert found == _EXPECTED_CALLEES
 
 
-_EXPECTED_PINS = {"shipmate.yml": 5, "shipmate-drift.yml": 1}
+def test_the_published_drift_fence_calls_drift_yml_on_the_placeholder():
+    """The consumer saves the `shipmate drift` fence by hand, so nothing renders or pins it,
+    and only this test reads it. Exactly one fence carries the name (`_fence` refuses
+    otherwise), and its `uses:` lines, compared whole against a hand-written list, are one
+    call of engine `drift.yml` on the placeholder the re-pin in docs/releasing.md rewrites.
+
+    Mutation: `@main` in place of `@<engine-sha>` in the fence.
+    """
+    page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    uses = [
+        line.strip()
+        for line in onboard._fence(page, "shipmate drift").splitlines()
+        if line.strip().startswith("uses:")
+    ]
+    assert uses == [
+        "uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release"
+    ]
+
+
+_EXPECTED_PINS = {"shipmate.yml": 5}
 
 
 def test_every_shim_is_pinned_at_every_site():
-    """Two files, six pins, and a file shipped still carrying `@<engine-sha>` resolves to
+    """One file, five pins, and a file shipped still carrying `@<engine-sha>` resolves to
     nothing.
 
     Nothing else can see a missed rewrite: `_callees` splits before the `@`, so a surviving
@@ -1962,17 +1811,17 @@ def test_every_shim_is_pinned_at_every_site():
     expensive: `_DOC_PIN` requires the trailing `#` comment, so a docs edit dropping
     `# see the latest release` from one line stops that pin being rewritten; and it is
     anchored on `ship-iac`, so normalising an owner in the docs to `<owner>` would unpin all
-    six. `_DOC_PIN` stays anchored deliberately -- the docs/releasing.md re-pin is anchored
+    five. `_DOC_PIN` stays anchored deliberately -- the docs/releasing.md re-pin is anchored
     the same way and the two writers must agree -- and this vector is what makes either edit
     loud.
 
     Hand-written, never derived from the docs.
 
-    Mutations: `_DOC_PIN.sub(..., count=1)`, which rewrites one pin of the six; and delete
+    Mutations: `_DOC_PIN.sub(..., count=1)`, which rewrites one pin of the five; and delete
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """
-    rendered = _rendered_shims()
+    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")}
     assert {name: text.count(f"@{'c' * 40} # v9.9.9") for name, text in rendered.items()} == (
         _EXPECTED_PINS
     )
@@ -1987,7 +1836,7 @@ def _plan_shim(tmp_path):
     """(path to the consumer's shipmate.yml, the text this script would render for it)."""
     path = tmp_path / ".github" / "workflows" / "shipmate.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "main", "shipmate")
+    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
 
 
 def test_the_rendered_push_trigger_names_the_default_branch():
@@ -1997,8 +1846,8 @@ def test_the_rendered_push_trigger_names_the_default_branch():
 
     Mutation: drop the substitution from `_render`.
     """
-    main = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main", "shipmate")
-    assert onboard._render(ENGINE, "c" * 40, "v9.9.9", "develop", "shipmate") == main.replace(
+    main = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
+    assert onboard._render(ENGINE, "c" * 40, "v9.9.9", "develop") == main.replace(
         "    branches: [main]\n", "    branches: [develop]\n"
     )
 
@@ -2015,9 +1864,7 @@ def test_a_file_rendered_for_the_default_branch_reports_ok(tmp_path):
         encoding="utf-8",
         newline="\n",
     )
-    onboard._reconcile_shim(
-        {**_shim_ctx(tmp_path), "default_branch": "develop"}, "shipmate", "shipmate.yml"
-    )
+    onboard._reconcile_shim({**_shim_ctx(tmp_path), "default_branch": "develop"})
     assert onboard.REPORT == [("ok", "shipmate.yml", "")]
 
 
@@ -2031,7 +1878,7 @@ def test_an_identical_file_reports_ok_through_crlf(tmp_path):
     path, text = _plan_shim(tmp_path)
     on_disk = text.replace("\n", "\r\n").encode("utf-8")
     path.write_bytes(on_disk)
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [("ok", "shipmate.yml", "")]
     assert path.read_bytes() == on_disk
 
@@ -2045,9 +1892,9 @@ def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     reads as `differs`.
     """
     path, _text = _plan_shim(tmp_path)
-    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "main", "shipmate")
+    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "main")
     path.write_text(older, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [
         (
             "pin-only",
@@ -2068,7 +1915,7 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     path, text = _plan_shim(tmp_path)
     edited = text + "# a local edit\n"
     path.write_text(edited, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [
         ("differs", "shipmate.yml", "differs beyond its pin, not overwritten")
     ]
@@ -2096,7 +1943,7 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
 
     monkeypatch.setattr(pathlib.Path, "write_text", fake)
     path, text = _plan_shim(tmp_path)
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [("created", "shipmate.yml", "")]
     assert seen["kwargs"] == {"encoding": "utf-8", "newline": "\n"}
     assert path.read_bytes().decode("utf-8") == text
@@ -2113,7 +1960,7 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
     path, _text = _plan_shim(tmp_path)
     page = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
     path.write_text(onboard._fence(page, "shipmate"), encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path), "shipmate", "shipmate.yml")
+    onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [
         ("differs", "shipmate.yml", "the published fence, never pinned: delete it and run again")
     ]
@@ -2155,9 +2002,14 @@ todo          Provider lock files
       stacks/app
 
 todo          adoption pull request
-    Re-run without --dry-run, then commit both workflow files and the table together,
+    Re-run without --dry-run, then commit the workflow file and the table together,
     in a pull request that changes no stack. The table is read from the default
     branch, so the first plan needs it merged.
+
+todo          drift workflow file
+    Add one workflow file per drift sweep from the `shipmate drift` fence in
+    docs/getting-started.md, under any name in `.github/workflows/`, with the same
+    pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).
 
 todo          gate ruleset
     Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because
@@ -2185,6 +2037,10 @@ cannot check  CODEOWNERS entry covering /.github/workflows/
 
 ok            Provider lock files
 ok            adoption pull request
+todo          drift workflow file
+    Add one workflow file per drift sweep from the `shipmate drift` fence in
+    docs/getting-started.md, under any name in `.github/workflows/`, with the same
+    pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).
 """
 
 REVIEWERS_RULE = {
@@ -2221,7 +2077,9 @@ def test_the_checklist_of_a_fresh_repository_in_a_dry_run(monkeypatch, tmp_path,
     The environments are all absent, so `apply_envs` holds `None` for each: a dry run must
     not read that as reviewed.
 
-    Mutation: delete the passphrase item from `_checklist`.
+    The drift-file item is `todo` on every run, since a drift file may have any name.
+
+    Mutations: delete the passphrase item from `_checklist`; delete `_DRIFT_ITEM` from it.
     """
     _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
     assert exit_.code == 0
