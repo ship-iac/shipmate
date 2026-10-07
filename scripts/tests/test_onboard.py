@@ -2909,9 +2909,11 @@ def test_a_listed_workload_no_stack_in_its_environment_tags_is_listed():
 
 
 def test_a_needs_predecessor_no_stack_tags_is_named_on_the_table_item():
-    """`staging` is an entry, so it is in `ctx["envs"]`, and no stack tags it.
+    """`staging` is an entry, so it is in `ctx["envs"]`, and no stack tags it. The item is
+    `todo`: the key reads as ordering `prod` after `staging` while it orders nothing.
 
-    Mutation: pass `ctx["envs"]` to `stale_needs` -- the `needs` line is gone.
+    Mutations: pass `ctx["envs"]` to `stale_needs` -- the `needs` line is gone; return `ok`
+    for the stale-needs case.
     """
     table = {"layout": "folder", "environments": {"prod": {"needs": ["staging"]}, "staging": {}}}
     context = ctx(
@@ -2921,7 +2923,7 @@ def test_a_needs_predecessor_no_stack_tags_is_named_on_the_table_item():
         tagged={"prod": frozenset()},
     )
     assert onboard._table_item(context) == (
-        "ok",
+        "todo",
         "`.github/shipmate.toml`",
         [
             "Provisioned for staging, which no stack tags yet: its first tagging pull request",

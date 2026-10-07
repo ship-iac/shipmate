@@ -772,7 +772,8 @@ def _table_item(ctx):
             "until a stack is tagged into each.",
             width=80,
         )
-    return "ok", item, lines
+    # A provisioned entry is `ok`; a stale `needs` reads as ordering while it orders nothing.
+    return ("todo" if stale else "ok"), item, lines
 
 
 def _app_item(ctx):
