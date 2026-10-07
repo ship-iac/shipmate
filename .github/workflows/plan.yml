@@ -47,6 +47,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       empty: ${{ steps.matrix.outputs.empty }}
       count: ${{ steps.matrix.outputs.count }}
+      unmanaged: ${{ steps.matrix.outputs.unmanaged }}
     steps:
       # Both triggers check out something else by default -- the base branch under
       # `pull_request_target`, the dispatch ref under `workflow_dispatch`. Naming the head SHA is
@@ -142,3 +143,4 @@ jobs:
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           github-vars: ${{ toJSON(vars) }}
+          unmanaged-stacks: ${{ needs.detect.outputs.unmanaged }}

@@ -24,6 +24,7 @@ apply or doctor verdict that is not 🟢. A plan comment never carries it.
 
 import html
 import itertools
+import json
 import os
 import pathlib
 import re
@@ -41,6 +42,9 @@ FOOTER_HINT = "Comment `shipmate help` for the available commands."
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
+#: Well below `HARD_CAP - SIZE_BUDGET`, so the unmanaged stacks line never eats the headroom.
+UNMANAGED_LINE_CAP = 1000
+UNMANAGED_NAMES = 10
 CELL_KEYS = ("stack", "environment", "changed")
 
 #: The consumer names its plan-calling job `shipmate`, and GitHub names a called workflow's
@@ -280,6 +284,25 @@ def verdict(cells, head_sha, run_url):
     return f"{circle} {n} of {len(cells)} cells change {provenance(head_sha, run_url)}"
 
 
+def unmanaged_line(paths):
+    """`⚪ N changed stack(s) carry no env/* tag ...` naming the first of `paths` (each
+    `_md_escape`d) that fit in `UNMANAGED_NAMES` names and `UNMANAGED_LINE_CAP` characters, then
+    `, and M more` for the rest. When not even the first fits, a fixed sentence names none. Empty
+    for no paths."""
+    if not paths:
+        return ""
+    lead = f"⚪ {len(paths)} changed stack(s) carry no env/* tag and are not managed by shipmate"
+    line, names = "", []
+    for path in paths[:UNMANAGED_NAMES]:
+        names.append(_md_escape(path))
+        more = len(paths) - len(names)
+        candidate = f"{lead}: {', '.join(names)}" + (f", and {more} more" if more else "")
+        if len(candidate) > UNMANAGED_LINE_CAP:
+            break
+        line = candidate
+    return line or f"{lead}; their paths are too long to list here."
+
+
 def _join(sections):
     """One newline between consecutive bare lines, a blank line on both sides of a fold-out:
     without the blank line after `</details>`, the next line stays inside the HTML block and
@@ -292,16 +315,27 @@ def _join(sections):
     return "".join(out)
 
 
-def build_comment(cells, checks, run_url, head_sha):
-    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, every cell in order
-    (a fold-out for a changed cell with plan text, else its bare line). No footer: the verdict
-    links the run, and neither plan verdict asks anything. Every cell is
-    guaranteed its bare line: the space all remaining cells' bare lines need is reserved up
-    front, so an early giant plan cannot starve a later cell."""
+def build_comment(cells, checks, run_url, head_sha, unmanaged=()):
+    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `unmanaged_line` of
+    `unmanaged` when it has paths, every cell in order (a fold-out for a changed cell with plan
+    text, else its bare line). No footer: the verdict links the run, and neither plan verdict
+    asks anything. Every cell is guaranteed its bare line: the space all remaining cells' bare
+    lines need is reserved up front, so an early giant plan cannot starve a later cell. The
+    unmanaged line yields, with a warning, when the bare lines leave it no room under HARD_CAP."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     urls = [check_url(c, checks, run_url) for c in meta]
     bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
+    if line := unmanaged_line(unmanaged):
+        # The smallest body with the line; past HARD_CAP it goes, so the refusal below keeps
+        # its one cause. In `head`, the line is counted in `used` before any fold-out is sized.
+        if len("\n\n".join(p for p in (head, line, "\n".join(bares)) if p)) > HARD_CAP:
+            print(
+                "::warning::the plan comment's cell lines leave no room under the 65,536-char "
+                "comment cap for the unmanaged stacks line; it was left out"
+            )
+        else:
+            head = f"{head}\n\n{line}"
     used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
@@ -402,6 +436,24 @@ def load_cells(cells_dir):
     return out
 
 
+def _unmanaged(raw):
+    """The paths `SHIPMATE_UNMANAGED` lists: none when empty, none with one warning when it is
+    not a JSON list of strings."""
+    if not raw:
+        return []
+    try:
+        paths = json.loads(raw)
+    except json.JSONDecodeError:
+        paths = None
+    if isinstance(paths, list) and all(isinstance(p, str) for p in paths):
+        return paths
+    print(
+        "::warning::unmanaged-stacks is not a JSON list of strings; the plan comment names no "
+        "unmanaged stack"
+    )
+    return []
+
+
 def main():
     # prefix="" gathers every check-run on the head SHA: plan jobs, pending apply checks,
     # detect/summary. Plan check names carry the consumer's calling job as a `shipmate / ` prefix,
@@ -411,11 +463,19 @@ def main():
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the verdict's run link and the per-cell fallback link promise.
     url = current_run_url()
+    unmanaged = _unmanaged(os.environ.get("SHIPMATE_UNMANAGED", ""))
+    body = build_comment(cells, checks, url, os.environ.get("HEAD_SHA", ""), unmanaged)
     with open("comment.md", "w", encoding="utf-8") as fh:
-        fh.write(build_comment(cells, checks, url, os.environ.get("HEAD_SHA", "")))
+        fh.write(body)
     pending = any(c["changed"] for c, _ in cells)
+    # A rendered line is the body's third paragraph; no cell section starts with ⚪.
+    line = unmanaged_line(unmanaged)
+    named = bool(line) and body.split("\n\n", 3)[2:3] == [line]
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n")
+        fh.write(
+            f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n"
+            f"unmanaged={'true' if named else 'false'}\n"
+        )
 
 
 if __name__ == "__main__":

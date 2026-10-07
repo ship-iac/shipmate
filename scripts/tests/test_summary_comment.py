@@ -4,6 +4,7 @@ import os
 import pathlib
 
 import pytest
+import yaml
 from _loader import ENGINE as _ENGINE
 from _loader import action_steps, load_script, run_lines, step_by
 
@@ -410,6 +411,75 @@ def test_build_comment_fails_loud_when_even_the_cell_lines_overflow():
         sc.build_comment(cells, {}, RUN_URL, SHA)
 
 
+_LEAD = "⚪ {} changed stack(s) carry no env/* tag and are not managed by shipmate"
+_NO_ROOM = (
+    "::warning::the plan comment's cell lines leave no room under the 65,536-char comment cap "
+    "for the unmanaged stacks line; it was left out\n"
+)
+
+
+def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verdict():
+    """Zero cells still render the line, each path escaped as a cell line's stack is.
+
+    Mutation: dropping the line when `cells` is empty reddens it."""
+    assert sc.build_comment([], {}, RUN_URL, SHA, ["stacks/[new]"]) == (
+        HEAD + f"🟢 no changes {AT}\n\n" + _LEAD.format(1) + ": stacks/&#91;new&#93;"
+    )
+
+
+def test_the_unmanaged_line_names_ten_paths_and_counts_the_rest():
+    """Mutation: naming every path reddens it."""
+    assert sc.unmanaged_line([f"s{i:02}" for i in range(12)]) == (
+        _LEAD.format(12) + ": s00, s01, s02, s03, s04, s05, s06, s07, s08, s09, and 2 more"
+    )
+    assert sc.unmanaged_line([]) == ""
+
+
+def test_the_unmanaged_line_stops_at_its_character_cap():
+    """Mutation: removing the character cap reddens it."""
+    line = sc.unmanaged_line(["a" * 400, "b" * 400] + ["c" * 3000] * 9)
+    assert line == _LEAD.format(11) + ": " + "a" * 400 + ", " + "b" * 400 + ", and 9 more"
+    assert len(line) <= sc.UNMANAGED_LINE_CAP
+
+
+def test_the_unmanaged_line_names_no_path_when_none_fits():
+    """Mutation: joining the empty name list (renders `: , and 10 more`) reddens it."""
+    assert sc.unmanaged_line(["p" * 3000] * 10) == (
+        _LEAD.format(10) + "; their paths are too long to list here."
+    )
+
+
+def test_the_unmanaged_line_is_counted_before_a_fold_out_is_sized():
+    """The line sits in the head, so `used` holds it before any fold-out is sized: the truncated
+    fold-out's limit shrinks by exactly `len(line) + 2`, the length the body gains, and
+    `render_section` cuts the plan at a row boundary (six characters a row here). The two bodies
+    therefore differ by less than one row.
+
+    Mutation: leaving the line out of `used` reddens it (the bodies differ by `len(line) + 2`)."""
+    cells = [(_cell(stack="s000"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1))]
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)
+    body = sc.build_comment(cells, {}, RUN_URL, SHA, ["stacks/unmanaged"])
+    line = _LEAD.format(1) + ": stacks/unmanaged"
+    assert body.startswith(HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n<details>")
+    assert len(without) <= sc.SIZE_BUDGET and len(body) <= sc.SIZE_BUDGET
+    assert abs(len(body) - len(without)) < 6
+
+
+def test_the_unmanaged_line_yields_to_cell_lines_near_the_hard_cap(capsys):
+    """The line is omitted with one warning, so "cell lines alone exceed" keeps one cause.
+
+    Mutation: always adding the line raises that refusal."""
+    cells = [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(130)]
+    pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA))
+    assert pad > 0
+    cells[0][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)
+    assert len(without) == sc.HARD_CAP - 10
+    capsys.readouterr()
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, ["stacks/unmanaged"]) == without
+    assert capsys.readouterr().out == _NO_ROOM
+
+
 def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
     a = tmp_path / "cell-summary.dev-us.stacks-db"
     a.mkdir()
@@ -753,21 +823,24 @@ def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
     doctor's `warned` output: findings render only as run-page annotations, so a run with a
     warning still posts. Behaviour lives in the action's shell, so this is source-derived.
 
+    It yields to the unmanaged stacks line the same way: a pull request changing only stacks
+    with no env/* tag gets a comment naming them.
+
     Mutation: test `"$DOCTOR_WARNED" = "true"` in the skip condition -- red.
-    Mutation: bind `DOCTOR_WARNED` to another step's output -- red."""
+    Mutation: bind `DOCTOR_WARNED` to another step's output -- red.
+    Mutation: drop the `"$UNMANAGED" != "true"` clause from the skip condition -- red.
+    Mutation: bind `UNMANAGED` to another output of step `build` -- red."""
     bodies = _guard_bodies()
-    quiet = next(
-        c
-        for c in bodies
-        if '"$nothing_changed" = "true"' in c
-        and '-z "$id"' in c
-        and '"$DOCTOR_WARNED" != "true"' in c
+    quiet = (
+        '[ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$DOCTOR_WARNED" != "true" ] '
+        '&& [ "$UNMANAGED" != "true" ]'
     )
+    assert quiet in bodies
     assert "exit 0" in bodies[quiet]
     assert not any("gh api" in line for line in bodies[quiet])
-    assert step_by("summary", name="Upsert sticky comment")["env"]["DOCTOR_WARNED"] == (
-        "${{ steps.doctor.outputs.warned }}"
-    )
+    env = step_by("summary", name="Upsert sticky comment")["env"]
+    assert env["DOCTOR_WARNED"] == "${{ steps.doctor.outputs.warned }}"
+    assert env["UNMANAGED"] == "${{ steps.build.outputs.unmanaged }}"
 
 
 #: The doctor step's whole shell body, hand-written: doctor's result is read here once, as the
@@ -847,10 +920,50 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     )
     # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`. Mutation:
     # binding `SHIPMATE_DOCTOR_WARNED` again -- a plan comment reads nothing from doctor.
+    # Mutation: mapping `unmanaged-stacks` to another env name.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
+        "SHIPMATE_UNMANAGED": "${{ inputs.unmanaged-stacks }}",
     }
+    # Mutation: `required: true` (GitHub does not enforce it, but it misdocuments a draft run).
+    decl = yaml.safe_load(src)["inputs"]["unmanaged-stacks"]
+    assert {k: v for k, v in decl.items() if k != "description"} == {
+        "required": False,
+        "default": "",
+    }
+
+
+_BAD_UNMANAGED = (
+    "::warning::unmanaged-stacks is not a JSON list of strings; the plan comment names no "
+    "unmanaged stack\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "out", "flag"),
+    [
+        ("", "", "false"),
+        ("not json", _BAD_UNMANAGED, "false"),
+        ('["stacks/x", 1]', _BAD_UNMANAGED, "false"),
+        ("[]", "", "false"),
+        ('["stacks/x"]', "", "true"),
+    ],
+)
+def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
+    tmp_path, monkeypatch, capsys, raw, out, flag
+):
+    """An empty or invalid value renders no line and leaves `pending` and `count` as they were;
+    `unmanaged` says whether the line rendered, which the upsert's create-skip reads.
+
+    Mutation: `json.loads` without a guard crashes the invalid cases.
+    Mutation: always writing `unmanaged=false` reddens the last case."""
+    monkeypatch.setenv("SHIPMATE_UNMANAGED", raw)
+    assert _run_main(tmp_path, monkeypatch, []) == f"pending=false\ncount=0\nunmanaged={flag}\n"
+    assert capsys.readouterr().out == out
+    line = "\n\n" + _LEAD.format(1) + ": stacks/x" if flag == "true" else ""
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + line
 
 
 def test_main_reports_zero_count_when_no_cell_summaries_arrived(tmp_path, monkeypatch):
