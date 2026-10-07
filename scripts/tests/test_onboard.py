@@ -2559,8 +2559,9 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
     assert checklist_items(checklist_of(out))["`.github/shipmate.toml`"] == (
         "ok",
         [
-            "Provisioned for prdo, which no stack tags yet: its first tagging pull request "
-            "deploys under these environments' protection. If a name is a typo, fix the entry."
+            "Provisioned for prdo, which no stack tags yet: its first",
+            "tagging pull request deploys under these environments' protection. If a name is",
+            "a typo, fix the entry.",
         ],
     )
     assert not [ln for ln in out.splitlines() if ln.startswith("::warning::")]

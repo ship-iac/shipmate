@@ -21,7 +21,8 @@ section below names the SHA the release tags.
 - **Drift moves out of `shipmate.yml` into its own workflow file: delete the `drift` job, the `schedule` trigger and the `drift` verb option from `shipmate.yml`, and save the `shipmate drift` fence in `docs/getting-started.md` under any file name in `.github/workflows/`, one file per sweep, in the re-pin commit. `scripts/onboard` writes only `shipmate.yml`.**
 - **`shipmate doctor` expects `shipmate.yml`'s `verb` options to be `[plan, apply, unlock]`.**
 - **A drift Issue closed because its cell is no longer managed says the stack or environment left the repository, or the stack carries no `env/*` tag.**
-- **A stack with no `env/*` tag is unmanaged: it is skipped with a notice naming it instead of failing the run (`CONTRACT.md` §Tag grammar).**
+- **A stack with no `env/*` tag is unmanaged: it is skipped with a notice that counts the unmanaged stacks and names up to ten, instead of failing the run (`CONTRACT.md` §Tag grammar).**
+- **A deploy refuses when its merged pull request holds a pending apply check on a stack that lost its `env/*` tags after it was planned: retag the stack and re-run the deploy, or apply it by hand and complete the check.**
 - **`scripts/onboard` no longer refuses a stack with no `env/*` tag, and provisions every environment the checkout's `.github/shipmate.toml` declares as well as every one a stack tags, and names a declared entry no stack tags on its `.github/shipmate.toml` checklist item.**
 - **`scripts/onboard` no longer refuses a `shared = true` entry that no stack tags; it provisions the bare `<env>` like any other entry.**
 

@@ -748,9 +748,9 @@ def _table_item(ctx):
         "ok",
         item,
         [
-            f"Provisioned for {', '.join(untagged)}, which no stack tags yet: its first tagging "
-            "pull request deploys under these environments' protection. If a name is a typo, "
-            "fix the entry."
+            f"Provisioned for {', '.join(untagged)}, which no stack tags yet: its first",
+            "tagging pull request deploys under these environments' protection. If a name is",
+            "a typo, fix the entry.",
         ],
     )
 
