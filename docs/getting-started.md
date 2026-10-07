@@ -21,7 +21,10 @@ does with that wiring.
   stack out of CI). `scripts/onboard` provisions every environment the table
   declares and every one a stack tags. So declare an environment in the table
   and run `scripts/onboard` before the first pull request tagging a stack into
-  it merges: that merge deploys.
+  it merges: that merge deploys. Until a stack tags it, `scripts/onboard` and
+  every whole-tree run (the drift sweep, `shipmate unlock`, a bare
+  `shipmate apply`) warn that the table declares an environment no stack tags;
+  that warning is expected.
 - **Nothing to set for the Terramate and OpenTofu versions.** They are in
   [`../VERSIONS`](../VERSIONS), and the `setup` action installs them from the
   engine commit your workflow file pins. Moving to other versions is a pin bump
@@ -76,8 +79,8 @@ nothing about the graph. Before that point the equivalent is
 `terramate experimental run-graph --label stack.dir` run locally.
 
 **Tags.** Environment membership is derived from `env/<name>` tags and nothing
-else; [Before you start](#before-you-start) covers re-tagging an existing
-repository.
+else; [Before you start](#before-you-start) covers adopting a repository whose
+stacks carry no `env/*` tag yet.
 
 **A named AWS profile in generated HCL.** The apply path holds only the OIDC
 session, so a literal `profile` in a `provider` or `backend` block fails there

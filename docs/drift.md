@@ -103,7 +103,9 @@ refuses it. See
 **Every sweep is also where a stale table entry surfaces.** The drift path is
 one of the three paths that scan the whole tree, so it is where the engine warns that
 the environment table declares an environment no stack tags — a leftover entry,
-or a typo in a key. It reports a `needs` predecessor matching no tag the same
+a typo in a key, or an entry declared ahead of the pull request that tags its
+first stack ([`getting-started.md`](getting-started.md) §Before you start); for
+that last cause the warning is expected until that pull request merges. It reports a `needs` predecessor matching no tag the same
 way: it is inert, and the warning names what it therefore fails to do. It also
 names a workload an environment's `workloads` lists and no stack in that
 environment tags. A pull request introducing that typo says nothing about it:
