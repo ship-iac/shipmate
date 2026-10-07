@@ -137,7 +137,9 @@ live probes.
 - **Whether any workflow file calls the engine's `drift.yml`.** Read at the
   commit under examination, like the pin probe. A file counts by the call in
   its text, not by its name, and a call only inside a `#` comment does not
-  count. With none, no stack is ever checked for drift, which is a warning.
+  count. With none, no stack is ever checked for drift, which is a note:
+  a repository may decline drift on purpose. The note keeps the verdict at ⚪
+  with the help hint, never 🟢 no problems found.
   An unreadable file leaves the question unverified, a note, since the call
   may sit in a file the probe could not read.
 
@@ -158,7 +160,8 @@ One such failure is the App token lacking read access to `rules/branches` or
 which the environment reads need on some configurations. One endpoint failure
 can name more than one probe: a `rules/branches` failure degrades both the
 gate-rule and the review-rule probe, because the two read it independently on
-purpose, so neither is silenced by the other's failure.
+purpose, so neither is silenced by the other's failure. The drift-file probe's
+"could not verify" finding is a note, because its worst finding is a note.
 
 The engine-pin and fork-trigger probes degrade to a note instead. Both read
 `.github/workflows`, and that read legitimately fails on the pull request that
