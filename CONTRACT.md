@@ -950,19 +950,15 @@ table's own keys and each `needs` item are held to that charset and to the
 `-plan`/`-apply` suffix rule, and an uppercase name is refused rather than left to
 match nothing.
 
-An `env/<name>` tag is mandatory for every stack a run inspects, and an
-untagged one fails the whole run rather than being skipped. Which stacks
-are inspected differs by path: the changed set on the plan and deploy
-paths, so untagged stacks elsewhere in the tree do not fail a plan run until
-one of them changes; every stack on the drift path, whatever a sweep's `tags`
-query, which is therefore the repo-wide backstop that catches the rest; and none on the checks-sourced
-bare-apply `detect`, which exempts the check deliberately — an untagged stack
-carries no apply check and so contributes no cell anyway, and an unrelated
-one must not abort an apply. Failing the whole run rather than the one stack is
-deliberate too: a silently skipped stack plans and applies nothing while the
-gate goes green over it, which is the one failure this contract will not trade
-for convenience. The failure names every untagged stack it found, so they are
-tagged from that list rather than found one re-run per stack.
+A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip
+it, and plan, deploy and drift print a notice naming every unmanaged stack they
+scanned (the changed set on plan and deploy, the whole tree on drift). The plan
+comment names the unmanaged stacks a pull request changes, under its verdict. A
+`workload/*` tag on an unmanaged stack is never checked. An `env/<name>` tag
+whose environment has no entry in the environment table still refuses the run
+under `layout = "tf_vars"`. The trade-off is accepted: a forgotten tag on a new
+stack is a notice and a line in the plan comment, not a refusal, and the gate
+goes green over a stack that plans nothing.
 
 **A drift sweep's `tags` query narrows what the sweep plans, never what it
 scans.** Engine `drift.yml` takes it as an input, one literal query per drift
@@ -985,7 +981,7 @@ workflow file:
   `shipmate / gate` greens.
 
 The repo-wide checks run over the full tree every sweep scans, before the query
-applies: untagged stacks, slug collisions, two `workload/*` tags on one stack,
+applies: slug collisions, two `workload/*` tags on one stack,
 `tf_vars`-layout coverage of every tagged environment, and the unused-entry
 warnings. The 256-cell matrix limit counts the cells the query keeps.
 
@@ -993,6 +989,21 @@ Three checks run per selected cell, after the query, so a cell it drops escapes
 them: resolving the cell's row from the environment table, the refusal of a row
 whose `env_binding` names no GitHub Environment, and the refusal of a
 `workload/*` tag its environment's `workloads` list does not name.
+
+### Taking a stack out of CI
+
+1. Remove every `env/*` tag from the stack in a pull request. Its plan comment
+   names the stack as unmanaged, and merging deploys nothing for it.
+2. Work on the stack by hand.
+3. Retag the stack in a later pull request to bring it back, or delete it.
+
+The stack's open drift Issues close on the next sweep that plans at least one
+cell, as Issues of a cell no longer managed. A sweep left with no cell skips its
+`issues` job ([`docs/drift.md`](docs/drift.md)), so close them by hand then.
+
+A stack that exists once, such as one in a management account, is a
+single-stack environment, not an unmanaged stack: give it an environment of its
+own ([`docs/aws.md`](docs/aws.md) §The environment table).
 
 ## Comment-ops
 

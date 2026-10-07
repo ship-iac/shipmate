@@ -13,16 +13,17 @@ those results into GitHub Issues: one labelled `drift` Issue per drifted stack �
 environment, titled `drift: <env> / <stack>`, updated in place while the drift
 persists and closed with a "Drift resolved" comment on the next clean run of
 its cell. An open `drift` Issue whose title starts with `drift: ` and names no
-stack × environment cell left in the repository is closed too, by any sweep
-whatever its query, with a comment that its stack or environment left the
-repository; an Issue titled any other way is never closed. That close runs
+stack × environment cell shipmate still manages is closed too, by any sweep
+whatever its query, with a comment that the cell is no longer managed: its
+stack or environment left the repository, or its stack carries no `env/*` tag.
+An Issue titled any other way is never closed. That close runs
 only when the sweep planned the default branch's current head: a re-run of an
 old sweep, or an older sweep finishing after a newer one, leaves those Issues
 open with a notice, and a head it cannot read fails the run. A sweep that plans
-no cell — every stack deleted, or a query matching nothing — skips the `issues`
-job and closes nothing, so after deleting every stack close its Issues by
-hand. The lookup is over open Issues only, so drift that returns later
-opens a fresh Issue rather than reopening the closed one.
+no cell — every stack deleted or untagged, or a query matching nothing — skips
+the `issues` job and closes nothing, so after deleting or untagging every stack
+close its Issues by hand. The lookup is over open Issues only, so drift that
+returns later opens a fresh Issue rather than reopening the closed one.
 To reach Slack, subscribe GitHub's Slack app
 (`/github subscribe <owner>/<repo> issues workflows`): it posts Issue opens and
 closes and workflow runs, not an update to an Issue that stays open.
@@ -171,13 +172,11 @@ the repository, so nothing closes the Issues. Close them by hand.
 Every sweep runs the repo-wide checks over the whole tree, whatever its query
 selects:
 
-- A stack with no `env/*` tag anywhere in the tree fails the sweep — the
-  repo-wide backstop ([`../CONTRACT.md`](../CONTRACT.md) §Tag grammar).
 - Two stack paths in one environment that slug alike (`net/edge` and `net-edge`
   both render `plan.<env>.net-edge`) fail the sweep
   ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifacts). A plan run catches such
   a pair only when it changes both.
-- A stack carrying two `workload/*` tags fails the sweep.
+- A stack with an `env/*` tag carrying two `workload/*` tags fails the sweep.
 - Under `layout = "tf_vars"`, an environment a stack tags with no entry in the
   environment table fails the sweep.
 - The unused-entry warnings above name what the table declares and no stack

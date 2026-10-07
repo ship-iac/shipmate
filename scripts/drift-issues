@@ -20,7 +20,8 @@ stack x env is left untouched rather than being auto-closed as if the
 environment were clean.
 
 An open Issue titled `drift: ` that names no cell of the scanned tree is
-closed: its stack or environment left the repository. Every cell of the tree,
+closed: it is no longer a managed cell, because its stack or environment left the
+repository or its stack carries no `env/*` tag. Every cell of the tree,
 passed in `SHIPMATE_TREE_CELLS`, says which cells exist, not the loaded artifacts
 or this sweep's matrix: a sweep filtered by a tag query must not close another
 sweep's Issues, and a lost artifact or a cell job that died before uploading must
@@ -192,8 +193,9 @@ def close_removed(rows, present, url):
             continue
         label = title.removeprefix(PREFIX)
         comment = (
-            f"`{label}` left the repository: [drift run]({url}) found no such stack and "
-            "environment."
+            f"`{label}` is no longer a managed cell: [drift run]({url}) found no such stack "
+            "and environment. The stack or environment left the repository, or the stack "
+            "carries no `env/*` tag."
         )
         try:
             _run(["gh", "issue", "close", str(row["number"]), "--comment", comment])
@@ -225,13 +227,13 @@ def main():
     if head is None:
         print(
             "::error::could not read the default branch head, so no Issue of a cell that "
-            "left the repository was closed"
+            "is no longer managed was closed"
         )
         failed.append("the default branch head")
     elif head != sha:
         print(
             f"::notice::this sweep planned {sha} but the default branch is at {head}, so no "
-            "Issue of a cell that left the repository was closed"
+            "Issue of a cell that is no longer managed was closed"
         )
     else:
         failed += close_removed(rows, present, url)

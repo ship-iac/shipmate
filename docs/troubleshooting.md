@@ -302,7 +302,7 @@ its `todo` items.
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.
 
-There are three. The first is the `SHIPMATE_APP_ID` repository variable
+There are two. The first is the `SHIPMATE_APP_ID` repository variable
 differing from `--app-id`. `--app-id` does not only set that variable: it pins
 the gate ruleset's `integration_id` and selects whose private key is stored on
 `shipmate-engine`. Reconciling the two separately would require a
@@ -311,9 +311,7 @@ variable — can never post, and the default branch would stay blocked until an
 admin deleted the ruleset. Re-run with the variable's value, or change the
 variable first. The second is a run without `--key` while `shipmate-engine`
 holds no `SHIPMATE_APP_PRIVATE_KEY`, or does not exist yet: there is no key to
-place. Re-run with `--key <path to the App's PEM private key>`. The third is a
-`shared = true` entry naming an environment no stack's `env/<name>` tag
-declares: it would bind nothing. Tag the stacks or drop the entry.
+place. Re-run with `--key <path to the App's PEM private key>`.
 
 ## Common failures
 

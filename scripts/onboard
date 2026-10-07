@@ -23,8 +23,9 @@ Exit codes: 0 clean, 2 at least one item differs, 1 a refusal or a failed
 write. `argparse` also exits 2 on a usage error, so a wrapper branching on 2
 must distinguish the two by output, or validate its own arguments first.
 
-Environments are derived from the repository's own Terramate env/* tags, never
-passed in: the set of environments is a property of the stacks. Those bound as
+Environments are derived, never passed in: the union of the repository's own
+Terramate env/* tags and the `environments` entries of the checkout's
+`.github/shipmate.toml`. Those bound as
 one bare `<env>` instead of the `<env>-plan` / `<env>-apply` pair are the entries
 holding `shared = true` in the checkout's `.github/shipmate.toml`.
 """

@@ -143,8 +143,9 @@ def _gh(monkeypatch, rows):
 
 def _left(number, label):
     comment = (
-        f"`{label}` left the repository: [drift run]({_RUN_URL}) found no such stack and "
-        "environment."
+        f"`{label}` is no longer a managed cell: [drift run]({_RUN_URL}) found no such stack "
+        "and environment. The stack or environment left the repository, or the stack carries "
+        "no `env/*` tag."
     )
     return ["gh", "issue", "close", str(number), "--comment", comment]
 
@@ -394,7 +395,7 @@ def test_a_stale_sweep_closes_no_removed_cells_issue(tmp_path, monkeypatch, caps
     assert capsys.readouterr().out == (
         "loaded 1 drift cell summaries\n"
         f"::notice::this sweep planned {_SHA} but the default branch is at {_NEWER}, so no "
-        "Issue of a cell that left the repository was closed\n"
+        "Issue of a cell that is no longer managed was closed\n"
     )
 
 
@@ -411,8 +412,8 @@ def test_an_unread_head_closes_no_removed_cells_issue_and_fails_the_run(
     assert str(exc.value) == "::error::drift reporting failed for: the default branch head"
     assert capsys.readouterr().out == (
         "loaded 0 drift cell summaries\n"
-        "::error::could not read the default branch head, so no Issue of a cell that left the "
-        "repository was closed\n"
+        "::error::could not read the default branch head, so no Issue of a cell that is no "
+        "longer managed was closed\n"
     )
 
 
