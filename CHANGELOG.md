@@ -33,6 +33,7 @@ section below names the SHA the release tags.
 - **`scripts/onboard`'s lock-file checklist item names `tofu init -backend=false`, which works before a stack's modules are installed.**
 - **`shipmate doctor` matches only the engine's own reusable workflows: a call to another repository's workflow of the same name no longer counts.**
 - **`shipmate doctor` warns when the default branch's `pull_request` rule requires last-push approval at 0 approving reviews, which blocks a sole maintainer's merge, and `docs/branch-protection.md` names last-push approval as the third setting a sole maintainer turns off.**
+- **`shipmate doctor`'s report no longer says the commit's runs had not finished because a cell's apply check is waiting to be applied.**
 
 ## [0.42.0] — 2026-10-04
 

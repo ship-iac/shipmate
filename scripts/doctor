@@ -2154,15 +2154,21 @@ def latest_check_ids(lines, app_id=""):
 
 def harvest_pending(lines, app_id=""):
     """True when any shipmate-relevant check run on this commit has not
-    completed.
+    completed, the App's `apply / ` checks excluded: each stays queued by
+    design until its cell is applied, and records no warnings.
 
     Keyed on the WHOLE relevant set, not the subset `latest_check_ids` selects:
     that ranking pushes a queued run below a completed one of the same name,
     which would hide exactly the case this flag exists to report."""
     for line in lines:
         run = _parse_check_run(line, app_id)
-        if run is not None and run.get("status") != "completed":
-            return True
+        if run is None or run.get("status") == "completed":
+            continue
+        if run.get("app_slug") != "github-actions" and (run.get("name") or "").startswith(
+            ag.APPLY_PREFIX
+        ):
+            continue
+        return True
     return False
 
 

@@ -2029,6 +2029,57 @@ def test_harvest_pending_ignores_third_party_check_runs():
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is False
 
 
+_QUEUED_APP_APPLY = (
+    '{"id": 3, "name": "apply / app / dev-eu", "app_slug": "shipmate", "app_id": 999, '
+    '"status": "queued"}'
+)
+
+
+def test_harvest_pending_ignores_the_queued_app_apply_checks():
+    """The App creates each changed cell's `apply / ` check queued until it is applied, so
+    counting it reported every pull request with an unapplied cell as unfinished.
+
+    Mutation: drop the `apply / ` skip -- True."""
+    lines = ['{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED]
+    assert doctor.harvest_pending([*lines, _QUEUED_APP_APPLY], app_id=_APP_ID) is False
+
+
+def test_harvest_pending_counts_a_queued_github_actions_apply_job():
+    """A `github-actions` apply job is queued only while an apply runs.
+
+    Mutation: skip every run with `apply / ` anywhere in its name, whoever authored it --
+    False."""
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        _QUEUED_APP_APPLY,
+        '{"id": 4, "name": "wave0 / apply / app / dev-eu", "app_slug": "github-actions", '
+        '"status": "queued"}',
+    ]
+    assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
+
+
+def test_harvest_pending_counts_a_queued_app_run_outside_the_apply_checks():
+    """Mutation: skip every App-authored run -- False."""
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        '{"id": 6, "name": "db / dev-eu", "app_slug": "shipmate", "app_id": 999, '
+        '"status": "queued"}',
+    ]
+    assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
+
+
+def test_harvest_pending_counts_a_queued_run_ranked_below_a_completed_one():
+    """A queued run has no `started_at`, so newest-per-name ranks it below a completed run
+    of the same name.
+
+    Mutation: key the flag on the newest run per name, as `latest_check_ids` ranks -- False."""
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        '{"id": 2, "name": "app / dev-eu", "app_slug": "github-actions", "status": "queued"}',
+    ]
+    assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
+
+
 def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_path, capsys):
     """The reduction already reads every check run on the commit, so it also decides the
     pending flag, which reaches the render step as the gather step's output. The TSV on
