@@ -749,13 +749,15 @@ def _unverified(subject, path=_WORKFLOWS_DIR):
     )
 
 
+def _no_engine(subject):
+    """The NOTICE of a probe checking `subject` against the engine repository when there is
+    none. The calling step supplies it, so an unknown one is not a repository
+    misconfiguration, and no other repository is matched in its place."""
+    return (NOTICE, f"{subject} not verified: the engine repository could not be determined.")
+
+
 PIN_UNREADABLE, PIN_NO_COMMIT = _unverified("engine pin freshness")
-# NOTICE: the calling step supplies the engine repository, so an unknown one is not a
-# repository misconfiguration, and no other repository is read in its place.
-PIN_NO_ENGINE = (
-    NOTICE,
-    "engine pin freshness not verified: the engine repository could not be determined.",
-)
+PIN_NO_ENGINE = _no_engine("engine pin freshness")
 
 
 def _contents_ref(ctx):
@@ -976,9 +978,11 @@ def _stripped_text(text):
     return "\n".join(_strip_comment(ln) for ln in text.splitlines())
 
 
-def _engine_call(callee):
-    """The `uses:` selector for a call of the engine reusable workflow `callee`."""
-    return re.compile(rf"/\.github/workflows/{re.escape(callee)}@")
+def _engine_call(engine, callee):
+    """The `uses:` selector for a call of `callee`, the reusable workflow of the engine
+    repository `engine` (`ctx["engine_repo"]`). Anchored at `uses:` like `_PIN`, so another
+    repository's workflow of the same name is not the engine's."""
+    return re.compile(rf"uses:\s*['\"]?{re.escape(engine)}/\.github/workflows/{re.escape(callee)}@")
 
 
 def _on_block(text):
@@ -1068,9 +1072,9 @@ def _unsafe_checkout_warnings(text, name):
     default is the outermost guard on this path.
 
     `_UNSAFE_CHECKOUT` matches at a line start OR after `{`/`,`: flow style is a
-    house idiom here — `docs/drift.md` and all four sample repositories write
-    `with: { fetch-depth: 0 }`, so a one-line checkout step is what a consumer
-    copying those pages produces. The value stops at `,`/`}` for the same
+    house idiom here — the engine's own workflows write
+    `with: { fetch-depth: 0, ref: ... }`, so a one-line checkout step is what a
+    consumer copying them produces. The value stops at `,`/`}` for the same
     reason: a flow-style `false` must read as `false` and not as `false }`,
     which would report the safest shape a consumer can write."""
     values = [
@@ -1148,9 +1152,6 @@ def _fork_trigger_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
 
 
-# The shim's call of the engine's plan workflow, whose block the job-name finding judges. Its
-# absence is `_routing_finding`'s zero-count finding for `plan.yml`.
-_PLAN_WORKFLOW_CALL = _engine_call("plan.yml")
 # Line-anchored, and matched only against a direct child of the calling job: a `name:` or `if:`
 # deeper in the block belongs to something else. Read through `_job_key`.
 _JOB_KEY = re.compile(r"^[ \t]*(?P<key>name|if)[ \t]*:(?P<value>.*)$")
@@ -1209,7 +1210,7 @@ def _job_key(region, key):
     return values[0] if values else None
 
 
-def _shim_job_name_finding(text, name):
+def _shim_job_name_finding(text, name, engine):
     """The calling job's display name, or [] when it is `shipmate` or the file
     calls the engine's plan workflow nowhere.
 
@@ -1228,8 +1229,11 @@ def _shim_job_name_finding(text, name):
     `jobs:` / `  shipmate:` / `    uses: …` produces the same check names as the documented
     shape. Only a direct child of the job is read as its name, so a `name:` under `with:`
     cannot stand in for one. Judged block-style, like the documented file and every other
-    finder here."""
-    region = _call_region(text, _PLAN_WORKFLOW_CALL)
+    finder here.
+
+    A file calling no `plan.yml` of `engine` draws nothing here: that absence is
+    `_routing_finding`'s zero-count finding."""
+    region = _call_region(text, _engine_call(engine, "plan.yml"))
     if region is None:
         return []
     named = _job_key(region, "name")
@@ -1494,7 +1498,7 @@ def _normalize_if(value):
     return " ".join(v.split())
 
 
-def _routing_finding(text, name):
+def _routing_finding(text, name, engine):
     """One finding per `ROUTING_IFS` entry the file does not satisfy.
 
     One file gates five jobs on the event, and a wrong gate is silent in both directions: a
@@ -1505,7 +1509,7 @@ def _routing_finding(text, name):
     out = []
     stripped = _stripped_text(text)
     for callee, expected in ROUTING_IFS.items():
-        pattern = _engine_call(callee)
+        pattern = _engine_call(engine, callee)
         count = len(pattern.findall(stripped))
         if count != 1:
             out.append(
@@ -1552,6 +1556,11 @@ SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
 )
 
 
+SHIPMATE_YML_NO_ENGINE = _no_engine(
+    "the workflow file's job name, dispatch wiring, event routing and leftover drift call"
+)
+
+
 SHIPMATE_YML_CALLS_DRIFT = (
     WARNING,
     "`shipmate.yml` still calls the engine's `drift.yml`: move the drift job to its own "
@@ -1571,7 +1580,13 @@ def _shipmate_yml_warnings(ctx):
     unreadable workflow file cannot hide it. A missing file is reported as unreadable, a
     NOTICE rather than a WARNING: the contents read cannot tell a 404 from a permission or
     API failure, neither of which is a misconfiguration. A repository without the file
-    receives no dispatch."""
+    receives no dispatch.
+
+    Without the engine repository nothing is read, dispatch wiring included: the other three
+    findings cannot be judged, and one notice covers the probe like its other degrades."""
+    engine = ctx["engine_repo"]
+    if not engine:
+        return [SHIPMATE_YML_NO_ENGINE]
     ref = _contents_ref(ctx)
     if ref is None:
         return [SHIPMATE_YML_NO_COMMIT]
@@ -1580,12 +1595,12 @@ def _shipmate_yml_warnings(ctx):
         return [SHIPMATE_YML_UNREADABLE]
     name = "shipmate.yml"
     return [
-        *_shim_job_name_finding(text, name),
+        *_shim_job_name_finding(text, name, engine),
         *_dispatch_wiring_finding(text, name),
-        *_routing_finding(text, name),
+        *_routing_finding(text, name, engine),
         *(
             [SHIPMATE_YML_CALLS_DRIFT]
-            if _engine_call("drift.yml").search(_stripped_text(text))
+            if _engine_call(engine, "drift.yml").search(_stripped_text(text))
             else []
         ),
     ]
@@ -1859,6 +1874,7 @@ def _app_permission_warnings(ctx):
 DRIFT_FILE_UNREADABLE, DRIFT_FILE_NO_COMMIT = _unverified(
     "whether a workflow file calls the engine's drift.yml"
 )
+DRIFT_FILE_NO_ENGINE = _no_engine("whether a workflow file calls the engine's drift.yml")
 DRIFT_FILE_MISSING = (
     NOTICE,
     "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
@@ -1875,11 +1891,14 @@ def _drift_file_warnings(ctx):
     any file, and a commented-out call sweeps nothing. A scan that stopped at an unreadable
     file reports only the unreadable NOTICE, never the missing one: the call may sit in a file it
     never read.
+    Without the engine repository nothing is read: any repository's `drift.yml` would match.
     """
+    if not ctx["engine_repo"]:
+        return [DRIFT_FILE_NO_ENGINE]
     ref = _contents_ref(ctx)
     if ref is None:
         return [DRIFT_FILE_NO_COMMIT]
-    call = _engine_call("drift.yml")
+    call = _engine_call(ctx["engine_repo"], "drift.yml")
     callers = []
 
     def per_file(text, name):

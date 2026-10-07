@@ -26,6 +26,8 @@ _BRANCH = "main"
 _ENVS = {"dev-eu"}
 _HEAD = "f" * 40
 _ENGINE_REPO = "acme/engine"
+#: The engine repository `docs/getting-started.md`'s fence calls.
+_PUBLISHED_ENGINE = "ship-iac/shipmate"
 _WF_DIR = f"repos/{_REPO}/contents/.github/workflows"
 # The pin probe reads the workflow files at the commit under examination, so
 # every contents path it asks for carries _ctx()'s head_sha as ?ref=.
@@ -2718,7 +2720,7 @@ _WRONG_JOB_NAME_TEXT = (
 
 
 def test_a_shim_whose_job_carries_the_contract_name_is_silent():
-    assert doctor._shim_job_name_finding(_SHIPMATE_WF, "shipmate.yml") == []
+    assert doctor._shim_job_name_finding(_SHIPMATE_WF, "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_shim_whose_job_is_named_something_else_is_reported():
@@ -2726,7 +2728,7 @@ def test_a_shim_whose_job_is_named_something_else_is_reported():
     vacuously if the probe reports nothing for everything, so it is paired with the silent
     case above."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == [
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
 
@@ -2738,7 +2740,7 @@ def test_a_shim_with_no_job_name_takes_the_job_id_and_is_silent():
     text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
         "    name: shipmate\n", "", 1
     )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_job_name_beats_a_job_id_that_is_the_contract_name():
@@ -2753,7 +2755,7 @@ def test_a_job_name_beats_a_job_id_that_is_the_contract_name():
     text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
         "    name: shipmate\n", "    name: terraform\n", 1
     )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == [
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
 
@@ -2762,7 +2764,7 @@ def test_a_job_id_that_is_not_the_contract_name_is_reported():
     """The other half of the job-id fallback: with no `name:` the id IS the display name, so
     an id that is not `shipmate` produces the wrong check names."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1)
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == [
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
 
@@ -2775,7 +2777,7 @@ def test_a_name_below_the_uses_line_is_still_the_jobs_name():
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
         uses_line, uses_line + "    name: shipmate\n", 1
     )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_name_deeper_in_the_block_is_not_the_jobs_name():
@@ -2785,7 +2787,7 @@ def test_a_name_deeper_in_the_block_is_not_the_jobs_name():
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
         anchor, f"{anchor}    with:\n      name: shipmate\n", 1
     )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == [
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
 
@@ -2794,7 +2796,7 @@ def test_a_quoted_job_name_is_silent():
     """Formatters quote scalars, so the value carries one layer of YAML quoting the comparison
     must strip. Mutation: drop the `.strip("\\"'")` on the matched value."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", '    name: "shipmate"\n', 1)
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_trailing_comment_after_the_job_name_is_silent():
@@ -2804,14 +2806,16 @@ def test_a_trailing_comment_after_the_job_name_is_silent():
     text = _SHIPMATE_WF.replace(
         "    name: shipmate\n", "    name: shipmate  # the name the plan links resolve\n"
     )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent():
     """Nothing to name: the routing finding reports the missing call, and two findings for one
     hole ask the reader's question twice."""
     assert (
-        doctor._shim_job_name_finding("on:\n  pull_request_target:\njobs:\n  x:\n", "shipmate.yml")
+        doctor._shim_job_name_finding(
+            "on:\n  pull_request_target:\njobs:\n  x:\n", "shipmate.yml", _ENGINE_REPO
+        )
         == []
     )
 
@@ -2820,7 +2824,7 @@ def test_an_unparseable_shim_reports_nothing_and_does_not_crash():
     """doctor reads consumer text with regexes precisely because a consumer file may not
     parse. A YAML parser raises here; this probe must return the finding it can see."""
     text = _SHIPMATE_WF.replace("  plan:\n", "  plan:\n    on: [ unbalanced\n", 1)
-    assert doctor._shim_job_name_finding(text, "shipmate.yml") == []
+    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_the_shipmate_yml_probe_is_registered_and_runs_its_three_finders_in_order(monkeypatch):
@@ -3010,7 +3014,7 @@ def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported_once(mon
     text = fence[: fence.index("  plan:\n")] + fence[fence.index("  comment-ops:\n") :]
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shipmate_yml_warnings(_ctx()) == [
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_PUBLISHED_ENGINE)) == [
         (doctor.WARNING, _wrong_count_text("plan.yml", 0))
     ]
 
@@ -3048,7 +3052,7 @@ def test_the_documented_workflow_file_is_dispatchable_and_correctly_named(monkey
     """
     responses = _fork_responses({"shipmate.yml": _documented_workflow_file()})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._shipmate_yml_warnings(_ctx()) == []
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_PUBLISHED_ENGINE)) == []
 
 
 def test_a_flow_style_on_value_is_silent():
@@ -3089,7 +3093,7 @@ def test_a_workflow_dispatch_line_under_jobs_does_not_satisfy_the_trigger():
 def test_a_failing_shipmate_yml_probe_degrades_naming_the_file(monkeypatch):
     """Mutation: drop the probe's `label` -- the note names "the shipmate yml settings"."""
 
-    def boom(text, name):
+    def boom(text, name, engine):
         raise RuntimeError("boom")
 
     responses = _fork_responses({"shipmate.yml": _WF_NO_TRIGGER})
@@ -3174,7 +3178,8 @@ def test_the_routing_probe_is_silent_on_the_documented_file():
     the file consumers paste, verbatim, through the whole probe.
 
     Mutation: edit any one of the five `ROUTING_IFS` expressions."""
-    assert doctor._routing_finding(_documented_workflow_file(), "shipmate.yml") == []
+    text = _documented_workflow_file()
+    assert doctor._routing_finding(text, "shipmate.yml", _PUBLISHED_ENGINE) == []
 
 
 def test_the_routing_probe_reports_a_job_whose_if_was_edited():
@@ -3184,7 +3189,9 @@ def test_the_routing_probe_reports_a_job_whose_if_was_edited():
     Mutation: compare the found expression as a prefix of the expected one instead of whole,
     and this edit passes."""
     text = _SHIPMATE_WF.replace(" && inputs.verb == 'apply'\n", "\n", 1)
-    assert doctor._routing_finding(text, "shipmate.yml") == [(doctor.WARNING, _EDITED_IF_TEXT)]
+    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == [
+        (doctor.WARNING, _EDITED_IF_TEXT)
+    ]
 
 
 def test_the_routing_finding_row_keeps_the_expected_if_intact():
@@ -3198,7 +3205,7 @@ def test_the_routing_finding_row_keeps_the_expected_if_intact():
         "",
         1,
     )
-    [(level, finding)] = doctor._routing_finding(text, "shipmate.yml")
+    [(level, finding)] = doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO)
     assert doctor._finding_row(level, finding) == (
         f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s job calling the engine's "
         "`plan.yml` declares no `if:`, so it then runs on every one of this file's triggers, so "
@@ -3214,7 +3221,7 @@ def test_the_routing_probe_reports_a_missing_job():
 
     Mutation: skip a callee the file does not call (`if count == 0: continue`)."""
     text = _SHIPMATE_WF[: _SHIPMATE_WF.index("  unlock:\n")]
-    assert doctor._routing_finding(text, "shipmate.yml") == [
+    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _wrong_count_text("unlock.yml", 0))
     ]
 
@@ -3229,8 +3236,32 @@ def test_the_routing_probe_reports_two_jobs_calling_one_callee():
         "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'\n"
         f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
     )
-    assert doctor._routing_finding(text, "shipmate.yml") == [
+    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _wrong_count_text("apply.yml", 2))
+    ]
+
+
+def test_another_repositorys_plan_workflow_is_not_routed():
+    """A third party's `plan.yml` is not a second job calling the engine's.
+
+    Mutation: drop the repository from `_engine_call`'s pattern -- a count-2 finding."""
+    text = _SHIPMATE_WF + "  lint:\n    uses: someorg/tf-tools/.github/workflows/plan.yml@v2\n"
+    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == []
+
+
+def test_the_shipmate_yml_probe_without_the_engine_repo_is_a_note_not_a_read(monkeypatch):
+    """Mutation: match any repository's workflows when `engine_repo` is empty."""
+
+    def gh(path):
+        pytest.fail(f"read the API with no engine repository: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._shipmate_yml_warnings(_ctx(engine_repo="")) == [
+        (
+            "notice",
+            "the workflow file's job name, dispatch wiring, event routing and leftover drift "
+            "call not verified: the engine repository could not be determined.",
+        )
     ]
 
 
@@ -3370,6 +3401,34 @@ def test_a_drift_call_in_a_file_of_any_name_satisfies_the_drift_probe(monkeypatc
     assert _drift_probe(monkeypatch, {"shipmate-drift.yml": plan_only}) == [_NO_DRIFT_FILE]
 
 
+def test_another_repositorys_drift_workflow_draws_the_missing_drift_notice(monkeypatch):
+    """A third party's `drift.yml` sweeps nothing shipmate reports on.
+
+    Mutation: drop the repository from `_engine_call`'s pattern -- the probe goes silent."""
+    other = _SHIPMATE_DRIFT_WF.replace(
+        f"{_ENGINE_REPO}/.github/workflows/drift.yml@{_SHA}",
+        "someorg/tf-tools/.github/workflows/drift.yml@v2",
+    )
+    assert "someorg/tf-tools/.github/workflows/drift.yml@v2" in other
+    assert _drift_probe(monkeypatch, {"sweeps.yml": other}) == [_NO_DRIFT_FILE]
+
+
+def test_the_drift_probe_without_the_engine_repo_is_a_note_not_a_read(monkeypatch):
+    """Mutation: match any repository's `drift.yml` when `engine_repo` is empty."""
+
+    def gh(path):
+        pytest.fail(f"read the API with no engine repository: {path}")
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._drift_file_warnings(_ctx(engine_repo="")) == [
+        (
+            "notice",
+            "whether a workflow file calls the engine's drift.yml not verified: the engine "
+            "repository could not be determined.",
+        )
+    ]
+
+
 def test_a_commented_out_drift_call_draws_the_missing_drift_notice(monkeypatch):
     """A call only inside a `#` comment sweeps nothing.
 
@@ -3447,7 +3506,7 @@ def test_drift_is_not_a_verb_shipmate_yml_offers():
 def test_shipmate_yml_without_a_drift_job_draws_no_routing_finding():
     """Mutation: re-add the `drift.yml` entry to `ROUTING_IFS` -- a zero-count finding."""
     assert "drift.yml" not in _SHIPMATE_WF
-    assert doctor._routing_finding(_SHIPMATE_WF, "shipmate.yml") == []
+    assert doctor._routing_finding(_SHIPMATE_WF, "shipmate.yml", _ENGINE_REPO) == []
 
 
 _SHIPMATE_YML_CALLS_DRIFT_TEXT = (
