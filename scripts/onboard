@@ -33,10 +33,15 @@ The closing checklist also reads the whole Terramate tree: stacks carrying no en
 tag, the tag refusals a plan would raise (two workload/* tags on one stack, two stack
 paths sharing one plan artifact name, a workload tag its environment's `workloads` list
 does not name), listed workloads no stack tags, and `needs` naming an environment no
-stack tags. Each is a checklist item; none changes the exit code.
+stack tags. It reads the working tree's `.github/workflows/` too: each file calling the
+engine's `drift.yml` has its `tags` query matched against the tree, naming cells no sweep
+covers, a clause or query matching no cell, and a sweep above the matrix limit. Each is a
+checklist item; none changes the exit code.
 """
 
 import argparse
+import contextlib
+import io
 import json
 import pathlib
 import re
@@ -638,14 +643,15 @@ def _reconcile_ruleset(ctx):
 #: the workflow file is rendered from a fence that guard parses, and an indented fence must
 #: be dedented rather than missed.
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
+ENGINE_SLUG = "ship-iac/shipmate"
 _DOC_PIN = re.compile(
-    r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
+    rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
 )
 #: Only a 40-hex pin, matching what the docs/releasing.md re-pin rewrites: a file still carrying
 #: the docs placeholder must not be reported `pin-only`, because that names a remedy which would
 #: then find no engine reference to move.
 _ANY_PIN = re.compile(
-    r"(?P<ref>ship-iac/shipmate/\.github/workflows/[^@\s]+)@[0-9a-f]{40}[^\S\n]*(#[^\n]*)?"
+    rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@[0-9a-f]{{40}}[^\S\n]*(#[^\n]*)?"
 )
 
 
@@ -967,16 +973,101 @@ def _adoption_item(ctx):
     )
 
 
-#: Always `todo`: a drift file may have any name, so this script cannot find one to mark.
-_DRIFT_ITEM = (
-    "todo",
-    "drift workflow file",
-    [
-        "Add one workflow file per drift sweep from the `shipmate drift` fence in",
-        "docs/getting-started.md, under any name in `.github/workflows/`, with the same",
-        "pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).",
-    ],
-)
+_NO_DRIFT_FILE = [
+    "Add one workflow file per drift sweep from the `shipmate drift` fence in",
+    "docs/getting-started.md, under any name in `.github/workflows/`, with the same",
+    "pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).",
+]
+
+#: A `tags:` key at the start of a line (block form) or after `{` or `,` (flow form).
+_TAGS_KEY = re.compile(r"""(?:^[ \t]*|(?P<flow>[{,])[ \t]*)["']?tags["']?[ \t]*:""", re.M)
+
+
+def _drift_query(region):
+    """(the `tags` query of the drift job `region`, "") or (None, why it cannot be read).
+    `region` is None when the selector matched a call `_call_region` cannot find line by line.
+
+    No key is "", which sweeps every cell. A block value runs to the end of the line, so
+    `env/a,env/b` is one OR query; a flow value stops at `,` or `}` unless quoted.
+    """
+    if region is None:
+        return None, "its `uses:` value starts on a later line, which this reader does not follow"
+    values = []
+    for m in _TAGS_KEY.finditer(region):
+        rest = region[m.end() :].partition("\n")[0].strip()
+        if rest[:1] in ("'", '"'):
+            values.append(rest[1:].partition(rest[0])[0])
+        elif m["flow"]:
+            values.append(re.split(r"[,}]", rest, maxsplit=1)[0].rstrip())
+        else:
+            values.append(rest)
+    if len(values) > 1:
+        return None, "its drift job sets `tags` more than once"
+    if values and "${{" in values[0]:
+        return None, "its `tags` is a `${{ }}` expression, which only a run resolves"
+    return (values[0] if values else ""), ""
+
+
+def _drift_files(root):
+    """[(file name, `tags` query or None, why None)] for each `.yml`/`.yaml` file in the
+    working tree's `.github/workflows/` whose comment-stripped text calls the engine's
+    `drift.yml`, by doctor's own selector, so the two cannot disagree on what a drift file is.
+    The query is read from the calling job alone (`_call_region`)."""
+    workflows = pathlib.Path(root) / ".github" / "workflows"
+    if not workflows.is_dir():
+        return []
+    dr = _load("doctor")
+    call = dr._engine_call(ENGINE_SLUG, "drift.yml")
+    found = []
+    for path in sorted(workflows.iterdir()):
+        if path.suffix not in (".yml", ".yaml") or not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if call.search(dr._stripped_text(text)):
+            found.append((path.name, *_drift_query(dr._call_region(text, call))))
+    return found
+
+
+def _drift_sweeps_item(ctx):
+    """Each drift file's `tags` query run through `filter_cells` and `cap_cells` over the whole
+    tree, as a drift run does: their notices and refusals, then the cells no file sweeps.
+    Coverage is computed only when every query was read and the tree is whole."""
+    item = "drift sweeps"
+    files = _drift_files(ctx["root"])
+    if not files:
+        return "todo", item, _NO_DRIFT_FILE
+    read = (
+        f"Read {', '.join(name for name, _q, _r in files)} in this working tree; a drift run "
+        "reads the default branch's copy."
+    )
+    why = [f"  {name}: {reason}." for name, query, reason in files if query is None]
+    if ctx["cells"] is None:
+        why.append("  a slug collision loses the tree; see `stack tags`.")
+    elif ctx["tree_errors"]:
+        why.append("  a stack with two `workload/*` tags has its cells dropped; see `stack tags`.")
+    if why:
+        return "cannot check", item, ["Coverage was not computed:", *why, read]
+    lines, covered = [], set()
+    for name, query, _reason in files:
+        errors, notices = [], io.StringIO()
+        with ec._gather(errors), contextlib.redirect_stdout(notices):
+            kept = bm.filter_cells(ctx["cells"], ctx["tags_by_stack"], query)
+            covered |= {(c["stack"], c["environment"]) for c in kept}
+            bm.cap_cells(kept, True)
+        found = [n.removeprefix("::notice::") for n in notices.getvalue().splitlines()]
+        lines += [f"{name}: {m.removeprefix('::error::')}" for m in [*found, *errors]]
+    uncovered = [
+        f"{c['stack']} ({c['environment']})"
+        for c in ctx["cells"]
+        if (c["stack"], c["environment"]) not in covered
+    ]
+    if uncovered:
+        lines += [
+            f"{len(uncovered)} cell(s) no drift file sweeps:",
+            *_stack_list(uncovered),
+            "Widen a `tags` query, or add a drift file for them.",
+        ]
+    return ("todo" if lines else "ok"), item, [*lines, read]
 
 
 _RULESET_ITEM = (
@@ -1017,8 +1108,8 @@ def _checklist(ctx):
         _lock_files_item(ctx),
         _unmanaged_item(ctx),
         _stack_tags_item(ctx),
+        _drift_sweeps_item(ctx),
         _adoption_item(ctx),
-        _DRIFT_ITEM,
     ]
     if ctx["ruleset_deferred"]:
         items.append(_RULESET_ITEM)

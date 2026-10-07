@@ -2012,15 +2012,15 @@ todo          Provider lock files
 
 ok            unmanaged stacks
 ok            stack tags
+todo          drift sweeps
+    Add one workflow file per drift sweep from the `shipmate drift` fence in
+    docs/getting-started.md, under any name in `.github/workflows/`, with the same
+    pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).
+
 todo          adoption pull request
     Re-run without --dry-run, then commit the workflow file and the table together,
     in a pull request that changes no stack. The table is read from the default
     branch, so the first plan needs it merged.
-
-todo          drift workflow file
-    Add one workflow file per drift sweep from the `shipmate drift` fence in
-    docs/getting-started.md, under any name in `.github/workflows/`, with the same
-    pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).
 
 todo          gate ruleset
     Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because
@@ -2028,8 +2028,8 @@ todo          gate ruleset
     §Post-plan topology). Then run this script again to create the gate ruleset.
 """
 
-#: Hand-written: a configured public repository. Every item this run can read is `ok`; the
-#: two it cannot read stay `cannot check`.
+#: Hand-written: a configured public repository with the `repo-example-folders` drift file.
+#: Every item this run can read is `ok`; the two it cannot read stay `cannot check`.
 CONFIGURED_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
@@ -2049,11 +2049,10 @@ cannot check  CODEOWNERS entry covering /.github/workflows/
 ok            Provider lock files
 ok            unmanaged stacks
 ok            stack tags
+ok            drift sweeps
+    Read drift.yml in this working tree; a drift run reads the default branch's copy.
+
 ok            adoption pull request
-todo          drift workflow file
-    Add one workflow file per drift sweep from the `shipmate drift` fence in
-    docs/getting-started.md, under any name in `.github/workflows/`, with the same
-    pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).
 """
 
 REVIEWERS_RULE = {
@@ -2090,9 +2089,10 @@ def test_the_checklist_of_a_fresh_repository_in_a_dry_run(monkeypatch, tmp_path,
     The environments are all absent, so `apply_envs` holds `None` for each: a dry run must
     not read that as reviewed.
 
-    The drift-file item is `todo` on every run, since a drift file may have any name.
+    The checkout holds no `.github/workflows/`, so the drift sweeps item asks for a file.
 
-    Mutations: delete the passphrase item from `_checklist`; delete `_DRIFT_ITEM` from it.
+    Mutations: delete the passphrase item from `_checklist`; delete `_drift_sweeps_item`
+    from it.
     """
     _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
     assert exit_.code == 0
@@ -2103,10 +2103,11 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
     """Driven through `main`, so the reviewer verdict rests on the `dev-eu-apply` read that
     `_reconcile_env` recorded, not on a hand-filled `apply_envs`.
 
-    Mutation: drop the `ctx["apply_envs"][name] = env` record from `_reconcile_env`, so the
-    reviewer item turns `todo`.
+    Mutations: drop the `ctx["apply_envs"][name] = env` record from `_reconcile_env`, so the
+    reviewer item turns `todo`; delete `_drift_sweeps_item` from `_checklist`.
     """
-    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "drift.yml").write_bytes(FOLDERS_DRIFT)
     (tmp_path / ".github" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
     (tmp_path / ".github" / "shipmate.toml").write_text(
         'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n',
@@ -3157,3 +3158,310 @@ def test_a_diverging_repository_app_id_is_refused(monkeypatch):
     onboard._refuse_diverging_app_id("".join("111"), {"SHIPMATE_APP_ID": "111"})
     onboard._refuse_diverging_app_id("222", {})
     assert onboard.REPORT == []
+
+
+DRIFT_ITEM = "drift sweeps"
+_FIXTURES = pathlib.Path(__file__).parent / "fixtures"
+# Byte-for-byte copies of committed blobs (`git cat-file blob`), LF: repo-example-stacks
+# `.github/workflows/drift-dev-eu.yml` at a76bffa and repo-example-folders
+# `.github/workflows/drift.yml` at e432598.
+STACKS_DRIFT = (_FIXTURES / "drift-stacks-dev-eu.yml").read_bytes()
+FOLDERS_DRIFT = (_FIXTURES / "drift-folders.yml").read_bytes()
+NO_DRIFT_FILE = [
+    "Add one workflow file per drift sweep from the `shipmate drift` fence in",
+    "docs/getting-started.md, under any name in `.github/workflows/`, with the same",
+    "pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).",
+]
+DRIFT_CALL = "    uses: ship-iac/shipmate/.github/workflows/drift.yml@main\n"
+
+
+def _read_line(*names):
+    return (
+        f"Read {', '.join(names)} in this working tree; a drift run reads the default "
+        "branch's copy."
+    )
+
+
+def _drift_job(with_lines=""):
+    """A minimal workflow file whose one job calls engine `drift.yml`."""
+    return f"on:\n  workflow_dispatch:\njobs:\n  drift:\n{DRIFT_CALL}{with_lines}"
+
+
+def _drift_ctx(tmp_path, files, **over):
+    """`ctx` rooted at `tmp_path`, with `files` ({name: bytes or str}) in its workflows."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    for name, body in files.items():
+        data = body if isinstance(body, bytes) else body.encode("utf-8")
+        (workflows / name).write_bytes(data)
+    return ctx(root=tmp_path, **over)
+
+
+def _tree(*cells):
+    """(cells, tags_by_stack) for `(stack, env)` pairs, each stack tagged with its envs."""
+    tags = {}
+    for stack, env in cells:
+        tags.setdefault(stack, []).append(f"env/{env}")
+    return (
+        [{"stack": s, "environment": e, "workload": ""} for s, e in cells],
+        tags,
+    )
+
+
+def test_a_cell_outside_every_drift_query_is_listed(tmp_path):
+    """The `repo-example-stacks` file sweeps `env/dev-eu`; the `dev-us` cell is in no sweep.
+
+    Mutation: `covered &= ...` in place of `covered |= ...` -- the dev-eu cell is listed too.
+    """
+    cells, tags = _tree(("a", "dev-eu"), ("a", "dev-us"))
+    context = _drift_ctx(
+        tmp_path, {"drift-dev-eu.yml": STACKS_DRIFT}, cells=cells, tags_by_stack=tags
+    )
+    assert onboard._drift_sweeps_item(context) == (
+        "todo",
+        DRIFT_ITEM,
+        [
+            "1 cell(s) no drift file sweeps:",
+            "  a (dev-us)",
+            "Widen a `tags` query, or add a drift file for them.",
+            _read_line("drift-dev-eu.yml"),
+        ],
+    )
+
+
+def test_a_drift_file_without_tags_sweeps_every_cell(tmp_path):
+    """The `repo-example-folders` file carries no `tags`, which `filter_cells` reads as every
+    cell.
+
+    Mutation: skip a file whose query is empty (`if not query: continue`) -- both cells are
+    listed.
+    """
+    cells, tags = _tree(("a", "dev-eu"), ("b", "dev-us"))
+    context = _drift_ctx(tmp_path, {"drift.yml": FOLDERS_DRIFT}, cells=cells, tags_by_stack=tags)
+    assert onboard._drift_sweeps_item(context) == ("ok", DRIFT_ITEM, [_read_line("drift.yml")])
+
+
+def test_the_drift_query_is_parsed_by_build_matrix(tmp_path, monkeypatch):
+    """Pinned by identity: the item shows what `build-matrix`'s `_parse_tag_query` raises.
+
+    Mutation: a local copy of `_parse_tag_query` (and the `filter_cells` calling it) in
+    onboard -- the sentinel is not shown.
+    """
+
+    def sentinel(query):
+        raise SystemExit("::error::SENTINEL")
+
+    monkeypatch.setattr(onboard.bm, "_parse_tag_query", sentinel)
+    cells, tags = _tree(("a", "dev-eu"))
+    context = _drift_ctx(
+        tmp_path, {"drift-dev-eu.yml": STACKS_DRIFT}, cells=cells, tags_by_stack=tags
+    )
+    assert onboard._drift_sweeps_item(context)[2][0] == "drift-dev-eu.yml: SENTINEL"
+
+
+@pytest.mark.parametrize(
+    ("count", "expected"),
+    [
+        (256, ("ok", DRIFT_ITEM, [_read_line("drift.yml")])),
+        (
+            257,
+            (
+                "todo",
+                DRIFT_ITEM,
+                [
+                    "drift.yml: 257 plan cells exceeds the GitHub Actions matrix limit of 256. "
+                    "A drift sweep is one matrix; split it across more drift files, each calling "
+                    "drift.yml with a narrower `tags` query (docs/drift.md).",
+                    _read_line("drift.yml"),
+                ],
+            ),
+        ),
+    ],
+)
+def test_a_sweep_above_the_matrix_limit_is_listed(tmp_path, count, expected):
+    """Both boundaries, through `build-matrix`'s own `cap_cells`.
+
+    Mutations: `> MATRIX_LIMIT + 1` in `cap_cells` -- 257 is `ok`; `>= MATRIX_LIMIT` -- 256
+    is listed.
+    """
+    cells, tags = _tree(*[(f"s{i:03}", "dev-eu") for i in range(count)])
+    context = _drift_ctx(tmp_path, {"drift.yml": FOLDERS_DRIFT}, cells=cells, tags_by_stack=tags)
+    assert onboard._drift_sweeps_item(context) == expected
+
+
+def test_a_dead_clause_and_an_empty_sweep_are_each_listed(tmp_path):
+    """`filter_cells`' own notices, one line each, its `::notice::` prefix removed. The block
+    value `env/dev-eu,env/ghost` is one OR query, comma included.
+
+    Mutations: drop the captured-notice lines -- `ok`; cut a block value at `,` like a flow
+    value (`elif True:` for `elif m["flow"]:`) -- the dead-clause line is gone.
+    """
+    cells, tags = _tree(("a", "dev-eu"))
+    files = {
+        "dead.yml": _drift_job("    with:\n      tags: env/dev-eu,env/ghost\n"),
+        "ghost.yml": _drift_job("    with:\n      tags: env/ghost\n"),
+    }
+    context = _drift_ctx(tmp_path, files, cells=cells, tags_by_stack=tags)
+    assert onboard._drift_sweeps_item(context) == (
+        "todo",
+        DRIFT_ITEM,
+        [
+            "dead.yml: the drift tags query 'env/dev-eu,env/ghost' has clause(s) matching no "
+            "cell: env/ghost. No stack carries: env/ghost. Tags match in their on-disk form, "
+            "such as 'env/dev-eu'.",
+            "ghost.yml: the drift tags query 'env/ghost' matches no stack x environment cell, "
+            "so this sweep is empty. No stack carries: env/ghost. Tags match in their on-disk "
+            "form, such as 'env/dev-eu'.",
+            _read_line("dead.yml", "ghost.yml"),
+        ],
+    )
+
+
+def test_a_tree_error_leaves_coverage_uncomputed(tmp_path):
+    """A two-tag stack's cells are dropped from the tree and a slug collision loses it, so
+    either makes coverage unknowable rather than a list of falsely uncovered cells.
+
+    Mutation: drop the `tree_errors` condition (`elif False:`) -- the two-tag case reports
+    `ok` over a tree missing a stack.
+    """
+    cells, tags = _tree(("a", "dev-eu"))
+    two_tags = _drift_ctx(
+        tmp_path,
+        {"drift.yml": FOLDERS_DRIFT},
+        cells=cells,
+        tags_by_stack=tags,
+        tree_errors=["::error::stack 'b' carries 2 workload tags"],
+    )
+    assert onboard._drift_sweeps_item(two_tags) == (
+        "cannot check",
+        DRIFT_ITEM,
+        [
+            "Coverage was not computed:",
+            "  a stack with two `workload/*` tags has its cells dropped; see `stack tags`.",
+            _read_line("drift.yml"),
+        ],
+    )
+    collided = {**two_tags, "cells": None, "tree_errors": ["::error::a-b, a/b all map"]}
+    assert onboard._drift_sweeps_item(collided) == (
+        "cannot check",
+        DRIFT_ITEM,
+        [
+            "Coverage was not computed:",
+            "  a slug collision loses the tree; see `stack tags`.",
+            _read_line("drift.yml"),
+        ],
+    )
+
+
+def test_a_commented_out_drift_call_is_no_drift_file(tmp_path):
+    """A commented-out call sweeps nothing.
+
+    Mutation: search the raw text instead of `_stripped_text` -- the file is taken for a drift
+    file whose call `_call_region`, which strips comments, cannot find: `cannot check`.
+    """
+    text = "on:\n  workflow_dispatch:\njobs:\n  drift:\n  #" + DRIFT_CALL[3:]
+    context = _drift_ctx(tmp_path, {"drift.yml": text})
+    assert onboard._drift_sweeps_item(context) == ("todo", DRIFT_ITEM, NO_DRIFT_FILE)
+
+
+def test_a_drift_call_split_across_lines_is_cannot_check(tmp_path):
+    """The selector's `uses:` pattern crosses a line break; `_call_region` reads line by line
+    and finds no call, so the query is unread rather than read as every cell.
+
+    Mutation: `_drift_query(dr._call_region(text, call) or "")` -- `ok`.
+    """
+    text = _drift_job().replace("    uses: ", "    uses:\n      ")
+    cells, tags = _tree(("a", "dev-eu"))
+    context = _drift_ctx(tmp_path, {"drift.yml": text}, cells=cells, tags_by_stack=tags)
+    assert onboard._drift_sweeps_item(context) == (
+        "cannot check",
+        DRIFT_ITEM,
+        [
+            "Coverage was not computed:",
+            "  drift.yml: its `uses:` value starts on a later line, which this reader does not "
+            "follow.",
+            _read_line("drift.yml"),
+        ],
+    )
+
+
+def test_another_repositorys_drift_yml_is_no_drift_file(tmp_path):
+    """Mutation: select with `re.compile(r"/drift\\.yml@")` in place of `_engine_call` --
+    the file is read as a sweep of every cell."""
+    text = _drift_job().replace("ship-iac/shipmate", "other/tools")
+    context = _drift_ctx(tmp_path, {"drift.yml": text})
+    assert onboard._drift_sweeps_item(context) == ("todo", DRIFT_ITEM, NO_DRIFT_FILE)
+
+
+def test_tags_outside_the_drift_job_are_not_the_query(tmp_path):
+    """An `on: push: tags:` filter and another job's `with: tags:` are outside the job block
+    `_call_region` returns.
+
+    Mutation: read `tags:` keys from the whole text instead of `_call_region` -- three keys,
+    `cannot check`.
+    """
+    text = (
+        "on:\n  push:\n    tags: [v1]\njobs:\n  drift:\n"
+        + DRIFT_CALL
+        + "    with:\n      tags: env/dev-eu\n"
+        + "  build:\n    uses: ./.github/workflows/build.yml\n    with:\n      tags: env/x\n"
+    )
+    cells, tags = _tree(("a", "dev-eu"))
+    context = _drift_ctx(tmp_path, {"drift.yml": text}, cells=cells, tags_by_stack=tags)
+    assert onboard._drift_sweeps_item(context) == ("ok", DRIFT_ITEM, [_read_line("drift.yml")])
+
+
+@pytest.mark.parametrize(
+    ("with_lines", "expected"),
+    [
+        ("    with: { runs_on: ubuntu-slim, tags: env/dev-eu }\n", ("env/dev-eu", "")),
+        (
+            '    with: { tags: "env/dev-eu,env/dev-us", runs_on: x }\n',
+            ("env/dev-eu,env/dev-us", ""),
+        ),
+        ("    with:\n      tags: 'env/dev-eu:workload/app'\n", ("env/dev-eu:workload/app", "")),
+        (
+            "    with:\n      tags: ${{ inputs.tags }}\n",
+            (None, "its `tags` is a `${{ }}` expression, which only a run resolves"),
+        ),
+        (
+            "    with:\n      tags: env/a\n      tags: env/b\n",
+            (None, "its drift job sets `tags` more than once"),
+        ),
+        ("    with:\n      runs_on: ubuntu-slim\n", ("", "")),
+    ],
+    ids=["flow", "flow-quoted-comma", "block-quoted", "expression", "two-keys", "no-key"],
+)
+def test_the_drift_query_is_read_without_yaml(with_lines, expected):
+    """Mutations: cut a quoted value at `,` (drop the quoted branch) -- `flow-quoted-comma`
+    and `block-quoted` keep their quotes or lose half; drop the flow cut -- `flow` reads
+    `env/dev-eu }`; drop the `${{` test -- `expression` is a query; count only the first
+    key -- `two-keys` is a query.
+    """
+    text = _drift_job(with_lines)
+    region = onboard._load("doctor")._call_region(
+        text, onboard._load("doctor")._engine_call(onboard.ENGINE_SLUG, "drift.yml")
+    )
+    assert onboard._drift_query(region) == expected
+
+
+def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, capsys):
+    """Mutation: the item calls `report("differs", ...)` on a finding -- the run exits 2."""
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "ghost.yml").write_text(
+        _drift_job("    with:\n      tags: env/ghost\n"), encoding="utf-8", newline="\n"
+    )
+    _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
+    assert exc.code == 0
+    assert checklist_items(checklist_of(capsys.readouterr().out))[DRIFT_ITEM] == (
+        "todo",
+        [
+            "ghost.yml: the drift tags query 'env/ghost' matches no stack x environment cell, "
+            "so this sweep is empty. No stack carries: env/ghost. Tags match in their on-disk "
+            "form, such as 'env/dev-eu'.",
+            "1 cell(s) no drift file sweeps:",
+            "  stacks/app (dev-eu)",
+            "Widen a `tags` query, or add a drift file for them.",
+            _read_line("ghost.yml"),
+        ],
+    )
