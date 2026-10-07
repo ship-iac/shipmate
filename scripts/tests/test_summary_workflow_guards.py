@@ -36,6 +36,7 @@ EXPECTED_SUMMARY_WITH = {
     "pr-number": "${{ needs.facts.outputs.pr-number }}",
     "head-sha": "${{ needs.facts.outputs.head-sha }}",
     "detect-result": "${{ needs.detect.result }}",
+    "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "plan-result": "${{ needs.plan.result }}",
     "planned-cells": "${{ needs.detect.outputs.count }}",
     "on-demand": "${{ needs.facts.outputs.on-demand }}",
@@ -45,12 +46,13 @@ EXPECTED_SUMMARY_WITH = {
     "github-vars": "${{ toJSON(vars) }}",
     "unmanaged-stacks": "${{ needs.detect.outputs.unmanaged }}",
 }
-#: `detect`'s whole outputs map: `unmanaged` is what the `with:` above passes on.
+#: `detect`'s whole outputs map: `unmanaged` and `refusal` are what the `with:` above passes on.
 EXPECTED_DETECT_OUTPUTS = {
     "matrix": "${{ steps.matrix.outputs.matrix }}",
     "empty": "${{ steps.matrix.outputs.empty }}",
     "count": "${{ steps.matrix.outputs.count }}",
     "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
+    "refusal": "${{ steps.matrix.outputs.refusal }}",
 }
 EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary"]
 
@@ -100,7 +102,8 @@ def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():
 def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     """Mutation: drop the `is-draft:` line -> gate-state never sees a draft.
     Mutation: drop the `unmanaged-stacks:` line -> the comment never names an unmanaged stack.
-    Mutation: drop `detect`'s `unmanaged` output -> the same, silently."""
+    Mutation: drop `detect`'s `unmanaged` output -> the same, silently.
+    Mutation: drop `detect`'s `refusal` output -> the gate never names a detect refusal."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1

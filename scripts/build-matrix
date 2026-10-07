@@ -526,6 +526,20 @@ def tag_filter_error(tags, no_pull_request: bool):
 
 
 def main():
+    """`_detect`, and on a `::error::` refusal also the `refusal` output: its first line without
+    the prefix, which the summary job writes into the gate description. The refusal re-raises,
+    so the step still fails."""
+    try:
+        _detect()
+    except SystemExit as exc:
+        if isinstance(exc.code, str) and exc.code.startswith("::error::"):
+            refusal = exc.code.splitlines()[0].removeprefix("::error::")
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                fh.write(f"refusal={refusal}\n")
+        raise
+
+
+def _detect():
     all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")

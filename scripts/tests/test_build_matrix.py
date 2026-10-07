@@ -795,7 +795,8 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
 def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
-    # name -> wiring; descriptions are prose and deliberately not pinned.
+    # name -> wiring; descriptions are prose and deliberately not pinned. Mutation: delete the
+    # `refusal` output -- the gate never names a detect refusal.
     doc = action_yaml("build-matrix")
     assert {name: spec["value"] for name, spec in doc["outputs"].items()} == {
         "matrix": "${{ steps.build.outputs.matrix }}",
@@ -803,6 +804,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "count": "${{ steps.build.outputs.count }}",
         "cells": "${{ steps.build.outputs.cells }}",
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
+        "refusal": "${{ steps.build.outputs.refusal }}",
     }
 
 
@@ -1051,8 +1053,8 @@ def test_a_row_without_a_usable_binding_refuses(monkeypatch, binding, shown):
 
 
 def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
-    """The refusal lands before `GITHUB_OUTPUT` is opened, so no half-written matrix reaches a
-    job that would bind it.
+    """The refusal lands before the matrix is written, so no half-written matrix reaches a job
+    that would bind it; only the refusal line is.
 
     Mutation: delete the `env_binding` check from `stamp_rows` -- main writes the matrix.
     """
@@ -1064,6 +1066,57 @@ def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
     }
     with pytest.raises(SystemExit):
         _run_main(monkeypatch, tmp_path, env, head_sha="cafe1234")
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        "refusal=stacks/app in dev-eu resolved env_binding '', which names no GitHub "
+        "Environment. A job bound to it would run outside every environment control, so no "
+        "matrix is written.\n"
+    )
+
+
+def test_a_refusal_reaches_the_refusal_output_and_still_fails_the_step(monkeypatch, tmp_path):
+    """Mutation: drop the `raise` in `main`'s handler -- no `SystemExit` reaches the test."""
+    tree = {"stacks/a": ["env/dev", "workload/net", "workload/web"]}
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40, table=_CORE_ONLY, stacks=tree
+        )
+    assert exc.value.code == _TWO_TAG_A
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        "refusal=stack 'stacks/a' carries 2 workload tags (workload/net, workload/web), and a "
+        "stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` and "
+        "remove the rest.\n"
+    )
+
+
+def test_a_multi_line_refusal_writes_its_first_line_only(monkeypatch, tmp_path):
+    """A second line would end the output's value and start a malformed one.
+
+    Mutation: write the whole message as the `refusal` line -- the gap line follows it."""
+    tree = {
+        "stacks/a": ["env/dev", "workload/net", "workload/web"],
+        "stacks/c": ["env/dev", "workload/app"],
+    }
+    with pytest.raises(SystemExit):
+        _run_main(
+            monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40, table=_CORE_ONLY, stacks=tree
+        )
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        "refusal=stack 'stacks/a' carries 2 workload tags (workload/net, workload/web), and a "
+        "stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` and "
+        "remove the rest.\n"
+    )
+
+
+def test_an_exit_that_is_not_a_refusal_writes_no_refusal(monkeypatch, tmp_path):
+    """Mutation: drop the `isinstance` check -- `int.startswith` raises `AttributeError`."""
+
+    def exit_one(repository, head_repo, no_pull_request):
+        raise SystemExit(1)
+
+    monkeypatch.setattr(bm, "fork_pr_error", exit_one)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40)
+    assert exc.value.code == 1
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == ""
 
 

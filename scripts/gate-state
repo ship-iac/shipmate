@@ -85,6 +85,20 @@ def _evidence_gap(*, cell_count, planned):
     return None
 
 
+def _detect_gap(detect_result, refusal):
+    """The hold description for a `detect` that did not succeed.
+
+    A `detect` that refused is named by its refusal, cut here to the 140 characters the
+    statuses API accepts; an empty one (a fmt or codegen failure, a crash) keeps the generic
+    text."""
+    if refusal:
+        return f"detect refused: {refusal}"[:140]
+    return (
+        f"change detection did not succeed ({detect_result}); fix the "
+        "shipmate / detect job before merging"
+    )
+
+
 def decide(
     *,
     detect_result,
@@ -94,6 +108,7 @@ def decide(
     pending,
     is_draft=False,
     on_demand=False,
+    refusal="",
 ):
     """Return (state, description, comment_mode).
 
@@ -109,16 +124,13 @@ def decide(
     `pending`, never `success`: nothing was planned, so there is nothing to green.
     It returns before `planned_cells` is read, because a skipped `detect` reports
     no count.
+
+    `refusal` is the line `build-matrix` refused with (`_detect_gap`).
     """
     if detect_result == "skipped" and is_draft and not on_demand:
         return "pending", DRAFT_DESCRIPTION, _DRAFT
     if detect_result != "success":
-        return (
-            "failure",
-            f"change detection did not succeed ({detect_result}); fix the "
-            "shipmate / detect job before merging",
-            _HOLD,
-        )
+        return "failure", _detect_gap(detect_result, refusal), _HOLD
     if plan_result == "cancelled":
         return None, "", _HOLD
     planned = _as_int(planned_cells)
@@ -160,6 +172,7 @@ def main():
         pending=os.environ.get("SHIPMATE_PENDING", "false") == "true",
         is_draft=os.environ.get("SHIPMATE_IS_DRAFT", "false") == "true",
         on_demand=os.environ.get("SHIPMATE_ON_DEMAND", "false") == "true",
+        refusal=os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"state={state or ''}\n")
