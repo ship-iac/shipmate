@@ -8,8 +8,8 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 Also holds the subprocess runner, which ``env-config`` wraps for the CI scripts, the secret
 scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
 switch for their console output. It also holds the ruleset and environment readers and the
-names ``doctor`` and ``onboard`` share, including the YAML comment stripper and the engine-call
-selector both scan workflow files with, reads the per-cell ``cell.json`` summaries and builds
+names ``doctor`` and ``onboard`` share, and the YAML comment stripper and engine-call selector
+``doctor`` scans workflow files with. It reads the per-cell ``cell.json`` summaries and builds
 this run's page link.
 """
 

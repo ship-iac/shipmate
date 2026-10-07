@@ -38,16 +38,7 @@ import textwrap
 import urllib.parse
 
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
-from _shipmate import (
-    ENGINE_ENV,
-    REPO_RE,
-    _engine_call,
-    _load,
-    _stripped_text,
-    gate_check,
-    review_count,
-    utf8_output,
-)
+from _shipmate import ENGINE_ENV, REPO_RE, _load, gate_check, review_count, utf8_output
 from _shipmate import approval_rules as _approval_rules
 from _shipmate import run as _run
 
@@ -649,7 +640,7 @@ def _reconcile_ruleset(ctx):
 
 
 #: `scripts/tests/test_docs_yaml_parses.py` imports this rather than keeping a second copy:
-#: each workflow file is rendered from a fence that guard parses, and an indented fence must
+#: the workflow file is rendered from a fence that guard parses, and an indented fence must
 #: be dedented rather than missed.
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
 _DOC_PIN = re.compile(
@@ -675,27 +666,25 @@ def _fence(page_text, name):
     if len(bodies) != 1:
         raise SystemExit(
             f"{len(bodies)} documented fences are named {name!r}; expected exactly one. "
-            "The workflow files are rendered from the docs, so each fence name must agree."
+            "The workflow file is rendered from the docs, so its fence name must agree."
         )
     return bodies[0]
 
 
-def _render(engine, sha, version, default_branch, name):
-    """The full text of the consumer workflow file rendered from the fence `name`,
-    LF-delimited and newline-terminated. The `shipmate` fence's `push` trigger is retargeted
-    to `default_branch`; no other fence has one."""
+def _render(engine, sha, version, default_branch):
+    """The full text of one consumer workflow file, LF-delimited and newline-terminated,
+    with its `push` trigger on `default_branch`."""
     text = _fence(
         (pathlib.Path(engine) / "docs" / "getting-started.md").read_text(encoding="utf-8"),
-        name,
+        "shipmate",
     )
-    if name == "shipmate":
-        trigger = "    branches: [main]\n"
-        if text.count(trigger) != 1:
-            raise SystemExit(
-                f"the documented shipmate fence holds {text.count(trigger)} `branches: [main]` "
-                "lines; expected exactly one, the push trigger this script retargets."
-            )
-        text = text.replace(trigger, f"    branches: [{default_branch}]\n")
+    trigger = "    branches: [main]\n"
+    if text.count(trigger) != 1:
+        raise SystemExit(
+            f"the documented shipmate fence holds {text.count(trigger)} `branches: [main]` "
+            "lines; expected exactly one, the push trigger this script retargets."
+        )
+    text = text.replace(trigger, f"    branches: [{default_branch}]\n")
     return _DOC_PIN.sub(rf"\g<ref>@{sha} # {version}", text)
 
 
@@ -704,15 +693,15 @@ def _depin(text):
     return _ANY_PIN.sub(r"\g<ref>@<pin>", text)
 
 
-def _reconcile_shim(ctx, name, filename):
-    """Write the consumer workflow file `filename` from the fence `name`, reporting anything
-    already there.
+def _reconcile_shim(ctx):
+    """Write the consumer workflow file, reporting anything already there.
 
     `pin-only` is not drift: moving a pin is the re-pin procedure in docs/releasing.md, so
     it does not reach `_exit_code`.
     """
+    filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
-    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"], name)
+    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"])
     if not path.is_file():
         write_file(path, text, filename)
         return
@@ -730,60 +719,6 @@ def _reconcile_shim(ctx, name, filename):
         report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:
         report("differs", filename, "differs beyond its pin, not overwritten")
-
-
-def _drift_callers(workflows):
-    """([workflow files calling the engine's `drift.yml`], [(file, detail)] for each file whose
-    call never resolves or that cannot be read), by name. Undecodable bytes are replaced:
-    the call is ASCII, so a stray Latin-1 byte elsewhere cannot hide it."""
-    call = _engine_call("drift.yml")
-    unpinned = re.compile(call.pattern + "<engine-sha>")
-    callers, unsweeping = [], []
-    for p in sorted([*workflows.glob("*.yml"), *workflows.glob("*.yaml")]):
-        if not p.is_file():
-            continue
-        try:
-            text = _stripped_text(p.read_text(encoding="utf-8", errors="replace"))
-        except OSError as e:
-            unsweeping.append((p.name, f"cannot be read ({e.strerror}), not overwritten"))
-            continue
-        if unpinned.search(text):
-            unsweeping.append(
-                (p.name, "the published fence, never pinned: delete it and run again")
-            )
-        elif call.search(text):
-            callers.append(p.name)
-    return callers, unsweeping
-
-
-def _reconcile_drift(ctx):
-    """Write `shipmate-drift.yml` from the `shipmate drift` fence when no workflow file in the
-    checkout calls the engine's `drift.yml`.
-
-    Matched by the call, never by file name or content: a consumer adds a `tags` query to the
-    drift file, splits it into several sweeps, or renames it. Comments are stripped first, as
-    doctor's drift-file probe strips them, so a commented-out call is no sweep to either.
-    A `shipmate-drift.yml` without a call is the consumer's file and is not overwritten. A
-    call still on the docs' `<engine-sha>` placeholder resolves to nothing, so it is no sweep
-    either: it is reported `differs`, and so is a file that cannot be read, since its call is
-    unknown. Either one, with no other caller, leads to no write.
-    """
-    workflows = pathlib.Path(ctx["root"]) / ".github" / "workflows"
-    callers, unsweeping = _drift_callers(workflows)
-    path = workflows / "shipmate-drift.yml"
-    for name, detail in unsweeping:
-        report("differs", name, detail)
-    if callers:
-        report("ok", path.name, "" if path.name in callers else f"called from {', '.join(callers)}")
-    elif unsweeping:
-        return
-    elif path.is_file():
-        report("differs", path.name, "calls no engine `drift.yml`, not overwritten")
-    else:
-        text = _render(
-            ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"], "shipmate drift"
-        )
-        write_file(path, text, path.name)
 
 
 #: GitHub's own search order for the file.
@@ -931,7 +866,7 @@ def _adoption_item(ctx):
         "todo",
         item,
         [
-            f"{verb} both workflow files and the table together,",
+            f"{verb} the workflow file and the table together,",
             "in a pull request that changes no stack. The table is read from the default",
             "branch, so the first plan needs it merged.",
         ],
@@ -1076,8 +1011,7 @@ def main(argv=None):
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)
     _reconcile_ruleset(ctx)
-    _reconcile_shim(ctx, "shipmate", "shipmate.yml")
-    _reconcile_drift(ctx)
+    _reconcile_shim(ctx)
     _checklist(ctx)
 
     sys.exit(_exit_code())
