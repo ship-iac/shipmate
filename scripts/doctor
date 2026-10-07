@@ -722,10 +722,22 @@ def _plan_env_secret_warnings(ctx):
     return out
 
 
+# A `uses:` key as YAML may spell it (`uses:`, `"uses":`, `uses :`) and the opening quote of
+# its value. Shared by `_PIN` and `_engine_call`, so the two read the same calls.
+_USES = r"""(?<![\w-])["']?uses["']?[ \t]*:\s*["']?"""
 _PIN = re.compile(
-    r"uses:\s*['\"]?(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
+    _USES + r"(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
     r"[\w./-]+@(?P<ref>[\w./-]+)"
 )
+
+
+def _engine_slug(engine):
+    """The pattern matching the engine repository `engine` as a `uses:` value names it.
+    Case-insensitive: GitHub resolves `owner/repo` in `uses:` that way. Every engine-slug
+    match goes through here, so the pin probe and `_engine_call` cannot disagree."""
+    return rf"(?i:{re.escape(engine)})"
+
+
 _SHA40 = re.compile(r"[0-9a-fA-F]{40}")
 
 
@@ -756,8 +768,9 @@ def _no_engine(subject):
     return (NOTICE, f"{subject} not verified: the engine repository could not be determined.")
 
 
-PIN_UNREADABLE, PIN_NO_COMMIT = _unverified("engine pin freshness")
-PIN_NO_ENGINE = _no_engine("engine pin freshness")
+_PIN_SUBJECT = "engine pin freshness"
+PIN_UNREADABLE, PIN_NO_COMMIT = _unverified(_PIN_SUBJECT)
+PIN_NO_ENGINE = _no_engine(_PIN_SUBJECT)
 
 
 def _contents_ref(ctx):
@@ -866,7 +879,7 @@ def _pins_in_text(text, fname, ctx, seen):
     engine = ctx["engine_repo"]
     for m in _PIN.finditer(text):
         slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
-        if slug != engine:
+        if not re.fullmatch(_engine_slug(engine), slug):
             continue  # a third party's action is not shipmate's to report on
         if not _SHA40.fullmatch(ref):
             out.append(
@@ -878,7 +891,7 @@ def _pins_in_text(text, fname, ctx, seen):
                 )
             )
             continue
-        seen.setdefault(slug, set()).add((fname, ref.lower()))
+        seen.setdefault(engine, set()).add((fname, ref.lower()))
     return out
 
 
@@ -982,7 +995,7 @@ def _engine_call(engine, callee):
     """The `uses:` selector for a call of `callee`, the reusable workflow of the engine
     repository `engine` (`ctx["engine_repo"]`). Anchored at `uses:` like `_PIN`, so another
     repository's workflow of the same name is not the engine's."""
-    return re.compile(rf"uses:\s*['\"]?{re.escape(engine)}/\.github/workflows/{re.escape(callee)}@")
+    return re.compile(_USES + rf"{_engine_slug(engine)}/\.github/workflows/{re.escape(callee)}@")
 
 
 def _on_block(text):
@@ -1554,10 +1567,9 @@ SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
     "the workflow file's job name, dispatch wiring, event routing and leftover drift call",
     _SHIPMATE_YML,
 )
-
-
+# Dispatch wiring reads no engine slug, so it is not in this subject.
 SHIPMATE_YML_NO_ENGINE = _no_engine(
-    "the workflow file's job name, dispatch wiring, event routing and leftover drift call"
+    "the workflow file's job name, event routing and leftover drift call"
 )
 
 
@@ -1582,11 +1594,9 @@ def _shipmate_yml_warnings(ctx):
     API failure, neither of which is a misconfiguration. A repository without the file
     receives no dispatch.
 
-    Without the engine repository nothing is read, dispatch wiring included: the other three
-    findings cannot be judged, and one notice covers the probe like its other degrades."""
-    engine = ctx["engine_repo"]
-    if not engine:
-        return [SHIPMATE_YML_NO_ENGINE]
+    Without the engine repository the three engine-anchored findings give way to one notice:
+    their selector would match no call, so each would report a healthy file. Dispatch wiring
+    reads no engine slug and still runs."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [SHIPMATE_YML_NO_COMMIT]
@@ -1594,6 +1604,9 @@ def _shipmate_yml_warnings(ctx):
     if text is None:
         return [SHIPMATE_YML_UNREADABLE]
     name = "shipmate.yml"
+    engine = ctx["engine_repo"]
+    if not engine:
+        return [*_dispatch_wiring_finding(text, name), SHIPMATE_YML_NO_ENGINE]
     return [
         *_shim_job_name_finding(text, name, engine),
         *_dispatch_wiring_finding(text, name),
@@ -1871,10 +1884,9 @@ def _app_permission_warnings(ctx):
     ]
 
 
-DRIFT_FILE_UNREADABLE, DRIFT_FILE_NO_COMMIT = _unverified(
-    "whether a workflow file calls the engine's drift.yml"
-)
-DRIFT_FILE_NO_ENGINE = _no_engine("whether a workflow file calls the engine's drift.yml")
+_DRIFT_FILE_SUBJECT = "whether a workflow file calls the engine's drift.yml"
+DRIFT_FILE_UNREADABLE, DRIFT_FILE_NO_COMMIT = _unverified(_DRIFT_FILE_SUBJECT)
+DRIFT_FILE_NO_ENGINE = _no_engine(_DRIFT_FILE_SUBJECT)
 DRIFT_FILE_MISSING = (
     NOTICE,
     "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
@@ -1891,7 +1903,8 @@ def _drift_file_warnings(ctx):
     any file, and a commented-out call sweeps nothing. A scan that stopped at an unreadable
     file reports only the unreadable NOTICE, never the missing one: the call may sit in a file it
     never read.
-    Without the engine repository nothing is read: any repository's `drift.yml` would match.
+    Without the engine repository nothing is read: the selector would match no call, and the
+    missing-file notice would be false.
     """
     if not ctx["engine_repo"]:
         return [DRIFT_FILE_NO_ENGINE]
@@ -2007,8 +2020,8 @@ def ctx_from_env():
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
         "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
         # The engine's own slug, passed in by the calling step from
-        # `job.workflow_repository` -- never hardcoded, so the probe stays
-        # org-agnostic. Empty degrades to pin freshness not verified.
+        # `job.workflow_repository` -- never hardcoded. The pin, `shipmate.yml` and drift-file
+        # probes match calls against it; empty degrades each to a not-verified notice.
         "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", ""),
         # A set, not one id: each cell's plan run comes from that cell's own
         # apply check, so one head's cells can come from several plan runs.

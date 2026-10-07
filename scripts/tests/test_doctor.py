@@ -2435,8 +2435,8 @@ _FORK_WARNED = [
         id="unsafe_pr_checkout_as_an_expression_is_warned",
     ),
     # A line-anchored key misses this, and flow style is not exotic authoring: the engine's
-    # own `.github/workflows/drift.yml` and all four sample repositories write
-    # `with: { fetch-depth: 0 }`. Missing it is fail-open on the outermost guard of the plan path.
+    # own `.github/workflows/apply.yml` writes `with: { fetch-depth: 0, ref: ... }`. Missing it
+    # is fail-open on the outermost guard of the plan path.
     pytest.param(
         {
             "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -3249,18 +3249,83 @@ def test_another_repositorys_plan_workflow_is_not_routed():
     assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == []
 
 
-def test_the_shipmate_yml_probe_without_the_engine_repo_is_a_note_not_a_read(monkeypatch):
-    """Mutation: match any repository's workflows when `engine_repo` is empty."""
+def test_the_shipmate_yml_probe_without_the_engine_repo_still_checks_dispatch_wiring(
+    monkeypatch,
+):
+    """With no engine repository the anchored selector matches no call, so the routing finder
+    would report every job missing. Dispatch wiring reads no slug and still reports.
 
-    def gh(path):
-        pytest.fail(f"read the API with no engine repository: {path}")
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
+    Mutations: remove the empty-engine guard -- five count-0 routing findings; return the
+    notice alone -- the dispatch finding leaves the list."""
+    responses = _fork_responses({"shipmate.yml": _WF_NO_TRIGGER})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shipmate_yml_warnings(_ctx(engine_repo="")) == [
+        (doctor.WARNING, _NO_TRIGGER_TEXT),
         (
             "notice",
-            "the workflow file's job name, dispatch wiring, event routing and leftover drift "
-            "call not verified: the engine repository could not be determined.",
+            "the workflow file's job name, event routing and leftover drift call not verified: "
+            "the engine repository could not be determined.",
+        ),
+    ]
+
+
+def _quote_uses_values(text):
+    return "\n".join(
+        f'    uses: "{ln[len("    uses: ") :]}"' if ln.startswith("    uses: ") else ln
+        for ln in text.split("\n")
+    )
+
+
+@pytest.mark.parametrize(
+    "spell",
+    [
+        pytest.param(lambda t: t.replace("    uses: ", "    'uses': "), id="quoted_key"),
+        pytest.param(lambda t: t.replace("    uses: ", "    uses : "), id="space_before_colon"),
+        pytest.param(_quote_uses_values, id="quoted_value"),
+    ],
+)
+def test_the_engine_call_reads_every_yaml_spelling_of_uses(spell):
+    """GitHub reads each of these as the same `uses:` key and value.
+
+    Mutations: drop the quotes around `uses` in `_USES` -- `quoted_key` reddens; drop
+    `[ \\t]*` before its colon -- `space_before_colon`; drop the value's opening quote --
+    `quoted_value`."""
+    text = spell(_SHIPMATE_WF)
+    assert text != _SHIPMATE_WF
+    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == []
+
+
+_MIXED_CASE_ENGINE = "Acme/Engine"
+
+
+def test_a_mixed_case_engine_slug_is_routed():
+    """GitHub resolves `owner/repo` in `uses:` case-insensitively.
+
+    Mutation: drop `(?i:` from `_engine_slug` -- five count-0 findings."""
+    text = _SHIPMATE_WF.replace(f"{_ENGINE_REPO}/", f"{_MIXED_CASE_ENGINE}/")
+    assert _MIXED_CASE_ENGINE in text
+    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == []
+
+
+def test_a_mixed_case_engine_slug_satisfies_the_drift_probe(monkeypatch):
+    """Mutation: drop `(?i:` from `_engine_slug` -- the missing-file notice."""
+    text = _SHIPMATE_DRIFT_WF.replace(f"{_ENGINE_REPO}/", f"{_MIXED_CASE_ENGINE}/")
+    assert _MIXED_CASE_ENGINE in text
+    assert _drift_probe(monkeypatch, {"sweeps.yml": text}) == []
+
+
+def test_a_mixed_case_engine_pin_is_judged(monkeypatch):
+    """Mutation: drop `(?i:` from `_engine_slug` -- the pin is skipped as a third party's."""
+    responses = {
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: {_MIXED_CASE_ENGINE}/actions/setup@v2\n"),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._pin_warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "`plan.yml` pins `Acme/Engine@v2` by tag or branch. Pin a commit SHA (a moving ref "
+            "lets the engine change under your deploy credentials).",
         )
     ]
 
@@ -3413,13 +3478,13 @@ def test_another_repositorys_drift_workflow_draws_the_missing_drift_notice(monke
     assert _drift_probe(monkeypatch, {"sweeps.yml": other}) == [_NO_DRIFT_FILE]
 
 
-def test_the_drift_probe_without_the_engine_repo_is_a_note_not_a_read(monkeypatch):
-    """Mutation: match any repository's `drift.yml` when `engine_repo` is empty."""
+def test_the_drift_probe_without_the_engine_repo_is_a_note(monkeypatch):
+    """With no engine repository the anchored selector matches no call, so a repository that
+    does sweep would read as having no drift file.
 
-    def gh(path):
-        pytest.fail(f"read the API with no engine repository: {path}")
-
-    monkeypatch.setattr(doctor, "_gh_json", gh)
+    Mutation: remove the empty-engine guard -- the false missing-file notice."""
+    responses = _fork_responses({"shipmate-drift.yml": _SHIPMATE_DRIFT_WF})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._drift_file_warnings(_ctx(engine_repo="")) == [
         (
             "notice",

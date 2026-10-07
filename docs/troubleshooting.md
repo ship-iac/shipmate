@@ -79,7 +79,11 @@ live probes.
   report on.
 - **Whether `shipmate.yml` is wired as published.** One read of the file, at
   the commit under examination, feeds four checks, so an unreadable file
-  leaves all four unverified together:
+  leaves all four unverified together. A call counts only when it names the
+  engine repository doctor runs from, in any letter case: a fork, a renamed
+  engine or a wrapper workflow does not count. When that repository could not
+  be determined, the job-name, routing and leftover-drift checks are a note
+  saying so, and the dispatch check still runs:
   - Whether its plan-calling job is named `shipmate`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
     makes the plan cell checks `shipmate / <stack> / <env>`. Under another name
@@ -137,11 +141,14 @@ live probes.
 - **Whether any workflow file calls the engine's `drift.yml`.** Read at the
   commit under examination, like the pin probe. A file counts by the call in
   its text, not by its name, and a call only inside a `#` comment does not
-  count. With none, no stack is ever checked for drift, which is a note:
+  count. A call counts only when it names the engine repository doctor runs
+  from, in any letter case: a fork, a renamed engine or a wrapper workflow does
+  not count. With none, no stack is ever checked for drift, which is a note:
   a repository may decline drift on purpose. The note keeps the verdict at ⚪
   with the help hint, never 🟢 no problems found.
   An unreadable file leaves the question unverified, a note, since the call
-  may sit in a file the probe could not read.
+  may sit in a file the probe could not read. So does an engine repository that
+  could not be determined, since no call can then be recognised.
 
 The report carries those findings together with the warning and failure
 annotations GitHub already recorded on this commit's workflow runs — shipmate's
