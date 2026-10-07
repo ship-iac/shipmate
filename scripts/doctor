@@ -100,6 +100,12 @@ _NO_REQUIRED_REVIEW = (
     "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
     "environments meant to apply unreviewed."
 )
+_LAST_PUSH_AT_ZERO = (
+    "the `pull_request` rule on `{branch}` requires 0 approving reviews but sets "
+    "`require_last_push_approval`, so a sole maintainer cannot merge: the last push needs "
+    "an approval from someone other than its pusher. Turn `require_last_push_approval` off "
+    "(docs/branch-protection.md §Reproducible ruleset)."
+)
 _ENV_NAME_CAP = 10
 # Same degrade posture as `_unverified`: unread is not misconfigured.
 _REVIEW_RULE_UNREADABLE = (
@@ -181,7 +187,9 @@ def _review_rule_warnings(ctx):
     since they are still held wherever owned files change; with it off it is a
     warning beside the code-owner warning. It is the sole-maintainer note only when
     no environment is gated or the default branch's table cannot be read
-    (`_no_review_findings`).
+    (`_no_review_findings`). Count 0 with `require_last_push_approval` on is a warning
+    whatever else is set: a sole maintainer cannot approve their own last push, so cannot
+    merge, and the sole-maintainer note is then omitted.
 
     Re-reads `rules/branches` rather than sharing `_gate_rule_warnings`'
     response, for `_existing_env_names`' per-probe-degrade reason.
@@ -192,7 +200,7 @@ def _review_rule_warnings(ctx):
     `CODEOWNERS` entry owns."""
     branch = ctx["default_branch"]
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
-    found = readable = code_owner = False
+    found = readable = code_owner = last_push = False
     for rule in rules:
         if rule.get("type") != "pull_request":
             continue
@@ -202,15 +210,20 @@ def _review_rule_warnings(ctx):
             continue
         readable = True
         code_owner = code_owner or bool(params.get("require_code_owner_review"))
+        last_push = last_push or bool(params.get("require_last_push_approval"))
     if not found:
         return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
     if not readable:
         return [(NOTICE, _REVIEW_RULE_UNREADABLE.format(branch=branch))]
     out = [] if code_owner else [(WARNING, _CODE_OWNER_REVIEW_OFF.format(branch=branch))]
-    return out if review_count(rules) else out + _no_review_findings(ctx, branch, code_owner)
+    if review_count(rules):
+        return out
+    if last_push:
+        out.append((WARNING, _LAST_PUSH_AT_ZERO.format(branch=branch)))
+    return out + _no_review_findings(ctx, branch, code_owner, last_push)
 
 
-def _no_review_findings(ctx, branch, code_owner):
+def _no_review_findings(ctx, branch, code_owner, last_push):
     """The count-0 finding. Gated environments are every one the default branch's table lists
     or a cell declares, less its `gated = false` entries.
 
@@ -229,7 +242,9 @@ def _no_review_findings(ctx, branch, code_owner):
     if gated:
         level = NOTICE if code_owner else WARNING
         return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=_code_spans(gated)))]
-    return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))] if code_owner else []
+    if not code_owner or last_push:
+        return []
+    return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))]
 
 
 def _code_spans(names):

@@ -3863,6 +3863,51 @@ def test_review_rule_count_is_the_highest_across_layered_rulesets(monkeypatch):
     assert _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE) == []
 
 
+_LAST_PUSH_WARNING = (
+    doctor.WARNING,
+    f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews but sets "
+    "`require_last_push_approval`, so a sole maintainer cannot merge: the last push needs "
+    "an approval from someone other than its pusher. Turn `require_last_push_approval` off "
+    "(docs/branch-protection.md §Reproducible ruleset).",
+)
+
+
+def _last_push_rule(code_owner, count):
+    rule = _pull_request_rule(code_owner=code_owner, count=count)
+    rule["parameters"]["require_last_push_approval"] = True
+    return rule
+
+
+def test_review_rule_count_zero_with_last_push_approval_warns(monkeypatch):
+    """Last-push approval at count 0 blocks a sole maintainer whether or not code-owner
+    review is on.
+
+    Mutation: warn only when code-owner review is also on -- the warning is missing."""
+    out = _review_probe(monkeypatch, [_last_push_rule(False, 0)], _ALL_UNGATED_TABLE)
+    assert out == [
+        (doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH)),
+        _LAST_PUSH_WARNING,
+    ]
+
+
+def test_review_rule_last_push_approval_replaces_the_sole_maintainer_note(monkeypatch):
+    """The sole-maintainer note calls count 0 supported; with last-push on it is not.
+
+    Mutation: keep the sole-maintainer note while last-push fires -- the note is listed."""
+    out = _review_probe(monkeypatch, [_last_push_rule(True, 0)], _ALL_UNGATED_TABLE)
+    assert out == [_LAST_PUSH_WARNING]
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    out = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE)
+    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+
+
+def test_review_rule_last_push_approval_with_a_required_review_is_silent(monkeypatch):
+    """At count 1 another person approves the last push anyway.
+
+    Mutation: drop the count check -- the last-push warning fires."""
+    assert _review_probe(monkeypatch, [_last_push_rule(True, 1)], _ALL_UNGATED_TABLE) == []
+
+
 _COUNT_WORDS = {
     3: "three",
     4: "four",
