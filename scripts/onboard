@@ -766,8 +766,8 @@ def _app_item(ctx):
         [
             f"Reading `repos/{ctx['repo']}/installation` needs an App JWT, which this run",
             "does not hold. Check it, or add the repository, at",
-            "https://github.com/organizations/<org>/settings/apps/shipmate/installations",
-            "Substitute your org and the App name you registered (docs/github-app.md §4).",
+            f"https://github.com/organizations/{ctx['repo'].split('/')[0]}/settings/installations",
+            "Open the App's `Configure` page there and add the repository (docs/github-app.md §4).",
             "The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.",
         ],
     )
