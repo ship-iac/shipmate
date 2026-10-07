@@ -35,6 +35,7 @@ section below names the SHA the release tags.
 - **`shipmate doctor` warns when the default branch's `pull_request` rule requires last-push approval at 0 approving reviews, which blocks a sole maintainer's merge, and `docs/branch-protection.md` names last-push approval as the third setting a sole maintainer turns off.**
 - **`shipmate doctor`'s report no longer says the commit's runs had not finished because a cell's apply check is waiting to be applied.**
 - **`shipmate doctor`'s report shows the engine placeholders `<env>`, `<stack>`, `<caller job>` and `<callee job>` with their angle brackets instead of as `&lt;env&gt;`.**
+- **`scripts/onboard` flags a committed lock that lacks the registry's `zh:` hashes, as a `tofu init` through a plugin cache writes it, and its remedy and `docs/getting-started.md` add `tofu providers lock -platform=linux_amd64` after `tofu init -backend=false`.**
 
 ## [0.42.0] — 2026-10-04
 

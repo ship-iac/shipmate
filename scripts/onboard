@@ -833,12 +833,29 @@ def _codeowners_item(ctx):
     )
 
 
+def _cache_written(lock):
+    """True when a `provider` block of the lock text carries no `zh:` hash. A registry read
+    records `zh:` for every provider; a `tofu init` through a plugin cache or a mirror
+    records only the local platform's `h1:`, and nothing here can tell which `h1:` is
+    `linux_amd64`'s, so a block without `zh:` is the observable signature."""
+    return any('"zh:' not in block for block in lock.split('provider "')[1:])
+
+
+def _stack_list(stacks):
+    lines = [f"  {s}" for s in stacks[:10]]
+    if len(stacks) > 10:
+        lines.append(f"  and {len(stacks) - 10} more")
+    return lines
+
+
 def _lock_files_item(ctx):
     """`ok` when every stack has a git-tracked `.terraform.lock.hcl`, the only lock the
-    provider cache keys on. Tracked, not present on disk: any local `tofu init` writes the
-    file, gitignored or not. `ctx["stacks"]` and the paths named here are relative to the
-    working directory, as `terramate list` printed them; `git ls-files` prints the same form.
-    One fixed pathspec keeps the argv under Windows' command-line limit at any stack count.
+    provider cache keys on, and no tracked lock on disk was written through a plugin cache
+    (`_cache_written`). Tracked, not present on disk: any local `tofu init` writes the file,
+    gitignored or not; a tracked lock absent from the working tree gets no content verdict.
+    `ctx["stacks"]` and the paths named here are relative to the working directory, as
+    `terramate list` printed them; `git ls-files` prints the same form. One fixed pathspec
+    keeps the argv under Windows' command-line limit at any stack count.
     """
     item = "Provider lock files"
     stacks = sorted(ctx["stacks"])
@@ -846,19 +863,36 @@ def _lock_files_item(ctx):
     if stacks:
         out = _run(["git", "ls-files", "-z", "--", ":(top)*.terraform.lock.hcl"])
         tracked = set(out.split("\0"))
-    lock = ".terraform.lock.hcl"
-    missing = [s for s in stacks if (pathlib.PurePosixPath(s) / lock).as_posix() not in tracked]
-    if not missing:
+    missing, cached = [], []
+    for s in stacks:
+        path = pathlib.PurePosixPath(s) / ".terraform.lock.hcl"
+        if path.as_posix() not in tracked:
+            missing.append(s)
+        elif (lock := pathlib.Path(path)).is_file() and _cache_written(
+            lock.read_text(encoding="utf-8")
+        ):
+            cached.append(s)
+    if not missing and not cached:
         return "ok", item, []
-    lines = [
-        f"{len(missing)} of {len(stacks)} stack(s) have no git-tracked `.terraform.lock.hcl`,",
-        "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-        "file first, since git refuses to add an ignored path, then run",
-        "`tofu init -backend=false` in each and commit the file:",
+    lines = []
+    if missing:
+        lines += [
+            f"{len(missing)} of {len(stacks)} stack(s) have no git-tracked `.terraform.lock.hcl`,",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path:",
+            *_stack_list(missing),
+        ]
+    if cached:
+        lines += [
+            f"{len(cached)} of {len(stacks)} stack(s) track a `.terraform.lock.hcl` without the",
+            "registry's `zh:` hashes, as a `tofu init` through a plugin cache writes it, so",
+            "the runner's provider cache cannot use it:",
+            *_stack_list(cached),
+        ]
+    lines += [
+        "In each, run `tofu init -backend=false`, then",
+        "`tofu providers lock -platform=linux_amd64`, and commit the file.",
     ]
-    lines += [f"  {s}" for s in missing[:10]]
-    if len(missing) > 10:
-        lines.append(f"  and {len(missing) - 10} more")
     return "todo", item, lines
 
 

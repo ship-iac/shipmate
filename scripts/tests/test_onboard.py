@@ -2001,9 +2001,10 @@ todo          CODEOWNERS entry covering /.github/workflows/
 todo          Provider lock files
     1 of 1 stack(s) have no git-tracked `.terraform.lock.hcl`,
     so the provider cache serves none of them. Remove any `.gitignore` entry for the
-    file first, since git refuses to add an ignored path, then run
-    `tofu init -backend=false` in each and commit the file:
+    file first, since git refuses to add an ignored path:
       stacks/app
+    In each, run `tofu init -backend=false`, then
+    `tofu providers lock -platform=linux_amd64`, and commit the file.
 
 todo          adoption pull request
     Re-run without --dry-run, then commit the workflow file and the table together,
@@ -2384,7 +2385,11 @@ def lock_run(tracked):
 
 
 def test_the_lock_item_is_ok_when_every_stack_tracks_its_lock(monkeypatch, tmp_path):
-    """Mutation: split the `git ls-files -z` output on a newline, which matches no path."""
+    """No lock is on disk: a tracked lock absent from the working tree gets no content verdict.
+
+    Mutation: split the `git ls-files -z` output on a newline, which matches no path. Or
+    flag a tracked lock that is not on disk as cache-written.
+    """
     monkeypatch.chdir(tmp_path)
     stacks = ["a", "b", "c"]
     tracked = {f"{s}/.terraform.lock.hcl" for s in stacks}
@@ -2408,10 +2413,11 @@ def test_the_lock_item_names_each_stack_without_a_tracked_lock(monkeypatch, tmp_
         [
             "2 of 3 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run",
-            "`tofu init -backend=false` in each and commit the file:",
+            "file first, since git refuses to add an ignored path:",
             "  a",
             "  c",
+            "In each, run `tofu init -backend=false`, then",
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -2427,8 +2433,7 @@ def test_the_lock_item_names_ten_stacks_and_counts_the_rest(monkeypatch, tmp_pat
         [
             "12 of 12 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run",
-            "`tofu init -backend=false` in each and commit the file:",
+            "file first, since git refuses to add an ignored path:",
             "  s00",
             "  s01",
             "  s02",
@@ -2440,6 +2445,8 @@ def test_the_lock_item_names_ten_stacks_and_counts_the_rest(monkeypatch, tmp_pat
             "  s08",
             "  s09",
             "  and 2 more",
+            "In each, run `tofu init -backend=false`, then",
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -2460,9 +2467,119 @@ def test_the_lock_item_resolves_stacks_against_the_working_directory(monkeypatch
         [
             "1 of 2 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run",
-            "`tofu init -backend=false` in each and commit the file:",
+            "file first, since git refuses to add an ignored path:",
             "  app",
+            "In each, run `tofu init -backend=false`, then",
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
+        ],
+    )
+
+
+#: Provider blocks shaped as OpenTofu 1.12 writes them: a registry read records both hash
+#: kinds, a `tofu init` through `plugin_cache_may_break_dependency_lock_file` one `h1:`.
+REGISTRY_NULL = """provider "registry.opentofu.org/hashicorp/null" {
+  version = "3.2.4"
+  hashes = [
+    "h1:AAAA=",
+    "h1:BBBB=",
+    "zh:1111",
+    "zh:2222",
+  ]
+}
+"""
+REGISTRY_RANDOM = """provider "registry.opentofu.org/hashicorp/random" {
+  version = "3.7.2"
+  hashes = [
+    "h1:CCCC=",
+    "zh:3333",
+  ]
+}
+"""
+CACHE_RANDOM = """provider "registry.opentofu.org/hashicorp/random" {
+  version = "3.7.2"
+  hashes = [
+    "h1:CCCC=",
+  ]
+}
+"""
+CACHE_WRITTEN_LINES = [
+    "1 of 2 stack(s) track a `.terraform.lock.hcl` without the",
+    "registry's `zh:` hashes, as a `tofu init` through a plugin cache writes it, so",
+    "the runner's provider cache cannot use it:",
+    "  b",
+    "In each, run `tofu init -backend=false`, then",
+    "`tofu providers lock -platform=linux_amd64`, and commit the file.",
+]
+
+
+def write_locks(root, locks):
+    for stack, text in locks.items():
+        (root / stack).mkdir()
+        (root / stack / ".terraform.lock.hcl").write_text(text, encoding="utf-8")
+    return lock_run({f"{s}/.terraform.lock.hcl" for s in locks})
+
+
+def test_a_lock_with_only_h1_hashes_is_flagged(monkeypatch, tmp_path):
+    """Mutation: accept a block carrying any `"h1:` entry, which reads `b` as `ok`."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        onboard, "_run", write_locks(tmp_path, {"a": REGISTRY_NULL, "b": CACHE_RANDOM})
+    )
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=["a", "b"])) == (
+        "todo",
+        LOCK_ITEM,
+        CACHE_WRITTEN_LINES,
+    )
+
+
+def test_one_cache_written_provider_block_flags_a_mixed_lock(monkeypatch, tmp_path):
+    """One cache miss gives a lock whose other blocks came from the registry.
+
+    Mutation: look for `"zh:` in the whole file instead of per `provider` block, which
+    reads `b` as `ok`.
+    """
+    monkeypatch.chdir(tmp_path)
+    locks = {"a": REGISTRY_NULL + "\n" + REGISTRY_RANDOM, "b": REGISTRY_NULL + "\n" + CACHE_RANDOM}
+    monkeypatch.setattr(onboard, "_run", write_locks(tmp_path, locks))
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=["a", "b"])) == (
+        "todo",
+        LOCK_ITEM,
+        CACHE_WRITTEN_LINES,
+    )
+
+
+def test_a_registry_written_lock_is_ok(monkeypatch, tmp_path):
+    """Mutation: flag a block that carries `"zh:` instead of one that lacks it, which
+    flags `a`."""
+    monkeypatch.chdir(tmp_path)
+    locks = {"a": REGISTRY_NULL + "\n" + REGISTRY_RANDOM}
+    monkeypatch.setattr(onboard, "_run", write_locks(tmp_path, locks))
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=["a"])) == ("ok", LOCK_ITEM, [])
+
+
+def test_a_missing_lock_and_a_cache_written_one_get_one_sentence_each(monkeypatch, tmp_path):
+    """Each sentence names only its own stacks; one remedy serves both.
+
+    Mutation: list the cache-written stacks under the missing-lock sentence, which names
+    `b` there and drops the second sentence.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(onboard, "_run", write_locks(tmp_path, {"b": CACHE_RANDOM}))
+    assert onboard._lock_files_item(ctx(root=tmp_path, stacks=["c", "b", "a"])) == (
+        "todo",
+        LOCK_ITEM,
+        [
+            "2 of 3 stack(s) have no git-tracked `.terraform.lock.hcl`,",
+            "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
+            "file first, since git refuses to add an ignored path:",
+            "  a",
+            "  c",
+            "1 of 3 stack(s) track a `.terraform.lock.hcl` without the",
+            "registry's `zh:` hashes, as a `tofu init` through a plugin cache writes it, so",
+            "the runner's provider cache cannot use it:",
+            "  b",
+            "In each, run `tofu init -backend=false`, then",
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -2490,10 +2607,11 @@ def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, caps
         [
             "2 of 2 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run",
-            "`tofu init -backend=false` in each and commit the file:",
+            "file first, since git refuses to add an ignored path:",
             "  a",
             "  b",
+            "In each, run `tofu init -backend=false`, then",
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -2511,9 +2629,10 @@ def test_the_lock_item_names_managed_stacks_only(monkeypatch, tmp_path, capsys):
         [
             "1 of 1 stack(s) have no git-tracked `.terraform.lock.hcl`,",
             "so the provider cache serves none of them. Remove any `.gitignore` entry for the",
-            "file first, since git refuses to add an ignored path, then run",
-            "`tofu init -backend=false` in each and commit the file:",
+            "file first, since git refuses to add an ignored path:",
             "  a",
+            "In each, run `tofu init -backend=false`, then",
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
