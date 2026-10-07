@@ -185,7 +185,7 @@ leave no whole tree to cover
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
 
 The checklist reads the working tree: stack tags, `.github/shipmate.toml` and
-`.github/workflows/`. Re-run `scripts/onboard --dry-run` after retagging a stack
+`.github/workflows/`. Re-run `scripts/onboard --app-id <id> --dry-run` after retagging a stack
 or adding, editing or deleting a drift file.
 
 Branch, commit, push and pull request are yours: the script writes files and
@@ -881,7 +881,7 @@ default-branch ref; it needs the `shipmate-engine` environment from the plan
 tier. `scripts/onboard` does not write it: save it from the `shipmate drift`
 fence in §The workflow file. Name, edit and split drift files freely — a `tags`
 query, other crons. When no workflow file calls `drift.yml`, `shipmate doctor`
-reports a notice. `scripts/onboard --dry-run` reads the drift files in the
+reports a notice. `scripts/onboard --app-id <id> --dry-run` reads the drift files in the
 working tree and names the cells none of them sweeps, a query or clause matching
 no cell, and a sweep above the 256-cell limit; re-run it after adding, editing or
 deleting a drift file. Scoping a sweep and what it costs are in
