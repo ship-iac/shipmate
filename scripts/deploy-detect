@@ -54,13 +54,31 @@ def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):
     return merge_sha
 
 
-def refuse_stranded_checks(unmanaged, open_names):
-    """Refuse when an open apply check belongs to a stack this scan found unmanaged: the stack
-    lost its `env/*` tags on the default branch after its pull request was planned, so no
-    cell carries its reviewed change and nothing else would ever complete the check. The
-    gate fails closed. Each stack's name prefix is built forward by `check_name`."""
-    prefixes = tuple(ad.ag.check_name(p, "") for p in unmanaged)
-    stranded = sorted(n for n in open_names if n.startswith(prefixes))
+def refuse_stranded_checks(tree, unmanaged, open_names):
+    """Refuse each open apply check of a stack this scan covers (a stack of a `tree` cell, or
+    `unmanaged`) whose `(stack, env)` is no `tree` cell: the stack lost that `env/*` tag on
+    the default branch after its pull request was planned, so no cell carries its reviewed
+    change and nothing else would ever complete the check. The gate fails closed. A check of
+    a stack absent from the scan is skipped silently: this merge's diff did not touch it.
+
+    A check names its env only in its name, and after the merge no env set holds the one a
+    stack lost (under `folder` or `workspace` a table may declare none), so `rest` is read
+    back from the name. It is that stack's env only when it is a valid env name and
+    `check_name` rebuilds the whole name from it; an env name cannot contain ` / `, so a
+    longer stack path sharing the prefix is never taken for this one."""
+    cells = {(c["stack"], c["environment"]) for c in tree}
+    scanned = {s for s, _ in cells} | set(unmanaged)
+    stranded = []
+    for name in open_names:
+        for stack in scanned:
+            rest = name.removeprefix(ad.ag.check_name(stack, ""))
+            if (
+                bm.ec._ENV_ENTRY.fullmatch(rest)
+                and name == ad.ag.check_name(stack, rest)
+                and (stack, rest) not in cells
+            ):
+                stranded.append(name)
+    stranded.sort()
     if stranded:
         raise SystemExit(
             f"::error::deploy aborted: {', '.join(stranded)}: the stack of each lost its "
@@ -78,7 +96,7 @@ def main():
     head = _merged_head(repo, merge_sha)
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
-    _, cells, _, unmanaged = bm.compute_cells(
+    _, cells, tree, unmanaged = bm.compute_cells(
         all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", "")
     )
     table = bm.env_config(cells)
@@ -89,7 +107,7 @@ def main():
     # disagree — the name leaves `completed` and its cell re-queues on the earlier record.
     lines = ad._check_run_lines(repo, head)
     completed = ad.ag.app_done_names(lines, app_id)
-    refuse_stranded_checks(unmanaged, ad.apply_check_names(lines, app_id) - completed)
+    refuse_stranded_checks(tree, unmanaged, ad.apply_check_names(lines, app_id) - completed)
     # AFTER the pending filter, as on both pre-merge paths: an applied cell needs no record,
     # so a completed check that carries none never refuses the deploy.
     pending = ad.with_plan_runs(ad.filter_pending(cells, completed), lines, app_id)

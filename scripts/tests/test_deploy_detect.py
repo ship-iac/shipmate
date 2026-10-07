@@ -471,6 +471,62 @@ def test_main_refuses_a_pending_apply_check_on_an_unmanaged_stack(tmp_path, monk
     )
 
 
+_PARTIAL_UNTAG_MESSAGE = (
+    "::error::deploy aborted: apply / stacks/app / prod: the stack of each lost its env/* tag "
+    "after this pull request was planned, so its reviewed change was not applied. Open a new "
+    "pull request that retags the stack (or otherwise changes it); that pull request plans "
+    "the current default branch, this merged change included, and its deploy applies it. "
+    "This run's apply checks are never read again and stay pending on the merged pull "
+    "request; re-running this deploy refuses again."
+)
+
+
+def test_main_refuses_an_open_check_for_an_env_the_stack_no_longer_tags(tmp_path, monkeypatch):
+    """`stacks/app` keeps `env/dev-eu` and lost `env/prod`: the `prod` check is stranded even
+    though the stack is still managed. Mutation: refuse only checks of `unmanaged` stacks (the
+    round-one form) -- the deploy writes waves."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[],
+            checks=[_apply_check("stacks/app"), _apply_check("stacks/app", "prod")],
+            stacks={"stacks/app": ["env/dev-eu"]},
+            deps={"stacks/app": set()},
+        )
+    assert str(exc_info.value) == _PARTIAL_UNTAG_MESSAGE
+
+
+def test_main_skips_an_open_check_on_a_stack_the_scan_does_not_cover(tmp_path, monkeypatch):
+    """Another pull request landed `stacks/other`'s change first, so this merge's diff does
+    not touch it: its open check is not this deploy's to refuse. Mutation: drop the in-scan
+    condition, refusing every open check that names no scan cell -- the deploy refuses."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[],
+        checks=[_apply_check("stacks/app"), _apply_check("stacks/other")],
+        stacks={"stacks/app": ["env/dev-eu"]},
+        deps={"stacks/app": set()},
+    )
+    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+
+
+def test_a_name_whose_rest_is_no_env_name_is_not_the_stack_s_check(tmp_path, monkeypatch):
+    """`apply / stacks/app / x / dev-eu` is the check of a stack `stacks/app / x`, absent from
+    the scan; read against `stacks/app` its rest `x / dev-eu` is no env name. Mutation: drop
+    the env-name `fullmatch` -- the deploy refuses it."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[],
+        checks=[_apply_check("stacks/app"), _apply_check("stacks/app / x", "dev-eu")],
+        stacks={"stacks/app": ["env/dev-eu"]},
+        deps={"stacks/app": set()},
+    )
+    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+
+
 def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path, monkeypatch):
     """An unmanaged stack the pull request changed, whose only apply check completed, does not
     refuse the deploy. Mutation: `stranded = sorted(unmanaged)` -- this run raises."""
