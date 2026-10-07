@@ -952,7 +952,9 @@ match nothing.
 
 A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip
 it, and plan, deploy and drift print a notice naming every unmanaged stack they
-scanned (the changed set on plan and deploy, the whole tree on drift). The plan
+scanned (the changed set on plan and deploy, the whole tree on drift). A bare
+`shipmate apply`, `shipmate unlock` and `scripts/onboard` print it too, over the
+whole tree. The plan
 comment names the unmanaged stacks a pull request changes, under its verdict. A
 `workload/*` tag on an unmanaged stack is never checked. An `env/<name>` tag
 whose environment has no entry in the environment table still refuses the run
@@ -1919,13 +1921,16 @@ Where the zero *does* mean no stacks changed, the suppression is create-only:
 an existing comment is always updated to the no-changes body, because a pull
 request that planned changes and then pushed them away must not keep displaying
 applies that no longer exist. With no comment yet, none is posted — a docs-only
-or engine-pin-bump pull request carries no shipmate comment — with one
-exception: a run where `doctor` emitted a warning still posts. Doctor's
+or engine-pin-bump pull request carries no shipmate comment — with two
+exceptions. A run where `doctor` emitted a warning still posts: doctor's
 findings are annotations with no file/line, so they render only on the run page
 (see §Comment-ops), and this comment's verdict links that run from the
 pull request. `::notice::`
 findings do not trigger the exception: they are informational, and would put a
-comment on every quiet run.
+comment on every quiet run. A run whose comment carries the unmanaged line also
+posts: a pull request that changes only stacks with no `env/*` tag plans nothing,
+and the comment is where it says so. When the line is left out for size (below),
+this exception does not apply.
 
 An existing comment is edited in place on every plan run (comment lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
@@ -1934,11 +1939,14 @@ App name, which a consumer org may have had to slug differently than
 trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
-line, the verdict line, a blank line, one line or fold-out per planned stack ×
-environment, sorted by environment then stack. There is no footer and no help
+line, the verdict line, a blank line, the unmanaged line and a blank line when
+the pull request changes an unmanaged stack, one line or fold-out per planned
+stack × environment, sorted by environment then stack. There is no footer and no help
 hint, whether or not `doctor` warned: both verdicts are normal results and the
 verdict links the run. The doctor step records its decision once, as its
-`warned` output, which the post-or-skip rule reads.
+`warned` output, which the post-or-skip rule reads; the build step records
+whether the unmanaged line rendered, as its `unmanaged` output, which the same
+rule reads.
 
 - **Verdict line.** `🟢 no changes` when no cell changes (zero cells
   included), else `🟡 N of M cells change`, then
@@ -1949,6 +1957,11 @@ verdict links the run. The doctor step records its decision once, as its
   hex SHA the line ends `at an unknown commit in [run #<n>](<run url>)`. The
   line reads the cells only: every failed plan job holds the gate, and a held
   run posts no comment.
+- **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
+  managed by shipmate: <paths>`, naming at most ten paths within 1,000
+  characters, then `, and M more`. When not even the first path fits, it ends
+  `; their paths are too long to list here.` When the cell lines leave it no
+  room under the 65,536-character cap, it is left out with a warning.
 - **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the

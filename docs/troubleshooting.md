@@ -857,12 +857,18 @@ An environment that must never apply unreviewed must not hold `gated = false`.
 
 No `shipmate / <stack> / <env>` checks appear, no plan comment is posted — unless
 there is
-already a plan comment to keep current, or `doctor` raised a warning on that
-run, either of which still posts one — and the gate goes green over no work.
+already a plan comment to keep current, `doctor` raised a warning on that
+run, or the pull request changes a stack with no `env/*` tag, any of which still
+posts one — and the gate goes green over no work.
 
 Change detection is `terramate list --changed`, so a pull request that touches
 no stack's own files and changes no generated `.tf` — an engine-pin bump, a docs
 edit — plans nothing. This is expected, not a fault.
+
+A changed stack with no `env/*` tag is unmanaged and plans nothing either. The
+plan comment names it under the verdict, and the `detect` log carries a notice
+naming it. Tag it `env/<name>` to bring it under shipmate ([`../CONTRACT.md`](../CONTRACT.md) §Tag
+grammar).
 
 The same rule drops a stack whose change was applied before merge and then
 reverted on the branch. The branch matches the default branch again, so no
