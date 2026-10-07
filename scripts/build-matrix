@@ -255,8 +255,9 @@ def tagged_workloads(stacks_by_env, tags_by_stack):
     """`{env: frozenset of the names its stacks' workload/<name> tags carry}`, every env of
     `stacks_by_env` included.
 
-    Not through `workload_of`: its two-tag refusal runs over the whole scanned tree in
-    `full_tree`, before any `tags` filter."""
+    Not through `workload_of`: its two-tag refusal runs in `full_tree` over the scanned tree's
+    managed stacks, before any `tags` filter. An unmanaged stack's workload tags are never
+    checked."""
     return {
         env: frozenset(
             t[len("workload/") :]

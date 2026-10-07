@@ -1003,8 +1003,14 @@ whose `env_binding` names no GitHub Environment, and the refusal of a
 2. Work on the stack by hand.
 3. Retag the stack in a later pull request to bring it back, or delete it.
 
+Every plan's `detect` still runs `terramate fmt --check` and
+`terramate generate --detailed-exit-code` over the whole repository, unmanaged
+stacks included. Keep an unmanaged stack formatted and its generated code
+current, or every plan's `detect` fails.
+
 The stack's open drift Issues close on the next sweep that plans at least one
-cell, as Issues of a cell no longer managed. A sweep left with no cell skips its
+cell and planned the default branch's current head, as Issues of a cell no
+longer managed. A sweep left with no cell skips its
 `issues` job ([`docs/drift.md`](docs/drift.md)), so close them by hand then.
 
 A stack that exists once, such as one in a management account, is a
