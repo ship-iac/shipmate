@@ -311,21 +311,25 @@ that causes it merges:
 | Item | `todo` when |
 | --- | --- |
 | `unmanaged stacks` | a stack carries no `env/*` tag. It names them; shipmate runs none of them, which needs nothing if deliberate. |
-| `stack tags` | a stack carries two `workload/*` tags, two stack paths in one environment slug alike, a stack's `workload/*` tag is outside its environment's `workloads` list, or that list names a workload no stack in the environment tags. |
-| `drift sweeps` | no workflow file calls the engine's `drift.yml`; a stack × environment cell is in no drift file's `tags` query; a query, or one clause of it, matches no cell; or a query has an empty term or selects more than 256 cells. The sweep refuses either of the last two, so that file's cells count as unswept. |
+| `stack tags` | a stack carries two `workload/*` tags, two stack paths in one environment slug alike, a stack's `workload/*` tag is outside its environment's `workloads` list (checked only when that entry names an `identity`), or that list names a workload no stack in the environment tags. |
+| `drift sweeps` | no workflow file calls the engine's `drift.yml`; a stack × environment cell is in no drift file's `tags` query; a query, or one clause of it, matches no cell; or a sweep refuses: its query has an empty term, selects more than 256 cells, or keeps a cell whose `workload/*` tag its environment's `workloads` list does not name. A refused sweep runs no cell, so that file's cells count as unswept. |
 
 `drift sweeps` reads every `.yml` and `.yaml` file in `.github/workflows/` and
 treats one as a drift file when it calls the engine's `drift.yml`, as
 `shipmate doctor` does. It reads this checkout's copies; a drift run reads the
 default branch's. It reports `cannot check` and computes no coverage when a
-drift file's `tags` is a `${{ }}` expression or is set more than once, when its
-`uses:` value is on the line after the key, when a file is not UTF-8, or when
-`stack tags` reports a two-tag stack or a slug collision, which leaves the tree
-incomplete.
+drift file's `tags` is a `${{ }}` expression, is set more than once, or starts
+on the line after its key (including a `>` or `|` block scalar); when its job
+splits a flow mapping across lines; when a file calls `drift.yml` more than once
+or its `uses:` value is on the line after the key; when a file or the directory
+cannot be read, or a file is not UTF-8; when `.github/shipmate.toml` fails
+validation; or when `stack tags` reports a two-tag stack or a slug collision,
+which leaves the tree incomplete.
 
 The `.github/shipmate.toml` item is `todo` when the table is absent or fails
-validation, or when a `needs` entry names an environment no stack tags, which
-orders nothing.
+validation, or when a `needs` entry names an environment that is neither an
+entry nor tagged on any stack, which orders nothing. A `needs` naming a declared
+entry no stack tags yet is the provisioned-ahead order and stays `ok`.
 
 Some disagreements are refused rather than reported: the run stops before its
 first write and exits 1 — no `differs` line, and nothing else runs.

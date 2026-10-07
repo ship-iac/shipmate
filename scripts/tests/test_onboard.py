@@ -88,7 +88,6 @@ def ctx(**over):
         "key": "-----BEGIN-----\npem\n",
         "envs": ["dev-eu"],
         "stacks": [],
-        "tagged_envs": {"dev-eu"},
         "shared": set(),
         "unresolved": set(),
         "root": None,
@@ -2907,20 +2906,19 @@ def test_a_listed_workload_no_stack_in_its_environment_tags_is_listed():
     )
 
 
-def test_a_needs_predecessor_no_stack_tags_is_named_on_the_table_item():
-    """`staging` is an entry, so it is in `ctx["envs"]`, and no stack tags it. The item is
-    `todo`: the key reads as ordering `prod` after `staging` while it orders nothing.
+def test_a_needs_predecessor_no_entry_declares_and_no_stack_tags_is_todo():
+    """`staging` is a declared, untagged entry: the provisioned-ahead order, already the
+    `ok` provisioned line. `stagng` is neither an entry nor tagged, so it orders nothing while
+    reading as ordering, and the item is `todo`.
 
-    Mutations: pass `ctx["envs"]` to `stale_needs` -- the `needs` line is gone; return `ok`
-    for the stale-needs case.
+    Mutations: pass only the tagged set to `stale_needs` -- `staging` is named too; return
+    `ok` for the stale-needs case.
     """
-    table = {"layout": "folder", "environments": {"prod": {"needs": ["staging"]}, "staging": {}}}
-    context = ctx(
-        table=table,
-        envs=["prod", "staging"],
-        tagged_envs={"prod"},
-        tagged={"prod": frozenset()},
-    )
+    table = {
+        "layout": "folder",
+        "environments": {"prod": {"needs": ["staging", "stagng"]}, "staging": {}},
+    }
+    context = ctx(table=table, envs=["prod", "staging"], tagged={"prod": frozenset()})
     assert onboard._table_item(context) == (
         "todo",
         "`.github/shipmate.toml`",
@@ -2928,8 +2926,8 @@ def test_a_needs_predecessor_no_stack_tags_is_named_on_the_table_item():
             "Provisioned for staging, which no stack tags yet: its first tagging pull request",
             "deploys under that environment's protection. If the name is a typo, fix the",
             "entry.",
-            "`needs` names staging, which no stack tags, so it orders nothing until a stack",
-            "is tagged into each.",
+            "`needs` names stagng, which no entry declares and no stack tags, so it orders",
+            "nothing. If a name is a typo, fix it.",
         ],
     )
 
@@ -2947,8 +2945,8 @@ def test_onboard_and_env_config_share_one_table_rule(monkeypatch):
         "each, or remove it from the list.",
     ]
     assert onboard._table_item(context)[2] == [
-        "`needs` names SENTINEL, which no stack tags, so it orders nothing until a stack",
-        "is tagged into each.",
+        "`needs` names SENTINEL, which no entry declares and no stack tags, so it orders",
+        "nothing. If a name is a typo, fix it.",
     ]
 
 
@@ -3464,8 +3462,8 @@ def test_the_drift_query_is_read_without_yaml(with_lines, expected):
     key -- `two-keys` is a query.
     """
     text = _drift_job(with_lines)
-    region = onboard._load("doctor")._call_region(
-        text, onboard._load("doctor")._engine_call(onboard.ENGINE_SLUG, "drift.yml")
+    region = onboard.dr._call_region(
+        text, onboard.dr._engine_call(onboard.ENGINE_SLUG, "drift.yml")
     )
     assert onboard._drift_query(region) == expected
 
@@ -3488,5 +3486,148 @@ def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, ca
             "  stacks/app (dev-eu)",
             "Widen a `tags` query, or add a drift file for them.",
             _read_line("ghost.yml"),
+        ],
+    )
+
+
+NOT_ON_KEY_LINE = "its `tags` value is not on the key's line, which this reader does not follow"
+
+
+@pytest.mark.parametrize(
+    ("with_lines", "reason"),
+    [
+        ("    with:\n      tags:\n        env/dev-eu\n", NOT_ON_KEY_LINE),
+        ("    with:\n      tags: >-\n        env/dev-eu\n", NOT_ON_KEY_LINE),
+        ("    with:\n      tags: |\n        env/dev-eu\n", NOT_ON_KEY_LINE),
+        (
+            "    with: {\n      tags: env/dev-eu }\n",
+            "its drift job splits a flow mapping across lines, which this reader does not follow",
+        ),
+    ],
+    ids=["next-line", "folded", "literal", "flow-split"],
+)
+def test_a_tags_value_the_line_reader_cannot_follow_is_cannot_check(tmp_path, with_lines, reason):
+    """Read as "", each would sweep every cell and mark it covered.
+
+    Mutations: treat an empty block value as "" (`if rest[:1] in (">", "|"):` in
+    `_tags_value`) -- `next-line` is `ok`; drop the split-flow test -- `flow-split` reads
+    `env/dev-eu }` as a block value and is `todo` over a query matching no cell.
+    """
+    cells, tags = _tree(("a", "dev-eu"))
+    context = _drift_ctx(
+        tmp_path, {"drift.yml": _drift_job(with_lines)}, cells=cells, tags_by_stack=tags
+    )
+    assert onboard._drift_sweeps_item(context) == (
+        "cannot check",
+        DRIFT_ITEM,
+        ["Coverage was not computed:", f"  drift.yml: {reason}.", _read_line("drift.yml")],
+    )
+
+
+def test_a_file_calling_drift_yml_twice_is_cannot_check(tmp_path):
+    """`_call_region` reads the first call only, so the second job's query would go unread.
+
+    Mutation: `calls > 2` for `calls > 1` in `_drift_file` -- the first job's query alone is
+    read and the item is `ok`.
+    """
+    text = _drift_job("    with:\n      tags: env/dev-eu\n") + "  second:\n" + DRIFT_CALL
+    cells, tags = _tree(("a", "dev-eu"))
+    context = _drift_ctx(tmp_path, {"drift.yml": text}, cells=cells, tags_by_stack=tags)
+    assert onboard._drift_sweeps_item(context) == (
+        "cannot check",
+        DRIFT_ITEM,
+        [
+            "Coverage was not computed:",
+            "  drift.yml: it calls `drift.yml` more than once.",
+            _read_line("drift.yml"),
+        ],
+    )
+
+
+def test_a_sweep_refusing_a_workload_gap_covers_no_cell(tmp_path):
+    """A drift detect runs `stamp_rows` and `refuse_workload_gaps` on its kept cells, and the
+    gap refuses the whole sweep, so the folders file sweeps nothing here.
+
+    Mutation: drop the `refuse_workload_gaps` call from `_sweep` -- `ok`.
+    """
+    cells = [{"stack": "a", "environment": "dev-eu", "workload": "net"}]
+    context = _drift_ctx(
+        tmp_path,
+        {"drift.yml": FOLDERS_DRIFT},
+        table=_listing(**{"dev-eu": ["core"]}),
+        cells=cells,
+        tags_by_stack={"a": ["env/dev-eu", "workload/net"]},
+        tagged={"dev-eu": frozenset({"net"})},
+    )
+    assert onboard._drift_sweeps_item(context) == (
+        "todo",
+        DRIFT_ITEM,
+        [
+            "drift.yml: 1 cell(s) carry a workload tag their environment's workloads list does "
+            "not name: a in dev-eu (workload/net; dev-eu lists core). A listed workload is the "
+            "only one the default branch grants a role to. Retag the stack, or add the workload "
+            "to environments.<env>.workloads in .github/shipmate.toml on the default branch, "
+            "which is where this table is read from: merge it there on its own pull request "
+            "first.",
+            "1 cell(s) no drift file sweeps:",
+            "  a (dev-eu)",
+            "Widen a `tags` query, or add a drift file for them.",
+            _read_line("drift.yml"),
+        ],
+    )
+
+
+def test_a_table_failing_validation_leaves_coverage_uncomputed(tmp_path):
+    """A drift detect refuses on it before any cell runs.
+
+    Mutation: drop the `ec.validate` check from `_coverage_blockers` -- `ok`.
+    """
+    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nshared = false\n')
+    cells, tags = _tree(("a", "dev-eu"))
+    context = _drift_ctx(
+        tmp_path, {"drift.yml": FOLDERS_DRIFT}, table=table, cells=cells, tags_by_stack=tags
+    )
+    assert onboard._drift_sweeps_item(context) == (
+        "cannot check",
+        DRIFT_ITEM,
+        [
+            "Coverage was not computed:",
+            "  `.github/shipmate.toml` fails validation; see its item.",
+            _read_line("drift.yml"),
+        ],
+    )
+
+
+def test_an_unreadable_workflow_file_or_directory_is_cannot_check(tmp_path, monkeypatch):
+    """An `OSError` comes after the run's writes, so it must not stop the run with exit 1.
+
+    Mutations: drop the `OSError` handler in `_drift_file` -- the item raises
+    `PermissionError`; drop the one around `iterdir` -- the same.
+    """
+    context = _drift_ctx(tmp_path, {"drift.yml": FOLDERS_DRIFT, "locked.yml": b"x\n"})
+    real = pathlib.Path.read_text
+
+    def read_text(self, *args, **kwargs):
+        if self.name == "locked.yml":
+            raise PermissionError(13, "Permission denied")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", read_text)
+    assert onboard._drift_sweeps_item(context)[2][:2] == [
+        "Coverage was not computed:",
+        "  locked.yml: it could not be read: [Errno 13] Permission denied.",
+    ]
+
+    def iterdir(self):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(pathlib.Path, "iterdir", iterdir)
+    assert onboard._drift_sweeps_item(context) == (
+        "cannot check",
+        DRIFT_ITEM,
+        [
+            "Coverage was not computed:",
+            "  .github/workflows/: it could not be listed: [Errno 13] Permission denied.",
+            _read_line(".github/workflows/"),
         ],
     )
