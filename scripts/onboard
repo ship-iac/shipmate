@@ -121,16 +121,11 @@ def _env_membership():
     return _load("build-matrix").env_membership(all_stacks=True)
 
 
-def _derive_envs(stacks_by_env):
-    if not stacks_by_env:
-        raise SystemExit(
-            "::error::this repository declares no environment: no stack carries an env/* tag, "
-            "so there is nothing to bind. Tag the stacks first (CONTRACT.md §Tag grammar)."
-        )
-    bad = sorted(e for e in stacks_by_env if not _ENV_RE.fullmatch(e))
+def _derive_envs(names):
+    bad = sorted(e for e in names if not _ENV_RE.fullmatch(e))
     if bad:
         raise SystemExit(f"::error::unusable environment name(s): {', '.join(bad)}")
-    return sorted(stacks_by_env)
+    return sorted(names)
 
 
 def _repo_root():
@@ -190,7 +185,7 @@ def _read_key(path):
     return pem
 
 
-def _resolve_shared(root, envs, repo, variables):
+def _resolve_shared(root, repo, variables):
     """(table, shared): the checkout's validated `.github/shipmate.toml` and the
     environments it marks `shared = true`.
 
@@ -198,8 +193,7 @@ def _resolve_shared(root, envs, repo, variables):
     resolves it from the repository `variables` over the organization variables reaching
     `repo`, GitHub's precedence; a file without one makes no API call. The table is
     structurally validated first, because `shared_envs` trusts its shape, and this runs
-    before the first write. A shared name no stack tags would bind nothing and report
-    success, so it is refused.
+    before the first write.
     """
     path = root / ec.CONFIG_PATH
     if not path.is_file():
@@ -216,14 +210,7 @@ def _resolve_shared(root, envs, repo, variables):
         )
         table = ec.parse_table(text, {**reaching, **variables})
     ec.validate_structure(table)
-    shared = ec.shared_envs(table)
-    for name in sorted(shared):
-        if name not in envs:
-            raise SystemExit(
-                f"[environments.{name}] in {ec.CONFIG_PATH} holds `shared = true`, but no "
-                f"stack declares {name!r}. Its environments are: {', '.join(envs)}."
-            )
-    return table, shared
+    return table, ec.shared_envs(table)
 
 
 def _variables():
@@ -748,7 +735,7 @@ def _table_item(ctx):
             ["Add one: copy the example in docs/getting-started.md §Environments for this tier."],
         )
     try:
-        ec.validate(ctx["table"], ctx["envs"])
+        ec.validate(ctx["table"], ctx["envs"], tagged=ctx["tagged"])
     except SystemExit as e:
         return "todo", item, [ln.removeprefix("::error::") for ln in str(e).splitlines()]
     return "ok", item, []
@@ -983,17 +970,20 @@ def main(argv=None):
     root = _repo_root()
     repo, default_branch, is_private = _repo_facts()
     stacks_by_env, tags_by_stack = _env_membership()
-    envs = _derive_envs(stacks_by_env)
     variables = _variables()
     _refuse_diverging_app_id(args.app_id, variables)
-    table, shared = _resolve_shared(root, envs, repo, variables)
+    table, shared = _resolve_shared(root, repo, variables)
+    # Table entries no stack tags yet are provisioned too: the first pull request tagging a
+    # stack into one deploys on merge, into an `<env>-apply` GitHub would otherwise auto-create.
+    envs = _derive_envs(set(stacks_by_env) | set((table or {}).get("environments", {})))
     ctx = {
         "repo": repo,
         "default_branch": default_branch,
         "app_id": args.app_id,
         "key": key,
         "envs": envs,
-        "stacks": list(tags_by_stack),
+        "stacks": sorted({s for stacks in stacks_by_env.values() for s in stacks}),
+        "tagged": _load("build-matrix").tagged_workloads(stacks_by_env, tags_by_stack),
         "table": table,
         "shared": shared,
         "unresolved": set(),
@@ -1014,7 +1004,7 @@ def main(argv=None):
     ctx["repo_secrets"] = _repo_secrets()
     _refuse_missing_key(ctx)
     print(f"{ctx['repo']} (default branch {ctx['default_branch']})")
-    print(f"environments: {', '.join(ctx['envs'])}")
+    print(f"environments: {', '.join(ctx['envs']) or '(none)'}")
     print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
     print(f"engine pin: {ctx['sha']} ({ctx['version']})")
 
