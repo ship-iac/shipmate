@@ -125,7 +125,8 @@ jobs:
       contents: read
     steps:
       - uses: $/actions/summary
-        # `scripts/doctor` reads the engine slug for its pin probe. `job` is unavailable in a
+        # `scripts/doctor`'s pin, `shipmate.yml` and drift-file probes match calls against the
+        # engine slug, and each degrades to a notice without it. `job` is unavailable in a
         # job-level `env:` (GitHub rejects the file) and `github.action_repository` is empty for
         # a `$/` action, so the step passes it; composite `run` steps inherit the caller's env.
         env:

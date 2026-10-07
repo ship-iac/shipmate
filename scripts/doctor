@@ -722,10 +722,22 @@ def _plan_env_secret_warnings(ctx):
     return out
 
 
+# A `uses:` key as YAML may spell it (`uses:`, `"uses":`, `uses :`) and the opening quote of
+# its value. Shared by `_PIN` and `_engine_call`, so the two read the same calls.
+_USES = r"""(?<![\w-])["']?uses["']?[ \t]*:\s*["']?"""
 _PIN = re.compile(
-    r"uses:\s*['\"]?(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
+    _USES + r"(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
     r"[\w./-]+@(?P<ref>[\w./-]+)"
 )
+
+
+def _engine_slug(engine):
+    """The pattern matching the engine repository `engine` as a `uses:` value names it.
+    Case-insensitive: GitHub resolves `owner/repo` in `uses:` that way. Every engine-slug
+    match goes through here, so the pin probe and `_engine_call` cannot disagree."""
+    return rf"(?i:{re.escape(engine)})"
+
+
 _SHA40 = re.compile(r"[0-9a-fA-F]{40}")
 
 
@@ -749,13 +761,16 @@ def _unverified(subject, path=_WORKFLOWS_DIR):
     )
 
 
-PIN_UNREADABLE, PIN_NO_COMMIT = _unverified("engine pin freshness")
-# NOTICE: the calling step supplies the engine repository, so an unknown one is not a
-# repository misconfiguration, and no other repository is read in its place.
-PIN_NO_ENGINE = (
-    NOTICE,
-    "engine pin freshness not verified: the engine repository could not be determined.",
-)
+def _no_engine(subject):
+    """The NOTICE of a probe checking `subject` against the engine repository when there is
+    none. The calling step supplies it, so an unknown one is not a repository
+    misconfiguration, and no other repository is matched in its place."""
+    return (NOTICE, f"{subject} not verified: the engine repository could not be determined.")
+
+
+_PIN_SUBJECT = "engine pin freshness"
+PIN_UNREADABLE, PIN_NO_COMMIT = _unverified(_PIN_SUBJECT)
+PIN_NO_ENGINE = _no_engine(_PIN_SUBJECT)
 
 
 def _contents_ref(ctx):
@@ -864,7 +879,7 @@ def _pins_in_text(text, fname, ctx, seen):
     engine = ctx["engine_repo"]
     for m in _PIN.finditer(text):
         slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
-        if slug != engine:
+        if not re.fullmatch(_engine_slug(engine), slug):
             continue  # a third party's action is not shipmate's to report on
         if not _SHA40.fullmatch(ref):
             out.append(
@@ -876,7 +891,7 @@ def _pins_in_text(text, fname, ctx, seen):
                 )
             )
             continue
-        seen.setdefault(slug, set()).add((fname, ref.lower()))
+        seen.setdefault(engine, set()).add((fname, ref.lower()))
     return out
 
 
@@ -976,9 +991,11 @@ def _stripped_text(text):
     return "\n".join(_strip_comment(ln) for ln in text.splitlines())
 
 
-def _engine_call(callee):
-    """The `uses:` selector for a call of the engine reusable workflow `callee`."""
-    return re.compile(rf"/\.github/workflows/{re.escape(callee)}@")
+def _engine_call(engine, callee):
+    """The `uses:` selector for a call of `callee`, the reusable workflow of the engine
+    repository `engine` (`ctx["engine_repo"]`). Anchored at `uses:` like `_PIN`, so another
+    repository's workflow of the same name is not the engine's."""
+    return re.compile(_USES + rf"{_engine_slug(engine)}/\.github/workflows/{re.escape(callee)}@")
 
 
 def _on_block(text):
@@ -1068,9 +1085,9 @@ def _unsafe_checkout_warnings(text, name):
     default is the outermost guard on this path.
 
     `_UNSAFE_CHECKOUT` matches at a line start OR after `{`/`,`: flow style is a
-    house idiom here — `docs/drift.md` and all four sample repositories write
-    `with: { fetch-depth: 0 }`, so a one-line checkout step is what a consumer
-    copying those pages produces. The value stops at `,`/`}` for the same
+    house idiom here — the engine's own workflows write
+    `with: { fetch-depth: 0, ref: ... }`, so a one-line checkout step is what a
+    consumer copying them produces. The value stops at `,`/`}` for the same
     reason: a flow-style `false` must read as `false` and not as `false }`,
     which would report the safest shape a consumer can write."""
     values = [
@@ -1148,9 +1165,6 @@ def _fork_trigger_warnings(ctx):
     return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
 
 
-# The shim's call of the engine's plan workflow, whose block the job-name finding judges. Its
-# absence is `_routing_finding`'s zero-count finding for `plan.yml`.
-_PLAN_WORKFLOW_CALL = _engine_call("plan.yml")
 # Line-anchored, and matched only against a direct child of the calling job: a `name:` or `if:`
 # deeper in the block belongs to something else. Read through `_job_key`.
 _JOB_KEY = re.compile(r"^[ \t]*(?P<key>name|if)[ \t]*:(?P<value>.*)$")
@@ -1209,7 +1223,7 @@ def _job_key(region, key):
     return values[0] if values else None
 
 
-def _shim_job_name_finding(text, name):
+def _shim_job_name_finding(text, name, engine):
     """The calling job's display name, or [] when it is `shipmate` or the file
     calls the engine's plan workflow nowhere.
 
@@ -1228,8 +1242,11 @@ def _shim_job_name_finding(text, name):
     `jobs:` / `  shipmate:` / `    uses: …` produces the same check names as the documented
     shape. Only a direct child of the job is read as its name, so a `name:` under `with:`
     cannot stand in for one. Judged block-style, like the documented file and every other
-    finder here."""
-    region = _call_region(text, _PLAN_WORKFLOW_CALL)
+    finder here.
+
+    A file calling no `plan.yml` of `engine` draws nothing here: that absence is
+    `_routing_finding`'s zero-count finding."""
+    region = _call_region(text, _engine_call(engine, "plan.yml"))
     if region is None:
         return []
     named = _job_key(region, "name")
@@ -1494,7 +1511,7 @@ def _normalize_if(value):
     return " ".join(v.split())
 
 
-def _routing_finding(text, name):
+def _routing_finding(text, name, engine):
     """One finding per `ROUTING_IFS` entry the file does not satisfy.
 
     One file gates five jobs on the event, and a wrong gate is silent in both directions: a
@@ -1505,7 +1522,7 @@ def _routing_finding(text, name):
     out = []
     stripped = _stripped_text(text)
     for callee, expected in ROUTING_IFS.items():
-        pattern = _engine_call(callee)
+        pattern = _engine_call(engine, callee)
         count = len(pattern.findall(stripped))
         if count != 1:
             out.append(
@@ -1550,6 +1567,10 @@ SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
     "the workflow file's job name, dispatch wiring, event routing and leftover drift call",
     _SHIPMATE_YML,
 )
+# Dispatch wiring reads no engine slug, so it is not in this subject.
+SHIPMATE_YML_NO_ENGINE = _no_engine(
+    "the workflow file's job name, event routing and leftover drift call"
+)
 
 
 SHIPMATE_YML_CALLS_DRIFT = (
@@ -1571,7 +1592,11 @@ def _shipmate_yml_warnings(ctx):
     unreadable workflow file cannot hide it. A missing file is reported as unreadable, a
     NOTICE rather than a WARNING: the contents read cannot tell a 404 from a permission or
     API failure, neither of which is a misconfiguration. A repository without the file
-    receives no dispatch."""
+    receives no dispatch.
+
+    Without the engine repository the three engine-anchored findings give way to one notice:
+    their selector would match no call, so each would report a healthy file. Dispatch wiring
+    reads no engine slug and still runs."""
     ref = _contents_ref(ctx)
     if ref is None:
         return [SHIPMATE_YML_NO_COMMIT]
@@ -1579,13 +1604,16 @@ def _shipmate_yml_warnings(ctx):
     if text is None:
         return [SHIPMATE_YML_UNREADABLE]
     name = "shipmate.yml"
+    engine = ctx["engine_repo"]
+    if not engine:
+        return [*_dispatch_wiring_finding(text, name), SHIPMATE_YML_NO_ENGINE]
     return [
-        *_shim_job_name_finding(text, name),
+        *_shim_job_name_finding(text, name, engine),
         *_dispatch_wiring_finding(text, name),
-        *_routing_finding(text, name),
+        *_routing_finding(text, name, engine),
         *(
             [SHIPMATE_YML_CALLS_DRIFT]
-            if _engine_call("drift.yml").search(_stripped_text(text))
+            if _engine_call(engine, "drift.yml").search(_stripped_text(text))
             else []
         ),
     ]
@@ -1856,9 +1884,9 @@ def _app_permission_warnings(ctx):
     ]
 
 
-DRIFT_FILE_UNREADABLE, DRIFT_FILE_NO_COMMIT = _unverified(
-    "whether a workflow file calls the engine's drift.yml"
-)
+_DRIFT_FILE_SUBJECT = "whether a workflow file calls the engine's drift.yml"
+DRIFT_FILE_UNREADABLE, DRIFT_FILE_NO_COMMIT = _unverified(_DRIFT_FILE_SUBJECT)
+DRIFT_FILE_NO_ENGINE = _no_engine(_DRIFT_FILE_SUBJECT)
 DRIFT_FILE_MISSING = (
     NOTICE,
     "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
@@ -1875,11 +1903,15 @@ def _drift_file_warnings(ctx):
     any file, and a commented-out call sweeps nothing. A scan that stopped at an unreadable
     file reports only the unreadable NOTICE, never the missing one: the call may sit in a file it
     never read.
+    Without the engine repository nothing is read: the selector would match no call, and the
+    missing-file notice would be false.
     """
+    if not ctx["engine_repo"]:
+        return [DRIFT_FILE_NO_ENGINE]
     ref = _contents_ref(ctx)
     if ref is None:
         return [DRIFT_FILE_NO_COMMIT]
-    call = _engine_call("drift.yml")
+    call = _engine_call(ctx["engine_repo"], "drift.yml")
     callers = []
 
     def per_file(text, name):
@@ -1988,8 +2020,8 @@ def ctx_from_env():
         "app_permission_error": os.environ.get("SHIPMATE_APP_PERMISSION_ERROR", ""),
         "head_sha": os.environ.get("SHIPMATE_HEAD_SHA", ""),
         # The engine's own slug, passed in by the calling step from
-        # `job.workflow_repository` -- never hardcoded, so the probe stays
-        # org-agnostic. Empty degrades to pin freshness not verified.
+        # `job.workflow_repository` -- never hardcoded. The pin, `shipmate.yml` and drift-file
+        # probes match calls against it; empty degrades each to a not-verified notice.
         "engine_repo": os.environ.get("SHIPMATE_ENGINE_REPO", ""),
         # A set, not one id: each cell's plan run comes from that cell's own
         # apply check, so one head's cells can come from several plan runs.

@@ -25,6 +25,7 @@ section below names the SHA the release tags.
 
 - **`shipmate doctor`'s failed-mint reply and App-permission warning, and `docs/github-app.md`, name the step a release adding an App permission needs: add it in the registered App's settings, then accept the request.**
 - **`scripts/onboard`'s lock-file checklist item names `tofu init -backend=false`, which works before a stack's modules are installed.**
+- **`shipmate doctor` matches only the engine's own reusable workflows: a call to another repository's workflow of the same name no longer counts.**
 
 ## [0.42.0] — 2026-10-04
 
