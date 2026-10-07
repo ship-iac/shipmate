@@ -321,11 +321,13 @@ def build_comment(cells, checks, run_url, head_sha, unmanaged=()):
     text, else its bare line). No footer: the verdict links the run, and neither plan verdict
     asks anything. Every cell is guaranteed its bare line: the space all remaining cells' bare
     lines need is reserved up front, so an early giant plan cannot starve a later cell. The
-    unmanaged line yields, with a warning, when the bare lines leave it no room under HARD_CAP."""
+    unmanaged line yields, with a warning, when the bare lines leave it no room under HARD_CAP.
+    Returns `(body, named)`; `named` says whether the unmanaged line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     urls = [check_url(c, checks, run_url) for c in meta]
     bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
+    named = False
     if line := unmanaged_line(unmanaged):
         # The smallest body with the line; past HARD_CAP it goes, so the refusal below keeps
         # its one cause. In `head`, the line is counted in `used` before any fold-out is sized.
@@ -336,6 +338,7 @@ def build_comment(cells, checks, run_url, head_sha, unmanaged=()):
             )
         else:
             head = f"{head}\n\n{line}"
+            named = True
     used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
@@ -355,7 +358,7 @@ def build_comment(cells, checks, run_url, head_sha, unmanaged=()):
             "::error::the plan comment's cell lines alone exceed the 65,536-char comment "
             "cap, shorten stack/env display names"
         )
-    return body
+    return body, named
 
 
 _STR_KEYS = ("stack", "environment")
@@ -464,13 +467,10 @@ def main():
     # artifacts the verdict's run link and the per-cell fallback link promise.
     url = current_run_url()
     unmanaged = _unmanaged(os.environ.get("SHIPMATE_UNMANAGED", ""))
-    body = build_comment(cells, checks, url, os.environ.get("HEAD_SHA", ""), unmanaged)
+    body, named = build_comment(cells, checks, url, os.environ.get("HEAD_SHA", ""), unmanaged)
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
     pending = any(c["changed"] for c, _ in cells)
-    # A rendered line is the body's third paragraph; no cell section starts with ⚪.
-    line = unmanaged_line(unmanaged)
-    named = bool(line) and body.split("\n\n", 3)[2:3] == [line]
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(
             f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n"
