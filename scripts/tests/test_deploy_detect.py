@@ -462,9 +462,12 @@ def test_main_refuses_a_pending_apply_check_on_an_unmanaged_stack(tmp_path, monk
         )
     assert str(exc_info.value) == (
         "::error::deploy aborted: apply / stacks/gone / dev-eu, apply / stacks/gone / dev-us: "
-        "the stack lost its env/* tags after this pull request was planned; its reviewed "
-        "change was not applied; retag the stack and re-run this deploy, or apply it by hand "
-        "and complete the check."
+        "the stack of each lost its env/* tag after this pull request was planned, so its "
+        "reviewed change was not applied. Open a new pull request that retags the stack (or "
+        "otherwise changes it); that pull request plans the current default branch, this "
+        "merged change included, and its deploy applies it. This run's apply checks are never "
+        "read again and stay pending on the merged pull request; re-running this deploy "
+        "refuses again."
     )
 
 

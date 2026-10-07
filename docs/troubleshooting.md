@@ -920,6 +920,32 @@ check. Fix the policy per `github-app.md` §5, which reads each repository's own
 default branch rather than hardcoding one. `shipmate doctor` probes both that
 the environment exists and that its policy actually names the default branch.
 
+### A deploy refused an apply check on a stack that lost its env tag
+
+```text
+::error::deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
+after this pull request was planned, so its reviewed change was not applied. Open a new
+pull request that retags the stack (or otherwise changes it); that pull request plans the
+current default branch, this merged change included, and its deploy applies it. This
+run's apply checks are never read again and stay pending on the merged pull request;
+re-running this deploy refuses again.
+```
+
+The message is one line; it is wrapped here. The merged pull request changed a
+stack, and another pull request removed that stack's `env/*` tag and merged
+first. The merged change reached the default branch, but no cell of this deploy
+carries it, so the deploy refuses rather than leave the apply check open with
+nothing applied.
+
+1. Open a new pull request that retags the stack, or otherwise changes it.
+2. Review its plan: it plans the current default branch, this merged change
+   included.
+3. Merge it. Its deploy applies the change.
+
+The refused deploy's apply checks stay pending on the merged pull request and
+are never read again. Do not re-run the refused deploy: it checks out the same
+commit and refuses again.
+
 ### The post-merge deploy was dropped as superseded
 
 A pull request merged, the `deploy` job for that merge was cancelled before it
