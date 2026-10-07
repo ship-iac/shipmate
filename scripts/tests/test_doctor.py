@@ -2029,6 +2029,57 @@ def test_harvest_pending_ignores_third_party_check_runs():
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is False
 
 
+_QUEUED_APP_APPLY = (
+    '{"id": 3, "name": "apply / app / dev-eu", "app_slug": "shipmate", "app_id": 999, '
+    '"status": "queued"}'
+)
+
+
+def test_harvest_pending_ignores_the_queued_app_apply_checks():
+    """The App creates each changed cell's `apply / ` check queued until it is applied, so
+    counting it reported every pull request with an unapplied cell as unfinished.
+
+    Mutation: drop the `apply / ` skip -- True."""
+    lines = ['{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED]
+    assert doctor.harvest_pending([*lines, _QUEUED_APP_APPLY], app_id=_APP_ID) is False
+
+
+def test_harvest_pending_counts_a_queued_github_actions_apply_job():
+    """A `github-actions` apply job is queued only while an apply runs.
+
+    Mutation: skip every run with `apply / ` anywhere in its name, whoever authored it --
+    False."""
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        _QUEUED_APP_APPLY,
+        '{"id": 4, "name": "wave0 / apply / app / dev-eu", "app_slug": "github-actions", '
+        '"status": "queued"}',
+    ]
+    assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
+
+
+def test_harvest_pending_counts_a_queued_app_run_outside_the_apply_checks():
+    """Mutation: skip every App-authored run -- False."""
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        '{"id": 6, "name": "db / dev-eu", "app_slug": "shipmate", "app_id": 999, '
+        '"status": "queued"}',
+    ]
+    assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
+
+
+def test_harvest_pending_counts_a_queued_run_ranked_below_a_completed_one():
+    """A queued run has no `started_at`, so newest-per-name ranks it below a completed run
+    of the same name.
+
+    Mutation: key the flag on the newest run per name, as `latest_check_ids` ranks -- False."""
+    lines = [
+        '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
+        '{"id": 2, "name": "app / dev-eu", "app_slug": "github-actions", "status": "queued"}',
+    ]
+    assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
+
+
 def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_path, capsys):
     """The reduction already reads every check run on the commit, so it also decides the
     pending flag, which reaches the render step as the gather step's output. The TSV on
@@ -2140,6 +2191,33 @@ def test_report_escapes_a_hostile_settings_finding():
     assert "<!-- shipmate:summary -->" not in body
     assert "&lt;!-- shipmate:summary --&gt;" in body
     assert body.count(doctor.DOCTOR_MARKER) == 1
+
+
+def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
+    """The env names are repository data; `<env>` is the engine's own placeholder, inside a
+    code span where an entity shows as written.
+
+    Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;env&gt;` shows.
+    Mutation: drop the `_md_escape` around the env names -- `a<b` renders raw."""
+    [_, (level, text)] = doctor._config_defaults({"environments": {"a<b": {"explicit": True}}})
+    assert doctor._finding_row(level, text) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `explicit = true` on a&lt;b: a bare "
+        "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
+    )
+
+
+def test_the_shim_job_name_row_keeps_the_engine_placeholders():
+    """Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;stack&gt;` shows."""
+    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
+    [(level, finding)] = doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO)
+    assert doctor._finding_row(level, finding) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s calling job is not named "
+        "`shipmate`. GitHub names a called workflow's check runs `<caller job> / <callee job>`, "
+        "so this repository's plan cell checks are not `shipmate / <stack> / <env>`. The plan "
+        "runs and the gate is unaffected; what is lost is every `plan` link in the plan "
+        "comment, which falls back to the workflow-run page instead of the cell's own check. "
+        "Rename the job `shipmate` (docs/getting-started.md)."
+    )
 
 
 def test_findings_only_fallback_escapes_a_hostile_settings_finding():
@@ -3861,6 +3939,51 @@ def test_review_rule_count_is_the_highest_across_layered_rulesets(monkeypatch):
         _pull_request_rule(code_owner=True, count=1),
     ]
     assert _review_probe(monkeypatch, rules, _GATED_AND_UNGATED_TABLE) == []
+
+
+_LAST_PUSH_WARNING = (
+    doctor.WARNING,
+    f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews but sets "
+    "`require_last_push_approval`, so a sole maintainer cannot merge: the last push needs "
+    "an approval from someone other than its pusher. Turn `require_last_push_approval` off "
+    "(docs/branch-protection.md §Reproducible ruleset).",
+)
+
+
+def _last_push_rule(code_owner, count):
+    rule = _pull_request_rule(code_owner=code_owner, count=count)
+    rule["parameters"]["require_last_push_approval"] = True
+    return rule
+
+
+def test_review_rule_count_zero_with_last_push_approval_warns(monkeypatch):
+    """Last-push approval at count 0 blocks a sole maintainer whether or not code-owner
+    review is on.
+
+    Mutation: warn only when code-owner review is also on -- the warning is missing."""
+    out = _review_probe(monkeypatch, [_last_push_rule(False, 0)], _ALL_UNGATED_TABLE)
+    assert out == [
+        (doctor.WARNING, doctor._CODE_OWNER_REVIEW_OFF.format(branch=_BRANCH)),
+        _LAST_PUSH_WARNING,
+    ]
+
+
+def test_review_rule_last_push_approval_replaces_the_sole_maintainer_note(monkeypatch):
+    """The sole-maintainer note calls count 0 supported; with last-push on it is not.
+
+    Mutation: keep the sole-maintainer note while last-push fires -- the note is listed."""
+    out = _review_probe(monkeypatch, [_last_push_rule(True, 0)], _ALL_UNGATED_TABLE)
+    assert out == [_LAST_PUSH_WARNING]
+    rules = [_pull_request_rule(code_owner=True, count=0)]
+    out = _review_probe(monkeypatch, rules, _ALL_UNGATED_TABLE)
+    assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
+
+
+def test_review_rule_last_push_approval_with_a_required_review_is_silent(monkeypatch):
+    """At count 1 another person approves the last push anyway.
+
+    Mutation: drop the count check -- the last-push warning fires."""
+    assert _review_probe(monkeypatch, [_last_push_rule(True, 1)], _ALL_UNGATED_TABLE) == []
 
 
 _COUNT_WORDS = {

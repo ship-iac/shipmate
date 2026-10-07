@@ -250,6 +250,11 @@ Control 3 is the ruleset in `docs/branch-protection.md` — required
 { "type": "deletion" }
 ```
 
+This is the team posture. A single maintainer sets the count to `0`, turns
+`require_last_push_approval` off, and either narrows `CODEOWNERS` or turns
+`require_code_owner_review` off (the costliest version, below);
+`docs/branch-protection.md` §Reproducible ruleset has why.
+
 The two review-freshness settings do different jobs, and the apply path only
 ever sees their combined result via `reviewDecision`:
 
@@ -259,7 +264,8 @@ ever sees their combined result via `reviewDecision`:
   by someone other than the person who pushed it. It is what stops an approver
   from pushing one more commit onto an approved pull request and applying it
   themselves. Keep it even if you decide dismiss-on-push is too disruptive for
-  your team — it is the one that survives that trade-off.
+  your team — it is the one that survives that trade-off. A sole maintainer
+  turns it off (`docs/branch-protection.md` §Reproducible ruleset has why).
 
 `required_approving_review_count` is the approval-count half of one
 repository-wide review rule. The apply path never reads the count: it reads
@@ -276,7 +282,9 @@ whenever code-owner review is off, whatever the count is. Count `0` with
 `require_code_owner_review` on is a different setting: the code-owner review
 still gates the merge wherever a `CODEOWNERS` entry covers the changed files,
 which is why doctor reports that combination as a note rather than a warning,
-naming any gated environments in it.
+naming any gated environments in it. Count `0` with `require_last_push_approval`
+on warns whatever else is set, and omits the sole-maintainer note; the
+gated-environments note still appears.
 Either way, a `CHANGES_REQUESTED` review still blocks an apply until it is
 resolved or dismissed (`authorize` passes only on `NONE` or `APPROVED`; see
 `docs/branch-protection.md` §"Review policy").

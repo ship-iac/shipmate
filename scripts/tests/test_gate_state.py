@@ -83,6 +83,43 @@ def test_detect_failure_is_a_red_gate_not_a_silent_skip():
     assert "detect" in desc
 
 
+def test_a_detect_refusal_names_itself_in_the_gate():
+    """Mutation: return the generic text when a refusal exists -- the refusal is not named."""
+    got = d(detect_result="failure", refusal="stack 'x' carries 2 workload tags")
+    assert got == ("failure", "detect failed: stack 'x' carries 2 workload tags", "hold")
+
+
+def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
+    """A fmt or codegen failure writes no refusal.
+
+    Mutation: write `detect failed: ` for an empty refusal -- the description changes."""
+    got = d(detect_result="failure", refusal="")
+    assert got == (
+        "failure",
+        "change detection did not succeed (failure); fix the shipmate / detect job before merging",
+        "hold",
+    )
+
+
+#: 300 characters, with a `"` the JSON body must escape.
+_LONG_REFUSAL = 'stack "a/b" ' + "x" * 288
+
+
+def test_main_cuts_a_long_refusal_to_the_statuses_limit(tmp_path, monkeypatch, capsys):
+    """Mutation: misspell `SHIPMATE_DETECT_REFUSAL` in `main()` -- the generic text."""
+    body = _main_body(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        SHIPMATE_DETECT_RESULT="failure",
+        SHIPMATE_DETECT_REFUSAL=_LONG_REFUSAL,
+    )
+    assert (body["state"], body["description"]) == (
+        "failure",
+        'detect failed: stack "a/b" ' + "x" * 113,
+    )
+
+
 def test_empty_matrix_greens_the_gate():
     # The docs-only or pin-bump pull request: detect succeeded, and the plan job was skipped
     # because nothing changed. Mapping `skipped` onto the old run_conclusion would write nothing
@@ -156,9 +193,11 @@ def test_more_cells_than_planned_holds():
         {"plan_result": "skipped", "planned_cells": "3"},
         {"planned_cells": "3", "cell_count": 0},
         {"detect_result": "skipped", "is_draft": True},
+        {"detect_result": "failure", "refusal": _LONG_REFUSAL},
     ],
 )
 def test_every_description_fits_the_statuses_api(kw):
+    """Mutation: drop the `[:140]` in `_detect_gap` -- the long-refusal case."""
     assert len(d(**kw)[1]) <= 140
 
 

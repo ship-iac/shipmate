@@ -10,6 +10,13 @@ inputs:
   detect-result:
     description: 'Result of the plan workflow''s detect job (needs.detect.result): success|failure|cancelled|skipped.'
     required: true
+  detect-refusal:
+    description: >-
+      build-matrix's `refusal` output: the first `::error::` line from detect (a refusal or a
+      failed tool or API call), empty when detect raised none. When detect-result is not
+      success, gate-state writes it into the gate description; empty keeps the generic text.
+    required: false
+    default: ""
   plan-result:
     description: 'Result of the plan workflow''s plan matrix job (needs.plan.result). "skipped" is the NORMAL empty-matrix case, not a failure.'
     required: true
@@ -199,6 +206,7 @@ runs:
       shell: bash
       env:
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
+        SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_PLAN_RESULT: ${{ inputs.plan-result }}
         SHIPMATE_PLANNED_CELLS: ${{ inputs.planned-cells }}
         SHIPMATE_CELL_COUNT: ${{ steps.build.outputs.count }}

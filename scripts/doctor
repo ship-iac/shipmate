@@ -61,6 +61,12 @@ sc = _load("summary-comment")
 ag = _load("apply-gate")
 _md_escape = sc._md_escape
 
+
+class _Rendered(str):
+    """Finding text whose repository parts are already escaped: `_finding_row` prints it as
+    is, so an engine literal such as `<env>` keeps its angle brackets in a code span."""
+
+
 GATE = "shipmate / gate"
 
 MODES = ("annotate", "report", "check-ids")
@@ -99,6 +105,12 @@ _NO_REQUIRED_REVIEW = (
     "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
     "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
     "environments meant to apply unreviewed."
+)
+_LAST_PUSH_AT_ZERO = (
+    "the `pull_request` rule on `{branch}` requires 0 approving reviews but sets "
+    "`require_last_push_approval`, so a sole maintainer cannot merge: the last push needs "
+    "an approval from someone other than its pusher. Turn `require_last_push_approval` off "
+    "(docs/branch-protection.md §Reproducible ruleset)."
 )
 _ENV_NAME_CAP = 10
 # Same degrade posture as `_unverified`: unread is not misconfigured.
@@ -181,7 +193,9 @@ def _review_rule_warnings(ctx):
     since they are still held wherever owned files change; with it off it is a
     warning beside the code-owner warning. It is the sole-maintainer note only when
     no environment is gated or the default branch's table cannot be read
-    (`_no_review_findings`).
+    (`_no_review_findings`). Count 0 with `require_last_push_approval` on is a warning
+    whatever else is set: a sole maintainer cannot approve their own last push, so cannot
+    merge, and the sole-maintainer note is then omitted.
 
     Re-reads `rules/branches` rather than sharing `_gate_rule_warnings`'
     response, for `_existing_env_names`' per-probe-degrade reason.
@@ -192,7 +206,7 @@ def _review_rule_warnings(ctx):
     `CODEOWNERS` entry owns."""
     branch = ctx["default_branch"]
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
-    found = readable = code_owner = False
+    found = readable = code_owner = last_push = False
     for rule in rules:
         if rule.get("type") != "pull_request":
             continue
@@ -202,15 +216,20 @@ def _review_rule_warnings(ctx):
             continue
         readable = True
         code_owner = code_owner or bool(params.get("require_code_owner_review"))
+        last_push = last_push or bool(params.get("require_last_push_approval"))
     if not found:
         return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
     if not readable:
         return [(NOTICE, _REVIEW_RULE_UNREADABLE.format(branch=branch))]
     out = [] if code_owner else [(WARNING, _CODE_OWNER_REVIEW_OFF.format(branch=branch))]
-    return out if review_count(rules) else out + _no_review_findings(ctx, branch, code_owner)
+    if review_count(rules):
+        return out
+    if last_push:
+        out.append((WARNING, _LAST_PUSH_AT_ZERO.format(branch=branch)))
+    return out + _no_review_findings(ctx, branch, code_owner, last_push)
 
 
-def _no_review_findings(ctx, branch, code_owner):
+def _no_review_findings(ctx, branch, code_owner, last_push):
     """The count-0 finding. Gated environments are every one the default branch's table lists
     or a cell declares, less its `gated = false` entries.
 
@@ -218,8 +237,10 @@ def _no_review_findings(ctx, branch, code_owner):
     exempt is then unknown, and naming all of them would warn about ones the file exempts.
 
     A NOTICE while code-owner review is on: a warning forces a plan comment on every no-op
-    plan, which a sole maintainer cannot silence. A WARNING while it is off. The names are
-    not escaped here: `_finding_row` escapes the whole finding.
+    plan, which a sole maintainer cannot silence. A WARNING while it is off. With no gated
+    environment, the sole-maintainer note is omitted while code-owner review is off or
+    last-push approval is on. The names are not escaped here: `_finding_row` escapes the
+    whole finding.
     """
     table = _default_branch_table(ctx)
     gated = []
@@ -229,7 +250,9 @@ def _no_review_findings(ctx, branch, code_owner):
     if gated:
         level = NOTICE if code_owner else WARNING
         return [(level, _NO_REQUIRED_REVIEW.format(branch=branch, envs=_code_spans(gated)))]
-    return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))] if code_owner else []
+    if not code_owner or last_push:
+        return []
+    return [(NOTICE, _SOLE_MAINTAINER_REVIEW.format(branch=branch))]
 
 
 def _code_spans(names):
@@ -1257,15 +1280,18 @@ def _shim_job_name_finding(text, name, engine):
     )
     if job_name == _SHIM_JOB_NAME:
         return []
+    # `name` is the engine's own file name, never repository data.
     return [
         (
             WARNING,
-            f"`{name}`'s calling job is not named `{_SHIM_JOB_NAME}`. GitHub names a called "
-            "workflow's check runs `<caller job> / <callee job>`, so this repository's plan cell "
-            f"checks are not `{_SHIM_JOB_NAME} / <stack> / <env>`. The plan runs and the gate is "
-            "unaffected; what is lost is every `plan` link in the plan comment, which falls "
-            "back to the workflow-run page instead of the cell's own check. Rename the job "
-            f"`{_SHIM_JOB_NAME}` (docs/getting-started.md).",
+            _Rendered(
+                f"`{name}`'s calling job is not named `{_SHIM_JOB_NAME}`. GitHub names a called "
+                "workflow's check runs `<caller job> / <callee job>`, so this repository's plan "
+                f"cell checks are not `{_SHIM_JOB_NAME} / <stack> / <env>`. The plan runs and "
+                "the gate is unaffected; what is lost is every `plan` link in the plan comment, "
+                "which falls back to the workflow-run page instead of the cell's own check. "
+                f"Rename the job `{_SHIM_JOB_NAME}` (docs/getting-started.md)."
+            ),
         )
     ]
 
@@ -1780,8 +1806,10 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"`explicit = true` on {_fit_items(envs, ', ', 400)}: a bare "
-            "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
+            _Rendered(
+                f"`explicit = true` on {_md_escape(_fit_items(envs, ', ', 400))}: a bare "
+                "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
+            )
             if envs
             else "`explicit`: set on no environment, so every environment applies on a bare "
             "`shipmate apply`, production included.",
@@ -2139,15 +2167,21 @@ def latest_check_ids(lines, app_id=""):
 
 def harvest_pending(lines, app_id=""):
     """True when any shipmate-relevant check run on this commit has not
-    completed.
+    completed, the App's `apply / ` checks excluded: each stays queued by
+    design until its cell is applied, and records no warnings.
 
     Keyed on the WHOLE relevant set, not the subset `latest_check_ids` selects:
     that ranking pushes a queued run below a completed one of the same name,
     which would hide exactly the case this flag exists to report."""
     for line in lines:
         run = _parse_check_run(line, app_id)
-        if run is not None and run.get("status") != "completed":
-            return True
+        if run is None or run.get("status") == "completed":
+            continue
+        if run.get("app_slug") != "github-actions" and (run.get("name") or "").startswith(
+            ag.APPLY_PREFIX
+        ):
+            continue
+        return True
     return False
 
 
@@ -2382,8 +2416,9 @@ def _finding_row(lvl, text):
     Escaped because a finding interpolates repository data (a file name, an
     API error): an unescaped `<!-- shipmate:summary -->` in one would make
     actions/summary's marker upsert PATCH this comment with the plan comment's
-    body."""
-    return f"- {_LEVEL_EMOJI[lvl]} {_md_escape(text)}"
+    body. A `_Rendered` finding escaped its repository parts itself and is
+    printed as is."""
+    return f"- {_LEVEL_EMOJI[lvl]} {text if isinstance(text, _Rendered) else _md_escape(text)}"
 
 
 def _findings_only_report(findings, ctx, circle, verdict):

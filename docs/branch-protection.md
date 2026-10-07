@@ -27,7 +27,8 @@ resolves to:
 
 | State | gate | Merge |
 |-------|-----------|-------|
-| `detect` did not succeed | `failure` — "change detection did not succeed" | blocked |
+| `detect` failed with an `::error::` line (a refusal or a failed tool or API call) | `failure` — "detect failed: <first `::error::` line>", cut to 140 characters | blocked |
+| `detect` failed without an `::error::` line (a fmt or codegen failure, a crash with none) | `failure` — "change detection did not succeed" | blocked |
 | A plan cell failed | `failure` — "plan incomplete" | blocked |
 | The plan job was cancelled | no status written at all | blocked (the required check never arrives) |
 | Plans succeeded, applies still pending | `pending` | blocked |
@@ -88,6 +89,12 @@ cat > "$ruleset" <<'JSON'
 JSON
 ```
 
+This body is the team posture. For a single maintainer, set
+`required_approving_review_count` to `0`, turn `require_last_push_approval` off,
+and narrow `CODEOWNERS`, which keeps code-owner review on (the single-maintainer
+paragraph below has why). Turning `require_code_owner_review` off instead makes
+`shipmate doctor` warn on every run; `docs/hardening.md` §3–5 names the cost.
+
 When `$id` is non-empty, replace that ruleset by its id. The `PUT` replaces the
 ruleset with the body, so carry any bypass actors it already holds into the
 body as its `bypass_actors` array first. Read them with:
@@ -121,13 +128,17 @@ satisfy — an App cannot be a CODEOWNER. It only bites for changed files a
 `CODEOWNERS` entry actually covers, so keep an entry covering the paths the IaC
 and the workflows live in.
 
-**A single maintainer cannot satisfy `require_last_push_approval` and
-`require_code_owner_review` together.** That holds where `CODEOWNERS` covers the
-changed files: the pusher cannot approve their own last push, and an App cannot
-be a code owner, so there is nobody left to approve. That posture needs either a
-narrow `CODEOWNERS` — covering `/.github/workflows/` alone, say, so ordinary IaC
-pull requests need no code-owner approval — or a bypass actor on the ruleset,
-which spends exactly the control a leaked App key cannot get past.
+**A single maintainer cannot merge with `require_last_push_approval` on, at
+any approval count.** The pusher cannot approve their own last push, so even at
+`required_approving_review_count: 0` nobody is left to approve, and `shipmate
+doctor` warns. `require_code_owner_review` blocks the same way where
+`CODEOWNERS` covers the changed files: the author cannot approve their own pull
+request, and an App cannot be a code owner. The sole-maintainer posture is
+three values: `required_approving_review_count: 0`, `require_last_push_approval`
+off, and `require_code_owner_review` off or a narrow `CODEOWNERS` — covering
+`/.github/workflows/` alone, say, so ordinary IaC pull requests need no
+code-owner approval. The alternative is a bypass actor on the ruleset, which
+spends exactly the control a leaked App key cannot get past.
 
 **A narrow `CODEOWNERS` leaves the environment table under ordinary review.**
 The role a cell assumes is a line in `.github/shipmate.toml` on the default
@@ -179,8 +190,9 @@ blocks when GitHub's `reviewDecision` is `REVIEW_REQUIRED` or
 cannot be determined at all — a wiring failure, never a policy state — apply
 fails closed rather than proceeding unreviewed.)
 
-- **Sole-maintainer mode** (`required_approving_review_count: 0`): `shipmate
-  apply` needs no approving review (a one-person repo can never self-approve
+- **Sole-maintainer mode** (`required_approving_review_count: 0`, with
+  `require_last_push_approval` off; §Reproducible ruleset has the three values
+  and why): `shipmate apply` needs no approving review (a one-person repo can never self-approve
   on GitHub) — but a `CHANGES_REQUESTED` review still blocks apply until
   resolved. `shipmate doctor` names each gated environment when it can read
   the default branch's table, in a note while code-owner review is on and in a

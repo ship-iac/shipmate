@@ -2691,7 +2691,8 @@ on. A failure anywhere in an env-level skips every successor level's applies
 for that deploy run — the failed environment's stacks stay pending, and
 downstream environments are not touched until it is fixed and re-run.
 `MAX_ENV_LEVELS` is `4`; an env-order graph that would span more levels than
-that fails loud rather than silently truncating.
+that fails validation of the table, naming one longest chain, rather than silently
+truncating.
 
 Targeted applies (`shipmate apply <env>`) act on a single environment and skip
 env-level ordering entirely — there is nothing to order across.

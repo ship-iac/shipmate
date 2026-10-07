@@ -44,10 +44,14 @@ does with that wiring.
   your own that omits `--no-recursive` refuses on them (`git-untracked`).
   [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards states the rule.
 - **Each stack's `.terraform.lock.hcl` committed.** It pins provider versions,
-  and without it every cell downloads its providers. Write it with `tofu init -backend=false`
-  (no backend credentials needed) against the OpenTofu registry; a lock from Terraform, or from a provider
-  mirror on another platform, does not serve the cache. [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards,
-  "Lock files and the provider cache", has the conditions and the reasoning.
+  and without it every cell downloads its providers. Write it with `tofu init -backend=false`,
+  then `tofu providers lock -platform=linux_amd64`, in each stack (no backend credentials
+  needed). A CLI configuration setting `plugin_cache_may_break_dependency_lock_file = true`
+  makes `tofu init` record only your platform's `h1:` hash, which the runner's cache cannot
+  use; `tofu providers lock` reads the OpenTofu registry whatever the cache holds. A lock from
+  Terraform, or from a provider mirror on another platform, does not serve the cache either.
+  [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Lock files and the provider
+  cache", has the conditions and the reasoning.
 
 The four tiers are ordered and each depends on the one before. Tier 1 alone is
 not a working installation; read tier 2's first paragraphs before deciding to

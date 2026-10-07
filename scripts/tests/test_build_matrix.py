@@ -389,7 +389,7 @@ def _run_main(
         monkeypatch.setenv(k, v)
     called = [] if called is None else called
 
-    def fake_compute(all_stacks=False, base="", tags=""):
+    def fake_compute(all_stacks=False, base="", tags="", errors=None):
         called.append((all_stacks, base, tags))
         # The whole row `build_matrix` emits, `workload` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.
@@ -793,6 +793,7 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
 
 
 def test_build_matrix_action_declares_the_outputs_the_gate_reads():
+    """Mutation: delete the `refusal` output -- the gate never names a detect error."""
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
     # name -> wiring; descriptions are prose and deliberately not pinned.
@@ -803,6 +804,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "count": "${{ steps.build.outputs.count }}",
         "cells": "${{ steps.build.outputs.cells }}",
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
+        "refusal": "${{ steps.build.outputs.refusal }}",
     }
 
 
@@ -1051,8 +1053,8 @@ def test_a_row_without_a_usable_binding_refuses(monkeypatch, binding, shown):
 
 
 def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
-    """The refusal lands before `GITHUB_OUTPUT` is opened, so no half-written matrix reaches a
-    job that would bind it.
+    """The refusal lands before the matrix is written, so no half-written matrix reaches a job
+    that would bind it; only the refusal line is.
 
     Mutation: delete the `env_binding` check from `stamp_rows` -- main writes the matrix.
     """
@@ -1064,6 +1066,57 @@ def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
     }
     with pytest.raises(SystemExit):
         _run_main(monkeypatch, tmp_path, env, head_sha="cafe1234")
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        "refusal=stacks/app in dev-eu resolved env_binding '', which names no GitHub "
+        "Environment. A job bound to it would run outside every environment control, so no "
+        "matrix is written.\n"
+    )
+
+
+def test_a_refusal_reaches_the_refusal_output_and_still_fails_the_step(monkeypatch, tmp_path):
+    """Mutation: drop the `raise` in `main`'s handler -- no `SystemExit` reaches the test."""
+    tree = {"stacks/a": ["env/dev", "workload/net", "workload/web"]}
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40, table=_CORE_ONLY, stacks=tree
+        )
+    assert exc.value.code == _TWO_TAG_A
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        "refusal=stack 'stacks/a' carries 2 workload tags (workload/net, workload/web), and a "
+        "stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` and "
+        "remove the rest.\n"
+    )
+
+
+def test_a_multi_line_refusal_writes_its_first_line_only(monkeypatch, tmp_path):
+    """A second line would end the output's value and start a malformed one.
+
+    Mutation: write the whole message as the `refusal` line -- the gap line follows it."""
+    tree = {
+        "stacks/a": ["env/dev", "workload/net", "workload/web"],
+        "stacks/c": ["env/dev", "workload/app"],
+    }
+    with pytest.raises(SystemExit):
+        _run_main(
+            monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40, table=_CORE_ONLY, stacks=tree
+        )
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        "refusal=stack 'stacks/a' carries 2 workload tags (workload/net, workload/web), and a "
+        "stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` and "
+        "remove the rest.\n"
+    )
+
+
+def test_an_exit_that_is_not_a_refusal_writes_no_refusal(monkeypatch, tmp_path):
+    """Mutation: drop the `isinstance` check -- `int.startswith` raises `AttributeError`."""
+
+    def exit_one(repository, head_repo, no_pull_request):
+        raise SystemExit(1)
+
+    monkeypatch.setattr(bm, "fork_pr_error", exit_one)
+    with pytest.raises(SystemExit) as exc:
+        _run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40)
+    assert exc.value.code == 1
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == ""
 
 
@@ -1096,6 +1149,82 @@ def test_every_cell_tagged_outside_its_list_is_named_in_one_refusal():
         "branch grants a role to. Retag the stack, or add the workload to "
         "environments.<env>.workloads in .github/shipmate.toml on the default branch, which is "
         "where this table is read from: merge it there on its own pull request first."
+    )
+
+
+_PLAN_ENV = {
+    "GITHUB_EVENT_NAME": "pull_request",
+    "GITHUB_REPOSITORY": "acme/iac",
+    "SHIPMATE_HEAD_REPO": "acme/iac",
+}
+#: Both environments name an identity and list only `core`, so every other tag is outside.
+_CORE_ONLY = {
+    "layout": "folder",
+    "identities": {"dev": {"aws": {"account": "111111111111", "apply": "deploy-{workload}"}}},
+    "environments": {
+        "dev": {"region": "eu-west-1", "identity": "dev", "workloads": ["core"]},
+        "prod": {"region": "eu-west-1", "identity": "dev", "workloads": ["core"]},
+    },
+}
+_TWO_TAG_A = (
+    "::error::stack 'stacks/a' carries 2 workload tags (workload/net, workload/web), and a "
+    "stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` and remove "
+    "the rest."
+)
+_TWO_TAG_B = (
+    "::error::stack 'stacks/b' carries 2 workload tags (workload/db, workload/dns), and a "
+    "stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` and remove "
+    "the rest."
+)
+
+
+def test_plan_detect_names_every_two_tag_stack_and_every_gap_in_one_refusal(monkeypatch, tmp_path):
+    """stacks/a sits in two environments and is named once; stacks/c's gap follows.
+
+    Mutations: raise the two-tag messages before the table is read in `main` -- the gap line
+    is missing; return the first workload instead of `None` from `workload_of`'s list branch --
+    the gap line also names stacks/a and stacks/b; raise inside `workload_of` when given a list
+    -- only stacks/a is named; call `workload_of` per cell in `full_tree` -- stacks/a is named
+    twice."""
+    tree = {
+        "stacks/a": ["env/dev", "env/prod", "workload/net", "workload/web"],
+        "stacks/b": ["env/dev", "workload/db", "workload/dns"],
+        "stacks/c": ["env/dev", "workload/app"],
+        "stacks/d": ["env/prod", "workload/core"],
+    }
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40, table=_CORE_ONLY, stacks=tree
+        )
+    assert exc.value.code == "\n".join(
+        [
+            _TWO_TAG_A,
+            _TWO_TAG_B,
+            "::error::1 cell(s) carry a workload tag their environment's workloads list does "
+            "not name: stacks/c in dev (workload/app; dev lists core). A listed workload is the "
+            "only one the default branch grants a role to. Retag the stack, or add the workload "
+            "to environments.<env>.workloads in .github/shipmate.toml on the default branch, "
+            "which is where this table is read from: merge it there on its own pull request "
+            "first.",
+        ]
+    )
+
+
+def test_plan_detect_names_a_two_tag_stack_and_a_table_refusal_together(monkeypatch, tmp_path):
+    """Mutation: raise the two-tag messages before the table is read in `main` -- the table
+    error is missing."""
+    tree = {"stacks/a": ["env/dev", "workload/net", "workload/web"]}
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            _PLAN_ENV,
+            head_sha="a" * 40,
+            table={"layout": "bogus"},
+            stacks=tree,
+        )
+    assert exc.value.code == (
+        _TWO_TAG_A + "\n::error::layout is 'bogus'; it must be one of tf_vars, workspace, folder."
     )
 
 

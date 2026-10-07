@@ -48,6 +48,7 @@ jobs:
       empty: ${{ steps.matrix.outputs.empty }}
       count: ${{ steps.matrix.outputs.count }}
       unmanaged: ${{ steps.matrix.outputs.unmanaged }}
+      refusal: ${{ steps.matrix.outputs.refusal }}
     steps:
       # Both triggers check out something else by default -- the base branch under
       # `pull_request_target`, the dispatch ref under `workflow_dispatch`. Naming the head SHA is
@@ -136,6 +137,7 @@ jobs:
           pr-number: ${{ needs.facts.outputs.pr-number }}
           head-sha: ${{ needs.facts.outputs.head-sha }}
           detect-result: ${{ needs.detect.result }}
+          detect-refusal: ${{ needs.detect.outputs.refusal }}
           plan-result: ${{ needs.plan.result }}
           planned-cells: ${{ needs.detect.outputs.count }}
           on-demand: ${{ needs.facts.outputs.on-demand }}

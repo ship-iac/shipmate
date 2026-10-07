@@ -1,6 +1,6 @@
 """The plan workflow -> summary action -> gate-state handshake.
 
-Three files have to agree on seven names. Nothing at runtime notices when they stop agreeing, and
+Three files have to agree on eight names. Nothing at runtime notices when they stop agreeing, and
 the failure is a gate decided from defaults.
 """
 
@@ -9,10 +9,11 @@ import json
 import re
 
 import pytest
-from _loader import SCRIPTS, step_by
+from _loader import SCRIPTS, action_yaml, step_by
 
 EXPECTED_GATE_ENV = {
     "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
+    "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_PLAN_RESULT": "${{ inputs.plan-result }}",
     "SHIPMATE_PLANNED_CELLS": "${{ inputs.planned-cells }}",
     "SHIPMATE_CELL_COUNT": "${{ steps.build.outputs.count }}",
@@ -31,6 +32,19 @@ def test_the_action_hands_gate_state_exactly_these_env_vars():
     read, or dropped from here while gate-state still reads it, both end as a gate decided from a
     default."""
     assert _summary_action_gate_step()["env"] == EXPECTED_GATE_ENV
+
+
+def test_the_action_declares_the_detect_refusal_input():
+    """An undeclared input reads empty with only a warning, so every refusal would fall back to
+    the generic gate text. Its `${{ }}` stays out of every `run:` by
+    `test_actions_shellcheck.py::test_no_template_expr_in_run`.
+
+    Mutation: delete the `detect-refusal` input declaration -- `KeyError`."""
+    declared = action_yaml("summary")["inputs"]["detect-refusal"]
+    assert {k: v for k, v in declared.items() if k != "description"} == {
+        "required": False,
+        "default": "",
+    }
 
 
 def _is_os_environ(node):

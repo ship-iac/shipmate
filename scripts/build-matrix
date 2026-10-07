@@ -36,17 +36,23 @@ PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 UNMANAGED_NAMES = 10
 
 
-def workload_of(tags, stack):
+def workload_of(tags, stack, errors=None):
     """The `workload/<name>` tag name of `stack`, or "" when it carries none.
 
-    Raises SystemExit naming `stack` and every `workload/*` tag when it carries two or more."""
+    When it carries two or more, the `::error::` message naming `stack` and every `workload/*`
+    tag is raised as `SystemExit`, or, given an `errors` list, appended to it and `None`
+    returned."""
     workloads = sorted(t for t in tags if t.startswith("workload/"))
     if len(workloads) > 1:
-        raise SystemExit(
+        message = (
             f"::error::stack '{stack}' carries {len(workloads)} workload tags "
             f"({', '.join(workloads)}), and a stack carries at most one `workload/<name>` tag. "
             "Keep one in the stack's `tags` and remove the rest."
         )
+        if errors is None:
+            raise SystemExit(message)
+        errors.append(message)
+        return None
     return workloads[0][len("workload/") :] if workloads else ""
 
 
@@ -166,11 +172,13 @@ def _matrix_limit_error(count, all_stacks):
     )
 
 
-def full_tree(envs, stacks_by_env, tags_by_stack):
+def full_tree(envs, stacks_by_env, tags_by_stack, errors=None):
     """The sorted cells of `envs`, each stamped with its `workload_of`, slug collisions refused.
 
     Uncapped: a `tags` filter narrows this list before `cap_cells` counts it, and both
-    refusals here cover the whole scan whatever the filter keeps."""
+    refusals here cover the whole scan whatever the filter keeps. Given an `errors` list, a
+    stack with two `workload/*` tags appends one message however many environments it is in,
+    and its cells are dropped rather than refused."""
     cells = sorted(
         (
             {"stack": stack, "environment": env}
@@ -179,8 +187,14 @@ def full_tree(envs, stacks_by_env, tags_by_stack):
         ),
         key=lambda c: (c["environment"], c["stack"]),
     )
+    workloads = {}
+    for c in cells:
+        if c["stack"] not in workloads:
+            workloads[c["stack"]] = workload_of(
+                tags_by_stack.get(c["stack"], []), c["stack"], errors
+            )
     cells = [
-        {**c, "workload": workload_of(tags_by_stack.get(c["stack"], []), c["stack"])} for c in cells
+        {**c, "workload": workloads[c["stack"]]} for c in cells if workloads[c["stack"]] is not None
     ]
     guard_slug_collisions(cells)
     return cells
@@ -269,7 +283,7 @@ def tagged_workloads(stacks_by_env, tags_by_stack):
     }
 
 
-def compute_cells(all_stacks=False, base="", tags=""):
+def compute_cells(all_stacks=False, base="", tags="", errors=None):
     """(`tagged_workloads` of the scan, the cells to plan, the scanned tree's cell names, the
     scan's `unmanaged_stacks`).
 
@@ -279,9 +293,9 @@ def compute_cells(all_stacks=False, base="", tags=""):
     stack -- run over the whole tree's managed stacks; `tags` narrows only the cells to
     plan, and the matrix limit counts those. The caller's per-cell checks (`stamp_rows`'
     resolution and `env_binding` refusal, `refuse_workload_gaps`) see only the returned cells.
-    The tree is `[{environment, stack}]` in matrix order, uncapped."""
+    The tree is `[{environment, stack}]` in matrix order, uncapped. `errors` is `full_tree`'s."""
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
-    full = full_tree(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
+    full = full_tree(sorted(stacks_by_env), stacks_by_env, tags_by_stack, errors)
     cells = cap_cells(filter_cells(full, tags_by_stack, tags), all_stacks)
     tree = [{"environment": c["environment"], "stack": c["stack"]} for c in full]
     return (
@@ -512,6 +526,21 @@ def tag_filter_error(tags, no_pull_request: bool):
 
 
 def main():
+    """`_detect`, and on a `::error::` exit (a refusal or a failed tool or API call) also the
+    `refusal` output: its first line without the prefix, which the summary job writes into the
+    gate description. The exit re-raises, so the step still fails."""
+    try:
+        _detect()
+    except SystemExit as exc:
+        if isinstance(exc.code, str) and exc.code.startswith("::error::"):
+            refusal = exc.code.splitlines()[0].removeprefix("::error::")
+            # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                fh.write(f"refusal={refusal}\n")
+        raise
+
+
+def _detect():
     all_stacks = os.environ.get("SHIPMATE_ALL_STACKS", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
@@ -534,14 +563,18 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
-    tagged, cells, tree, unmanaged = compute_cells(all_stacks, base, tags)
-    # One call serves plan and drift, and only drift scans the whole tree. Under
-    # `all_stacks=False` the map covers the CHANGED stacks alone, so passing it would
-    # report every unchanged environment as an unused table entry on every plan. The
-    # table is checked against `tree`, so a `tags` filter cannot hide an uncovered env.
-    table = env_config(tree, tagged if all_stacks else None)
-    cells = stamp_rows(cells, table, "plan")
-    refuse_workload_gaps(cells, table)
+    errors = []
+    tagged, cells, tree, unmanaged = compute_cells(all_stacks, base, tags, errors)
+    with ec._gather(errors):
+        # One call serves plan and drift, and only drift scans the whole tree. Under
+        # `all_stacks=False` the map covers the CHANGED stacks alone, so passing it would
+        # report every unchanged environment as an unused table entry on every plan. The
+        # table is checked against `tree`, so a `tags` filter cannot hide an uncovered env.
+        table = env_config(tree, tagged if all_stacks else None)
+        cells = stamp_rows(cells, table, "plan")
+        refuse_workload_gaps(cells, table)
+    if errors:
+        raise SystemExit("\n".join(errors))
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
