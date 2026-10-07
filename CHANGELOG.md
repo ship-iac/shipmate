@@ -20,6 +20,7 @@ section below names the SHA the release tags.
 - **Drift moves out of `shipmate.yml` into its own workflow file: delete the `drift` job, the `schedule` trigger and the `drift` verb option from `shipmate.yml`, and save the `shipmate drift` fence in `docs/getting-started.md` under any file name in `.github/workflows/`, one file per sweep, in the re-pin commit. `scripts/onboard` writes only `shipmate.yml`.**
 - **`shipmate doctor` expects `shipmate.yml`'s `verb` options to be `[plan, apply, unlock]`.**
 - **A drift Issue closed because its cell is gone says the stack or environment left the repository.**
+- **Drift checks out the swept commit only, not the full history.**
 
 ### Fixed
 

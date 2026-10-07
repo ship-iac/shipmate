@@ -33,7 +33,6 @@ jobs:
           set -euo pipefail
           echo "default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }
       - uses: $/actions/setup
       - id: m
         uses: $/actions/build-matrix
@@ -58,7 +57,6 @@ jobs:
     name: ${{ matrix.stack }} / ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }
       - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}
