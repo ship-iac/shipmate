@@ -758,8 +758,8 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
     check."""
     seen = {}
 
-    def _membership(all_stacks=False, base="", require_env_tag=True):
-        seen.update(all_stacks=all_stacks, base=base, require_env_tag=require_env_tag)
+    def _membership(all_stacks=False, base=""):
+        seen.update(all_stacks=all_stacks, base=base)
         stacks_by_env, tags_by_stack = {}, {}
         for c in cells:
             stacks_by_env.setdefault(c["environment"], []).append(c["stack"])
@@ -792,7 +792,8 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
     """stacks/app has a pending check and is queued; stacks/dns has a completed check and is
     not; stacks/db has no check at all and is not queued either. Every queued cell takes a real
     state lock and may force-break one, so a stack this pull request never planned must not be
-    in range. The foreign-App pending check on stacks/db must not enrol it."""
+    in range. The foreign-App pending check on stacks/db must not enrol it. Mutation: pass
+    `require_env_tag=False` to `env_membership` -- TypeError."""
     out = _unlock_env(monkeypatch, tmp_path)
     _boom_on_plan_path(monkeypatch)
     seen = _stub_unlock_tree(
@@ -812,7 +813,7 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
     ad.main()
     # all_stacks=True is the point: a cell whose plan artifacts expired long ago is exactly the
     # cell that can hold a stranded lock.
-    assert seen == {"all_stacks": True, "base": "", "require_env_tag": False}
+    assert seen == {"all_stacks": True, "base": ""}
     assert json.loads(_parsed(out)["cells"]) == [
         {
             "stack": "stacks/app",
@@ -1049,9 +1050,9 @@ def _stub_one_pending_check(monkeypatch):
 
 
 def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, tmp_path):
-    # Through the real env_membership: require_env_tag=True would abort on `stacks/orphan` and
-    # make unlock unavailable for every environment, precisely when the pipeline is already
-    # degraded enough to strand a lock.
+    # Through the real env_membership: a refusal of `stacks/orphan` would make unlock
+    # unavailable for every environment, precisely when the pipeline is already degraded
+    # enough to strand a lock.
     out = _unlock_env(monkeypatch, tmp_path)
     _boom_on_plan_path(monkeypatch)
     _stub_one_pending_check(monkeypatch)

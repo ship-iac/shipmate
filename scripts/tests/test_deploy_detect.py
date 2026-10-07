@@ -157,7 +157,8 @@ def _run_main(
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: HEAD)
-    # `compute_cells` returns (env->workloads map, rows, tree names); a double returning fewer
+    # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks); a double
+    # returning fewer
     # unpacks into the wrong names and fails somewhere unrelated.
     if stacks is None:
         monkeypatch.setattr(
@@ -167,6 +168,7 @@ def _run_main(
                 {c["environment"]: frozenset({c["workload"]} - {""}) for c in cells},
                 cells,
                 [{"environment": c["environment"], "stack": c["stack"]} for c in cells],
+                [],
             ),
         )
     else:

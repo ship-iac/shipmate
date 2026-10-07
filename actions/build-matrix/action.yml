@@ -61,6 +61,9 @@ outputs:
   cells:
     description: 'JSON [{environment,stack},...]: every cell of the scanned tree before the `tags` filter, in matrix order, as names alone to keep an env var small; not capped at 256 like the matrix. Read by drift-issues to close the Issues of removed cells. The list reaches drift-issues in one environment variable: past about 2,000 cells (128 KiB, Linux''s per-string limit) every sweep''s `issues` job fails at its "Upsert / close drift issues" step before the script starts, after every cell has planned.'
     value: ${{ steps.build.outputs.cells }}
+  unmanaged:
+    description: 'JSON list of the scanned stack paths carrying no `env/*` tag, sorted, uncapped; `[]` when none. Shipmate plans, applies and sweeps none of them. Read by the plan summary for its comment line.'
+    value: ${{ steps.build.outputs.unmanaged }}
 runs:
   using: composite
   steps:

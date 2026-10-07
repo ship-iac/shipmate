@@ -60,7 +60,9 @@ def main():
     head = _merged_head(repo, merge_sha)
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
-    _, cells, _ = bm.compute_cells(all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""))
+    _, cells, _, _ = bm.compute_cells(
+        all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", "")
+    )
     table = bm.env_config(cells)
     cells = bm.stamp_rows(cells, table, "apply")
     app_id = os.environ["SHIPMATE_APP_ID"]

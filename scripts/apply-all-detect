@@ -7,7 +7,7 @@ applying from the plan run its own check records, and the environment entries'
 `needs` bucket the pending ones into env-levels exactly as on the
 merge-deploy path. Env membership comes from stack tags
 (build-matrix.env_membership) so check names are only ever constructed forward,
-never reverse-parsed.
+never reverse-parsed; a stack with no `env/*` tag is in no environment and adds no cell.
 
 Three exclusions distinguish the bare form from deploy:
 - envs whose entry holds `explicit = true` (typically prod) are removed
@@ -60,7 +60,7 @@ def main():
 
     ad.validate_head_sha(head)
 
-    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
+    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     app_id = os.environ["SHIPMATE_APP_ID"]
     lines = ad._check_run_lines(repo, head)
     cells = cells_from_checks(ad.apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)

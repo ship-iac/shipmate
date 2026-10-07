@@ -257,13 +257,8 @@ def run_unlock(repo, env, head):
     deliberately avoids (one unrelated stack's unresolvable expression would
     block an approved plan). That trade is inverted here on purpose: unlock has
     no plan to protect, and it must reach a cell whose plan artifacts expired
-    long ago.
-
-    `require_env_tag=False` for the same reason the bare-apply path passes it: an
-    untagged stack contributes no cell anyway, and unlock is the RECOVERY verb —
-    reached when the pipeline is already degraded, which is exactly when a
-    half-finished stack may be sitting in the tree. Failing loud there would make
-    unlock unavailable for every environment precisely when it is needed.
+    long ago. A stack with no `env/*` tag is in no environment, so it adds no
+    cell and cannot make unlock unavailable.
 
     `env_membership` + `build_matrix([env], {env: queued}, ...)` rather than
     `compute_cells`, which is what the bare-apply detect does with the same whole-tree walk
@@ -283,7 +278,7 @@ def run_unlock(repo, env, head):
     made at comment time. `cells` is written even for an empty queue, as `[]`,
     because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
     `fromJSON('')` is an error."""
-    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
+    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     runs = ag.app_runs(_check_run_lines(repo, head), os.environ["SHIPMATE_APP_ID"])
     # Not the complement of done: a name with no run is not pending, and a completed run
     # with a bad conclusion is done being run; either would enrol a cell into a force-unlock.

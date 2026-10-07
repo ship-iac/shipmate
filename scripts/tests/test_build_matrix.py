@@ -86,7 +86,7 @@ def test_the_matrix_limit_counts_the_cells_a_query_keeps(monkeypatch):
         "_tags",
         lambda s: ["env/dev-eu", "workload/keep" if s < "stacks/s010" else "workload/drop"],
     )
-    _, cells, tree = bm.compute_cells(all_stacks=True, tags="workload/keep")
+    _, cells, tree, _ = bm.compute_cells(all_stacks=True, tags="workload/keep")
     assert [c["stack"] for c in cells] == [f"stacks/s{i:03}" for i in range(10)]
     assert tree == [{"environment": "dev-eu", "stack": f"stacks/s{i:03}"} for i in range(257)]
 
@@ -185,44 +185,13 @@ def test_tags_evals_with_as_json(monkeypatch):
 
 
 def test_compute_cells_fans_out_multi_env(monkeypatch):
-    # Happy path only -- does NOT exercise the untagged-stack guard.
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu", "env/dev-us", "workload/app"])
-    _, cells, _ = bm.compute_cells(all_stacks=True)
+    _, cells, _, _ = bm.compute_cells(all_stacks=True)
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
         {"stack": "stacks/app", "environment": "dev-us", "workload": "app"},
     ]
-
-
-def test_compute_cells_raises_on_untagged_stack(monkeypatch):
-    # A stack with no env/* tag would silently vanish from plan, apply and drift, so
-    # compute_cells fails loud instead.
-    monkeypatch.setattr(
-        bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/orphan"]
-    )
-    monkeypatch.setattr(
-        bm,
-        "_tags",
-        lambda s: ["env/dev-eu"] if s == "stacks/app" else ["workload/net"],
-    )
-    with pytest.raises(SystemExit) as exc_info:
-        bm.compute_cells(all_stacks=True)
-    assert "stacks/orphan" in str(exc_info.value)
-    assert "stacks/app" not in str(exc_info.value)
-
-
-def test_untagged_failure_names_the_count_and_every_stack(monkeypatch):
-    # So a migration can be re-run and watched shrink.
-    stacks = ["stacks/zeta", "stacks/alpha", "stacks/mid"]
-    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
-    monkeypatch.setattr(bm, "_tags", lambda s: ["workload/util"])
-    with pytest.raises(SystemExit) as exc_info:
-        bm.env_membership(all_stacks=True)
-    assert str(exc_info.value) == (
-        "::error::3 stack(s) have no env/* tag and cannot fan out to any "
-        "environment (they would silently skip): stacks/alpha, stacks/mid, stacks/zeta"
-    )
 
 
 def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
@@ -237,24 +206,65 @@ def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
     assert tags_by_stack == tags
 
 
-def test_env_membership_fails_loud_on_untagged_stack(monkeypatch):
-    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/orphan"])
-    monkeypatch.setattr(bm, "_tags", lambda s: ["workload/app"])
-    with pytest.raises(SystemExit):
-        bm.env_membership(all_stacks=True)
+_UNMANAGED_TREE = {
+    "stacks/app": ["env/dev-eu"],
+    "stacks/zeta": ["workload/net"],
+    "stacks/alpha": [],
+}
 
 
-def test_env_membership_require_env_tag_false_ignores_untagged(monkeypatch):
-    # The artifact-sourced bare-apply path passes require_env_tag=False: an untagged stack
-    # anywhere in the repo must not abort membership. It produces no plan.<env>.<slug>
-    # artifact and no cell, so it vanishes from the map while tagged stacks still bucket.
-    stacks = ["stacks/app", "stacks/orphan"]
-    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
-    tags = {"stacks/app": ["env/dev-eu"], "stacks/orphan": ["workload/util"]}
-    monkeypatch.setattr(bm, "_tags", lambda s: tags[s])
-    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, require_env_tag=False)
+def test_env_membership_skips_untagged_stacks_with_a_whole_tree_notice(monkeypatch, capsys):
+    """Two stacks with no `env/*` tag are in the tag map, in no environment, and named in one
+    sorted notice. Mutation: restore the `SystemExit` refusal."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
+    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     assert stacks_by_env == {"dev-eu": ["stacks/app"]}
-    assert tags_by_stack == tags  # The orphan is still reported in tags, not bucketed.
+    assert tags_by_stack == _UNMANAGED_TREE
+    assert capsys.readouterr().out == (
+        "::notice::2 stack(s) carry no env/* tag and are not managed by shipmate: "
+        "stacks/alpha, stacks/zeta\n"
+    )
+
+
+def test_the_changed_set_scan_names_its_scope_in_the_notice(monkeypatch, capsys):
+    """Mutation: print the whole-tree wording on both scans."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
+    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    bm.env_membership(all_stacks=False, base="deadbeef")
+    assert capsys.readouterr().out == (
+        "::notice::2 changed stack(s) carry no env/* tag and are not managed by shipmate: "
+        "stacks/alpha, stacks/zeta\n"
+    )
+
+
+def test_no_unmanaged_stack_prints_nothing(monkeypatch, capsys):
+    """Mutation: print the notice with N = 0."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
+    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
+    bm.env_membership(all_stacks=True)
+    assert capsys.readouterr().out == ""
+
+
+def test_compute_cells_leaves_an_unmanaged_stack_out_of_cells_and_tree(monkeypatch):
+    """The fourth element lists it, and no cell or tree entry names it, so drift closes its
+    Issues. Mutation: add unmanaged stacks to `tree`."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
+    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    _, cells, tree, unmanaged = bm.compute_cells(all_stacks=True)
+    assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
+    assert tree == [{"environment": "dev-eu", "stack": "stacks/app"}]
+    assert unmanaged == ["stacks/alpha", "stacks/zeta"]
+
+
+def test_two_workload_tags_on_an_unmanaged_stack_draw_no_refusal(monkeypatch):
+    """Mutation: call `workload_of` over every stack in `tags_by_stack` in `full_tree`."""
+    tree = {"stacks/app": ["env/dev-eu"], "stacks/odd": ["workload/a", "workload/b"]}
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
+    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    _, cells, _, unmanaged = bm.compute_cells(all_stacks=True)
+    assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
+    assert unmanaged == ["stacks/odd"]
 
 
 def test_a_stated_head_repository_equal_to_this_repository_is_planned():
@@ -374,7 +384,7 @@ def _run_main(
         names = [{"environment": e, "stack": s} for s, e in cells] if tree is None else tree
         # The real `compute_cells` returns the env->workloads map beside the rows, and `main`
         # forwards it as `tagged` only under `all_stacks`. The rows tag no workload.
-        return {e: frozenset() for _, e in cells}, rows, names
+        return {e: frozenset() for _, e in cells}, rows, names, []
 
     if stacks is None:
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
@@ -779,6 +789,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "empty": "${{ steps.build.outputs.empty }}",
         "count": "${{ steps.build.outputs.count }}",
         "cells": "${{ steps.build.outputs.cells }}",
+        "unmanaged": "${{ steps.build.outputs.unmanaged }}",
     }
 
 
@@ -1570,3 +1581,41 @@ def test_a_drift_run_passes_the_query_through_verbatim(monkeypatch, tmp_path):
         {**_DRIFT_ENV, "SHIPMATE_TAGS": " env/dev-eu ,workload/app"},
     )
     assert called == [(True, "", " env/dev-eu ,workload/app")]
+
+
+def test_an_env_tag_naming_no_table_entry_still_refuses_under_tf_vars(monkeypatch, tmp_path):
+    """`env/nope` is a tag naming an environment the table lacks, not an unmanaged stack.
+
+    Mutation: in `env_membership`, drop `env/*` tags naming no table entry -- the sweep plans.
+    """
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            _DRIFT_ENV,
+            table={"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}},
+            stacks={"stacks/app": ["env/dev-eu"], "stacks/typo": ["env/nope"]},
+        )
+    assert str(exc.value) == (
+        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
+        "environment table, and nope has no entry in it."
+    )
+
+
+@pytest.mark.parametrize(
+    ("stacks", "expected"),
+    [
+        (
+            {"stacks/app": ["env/dev-eu"], "stacks/z": [], "stacks/a": ["workload/x"]},
+            '["stacks/a", "stacks/z"]',
+        ),
+        ({"stacks/app": ["env/dev-eu"]}, "[]"),
+    ],
+    ids=["two", "none"],
+)
+def test_main_writes_the_unmanaged_stacks_as_a_sorted_json_list(
+    monkeypatch, tmp_path, stacks, expected
+):
+    """Written on every run, `[]` when none. Mutation: omit the line when the list is empty."""
+    outputs, _ = _run_main(monkeypatch, tmp_path, _DRIFT_ENV, stacks=stacks)
+    assert outputs["unmanaged"] == expected

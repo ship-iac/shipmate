@@ -216,24 +216,27 @@ def _tags(stack):
     return json.loads(out)
 
 
-def env_membership(all_stacks=False, base="", require_env_tag=True):
-    """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT
-    tag grammar: env/<name>).
+def unmanaged_stacks(tags_by_stack):
+    """Sorted stack paths carrying no `env/*` tag: shipmate does not run them (CONTRACT §Tag
+    grammar)."""
+    return sorted(
+        s for s, tags in tags_by_stack.items() if not any(t.startswith("env/") for t in tags)
+    )
 
-    `require_env_tag` (default True) is the plan/deploy fan-out posture: an
-    untagged stack fails loud, because there it would silently vanish from the
-    matrix. The artifact-sourced bare-apply path passes False -- an untagged
-    stack produces no `plan.<env>.<slug>` artifact and so contributes no cell
-    regardless, and an unrelated one must not abort the apply."""
+
+def env_membership(all_stacks=False, base=""):
+    """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT tag
+    grammar: env/<name>). A stack with no `env/*` tag is unmanaged: it is in the tag map,
+    in no environment, and named in one notice scoped to what this call scanned."""
     stacks = _list_stacks(all_stacks, base)
     tags_by_stack = {s: _tags(s) for s in stacks}
-    if require_env_tag:
-        untagged = [s for s in stacks if not any(t.startswith("env/") for t in tags_by_stack[s])]
-        if untagged:
-            raise SystemExit(
-                f"::error::{len(untagged)} stack(s) have no env/* tag and cannot fan out to any "
-                "environment (they would silently skip): " + ", ".join(sorted(untagged))
-            )
+    unmanaged = unmanaged_stacks(tags_by_stack)
+    if unmanaged:
+        scope = "stack(s)" if all_stacks else "changed stack(s)"
+        print(
+            f"::notice::{len(unmanaged)} {scope} carry no env/* tag and are not managed by "
+            f"shipmate: {', '.join(unmanaged)}"
+        )
     stacks_by_env = {}
     for s in stacks:
         for t in tags_by_stack[s]:
@@ -260,12 +263,13 @@ def tagged_workloads(stacks_by_env, tags_by_stack):
 
 
 def compute_cells(all_stacks=False, base="", tags=""):
-    """(`tagged_workloads` of the scan, the cells to plan, the scanned tree's cell names).
+    """(`tagged_workloads` of the scan, the cells to plan, the scanned tree's cell names, the
+    scan's `unmanaged_stacks`).
 
     The map is returned beside the cells because a caller that scanned the whole tree feeds it
     to `env_config` as `tagged`, and re-scanning would be a second source that can disagree
-    with this one. The tree-wide checks here -- untagged stacks, slug collisions, two
-    `workload/*` tags on one stack -- run over the whole tree; `tags` narrows only the cells to
+    with this one. The tree-wide checks here -- slug collisions, two `workload/*` tags on one
+    stack -- run over the whole tree's managed stacks; `tags` narrows only the cells to
     plan, and the matrix limit counts those. The caller's per-cell checks (`stamp_rows`'
     resolution and `env_binding` refusal, `refuse_workload_gaps`) see only the returned cells.
     The tree is `[{environment, stack}]` in matrix order, uncapped."""
@@ -273,7 +277,12 @@ def compute_cells(all_stacks=False, base="", tags=""):
     full = full_tree(sorted(stacks_by_env), stacks_by_env, tags_by_stack)
     cells = cap_cells(filter_cells(full, tags_by_stack, tags), all_stacks)
     tree = [{"environment": c["environment"], "stack": c["stack"]} for c in full]
-    return tagged_workloads(stacks_by_env, tags_by_stack), cells, tree
+    return (
+        tagged_workloads(stacks_by_env, tags_by_stack),
+        cells,
+        tree,
+        unmanaged_stacks(tags_by_stack),
+    )
 
 
 def env_config(cells, tagged=None, table=None):
@@ -518,7 +527,7 @@ def main():
     )
     if rejection:
         raise SystemExit(rejection)
-    tagged, cells, tree = compute_cells(all_stacks, base, tags)
+    tagged, cells, tree, unmanaged = compute_cells(all_stacks, base, tags)
     # One call serves plan and drift, and only drift scans the whole tree. Under
     # `all_stacks=False` the map covers the CHANGED stacks alone, so passing it would
     # report every unchanged environment as an unused table entry on every plan. The
@@ -531,6 +540,7 @@ def main():
         fh.write(f"empty={'true' if not cells else 'false'}\n")
         fh.write(f"count={len(cells)}\n")
         fh.write(f"cells={json.dumps(tree)}\n")
+        fh.write(f"unmanaged={json.dumps(unmanaged)}\n")
     listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
     print(f"{len(cells)} cell(s): {listing}")
 
