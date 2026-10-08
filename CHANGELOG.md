@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.43.0] — 2026-10-08
 
+Tags `ce6faac`.
+
 ### Added
 
 - **Each drift workflow file can pass engine `drift.yml` a `tags` query, so one file sweeps only the cells it selects (`docs/drift.md` §Scoping a sweep).**
