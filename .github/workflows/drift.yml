@@ -14,7 +14,7 @@ permissions: {}
 jobs:
   # Resolves the default branch from the API, not from github.event.repository.default_branch,
   # whose population under `schedule` is the question the gates below must not depend on. Ungated
-  # on purpose: no consumer code, no secret, so a feature-branch dispatch fails at those gates.
+  # on purpose: no consumer code, no secret, so a feature-branch dispatch stops at those gates, which skip the jobs behind them.
   detect:
     runs-on: ${{ inputs.runs_on }}
     permissions:

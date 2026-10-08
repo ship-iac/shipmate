@@ -252,11 +252,17 @@ tag. Nor does it cover the comment leg — parse, authorize, route — which by
 construction runs the sample's default-branch workflows and so is only
 exercised after the re-pin.
 
+A dispatch of a drift file the sample's default branch already holds
+(`gh workflow run <drift-file>.yml --ref smoke/vX.Y.Z`) runs the scratch branch's copy,
+so it loads `drift.yml` at the pin that copy carries, and runs `detect`, which parses
+`actions/setup` and `actions/build-matrix` at that SHA. It skips the `drift` and `issues`
+jobs, which run only at the default branch, so `drift-cell` and `drift-issues` stay
+unparsed. Read it as green when `detect` succeeded; the cells first run on the drift
+file's first dispatch or schedule after the re-pin merges.
+
 When the release refuses a key the default branch's table still holds, a `verb=plan`
-dispatch on the scratch branch, or a dispatch of one of its drift files
-(`gh workflow run <drift-file>.yml --ref smoke/vX.Y.Z`, once that file is on the sample's
-default branch), stops at detect on that key: expected, and that release's smoke is the
-`verb=apply` dispatch alone. Otherwise a `verb=plan`
+dispatch on the scratch branch, or that drift-file dispatch, stops at detect on that
+key: expected, and that release's smoke is the `verb=apply` dispatch alone. Otherwise a `verb=plan`
 dispatch on the scratch branch runs the cells and stops at
 `plan.yml`'s `summary`, the only job holding the App key. It binds the
 `shipmate-engine` environment, whose deployment branch policy allows the
