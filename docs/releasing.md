@@ -141,7 +141,7 @@ repository's tag namespace.
 
 Only `repo-example-stacks-aws` is re-pinned at release. The other three samples
 reference the engine at `@main` and exercise it on their own triggers (pull
-requests, merges, the nightly drift run); they carry no pin to move and no
+requests, merges, their drift sweeps); they carry no pin to move and no
 release-freshness alarm.
 
 Releases on this repository are immutable, so a published tag cannot later be

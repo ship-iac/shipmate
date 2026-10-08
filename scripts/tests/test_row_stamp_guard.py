@@ -107,7 +107,7 @@ def test_the_plan_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
 
 def test_the_drift_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
     """Call site 2: the same `build-matrix` line, reached with `all-stacks: true`. Drift plans
-    and never applies, and the nightly run is the one nobody watches.
+    and never applies, and a drift sweep is the run nobody watches.
 
     Mutations: as above -- one argument and one wrapper, so both cases red together.
     """

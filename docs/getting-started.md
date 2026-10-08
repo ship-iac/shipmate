@@ -637,8 +637,8 @@ rules from Settings → Environments → `<name>` (or the API):
 - **Required reviewers and "Prevent self-review" — per environment, your
   call.** This applies to every env that has an `<env>-apply`. A shared env is
   not one of
-  them: a reviewer on the bare `<env>` stalls the plan cells and the nightly
-  drift run too, so the gate there is unavailable rather than declined, and
+  them: a reviewer on the bare `<env>` stalls the plan cells and every
+  drift sweep covering it too, so the gate there is unavailable rather than declined, and
   turning it on later means splitting the environment again
   ([`hardening.md`](hardening.md) #6). With them, an apply to that environment
   pauses for a named team, and that pause is the one gate an App installation
@@ -689,7 +689,8 @@ consumer file names it: your jobs pass the App key by name and bind no
 environment of their own. The `ops` job can declare it because an
 `issue_comment` run evaluates at the default branch's tip, which is what the
 environment's branch policy admits — the same reason engine `drift.yml`'s
-`issues` job can, on the nightly `schedule`.
+`issues` job can, on a drift file's `schedule` or a `workflow_dispatch` at the
+default branch.
 
 `shipmate apply` lands on the `apply` job, which calls the engine's `apply.yml`
 with the dispatched `environment`: a targeted `shipmate apply <env>` sends one
@@ -823,9 +824,10 @@ are lowercase, so the cell lowercases the suffix: `TF_VAR_ENDPOINT` →
 **`SHIPMATE_VARS` costs no workflow edit.** It is a GitHub variable, so it
 arrives like any other one — nothing to declare, nothing to map. Only
 `SHIPMATE_SECRETS` touches `shipmate.yml`, because only secrets cross the
-declaration boundary; the six cell-running jobs of the file above already carry
-its line, and the comment on the `plan` job's line says why deleting it breaks
-the channel — the other five carry the same line without a comment.
+declaration boundary; the four cell-running jobs of `shipmate.yml` and each
+drift file's `drift` job already carry its line, and the comment on the `plan`
+job's line says why deleting it breaks the channel — the others carry the same
+line without a comment.
 
 **One is a variable and one is a secret, and swapping them fails.** Setting
 `SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
@@ -875,7 +877,8 @@ and what masking does and does not cover.
 ### Drift detection
 
 Each drift file's `drift` job plans every stack × environment, or the cells its
-`tags` query selects, nightly against real state, then opens, updates and closes drift Issues from what those cells
+`tags` query selects, on its schedule or a `workflow_dispatch`, against real
+state, then opens, updates and closes drift Issues from what those cells
 report. The engine jobs behind it that hold a credential run only at the
 default-branch ref; it needs the `shipmate-engine` environment from the plan
 tier. `scripts/onboard` does not write it: save it from the `shipmate drift`

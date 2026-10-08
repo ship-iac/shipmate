@@ -51,7 +51,7 @@ live probes.
   entry of `.github/shipmate.toml`, read from the default branch's copy that every
   run binds from; when that copy cannot be read or is invalid, these environment
   probes are skipped with a note. A shared environment carrying approval rules warns that they stall the plan
-  cells and the nightly drift run; its missing approval rules and its branch
+  cells and every drift sweep covering it; its missing approval rules and its branch
   policy are notes.
 - **The secrets a plan environment holds, names only.** The API never returns a
   value. A plan cell runs branch code with whatever that environment releases
@@ -283,8 +283,8 @@ mandate. Each one names what to do.
 | --- | --- |
 | `<name> branch policy` — also permits other branches | the environment — `shipmate-engine`, an `<env>-apply`, or a shared bare `<env>` — has a deployment branch policy naming branches besides the default one, so a workflow on any of them can still claim what that environment scopes. Delete the extra entries in Settings → Environments if they were not deliberate. |
 | `<env>-plan` — it carries a deployment branch policy | a plan environment must have none: plan cells evaluate at the pull request's base ref, so a policy blocks every cell whose pull request targets a branch it does not name ([`hardening.md`](hardening.md) #8). Remove the policy. |
-| `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall every plan cell and the nightly drift run. Remove them ([`hardening.md`](hardening.md) #6). |
-| `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and the nightly drift run as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop `shared = true` from `[environments.<env>]`. |
+| `<env>-plan` — it carries protection rules | required reviewers or a wait timer on a plan environment stall that environment's plan cells and every drift sweep covering it. Remove them ([`hardening.md`](hardening.md) #6). |
+| `<env>` — it carries protection rules and is shared | a shared bare `<env>` is bound by the plan cells and every drift sweep covering it as well as the applies, and GitHub offers no per-job filter, so a protection rule there stalls all three. To gate applies alone, split it into `<env>-plan` / `<env>-apply` and drop `shared = true` from `[environments.<env>]`. |
 | `<env>` — the naming the engine does not bind is also present | the naming `shared = true` in `[environments.<env>]` does not select already exists: a bare `<env>` where the engine binds the `<env>-plan` / `<env>-apply` pair, or either half where it binds the bare `<env>`. Nothing binds the unused naming, so the run creates and changes nothing for that environment — including the naming it does bind, which is why it is reported rather than half-written. Delete the unused naming, or move the environment to the other one by setting or dropping `shared = true` in its entry of the checkout's `.github/shipmate.toml`. |
 | `gate ruleset` — the rulesets POST was rejected (HTTP 422) | most likely the name is taken by a ruleset whose enforcement is `evaluate` or `disabled`, which the effective-rules read cannot see; 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` first. Set it to active, or delete it and run again. |
 | `gate ruleset` — rulesets need GitHub Pro, Team, Enterprise, or a public repository | the plan this repository is on has no rulesets. Configure the gate by hand from [`branch-protection.md`](branch-protection.md). |
@@ -914,9 +914,9 @@ files plans the destroy of what the revert removed from configuration, and a
 
 ### A dispatched verb produced a run in which every job was skipped
 
-The comment was accepted, the dispatch succeeded and the run page shows six
+The comment was accepted, the dispatch succeeded and the run page shows five
 skipped jobs and nothing else — which is what a healthy run also shows for the
-five jobs the event did not select.
+four jobs the event did not select.
 
 The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
