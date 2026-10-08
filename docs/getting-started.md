@@ -638,7 +638,7 @@ rules from Settings → Environments → `<name>` (or the API):
   call.** This applies to every env that has an `<env>-apply`. A shared env is
   not one of
   them: a reviewer on the bare `<env>` stalls the plan cells and every
-  drift sweep too, so the gate there is unavailable rather than declined, and
+  drift sweep covering it too, so the gate there is unavailable rather than declined, and
   turning it on later means splitting the environment again
   ([`hardening.md`](hardening.md) #6). With them, an apply to that environment
   pauses for a named team, and that pause is the one gate an App installation
@@ -689,7 +689,8 @@ consumer file names it: your jobs pass the App key by name and bind no
 environment of their own. The `ops` job can declare it because an
 `issue_comment` run evaluates at the default branch's tip, which is what the
 environment's branch policy admits — the same reason engine `drift.yml`'s
-`issues` job can, on a drift file's `schedule`.
+`issues` job can, on a drift file's `schedule` or a `workflow_dispatch` at the
+default branch.
 
 `shipmate apply` lands on the `apply` job, which calls the engine's `apply.yml`
 with the dispatched `environment`: a targeted `shipmate apply <env>` sends one
@@ -876,7 +877,7 @@ and what masking does and does not cover.
 ### Drift detection
 
 Each drift file's `drift` job plans every stack × environment, or the cells its
-`tags` query selects, on its schedule against real state, then opens, updates and closes drift Issues from what those cells
+`tags` query selects, on its schedule or a `workflow_dispatch`, against real state, then opens, updates and closes drift Issues from what those cells
 report. The engine jobs behind it that hold a credential run only at the
 default-branch ref; it needs the `shipmate-engine` environment from the plan
 tier. `scripts/onboard` does not write it: save it from the `shipmate drift`

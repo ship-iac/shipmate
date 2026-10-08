@@ -433,7 +433,7 @@ def _env_shape_findings(name, env, data, role):
                 f"{_shared_intro(env)} has "
                 f"protection rules ({', '.join(approval)}). A protection rule gates every "
                 "job that binds the environment and GitHub offers no per-job filter, so "
-                "the plan cells and every drift sweep will not start immediately "
+                "the plan cells and every drift sweep covering it will not start immediately "
                 f"either. To gate applies only, split it into `{env}-plan` and "
                 f"`{env}-apply` and remove `shared = true` from its `[environments.{env}]` entry.",
             )
@@ -461,7 +461,7 @@ def _env_shape_findings(name, env, data, role):
                 "approval rules (required reviewers or a wait timer), so pre-merge applies "
                 "to it are unreviewed, and no reviewer gate is available while it is "
                 "shared: a reviewer here would stall the plan cells and every drift "
-                f"sweep. Split it into `{env}-plan` and `{env}-apply` if you need one.",
+                f"sweep covering it. Split it into `{env}-plan` and `{env}-apply` if you need one.",
             )
         )
     return out

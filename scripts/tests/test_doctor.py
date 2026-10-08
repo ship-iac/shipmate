@@ -374,7 +374,8 @@ _SHARED_UNREVIEWED = (
     "GitHub Environment `dev-eu` (shared between plan and apply by `shared = true` in its "
     "`[environments.dev-eu]` entry) has no approval rules (required reviewers or a wait "
     "timer), so pre-merge applies to it are unreviewed, and no reviewer gate is available "
-    "while it is shared: a reviewer here would stall the plan cells and every drift sweep. "
+    "while it is shared: a reviewer here would stall the plan cells and every drift sweep "
+    "covering it. "
     "Split it into `dev-eu-plan` and `dev-eu-apply` if you need one.",
 )
 
@@ -856,7 +857,7 @@ def test_plan_env_branch_policy_warned(monkeypatch):
 def test_shared_env_with_reviewers_warns_about_plan_cells_and_drift(monkeypatch):
     """Protection rules gate every job binding the environment and GitHub offers
     no per-job filter, so on a shared environment reviewers stall the plan cells
-    AND every drift sweep -- both have to be named, or a consumer reads the
+    AND every drift sweep covering it -- both have to be named, or a consumer reads the
     finding as being only about applies."""
     responses = _protection(_env("dev-eu", rules=("required_reviewers",)), table=_SHARED_TABLE)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -935,7 +936,8 @@ def test_a_shared_env_with_reviewers_names_the_key_that_shares_it(monkeypatch):
             "in its `[environments.dev-eu]` entry) has protection rules "
             "(required_reviewers). A protection rule gates every job that binds the "
             "environment and GitHub offers no per-job filter, so the plan cells and "
-            "every drift sweep will not start immediately either. To gate applies only, split "
+            "every drift sweep covering it will not start immediately either. To gate applies "
+            "only, split "
             "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared = true` from its "
             "`[environments.dev-eu]` entry.",
         )

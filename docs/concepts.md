@@ -122,8 +122,8 @@ Terramate `after` DAG ([`CONTRACT.md`](../CONTRACT.md) §Fan-out, §Env apply
 order), and a comment-triggered apply and a post-merge deploy share one
 concurrency group per stack × environment, so they never race on the same cell.
 
-Each drift sweep is a workflow file of its own: on its schedule it plans every
-stack × environment, or the cells its `tags` query selects, and opens one GitHub
+Each drift sweep is a workflow file of its own: on its schedule or a
+`workflow_dispatch` it plans every stack × environment, or the cells its `tags` query selects, and opens one GitHub
 Issue per drifted cell; setup is in [drift.md](drift.md).
 
 **Remote state and cloud credentials.** Nothing configures state. A local

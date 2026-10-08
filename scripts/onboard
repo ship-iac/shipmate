@@ -300,7 +300,7 @@ def _report_shared_approval(ctx, name, env):
 
     `_env_names` collapses a shared env to one apply-role environment, but a protection
     rule there is not the reviewer gate the split naming gives an apply environment: the
-    plan cells and every drift sweep bind the same environment and GitHub offers no
+    plan cells and every drift sweep covering it bind the same environment and GitHub offers no
     per-job filter, so they stall too. `doctor` warns on it; reported here, never stripped.
     """
     approval = _approval_rules(env) if env is not None and name in ctx["shared"] else []
@@ -310,7 +310,7 @@ def _report_shared_approval(ctx, name, env):
         "differs",
         name,
         f"it carries protection rules ({', '.join(approval)}) and is shared, so the plan "
-        "cells and every drift sweep do not start immediately either. To gate applies "
+        "cells and every drift sweep covering it do not start immediately either. To gate applies "
         f"alone, split it into `{name}-plan` and `{name}-apply` and drop `shared = true` "
         f"from `[environments.{name}]`.",
     )
@@ -1150,7 +1150,8 @@ def _checklist(ctx):
     run exits 0 over them.
     """
     # A reviewer on a shared env's bare environment stalls the plan cells and the drift
-    # run, so it is asked for only where the apply path has an environment of its own.
+    # sweeps covering it, so it is asked for only where the apply path has an environment
+    # of its own.
     ungated = ec.ungated_envs(ctx["table"] or {})
     gated = [env for env in ctx["envs"] if env not in ctx["unresolved"] and env not in ungated]
     reviewed = [

@@ -1625,7 +1625,7 @@ def test_a_filtered_sweep_still_refuses_two_workload_tags_outside_it(monkeypatch
 
 def test_a_tag_filter_does_not_hide_a_workload_from_drift(monkeypatch, tmp_path, capsys):
     """The filter drops `stacks/net`, the only stack tagging `workload/net`, from the cells; the
-    tag still exists, so drift must not report `net` as untagged every night.
+    tag still exists, so drift must not report `net` as untagged on every sweep.
 
     Mutation: derive `tagged` from the filtered cells in `compute_cells` -- the warning names
     `net`."""
