@@ -345,8 +345,8 @@ ownership never applies to the pull request carrying the edit — it has to merg
 first, on its own. A sole maintainer whose `CODEOWNERS` covers a workflow file
 merges an engine re-pin only with code-owner review turned off for that merge
 (`docs/branch-protection.md` §Reproducible ruleset). The rule also has a floor to
-check now: an entry that owns `/.github/` (or `CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as
-the only way out — and that spends the one merge-time control a leaked App key
+check now: an entry that owns `/.github/` (or `CODEOWNERS`' own path) owns the
+fix too, leaving a ruleset bypass actor as the only way out — and that spends the one merge-time control a leaked App key
 cannot satisfy. `docs/branch-protection.md` has the sole-maintainer shape.
 
 ## 6. Environment reviewers — the gate that holds after a merge
