@@ -137,8 +137,12 @@ request, and an App cannot be a code owner. The sole-maintainer posture is
 three values: `required_approving_review_count: 0`, `require_last_push_approval`
 off, and `require_code_owner_review` off or a narrow `CODEOWNERS` — covering
 `/.github/workflows/` alone, say, so ordinary IaC pull requests need no
-code-owner approval. The alternative is a bypass actor on the ruleset, which
-spends exactly the control a leaked App key cannot get past.
+code-owner approval. A narrow `CODEOWNERS` still blocks the maintainer on every
+file it covers: with `/.github/workflows/` covered, each engine re-pin and each
+drift-file edit merges only after `require_code_owner_review` is turned off for
+that merge (re-run this section's `PUT` with it `false`, merge, then `PUT` it back
+to `true`). The alternative is a bypass actor on the ruleset, which spends exactly
+the control a leaked App key cannot get past.
 
 **A narrow `CODEOWNERS` leaves the environment table under ordinary review.**
 The role a cell assumes is a line in `.github/shipmate.toml` on the default

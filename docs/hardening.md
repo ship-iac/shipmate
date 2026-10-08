@@ -342,10 +342,10 @@ coverage, and it never fails a run, so that is a warning, not enforcement.
 **Know which copy of `CODEOWNERS` decides, before you need to change it.** GitHub
 evaluates it from the pull request's base branch, so narrowing or widening
 ownership never applies to the pull request carrying the edit — it has to merge
-first, on its own. That timing is the difference between a sole maintainer being
-able to merge an engine re-pin that touches a workflow file and not being
-able to. The rule also has a floor to check now: an entry that owns `/.github/`
-(or `CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as
+first, on its own. A sole maintainer whose `CODEOWNERS` covers a workflow file
+merges an engine re-pin only with code-owner review turned off for that merge
+(`docs/branch-protection.md` §Reproducible ruleset). The rule also has a floor to
+check now: an entry that owns `/.github/` (or `CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as
 the only way out — and that spends the one merge-time control a leaked App key
 cannot satisfy. `docs/branch-protection.md` has the sole-maintainer shape.
 
