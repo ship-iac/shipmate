@@ -405,7 +405,7 @@ actual work here:
   plan of a draft does run, and `on-demand` is how the caller says so.
 
 What none of this defends against is a change to the trusted workflow files
-themselves — the consumer's `shipmate.yml`, and the engine's `plan.yml`,
+themselves — the consumer's `shipmate.yml` and drift workflow files, and the engine's `plan.yml`,
 `apply.yml` and the rest — landing on the default
 branch, where they *would* satisfy the environment's policy. That path runs
 through an ordinary pull request and merge — no `pull_request`- or

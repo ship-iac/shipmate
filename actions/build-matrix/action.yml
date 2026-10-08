@@ -24,7 +24,7 @@ inputs:
     default: ""
   no-pull-request:
     description: >-
-      Set to 'true' only in a workflow with no pull-request context (nightly drift). A
+      Set to 'true' only in a workflow with no pull-request context (a drift sweep). A
       no-pull-request of 'true' is what skips the head-repository and head-commit checks. Never
       set it in a plan wrapper.
     required: false
@@ -35,7 +35,7 @@ inputs:
       a Terramate query. ',' is OR and ':' is AND, so 'env/dev-eu,env/dev-us' is either
       environment and 'env/dev-eu:workload/app' is both. A cell matches against its stack's
       tags with every other `env/*` tag removed, so 'env/a:env/b' matches nothing. Empty (the
-      default) covers every cell. Allowed only alongside no-pull-request (nightly drift),
+      default) covers every cell. Allowed only alongside no-pull-request (a drift sweep),
       because narrowing a plan run would leave changed stacks with no plan cell and no apply
       check. Every clause matching no cell is named in a notice, with the terms no stack
       carries; a query matching no cell leaves the run empty with a notice; an empty term

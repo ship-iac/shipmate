@@ -13,7 +13,7 @@ In reading order.
 | [`aws.md`](aws.md) | S3 backend, GitHub OIDC roles, the environment table's identities. |
 | [`github-app.md`](github-app.md) | Register and install the App; the `shipmate-engine` environment. |
 | [`branch-protection.md`](branch-protection.md) | Require `shipmate / gate`; the reproducible ruleset. |
-| [`drift.md`](drift.md) | Nightly drift detection, scoping a sweep, and what it costs. |
+| [`drift.md`](drift.md) | Scheduled drift detection, scoping a sweep, and what it costs. |
 | [`troubleshooting.md`](troubleshooting.md) | `shipmate doctor`, who may ask for its report, and the failures consumers hit. |
 | [`concepts.md`](concepts.md) | How it works: fan-out, checks-first, comment-ops, the environment/tag model. |
 | [`hardening.md`](hardening.md) | Who can make the engine act at all, and what none of it fixes. |

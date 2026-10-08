@@ -75,7 +75,7 @@ That split makes the artifact the only channel by which a cell's drift
 becomes visible. `drift-cell`'s compose and upload steps run `if: always()` and
 are deliberately not `continue-on-error`: were the artifact allowed to go
 missing, `drift-issues` would not see the cell — no Issue and a
-green nightly run over real drift. Both gated jobs also refuse to run off the
+green sweep over real drift. Both gated jobs also refuse to run off the
 default branch, resolved from the API by `detect` rather than read from the
 `schedule` event payload.
 
@@ -121,7 +121,7 @@ ahead rather than stale.
 
 `build-matrix` runs with `all-stacks: "true"` and an empty `base-sha`, so a
 sweep without a `tags` query plans every stack × environment in the repository,
-every night — runner minutes scale with the whole tree, not the changed set. Each cell is a
+on every run — runner minutes scale with the whole tree, not the changed set. Each cell is a
 `tofu init` plus a `tofu plan` against real state, which also means real backend
 and provider API traffic on that schedule. The knobs are the cron expression and
 how many environments you tag stacks into, and how you split the tree across

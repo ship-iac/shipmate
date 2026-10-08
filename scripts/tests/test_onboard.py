@@ -963,7 +963,7 @@ def test_the_split_pair_alone_is_refused_before_the_bare_env_is_created(monkeypa
 
 def test_plan_environment_with_a_protection_rule_is_reported(monkeypatch):
     """A required reviewer or a wait timer on a plan environment stalls every plan cell
-    and the nightly drift run. It is drift, not something to strip: removing a
+    and every drift sweep. It is drift, not something to strip: removing a
     protection a consumer set is not this script's call.
 
     Mutation: drop the `protection_rules` arm of `_plan_drift`, so the environment
@@ -2266,7 +2266,7 @@ def test_the_ruleset_reconciler_stores_the_review_count(monkeypatch):
 
 
 def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(capsys, tmp_path):
-    """A shared env is bound by plan cells and the nightly drift run too, so a required
+    """A shared env is bound by plan cells and every drift sweep too, so a required
     reviewer on it stalls them rather than gating an apply: no environment is asked for
     reviewers, and the `pull_request` rule is the only apply gate left to judge.
 
@@ -3051,7 +3051,7 @@ def test_shared_mode_reports_the_unused_naming_too(monkeypatch):
 
 def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch):
     """A shared env is one bare environment on both paths, so a required reviewer there
-    gates the plan cells and the nightly drift run too -- GitHub has no per-job filter.
+    gates the plan cells and every drift sweep too -- GitHub has no per-job filter.
     `doctor` warns on it; `_env_names` collapses the env to `role == "apply"`, which
     would otherwise report a conforming branch policy as plain `ok`.
 
@@ -3092,7 +3092,7 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
             "differs",
             "dev-eu",
             "it carries protection rules (required_reviewers, wait_timer) and is shared, "
-            "so the plan cells and the nightly drift run do not start immediately either. "
+            "so the plan cells and every drift sweep do not start immediately either. "
             "To gate applies alone, split it into `dev-eu-plan` and `dev-eu-apply` and "
             "drop `shared = true` from `[environments.dev-eu]`.",
         ),

@@ -221,7 +221,7 @@ never used.
   Environment itself, so approval gating is enforced by GitHub, not by
   workflow logic.
 - **Plan and apply bind different GitHub Environments by default (split
-  mode).** For a logical env `<env>`, plan jobs (and the nightly drift run) bind
+  mode).** For a logical env `<env>`, plan jobs (and every drift sweep) bind
   `<env>-plan`, apply jobs bind `<env>-apply`. This lets apply carry stricter
   protection rules (required reviewers, wait timers) than plan, even though both
   act against the same logical environment. "The apply environment" below means
@@ -248,7 +248,7 @@ never used.
   `shared = true` in its `[environments.<env>]` entry makes both paths bind the
   bare `<env>` — one environment, no suffix. The price is stated in
   `docs/hardening.md` (§6 and §7–9): a protection rule on a shared environment
-  gates the plan cells and the nightly drift run too, so the reviewer gate is
+  gates the plan cells and every drift sweep too, so the reviewer gate is
   given up rather than relocated, and plan and apply OIDC tokens become identical
   in `sub`, so no trust policy can separate them.
   - The key is read from the default branch like the rest of the file, so a
@@ -327,11 +327,12 @@ never used.
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
   the apply path (`apply.yml`, `apply-review.yml`,
   `apply-env-level.yml`, `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
-  passes the key by name and binds no environment of its own. Each of those
+  and each drift workflow file pass the key by name and bind no environment of
+  their own. Each of those
   engine jobs runs at a ref the environment's default-branch policy admits —
   the base ref under
-  `pull_request_target`, the default branch under `issue_comment`, the nightly
-  `schedule` and `push` — which is what lets them declare it at all. What never
+  `pull_request_target`, the default branch under `issue_comment`, a drift
+  file's `schedule` and `push` — which is what lets them declare it at all. What never
   happens is a *logical* environment name
   (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
   literal exception, spelled identically everywhere it appears because it
@@ -767,7 +768,7 @@ The unused-entry warning, and its sibling naming a listed workload that no stack
 in its environment tags, need the whole-tree tag map, and they never trigger a
 scan of their own — evaluating the whole tree on a targeted apply would let one
 unrelated stack's unresolvable expression block an approved plan. So they fire
-only where a whole-tree scan already happened: the nightly drift run, `unlock`,
+only where a whole-tree scan already happened: every drift sweep, `unlock`,
 and a bare `shipmate apply`. The plan, deploy and targeted-apply paths see a
 changed set or a workset and stay silent.
 
@@ -781,7 +782,7 @@ catches only names no environment name could take; a plain misspelling reaches
 these warnings instead.
 
 **A typo'd table key therefore does not surface on the pull request that
-introduces it.** It surfaces on the next nightly drift run. Refusals are
+introduces it.** It surfaces on the next run of any drift sweep. Refusals are
 unaffected — they need only the environments already in the matrix, so a tagged
 environment missing from the table still refuses on every path.
 
@@ -1598,7 +1599,7 @@ in the engine placing it there. What *is* base-branch under this trigger is the
 checkout: `GITHUB_SHA` and `GITHUB_REF` name the base, which is why the engine's
 `detect` and `plan` jobs pass `ref: ${{ needs.facts.outputs.head-sha }}`
 explicitly. The two are routinely confused; they are opposite sides of the same
-trigger. The file's other five jobs are skipped under that trigger, each
+trigger. The file's other four jobs are skipped under that trigger, each
 completing as a `skipped` check-run on the same head; nothing functional depends
 on them, and `scripts/mirror-checks` does not copy them.
 

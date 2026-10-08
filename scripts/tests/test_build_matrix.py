@@ -595,7 +595,7 @@ def test_the_opt_out_skips_the_head_checkout_check(monkeypatch):
     ],
 )
 def test_main_parses_the_opt_out_once_for_all_three_guards(monkeypatch, tmp_path, value, opted_out):
-    """Case- and whitespace-insensitive, so a `no-pull-request: True` does not redden a nightly
+    """Case- and whitespace-insensitive, so a `no-pull-request: True` does not redden a sweep
     over YAML capitalisation. Only "true" opts out: the manifest default is the non-empty string
     "false", so anything that treats a non-empty value as the opt-out would plan every unstated
     run unchecked.
@@ -756,7 +756,7 @@ def test_build_matrix_action_declares_its_inputs():
     that there is no pull request at all, and `tags` is refused unless the run states that
     too. All are settable only by this repository's own default-branch workflow, which a
     pull-request author cannot edit, and the direction is chosen so a forgotten input
-    refuses (plan wrapper) or reddens the nightly (drift), never plans a fork.
+    refuses (plan wrapper) or reddens the sweep (drift), never plans a fork.
 
     Hand-written, name -> default; descriptions are prose and not pinned."""
     from _loader import action_yaml
@@ -1641,7 +1641,7 @@ def test_a_tag_filter_does_not_hide_a_workload_from_drift(monkeypatch, tmp_path,
 
 _TAG_FILTER_ERROR = (
     "::error::the `tags` filter is only for a workflow with no pull request at all "
-    "(nightly drift), and this run did not pass `no-pull-request: true`. In a plan "
+    "(a drift sweep), and this run did not pass `no-pull-request: true`. In a plan "
     "job it would drop changed stacks from the matrix: a dropped stack gets no plan "
     "cell and no apply check, `shipmate / gate` greens over it, and the change merges "
     "and never applies. Remove the input from the plan job."

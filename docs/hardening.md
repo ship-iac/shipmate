@@ -102,12 +102,12 @@ both paths instead (CONTRACT.md §Env model). On such an environment:
 
 - **Row 6 is forfeited.** A protection rule gates every job that binds the
   environment, with no per-job filter, so a wait timer stalls the plan cells
-  and the nightly drift run just as a reviewer does (§6). The reviewer gate is
+  and every drift sweep just as a reviewer does (§6). The reviewer gate is
   not relocated, it is gone, and rows 7 and 18 then place credentials on an
   environment plan-time code reaches.
 - **Row 17 still works, conditionally (§6).** A deployment branch policy naming
   the default branch admits plan cells (they evaluate at the pull request's
-  *base* ref), the scheduled drift run and the apply, while still refusing a
+  *base* ref), every drift sweep and the apply, while still refusing a
   branch-authored workflow that names the environment — the control row 17
   exists for. A repository using release branches must open the policy up, and
   then row 17 is forfeited too.
@@ -416,7 +416,7 @@ costs, so the choice is made with the price visible:
   "What none of this fixes").
 - **Shared mode is the strongest form of ungated.** A logical env holding
   `shared = true` binds one bare `<env>` for plan and apply, and a
-  reviewer on it stalls every plan cell and the nightly drift run — so the gate
+  reviewer on it stalls every plan cell and every drift sweep — so the gate
   is not merely unset, it is unavailable, and no later decision can turn it on
   without splitting the environment again. The same environment is what plan-time
   branch code runs inside, so control 7's scoping buys nothing against that code
@@ -623,7 +623,7 @@ no split of its own.
   read-only plan role is unreachable for
   every shared env: plan cells assume the write role while executing
   branch-authored HCL ("Plan-time code execution" — a provider or an `external`
-  data source runs at plan time), and the nightly drift run assumes it too,
+  data source runs at plan time), and every drift sweep assumes it too,
   over the default branch's code. The claim condition cannot
   separate the two paths either: both tokens carry
   `repo:<owner>/<repo>:environment:<env>` — byte-identical `sub` — so no trust
@@ -658,7 +658,7 @@ no split of its own.
   merged pull request under row 4, like naming a role in row 18 — and row 4's
   code-owner half is a no-op unless a `CODEOWNERS` entry covers
   `/.github/shipmate.toml`. One line moves plan cells running unreviewed branch
-  code onto the apply role, and the nightly drift run with them — the cell
+  code onto the apply role, and every drift sweep with them — the cell
   resolves its identity's `aws.apply` for the bare `<env>` it now binds, and an
   identity setting `aws.plan` refuses there, so a shared environment's identity
   never holds a plan-side role. `shipmate doctor` reads the
@@ -922,7 +922,7 @@ failing the run when the two differ.
 
 Both refuse by default: a run that states no commit at all is refused, not
 planned (the one exception is `no-pull-request: "true"`, which only engine
-`drift.yml` passes, for a nightly sweep that has no pull request to state
+`drift.yml` passes, for a drift sweep that has no pull request to state
 anything about). The direction is the point. A plan workflow that forgot the
 `ref:` would plan the base branch, report no changes for a pull request it had
 never read, and green `shipmate / gate` with nothing queued to apply — a silent,
