@@ -332,8 +332,8 @@ never used.
   engine jobs runs at a ref the environment's default-branch policy admits —
   the base ref under
   `pull_request_target`, the default branch under `issue_comment` and `push`,
-  and under a drift file's `schedule` or a `workflow_dispatch` at the default
-  branch — which is what lets them declare it at all. What never
+  a drift file's `schedule`, and a `workflow_dispatch` of
+  `shipmate.yml` or a drift file at the default branch — which is what lets them declare it at all. What never
   happens is a *logical* environment name
   (`staging`, `dev-eu`) hardcoded anywhere — `shipmate-engine` is the one
   literal exception, spelled identically everywhere it appears because it

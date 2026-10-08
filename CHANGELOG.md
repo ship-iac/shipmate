@@ -27,7 +27,7 @@ section below names the SHA the release tags.
 - **A deploy refuses when its merged pull request holds an open apply check on a stack that lost its `env/*` tag after it was planned, and names every other open check of that merge, which it does not apply either: open a new pull request that retags each stranded stack and changes every other named stack; its deploy applies all of them. Re-running the refused deploy refuses again (`docs/troubleshooting.md`).**
 - **`scripts/onboard` no longer refuses a stack with no `env/*` tag, and provisions every environment the checkout's `.github/shipmate.toml` declares as well as every one a stack tags, and names a declared entry no stack tags on its `.github/shipmate.toml` checklist item.**
 - **`scripts/onboard` no longer refuses a `shared = true` entry that no stack tags; it provisions the bare `<env>` like any other entry.**
-- **`shipmate doctor`'s and `scripts/onboard`'s shared-environment protection messages name every drift sweep covering the environment among the jobs those rules stall, and `build-matrix`'s head-repository, head-commit and `tags` refusals name a drift sweep as the workflow with no pull request.**
+- **`shipmate doctor`'s and `scripts/onboard`'s shared-environment protection messages say those rules stall every drift sweep covering the environment, and `build-matrix`'s head-repository, head-commit and `tags` refusals name a drift sweep as the workflow with no pull request.**
 
 ### Fixed
 

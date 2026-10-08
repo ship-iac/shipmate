@@ -962,9 +962,9 @@ def test_the_split_pair_alone_is_refused_before_the_bare_env_is_created(monkeypa
 
 
 def test_plan_environment_with_a_protection_rule_is_reported(monkeypatch):
-    """A required reviewer or a wait timer on a plan environment stalls every plan cell
-    and every drift sweep covering it. It is drift, not something to strip: removing a
-    protection a consumer set is not this script's call.
+    """A required reviewer or a wait timer on a plan environment stalls that
+    environment's plan cells and every drift sweep covering it. It is drift, not something
+    to strip: removing a protection a consumer set is not this script's call.
 
     Mutation: drop the `protection_rules` arm of `_plan_drift`, so the environment
     reports `ok` and the run exits 0.

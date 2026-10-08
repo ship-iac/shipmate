@@ -418,7 +418,7 @@ costs, so the choice is made with the price visible:
   "What none of this fixes").
 - **Shared mode is the strongest form of ungated.** A logical env holding
   `shared = true` binds one bare `<env>` for plan and apply, and a
-  reviewer on it stalls every plan cell and every drift sweep covering it — so the gate
+  reviewer on it stalls that environment's plan cells and every drift sweep covering it — so the gate
   is not merely unset, it is unavailable, and no later decision can turn it on
   without splitting the environment again. The same environment is what plan-time
   branch code runs inside, so control 7's scoping buys nothing against that code
@@ -625,7 +625,7 @@ no split of its own.
   read-only plan role is unreachable for
   every shared env: plan cells assume the write role while executing
   branch-authored HCL ("Plan-time code execution" — a provider or an `external`
-  data source runs at plan time), and every drift sweep covering it assumes it too,
+  data source runs at plan time), and every drift sweep covering that env assumes the write role too,
   over the default branch's code. The claim condition cannot
   separate the two paths either: both tokens carry
   `repo:<owner>/<repo>:environment:<env>` — byte-identical `sub` — so no trust
@@ -660,7 +660,7 @@ no split of its own.
   merged pull request under row 4, like naming a role in row 18 — and row 4's
   code-owner half is a no-op unless a `CODEOWNERS` entry covers
   `/.github/shipmate.toml`. One line moves plan cells running unreviewed branch
-  code onto the apply role, and every drift sweep covering it with them — the cell
+  code onto the apply role, and every drift sweep covering that environment with them — the cell
   resolves its identity's `aws.apply` for the bare `<env>` it now binds, and an
   identity setting `aws.plan` refuses there, so a shared environment's identity
   never holds a plan-side role. `shipmate doctor` reads the

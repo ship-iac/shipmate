@@ -877,7 +877,8 @@ and what masking does and does not cover.
 ### Drift detection
 
 Each drift file's `drift` job plans every stack × environment, or the cells its
-`tags` query selects, on its schedule or a `workflow_dispatch`, against real state, then opens, updates and closes drift Issues from what those cells
+`tags` query selects, on its schedule or a `workflow_dispatch`, against real
+state, then opens, updates and closes drift Issues from what those cells
 report. The engine jobs behind it that hold a credential run only at the
 default-branch ref; it needs the `shipmate-engine` environment from the plan
 tier. `scripts/onboard` does not write it: save it from the `shipmate drift`
