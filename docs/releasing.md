@@ -268,6 +268,12 @@ annotation; any other `summary` failure is a finding. The gate status, the plan
 comment and the apply checks get their first live run after the tag. Do not
 loosen the branch policy to smoke them: that hands the App key to every branch.
 
+A drift file dispatched at the scratch branch
+(`gh workflow run <drift-file>.yml --ref smoke/vX.Y.Z`) loads `drift.yml` at the
+release SHA and runs `detect`, then skips its `drift` and `issues` jobs, which run only
+at the default branch. Read that run as green when `detect` succeeded. Its cells first
+run on the first dispatch or schedule after the re-pin merges.
+
 Smoke proves the dispatch wiring resolves; acceptance proves the behaviour is
 right.
 
