@@ -22,7 +22,8 @@ import test_apply_detect as tad
 import test_build_matrix as tbm
 import test_deploy_detect as tdd
 import test_row_stamp_guard as trs
-from _detect_fixtures import PLAN_SHA, _apply_check, check_run
+import test_unlock_detect as tud
+from _detect_fixtures import PLAN_SHA, _apply_check, _parsed, check_run
 
 _ROLE = "arn:aws:iam::1:role/net"
 
@@ -151,20 +152,19 @@ def test_the_targeted_apply_refuses_over_the_pending_cells_only(monkeypatch, tmp
 
 
 def test_the_unlock_refuses_over_the_queue_only(monkeypatch, tmp_path):
-    """Call site 5: `run_unlock`. Only stacks/app has a pending check; stacks/dns and stacks/db
-    are in dev-eu and outside the queue.
+    """Call site 5: `unlock-detect` main(). Only stacks/app has a pending check; stacks/dns and
+    stacks/db are in dev-eu and outside the queue.
 
     Mutation: build the cells from the whole of `stacks_by_env` -- stacks/db and stacks/dns are
     recorded too."""
-    calls = _spy(monkeypatch, tad.ad.bm)
-    tad._unlock_env(monkeypatch, tmp_path, table=trs._TABLE)
-    tad._boom_on_plan_path(monkeypatch)
-    tad._stub_unlock_tree(
+    calls = _spy(monkeypatch, tud.ud.bm)
+    tud._unlock_env(monkeypatch, tmp_path, table=trs._TABLE)
+    tud._stub_unlock_tree(
         monkeypatch,
-        tad._DEV_EU_CELLS,
+        tud._DEV_EU_CELLS,
         [check_run(name="apply / stacks/app / dev-eu", status="in_progress", conclusion=None)],
     )
-    tad.ad.main()
+    tud.ud.main()
     assert calls == [
         (
             [{"stack": "stacks/app", "environment": "dev-eu", "workload": "app", **_APPLY}],
@@ -255,28 +255,27 @@ def test_the_targeted_apply_refuses_an_outside_tag_only_on_a_pending_cell(
         assert exc.value.code == _GAP_ERROR
     else:
         tad.ad.main()
-        assert json.loads(tad._parsed(out)["envlevel0_waves"])["wave0"] == []
+        assert json.loads(_parsed(out)["envlevel0_waves"])["wave0"] == []
 
 
 @pytest.mark.parametrize("pending", [True, False], ids=["pending", "completed"])
 def test_the_unlock_refuses_an_outside_tag_only_on_a_queued_cell(monkeypatch, tmp_path, pending):
     """Mutation: build the cells from the whole of `stacks_by_env` -- the completed case
     refuses."""
-    out = tad._unlock_env(monkeypatch, tmp_path, table=_GAP)
-    tad._boom_on_plan_path(monkeypatch)
+    out = tud._unlock_env(monkeypatch, tmp_path, table=_GAP)
     status = {"status": "in_progress", "conclusion": None} if pending else {}
-    tad._stub_unlock_tree(
+    tud._stub_unlock_tree(
         monkeypatch,
         [{"stack": "stacks/app", "environment": "dev-eu", "workload": "app"}],
         [check_run(name="apply / stacks/app / dev-eu", **status)],
     )
     if pending:
         with pytest.raises(SystemExit) as exc:
-            tad.ad.main()
+            tud.ud.main()
         assert exc.value.code == _GAP_ERROR
     else:
-        tad.ad.main()
-        assert json.loads(tad._parsed(out)["cells"]) == []
+        tud.ud.main()
+        assert json.loads(_parsed(out)["cells"]) == []
 
 
 @pytest.mark.parametrize("explicit", [False, True], ids=["runnable", "excluded"])

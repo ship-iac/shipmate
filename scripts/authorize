@@ -52,6 +52,12 @@ def _review_not_required(review_decision, environment, ungated_envs):
     return review_decision == "NONE" and environment.casefold() not in ungated_envs
 
 
+def _ungated_exemption(review_decision, environment, ungated_envs):
+    """Whether `environment` applies without the review the branch ruleset requires, by its
+    `gated: false` entry. The apply comment reports each such environment."""
+    return review_decision == "REVIEW_REQUIRED" and environment.casefold() in ungated_envs
+
+
 def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     """Reject reason for the ruleset-delegated review check, or None to pass.
 
@@ -62,7 +68,9 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
     any entry holds `gated: false`, and is partitioned per env in apply-all-detect."""
     if review_decision == "REVIEW_REQUIRED":
-        if ungated_envs and (not environment or environment.casefold() in ungated_envs):
+        if ungated_envs and (
+            not environment or _ungated_exemption(review_decision, environment, ungated_envs)
+        ):
             return None
         if ungated_envs:
             return (
@@ -237,15 +245,13 @@ def main():
         ungated_envs=ungated_envs,
         verb=verb,
     )
-    # The targeted path's audit trail. REVIEW_REQUIRED plus an ungated env define the
-    # exemption; `ok`, a named environment and verb="apply" are the gates the module
-    # docstring explains.
+    # The targeted path's audit trail. `ok`, a named environment and verb="apply" are the
+    # gates the module docstring explains.
     exempted = (
         verb == "apply"
         and ok
-        and review_decision == "REVIEW_REQUIRED"
         and bool(environment)
-        and environment.casefold() in ungated_envs
+        and _ungated_exemption(review_decision, environment, ungated_envs)
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"authorized={'true' if ok else 'false'}\n")

@@ -647,3 +647,21 @@ def test_review_not_required_decision_table(decision, environment, expected):
     Mutation: compare `review_decision != "NONE"` -- the three prod-eu rows flip.
     Mutation: drop `.casefold()` -- the `DEV-EU` row is named."""
     assert az._review_not_required(decision, environment, frozenset({"dev-eu"})) is expected
+
+
+@pytest.mark.parametrize(
+    ("decision", "environment", "expected"),
+    [
+        ("REVIEW_REQUIRED", "dev-eu", True),
+        ("REVIEW_REQUIRED", "DEV-EU", True),
+        ("REVIEW_REQUIRED", "prod-eu", False),
+        ("NONE", "dev-eu", False),
+        ("APPROVED", "dev-eu", False),
+    ],
+)
+def test_ungated_exemption_decision_table(decision, environment, expected):
+    """dev-eu holds `gated: false`; prod-eu is gated.
+
+    Mutation: drop the `in ungated_envs` clause -- the prod-eu row goes true.
+    Mutation: drop `.casefold()` -- the `DEV-EU` row goes false."""
+    assert az._ungated_exemption(decision, environment, frozenset({"dev-eu"})) is expected

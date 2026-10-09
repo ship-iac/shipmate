@@ -25,8 +25,8 @@ the stack path, never a display name — so the code that *creates* the apply
 check (`pending-checks`, run by `actions/summary`),
 *completes* it (`scripts/apply-complete`, run by `actions/apply-complete` in
 `apply-env-level.yml`'s `complete` job), *filters the still-pending queue*
-(`deploy-detect` / `apply-detect` / `apply-all-detect`, which only ever have the
-path), and *reports it* (`apply-comment`) all reconstruct the identical name
+(`deploy-detect` / `apply-detect` / `apply-all-detect` / `unlock-detect`, which
+only ever have the path), and *reports it* (`apply-comment`) all reconstruct the identical name
 from the one value they share.
 
 The engine composes the plan check's name nowhere: it is the plan matrix job's own

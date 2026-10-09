@@ -331,7 +331,9 @@ def _bound_names(ctx):
         return None
     shared = ec.shared_envs(table)
     return [
-        (env, name, role) for env in sorted(ctx["envs"]) for name, role in ec.env_names(env, shared)
+        (env, name, role)
+        for env in sorted(ctx["envs"])
+        for role, name in ec.env_names(env, env in shared).items()
     ]
 
 
@@ -1625,8 +1627,7 @@ def _subject_accounts(table):
     """
     shared, accounts = ec.shared_envs(table), {}
     for env, path, _, role in ec.resolved_roles(table):
-        names = {kind: name for name, kind in ec.env_names(env, shared)}
-        found = accounts.setdefault(names.get("shared") or names[path], set())
+        found = accounts.setdefault(ec.env_binding(env, env in shared, path), set())
         fields = role.split(":")
         if len(fields) > 4 and fields[4]:
             found.add(fields[4])

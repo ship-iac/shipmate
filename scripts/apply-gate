@@ -80,7 +80,7 @@ def _is_done(run):
 def done_names(check_runs):
     """Names whose *latest* run is completed with a good conclusion (success,
     or neutral for no-change cells). This is the single done-predicate shared
-    with deploy-detect / apply-detect so a "completed" status with a bad
+    with the apply-side detects so a "completed" status with a bad
     conclusion, or a stale completed run superseded by a newer pending one,
     is never mistaken for done."""
     return {name for name, run in latest_by_name(check_runs).items() if _is_done(run)}
@@ -91,8 +91,7 @@ def parse_jsonl(lines):
     skipped), as emitted by `gh api --paginate --jq`. A malformed line raises
     SystemExit naming the offending line (truncated) instead of letting a raw
     json.JSONDecodeError traceback obscure which line was bad. Shared by this
-    script's stdin parsing and by deploy-detect / apply-detect's check-runs
-    parsing."""
+    script's stdin parsing and by the detects' check-runs parsing."""
     out = []
     for line in lines:
         line = line.strip()

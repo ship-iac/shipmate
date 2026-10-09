@@ -28,12 +28,18 @@ _SCRIPT_ENV = {
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_REVIEW_DECISION": "${{ inputs.review-decision }}",
-        "SHIPMATE_MODE": "${{ inputs.mode }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
     },
     "deploy-detect": {
         "GH_TOKEN": "${{ github.token }}",
         "SHIPMATE_BASE_SHA": "${{ inputs.base-sha }}",
+        "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+        "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
+    },
+    "unlock-detect": {
+        "GH_TOKEN": "${{ github.token }}",
+        "SHIPMATE_ENV": "${{ inputs.environment }}",
+        "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
     },
@@ -45,6 +51,7 @@ _TABLE_READERS = (
     "build-matrix",
     "apply-detect",
     "deploy-detect",
+    "unlock-detect",
     "comment-ops",
     "summary",
 )
@@ -100,7 +107,7 @@ _VARS_HOLDERS = {
     ("plan.yml", "detect", "$/actions/build-matrix"),
     ("drift.yml", "detect", "$/actions/build-matrix"),
     ("apply.yml", "detect", "$/actions/apply-detect"),
-    ("unlock.yml", "detect", "$/actions/apply-detect"),
+    ("unlock.yml", "detect", "$/actions/unlock-detect"),
     ("deploy.yml", "detect", "$/actions/deploy-detect"),
     ("plan.yml", "plan", "$/actions/plan-cell"),
     ("drift.yml", "drift", "$/actions/drift-cell"),
@@ -122,10 +129,8 @@ def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(act
 
 #: The whole `run:` of `apply-detect`'s script step.
 _APPLY_DETECT_RUN = """\
-# An empty environment is the bare form, which only apply mode has; an omitted mode input
-# means apply. Unlock, or an explicitly empty or unknown mode, reaches apply-detect, which
-# refuses an empty environment.
-if [ -z "$SHIPMATE_ENV" ] && [ "$SHIPMATE_MODE" = apply ]; then
+# An empty environment is the bare form.
+if [ -z "$SHIPMATE_ENV" ]; then
   exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-all-detect"
 fi
 exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"
@@ -141,42 +146,16 @@ def test_the_apply_detect_step_runs_exactly_this_script():
     assert _script_step("apply-detect")["run"] == _APPLY_DETECT_RUN
 
 
-def test_the_apply_detect_mode_defaults_to_apply():
-    """`apply.yml` passes no `mode:`, so its bare form rests on this default.
-
-    Mutation: `default: apply` -> `default: ""`."""
-    assert action_yaml("apply-detect")["inputs"]["mode"] == {
-        "description": (
-            "apply (default) or unlock. Anything else takes the apply path, which is the "
-            "stricter of the two; with an empty environment, only apply runs the bare form."
-        ),
-        "required": False,
-        "default": "apply",
-    }
-
-
 @bash_only
 @pytest.mark.parametrize(
-    ("environment", "mode", "argv"),
+    ("environment", "argv"),
     [
-        ("dev-eu", "apply", ["/ap/../../scripts/apply-detect"]),
-        ("", "apply", ["/ap/../../scripts/apply-all-detect"]),
-        ("", "unlock", ["/ap/../../scripts/apply-detect"]),
-        ("dev-eu", "unlock", ["/ap/../../scripts/apply-detect"]),
-        ("", "", ["/ap/../../scripts/apply-detect"]),
-        ("", "banana", ["/ap/../../scripts/apply-detect"]),
+        ("dev-eu", ["/ap/../../scripts/apply-detect"]),
+        ("", ["/ap/../../scripts/apply-all-detect"]),
     ],
 )
-def test_the_apply_detect_action_picks_the_script_by_environment_and_mode(
-    tmp_path, environment, mode, argv
-):
-    """Only an empty environment in apply mode reaches `apply-all-detect`; an unlock, or an
-    explicitly empty or unknown mode, reaches `apply-detect`, whose `validate_env` refuses an
-    empty environment. An omitted `mode:` input arrives as `apply`, its default.
-
-    Mutation: `-z` -> `-n`.
-    Mutation: delete `&& [ "$SHIPMATE_MODE" = apply ]` -- the `("", "unlock")` row reddens.
-    Mutation: `= apply` -> `!= unlock` -- the `("", "")` and `("", "banana")` rows redden.
+def test_the_apply_detect_action_picks_the_script_by_environment(tmp_path, environment, argv):
+    """Mutation: `-z` -> `-n`.
     Mutation: swap the two script names."""
     stubs = tmp_path / "bin"
     stubs.mkdir()
@@ -192,7 +171,6 @@ def test_the_apply_detect_action_picks_the_script_by_environment_and_mode(
         "GITHUB_ACTION_PATH": "/ap",
         "RECORD": str(record),
         "SHIPMATE_ENV": environment,
-        "SHIPMATE_MODE": mode,
     }
     result = run_step(tmp_path, _script_step("apply-detect")["run"], env)
     assert result.returncode == 0, result.stderr

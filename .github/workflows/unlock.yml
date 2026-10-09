@@ -38,13 +38,9 @@ jobs:
         with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
       - uses: $/actions/setup
       - id: d
-        uses: $/actions/apply-detect
+        uses: $/actions/unlock-detect
         with:
           environment: ${{ inputs.environment }}
-          # A literal, not an input: this file is the verb. `run_unlock` reads
-          # neither the review decision nor the ungated-env list -- an approval
-          # reviews a diff and unlock applies none -- so neither is passed.
-          mode: unlock
           head-sha: ${{ inputs.ref }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           github-vars: ${{ toJSON(vars) }}

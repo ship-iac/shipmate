@@ -151,14 +151,27 @@ def test_the_action_feeds_every_shipmate_env_var_the_script_reads(detect, action
     either side is the regression this catches.
 
     Mutation: delete `SHIPMATE_HEAD_SHA` from `apply-detect`'s script step -- both rows redden."""
-    src = (ENGINE / "scripts" / detect).read_text(encoding="utf-8")
-    read = set(re.findall(r'os\.environ(?:\.get)?\(?\[?["\'](SHIPMATE_[A-Z0-9_]+)["\']', src))
+    read = _shipmate_reads(detect)
     assert "SHIPMATE_REVIEW_DECISION" in read, (
         f"{detect} no longer reads the review decision: {sorted(read)}"
     )
-    step = step_by(action, id="d")
-    missing = read - set(step["env"])
-    assert not missing, f"the {action} action's env: block omits {sorted(missing)} for {detect}"
+    missing = sorted(read - set(step_by(action, id="d")["env"]))
+    assert not missing, f"the {action} action's env: block omits {missing} for {detect}"
+
+
+def test_the_unlock_action_feeds_every_shipmate_env_var_its_script_reads():
+    """The same derivation for the one detect that reads no review decision.
+
+    Mutation: add a read of `os.environ["SHIPMATE_X"]` to `unlock-detect`."""
+    read = _shipmate_reads("unlock-detect")
+    assert "SHIPMATE_ENV" in read, f"the derivation found no reads: {sorted(read)}"
+    missing = sorted(read - set(step_by("unlock-detect", id="d")["env"]))
+    assert not missing, f"the unlock-detect action's env: block omits {missing}"
+
+
+def _shipmate_reads(detect):
+    src = (ENGINE / "scripts" / detect).read_text(encoding="utf-8")
+    return set(re.findall(r'os\.environ(?:\.get)?\(?\[?["\'](SHIPMATE_[A-Z0-9_]+)["\']', src))
 
 
 def test_the_decision_query_distinguishes_a_missing_pull_request():

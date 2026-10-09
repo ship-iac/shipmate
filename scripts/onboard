@@ -392,15 +392,16 @@ def _reconcile_key(ctx):
 def _env_names(env, shared):
     """[(environment name, role)] for one derived environment; a shared one is reconciled
     as an apply environment."""
-    names = ec.env_names(env, shared)
-    return [(name, "apply" if role == "shared" else role) for name, role in names]
+    return [
+        (name, "apply" if role == "shared" else role)
+        for role, name in ec.env_names(env, env in shared).items()
+    ]
 
 
 def _unused_naming(env, shared):
     """The environment names for the naming this repository does *not* bind: `env_names`
     under the opposite `shared` setting."""
-    unused = set() if env in shared else {env}
-    return [name for name, _role in ec.env_names(env, unused)]
+    return list(ec.env_names(env, env not in shared).values())
 
 
 def _naming_conflict(ctx, env):

@@ -5,9 +5,9 @@ from _detect_fixtures import (
     APP_ID,
     PLAN_SHA,
     _apply_check,
+    _parsed,
     _record,
     completed_names,
-    spy_env_config,
 )
 from _detect_fixtures import check_run as _check
 from _loader import load_script
@@ -201,7 +201,7 @@ def test_dag_shape_notice_reports_a_layered_graph():
 
 
 def _apply_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
-    """Env for an apply-mode main() run; returns the GITHUB_OUTPUT path."""
+    """Env for a main() run; returns the GITHUB_OUTPUT path."""
     out = tmp_path / "out.txt"
     env = {
         "GITHUB_REPOSITORY": "acme/iac",
@@ -212,8 +212,6 @@ def _apply_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
         "SHIPMATE_REVIEW_DECISION": "APPROVED",
     }
     env.update(overrides)
-    if "SHIPMATE_MODE" not in env:
-        monkeypatch.delenv("SHIPMATE_MODE", raising=False)
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     _stub_read_table(monkeypatch, table, reads)
@@ -434,17 +432,12 @@ def test_validate_env_refuses_a_name_no_environment_can_take(value):
 
 def test_validate_env_rejects_empty():
     """An empty env reads as a bare apply inside _review_reason, which exempts it whenever any
-    table entry holds `gated: false` -- a bypassed refusal on a gate path. The action routes
-    only an empty environment in apply mode to apply-all-detect, so an empty one arriving here
-    is an unlock or an explicitly empty or unknown mode.
+    table entry holds `gated: false` -- a bypassed refusal on a gate path.
 
     Mutation: run the name check before the empty check -- `""` gets the charset message."""
     with pytest.raises(SystemExit) as e:
         ad.validate_env("")
-    assert str(e.value) == (
-        "::error::SHIPMATE_ENV is empty; the targeted apply path is single-env "
-        "and its review refusal is evaluated per environment."
-    )
+    assert str(e.value) == "::error::SHIPMATE_ENV is empty; this path is single-env."
 
 
 def test_validate_env_accepts_normal():
@@ -710,296 +703,7 @@ def test_main_names_a_gated_env_applied_with_no_review_required(
     assert json.loads(_parsed(out)["review_not_required_envs"]) == expected
 
 
-def _unlock_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
-    """Env for a main() run, unlock unless `SHIPMATE_MODE` is overridden. Returns the
-    GITHUB_OUTPUT path.
-
-    `shipmate unlock <env>` applies no plan and consumes no plan artifact: a lock outlives the
-    run that stranded it, so those artifacts may be long expired."""
-    out = tmp_path / "out"
-    env = {
-        "GITHUB_REPOSITORY": "acme/iac",
-        "SHIPMATE_ENV": "dev-eu",
-        "SHIPMATE_HEAD_SHA": "a" * 40,
-        "SHIPMATE_MODE": "unlock",
-        "GITHUB_OUTPUT": str(out),
-    }
-    env.update(overrides)
-    if "SHIPMATE_REVIEW_DECISION" not in env:
-        monkeypatch.delenv("SHIPMATE_REVIEW_DECISION", raising=False)
-    for name, value in env.items():
-        monkeypatch.setenv(name, value)
-    _stub_read_table(monkeypatch, table, reads)
-    return out
-
-
-def _boom_on_plan_path(monkeypatch):
-    """Every apply-workset call fails loudly: unlock must reach none of them.
-
-    `_check_run_lines` is deliberately not boomed, because the unlock queue reads the same
-    listing for its pending names. What unlock must never reach is the workset built
-    from it, and the plan run each cell would apply from."""
-
-    def _boom(*a, **kw):
-        raise AssertionError("unlock mode reached the apply workset")
-
-    for name in ("run_graph_deps", "paths_with_checks", "cells_for_env", "with_plan_runs"):
-        monkeypatch.setattr(ad, name, _boom)
-
-
-_DEV_EU_PENDING_CHECKS = [
-    _check(name=f"apply / {stack} / dev-eu", status="in_progress", conclusion=None)
-    for stack in ("stacks/app", "stacks/dns", "stacks/db")
-]
-
-
-def _stub_unlock_tree(monkeypatch, cells, checks=None):
-    """Stub the tag walk and the check-run listing; returns the kwargs `env_membership` was
-    called with.
-
-    Only the walk is stubbed. The real `build_matrix` turns its output into cells, so the
-    matrix-limit and slug-collision guards it carries stay on the unlock path instead of being
-    stubbed out of it.
-
-    `checks` are stubbed as the raw JSONL `gh` emits, not as a set of names, so the queue's
-    membership rule itself is under test rather than assumed: a construction that asks the
-    wrong question of the same listing reddens here. Default: every dev-eu cell has a pending
-    check."""
-    seen = {}
-
-    def _membership(all_stacks=False, base="", check_names=True):
-        seen.update(all_stacks=all_stacks, base=base, check_names=check_names)
-        stacks_by_env, tags_by_stack = {}, {}
-        for c in cells:
-            stacks_by_env.setdefault(c["environment"], []).append(c["stack"])
-            tags = tags_by_stack.setdefault(c["stack"], [])
-            for tag in (f"env/{c['environment']}", f"workload/{c['workload']}"):
-                if tag not in tags:
-                    tags.append(tag)
-        return stacks_by_env, tags_by_stack
-
-    runs = _DEV_EU_PENDING_CHECKS if checks is None else checks
-    monkeypatch.setattr(ad.bm, "_run", lambda args: "\n".join(json.dumps(r) for r in runs))
-    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
-    monkeypatch.setattr(ad.bm, "env_membership", _membership)
-    return seen
-
-
-_DEV_EU_CELLS = [
-    {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
-    {"stack": "stacks/dns", "environment": "dev-eu", "workload": "net"},
-    {"stack": "stacks/db", "environment": "dev-eu", "workload": "app"},
-    {"stack": "stacks/app", "environment": "prod-eu", "workload": "app"},
-]
-
-
-def _parsed(out):
-    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
-
-
-def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_path):
-    """stacks/app has a pending check and is queued; stacks/dns has a completed check and is
-    not; stacks/db has no check at all and is not queued either. Every queued cell takes a real
-    state lock and may force-break one, so a stack this pull request never planned must not be
-    in range. The foreign-App pending check on stacks/db must not enrol it. Mutation: pass
-    `require_env_tag=False` to `env_membership` -- TypeError."""
-    out = _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    seen = _stub_unlock_tree(
-        monkeypatch,
-        _DEV_EU_CELLS,
-        [
-            _check(name="apply / stacks/app / dev-eu", status="in_progress", conclusion=None),
-            _check(name="apply / stacks/dns / dev-eu"),
-            _check(
-                name="apply / stacks/db / dev-eu",
-                status="in_progress",
-                conclusion=None,
-                app={"id": 15368},
-            ),
-        ],
-    )
-    ad.main()
-    # all_stacks=True is the point: a cell whose plan artifacts expired long ago is exactly the
-    # cell that can hold a stranded lock.
-    assert seen == {"all_stacks": True, "base": "", "check_names": False}
-    assert json.loads(_parsed(out)["cells"]) == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "app",
-            "role_arn": "",
-            "cred_region": "",
-            "tf_vars": {},
-            "config_path": "apply",
-            "env_binding": "dev-eu-apply",
-        },
-    ]
-
-
-def test_unlock_empty_queue_warns_that_nothing_was_probed(monkeypatch, tmp_path, capsys):
-    # An empty queue is legitimate, and since the queue narrowed to the cells that have a
-    # pending check it is the normal outcome for the case the runbook names. It must not be a
-    # silent green run.
-    out = _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, [_check(name="apply / stacks/app / dev-eu")])
-    ad.main()
-    # Whole file: unlock.yml reads `cells` alone, so nothing else is written.
-    assert out.read_text(encoding="utf-8") == "cells=[]\n"
-    assert (
-        "::warning::no cell in dev-eu has a pending apply check, so no lock was "
-        "probed; a lock on a cell whose check already completed, or on a stack "
-        "applied out of band, is released out of band; see the state-lock "
-        "section of docs/troubleshooting.md." in capsys.readouterr().out.splitlines()
-    )
-
-
-def test_unlock_non_empty_queue_does_not_warn(monkeypatch, tmp_path, capsys):
-    # The other half: the warning is about an empty queue, not decoration on every unlock run.
-    _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
-    ad.main()
-    out = capsys.readouterr().out
-    assert "cells=3 pending=3" in out  # Not vacuous: there is a queue.
-    assert "no cell in dev-eu has a pending apply check" not in out
-
-
-def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_path):
-    """build_matrix refuses a cell set above the GHA matrix limit, and over a whole-tree walk
-    that ceiling counts every stack x every environment. Built for all envs and filtered
-    afterwards, a repository past the limit could never unlock any environment however short
-    its queue, and the refusal would tell the operator to split a pull request that does not
-    exist. Only the target env's cells are built, so the ceiling bounds what the matrix holds."""
-    out = _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(
-        monkeypatch,
-        [
-            {
-                "stack": "stacks/app",
-                "environment": f"env-{i}",
-                "workload": "app",
-            }
-            for i in range(ad.bm.MATRIX_LIMIT + 10)
-        ]
-        + [_DEV_EU_CELLS[0]],
-    )
-    ad.main()
-    assert json.loads(_parsed(out)["cells"]) == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "app",
-            "role_arn": "",
-            "cred_region": "",
-            "tf_vars": {},
-            "config_path": "apply",
-            "env_binding": "dev-eu-apply",
-        }
-    ]
-
-
-def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
-    """The guard against a fall-through into the apply matrix: a mode confusion that reaches the
-    wave assignment turns an unlock into an apply.
-
-    Mutation: delete the `return` after `run_unlock` -- reddens on `refuse_unreviewed`'s
-    refusal of the absent decision before the key filter is reached, so it does not prove the
-    filter.
-    Mutation: write an `envlevel0_waves=` line from `run_unlock` -- the filter reddens."""
-    out = _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
-    ad.main()
-    parsed = _parsed(out)
-    assert len(json.loads(parsed["cells"])) == 3  # Not vacuous: there is a queue.
-    wave_keys = [k for k in parsed if "waves" in k or "empty" in k]
-    assert wave_keys == []
-
-
-def test_unlock_does_not_refuse_an_unreviewed_pr(monkeypatch, tmp_path):
-    # An approval reviews a diff and unlock applies none, and `scripts/authorize` makes the
-    # same call at comment time. The apply-mode half of this divergence is
-    # test_unlock_absent_mode_takes_the_stricter_apply_path.
-    out = _unlock_env(monkeypatch, tmp_path, SHIPMATE_REVIEW_DECISION="")
-    _boom_on_plan_path(monkeypatch)
-
-    def _boom(*a):
-        raise AssertionError("unlock mode consulted the review decision")
-
-    monkeypatch.setattr(ad, "refuse_unreviewed", _boom)
-    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
-    ad.main()
-    assert len(json.loads(_parsed(out)["cells"])) == 3
-
-
-def test_unlock_passes_the_whole_tree_workload_map(monkeypatch, tmp_path):
-    """Mutation: pass `set(stacks_by_env)` at `run_unlock`'s `env_config` call -- the spy
-    records the environment set."""
-    _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(
-        monkeypatch,
-        [*_DEV_EU_CELLS, {"stack": "stacks/web", "environment": "dev-us", "workload": "web"}],
-    )
-    seen = spy_env_config(monkeypatch, ad.bm)
-    ad.main()
-    assert seen == [
-        {
-            "dev-eu": frozenset({"app", "net"}),
-            "prod-eu": frozenset({"app"}),
-            "dev-us": frozenset({"web"}),
-        }
-    ]
-
-
-def test_unlock_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_path):
-    """Unlock has always read the table -- `run_unlock`'s own `env_config` is where an unlock
-    cell gets its identity and its credentials. The invariant is one read on this path, not
-    none, and the apply path's read is placed after the unlock return to keep it so.
-
-    Mutation: move `table = bm.ec.read_table()` above the `SHIPMATE_MODE == "unlock"` return
-    -- the count becomes 2."""
-    reads = []
-    _unlock_env(monkeypatch, tmp_path, reads=reads)
-    _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
-    ad.main()
-    assert len(reads) == 1
-
-
-@pytest.mark.parametrize("mode", ["", "apply", "APPLY", "unlock-ish", "banana"])
-def test_unlock_absent_mode_takes_the_stricter_apply_path(monkeypatch, tmp_path, mode):
-    # Same review_decision="" the unlock test accepts. Anything that is not exactly "unlock"
-    # must refuse, so an absent or garbled mode fails closed.
-    _unlock_env(monkeypatch, tmp_path, SHIPMATE_MODE=mode)
-    with pytest.raises(SystemExit) as exc_info:
-        ad.main()
-    assert str(exc_info.value).startswith("::error::not authorized")
-
-
-def test_unlock_notice_names_the_mode(monkeypatch, tmp_path, capsys):
-    _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_unlock_tree(
-        monkeypatch,
-        _DEV_EU_CELLS,
-        [
-            _check(name="apply / stacks/app / dev-eu", status="in_progress", conclusion=None),
-            _check(name="apply / stacks/dns / dev-eu"),
-            _check(name="apply / stacks/db / dev-eu", status="queued", conclusion=None),
-        ],
-    )
-    ad.main()
-    assert (
-        f"::notice title=apply-detect::mode=unlock env=dev-eu head={'a' * 40} "
-        "cells=3 pending=2" in capsys.readouterr().out.splitlines()
-    )
-
-
-def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
+def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
     key on the apply path is caught. apply.yml reads the four `envlevelN_waves`, the four
     `envlevelN_empty`, `head_sha` and `review_not_required_envs`; a targeted apply is env-level
@@ -1034,7 +738,7 @@ def test_apply_mode_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path)
     )
 
 
-def test_apply_mode_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
+def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
     """Mutation: iterate `w0` instead of `w0.values()` in the notice -- it prints the key
     lengths `[5, 5, ...]` and `empty=False`."""
     _apply_env(monkeypatch, tmp_path)
@@ -1049,104 +753,3 @@ def test_apply_mode_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsy
         "cells=2 completed=0 pending=2 waves=[1, 1, 0, 0, 0, 0, 0, 0] empty=False"
         in capsys.readouterr().out.splitlines()
     )
-
-
-def _stub_one_pending_check(monkeypatch):
-    """One pending App-authored check, for `stacks/app / dev-eu`, as the raw JSONL `gh` emits."""
-    line = json.dumps(_check(name="apply / stacks/app / dev-eu", status="queued", conclusion=None))
-    monkeypatch.setattr(ad.bm, "_run", lambda args: line)
-    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
-
-
-def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, tmp_path):
-    # Through the real env_membership: a refusal of `stacks/orphan` would make unlock
-    # unavailable for every environment, precisely when the pipeline is already degraded
-    # enough to strand a lock.
-    out = _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_one_pending_check(monkeypatch)
-    monkeypatch.setattr(
-        ad.bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/orphan"]
-    )
-    monkeypatch.setattr(
-        ad.bm, "_tags", lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else []
-    )
-    ad.main()
-    assert json.loads(_parsed(out)["cells"]) == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "app",
-            "role_arn": "",
-            "cred_region": "",
-            "tf_vars": {},
-            "config_path": "apply",
-            "env_binding": "dev-eu-apply",
-        }
-    ]
-
-
-def test_unlock_tolerates_an_unusable_env_tag_elsewhere_in_the_tree(monkeypatch, tmp_path):
-    """Through the real env_membership: `stacks/other` carries `env/a.b`, which refuses every
-    other run, and must not make `dev-eu` unable to unlock.
-
-    Mutation: pass `check_names=True` from `run_unlock` -- the tag refusal fires."""
-    out = _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_one_pending_check(monkeypatch)
-    monkeypatch.setattr(
-        ad.bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/other"]
-    )
-    monkeypatch.setattr(
-        ad.bm,
-        "_tags",
-        lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else ["env/a.b"],
-    )
-    ad.main()
-    assert json.loads(_parsed(out)["cells"]) == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "app",
-            "role_arn": "",
-            "cred_region": "",
-            "tf_vars": {},
-            "config_path": "apply",
-            "env_binding": "dev-eu-apply",
-        }
-    ]
-
-
-def test_unlock_ignores_two_workload_tags_on_a_stack_outside_the_queue(monkeypatch, tmp_path):
-    """stacks/other is in dev-eu with two `workload/*` tags and no apply check, so it is not
-    released and must not refuse the unlock of stacks/app.
-
-    Mutation: build the cells from the whole of `stacks_by_env` in `run_unlock` -- the
-    two-workload-tag refusal fires."""
-    out = _unlock_env(monkeypatch, tmp_path)
-    _boom_on_plan_path(monkeypatch)
-    _stub_one_pending_check(monkeypatch)
-    monkeypatch.setattr(
-        ad.bm,
-        "env_membership",
-        lambda **kw: (
-            {"dev-eu": ["stacks/app", "stacks/other"]},
-            {
-                "stacks/app": ["env/dev-eu", "workload/app"],
-                "stacks/other": ["env/dev-eu", "workload/a", "workload/b"],
-            },
-        ),
-    )
-    ad.main()
-    assert json.loads(_parsed(out)["cells"]) == [
-        {
-            "stack": "stacks/app",
-            "environment": "dev-eu",
-            "workload": "app",
-            "role_arn": "",
-            "cred_region": "",
-            "tf_vars": {},
-            "config_path": "apply",
-            "env_binding": "dev-eu-apply",
-        }
-    ]
