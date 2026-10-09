@@ -462,11 +462,11 @@ def test_every_apply_and_unlock_step_after_the_decision_is_gated():
     names = [s.get("name") for s in steps]
     after = steps[names.index("Reject a commenter without write access") + 1 :]
     gated = {
-        s.get("name"): s.get("if")
+        s.get("name") or s["uses"]: s.get("if")
         for s in after
         if any(f"outputs.route == '{r}'" in (s.get("if") or "") for r in ("apply", "unlock"))
     }
-    assert len(gated) == 7, list(gated)
+    assert len(gated) == 8, list(gated)
     assert gated == _SHARED_ROUTE_IFS
 
 
@@ -1286,14 +1286,18 @@ _SHARED_ROUTE_IFS = {
         "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
         " && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}"
     ),
+    "$/actions/python-yaml": (
+        "${{ (steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply'"
+        " || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized == 'true' }}"
+    ),
 }
 
 
 def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
     matched = {
-        s["name"]: s.get("if")
+        s.get("name") or s["uses"]: s.get("if")
         for s in action_steps("comment-ops")
-        if s.get("name") in _SHARED_ROUTE_IFS
+        if (s.get("name") or s["uses"]) in _SHARED_ROUTE_IFS
     }
     assert matched == _SHARED_ROUTE_IFS
 
@@ -1384,13 +1388,13 @@ _STEP_NAMES = [
     "Reject malformed / reserved command",
     "Post help",
     "Acknowledge a command that changes no infrastructure",
-    "$/actions/python-yaml",
     "Read the commenter's repository permission",
     "Authorize the commenter's permission",
     "Reject a commenter without write access",
     "Permission check failed",
     "Authorize plan",
     "Reject an unauthorized plan",
+    "$/actions/python-yaml",
     "Mint App token for doctor",
     "Doctor: App token unavailable",
     "Doctor: probe the manifest's full permission set",

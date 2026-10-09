@@ -121,10 +121,6 @@ runs:
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/comments/$COMMENT_ID/reactions" \
           -f content=eyes >/dev/null || true
 
-    - uses: $/actions/python-yaml
-      # doctor and gate-config parse YAML; plan and help comments skip the apt install.
-      if: ${{ steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock' }}
-
     - name: Read the commenter's repository permission
       id: permission
       if: ${{ steps.parse.outputs.route != '' && steps.parse.outputs.route != 'help' }}
@@ -230,6 +226,11 @@ runs:
         set -euo pipefail
         body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+
+    - uses: $/actions/python-yaml
+      # doctor and gate-config parse YAML; plan and help comments, and a commenter `access`
+      # refused, skip the apt install.
+      if: ${{ (steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized == 'true' }}
 
     - name: Mint App token for doctor
       id: doctortoken

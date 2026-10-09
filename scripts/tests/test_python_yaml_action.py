@@ -26,10 +26,11 @@ _APT = ["-n", "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "-qq", "-o"]
 _APT += ["Acquire::Retries=3"]
 _UPDATE = [*_APT, "update"]
 _INSTALL = [*_APT, "install", "-y", "--no-install-recommends", "python3-yaml"]
-#: The install step's whole `if:` in comment-ops: the routes that run `doctor` or `gate-config`.
+#: The install step's whole `if:` in comment-ops: the routes that run `doctor` or `gate-config`,
+#: for a commenter `access` permitted.
 _COMMENT_OPS_IF = (
-    "${{ steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply'"
-    " || steps.parse.outputs.route == 'unlock' }}"
+    "${{ (steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply'"
+    " || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized == 'true' }}"
 )
 
 
@@ -164,7 +165,8 @@ def test_summary_installs_directly_before_doctor_and_its_gate_step_stays_uncondi
 
 
 def test_comment_ops_installs_for_its_parsing_routes_before_any_parsing_step():
-    """Mutations: drop `unlock` from the `if:`; move the step after `Resolve gate configuration`."""
+    """Mutations: drop `unlock` from the `if:`; drop the `access` clause; move the step after
+    `Resolve gate configuration`."""
     steps = action_steps("comment-ops")
     (at,) = [i for i, s in enumerate(steps) if s.get("uses") == _USES]
     assert steps[at] == {"uses": _USES, "if": _COMMENT_OPS_IF}
