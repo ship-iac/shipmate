@@ -983,6 +983,12 @@ def _adoption_item(ctx):
     )
 
 
+#: onboard's refusal on a python below the engine's floor, ahead of any read or write.
+PYTHON_TOO_OLD = (
+    "onboard needs Python {floor} or later; the python you run onboard with is {found}. "
+    "Run onboard with a python {floor} or later."
+)
+
 #: onboard's refusal on a python without PyYAML, ahead of any read or write.
 PYYAML_MISSING = (
     "onboard needs PyYAML. Install it for the python you run onboard with: sudo apt install "
@@ -1221,6 +1227,13 @@ def main(argv=None):
     if not _APP_ID_RE.fullmatch(args.app_id):
         raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
     _DRY = args.dry_run
+    if sys.version_info < ec._MIN_PYTHON:
+        raise SystemExit(
+            PYTHON_TOO_OLD.format(
+                floor=".".join(map(str, ec._MIN_PYTHON)),
+                found=".".join(map(str, sys.version_info[:3])),
+            )
+        )
     if importlib.util.find_spec("yaml") is None:
         raise SystemExit(PYYAML_MISSING)
 

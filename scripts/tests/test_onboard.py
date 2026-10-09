@@ -1194,6 +1194,27 @@ def test_a_python_without_pyyaml_refuses_before_any_read(monkeypatch):
     )
 
 
+def test_a_python_below_the_floor_refuses_before_any_read(monkeypatch):
+    """The floor in the operator's words, whole: onboard runs on their machine, so the runner
+    wording `ec.runner_refusal` gives (choose a newer `runs_on` image) does not apply.
+
+    Mutation: delete the floor check in `main` -- the PyYAML check passes and the first read's
+    stub fails the test."""
+
+    def unreachable(*args):
+        pytest.fail("onboard read something before refusing an old python")
+
+    for name in ("_run", "_engine_pin", "_repo_root", "_repo_facts", "_read_key"):
+        monkeypatch.setattr(onboard, name, unreachable)
+    monkeypatch.setattr(sys, "version_info", (3, 11, 9, "final", 0))
+    with pytest.raises(SystemExit) as excinfo:
+        onboard.main(["--app-id", "1"])
+    assert excinfo.value.code == (
+        "onboard needs Python 3.12 or later; the python you run onboard with is 3.11.9. Run "
+        "onboard with a python 3.12 or later."
+    )
+
+
 def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path):
     """`onboard` moves no pin -- `_reconcile_shim` reports `pin-only` and leaves it, and that
     status never reaches `_exit_code`. A `.github/shipmate-config.yml` written here could therefore
