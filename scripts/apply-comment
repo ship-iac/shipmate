@@ -341,7 +341,8 @@ def load_check_maps(path, app_id):
 
 def _check_name(row):
     """This row's apply check name, forward-built per the CONTRACT grammar
-    `apply / <stack> / <env>` -- never reverse-parsed."""
+    `apply / <stack> / <env>`; this module never parses one back (the one site that does is
+    named in `apply-gate.check_name`)."""
     return ag.check_name(row["stack"], row["environment"])
 
 
