@@ -75,15 +75,15 @@ tool's config as a *lower bound* on the real graph, not as the graph: one
 migration that audited the OpenTofu code instead of porting the config went from
 6 declared edges to 105, and from 2 wave levels to 6.
 
-Two detect jobs report the shape as a `::notice::` line — stack count, `after`
+Three detect jobs report the shape as a `::notice::` line — stack count, `after`
 edge count, wave levels, and how many stacks would apply concurrently. A reader
 who knows the repository can judge that last number immediately; nobody else
-can. Exactly two print it: the detect job of a dispatched `shipmate apply <env>`
-and the post-merge deploy's detect, so it arrives after the pull request
-that would have been the place to fix the graph. A plan run does not print
-it, and neither does a bare `shipmate apply` — seeing no such line there says
-nothing about the graph. Before that point the equivalent is
-`terramate experimental run-graph --label stack.dir` run locally.
+can. Exactly three print it: the detect jobs of a dispatched `shipmate apply <env>`,
+of a bare `shipmate apply`, and of the post-merge deploy, so it arrives after the
+plan review that would have been the place to fix the graph. A plan run does not
+print it — seeing no such line there says nothing about the graph. Before that
+point the equivalent is `terramate experimental run-graph --label stack.dir` run
+locally.
 
 **Tags.** Environment membership is derived from `env/<name>` tags and nothing
 else; [Before you start](#before-you-start) covers adopting a repository whose
