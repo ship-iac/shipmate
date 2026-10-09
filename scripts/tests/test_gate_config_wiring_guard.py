@@ -1,9 +1,9 @@
-"""Guards the hop that carries the gate settings from `.github/shipmate.toml` into
+"""Guards the hop that carries the gate settings from `.github/shipmate-config.yml` into
 comment-ops' `Authorize` step.
 
 `Authorize` reads `ungated_envs` from the resolve step. A resolve that skips while
 authorization runs, or whose `id:` no longer matches the expression, hands it an empty list,
-which exempts nothing: every `gated = false` environment silently needs a review again. So the
+which exempts nothing: every `gated: false` environment silently needs a review again. So the
 resolve step sits before `gather` -- pinned by `_STEP_NAMES` in `test_comment_ops_action.py`,
 which compares the whole step list -- and shares `gather`'s one condition, pinned by the `if:`
 entry in that module's `_SHARED_ROUTE_IFS` and by the comparison below.
@@ -53,7 +53,7 @@ def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
 def test_the_resolve_step_carries_the_id_authorize_reads():
     """The producer end of the coupling. `Authorize` hard-codes
     `steps.gate.outputs.ungated_envs`, and a renamed or deleted `id:` leaves it resolving to
-    the empty string: no environment is exempt, and every `gated = false` apply is refused
+    the empty string: no environment is exempt, and every `gated: false` apply is refused
     for want of a review.
 
     Mutation: rename the step's `id:` to `gateconfig`, or delete it.
@@ -92,7 +92,7 @@ def test_the_file_is_the_only_source(monkeypatch, tmp_path):
     both bare and in `SHIPMATE_GITHUB_VARS`, so a fallback an admin could set without a pull
     request changes the output. Mutations: union `SHIPMATE_UNGATED_ENVS` from the parsed
     `SHIPMATE_GITHUB_VARS`, or from the process environment, into `ungated_envs`' result --
-    `prod` joins; or have `ungated_envs` return the `gated = true` entries -- `prod` replaces
+    `prod` joins; or have `ungated_envs` return the `gated: true` entries -- `prod` replaces
     both dev entries."""
     monkeypatch.setenv("SHIPMATE_GITHUB_VARS", '{"SHIPMATE_UNGATED_ENVS": "prod"}')
     monkeypatch.setenv("SHIPMATE_UNGATED_ENVS", "prod")
@@ -111,23 +111,20 @@ def test_the_file_is_the_only_source(monkeypatch, tmp_path):
 
 
 def test_a_file_declaring_no_exemption_resolves_to_empty(monkeypatch, tmp_path):
-    """The minimum configuration: a file with no `gated = false` entry is valid and exempts
+    """The minimum configuration: a file with no `gated: false` entry is valid and exempts
     no environment. Mutation: return a non-empty default."""
     assert _resolve(monkeypatch, tmp_path, {"layout": "tf_vars"}) == {"ungated_envs": ""}
 
 
 def test_the_table_is_validated_before_it_is_resolved(monkeypatch, tmp_path):
-    """`validate_structure` is what the resolvers assume and do not enforce. A quoted
-    `gated = "false"` reads as ungated to a person and resolves as gated -- invisible unless
-    the run refuses it.
+    """`validate_structure` is what the resolvers assume and do not enforce. A
+    `gated: no` reads as ungated to a person and resolves as gated -- invisible unless the run
+    refuses it.
 
     Mutation: resolve the table straight from `read_table` without
     validating it; this test then writes an empty exemption instead of refusing.
     """
-    table = {"layout": "folder", "environments": {"dev-eu": {"gated": "false"}}}
+    table = {"layout": "folder", "environments": {"dev-eu": {"gated": "no"}}}
     with pytest.raises(SystemExit) as exc:
         _resolve(monkeypatch, tmp_path, table)
-    assert str(exc.value) == (
-        "::error::environments.dev-eu.gated must be a boolean, got str. Write "
-        "gated = true or gated = false, unquoted."
-    )
+    assert str(exc.value) == ("::error::environments.dev-eu.gated must be true or false, got 'no'.")

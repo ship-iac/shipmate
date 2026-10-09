@@ -1,6 +1,6 @@
 """`env-config` refuses a malformed identity, or an environment naming one wrongly.
 
-Credentials live in `[identities.<name>]`; an environment names one with `identity` and admits
+Credentials live in `identities.<name>`; an environment names one with `identity` and admits
 workloads with `workloads`. Every refusal here is compared whole against a hand-written literal
 over a minimal table, never by substring and never against a constant read from the script: an
 operator reading a refusal in a run log has no other source.
@@ -101,37 +101,12 @@ def test_an_identity_granting_no_credential_refuses(aws):
     )
 
 
-@pytest.mark.parametrize(
-    ("field", "value", "found"),
-    [("plan", 3, "int"), ("apply", ["a"], "list"), ("account", True, "bool")],
-)
-def test_a_field_that_is_neither_string_nor_map_refuses(field, value, found):
-    """A boolean account keeps the type refusal although Python counts it an `int`.
-
-    Mutations: drop the type refusal in the field check -- every case validates or raises raw;
-    or route every `int` account to the account-id refusal -- the `bool` case gets it.
-    """
-    assert _refusal(_identity({"apply": _ARN, field: value})) == (
+@pytest.mark.parametrize("field", ["plan", "apply", "account"])
+def test_a_field_that_is_neither_string_nor_map_refuses(field):
+    """Mutation: drop the type refusal in the field check -- every case validates."""
+    assert _refusal(_identity({"apply": _ARN, field: ["a"]})) == (
         f"::error::identities.dev.aws.{field} must be a string or a map keyed by workload, "
-        f"got {found}."
-    )
-
-
-@pytest.mark.parametrize(
-    ("account", "where"),
-    [(111111111111, "aws.account"), ({"core": 111111111111}, "aws.account.core")],
-    ids=["field", "map-value"],
-)
-def test_an_integer_account_gets_the_account_id_refusal(account, where):
-    """The account-id refusal's second sentence is written for this case.
-
-    Mutation: route an integer account to the type refusals again -- the field case reads
-    "must be a string or a map keyed by workload, got int." and the map-value case "must be
-    a string, got int."
-    """
-    assert _refusal(_identity({"apply": _ARN, "account": account})) == (
-        f"::error::identities.dev.{where} is not a 12-digit AWS account id in a quoted string. "
-        "A TOML integer drops a leading 0."
+        "got list."
     )
 
 
@@ -155,7 +130,7 @@ def test_an_empty_map_at_a_field_refuses(aws):
 @pytest.mark.parametrize(
     ("value", "kind"),
     [
-        ({"core": 3}, "core must be a string, got int"),
+        ({"core": ["a"]}, "core must be a string, got list"),
         ({"workloads": {"net": _ARN}}, "workloads must be a string, got dict"),
     ],
 )
@@ -167,8 +142,8 @@ def test_a_map_value_that_is_not_a_string_refuses(value, kind):
 @pytest.mark.parametrize("field", ["plan", "account"])
 @pytest.mark.parametrize("key", ["role", "region"])
 def test_role_and_region_are_not_workload_names(field, key):
-    """`aws.plan.role = "…"` parses as a map keyed `role`, which would otherwise validate as
-    the role of a workload named `role`.
+    """`plan: {role: …}` parses as a map keyed `role`, which would otherwise validate as the
+    role of a workload named `role`.
 
     Mutation: drop `role` or `region` from the reserved names -- its cases validate.
     """
@@ -243,8 +218,30 @@ def test_an_empty_string_refuses(aws, where):
 def test_an_account_that_is_not_twelve_digits_refuses(account, where):
     """Mutation: drop the account check -- every case validates."""
     assert _refusal(_identity({"apply": _ARN, "account": account})) == (
-        f"::error::identities.dev.{where} is not a 12-digit AWS account id in a quoted string. "
-        "A TOML integer drops a leading 0."
+        f"::error::identities.dev.{where} is not a 12-digit AWS account id."
+    )
+
+
+_LEADING_ZERO = """\
+layout: folder
+identities:
+  dev:
+    aws:
+      account: 012345670123
+      apply: shipmate-apply
+environments:
+  dev-eu:
+    region: eu-west-1
+    identity: dev
+"""
+
+
+def test_an_account_written_bare_keeps_its_leading_zero():
+    """Every digit is octal, so a YAML 1.1 loader reads it as the integer 1402433619. Mutation:
+    base the config loader on `SafeLoader` -- the account refuses as not 12 digits."""
+    table = ec.validate_structure(ec.parse_table(_LEADING_ZERO, {}))
+    assert ec.resolve(table, "dev-eu", "apply", "")["role_arn"] == (
+        "arn:aws:iam::012345670123:role/shipmate-apply"
     )
 
 
@@ -284,7 +281,7 @@ def test_an_identity_that_names_nothing_refuses(identities, identity, names):
         "environments": {"dev-eu": {"region": "eu-west-1", "identity": identity}},
     }
     assert _refusal(table) == (
-        "::error::environment dev-eu: identity names no [identities.<name>] table; the file "
+        "::error::environment dev-eu: identity names no entry under identities; the file "
         f"declares {names}."
     )
 
@@ -338,7 +335,7 @@ def test_a_varying_identity_needs_a_workloads_list(aws):
     `aws.account`."""
     assert _refusal(_named(aws)) == (
         "::error::environment dev-eu names identity dev, whose roles vary by workload, and "
-        'lists no workloads. List the workloads it admits: workloads = ["…"].'
+        "lists no workloads. List the workloads it admits: workloads: […]."
     )
 
 
@@ -348,7 +345,7 @@ def test_a_shared_environment_naming_an_identity_with_a_plan_role_refuses():
     assert _refusal(_named({"plan": _ARN, "apply": _ARN}, shared=True)) == (
         "::error::environment dev-eu is shared between the plan and apply paths, so identity "
         "dev's aws.plan cannot apply to it: a shared environment uses aws.apply on both paths. "
-        "Name an identity without aws.plan, or set shared = false."
+        "Name an identity without aws.plan, or set shared: false."
     )
 
 
@@ -488,11 +485,10 @@ def test_errors_across_identities_and_environments_refuse_as_one():
     assert _refusal(table) == (
         "::error::identities.a.region is not a key this engine implements. An identity holds "
         "aws.account, aws.plan and aws.apply.\n"
-        "::error::identities.a.aws.account is not a 12-digit AWS account id in a quoted string. "
-        "A TOML integer drops a leading 0.\n"
+        "::error::identities.a.aws.account is not a 12-digit AWS account id.\n"
         "::error::identities.b.aws.apply holds a brace outside {workload}, the only "
         "placeholder.\n"
-        "::error::environment dev: identity names no [identities.<name>] table; the file "
+        "::error::environment dev: identity names no entry under identities; the file "
         "declares a, b.\n"
         "::error::environment prod: workloads admits workloads to an identity, and the "
         "environment names none. Name an identity, or remove workloads; without one a workload "
@@ -516,19 +512,22 @@ def test_an_environment_naming_a_refused_identity_skips_its_role_checks():
 # --- references resolve before the checks -------------------------------------------------
 
 _REFERENCED_ROLE = """\
-layout = "folder"
+layout: folder
 
-[identities.dev]
-aws.apply = { vars = "DEV_APPLY_ROLE" }
+identities:
+  dev:
+    aws:
+      apply: {vars: DEV_APPLY_ROLE}
 
-[environments.dev-eu]
-region   = "eu-west-1"
-identity = "dev"
+environments:
+  dev-eu:
+    region: eu-west-1
+    identity: dev
 """
 
 
 def test_a_variable_holding_a_full_arn_needs_no_account():
-    """Mutation: validate the raw `load_toml` result -- `{ vars = ... }` then refuses as a map
+    """Mutation: validate the raw `load_config` result -- `{vars: ...}` then refuses as a map
     keyed `vars`."""
     table = ec.parse_table(_REFERENCED_ROLE, {"DEV_APPLY_ROLE": _ARN})
     assert ec.validate_structure(table) is table
@@ -550,10 +549,8 @@ def test_a_variable_holding_the_placeholder_fills_it():
     Mutation: as above.
     """
     text = (
-        _REFERENCED_ROLE.replace(
-            "[identities.dev]\n", f'[identities.dev]\naws.account = "{_ACCOUNT}"\n'
-        )
-        + 'workloads = ["core"]\n'
+        _REFERENCED_ROLE.replace("    aws:\n", f"    aws:\n      account: {_ACCOUNT}\n")
+        + "    workloads: [core]\n"
     )
     table = ec.validate_structure(ec.parse_table(text, {"DEV_APPLY_ROLE": "x-{workload}"}))
     assert ec.resolve(table, "dev-eu", "apply", "core")["role_arn"] == (
@@ -565,23 +562,28 @@ def test_a_variable_holding_the_placeholder_fills_it():
 
 #: One identity, two environments, the account map holding every workload of either.
 _STAGE = """\
-layout = "tf_vars"
+layout: tf_vars
 
-[identities.dev]
-aws.account = { core = "111111111111", network = "222222222222", product = "333333333333" }
-aws.plan    = "a18n-tofu-plan"
-aws.apply   = "a18n-tofu-deploy"
+identities:
+  dev:
+    aws:
+      account:
+        core: 111111111111
+        network: 222222222222
+        product: 333333333333
+      plan: a18n-tofu-plan
+      apply: a18n-tofu-deploy
 
-[environments.dev-eu]
-region    = "eu-central-1"
-identity  = "dev"
-workloads = ["core", "network", "product"]
-
-[environments.dev-us]
-region    = "us-east-1"
-identity  = "dev"
-workloads = ["network", "product"]
-needs     = ["dev-eu"]
+environments:
+  dev-eu:
+    region: eu-central-1
+    identity: dev
+    workloads: [core, network, product]
+  dev-us:
+    region: us-east-1
+    identity: dev
+    workloads: [network, product]
+    needs: [dev-eu]
 """
 
 

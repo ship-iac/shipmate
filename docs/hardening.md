@@ -542,30 +542,38 @@ no split of its own.
 
   Yes:
 
-  ```toml
-  layout = "tf_vars"
+  ```yaml
+  # .github/shipmate-config.yml
+  layout: tf_vars
 
-  [identities.prod]
-  aws.plan  = "arn:aws:iam::9817:role/prod-plan"
-  aws.apply = "arn:aws:iam::9817:role/prod-apply"
+  identities:
+    prod:
+      aws:
+        plan: arn:aws:iam::9817:role/prod-plan
+        apply: arn:aws:iam::9817:role/prod-apply
 
-  [environments.prod]
-  region   = "eu-west-1"
-  identity = "prod"
+  environments:
+    prod:
+      region: eu-west-1
+      identity: prod
   ```
 
   No — the plan path assumes the apply role:
 
-  ```toml
-  layout = "tf_vars"
+  ```yaml
+  # .github/shipmate-config.yml
+  layout: tf_vars
 
-  [identities.prod]
-  aws.plan  = "arn:aws:iam::9817:role/prod-apply"
-  aws.apply = "arn:aws:iam::9817:role/prod-apply"
+  identities:
+    prod:
+      aws:
+        plan: arn:aws:iam::9817:role/prod-apply
+        apply: arn:aws:iam::9817:role/prod-apply
 
-  [environments.prod]
-  region   = "eu-west-1"
-  identity = "prod"
+  environments:
+    prod:
+      region: eu-west-1
+      identity: prod
   ```
 
   Nothing refuses this: one role on both paths is a legitimate shape for an

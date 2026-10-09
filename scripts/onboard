@@ -25,9 +25,9 @@ must distinguish the two by output, or validate its own arguments first.
 
 Environments are derived, never passed in: the union of the repository's own
 Terramate env/* tags and the `environments` entries of the checkout's
-`.github/shipmate.toml`. Those bound as
+`.github/shipmate-config.yml`. Those bound as
 one bare `<env>` instead of the `<env>-plan` / `<env>-apply` pair are the entries
-holding `shared = true` in the checkout's `.github/shipmate.toml`.
+holding `shared: true` in the checkout's `.github/shipmate-config.yml`.
 
 The closing checklist also reads the whole Terramate tree: stacks carrying no env/*
 tag, the tag refusals a plan would raise (two workload/* tags on one stack, two stack
@@ -198,10 +198,10 @@ def _read_key(path):
 
 
 def _resolve_shared(root, repo, variables):
-    """(table, shared): the checkout's validated `.github/shipmate.toml` and the
-    environments it marks `shared = true`.
+    """(table, shared): the checkout's validated `.github/shipmate-config.yml` and the
+    environments it marks `shared: true`.
 
-    No file gives `(None, set())`. A file holding a `{ vars = "NAME" }` reference
+    No file gives `(None, set())`. A file holding a `{vars: NAME}` reference
     resolves it from the repository `variables` over the organization variables reaching
     `repo`, GitHub's precedence; a file without one makes no API call. The table is
     structurally validated first, because `shared_envs` trusts its shape, and this runs
@@ -211,7 +211,7 @@ def _resolve_shared(root, repo, variables):
     if not path.is_file():
         return None, set()
     text = path.read_text(encoding="utf-8")
-    table = ec.load_toml(text)
+    table = ec.load_config(text)
     refs = ec.references(table)
     if refs:
         key, var = refs[0]
@@ -309,8 +309,8 @@ def _report_shared_approval(ctx, name, env):
         name,
         f"it carries protection rules ({', '.join(approval)}) and is shared, so the plan "
         "cells and every drift sweep covering it do not start immediately either. To gate applies "
-        f"alone, split it into `{name}-plan` and `{name}-apply` and drop `shared = true` "
-        f"from `[environments.{name}]`.",
+        f"alone, split it into `{name}-plan` and `{name}-apply` and drop `shared: true` "
+        f"from `environments.{name}`.",
     )
 
 
@@ -416,9 +416,9 @@ def _naming_conflict(ctx, env):
         return False
     names = " and ".join(f"`{n}`" for n in unused)
     remedy = (
-        f"drop `shared = true` from `[environments.{env}]`"
+        f"drop `shared: true` from `environments.{env}`"
         if env in ctx["shared"]
-        else f"set `shared = true` in `[environments.{env}]` so the engine binds the bare "
+        else f"set `shared: true` in `environments.{env}` so the engine binds the bare "
         f"`{env}` instead"
     )
     report(

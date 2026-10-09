@@ -10,20 +10,21 @@ under both pull-request events, and a fork pull request is refused before it pla
 import base64
 import contextlib
 import graphlib
+import importlib.util
 import json
 import os
 import re
 import sys
 import types
 
-from _shipmate import run
+from _shipmate import load_config_text, run, yaml_error_text
 
 #: The file the engine reads its settings from, and the interpreter floor that reading it
 #: needs. The floor is CONTRACT.md section Runner prerequisites, which every runner already
 #: promises; nothing in the engine installs or pins a Python, so this is the only place it
 #: is checked.
-CONFIG_PATH = ".github/shipmate.toml"
-_MIN_PYTHON = (3, 11)
+CONFIG_PATH = ".github/shipmate-config.yml"
+_MIN_PYTHON = (3, 12)
 
 
 def _run(args):
@@ -40,50 +41,72 @@ def _run(args):
         raise SystemExit(f"::error::{e}") from None
 
 
-def interpreter_refusal():
-    """The refusal an under-floor interpreter earns, or `None`.
+def runner_refusal():
+    """The refusal a runner lacking what reading the file needs earns, or `None`: an
+    interpreter below the floor first, then a missing PyYAML.
 
     Separately callable so `doctor` can run it outside the try that turns a `SystemExit`
-    into a "this file is not valid" finding: the floor is a property of the runner, true
-    of the default branch's copy too, and merging anything changes nothing about it. Lazy
-    rather than module level, so an old interpreter can still import this module.
+    into a "this file is not valid" finding: both are properties of the runner, true of the
+    default branch's copy too, and merging anything changes nothing about them. PyYAML is
+    looked up, never imported, so an old interpreter can still import this module.
     """
-    if sys.version_info >= _MIN_PYTHON:
-        return None
-    found = ".".join(str(n) for n in sys.version_info[:3])
-    return (
-        f"::error::{CONFIG_PATH} is read with tomllib, which needs Python "
-        f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} or later; this runner has {found}. "
-        "CONTRACT.md section Runner prerequisites requires python3 >= "
-        f"{_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} on every runner. Choose a newer "
-        "runs_on image."
-    )
+    if sys.version_info < _MIN_PYTHON:
+        found = ".".join(str(n) for n in sys.version_info[:3])
+        return (
+            f"::error::the engine needs Python {_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} or later; "
+            f"this runner has {found}. CONTRACT.md section Runner prerequisites requires "
+            f"python3 >= {_MIN_PYTHON[0]}.{_MIN_PYTHON[1]} on every runner. Choose a newer "
+            "runs_on image."
+        )
+    if importlib.util.find_spec("yaml") is None:
+        return (
+            "::error::the engine needs PyYAML for python3 and this runner has none. Install "
+            "python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; "
+            "CONTRACT.md section Runner prerequisites lists it."
+        )
+    return None
 
 
-def load_toml(text):
-    """The table parsed from `text` with no reference resolved, or `SystemExit`.
+_FLAGS = ("shared", "explicit", "gated")
 
-    The interpreter check runs ahead of the import, because a module-level `import tomllib`
-    would raise `ModuleNotFoundError` before any caller could report the real cause -- an
-    older runner image than CONTRACT.md requires.
 
-    A leading U+FEFF is refused, not stripped: `tomllib` rejects it, the contents API
-    delivers it, and every reader must reach the same verdict on the same file. Adding a
-    strip here reddens test_a_byte_order_mark_is_reported_the_way_a_run_sees_it.
+def load_config(text):
+    """The mapping parsed from `text` with no reference resolved, or `SystemExit`.
+
+    The runner check runs ahead of the parse, which would otherwise fail on a missing PyYAML
+    with a bare `ModuleNotFoundError` instead of naming the runner prerequisite.
+
+    Every scalar is a string. An environment's `shared`, `explicit` or `gated` holding exactly
+    `true` or `false` becomes a bool here, before any reference resolves; any other value stays
+    as written for `validate_structure` to refuse.
     """
-    refusal = interpreter_refusal()
+    refusal = runner_refusal()
     if refusal:
         raise SystemExit(refusal)
-    import tomllib
+    import yaml
 
     try:
-        return tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise SystemExit(f"::error::{CONFIG_PATH} is not valid TOML: {exc}") from exc
+        parsed = load_config_text(text)
+    except yaml.YAMLError as exc:
+        raise SystemExit(
+            f"::error::{CONFIG_PATH} is not valid YAML: {yaml_error_text(exc)}"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise SystemExit(
+            f"::error::{CONFIG_PATH} must hold a mapping at the top level, got "
+            f"{type(parsed).__name__}"
+        )
+    environments = parsed.get("environments")
+    for entry in environments.values() if isinstance(environments, dict) else ():
+        if isinstance(entry, dict):
+            for key in _FLAGS:
+                if entry.get(key) in ("true", "false"):
+                    entry[key] = entry[key] == "true"
+    return parsed
 
 
 def _is_reference(value):
-    """Exactly `{ vars = "NAME" }`. Any other mapping holding `vars` is ordinary data."""
+    """Exactly `{vars: NAME}`. Any other mapping holding `vars` is ordinary data."""
     return isinstance(value, dict) and len(value) == 1 and isinstance(value.get("vars"), str)
 
 
@@ -99,9 +122,9 @@ def _walk(value, path):
 
 
 def references(parsed):
-    """`(dotted key path, NAME)` for every reference in a raw `load_toml` result, by path.
+    """`(dotted key path, NAME)` for every reference in a raw `load_config` result, by path.
 
-    The root table is never a reference: a file holding only `vars = "X"` is a setting.
+    The root mapping is never a reference: a file holding only `vars: X` is a setting.
     """
     return sorted(
         (path, node["vars"])
@@ -144,7 +167,7 @@ def _lookup(path, name, variables):
     if name != name.upper():
         raise SystemExit(
             f'{where} "{name}"; GitHub variable names are uppercase. Write '
-            f'{{ vars = "{name.upper()}" }}.'
+            f"{{vars: {name.upper()}}}."
         )
     if name not in variables:
         raise SystemExit(
@@ -168,8 +191,8 @@ def _replace(value, path, variables):
 
 
 def parse_table(text, variables=None):
-    """The table parsed from `text`, each `{ vars = "NAME" }` replaced by that GitHub
-    variable's value, or `SystemExit`.
+    """The table parsed from `text`, each `{vars: NAME}` replaced by that GitHub variable's
+    value, or `SystemExit`.
 
     Shared by every reader: `read_table` below reads the default branch's file, and
     `doctor` reads a branch's copy to report on it. Resolving here and nowhere else is what
@@ -179,7 +202,7 @@ def parse_table(text, variables=None):
     only when the file holds a reference: a file without one never touches it. An unset,
     empty, lowercase or malformed name refuses, naming the key path and the name.
     """
-    parsed = load_toml(text)
+    parsed = load_config(text)
     refs = references(parsed)
     if not refs:
         return parsed
@@ -258,8 +281,7 @@ def contents_text(path, fetch=None):
 
     Anything that is not a base64 blob is UNREADABLE, not empty: a >1 MB file answers with
     `encoding: "none"` and empty `content`, which would otherwise decode to a readable
-    EMPTY file a caller reads as clean. A leading U+FEFF is left in place for the reason
-    `load_toml` gives.
+    EMPTY file a caller reads as clean.
 
     `fetch` reads the JSON, defaulting to this module's `gh api` call. It is a seam, not
     flexibility: `doctor` passes its own reader so that the mocks in its tests keep
@@ -289,8 +311,8 @@ _ROLE_FIELDS = ("plan", "apply")
 _PLACEHOLDER = "{workload}"
 _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 
-#: `vars` because a one-key `{ vars = "…" }` is a reference; `role` and `region` because
-#: `aws.plan.role = "…"` and `aws.plan.region = "…"` parse as maps keyed by them, which would
+#: `vars` because a one-key `{vars: NAME}` is a reference; `role` and `region` because
+#: `plan: {role: x}` and `plan: {region: x}` parse as maps keyed by them, which would
 #: otherwise validate as a role for a workload of that name.
 _RESERVED_WORKLOADS = ("vars", "role", "region")
 
@@ -364,22 +386,21 @@ def _check_vars(entry, env, errors):
 
 
 def _check_flags(entry, env, errors):
-    """`shared`, `explicit` and `gated` are TOML booleans, one message per flag.
+    """`shared`, `explicit` and `gated` hold `true` or `false`, one message per flag.
 
-    A quoted `"true"` reads as set to a person and resolves as unset; for `explicit` that
-    puts the environment on a bare `shipmate apply`. A reference resolves to a string, so
-    it refuses here too.
+    `load_config` turned those two spellings into bools, so anything else here reads as set to
+    a person and resolves as unset; for `explicit` that puts the environment on a bare
+    `shipmate apply`. A reference resolves after that, so it refuses here too.
     """
-    for key in ("shared", "explicit", "gated"):
+    for key in _FLAGS:
         if key in entry and not isinstance(entry[key], bool):
             errors.append(
-                f"::error::environments.{env}.{key} must be a boolean, got "
-                f"{type(entry[key]).__name__}. Write {key} = true or {key} = false, unquoted."
+                f"::error::environments.{env}.{key} must be true or false, got {entry[key]!r}."
             )
 
 
 def shared_envs(table):
-    """The environments whose entry holds `shared = true`.
+    """The environments whose entry holds `shared: true`.
 
     Such an environment binds one bare GitHub Environment on both paths instead of the
     `<env>-plan` / `<env>-apply` pair. Anything but `true` is unshared, the protected
@@ -401,7 +422,7 @@ def env_names(env, shared):
 def explicit_envs(table):
     """Environments a bare `shipmate apply` skips: each needs its own `shipmate apply <env>`.
 
-    Only `explicit = true` holds one back; `validate_structure` refuses any other value.
+    Only `explicit: true` holds one back; `validate_structure` refuses any other value.
     """
     return sorted(
         e for e, entry in table.get("environments", {}).items() if entry.get("explicit") is True
@@ -411,7 +432,7 @@ def explicit_envs(table):
 def ungated_envs(table):
     """Environments a targeted apply reaches without an approving review.
 
-    Only `gated = false` exempts one; anything else is gated, the protected direction.
+    Only `gated: false` exempts one; anything else is gated, the protected direction.
     Entry names are lowercase by `_check_env_name`, so the set already matches the
     casefolded env name `authorize` compares against it.
     """
@@ -466,16 +487,7 @@ def _empty(name, where):
 
 
 def _not_an_account(name, where):
-    return SystemExit(
-        f"::error::identities.{name}.{where} is not a 12-digit AWS account id in a quoted "
-        "string. A TOML integer drops a leading 0."
-    )
-
-
-def _is_integer(value):
-    """A TOML integer, which an account id must not be; a TOML boolean is a Python `int` too
-    and keeps the type refusal."""
-    return isinstance(value, int) and not isinstance(value, bool)
+    return SystemExit(f"::error::identities.{name}.{where} is not a 12-digit AWS account id.")
 
 
 def _check_value(name, where, field, value):
@@ -494,12 +506,10 @@ def _check_value(name, where, field, value):
 
 
 def _check_map_value(name, field, key, value):
-    """One `key = value` of a field written as a map keyed by workload."""
+    """One `key: value` of a field written as a map keyed by workload."""
     where = f"identities.{name}.aws.{field}.{key}"
     if not _is_workload(key):
         raise _not_a_workload(where)
-    if field == "account" and _is_integer(value):
-        raise _not_an_account(name, f"aws.{field}.{key}")
     _string(value, where)
     _check_value(name, f"aws.{field}.{key}", field, value)
 
@@ -510,8 +520,6 @@ def _check_field(name, field, value, errors):
     if isinstance(value, str):
         with _gather(errors):
             _check_value(name, f"aws.{field}", field, value)
-    elif field == "account" and _is_integer(value):
-        errors.append(str(_not_an_account(name, f"aws.{field}")))
     elif value == {}:
         errors.append(str(_empty(name, f"aws.{field}")))
     elif isinstance(value, dict):
@@ -615,7 +623,7 @@ def _check_identity_use(entry, env, errors, declared, valid):
     name = entry["identity"]
     if not isinstance(name, str) or name not in declared:
         errors.append(
-            f"::error::environment {env}: identity names no [identities.<name>] table; the "
+            f"::error::environment {env}: identity names no entry under identities; the "
             f"file declares {', '.join(sorted(declared)) or 'none'}."
         )
         return
@@ -635,14 +643,14 @@ def _check_named_identity(entry, env, name, aws, errors, listed_ok):
     if varies and "workloads" not in entry:
         errors.append(
             f"::error::environment {env} names identity {name}, whose roles vary by workload, "
-            'and lists no workloads. List the workloads it admits: workloads = ["…"].'
+            "and lists no workloads. List the workloads it admits: workloads: […]."
         )
     shared = entry.get("shared") is True
     if shared and "plan" in aws:
         errors.append(
             f"::error::environment {env} is shared between the plan and apply paths, so "
             f"identity {name}'s aws.plan cannot apply to it: a shared environment uses "
-            "aws.apply on both paths. Name an identity without aws.plan, or set shared = false."
+            "aws.apply on both paths. Name an identity without aws.plan, or set shared: false."
         )
     if varies and not listed_ok:
         return
@@ -724,7 +732,7 @@ def _check_dry_coverage(environments, matrix_envs):
         else:
             continue
         raise SystemExit(
-            '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
+            "::error::layout: tf_vars derives TF_VAR_env and TF_VAR_region from the "
             f"environment table, and {env} has {missing}."
         )
 
@@ -962,10 +970,8 @@ def validate_structure(table):
     if "layout" not in table:
         errors.append(
             f"::error::{CONFIG_PATH} declares no layout, so no cell can resolve its "
-            'environment identity. Declare layout = "tf_vars", "workspace" or "folder" on the '
-            "default branch, which is where this table is read from. A scalar written below "
-            "a [table] header lands inside that table rather than at the top level, so "
-            "layout must come before the first header."
+            "environment identity. Declare layout: tf_vars, layout: workspace or layout: "
+            "folder on the default branch, which is where this table is read from."
         )
     elif table["layout"] not in _LAYOUTS:
         errors.append(

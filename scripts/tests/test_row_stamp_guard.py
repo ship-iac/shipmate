@@ -54,7 +54,7 @@ _PLAN_ROLE = "arn:aws:iam::1:role/plan"
 _APPLY_ROLE = "arn:aws:iam::1:role/apply"
 
 #: A table whose two paths hold distinct roles, so a detect resolving the wrong path is a
-#: different value rather than the same one. `layout = "folder"` derives no `tf_vars`, so an
+#: different value rather than the same one. `layout: folder` derives no `tf_vars`, so an
 #: empty `tf_vars` on a stamped row is legitimate and is not evidence of a missing stamp.
 _TABLE = {
     "layout": "folder",
@@ -209,7 +209,7 @@ def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
 
 
 def test_a_shared_environment_resolves_the_apply_tier_on_the_plan_path(monkeypatch, tmp_path):
-    """The plan detect passes `plan`, and an entry holding `shared = true` still resolves
+    """The plan detect passes `plan`, and an entry holding `shared: true` still resolves
     `aws.apply` and binds the bare environment: one GitHub Environment on both paths means one
     credential on both paths.
 

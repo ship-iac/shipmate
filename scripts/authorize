@@ -18,7 +18,7 @@ the only review rule is code-owner review and no changed file has an owner) and
 `APPROVED` authorize; any
 other value — including an absent/empty one — fails closed, except that
 `REVIEW_REQUIRED` also authorizes for an environment whose entry holds
-`gated = false`.
+`gated: false`.
 
 The `ungated_exemption` output is the targeted path's audit trail: `reviewDecision`
 is a live value with no history, so once the review lands nothing else distinguishes
@@ -46,7 +46,7 @@ def parse_ungated_envs(raw):
 
 def _review_not_required(review_decision, environment, ungated_envs):
     """Whether a gated `environment` is authorized only by a `NONE` decision, with no
-    `gated = false` entry for it. GitHub returns that null decision when no rule requires a
+    `gated: false` entry for it. GitHub returns that null decision when no rule requires a
     review and also when the only review rule is code-owner review and no changed file has an
     owner. The apply comment names each such environment."""
     return review_decision == "NONE" and environment.casefold() not in ungated_envs
@@ -58,9 +58,9 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
     Only the explicit pass values authorize: NONE (comment-ops' sentinel for a
     null decision, which also covers required code-owner review that owns none of
     the changed files) and APPROVED. Anything
-    else fails closed. An environment whose entry holds `gated = false` is exempt
+    else fails closed. An environment whose entry holds `gated: false` is exempt
     from REVIEW_REQUIRED and from nothing else; a bare apply passes here when
-    any entry holds `gated = false`, and is partitioned per env in apply-all-detect."""
+    any entry holds `gated: false`, and is partitioned per env in apply-all-detect."""
     if review_decision == "REVIEW_REQUIRED":
         if ungated_envs and (not environment or environment.casefold() in ungated_envs):
             return None
@@ -68,7 +68,7 @@ def _review_reason(review_decision, environment="", ungated_envs=frozenset()):
             return (
                 f"not authorized: PR review is required by the branch ruleset "
                 f"and has not been satisfied, and `environments.{environment}.gated` is "
-                f"not `false` in `.github/shipmate.toml`; obtain the "
+                f"not `false` in `.github/shipmate-config.yml`; obtain the "
                 f"required approving review(s), then re-run `shipmate apply`."
             )
         return (

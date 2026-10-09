@@ -6,7 +6,7 @@ import sys
 import pytest
 import yaml
 from _loader import ACTIONS, ENGINE, SCRIPTS, load_script
-from test_env_config_toml_fixtures import CANONICAL, MISPLACED_CONTROL
+from test_env_config_yaml_fixtures import CANONICAL
 
 doctor = load_script("doctor")
 
@@ -253,7 +253,7 @@ def _quiet_new_probes():
 _CONFIG_READ = f"repos/{_REPO}/contents/{doctor.CONFIG_PATH}{_REF}"
 #: The environment probes' read: no ref, the request `read_table` makes, which GitHub
 #: answers from the default branch. Hand-written so a re-added `?ref=` reddens.
-_CONFIG_ON_DEFAULT = "repos/o/r/contents/.github/shipmate.toml"
+_CONFIG_ON_DEFAULT = "repos/o/r/contents/.github/shipmate-config.yml"
 
 
 def test_healthy_repo_emits_nothing(monkeypatch):
@@ -318,25 +318,27 @@ def test_missing_environment_of_the_split_pair_warned(monkeypatch):
 
 #: Hand-written tables for the mode tests. `CANONICAL` declares `dev-eu` without the key.
 _SHARED_TABLE = """\
-layout = "tf_vars"
+layout: tf_vars
 
-[environments.dev-eu]
-region = "eu-west-1"
-shared = true
+environments:
+  dev-eu:
+    region: eu-west-1
+    shared: true
 """
 _UNSHARED_TABLE = """\
-layout = "tf_vars"
+layout: tf_vars
 
-[environments.dev-eu]
-region = "eu-west-1"
-shared = false
+environments:
+  dev-eu:
+    region: eu-west-1
+    shared: false
 """
-#: Well-formed TOML that `validate_structure` refuses: an entry that is not a table.
+#: Well-formed YAML that `validate_structure` refuses: an entry that is not a mapping.
 _INVALID_TABLE = """\
-layout = "tf_vars"
+layout: tf_vars
 
-[environments]
-dev-eu = 7
+environments:
+  dev-eu: [7]
 """
 
 
@@ -371,8 +373,8 @@ _MISSING_SHARED = (
 #: The shared-mode NOTICE for a bare `dev-eu` with no approval rules.
 _SHARED_UNREVIEWED = (
     doctor.NOTICE,
-    "GitHub Environment `dev-eu` (shared between plan and apply by `shared = true` in its "
-    "`[environments.dev-eu]` entry) has no approval rules (required reviewers or a wait "
+    "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` in its "
+    "`environments.dev-eu` entry) has no approval rules (required reviewers or a wait "
     "timer), so pre-merge applies to it are unreviewed, and no reviewer gate is available "
     "while it is shared: a reviewer here would stall the plan cells and every drift sweep "
     "covering it. "
@@ -388,9 +390,9 @@ def _env_findings(monkeypatch, table, *envs):
 
 
 def test_the_table_selects_the_mode(monkeypatch):
-    """The mode comes from `shared = true` in the environment's table entry, never from
+    """The mode comes from `shared: true` in the environment's table entry, never from
     which environments exist: the same bare `dev-eu` is a healthy shared environment under
-    the key and two missing halves without it. `shared = false` reads as absent.
+    the key and two missing halves without it. `shared: false` reads as absent.
 
     Mutation: make env-config's `env_names` ignore `shared` and always return the split
     pair -- the shared case reddens; always return the bare shared name -- the other two
@@ -404,7 +406,7 @@ def test_the_table_selects_the_mode(monkeypatch):
 #: Hand-written: the environment probes' one finding when the default branch's table is unusable.
 _DEFAULT_TABLE_SKIPPED = (
     doctor.NOTICE,
-    "the environment probes were skipped: the default branch's `.github/shipmate.toml` "
+    "the environment probes were skipped: the default branch's `.github/shipmate-config.yml` "
     "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
     "and it alone selects which GitHub Environments a run binds. While that holds, every run "
     "refuses at detect.",
@@ -432,8 +434,8 @@ def test_an_invalid_default_table_skips_the_environment_probes(monkeypatch):
         _DEFAULT_TABLE_SKIPPED,
         (
             doctor.WARNING,
-            "`.github/shipmate.toml` at the commit under examination is not valid: "
-            "environment dev-eu must be a mapping, got int. Merging it refuses every "
+            "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+            "environment dev-eu must be a mapping, got list. Merging it refuses every "
             "operation that reads the table. Execution still reads the default branch's "
             "copy, which this says nothing about.",
         ),
@@ -490,7 +492,7 @@ def test_an_interpreter_below_the_floor_skips_the_environment_probes(monkeypatch
     Mutation: drop the NOTICE (`return []`) -- an empty list reads as every environment
     existing; or move the refusal check after `_existing_env_names` in any probe -- the
     listing is read."""
-    monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
+    monkeypatch.setattr(sys, "version_info", (3, 11, 9, "final", 0))
     found, asked = _environment_probes(monkeypatch, _ctx())
     assert found == [
         (
@@ -528,7 +530,7 @@ def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
 )
 def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at_head):
     """Execution binds from the default branch's table, so on a pull request that removes
-    `shared = true` every run until merge still binds the bare `dev-eu`: that is the
+    `shared: true` every run until merge still binds the bare `dev-eu`: that is the
     environment the probes inspect. The table is read with no ref, as `read_table` reads it,
     whatever the event payload names as the default branch.
 
@@ -617,7 +619,7 @@ def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
 
 
 def test_shared_environment_produces_no_existence_finding(monkeypatch):
-    """The bare name alone under `shared = true` is a supported configuration --
+    """The bare name alone under `shared: true` is a supported configuration --
     not a half-created split pair."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", table=_SHARED_TABLE))
     assert doctor._environment_warnings(_ctx()) == []
@@ -940,14 +942,14 @@ def test_a_shared_env_with_reviewers_names_the_key_that_shares_it(monkeypatch):
     assert doctor._env_protection_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "GitHub Environment `dev-eu` (shared between plan and apply by `shared = true` "
-            "in its `[environments.dev-eu]` entry) has protection rules "
+            "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` "
+            "in its `environments.dev-eu` entry) has protection rules "
             "(required_reviewers). A protection rule gates every job that binds the "
             "environment and GitHub offers no per-job filter, so the plan cells and "
             "every drift sweep covering it will not start immediately either. To gate applies "
             "only, split "
-            "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared = true` from its "
-            "`[environments.dev-eu]` entry.",
+            "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared: true` from its "
+            "`environments.dev-eu` entry.",
         )
     ]
 
@@ -2211,7 +2213,7 @@ def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
     Mutation: drop the `_md_escape` around the env names -- `a<b` renders raw."""
     [_, (level, text)] = doctor._config_defaults({"environments": {"a<b": {"explicit": True}}})
     assert doctor._finding_row(level, text) == (
-        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `explicit = true` on a&lt;b: a bare "
+        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `explicit: true` on a&lt;b: a bare "
         "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
     )
 
@@ -3803,21 +3805,22 @@ def test_review_rule_missing_parameters_key_is_unverified(monkeypatch):
 
 
 _GATED_AND_UNGATED_TABLE = """\
-layout = "tf_vars"
+layout: tf_vars
 
-[environments.dev-eu]
-region = "eu-west-1"
-
-[environments.sandbox]
-region = "eu-west-1"
-gated = false
+environments:
+  dev-eu:
+    region: eu-west-1
+  sandbox:
+    region: eu-west-1
+    gated: false
 """
 _ALL_UNGATED_TABLE = """\
-layout = "tf_vars"
+layout: tf_vars
 
-[environments.dev-eu]
-region = "eu-west-1"
-gated = false
+environments:
+  dev-eu:
+    region: eu-west-1
+    gated: false
 """
 
 
@@ -3829,7 +3832,7 @@ def _no_required_review(envs, level=doctor.NOTICE):
         f"these gated environments can apply without an approving review: {envs}. One is held "
         "only where a code-owner review is required for the changed files. `gated` can "
         "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
-        "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
+        "`required_approving_review_count` to 1 or more, or set `gated: false` on the "
         "environments meant to apply unreviewed.",
     )
 
@@ -3891,7 +3894,7 @@ def test_review_rule_count_zero_with_an_unreadable_table_is_the_notice(monkeypat
     assert out == [(doctor.NOTICE, doctor._SOLE_MAINTAINER_REVIEW.format(branch=_BRANCH))]
 
 
-@pytest.mark.parametrize("table", [_INVALID_TABLE, "layout = "], ids=["invalid", "not-toml"])
+@pytest.mark.parametrize("table", [_INVALID_TABLE, "layout: ["], ids=["invalid", "not-yaml"])
 def test_review_rule_count_zero_with_an_invalid_table_is_the_notice(monkeypatch, table):
     """An invalid or unparseable default-branch table degrades like an unreadable one, and
     never raises: `warnings()` would drop the code-owner finding with it.
@@ -3903,7 +3906,7 @@ def test_review_rule_count_zero_with_an_invalid_table_is_the_notice(monkeypatch,
 
 
 def test_review_rule_count_zero_names_a_declared_environment_the_table_lacks(monkeypatch):
-    """An environment only a cell declares is gated: no entry holds `gated = false` for it.
+    """An environment only a cell declares is gated: no entry holds `gated: false` for it.
 
     Mutation: drop the union with `ctx["envs"]` -- `prod-us` is not named."""
     rules = [_pull_request_rule(code_owner=True, count=0)]
@@ -3936,7 +3939,7 @@ def test_review_rule_count_zero_escapes_an_environment_name(monkeypatch):
         "review: `a|b&lt;c`. One is held only where a code-owner review is required for the "
         "changed files. `gated` can only relax a review requirement the ruleset sets "
         "(docs/hardening.md #3 to #5); set `required_approving_review_count` to 1 or more, or set "
-        "`gated = false` on the environments meant to apply unreviewed."
+        "`gated: false` on the environments meant to apply unreviewed."
     )
 
 
@@ -4203,8 +4206,8 @@ def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeyp
     assert doctor._plan_env_secret_warnings(_ctx()) == [
         (
             doctor.NOTICE,
-            "GitHub Environment `dev-eu` (shared between plan and apply by `shared = true` "
-            "in its `[environments.dev-eu]` entry) holds 1 secret(s) (`AWS_ROLE_ARN`). "
+            "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` "
+            "in its `environments.dev-eu` entry) holds 1 secret(s) (`AWS_ROLE_ARN`). "
             "It is the apply environment too, so a plan cell runs the pull request "
             "branch's own code with everything it releases: any credential held there for "
             "applying is reachable by plan-time code. Protection rules on it would stall those "
@@ -4536,18 +4539,24 @@ def test_declared_envs_reads_every_run_directory_of_comment_ops_download(tmp_pat
     assert doctor._declared_envs(tmp_path) == {"dev-eu", "dev-us"}
 
 
-#: The refusal the misplaced control earns, whole: the probe's own framing plus the
+#: A top-level setting indented under an entry, where it parses as a key of that entry.
+MISINDENTED_CONTROL = """\
+environments:
+  prod:
+    region: eu-west-1
+    layout: folder                 # intended as a top-level setting
+"""
+
+#: The refusal the misindented control earns, whole: the probe's own framing plus the
 #: missing-layout and `_check_environment` messages with the `::error::` prefix stripped.
 #: Hand-written, not read back from the module, so a probe that reported a different
 #: refusal -- or reported this one as a skipped probe -- reddens here.
-_MISPLACED_FINDING = (
+_MISINDENTED_FINDING = (
     doctor.WARNING,
-    "`.github/shipmate.toml` at the commit under examination is not valid: "
-    ".github/shipmate.toml declares no layout, so no cell can resolve its environment "
-    'identity. Declare layout = "tf_vars", "workspace" or "folder" on the default branch, '
-    "which is where this table is read from. A scalar written below a [table] header lands "
-    "inside that table rather than at the top level, so layout must come before the first "
-    "header. "
+    "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+    ".github/shipmate-config.yml declares no layout, so no cell can resolve its environment "
+    "identity. Declare layout: tf_vars, layout: workspace or layout: folder on the default "
+    "branch, which is where this table is read from. "
     "environment prod: layout is not a key this engine implements. An environment "
     "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. Merging it "
     "refuses every "
@@ -4568,21 +4577,21 @@ def _config_responses(at_head, on_default=CANONICAL):
     }
 
 
-def test_the_config_probe_reads_the_examined_commit_and_reports_a_misplaced_control(
+def test_the_config_probe_reads_the_examined_commit_and_reports_a_misindented_control(
     monkeypatch,
 ):
-    """Two claims, one fixture. The design's misplaced control sits at the commit under
-    examination and a valid file on the default branch, so:
+    """Two claims, one fixture. A misindented control sits at the commit under examination
+    and a valid file on the default branch, so:
 
     - reading `?ref=<head sha>` is what produces a finding at all (mutation: build the ref
       from `ctx["default_branch"]` -- the probe then reports the valid file's notes);
     - the placement mistake is reported, whole (mutation: return the parsed table without
-      calling `validate_structure` -- the file is well-formed TOML and every finding here
+      calling `validate_structure` -- the file is well-formed YAML and every finding here
       disappears).
     """
-    responses = _config_responses(MISPLACED_CONTROL)
+    responses = _config_responses(MISINDENTED_CONTROL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._config_warnings(_ctx()) == [_MISPLACED_FINDING]
+    assert doctor._config_warnings(_ctx()) == [_MISINDENTED_FINDING]
 
 
 def test_a_refusal_is_the_finding_not_a_skipped_probe(monkeypatch):
@@ -4598,10 +4607,10 @@ def test_a_refusal_is_the_finding_not_a_skipped_probe(monkeypatch):
             "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
         ),
         **_quiet_new_probes(),
-        **_config_responses(MISPLACED_CONTROL),
+        **_config_responses(MISINDENTED_CONTROL),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor.warnings(_ctx()) == [_MISPLACED_FINDING]
+    assert doctor.warnings(_ctx()) == [_MISINDENTED_FINDING]
 
 
 def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypatch):
@@ -4612,24 +4621,23 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
     reads `gated.; environments`.
     """
     text = (
-        'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n'
-        'needs = ["dev-eu"]\n'
+        "layout: folder\n\nenvironments:\n  dev-eu:\n    regoin: eu-west-1\n    gated: False\n"
+        "    needs: [dev-eu]\n"
     )
     responses = _config_responses(text)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._config_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "`.github/shipmate.toml` at the commit under examination is not valid: "
+            "`.github/shipmate-config.yml` at the commit under examination is not valid: "
             "environment dev-eu: regoin is not a key this engine implements. An environment "
             "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. "
-            "environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
-            "gated = false, unquoted. "
+            "environments.dev-eu.gated must be true or false, got 'False'. "
             "needs is cyclic: dev-eu -> dev-eu: each of those must fully apply before the "
             "next, so the ordering has no first environment and no apply path can sort it. "
-            "Break the chain in .github/shipmate.toml. Merging it refuses every operation that "
-            "reads the table. Execution still reads the default branch's copy, which this says "
-            "nothing about.",
+            "Break the chain in .github/shipmate-config.yml. Merging it refuses every "
+            "operation that reads the table. Execution still reads the default branch's copy, "
+            "which this says nothing about.",
         )
     ]
 
@@ -4640,18 +4648,18 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
 
     Mutation: join every line, dropping the `[:CONFIG_ERROR_LINES]` slice and the tail.
     """
-    text = 'layout = "folder"\n' + "".join(f"k{n:02} = 1\n" for n in range(1, 13))
+    text = "layout: folder\n" + "".join(f"k{n:02}: 1\n" for n in range(1, 13))
     responses = _config_responses(text)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     unknown = (
-        "{} is not a setting this engine implements. .github/shipmate.toml holds "
+        "{} is not a setting this engine implements. .github/shipmate-config.yml holds "
         "layout, identities, environments."
     )
     shown = " ".join(unknown.format(f"k{n:02}") for n in range(1, 11))
     assert doctor._config_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "`.github/shipmate.toml` at the commit under examination is not valid: "
+            "`.github/shipmate-config.yml` at the commit under examination is not valid: "
             f"{shown} … and 2 more. Merging it refuses every operation that reads the "
             "table. Execution still reads the default branch's copy, which this says nothing "
             "about.",
@@ -4661,24 +4669,24 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
 
 def test_an_interpreter_below_the_floor_is_not_reported_as_an_invalid_file(monkeypatch):
     """The floor is a property of the runner, not of the file, so the file-validity wrapper
-    would tell a consumer on an old `runs_on` image that their TOML is invalid, that merging
+    would tell a consumer on an old `runs_on` image that their file is invalid, that merging
     it refuses every operation, and that the default branch is unaffected -- three false
     claims, sending them to read a file that is fine. The fixture holds a VALID file, so a
     wrapped refusal can only be the floor's.
 
-    Mutation: drop the `interpreter_refusal()` check ahead of `_contents_ref` in
+    Mutation: drop the `runner_refusal()` check ahead of `_contents_ref` in
     `_config_table`, folding the refusal into the file-validity finding.
     """
-    monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
+    monkeypatch.setattr(sys, "version_info", (3, 11, 9, "final", 0))
     responses = _config_responses(CANONICAL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._config_warnings(_ctx()) == [
         (
             doctor.WARNING,
             "this runner's Python refuses the environment table before any revision of it "
-            "is read: .github/shipmate.toml is read with tomllib, which needs Python 3.11 "
-            "or later; this runner has 3.10.6. CONTRACT.md section Runner prerequisites "
-            "requires python3 >= 3.11 on every runner. Choose a newer runs_on image. "
+            "is read: the engine needs Python 3.12 or later; this runner has 3.11.9. "
+            "CONTRACT.md section Runner prerequisites requires python3 >= 3.12 on every "
+            "runner. Choose a newer runs_on image. "
             "Nothing is wrong with the file: merging it changes nothing, and every "
             "operation that reads the table meets the same refusal on the default branch "
             "too.",
@@ -4749,13 +4757,13 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
     """
     # A file with no reference must not need the caller's variables at all.
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
-    responses = _config_responses(CANONICAL, on_default=MISPLACED_CONTROL)
+    responses = _config_responses(CANONICAL, on_default=MISINDENTED_CONTROL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._config_warnings(_ctx()) == []
     assert doctor.config_status(_ctx()) == [
         (
             doctor.NOTICE,
-            "`.github/shipmate.toml` at the commit under examination parses, and passes "
+            "`.github/shipmate-config.yml` at the commit under examination parses, and passes "
             "every check a file can be judged on by itself: its top-level keys, "
             "`layout`, the identities and the environment entries. Not checked here, for want "
             "of a plan matrix and a whole-tree environment scan: `tf_vars`-layout coverage of "
@@ -4806,26 +4814,28 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`explicit = true` on prod: a bare `shipmate apply` skips those, and each "
+            "`explicit: true` on prod: a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
     ]
 
 
 #: Two references, one of them a list item, hand-written.
-_REFERENCED = """layout = "folder"
+_REFERENCED = """layout: folder
 
-[identities.dev]
-aws.plan  = { vars = "DEV_PLAN_ROLE" }
-aws.apply = "arn:aws:iam::981781037707:role/shipmate-apply"
+identities:
+  dev:
+    aws:
+      plan: {vars: DEV_PLAN_ROLE}
+      apply: arn:aws:iam::981781037707:role/shipmate-apply
 
-[environments.dev]
-region   = "eu-west-1"
-identity = "dev"
-
-[environments.prod]
-explicit = true
-needs    = [{ vars = "FIRST_ENV" }]
+environments:
+  dev:
+    region: eu-west-1
+    identity: dev
+  prod:
+    explicit: true
+    needs: [{vars: FIRST_ENV}]
 """
 
 
@@ -4853,7 +4863,7 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         (doctor.NOTICE, doctor.CONFIG_VALID),
         (
             doctor.NOTICE,
-            "`.github/shipmate.toml` at the commit under examination takes these values from "
+            "`.github/shipmate-config.yml` at the commit under examination takes these values from "
             "GitHub variables instead of holding them: `environments.prod.needs[0]` from "
             "variable `FIRST_ENV`; `identities.dev.aws.plan` from variable `DEV_PLAN_ROLE`. "
             "Every run "
@@ -4882,7 +4892,7 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`explicit = true` on prod: a bare `shipmate apply` skips those, and each "
+            "`explicit: true` on prod: a bare `shipmate apply` skips those, and each "
             "needs its own `shipmate apply <env>`.",
         ),
     ]
@@ -4916,7 +4926,7 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
         ),
         (
             doctor.NOTICE,
-            "`explicit = true` on "
+            "`explicit: true` on "
             "environment-with-a-long-name-00, environment-with-a-long-name-01, "
             "environment-with-a-long-name-02, environment-with-a-long-name-03, "
             "environment-with-a-long-name-04, environment-with-a-long-name-05, "
@@ -4988,37 +4998,36 @@ def test_rows_that_fill_the_budget_exactly_all_fit():
 #: A varying identity with two workloads listed out of alphabetical order, an apply-only
 #: identity named by a shared and by two unshared environments, one of them writing
 #: `workloads`, and an entry naming none.
-_ROLES_TABLE = """layout = "folder"
+_ROLES_TABLE = """layout: folder
 
-[identities.app]
-aws.account = "111111111111"
-aws.plan    = "{workload}-plan"
-aws.apply   = { core = "core-apply", network = "net-apply" }
+identities:
+  app:
+    aws:
+      account: 111111111111
+      plan: "{workload}-plan"
+      apply: {core: core-apply, network: net-apply}
+  ops:
+    aws:
+      apply: arn:aws:iam::333333333333:role/ops-apply
 
-[identities.ops]
-aws.apply = "arn:aws:iam::333333333333:role/ops-apply"
-
-[environments.dev]
-region    = "eu-west-1"
-identity  = "app"
-workloads = ["network", "core"]
-
-[environments.ops]
-region   = "eu-west-1"
-identity = "ops"
-shared   = true
-
-[environments.plain]
-region = "eu-west-1"
-
-[environments.stage]
-region   = "eu-west-1"
-identity = "ops"
-
-[environments.tools]
-region    = "eu-west-1"
-identity  = "ops"
-workloads = ["ci"]
+environments:
+  dev:
+    region: eu-west-1
+    identity: app
+    workloads: [network, core]
+  ops:
+    region: eu-west-1
+    identity: ops
+    shared: true
+  plain:
+    region: eu-west-1
+  stage:
+    region: eu-west-1
+    identity: ops
+  tools:
+    region: eu-west-1
+    identity: ops
+    workloads: [ci]
 """
 
 
@@ -5394,8 +5403,8 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
     assert doctor._config_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "`.github/shipmate.toml` at the commit under examination is not valid: "
-            ".github/shipmate.toml identities.dev.aws.plan references GitHub variable "
+            "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+            ".github/shipmate-config.yml identities.dev.aws.plan references GitHub variable "
             "DEV_PLAN_ROLE, which is not set. A reference reads repository and organization "
             "variables; the variables of a cell's <env>-plan, <env>-apply or shared <env> "
             "Environment are never read. "
@@ -5413,7 +5422,7 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
 
     Mutation: drop `_config_defaults` from `config_status`.
     """
-    responses = {_CONFIG_READ: _wf_file('layout = "folder"\n')}
+    responses = {_CONFIG_READ: _wf_file("layout: folder\n")}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor.config_status(_ctx())[1:] == [
         (
@@ -5442,7 +5451,7 @@ def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
 
     monkeypatch.setattr(doctor.ec, "read_table", forbidden)
     monkeypatch.setattr(doctor.ec, "resolve", forbidden)
-    for text in (CANONICAL, MISPLACED_CONTROL):
+    for text in (CANONICAL, MISINDENTED_CONTROL):
         responses = _config_responses(text)
         monkeypatch.setattr(doctor, "_gh_json", lambda path, r=responses: r[path])
         ctx = _ctx()
@@ -5450,28 +5459,6 @@ def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):
         doctor._config_warnings(ctx)
         doctor.config_status(ctx)
         assert ctx == before
-
-
-def test_a_byte_order_mark_is_reported_the_way_a_run_sees_it(monkeypatch):
-    """`tomllib` refuses a leading U+FEFF, and the execution reader hands it the bytes
-    the contents API returned. Stripping the BOM here would report a table valid that every run
-    reading it refuses -- two readers of one file disagreeing, which is the class this
-    check exists to remove.
-
-    A substring rather than the whole finding, deliberately: `tomllib`'s decode message
-    ends in a position report that is the interpreter's to word, so pinning it whole would
-    pin CPython's phrasing. The framing around it is pinned whole by
-    `test_the_config_probe_reads_the_examined_commit_and_reports_a_misplaced_control`.
-
-    Mutation: read the file with `_workflow_text` instead of `_contents_text`.
-    """
-    responses = {_CONFIG_READ: _wf_file("\ufeff" + CANONICAL)}
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    out = doctor._config_warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
-    assert level == doctor.WARNING
-    assert "is not valid: .github/shipmate.toml is not valid TOML" in text
 
 
 def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
@@ -5500,7 +5487,7 @@ def test_the_all_clear_survives_a_sound_environment_table(monkeypatch):
     # The status section renders too, and below the all-clear rather than instead of it.
     assert doctor.CONFIG_HEADING in body
     assert body.index("no problems found") < body.index(doctor.CONFIG_HEADING)
-    assert "`explicit = true` on prod" in body
+    assert "`explicit: true` on prod" in body
 
 
 def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
@@ -5515,7 +5502,7 @@ def test_the_report_renders_the_table_status_beside_a_finding(monkeypatch):
     )
     assert "gate rule missing" in body
     assert "no problems found" not in body
-    assert "`explicit = true` on prod" in body
+    assert "`explicit: true` on prod" in body
 
 
 def test_no_status_section_beside_a_refusal(monkeypatch):
@@ -5524,7 +5511,7 @@ def test_no_status_section_beside_a_refusal(monkeypatch):
 
     Mutation: return `[(NOTICE, CONFIG_VALID)]` from `config_status` whatever the table.
     """
-    responses = _config_responses(MISPLACED_CONTROL)
+    responses = _config_responses(MISINDENTED_CONTROL)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     ctx = _ctx()
     assert doctor.config_status(ctx) == []
@@ -5535,22 +5522,22 @@ def test_no_status_section_beside_a_refusal(monkeypatch):
 #: A cycle is decidable from the file alone, so `doctor` must report it rather than certify
 #: the file. Kept here rather than beside the design's two published files: that module's
 #: subject is the bytes `docs/` publishes, and this is neither of them.
-CYCLIC_ORDER = """layout = "folder"
+CYCLIC_ORDER = """layout: folder
 
-[environments.dev]
-needs = ["prod"]
-
-[environments.prod]
-needs = ["dev"]
+environments:
+  dev:
+    needs: [prod]
+  prod:
+    needs: [dev]
 """
-#: Hand-written whole, like `_MISPLACED_FINDING`: the probe's framing plus
+#: Hand-written whole, like `_MISINDENTED_FINDING`: the probe's framing plus
 #: `_check_cycle`'s message, via `validate_structure`, with the `::error::` prefix stripped.
 _CYCLIC_FINDING = (
     doctor.WARNING,
-    "`.github/shipmate.toml` at the commit under examination is not valid: needs is "
+    "`.github/shipmate-config.yml` at the commit under examination is not valid: needs is "
     "cyclic: dev -> prod -> dev: each of those must fully apply before the next, so the "
     "ordering has no first environment and no apply path can sort it. Break the chain in "
-    ".github/shipmate.toml. Merging it refuses every operation that reads the table. "
+    ".github/shipmate-config.yml. Merging it refuses every operation that reads the table. "
     "Execution still reads the default branch's copy, which this says nothing about.",
 )
 

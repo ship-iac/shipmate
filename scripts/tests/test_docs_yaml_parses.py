@@ -8,6 +8,9 @@ line and breaks a block's indentation. Reviewers reading prose do not reliably s
 catches syntax rot from a bad paste, not semantic drift from the sample repos: a fence that
 parses but is semantically wrong is out of scope, because the docs are reviewed prose and the
 sample repos' CI remains the executed copy of record that proves a documented workflow runs.
+
+Config fences (`_loader.is_config_fence`) are discovered here and checked by
+`test_docs_config_parses.py` instead.
 """
 
 import re
@@ -20,6 +23,7 @@ from _loader import (
     WORKFLOWS,
     assert_every_fence_discovered,
     doc_fences,
+    is_config_fence,
     load_script,
     workflow_yaml,
 )
@@ -38,7 +42,8 @@ _OPENER = re.compile(r"^[ \t]*```ya?ml\b", re.M)
 
 
 # Discovery is by glob, so a page added later is covered without editing this file.
-_FENCES = list(doc_fences(_PAGES, _FENCE))
+_DISCOVERED = list(doc_fences(_PAGES, _FENCE))
+_FENCES = [fence for fence in _DISCOVERED if not is_config_fence(fence[2])]
 
 
 def test_every_fence_was_discovered():
@@ -47,7 +52,7 @@ def test_every_fence_was_discovered():
     Mutation: write ```yml for one opener -- `_OPENER` still counts it and `_FENCE` no longer
     pairs it.
     """
-    assert_every_fence_discovered(_PAGES, _FENCES, _OPENER, "yaml")
+    assert_every_fence_discovered(_PAGES, _DISCOVERED, _OPENER, "yaml")
 
 
 @pytest.mark.parametrize(

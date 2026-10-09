@@ -993,7 +993,7 @@ _REPLIES = {
         "SHIPMATE_REPLY_ENV": _PARSED_ENV,
         "SHIPMATE_REPLY_OUTCOME": "refused",
         "SHIPMATE_REPLY_TEXT": (
-            "could not resolve the gate settings from `.github/shipmate.toml` on the default "
+            "could not resolve the gate settings from `.github/shipmate-config.yml` on the default "
             "branch, so this command was not run. The file is not merged there, it does not "
             "validate, or a variable it references is unset or empty, this run's log says "
             "which. Fix that and comment again."
@@ -1005,7 +1005,7 @@ _REPLIES = {
         "SHIPMATE_REPLY_OUTCOME": "notice",
         "SHIPMATE_REPLY_TEXT": (
             "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an "
-            "approving review (`gated = false` in `.github/shipmate.toml`). The apply result "
+            "approving review (`gated: false` in `.github/shipmate-config.yml`). The apply result "
             "comment shows what applied."
         ),
     },
@@ -1242,7 +1242,7 @@ def test_the_exemption_report_claims_permission_never_completion(tmp_path):
     assert body == (
         "### shipmate apply dev-eu\n\n"
         "⚪ dev-eu: ungated, permitted to apply without an approving review "
-        "(`gated = false` in `.github/shipmate.toml`). The apply result comment shows what "
+        "(`gated: false` in `.github/shipmate-config.yml`). The apply result comment shows what "
         "applied.\n\n"
         f"[run]({_RUN_URL})"
     )
@@ -1325,7 +1325,7 @@ def test_both_verb_steps_bind_shipmate_verb_to_the_parsed_route():
 
 
 def test_exactly_the_table_readers_receive_the_callers_variables():
-    """`gate-config` and every `doctor` probe run read `.github/shipmate.toml` through
+    """`gate-config` and every `doctor` probe run read `.github/shipmate-config.yml` through
     `parse_table`, which refuses a file holding a variable reference when
     `SHIPMATE_GITHUB_VARS` is absent. Selected over every step of both actions, so a further
     holder fails too.

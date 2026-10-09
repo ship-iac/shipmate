@@ -436,33 +436,36 @@ environment, with the credential fields written as `aws.plan` inside it. A
 separate `[identities.dev.aws]` header parses to exactly the same mapping, but
 mixing the two notations for one identity is a parse error (§TOML placement).
 
-```toml
-layout = "tf_vars"                # tf_vars | workspace | folder
+```yaml
+# .github/shipmate-config.yml
+layout: tf_vars                    # tf_vars | workspace | folder
 
-[identities.dev]
-aws.account = "111111111111"      # a role name below becomes arn:aws:iam::<account>:role/<name>
-aws.plan    = "shipmate-plan-{workload}"
-aws.apply   = "shipmate-apply-{workload}"
+identities:
+  dev:
+    aws:
+      account: 111111111111        # a role name below becomes arn:aws:iam::<account>:role/<name>
+      plan: shipmate-plan-{workload}
+      apply: shipmate-apply-{workload}
+  prod:
+    aws:
+      apply: arn:aws:iam::4402:role/shipmate-apply   # a full ARN is used as written
 
-[identities.prod]
-aws.apply = "arn:aws:iam::4402:role/shipmate-apply"  # a full ARN is used as written
-
-[environments.dev-eu]
-region              = "eu-west-1" # the layout's TF_VAR_region and the credentials step's region
-identity            = "dev"
-workloads           = ["core", "net-edge"]  # the workload tags this environment admits
-gated               = false       # applies without an approving review
-
-[environments.prod]
-region              = "eu-west-1"
-identity            = "prod"
-needs               = ["dev-eu"]  # dev-eu fully applies first
-explicit            = true        # a bare `shipmate apply` skips it
-tf_vars.TF_VAR_account = "4402"   # merged over the layout's TF_VAR_*
-
-[environments.sbx]
-region              = "eu-west-1"
-shared              = true        # one bare `sbx` Environment on both paths
+environments:
+  dev-eu:
+    region: eu-west-1              # the layout's TF_VAR_region and the credentials step's region
+    identity: dev
+    workloads: [core, net-edge]    # the workload tags this environment admits
+    gated: false                   # applies without an approving review
+  prod:
+    region: eu-west-1
+    identity: prod
+    needs: [dev-eu]                # dev-eu fully applies first
+    explicit: true                 # a bare `shipmate apply` skips it
+    tf_vars:
+      TF_VAR_account: 4402         # merged over the layout's TF_VAR_*
+  sbx:
+    region: eu-west-1
+    shared: true                   # one bare `sbx` Environment on both paths
 ```
 
 An environment entry holds `region`, `tf_vars`, `identity`, `workloads`,
@@ -586,17 +589,22 @@ would stop describing environment identity.
 
 Any string value in the file may instead name a GitHub variable:
 
-```toml
-layout = "tf_vars"
+```yaml
+# .github/shipmate-config.yml
+layout: tf_vars
 
-[identities.prod]
-aws.apply = { vars = "PROD_APPLY_ROLE" }
+identities:
+  prod:
+    aws:
+      apply: {vars: PROD_APPLY_ROLE}
 
-[environments.prod]
-needs                  = [{ vars = "FIRST_ENV" }]
-region                 = { vars = "PROD_REGION" }
-identity               = "prod"
-tf_vars.TF_VAR_account = { vars = "PROD_ACCOUNT" }
+environments:
+  prod:
+    needs: [{vars: FIRST_ENV}]
+    region: {vars: PROD_REGION}
+    identity: prod
+    tf_vars:
+      TF_VAR_account: {vars: PROD_ACCOUNT}
 ```
 
 - **Shape.** Exactly `{ vars = "NAME" }`: a mapping with one key, `vars`,
@@ -1292,12 +1300,14 @@ share the same App-minted `workflow_dispatch` mechanism and the same per-env
 applied without an approving review. The entry's name is matched against the env
 on the apply checks:
 
-```toml
-layout = "tf_vars"
+```yaml
+# .github/shipmate-config.yml
+layout: tf_vars
 
-[environments.dev-eu]
-region = "eu-west-1"
-gated  = false
+environments:
+  dev-eu:
+    region: eu-west-1
+    gated: false
 ```
 
 It exempts one requirement, `reviewed`, and only its `REVIEW_REQUIRED`

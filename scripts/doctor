@@ -36,7 +36,7 @@ Probes:
   workflow, each with the `if:` that selects it — a wrong one sends a verb nowhere
   and its run completes green with every job skipped; and no call of `drift.yml`,
   which runs from its own workflow file.
-- the environment table at the commit under examination: `.github/shipmate.toml`
+- the environment table at the commit under examination: `.github/shipmate-config.yml`
   parses and passes the checks a file can be judged on by itself, before it merges
   to the default branch execution reads it from.
 - GitHub App installation permission drift.
@@ -103,7 +103,7 @@ _NO_REQUIRED_REVIEW = (
     "these gated environments can apply without an approving review: {envs}. One is held "
     "only where a code-owner review is required for the changed files. `gated` can "
     "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
-    "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
+    "`required_approving_review_count` to 1 or more, or set `gated: false` on the "
     "environments meant to apply unreviewed."
 )
 _LAST_PUSH_AT_ZERO = (
@@ -243,7 +243,7 @@ def _review_rule_warnings(ctx):
 
 def _no_review_findings(ctx, branch, code_owner, last_push):
     """The count-0 finding. Gated environments are every one the default branch's table lists
-    or a cell declares, less its `gated = false` entries.
+    or a cell declares, less its `gated: false` entries.
 
     None are named when that table cannot be read or is invalid: which environments are
     exempt is then unknown, and naming all of them would warn about ones the file exempts.
@@ -323,8 +323,8 @@ def _bound_names(ctx):
 def _shared_intro(env):
     """Opening clause of a shared-role finding."""
     return (
-        f"GitHub Environment `{env}` (shared between plan and apply by `shared = true` in "
-        f"its `[environments.{env}]` entry)"
+        f"GitHub Environment `{env}` (shared between plan and apply by `shared: true` in "
+        f"its `environments.{env}` entry)"
     )
 
 
@@ -349,7 +349,7 @@ def _missing(name, env, role):
 
 DEFAULT_TABLE_UNREADABLE = (
     NOTICE,
-    "the environment probes were skipped: the default branch's `.github/shipmate.toml` "
+    "the environment probes were skipped: the default branch's `.github/shipmate-config.yml` "
     "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
     "and it alone selects which GitHub Environments a run binds. While that holds, every run "
     "refuses at detect.",
@@ -373,7 +373,7 @@ def _environment_warnings(ctx):
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
-    if ec.interpreter_refusal():
+    if ec.runner_refusal():
         return [ENV_PROBES_INTERPRETER_REFUSED]
     names = _existing_env_names(ctx)
     bound = _bound_names(ctx)
@@ -389,7 +389,7 @@ def _probed_bindings(ctx):
     With no declared env nothing is read: listing the environments anyway would let a
     repository whose token cannot list them collect a "could not verify" degrade for a probe
     that had no work to do. Existence comes from `_existing_env_names`."""
-    if not ctx["envs"] or ec.interpreter_refusal():
+    if not ctx["envs"] or ec.runner_refusal():
         return []
     existing = _existing_env_names(ctx)
     bound = _bound_names(ctx)
@@ -444,7 +444,7 @@ def _env_shape_findings(name, env, data, role):
                 "job that binds the environment and GitHub offers no per-job filter, so "
                 "the plan cells and every drift sweep covering it will not start immediately "
                 f"either. To gate applies only, split it into `{env}-plan` and "
-                f"`{env}-apply` and remove `shared = true` from its `[environments.{env}]` entry.",
+                f"`{env}-apply` and remove `shared: true` from its `environments.{env}` entry.",
             )
         )
     if role == "shared" and policy:
@@ -856,9 +856,6 @@ def _workflow_text(path):
 
     One leading U+FEFF is dropped: a BOM sits in front of the column-0 `on:` key,
     which `_on_block` would otherwise read as no top-level trigger block at all.
-    The config probe reads its file through `_contents_text` without this step:
-    `tomllib` refuses a BOM, so stripping one there would report a table valid
-    that every run reading it refuses.
     """
     text = _contents_text(path)
     return None if text is None else text.removeprefix("\ufeff")
@@ -1833,7 +1830,7 @@ def _config_defaults(table):
         (
             NOTICE,
             _Rendered(
-                f"`explicit = true` on {_md_escape(_fit_items(envs, ', ', 400))}: a bare "
+                f"`explicit: true` on {_md_escape(_fit_items(envs, ', ', 400))}: a bare "
                 "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             )
             if envs
@@ -1856,7 +1853,7 @@ def _config_table(ctx):
     alone — `validate_structure`, not `validate` — because the rest need run context;
     CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
     """
-    refusal = ec.interpreter_refusal()
+    refusal = ec.runner_refusal()
     if refusal:
         # Ahead of every read, and outside the try below: the floor is a property of this
         # runner, so no revision of the file can be at fault and none is worth reading.
@@ -1892,7 +1889,7 @@ def _config_table(ctx):
             "branch's copy, which this says nothing about.",
         )
         return None, [invalid], []
-    refs = ec.references(ec.load_toml(text))
+    refs = ec.references(ec.load_config(text))
     shown = "; ".join(f"`{path}` from variable `{name}`" for path, name in refs)
     return table, [], [(NOTICE, CONFIG_REFERENCES.format(refs=shown))] if refs else []
 

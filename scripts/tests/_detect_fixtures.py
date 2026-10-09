@@ -69,7 +69,7 @@ MINIMAL_TABLE: dict[str, Any] = {"layout": "folder"}
 
 def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), reads=None):
     """Stub `read_table` on every `env-config` instance in `configs`, carrying `order`
-    as each entry's `needs` and `explicit` as each named entry's `explicit = true`.
+    as each entry's `needs` and `explicit` as each named entry's `explicit: true`.
 
     Shared by the two ordering detects so neither can drift back to stubbing `env-order`'s
     readers: a double there answers whatever the test asked for even when the caller has

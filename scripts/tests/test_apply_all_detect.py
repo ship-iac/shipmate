@@ -564,7 +564,7 @@ def test_main_reports_a_held_explicit_env_as_excluded_too(tmp_path, monkeypatch)
 
 
 def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
-    """The hold and the applied-ungated report both resolve from `gated = false` on the
+    """The hold and the applied-ungated report both resolve from `gated: false` on the
     default branch's entry, which is the only source: an environment without it is held.
 
     Mutation: resolve `ungated` from the process environment -- nothing sets it, so every
@@ -579,6 +579,25 @@ def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
     assert _wave_envs(parsed) == ["dev-eu"]
     assert json.loads(parsed["review_held_envs"]) == ["prod-eu"]
     assert json.loads(parsed["applied_ungated_envs"]) == ["dev-eu"]
+
+
+@pytest.mark.parametrize("written", ["true", '"true"'], ids=["bare", "quoted"])
+def test_an_explicit_flag_holds_the_env_back_however_it_is_quoted(tmp_path, monkeypatch, written):
+    """Every scalar in the file is a string, so a bare `true` and a quoted one parse alike and
+    both must keep the environment off a bare apply. The table goes through the real parser.
+
+    Mutation: delete the flag normalisation in `load_config` -- `explicit_envs` then sees the
+    string `"true"`, and prod applies with dev-eu."""
+    text = f"layout: folder\nenvironments:\n  prod:\n    explicit: {written}\n"
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "prod"],
+        table=aad.bm.ec.parse_table(text, {}),
+        decision="APPROVED",
+    )
+    assert _wave_envs(parsed) == ["dev-eu"]
+    assert json.loads(parsed["excluded_envs"]) == ["prod"]
 
 
 def test_main_reports_every_env_applied_when_all_of_them_are_listed(tmp_path, monkeypatch):
@@ -614,7 +633,7 @@ def test_main_omits_a_listed_explicit_env_from_the_applied_report(tmp_path, monk
 def test_main_names_the_gated_envs_applied_with_no_review_required(
     tmp_path, monkeypatch, decision, expected
 ):
-    """dev-eu is gated and runnable; dev-us is ungated, and its `gated = false` entry already
+    """dev-eu is gated and runnable; dev-us is ungated, and its `gated: false` entry already
     declares it applies unreviewed; prod-eu is gated but explicit, so it never runs and must
     not be named.
 

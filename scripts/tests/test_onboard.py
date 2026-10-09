@@ -197,22 +197,23 @@ def test_dry_run_issues_no_write(monkeypatch):
 
 
 def write_table(root, entry):
-    """A `.github/shipmate.toml` under `root` with one `dev-eu` table ending in `entry`."""
+    """A `.github/shipmate-config.yml` under `root` with one `dev-eu` entry ending in `entry`,
+    which is indented as the file needs it."""
     (root / ".github").mkdir(exist_ok=True)
-    (root / ".github" / "shipmate.toml").write_text(
-        f'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n{entry}',
+    (root / ".github" / "shipmate-config.yml").write_text(
+        f"layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: eu-west-1\n{entry}",
         encoding="utf-8",
         newline="\n",
     )
 
 
 def test_a_shared_entry_no_stack_tags_is_provisioned(monkeypatch, tmp_path, capsys):
-    """A `shared = true` entry is provisioned like any other, tagged or not: its bare
+    """A `shared: true` entry is provisioned like any other, tagged or not: its bare
     environment exists before the first pull request tagging a stack into it merges.
 
     Mutation: restore the loop refusing a shared name outside the tag-derived environments.
     """
-    write_table(tmp_path, "shared = true\n")
+    write_table(tmp_path, "    shared: true\n")
     policies = {"repos/o/r/environments/dev-eu/deployment-branch-policies": ABSENT}
     _, exc = run_main(monkeypatch, tmp_path, policies, ["--dry-run"], membership=({}, {}))
     assert exc.code == 0
@@ -693,7 +694,7 @@ def test_repository_level_key_is_deleted(monkeypatch):
 
 
 def test_shared_mode_binds_one_bare_environment(monkeypatch):
-    """An environment whose table entry holds `shared = true` is one bare
+    """An environment whose table entry holds `shared: true` is one bare
     `<env>` on both paths; no `<env>-plan` is created for it.
 
     The two suffixed reads are the naming-conflict probe, which in shared mode looks for
@@ -864,7 +865,7 @@ SPLIT_CONFLICT = (
     "dev-eu",
     "the engine binds `dev-eu-plan` / `dev-eu-apply` for `dev-eu`, and `dev-eu` is also "
     "present. Nothing binds `dev-eu`, so nothing was created or changed for `dev-eu`. "
-    "Delete `dev-eu`, or set `shared = true` in `[environments.dev-eu]` so the engine "
+    "Delete `dev-eu`, or set `shared: true` in `environments.dev-eu` so the engine "
     "binds the bare `dev-eu` instead.",
 )
 SHARED_CONFLICT = (
@@ -873,7 +874,7 @@ SHARED_CONFLICT = (
     "the engine binds `dev-eu` for `dev-eu`, and `dev-eu-plan` and `dev-eu-apply` are "
     "also present. Nothing binds `dev-eu-plan` and `dev-eu-apply`, so nothing was created "
     "or changed for `dev-eu`. Delete `dev-eu-plan` and `dev-eu-apply`, or drop "
-    "`shared = true` from `[environments.dev-eu]`.",
+    "`shared: true` from `environments.dev-eu`.",
 )
 
 
@@ -934,7 +935,7 @@ def test_a_bare_env_alone_is_refused_before_the_split_pair_is_created(monkeypatc
 
 def test_the_split_pair_alone_is_refused_before_the_bare_env_is_created(monkeypatch):
     """The mirror of the case above, reached by marking a split repository's environment
-    `shared = true`: creating the bare `dev-eu` beside the pair leaves the same unused
+    `shared: true`: creating the bare `dev-eu` beside the pair leaves the same unused
     naming behind, so it is refused rather than written.
 
     Mutation: `_unused_naming` returning `[env]` unconditionally, which reads the bare
@@ -1174,7 +1175,7 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, key=True, membership=ONE
 
 def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path):
     """`onboard` moves no pin -- `_reconcile_shim` reports `pin-only` and leaves it, and that
-    status never reaches `_exit_code`. A `.github/shipmate.toml` written here could therefore
+    status never reaches `_exit_code`. A `.github/shipmate-config.yml` written here could therefore
     hand a repository still pinned to an older engine a file that engine refuses, silently,
     because a top-level key it predates is rejected outright. So the file stays a checklist
     item for a human who merges it in the right order.
@@ -1184,7 +1185,7 @@ def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path)
     `key.pem` is this harness's own input, not something the run created. The drift file is
     the consumer's to name, so `shipmate.yml` is the only workflow file a run writes.
 
-    Mutations: write a `.github/shipmate.toml` from `_checklist`; render the `shipmate drift`
+    Mutations: write a `.github/shipmate-config.yml` from `_checklist`; render the `shipmate drift`
     fence to `.github/workflows/shipmate-drift.yml` from `main`.
     """
     run_main(monkeypatch, tmp_path, {}, [])
@@ -1260,15 +1261,15 @@ def _variable_sets(fake):
 
 
 def test_the_table_decides_which_naming_is_created(monkeypatch, tmp_path):
-    """The checkout's `.github/shipmate.toml` is the only source of the shared set: an
-    entry holding `shared = true` gets the bare environment and no split pair, and no run
+    """The checkout's `.github/shipmate-config.yml` is the only source of the shared set: an
+    entry holding `shared: true` gets the bare environment and no split pair, and no run
     writes a variable naming it.
 
     Mutations: `_resolve_shared` returning `set()` without reading the file reddens the
     shared case; writing a SHIPMATE_SHARED_ENVS variable from `_reconcile_variables`
     reddens its variable list.
     """
-    write_table(tmp_path, "shared = true\n")
+    write_table(tmp_path, "    shared: true\n")
     fake, _ = run_main(
         monkeypatch,
         tmp_path,
@@ -1291,27 +1292,24 @@ def test_without_a_table_every_environment_is_split(monkeypatch, tmp_path):
 
 
 def test_an_invalid_table_refuses_before_any_write(monkeypatch, tmp_path):
-    """`shared_envs` trusts the table's shape, and a quoted `"true"` reads as unshared, the
-    split naming. The structural check refuses first, while no write has run.
+    """`shared_envs` trusts the table's shape, and a `yes` reads as unshared, the split
+    naming. The structural check refuses first, while no write has run.
 
     Mutation: drop the `validate_structure` call in `_resolve_shared`, which reconciles
     the split pair.
     """
-    write_table(tmp_path, 'shared = "true"\n')
+    write_table(tmp_path, "    shared: yes\n")
     fake, exc = run_main(monkeypatch, tmp_path, {}, [])
     assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
-    assert str(exc) == (
-        "::error::environments.dev-eu.shared must be a boolean, got str. "
-        "Write shared = true or shared = false, unquoted."
-    )
+    assert str(exc) == ("::error::environments.dev-eu.shared must be true or false, got 'yes'.")
 
 
 def write_referencing_table(root):
-    """A `.github/shipmate.toml` whose shared `dev-eu` takes its region from DEV_EU_REGION."""
+    """A `.github/shipmate-config.yml` whose shared `dev-eu` takes its region from DEV_EU_REGION."""
     (root / ".github").mkdir(exist_ok=True)
-    (root / ".github" / "shipmate.toml").write_text(
-        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = { vars = "DEV_EU_REGION" }\n'
-        "shared = true\n",
+    (root / ".github" / "shipmate-config.yml").write_text(
+        "layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: {vars: DEV_EU_REGION}\n"
+        "    shared: true\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -1364,7 +1362,7 @@ def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_p
     assert str(excinfo.value) == (
         "could not read the organization variables reaching o/r: gh: Forbidden (HTTP 403)\n"
         "A fine-grained token needs this repository's Variables read permission, and "
-        "`--slurp` needs a recent `gh`. .github/shipmate.toml environments.dev-eu.region "
+        "`--slurp` needs a recent `gh`. .github/shipmate-config.yml environments.dev-eu.region "
         "references GitHub variable DEV_EU_REGION, and onboard resolves a reference from "
         "these variables and the repository's."
     )
@@ -1374,7 +1372,7 @@ def test_resolve_shared_returns_the_table_it_validated(tmp_path):
     """`main` keeps the table for the checklist. Mutation: return `{}, set()` when there is
     no file, which reads as a table declaring nothing."""
     assert onboard._resolve_shared(tmp_path, "o/r", {}) == (None, set())
-    write_table(tmp_path, "shared = true\n")
+    write_table(tmp_path, "    shared: true\n")
     assert onboard._resolve_shared(tmp_path, "o/r", {}) == (
         {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1", "shared": True}}},
         {"dev-eu"},
@@ -1388,7 +1386,7 @@ def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
         raise AssertionError(f"unexpected call: {args}")
 
     monkeypatch.setattr(onboard, "_run", refuse)
-    write_table(tmp_path, "shared = true\n")
+    write_table(tmp_path, "    shared: true\n")
     assert onboard._resolve_shared(tmp_path, "o/r", {})[1] == {"dev-eu"}
 
 
@@ -1984,7 +1982,7 @@ todo          SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
     gh secret set SHIPMATE_PLAN_PASSPHRASE
     An organization secret of that name is not visible to this read.
 
-todo          `.github/shipmate.toml`
+todo          `.github/shipmate-config.yml`
     Add one: copy the example in docs/getting-started.md §Environments for this tier.
 
 cannot check  o/r in the App installation's repository selection
@@ -2034,7 +2032,7 @@ CONFIGURED_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
 ok            SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
-ok            `.github/shipmate.toml`
+ok            `.github/shipmate-config.yml`
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
     does not hold. Check it, or add the repository, at
@@ -2109,8 +2107,8 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "drift.yml").write_bytes(FOLDERS_DRIFT)
     (tmp_path / ".github" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
-    (tmp_path / ".github" / "shipmate.toml").write_text(
-        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n',
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: eu-west-1\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -2166,12 +2164,12 @@ def test_a_table_failing_tf_vars_coverage_is_todo_naming_the_refusal():
 
     Mutation: call `ec.validate_structure` instead of `ec.validate`.
     """
-    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nshared = false\n')
+    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    shared: false\n")
     assert onboard._table_item(ctx(table=table)) == (
         "todo",
-        "`.github/shipmate.toml`",
+        "`.github/shipmate-config.yml`",
         [
-            'layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the environment '
+            "layout: tf_vars derives TF_VAR_env and TF_VAR_region from the environment "
             "table, and dev-eu has an entry with no region."
         ],
     )
@@ -2323,7 +2321,7 @@ def test_a_shared_environment_beside_a_reviewed_one_needs_the_review_rule(capsys
 
 
 def test_an_ungated_environment_is_not_asked_for_reviewers(capsys, tmp_path):
-    """`gated = false` exempts an environment from the review requirement, so asking for
+    """`gated: false` exempts an environment from the review requirement, so asking for
     reviewers on it contradicts the table.
 
     Mutation: drop the `env not in ungated` filter from `_checklist`.
@@ -2679,10 +2677,10 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
     Mutation: always render the several-name wording -- the one-name lines differ.
     Mutation: pass `tagged` to `_table_item`'s `ec.validate` again -- the warning prints.
     """
-    write_table(tmp_path, '\n[environments.prdo]\nregion = "eu-west-1"\n')
+    write_table(tmp_path, "  prdo:\n    region: eu-west-1\n")
     run_main(monkeypatch, tmp_path, PRDO_ROUTES, ["--dry-run"])
     out = capsys.readouterr().out
-    assert checklist_items(checklist_of(out))["`.github/shipmate.toml`"] == (
+    assert checklist_items(checklist_of(out))["`.github/shipmate-config.yml`"] == (
         "ok",
         [
             "Provisioned for prdo, which no stack tags yet: its first tagging pull request",
@@ -2695,8 +2693,8 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
 
 def _table_only_detail(*names):
     """`_table_item`'s detail for a tagged `dev-eu` plus table-only `names`."""
-    entries = "".join(f'\n[environments.{n}]\nregion = "eu-west-1"\n' for n in ("dev-eu", *names))
-    table = ec.parse_table(f'layout = "tf_vars"\n{entries}')
+    entries = "".join(f"  {n}:\n    region: eu-west-1\n" for n in ("dev-eu", *names))
+    table = ec.parse_table(f"layout: tf_vars\nenvironments:\n{entries}")
     verdict, _, details = onboard._table_item(ctx(table=table, envs=sorted(["dev-eu", *names])))
     assert verdict == "ok"
     return details
@@ -2730,8 +2728,8 @@ def test_the_table_only_detail_wraps_the_whole_sentence_at_80(names, sentence):
 
 def test_a_table_whose_entries_are_all_tagged_has_no_detail():
     """Mutation: name every environment, tagged or not -- `dev-eu` is listed."""
-    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n')
-    assert onboard._table_item(ctx(table=table)) == ("ok", "`.github/shipmate.toml`", [])
+    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: eu-west-1\n")
+    assert onboard._table_item(ctx(table=table)) == ("ok", "`.github/shipmate-config.yml`", [])
 
 
 def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_path, capsys):
@@ -2742,8 +2740,8 @@ def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_
     Mutation: derive `envs` from `stacks_by_env` alone.
     """
     (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "shipmate.toml").write_text(
-        'layout = "tf_vars"\n\n[environments.prod]\nregion = "eu-west-1"\n',
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "layout: tf_vars\n\nenvironments:\n  prod:\n    region: eu-west-1\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -2805,10 +2803,11 @@ def test_a_stack_with_two_workload_tags_is_a_stack_tags_line(monkeypatch, tmp_pa
     gone; that and remove the `ec._gather` wrapper -- the refusal raises into `main`.
     """
     (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "shipmate.toml").write_text(
-        'layout = "tf_vars"\n\n[identities.dev.aws]\n'
-        'apply = "arn:aws:iam::111111111111:role/apply"\n\n'
-        '[environments.dev-eu]\nregion = "eu-west-1"\nidentity = "dev"\nworkloads = ["core"]\n',
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "layout: tf_vars\n\nidentities:\n  dev:\n    aws:\n"
+        "      apply: arn:aws:iam::111111111111:role/apply\n\n"
+        "environments:\n  dev-eu:\n    region: eu-west-1\n    identity: dev\n"
+        "    workloads: [core]\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -2826,8 +2825,9 @@ def test_a_stack_with_two_workload_tags_is_a_stack_tags_line(monkeypatch, tmp_pa
             "1 cell(s) carry a workload tag their environment's workloads list does not name: "
             "b in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
             "the default branch grants a role to. Retag the stack, or add the workload to "
-            "environments.<env>.workloads in .github/shipmate.toml on the default branch, which "
-            "is where this table is read from: merge it there on its own pull request first.",
+            "environments.<env>.workloads in .github/shipmate-config.yml on the default "
+            "branch, which is where this table is read from: merge it there on its own pull "
+            "request first.",
             "`environments.dev-eu.workloads` lists core, which no stack in dev-eu tags. Tag a",
             "stack with each, or remove it from the list.",
         ],
@@ -2880,8 +2880,9 @@ def test_a_cell_whose_workload_its_list_does_not_name_is_listed():
             "1 cell(s) carry a workload tag their environment's workloads list does not name: "
             "a in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
             "the default branch grants a role to. Retag the stack, or add the workload to "
-            "environments.<env>.workloads in .github/shipmate.toml on the default branch, which "
-            "is where this table is read from: merge it there on its own pull request first."
+            "environments.<env>.workloads in .github/shipmate-config.yml on the default "
+            "branch, which is where this table is read from: merge it there on its own pull "
+            "request first."
         ],
     )
 
@@ -2921,7 +2922,7 @@ def test_a_needs_predecessor_no_entry_declares_and_no_stack_tags_is_todo():
     context = ctx(table=table, envs=["prod", "staging"], tagged={"prod": frozenset()})
     assert onboard._table_item(context) == (
         "todo",
-        "`.github/shipmate.toml`",
+        "`.github/shipmate-config.yml`",
         [
             "Provisioned for staging, which no stack tags yet: its first tagging pull request",
             "deploys under that environment's protection. If the name is a typo, fix the",
@@ -3022,7 +3023,7 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch)
 
 
 def test_shared_mode_reports_the_unused_naming_too(monkeypatch):
-    """Running once without `shared = true` and once with it produces all three environments.
+    """Running once without `shared: true` and once with it produces all three environments.
     The second run must not silently bind the bare one: nothing binds the pair in shared
     mode, so the probe runs in shared mode as well.
 
@@ -3094,7 +3095,7 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
             "it carries protection rules (required_reviewers, wait_timer) and is shared, "
             "so the plan cells and every drift sweep covering it do not start immediately either. "
             "To gate applies alone, split it into `dev-eu-plan` and `dev-eu-apply` and "
-            "drop `shared = true` from `[environments.dev-eu]`.",
+            "drop `shared: true` from `environments.dev-eu`.",
         ),
         ("ok", "dev-eu branch policy", "main"),
     ]
@@ -3212,8 +3213,8 @@ def test_an_absent_table_leaves_coverage_uncomputed(tmp_path):
         DRIFT_ITEM,
         [
             "Coverage was not computed:",
-            "  `.github/shipmate.toml` is absent, and a drift run refuses without it; see its "
-            "item.",
+            "  `.github/shipmate-config.yml` is absent, and a drift run refuses without it; see "
+            "its item.",
             _read_line("drift.yml"),
         ],
     )
@@ -3497,8 +3498,8 @@ def test_the_drift_query_is_read_without_yaml(with_lines, expected):
 def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, capsys):
     """Mutation: the item calls `report("differs", ...)` on a finding -- the run exits 2."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    (tmp_path / ".github" / "shipmate.toml").write_text(
-        'layout = "folder"\n\n[environments.dev-eu]\n', encoding="utf-8", newline="\n"
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "layout: folder\n\nenvironments:\n  dev-eu: {}\n", encoding="utf-8", newline="\n"
     )
     (tmp_path / ".github" / "workflows" / "ghost.yml").write_text(
         _drift_job("    with:\n      tags: env/ghost\n"), encoding="utf-8", newline="\n"
@@ -3595,7 +3596,7 @@ def test_a_sweep_refusing_a_workload_gap_covers_no_cell(tmp_path):
             "drift.yml: 1 cell(s) carry a workload tag their environment's workloads list does "
             "not name: a in dev-eu (workload/net; dev-eu lists core). A listed workload is the "
             "only one the default branch grants a role to. Retag the stack, or add the workload "
-            "to environments.<env>.workloads in .github/shipmate.toml on the default branch, "
+            "to environments.<env>.workloads in .github/shipmate-config.yml on the default branch, "
             "which is where this table is read from: merge it there on its own pull request "
             "first.",
             "1 cell(s) no drift file sweeps:",
@@ -3611,7 +3612,7 @@ def test_a_table_failing_validation_leaves_coverage_uncomputed(tmp_path):
 
     Mutation: drop the `ec.validate` check from `_coverage_blockers` -- `ok`.
     """
-    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nshared = false\n')
+    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    shared: false\n")
     cells, tags = _tree(("a", "dev-eu"))
     context = _drift_ctx(
         tmp_path, {"drift.yml": FOLDERS_DRIFT}, table=table, cells=cells, tags_by_stack=tags
@@ -3621,7 +3622,7 @@ def test_a_table_failing_validation_leaves_coverage_uncomputed(tmp_path):
         DRIFT_ITEM,
         [
             "Coverage was not computed:",
-            "  `.github/shipmate.toml` fails validation; see its item.",
+            "  `.github/shipmate-config.yml` fails validation; see its item.",
             _read_line("drift.yml"),
         ],
     )

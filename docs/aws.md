@@ -133,17 +133,23 @@ choose which role its own plan assumes.
 [`../CONTRACT.md`](../CONTRACT.md) §Environment table is the schema of record;
 this is what it looks like for the AWS sample:
 
-```toml
-layout = "tf_vars"
+```yaml
+# .github/shipmate-config.yml
+layout: tf_vars
 
-[identities.dev]
-aws.plan  = "arn:aws:iam::9817:role/shipmate-plan"
-aws.apply = { app = "arn:aws:iam::9817:role/shipmate-apply", net-edge = "arn:aws:iam::9817:role/net-edge" }
+identities:
+  dev:
+    aws:
+      plan: arn:aws:iam::9817:role/shipmate-plan
+      apply:
+        app: arn:aws:iam::9817:role/shipmate-apply
+        net-edge: arn:aws:iam::9817:role/net-edge
 
-[environments.dev-eu]
-region    = "eu-west-1"
-identity  = "dev"
-workloads = ["app", "net-edge"]
+environments:
+  dev-eu:
+    region: eu-west-1
+    identity: dev
+    workloads: [app, net-edge]
 ```
 
 Beyond the schema:
@@ -184,16 +190,20 @@ Beyond the schema:
   account's stack gets an identity and an environment naming it, and its one
   stack is tagged `env/mgmt`:
 
-  ```toml
-  layout = "tf_vars"
+  ```yaml
+  # .github/shipmate-config.yml
+  layout: tf_vars
 
-  [identities.management]
-  aws.plan  = "arn:aws:iam::4402:role/shipmate-plan"
-  aws.apply = "arn:aws:iam::4402:role/shipmate-apply"
+  identities:
+    management:
+      aws:
+        plan: arn:aws:iam::4402:role/shipmate-plan
+        apply: arn:aws:iam::4402:role/shipmate-apply
 
-  [environments.mgmt]
-  region   = "eu-west-1"
-  identity = "management"
+  environments:
+    mgmt:
+      region: eu-west-1
+      identity: management
   ```
 
   A stack with no `env/*` tag is unmanaged instead: shipmate never plans or

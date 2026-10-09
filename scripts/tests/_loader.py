@@ -170,6 +170,15 @@ def doc_fences(pages, fence):
             yield page, text[: m.start()].count("\n") + 1, textwrap.dedent(m.group("body"))
 
 
+#: The first line of a ```yaml fence that holds a `.github/shipmate-config.yml` example.
+CONFIG_FENCE_MARKER = "# .github/shipmate-config.yml"
+
+
+def is_config_fence(body):
+    """Whether a dedented ```yaml fence body is a config example rather than a workflow."""
+    return body.partition("\n")[0] == CONFIG_FENCE_MARKER
+
+
 def assert_every_fence_discovered(pages, fences, opener, lang):
     """Fail unless ``fences`` holds one entry per ``opener`` match in ``pages``.
 

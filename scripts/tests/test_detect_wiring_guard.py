@@ -5,7 +5,7 @@
   present input. `build-matrix`'s block is pinned by
   `test_build_matrix.py::test_build_matrix_action_hands_the_script_the_names_it_reads`.
 - Every detect action, `comment-ops` and `summary` declares `github-vars`, and every detect call
-  site passes it `toJSON(vars)`, so `env-config` can resolve a `{ vars = "NAME" }` reference in
+  site passes it `toJSON(vars)`, so `env-config` can resolve a `{vars: NAME}` reference in
   the table. The
   `with:` of `plan.yml`, `drift.yml` and `unlock.yml`'s detect steps is pinned whole beside the
   rest of those workflows; the other two steps are pinned here whole, beside `apply.yml`'s

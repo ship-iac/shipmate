@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pytest
 from _detect_fixtures import spy_env_config
@@ -349,6 +350,7 @@ def _run_main(
     table=None,
     stacks=None,
     tree=None,
+    read_table=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -356,7 +358,8 @@ def _run_main(
 
     The double returns `tree` as the scanned tree's cell names, or the names of `cells` when
     it is None. `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that
-    tree instead of the double, and leaves `called`, `cells` and `tree` unused.
+    tree instead of the double, and leaves `called`, `cells` and `tree` unused. `read_table`
+    replaces the default-branch read, which otherwise answers `table`.
 
     `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
     run past the head-checkout refusal looks like; without it the run states no head and is
@@ -404,7 +407,7 @@ def _run_main(
     else:
         monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
         monkeypatch.setattr(bm, "_tags", lambda s: stacks[s])
-    monkeypatch.setattr(bm.ec, "read_table", lambda: dict(table or _MINIMAL_TABLE))
+    monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
     bm.main()
     parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
     return parsed, called
@@ -1107,6 +1110,30 @@ def test_a_multi_line_refusal_writes_its_first_line_only(monkeypatch, tmp_path):
     )
 
 
+def test_a_runner_without_pyyaml_reaches_the_refusal_output(monkeypatch, tmp_path):
+    """The default branch's file is read through the real parser on a runner without PyYAML,
+    and the gate must name the prerequisite rather than a generic detect failure.
+
+    Mutation: delete the `runner_refusal()` call from `load_config` -- the parse then runs
+    without its prerequisite and no `refusal` line names it."""
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    refusal = (
+        "the engine needs PyYAML for python3 and this runner has none. Install python3-yaml "
+        "(Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; CONTRACT.md section "
+        "Runner prerequisites lists it."
+    )
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            _PLAN_ENV,
+            head_sha="a" * 40,
+            read_table=lambda: bm.ec.parse_table("layout: folder\n"),
+        )
+    assert exc.value.code == f"::error::{refusal}"
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == f"refusal={refusal}\n"
+
+
 def test_an_exit_that_is_not_a_refusal_writes_no_refusal(monkeypatch, tmp_path):
     """Mutation: drop the `isinstance` check -- `int.startswith` raises `AttributeError`."""
 
@@ -1147,8 +1174,8 @@ def test_every_cell_tagged_outside_its_list_is_named_in_one_refusal():
         "name: stacks/app in dev-eu (workload/app; dev-eu lists core, net); stacks/db in dev-eu "
         "(workload/db; dev-eu lists core, net). A listed workload is the only one the default "
         "branch grants a role to. Retag the stack, or add the workload to "
-        "environments.<env>.workloads in .github/shipmate.toml on the default branch, which is "
-        "where this table is read from: merge it there on its own pull request first."
+        "environments.<env>.workloads in .github/shipmate-config.yml on the default branch, "
+        "which is where this table is read from: merge it there on its own pull request first."
     )
 
 
@@ -1203,7 +1230,7 @@ def test_plan_detect_names_every_two_tag_stack_and_every_gap_in_one_refusal(monk
             "::error::1 cell(s) carry a workload tag their environment's workloads list does "
             "not name: stacks/c in dev (workload/app; dev lists core). A listed workload is the "
             "only one the default branch grants a role to. Retag the stack, or add the workload "
-            "to environments.<env>.workloads in .github/shipmate.toml on the default branch, "
+            "to environments.<env>.workloads in .github/shipmate-config.yml on the default branch, "
             "which is where this table is read from: merge it there on its own pull request "
             "first.",
         ]
@@ -1585,7 +1612,7 @@ def test_a_filtered_sweep_still_checks_every_environment_against_a_tf_vars_table
             stacks=_MULTI_ENV_TREE,
         )
     assert str(exc.value) == (
-        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
+        "::error::layout: tf_vars derives TF_VAR_env and TF_VAR_region from the "
         "environment table, and dev-us has no entry in it."
     )
 
@@ -1739,7 +1766,7 @@ def test_an_env_tag_naming_no_table_entry_still_refuses_under_tf_vars(monkeypatc
             stacks={"stacks/app": ["env/dev-eu"], "stacks/typo": ["env/nope"]},
         )
     assert str(exc.value) == (
-        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
+        "::error::layout: tf_vars derives TF_VAR_env and TF_VAR_region from the "
         "environment table, and nope has no entry in it."
     )
 

@@ -10,7 +10,7 @@ merge-deploy path. Env membership comes from stack tags
 never reverse-parsed; a stack with no `env/*` tag is in no environment and adds no cell.
 
 Three exclusions distinguish the bare form from deploy:
-- envs whose entry holds `explicit = true` (typically prod) are removed
+- envs whose entry holds `explicit: true` (typically prod) are removed
   before env-levels are built; their apply checks stay pending, so
   `shipmate / gate` keeps gating the merge until a targeted
   `shipmate apply <env>` completes them. `excluded_envs` names every one with
@@ -21,7 +21,7 @@ Three exclusions distinguish the bare form from deploy:
   level;
 - envs the PR's review decision does not authorize are held until it carries
   an approving review, dropped the same way; an entry holding
-  `gated = false` is exempt from that hold.
+  `gated: false` is exempt from that hold.
 """
 
 import json

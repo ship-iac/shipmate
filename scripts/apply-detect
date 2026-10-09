@@ -19,7 +19,7 @@ Apply mode writes the same env-level output contract as the bare form
 1-3 empty.
 
 Before any of that, the PR's review decision — read server-side by the `review`
-job, narrowed by `gated = false` on the environment's entry — must authorize this
+job, narrowed by `gated: false` on the environment's entry — must authorize this
 environment, or the run refuses.
 """
 
@@ -230,7 +230,7 @@ def refuse_unreviewed(env, table, decision):
     checks stay pending, and the gate stays pending with them.
 
     `table` must have been through `validate_structure`: `ungated_envs` reads only a
-    boolean `false` as ungated, so a quoted `gated = "false"` would otherwise refuse as
+    boolean `false` as ungated, so a `gated: no` would otherwise refuse as
     unreviewed rather than as the malformed setting it is."""
     ungated = bm.ec.ungated_envs(table)
     reason = az._review_reason(decision, env, ungated)

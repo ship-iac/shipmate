@@ -37,7 +37,7 @@ inputs:
     required: false
     default: ""
   applied-ungated-envs:
-    description: "JSON array of environments applied without an approving review, per `gated = false` on their entries (all-environments form only); the render step annotates each with a notice, not a comment line. Empty = []."
+    description: "JSON array of environments applied without an approving review, per `gated: false` on their entries (all-environments form only); the render step annotates each with a notice, not a comment line. Empty = []."
     required: false
     default: ""
   review-not-required-envs:

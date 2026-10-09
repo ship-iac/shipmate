@@ -263,16 +263,20 @@ creates all of them, including `shipmate-engine` and its branch policy:
   [`../CONTRACT.md`](../CONTRACT.md) §Env model is the per-layout table;
   [`concepts.md`](concepts.md) explains where they land.
 
-  ```toml
-  layout = "tf_vars"
+  ```yaml
+  # .github/shipmate-config.yml
+  layout: tf_vars
 
-  [identities.dev]
-  aws.plan  = "arn:aws:iam::9817:role/shipmate-plan"
-  aws.apply = "arn:aws:iam::9817:role/shipmate-apply"
+  identities:
+    dev:
+      aws:
+        plan: arn:aws:iam::9817:role/shipmate-plan
+        apply: arn:aws:iam::9817:role/shipmate-apply
 
-  [environments.dev-eu]
-  region   = "eu-west-1"
-  identity = "dev"
+  environments:
+    dev-eu:
+      region: eu-west-1
+      identity: dev
   ```
 
   Give the plan and apply paths separate roles: the plan path is reachable from
@@ -938,12 +942,14 @@ approval before merge also requires one before every apply. To keep a low-tier
 environment self-service while the rest stay gated, set `gated = false` on its
 entry in `.github/shipmate.toml`:
 
-```toml
-layout = "tf_vars"
+```yaml
+# .github/shipmate-config.yml
+layout: tf_vars
 
-[environments.dev-eu]
-region = "eu-west-1"
-gated  = false
+environments:
+  dev-eu:
+    region: eu-west-1
+    gated: false
 ```
 
 Your workflow file needs no line for it, and neither does a repository setting.
