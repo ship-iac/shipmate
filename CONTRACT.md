@@ -955,7 +955,9 @@ Terramate refuses an uppercase letter in a tag, so an environment name is
 lowercase letters, digits, `-` and `_` — never uppercase. The `environments`
 table's own keys and each `needs` item are held to that charset and to the
 `-plan`/`-apply` suffix rule, and an uppercase name is refused rather than left to
-match nothing.
+match nothing. An `env/<name>` tag takes an environment-table name (lowercase
+letters, digits, `-`, `_`, no `-plan`/`-apply` suffix), and any other refuses the
+run.
 
 A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip
 it, and plan, deploy and drift print a notice counting the unmanaged stacks they

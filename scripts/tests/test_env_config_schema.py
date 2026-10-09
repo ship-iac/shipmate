@@ -487,7 +487,7 @@ def test_the_single_entry_point_validates_ordering(table, message):
     string inside single quotes, `'"dev-eu"'`, arrives with its inner quotes still on.
 
     Mutations: delete the `validate_env_name_list` call from `_check_entries` -- every
-    case validates; drop either entry from the suffix tuple in `_check_env_name` -- that
+    case validates; drop either entry from the suffix tuple in `check_env_name` -- that
     suffix's case validates; or widen `_ENV_ENTRY` to `.+` -- the space, quote and
     uppercase cases validate.
     """
@@ -503,7 +503,7 @@ def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
     matched with their hyphen, so `plan-eu` and `apply-svc` survive a containment test too
     and pin the leading-word half rather than this one.
 
-    Mutation: `e.endswith(suffix)` -> `suffix in e` in `_check_env_name` -- `eu-plan-1`
+    Mutation: `e.endswith(suffix)` -> `suffix in e` in `check_env_name` -- `eu-plan-1`
     then refuses.
     """
     table = _needs(["dev", "plan-eu", "apply-svc", "eu-plan-1"])

@@ -209,6 +209,35 @@ def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
     assert tags_by_stack == tags
 
 
+_CHARSET = (
+    " is not an environment name; entries are bare logical env names (lowercase letters, "
+    "digits, '-' and '_'), with no quotes, spaces or path separators."
+)
+
+
+@pytest.mark.parametrize(
+    ("tag", "message"),
+    [
+        ("env/a.b", "::error::stack 'stacks/c' tag 'env/a.b'" + _CHARSET),
+        ("env/../admin", "::error::stack 'stacks/c' tag 'env/../admin'" + _CHARSET),
+        (
+            "env/prod-apply",
+            "::error::stack 'stacks/c' tag 'env/prod-apply' carries the environment suffix "
+            "'-apply'; a tag is matched against the bare logical env name; write 'prod' instead.",
+        ),
+    ],
+    ids=["dot", "path", "suffix"],
+)
+def test_env_membership_refuses_a_tag_no_environment_can_take(monkeypatch, tag, message):
+    """Mutations: drop the `check_env_name` call -- `env/a.b` passes; refuse only on
+    `is_env_name` -- `env/prod-apply` passes."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/c"])
+    monkeypatch.setattr(bm, "_tags", lambda s: [tag] if s == "stacks/c" else ["env/dev-eu"])
+    with pytest.raises(SystemExit) as e:
+        bm.env_membership(all_stacks=True)
+    assert str(e.value) == message
+
+
 _UNMANAGED_TREE = {
     "stacks/app": ["env/dev-eu"],
     "stacks/zeta": ["workload/net"],
