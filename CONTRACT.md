@@ -976,7 +976,7 @@ deploy refuses when its merged pull request holds an open apply check for a
 stack and environment the merge no longer pairs: the stack, changed by that
 pull request, lost that `env/*` tag (or every one) after the pull request was
 planned, so no cell would ever apply its reviewed change. The refusal applies
-nothing, so it also names every other cell of that merge, as `<stack> / <env>`.
+nothing, so it also names every other cell of that merge still to apply, as `<stack> / <env>`.
 A new pull request that retags each stranded stack and changes every other
 named stack plans the current default branch, and its deploy applies all of
 them. After a deliberate untag, the stranded change is applied by hand instead,
