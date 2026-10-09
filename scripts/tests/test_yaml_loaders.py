@@ -28,7 +28,8 @@ def test_the_config_loader_reads_every_scalar_as_a_string():
 
 
 def test_the_config_loader_refuses_a_duplicate_key_at_its_position():
-    """Reddens on deleting the config loader's `seen` check: the second value wins silently."""
+    """Reddens on deleting the duplicate check in `_check_keys`: the second value wins
+    silently."""
     assert _config_refusal("a: 1\na: 2\n") == "duplicate key 'a' (line 2, column 1)"
 
 
@@ -52,8 +53,9 @@ def test_the_config_loader_refuses_an_alias_an_anchor_and_a_tag_by_name(text, re
 
 
 def test_the_config_loader_refuses_a_non_scalar_key():
-    """Reddens on deleting the config loader's `ScalarNode` check: the list key then reaches
-    the `seen` set and raises `TypeError`, which a caller catching `YAMLError` misses."""
+    """Reddens on deleting the `key.id != "scalar"` check in `_check_keys`: the list key then
+    reaches the duplicate check and raises `TypeError`, which a caller catching `YAMLError`
+    misses."""
     assert _config_refusal("? [a, b]\n: v\n") == "a key must be a plain value (line 1, column 3)"
 
 
@@ -78,8 +80,8 @@ def test_the_config_loader_accepts_a_bom_crlf_and_an_empty_document(text, expect
 
 
 def test_the_workflow_loader_types_scalars_by_the_yaml_1_2_core_schema():
-    """Reddens on skipping the clear of `yaml_implicit_resolvers`: YAML 1.1 then reads `on`
-    as `True`, `yes` and `no` as booleans and `08` as a failed octal."""
+    """Reddens on skipping the clear of `yaml_implicit_resolvers`: YAML 1.1 then reads both
+    `on` and `yes` as `True`, and the load refuses them as a duplicate key."""
     text = "on:\n  push:\nyes: no\nr: true\nn: 08\no: 0o17\nf: 1.10\nz: ~\n"
     assert load_workflow_text(text) == {
         "on": {"push": None},
@@ -93,15 +95,15 @@ def test_the_workflow_loader_types_scalars_by_the_yaml_1_2_core_schema():
 
 
 def test_the_workflow_loader_refuses_a_duplicate_key():
-    """Reddens on deleting the workflow loader's `seen` check: the second value wins."""
+    """Reddens on deleting the duplicate check in `_check_keys`: the second value wins."""
     with pytest.raises(yaml.YAMLError) as exc:
         load_workflow_text("a: 1\na: 2\n")
     assert yaml_error_text(exc.value) == "duplicate key 'a' (line 2, column 1)"
 
 
 def test_the_workflow_loader_refuses_a_non_scalar_key_as_a_yaml_error():
-    """Reddens on deleting the workflow loader's `ScalarNode` check: the constructed list key
-    raises `TypeError` in the `seen` check instead of a `YAMLError`."""
+    """Reddens on deleting the `key.id != "scalar"` check in `_check_keys`: the constructed
+    list key raises `TypeError` in the duplicate check instead of a `YAMLError`."""
     with pytest.raises(yaml.YAMLError) as exc:
         load_workflow_text("? [a, b]\n: v\n")
     assert yaml_error_text(exc.value) == "a key must be a plain value (line 1, column 3)"
@@ -127,6 +129,16 @@ def test_the_workflow_loader_refuses_a_bad_explicit_tag_value_as_a_yaml_error(te
     with pytest.raises(yaml.YAMLError) as exc:
         load_workflow_text(text)
     assert yaml_error_text(exc.value) == expected
+
+
+def test_a_bad_explicit_tag_value_is_echoed_cut_to_80_characters():
+    """The refusal reaches doctor's pull request comment whole, so a 10,000-character value
+    must not. Mutation: echo `node.value` uncut -- the refusal runs past 10,000 characters."""
+    with pytest.raises(yaml.YAMLError) as exc:
+        load_workflow_text("x: !!int " + "a" * 10_000 + "\n")
+    assert yaml_error_text(exc.value) == (
+        f"'{'a' * 80}...' is not a valid !!int (line 1, column 4)"
+    )
 
 
 @pytest.mark.parametrize("load", [load_workflow_text, load_config_text])
@@ -169,9 +181,7 @@ def test_the_workflow_loader_matches_safe_load_on_every_engine_file(path):
 def test_the_guard_harness_parses_workflows_with_the_workflow_loader():
     """The guards read engine files the way doctor reads a consumer's, so `on` stays a string
     key. Reddens on parsing `_loader._parse_yaml` with `yaml.safe_load`: `on` becomes `True`."""
-    doc = workflow_yaml("plan.yml")
-    assert "on" in doc
-    assert True not in doc
+    assert set(workflow_yaml("plan.yml")) == {"name", "on", "permissions", "cache-mode", "jobs"}
 
 
 def test_shipmate_imports_without_pyyaml_and_the_loader_raises(monkeypatch):

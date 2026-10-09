@@ -198,15 +198,19 @@ def _check_keys(node, key_of):
 def _construct_object(self, node, deep=False):
     """`WorkflowLoader.construct_object`: SafeLoader's, refusing as a `ConstructorError` at
     `node` the plain exceptions its scalar constructors raise on an explicit tag with a bad
-    value (`!!int abc`), which a caller catching `YAMLError` would miss."""
+    value (`!!int abc`), which a caller catching `YAMLError` would miss. The value is cut to
+    80 characters, because the refusal reaches a pull request comment whole."""
     from yaml import SafeLoader
     from yaml.constructor import ConstructorError
 
     try:
         return SafeLoader.construct_object(self, node, deep)
     except (ValueError, LookupError, AttributeError, TypeError):
+        if node.id != "scalar":
+            raise
         tag = node.tag.replace("tag:yaml.org,2002:", "!!")
-        _refuse(ConstructorError, f"{node.value!r} is not a valid {tag}", node.start_mark)
+        value = node.value if len(node.value) <= 80 else node.value[:80] + "..."
+        _refuse(ConstructorError, f"{value!r} is not a valid {tag}", node.start_mark)
 
 
 @functools.cache
@@ -281,9 +285,9 @@ def load_workflow_text(text):
     """Parse a GitHub workflow or action file by the YAML 1.2 core schema, as GitHub does.
 
     `true`/`false` in three casings are booleans; decimal, `0o` and `0x` integers, floats and
-    `null`/`~`/empty are typed; every other scalar, `on`, `yes`, `no`, `08` and `1_000`
-    included, is a string. Aliases resolve, an unknown local tag (`!foo`) reads as untagged,
-    `<<` is an ordinary key, and a duplicate or non-scalar key is refused. Raises
+    `null`/`~`/empty are typed, and `08` is the integer 8; every other scalar, `on`, `yes`,
+    `no` and `1_000` included, is a string. Aliases resolve, an unknown local tag (`!foo`) reads
+    as untagged, `<<` is an ordinary key, and a duplicate or non-scalar key is refused. Raises
     `yaml.YAMLError`, and `ModuleNotFoundError` when PyYAML is absent.
     """
     return _parse(_loaders()[1], text)
