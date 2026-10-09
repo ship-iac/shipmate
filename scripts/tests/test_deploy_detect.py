@@ -435,7 +435,7 @@ def test_main_refuses_a_cyclic_needs_before_sorting_env_levels(tmp_path, monkeyp
     assert str(exc.value) == (
         "::error::needs is cyclic: a -> b -> a: each of those must fully apply before the "
         "next, so the ordering has no first environment and no apply path can sort it. Break "
-        "the chain in .github/shipmate.toml."
+        "the chain in .github/shipmate-config.yml."
     )
 
 

@@ -26,7 +26,7 @@ def _step(needle):
 def test_the_workflow_declares_no_inputs_and_one_secret():
     """Mutation: add any `workflow_call` input, or make the secret `required: true` -- which
     fails at load time for every consumer scoping the key to an environment."""
-    call = workflow_yaml(WF)[True]["workflow_call"]
+    call = workflow_yaml(WF)["on"]["workflow_call"]
     assert call.get("inputs") is None
     assert call["secrets"] == {"SHIPMATE_APP_PRIVATE_KEY": {"required": False}}
 
@@ -100,7 +100,7 @@ def test_the_authz_step_passes_this_whole_with_block():
     constant privileged login, and every commenter's `shipmate apply` passes the permission
     check; add an `ungated-envs` back, and the gate settings acquire a second source that a
     repository variable can set without a pull request. `github-vars` is not that: it resolves
-    only the `{ vars = "NAME" }` references the file itself names, so the file still chooses;
+    only the `{vars: NAME}` references the file itself names, so the file still chooses;
     delete it, and a file holding a reference refuses every apply and unlock.
     """
     assert _step("actions/comment-ops")["with"] == {

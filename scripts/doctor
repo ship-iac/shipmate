@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the twelve live probes'
+- report: render the sticky PR comment on demand — the thirteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
@@ -28,6 +28,8 @@ Probes:
   open and therefore ungated.
 - `shipmate-engine`: exists, with a branch policy naming the default branch.
 - secrets held by each declared plan environment.
+- the consumer's workflow files parse as YAML; the other workflow probes skip one that does
+  not.
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
 - the consumer's `shipmate.yml`: the plan-calling job named `shipmate`, or the plan
@@ -36,7 +38,7 @@ Probes:
   workflow, each with the `if:` that selects it — a wrong one sends a verb nowhere
   and its run completes green with every job skipped; and no call of `drift.yml`,
   which runs from its own workflow file.
-- the environment table at the commit under examination: `.github/shipmate.toml`
+- the environment table at the commit under examination: `.github/shipmate-config.yml`
   parses and passes the checks a file can be judged on by itself, before it merges
   to the default branch execution reads it from.
 - GitHub App installation permission drift.
@@ -45,6 +47,7 @@ Probes:
 
 import collections
 import contextlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -53,7 +56,16 @@ import sys
 
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
 from _shipmate import ENGINE_ENV as _ENGINE_ENV
-from _shipmate import _load, approval_rules, current_run_url, gate_check, review_count, utf8_output
+from _shipmate import (
+    _load,
+    approval_rules,
+    current_run_url,
+    gate_check,
+    load_workflow_text,
+    review_count,
+    utf8_output,
+    yaml_error_text,
+)
 
 ec = _load("env-config")
 _gh_json = ec.gh_json
@@ -103,7 +115,7 @@ _NO_REQUIRED_REVIEW = (
     "these gated environments can apply without an approving review: {envs}. One is held "
     "only where a code-owner review is required for the changed files. `gated` can "
     "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
-    "`required_approving_review_count` to 1 or more, or set `gated = false` on the "
+    "`required_approving_review_count` to 1 or more, or set `gated: false` on the "
     "environments meant to apply unreviewed."
 )
 _LAST_PUSH_AT_ZERO = (
@@ -241,9 +253,12 @@ def _review_rule_warnings(ctx):
     return out + _no_review_findings(ctx, branch, code_owner, last_push)
 
 
+_review_rule_warnings.parses_yaml = True
+
+
 def _no_review_findings(ctx, branch, code_owner, last_push):
     """The count-0 finding. Gated environments are every one the default branch's table lists
-    or a cell declares, less its `gated = false` entries.
+    or a cell declares, less its `gated: false` entries.
 
     None are named when that table cannot be read or is invalid: which environments are
     exempt is then unknown, and naming all of them would warn about ones the file exempts.
@@ -323,8 +338,8 @@ def _bound_names(ctx):
 def _shared_intro(env):
     """Opening clause of a shared-role finding."""
     return (
-        f"GitHub Environment `{env}` (shared between plan and apply by `shared = true` in "
-        f"its `[environments.{env}]` entry)"
+        f"GitHub Environment `{env}` (shared between plan and apply by `shared: true` in "
+        f"its `environments.{env}` entry)"
     )
 
 
@@ -349,7 +364,7 @@ def _missing(name, env, role):
 
 DEFAULT_TABLE_UNREADABLE = (
     NOTICE,
-    "the environment probes were skipped: the default branch's `.github/shipmate.toml` "
+    "the environment probes were skipped: the default branch's `.github/shipmate-config.yml` "
     "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
     "and it alone selects which GitHub Environments a run binds. While that holds, every run "
     "refuses at detect.",
@@ -373,13 +388,16 @@ def _environment_warnings(ctx):
                 "environment set is unknown, so the environment probes were skipped.",
             )
         ]
-    if ec.interpreter_refusal():
+    if ec.runner_refusal():
         return [ENV_PROBES_INTERPRETER_REFUSED]
     names = _existing_env_names(ctx)
     bound = _bound_names(ctx)
     if bound is None:
         return [DEFAULT_TABLE_UNREADABLE]
     return [(WARNING, _missing(n, env, r)) for env, n, r in bound if n not in names]
+
+
+_environment_warnings.parses_yaml = True
 
 
 def _probed_bindings(ctx):
@@ -389,7 +407,7 @@ def _probed_bindings(ctx):
     With no declared env nothing is read: listing the environments anyway would let a
     repository whose token cannot list them collect a "could not verify" degrade for a probe
     that had no work to do. Existence comes from `_existing_env_names`."""
-    if not ctx["envs"] or ec.interpreter_refusal():
+    if not ctx["envs"] or ec.runner_refusal():
         return []
     existing = _existing_env_names(ctx)
     bound = _bound_names(ctx)
@@ -444,7 +462,7 @@ def _env_shape_findings(name, env, data, role):
                 "job that binds the environment and GitHub offers no per-job filter, so "
                 "the plan cells and every drift sweep covering it will not start immediately "
                 f"either. To gate applies only, split it into `{env}-plan` and "
-                f"`{env}-apply` and remove `shared = true` from its `[environments.{env}]` entry.",
+                f"`{env}-apply` and remove `shared: true` from its `environments.{env}` entry.",
             )
         )
     if role == "shared" and policy:
@@ -501,6 +519,9 @@ def _env_protection_warnings(ctx):
             continue
         out.extend(_env_shape_findings(name, env, data, role))
     return out
+
+
+_env_protection_warnings.parses_yaml = True
 
 
 def _engine_environment_warnings(ctx):
@@ -754,19 +775,19 @@ def _plan_env_secret_warnings(ctx):
     return out
 
 
-# A `uses:` key as YAML may spell it (`uses:`, `"uses":`, `uses :`) and the opening quote of
-# its value. Shared by `_PIN` and `_engine_call`, so the two read the same calls.
-_USES = r"""(?<![\w-])["']?uses["']?[ \t]*:\s*["']?"""
+_plan_env_secret_warnings.parses_yaml = True
+
+
+# A whole `uses:` value naming another repository's action or reusable workflow.
 _PIN = re.compile(
-    _USES + r"(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/"
-    r"[\w./-]+@(?P<ref>[\w./-]+)"
+    r"(?P<owner>[\w.-]+)/(?P<repo>[\w.-]+)/(?:actions|\.github)/[\w./-]+@(?P<ref>[\w./-]+)"
 )
 
 
 def _engine_slug(engine):
     """The pattern matching the engine repository `engine` as a `uses:` value names it.
     Case-insensitive: GitHub resolves `owner/repo` in `uses:` that way. Every engine-slug
-    match goes through here, so the pin probe and `_engine_call` cannot disagree."""
+    match goes through here, so the pin probe and `_engine_calls` cannot disagree."""
     return rf"(?i:{re.escape(engine)})"
 
 
@@ -851,21 +872,47 @@ def _contents_text(path):
     return ec.contents_text(path, fetch=_gh_json)
 
 
-def _workflow_text(path):
-    """One workflow file's decoded text, or None when it cannot be read.
+def _workflow_doc(text, name):
+    """(the parsed mapping, None) for the workflow file `name` holding `text`, or (None, the
+    NOTICE saying it does not parse). Only `_workflow_parse_warnings` reports that NOTICE;
+    every other workflow probe skips the file.
 
-    One leading U+FEFF is dropped: a BOM sits in front of the column-0 `on:` key,
-    which `_on_block` would otherwise read as no top-level trigger block at all.
-    The config probe reads its file through `_contents_text` without this step:
-    `tomllib` refuses a BOM, so stripping one there would report a table valid
-    that every run reading it refuses.
+    Read with the YAML 1.2 core loader GitHub's own parser matches: a file that loads here is
+    typed as GitHub types it. The probes read fixed paths of the result and never walk it
+    whole, and a value they turn into text passes `_scalar` first, so an alias graph costs
+    what its fixed paths cost, at those paths too.
     """
-    text = _contents_text(path)
-    return None if text is None else text.removeprefix("\ufeff")
+    from yaml import YAMLError
+
+    try:
+        doc = load_workflow_text(text)
+    except YAMLError as exc:
+        problem = yaml_error_text(exc)
+    else:
+        if isinstance(doc, dict):
+            return doc, None
+        problem = "the file is not a mapping"
+    return None, (
+        NOTICE,
+        f"`{name}` could not be parsed as YAML ({problem}): doctor skipped its checks.",
+    )
 
 
-def _scan_workflow_texts(ctx, ref, per_file, unreadable):
-    """Findings from `per_file(text, name)` over every workflow file at `ref`.
+def _workflow_file(ctx, name, ref):
+    """(text, doc, parse finding) of the workflow file `name` at `ref`, read and parsed once
+    per run and kept on `ctx`: text None when it cannot be read, doc None when it does not
+    parse (`_workflow_doc`)."""
+    cache = ctx.setdefault("workflow_reads", {})
+    if (name, ref) not in cache:
+        text = _contents_text(f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}/{name}{ref}")
+        parsed = (None, None) if text is None else _workflow_doc(text, name)
+        cache[(name, ref)] = (text, *parsed)
+    return cache[(name, ref)]
+
+
+def _scan_workflow_docs(ctx, ref, per_file, unreadable):
+    """Findings from `per_file(doc, name)` over every workflow file at `ref` that parses.
+    A file that does not is skipped: `_workflow_parse_warnings` reports it.
 
     Stops at the first unreadable file and reports `unreadable`: the same cause
     (permissions, a bad ref, an API outage) applies to the rest of the directory.
@@ -888,34 +935,70 @@ def _scan_workflow_texts(ctx, ref, per_file, unreadable):
     if files is None:
         return [unreadable]
     out = []
-    for name, text in files:
+    for name, text, doc, _ in files:
         if text is None:
             out.append(unreadable)
             break
-        out.extend(per_file(text, name))
+        if doc is not None:
+            out.extend(per_file(doc, name))
     return out
 
 
 def _workflow_files(ctx, ref):
-    """[(name, text)] for the workflow files at `ref`, ending at the first unreadable file
-    (its text None); None when the listing is unreadable. Read once per run, kept on `ctx`."""
+    """[(name, text, doc, parse finding)] (`_workflow_file`) for the workflow files at `ref`,
+    ending at the first unreadable file (its text None); None when the listing is unreadable.
+    Read once per run, kept on `ctx`."""
     cache = ctx.setdefault("workflow_files", {})
     if ref not in cache:
-        base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
-        names, readable = _workflow_names(f"{base}{ref}")
+        names, readable = _workflow_names(f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}{ref}")
         files = [] if readable else None
         for name in names if readable else ():
-            text = _workflow_text(f"{base}/{name}{ref}")
-            files.append((name, text))
-            if text is None:
+            files.append((name, *_workflow_file(ctx, name, ref)))
+            if files[-1][1] is None:
                 break
         cache[ref] = files
     return cache[ref]
 
 
-def _pins_in_text(text, fname, ctx, seen):
+def _mapping(value):
+    """`value` when it is a mapping, else `{}`: a parsed key may hold null or a scalar."""
+    return value if isinstance(value, dict) else {}
+
+
+def _scalar(value):
+    """`value` when it is a scalar (a string, bool, number or null), else `None`. A fixed path
+    may hold an alias graph, and `str()` of one visits every leaf it expands to."""
+    return value if value is None or isinstance(value, (str, bool, int, float)) else None
+
+
+def _jobs(doc):
+    """[(job id, job)] of the workflow `doc`, each job a mapping."""
+    return [(job_id, _mapping(job)) for job_id, job in _mapping(doc.get("jobs")).items()]
+
+
+def _call_sites(doc):
+    """Each job of `doc` and each of its steps, as mappings: where a `uses:` and the `with:`
+    it is handed are read from."""
+    for _, job in _jobs(doc):
+        steps = job.get("steps")
+        yield job
+        yield from (_mapping(step) for step in (steps if isinstance(steps, list) else []))
+
+
+def _engine_calls(doc, engine, callee):
+    """[(job id, job)] of the jobs in `doc` whose `uses:` is `callee`, a reusable workflow of
+    the engine repository `engine`, at any ref. Another repository's workflow of the same name
+    is not the engine's."""
+    call = re.compile(rf"{_engine_slug(engine)}/\.github/workflows/{re.escape(callee)}@.+")
+    return [
+        (job_id, job) for job_id, job in _jobs(doc) if call.fullmatch(str(_scalar(job.get("uses"))))
+    ]
+
+
+def _pin_findings(doc, fname, ctx, seen):
     """Tag/branch-pin warnings for one workflow file, recording its SHA pins in
-    `seen` ({(file, sha)}) for the freshness comparison.
+    `seen` ({(file, sha)}) for the freshness comparison. A pin is the whole `uses:` value
+    of a job or a step.
 
     Only pins of the engine's own repository are considered. Every finding here
     is worded about the engine — a moving ref letting the engine change under
@@ -924,7 +1007,10 @@ def _pins_in_text(text, fname, ctx, seen):
     no deploy credentials and has its own release cadence."""
     out = []
     engine = ctx["engine_repo"]
-    for m in _PIN.finditer(text):
+    for site in _call_sites(doc):
+        m = _PIN.fullmatch(str(_scalar(site.get("uses"))))
+        if m is None:
+            continue
         slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
         if not re.fullmatch(_engine_slug(engine), slug):
             continue  # a third party's action is not shipmate's to report on
@@ -956,10 +1042,10 @@ def _pins_in_workflows(ctx):
     ref = _contents_ref(ctx)
     if ref is None:
         return [PIN_NO_COMMIT], seen
-    out = _scan_workflow_texts(
+    out = _scan_workflow_docs(
         ctx,
         ref,
-        lambda text, name: _pins_in_text(text, name, ctx, seen),
+        lambda doc, name: _pin_findings(doc, name, ctx, seen),
         PIN_UNREADABLE,
     )
     return out, seen
@@ -1009,138 +1095,46 @@ def _pin_warnings(ctx):
     return out
 
 
-# Word-ish boundaries, so `pull_request_target_foo` is a different trigger. Where the search runs:
-# `declares_pull_request_target`.
-_PR_TARGET = re.compile(r"(?<![\w-])pull_request_target(?![\w-])")
+_pin_warnings.parses_yaml = True
+
+
 FORK_TRIGGER_UNREADABLE, FORK_TRIGGER_NO_COMMIT = _unverified("`pull_request_target` triggers")
-
-# Flow-style tolerant. Why this input matters, and why the anchor and the value terminator are
-# what they are: `_unsafe_checkout_warnings`.
-_UNSAFE_CHECKOUT = re.compile(
-    r"(?:^|[{,])[ \t]*allow-unsafe-pr-checkout[ \t]*:(?P<value>[^,}\n]*)", re.M
-)
+_UNSAFE_CHECKOUT = "allow-unsafe-pr-checkout"
 
 
-# `on` at column 0 only, optionally quoted; the anchoring is `_on_block`'s match, see there.
-_ON_KEY = re.compile(r"""["']?on["']?[ \t]*:(?P<rest>.*)$""")
+def _events(doc):
+    """The event names the workflow `doc`'s `on:` declares, in each of its three forms: one
+    event, a list of them, or a mapping keyed by them."""
+    on = doc.get("on")
+    return list(on) if isinstance(on, (dict, list)) else [on]
 
 
-def _strip_comment(line):
-    """`line` up to its YAML comment marker: a `#` at the start of the line or
-    preceded by whitespace. A `#` inside a token (`branch#1`) is not a comment."""
-    for i, ch in enumerate(line):
-        if ch == "#" and (i == 0 or line[i - 1] in " \t"):
-            return line[:i]
-    return line
+def declares_pull_request_target(doc):
+    """Whether the workflow `doc` declares the `pull_request_target` trigger. Only the
+    events `on:` names count: the same word in a comment, a `run:` body, an `if:` or an
+    input's `options:` declares nothing."""
+    return "pull_request_target" in _events(doc)
 
 
-def _stripped_text(text):
-    """`text` with every YAML comment removed, line structure intact."""
-    return "\n".join(_strip_comment(ln) for ln in text.splitlines())
+def _unsafe_checkout_warnings(doc, name):
+    """`allow-unsafe-pr-checkout` handed by a job or a step `with:` anything but false.
 
-
-def _engine_call(engine, callee):
-    """The `uses:` selector for a call of `callee`, the reusable workflow of the engine
-    repository `engine` (`ctx["engine_repo"]`). Anchored at `uses:` like `_PIN`, so another
-    repository's workflow of the same name is not the engine's."""
-    return re.compile(_USES + rf"{_engine_slug(engine)}/\.github/workflows/{re.escape(callee)}@")
-
-
-def _on_block(text):
-    """(inline remainder of the `on:` line, its following lines) with comments
-    stripped, or (None, []) for a file with no top-level `on:`. The block runs to
-    the first line starting at column 0; blank and comment-only lines do not end
-    it.
-
-    A workflow's `on:` is a top-level key, so an indented one belongs to
-    something else. `_ON_KEY` is matched rather than searched, and that is the
-    whole of the anchoring — unanchored, `    python-version: 3.12` matches
-    (`versi` + `on:`) and silently retargets the block this probe reads."""
-    lines = text.splitlines()
-    for i, line in enumerate(lines):
-        m = _ON_KEY.match(line)
-        if not m:
-            continue
-        block = []
-        for nxt in lines[i + 1 :]:
-            stripped = _strip_comment(nxt)
-            if stripped.strip() and not stripped[0].isspace():
-                break
-            block.append(stripped)
-        return _strip_comment(m.group("rest")), block
-    return None, []
-
-
-def _indent(line):
-    return len(line) - len(line.lstrip())
-
-
-def _event_lines(inline, block):
-    """The lines of an `on:` value that can name an event: the inline remainder,
-    plus — for a block mapping or sequence — only its shallowest children.
-    Anything deeper is one event's own configuration (`types:`, a
-    `workflow_dispatch` input's `options:`). A flow collection is a single value
-    however it is wrapped across lines, so all of its lines count."""
-    content = [ln for ln in [inline, *block] if ln.strip()]
-    if content and content[0].lstrip()[:1] in ("[", "{"):
-        return content
-    indents = [_indent(ln) for ln in block if ln.strip()]
-    if not indents:
-        return [inline]
-    top = min(indents)
-    return [inline] + [ln for ln in block if ln.strip() and _indent(ln) == top]
-
-
-def declares_pull_request_target(text):
-    """Whether a workflow file declares the `pull_request_target` trigger.
-
-    Comments are stripped first: `# never add pull_request_target here` is
-    exactly the line a repository writes *because* it does not have one, and
-    reporting it would train readers to ignore the finding.
-
-    The search is scoped to the workflow's top-level `on:` value, at the level
-    where event names live: a `run:` body, an `if:` expression and a
-    `strategy.matrix` value are not in that block at all, and a
-    `workflow_dispatch` input's `options:` entry is nested below it. doctor is
-    stdlib-only and cannot yaml.safe_load, so the block is sliced by
-    indentation."""
-    inline, block = _on_block(text)
-    if inline is None:
-        return False
-    return any(_PR_TARGET.search(ln) for ln in _event_lines(inline, block))
-
-
-def _unsafe_checkout_warnings(text, name):
-    """`allow-unsafe-pr-checkout` set to anything but a literal false.
-
-    Comments are stripped first, for the same reason
-    `declares_pull_request_target` strips them: `# never set
-    allow-unsafe-pr-checkout: true` is what a careful repository writes
-    *because* it does not have one. A `${{ }}` value is unknown, not false, so
-    it is reported — it may evaluate true.
+    False is the boolean or the string `false` in any letter case: a finding on a correct
+    repository trains readers to ignore the whole suite. A `${{ }}` value is unknown, not
+    false, so it is reported — it may evaluate true.
 
     EVERY occurrence is examined, not the first: a consumer file checks out in
     more than one job, and one job's explicit `false` — the shape this very
     finding asks for — must not silence another job's `true`.
 
-    The value is compared case-insensitively: `False` and `FALSE` are the same
-    legal YAML boolean as `false`, and a finding on a correct repository trains
-    readers to ignore the whole suite.
-
     `actions/checkout` refuses to check out a fork's head under
     `pull_request_target` unless this input turns the refusal off, which makes
     it the single most consequential line a consumer can add: that third party's
-    default is the outermost guard on this path.
-
-    `_UNSAFE_CHECKOUT` matches at a line start OR after `{`/`,`: flow style is a
-    house idiom here — the engine's own workflows write
-    `with: { fetch-depth: 0, ref: ... }`, so a one-line checkout step is what a
-    consumer copying them produces. The value stops at `,`/`}` for the same
-    reason: a flow-style `false` must read as `false` and not as `false }`,
-    which would report the safest shape a consumer can write."""
+    default is the outermost guard on this path."""
     values = [
-        m.group("value").strip().strip("\"'").lower()
-        for m in _UNSAFE_CHECKOUT.finditer(_stripped_text(text))
+        str(_scalar(_mapping(site.get("with"))[_UNSAFE_CHECKOUT])).lower()
+        for site in _call_sites(doc)
+        if _UNSAFE_CHECKOUT in _mapping(site.get("with"))
     ]
     if all(v == "false" for v in values):
         return []
@@ -1183,15 +1177,15 @@ def _fork_trigger_warnings(ctx):
     if ref is None:
         return [FORK_TRIGGER_NO_COMMIT]
 
-    def finding(text, name):
+    def finding(doc, name):
         # Before the `shipmate.yml` exemption below, not after: `shipmate.yml`
         # is exactly the file where a fork checkout would be turned on.
-        out = _unsafe_checkout_warnings(text, name)
+        out = _unsafe_checkout_warnings(doc, name)
         # Exempt for the reasons the docstring gives. Exact name — a `custom-plan.yml` is a
         # consumer file and gets the warning.
         if name == "shipmate.yml":
             return out
-        if not declares_pull_request_target(text):
+        if not declares_pull_request_target(doc):
             return out
         return out + [
             (
@@ -1210,68 +1204,16 @@ def _fork_trigger_warnings(ctx):
             )
         ]
 
-    return _scan_workflow_texts(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
+    return _scan_workflow_docs(ctx, ref, finding, FORK_TRIGGER_UNREADABLE)
 
 
-# Line-anchored, and matched only against a direct child of the calling job: a `name:` or `if:`
-# deeper in the block belongs to something else. Read through `_job_key`.
-_JOB_KEY = re.compile(r"^[ \t]*(?P<key>name|if)[ \t]*:(?P<value>.*)$")
+_fork_trigger_warnings.parses_yaml = True
+
+
 _SHIM_JOB_NAME = "shipmate"
 
 
-def _call_region(text, pattern):
-    """The comment-stripped lines of the block enclosing the `uses:` line
-    `pattern` matches, or None when the file has no such line.
-
-    The block is found by walking BACK from the `uses:` line to the enclosing
-    key (the first shallower line) and then forward to the next line at that
-    key's level or above, so one `uses:` inside a shim's calling job returns
-    that whole job, its id line included. Forward-only from `uses:` would miss a
-    `name:` written above it — the shape docs/getting-started.md ships — and
-    report a correctly named job as carrying no name at all. A probe that fires
-    on the documented shape trains readers to ignore the suite."""
-    lines = _stripped_text(text).splitlines()
-    for i, line in enumerate(lines):
-        if not pattern.search(line):
-            continue
-        depth = _indent(line)
-        start = next(
-            (j for j in range(i - 1, -1, -1) if lines[j].strip() and _indent(lines[j]) < depth),
-            i,
-        )
-        region = [lines[start]]
-        for nxt in lines[start + 1 :]:
-            if nxt.strip() and _indent(nxt) < depth:
-                break
-            region.append(nxt)
-        return "\n".join(region)
-    return None
-
-
-def _job_key(region, key):
-    """The value of `key` written as a direct child of the job block `region`, or None.
-
-    Only a direct child is read, so a `name:` under `with:` or an `if:` on a step cannot
-    stand in for the job's own. Judged block-style, like the documented file and every other
-    finder here.
-
-    KNOWN GAP: a block scalar (`if: >-`) yields its first line alone, which the whole-value
-    comparison then reports as differing. That reports a healthy file rather than passing a
-    broken one, which is the safe direction, and the published file writes one line."""
-    lines = region.splitlines()
-    body = [ln for ln in lines[1:] if ln.strip()]
-    depth = min((_indent(ln) for ln in body), default=0)
-    values = [
-        m.group("value").strip()
-        for ln in body
-        if _indent(ln) == depth
-        for m in [_JOB_KEY.match(ln)]
-        if m and m.group("key") == key
-    ]
-    return values[0] if values else None
-
-
-def _shim_job_name_finding(text, name, engine):
+def _shim_job_name_finding(doc, name, engine):
     """The calling job's display name, or [] when it is `shipmate` or the file
     calls the engine's plan workflow nowhere.
 
@@ -1282,28 +1224,18 @@ def _shim_job_name_finding(text, name, engine):
     that exact name and falls back to the workflow-run URL on a miss — so the failure is a
     silently degraded comment, not an error anyone sees.
 
-    Regex over the call's own block rather than a YAML parse, like every other
-    finder here: a consumer file that does not parse must still be read for what
-    can be read, not skipped.
-
     An absent `name:` is not a finding — GitHub displays the job id then, so a job written
     `jobs:` / `  shipmate:` / `    uses: …` produces the same check names as the documented
-    shape. Only a direct child of the job is read as its name, so a `name:` under `with:`
-    cannot stand in for one. Judged block-style, like the documented file and every other
-    finder here.
+    shape. Only the job's own `name:` is read, so a `name:` under `with:` cannot stand in
+    for one.
 
     A file calling no `plan.yml` of `engine` draws nothing here: that absence is
     `_routing_finding`'s zero-count finding."""
-    region = _call_region(text, _engine_call(engine, "plan.yml"))
-    if region is None:
+    calls = _engine_calls(doc, engine, "plan.yml")
+    if not calls:
         return []
-    named = _job_key(region, "name")
-    job_name = (
-        named.strip("\"'")
-        if named is not None
-        else region.splitlines()[0].strip().rstrip(":").strip("\"'")
-    )
-    if job_name == _SHIM_JOB_NAME:
+    job_id, job = calls[0]
+    if str(_scalar(job.get("name")) or job_id) == _SHIM_JOB_NAME:
         return []
     # `name` is the engine's own file name, never repository data.
     return [
@@ -1321,105 +1253,30 @@ def _shim_job_name_finding(text, name, engine):
     ]
 
 
-# The dispatch leg of the consumer's workflow file. NOT line-anchored, because absence is the
-# finding; see `_dispatch_wiring_finding`.
-_DISPATCH_TRIGGER = re.compile(r"[\s{,]workflow_dispatch[ \t]*:")
-
-
-def _input_key(name):
-    """The unanchored selector for one mapping key, `name:`. Unanchored for
-    `_DISPATCH_TRIGGER`'s reason, and escaped because a consumer names their own inputs."""
-    return re.compile(rf"[\s{{,]{re.escape(name)}[ \t]*:")
-
-
 #: Every input `scripts/dispatch-body` can name. An input the file does not declare is
 #: `Unexpected inputs provided` (HTTP 422, no run); one it declares `required: true` that a body
 #: omits is `Required input not provided` (HTTP 422, no run) — which is why every input the
 #: file declares beside `verb`, a consumer's own included, must be optional.
 _DISPATCH_INPUTS = ("verb", "environment", "ref", "pr_number")
-#: The whole option list `actions/dispatch` can send, compared
-#: in order and as parsed options: a list missing `unlock` refuses that verb, one carrying an
-#: extra offers a verb no `if:` selects, and a text comparison would report
-#: `[plan,apply,unlock]` — the same sequence — and tell the consumer to write what their
-#: file already means. Read from `verb`'s own block (`_input_block`), never the first `options:`
-#: in the trigger, or a consumer's own input declared above `verb` becomes the list compared.
-#: KNOWN GAP: the flow form only, so a block-style `options:` reports as differing — the safe
-#: direction, and the published file writes the flow form.
+#: The whole option list `actions/dispatch` can send, compared in order and as parsed
+#: options: a list missing `unlock` refuses that verb, and one carrying an extra offers a verb
+#: no `if:` selects. Read from `verb`'s own declaration, never another input's `options:`.
 _VERB_OPTION_LIST = ["plan", "apply", "unlock"]
 #: The same list as the findings render it. Derived, so there is one hand-written copy.
 _VERB_OPTIONS = f"[{', '.join(_VERB_OPTION_LIST)}]"
-_VERB_OPTIONS_KEY = re.compile(r"[\s{,]options[ \t]*:[ \t]*(?P<value>\[[^\]]*\])")
-# One mapping key at the start of a line, for the input names `_declared_inputs` enumerates.
-_INPUT_NAME = re.compile(r"[ \t]*([A-Za-z_][\w-]*)[ \t]*:")
-_REQUIRED_TRUE = re.compile(r"""[\s{,]required[ \t]*:[ \t]*["']?true["']?""", re.I)
 
 
-def _input_block(on_text, input_name):
-    """The lines one input's declaration owns — the remainder of its key line plus every line
-    indented deeper than it — or None when the `on:` block declares no such input.
-
-    One input at a time, because the trigger's keys are not interchangeable: `verb` is the
-    only required input and the only one carrying an `options:` list, so a scan of the whole
-    trigger would read its `required: true` as every other input's and its `options:` as an
-    earlier input's. A consumer may declare inputs of their own, and one written above `verb`
-    would otherwise become the thing both findings judge.
-
-    KNOWN GAP: a wholly inline `on:` mapping puts every input on one line, so an input's block
-    runs to the end of that line and takes the inputs after it in. The published file writes
-    block style, and either way the finding names a remedy that applies to the file."""
-    lines = on_text.splitlines()
-    for i, line in enumerate(lines):
-        m = _input_key(input_name).search(line)
-        if not m:
-            continue
-        depth = _indent(line)
-        body = [line[m.end() :]]
-        for nxt in lines[i + 1 :]:
-            if nxt.strip() and _indent(nxt) <= depth:
-                break
-            body.append(nxt)
-        return body
-    return None
-
-
-def _declared_inputs(on_text):
-    """The input names the trigger declares, in file order — a consumer's own beside the four
-    `actions/dispatch` sends.
-
-    The keys of `inputs:`' own block (`_input_block`) at its shallowest indent, so a nested
-    `required:` or `options:` is not read as a name. KNOWN GAP: a wholly inline `on:` mapping
-    puts every key on one line and yields none here, which is why `_required_inputs` adds the
-    four back by name.
-    """
-    body = _input_block(on_text, "inputs") or []
-    keys = [(_indent(b), m) for b in body[1:] if (m := _INPUT_NAME.match(b))]
-    depth = min((d for d, _ in keys), default=0)
-    return [m.group(1) for d, m in keys if d == depth]
-
-
-def _required_inputs(on_text):
-    """Every input the `on:` block declares other than `verb` that it also declares `required:
-    true`, block-style or in a flow mapping on the key's own line.
-
-    Not only `_DISPATCH_INPUTS`: a consumer may declare inputs of its own, and a `required:
-    true` one answers HTTP 422 to every commented verb the same way the retired plan-run input
-    did.
-    """
-    names = dict.fromkeys([*_declared_inputs(on_text), *_DISPATCH_INPUTS[1:]])
-    return [
-        name
-        for name in names
-        if name != "verb"
-        and any(_REQUIRED_TRUE.search(f" {b}") for b in _input_block(on_text, name) or [])
-    ]
-
-
-def _dispatch_input_findings(on_text, name):
+def _dispatch_input_findings(inputs, name):
     """The three ways a declared `workflow_dispatch` trigger still refuses a verb: an input
     `scripts/dispatch-body` names that the file does not declare, a `verb` offering the wrong
-    option list, and an input other than `verb` declared required."""
+    option list, and an input other than `verb` declared `required: true`.
+
+    `inputs` is the trigger's `inputs:` mapping. Requiredness is every declared input's, not
+    only `_DISPATCH_INPUTS`': a consumer may declare inputs of its own, and a required one
+    answers HTTP 422 to every commented verb the same way. Only the boolean `true` counts:
+    GitHub's typed parser refuses `required: yes` as a workflow file error."""
     out = []
-    missing = [n for n in _DISPATCH_INPUTS if not _input_key(n).search(on_text)]
+    missing = [n for n in _DISPATCH_INPUTS if n not in inputs]
     if missing:
         out.append(
             (
@@ -1433,10 +1290,7 @@ def _dispatch_input_findings(on_text, name):
                 "(docs/getting-started.md).",
             )
         )
-    verb = _input_block(on_text, "verb")
-    found = _VERB_OPTIONS_KEY.search("\n".join(verb)) if verb else None
-    offered = [o.strip() for o in found.group("value")[1:-1].split(",")] if found else None
-    if offered != _VERB_OPTION_LIST:
+    if _mapping(inputs.get("verb")).get("options") != _VERB_OPTION_LIST:
         out.append(
             (
                 WARNING,
@@ -1448,7 +1302,11 @@ def _dispatch_input_findings(on_text, name):
                 "(docs/getting-started.md).",
             )
         )
-    required = _required_inputs(on_text)
+    required = [
+        str(n)
+        for n, spec in inputs.items()
+        if n != "verb" and _mapping(spec).get("required") is True
+    ]
     if required:
         out.append(
             (
@@ -1470,18 +1328,13 @@ def _and_list(names):
     return " and ".join([", ".join(quoted[:-1]), quoted[-1]] if len(quoted) > 1 else quoted)
 
 
-def _dispatch_wiring_finding(text, name):
+def _dispatch_wiring_finding(doc, name):
     """The four ways the consumer's workflow file cannot serve a dispatched verb. Every
     commented verb dispatches the consumer's own `shipmate.yml`, and each of these is
     invisible until someone comments.
 
-    The trigger and its inputs are looked for inside the `on:` block
-    (`_on_block`), inline remainder included, and not in the whole file: a `with:`
-    line forwarding `pr_number` on is not a declaration of it, and a
-    `workflow_dispatch:` line under `jobs:` — no such key exists, but a stray line
-    matches a whole-file regex — must not satisfy the trigger. That scoping is
-    also what lets the two keys be matched unanchored, which is what sees a
-    flow-style `on:` value.
+    The trigger is an event `on:` names, in any of its forms (`_events`), and its inputs are
+    `on.workflow_dispatch.inputs`: a `with:` forwarding `pr_number` declares nothing.
 
     Four findings rather than one, because the remedies differ and so do the
     refusals. Each ends in a dispatch-time HTTP 422 with no run created, and they
@@ -1493,21 +1346,9 @@ def _dispatch_wiring_finding(text, name):
     no job's `if:` selects when it carries an extra.
 
     The three input findings are examined only where the trigger itself is there: without it
-    nothing is dispatched at all, and three further remedies below that one bury it.
-
-    `_DISPATCH_TRIGGER` and `_input_key` are unanchored because ABSENCE is
-    the finding here: a shape an anchor misses would report a correctly wired
-    file as declaring no trigger at all.
-    `on: { workflow_dispatch: { inputs: { pr_number: … } } }` is legal YAML, and
-    an anchor fails after `{ ` however much of the flow mapping is fed in. A
-    preceding brace, comma or whitespace stands in for the line start. That is
-    safe only inside the `on:` block: unanchored over a whole file, `versi` +
-    `on:` is the retargeting `_on_block` documents."""
-    inline, block = _on_block(text)
-    on_text = "\n".join([inline or "", *block])
-    out = []
-    if not _DISPATCH_TRIGGER.search(on_text):
-        out.append(
+    nothing is dispatched at all, and three further remedies below that one bury it."""
+    if "workflow_dispatch" not in _events(doc):
+        return [
             (
                 WARNING,
                 f"`{name}` declares no `workflow_dispatch` trigger, so every commented verb is "
@@ -1518,10 +1359,9 @@ def _dispatch_wiring_finding(text, name):
                 "the trigger, with its `verb`, `environment`, `ref` and `pr_number` inputs "
                 "(docs/getting-started.md).",
             )
-        )
-    else:
-        out.extend(_dispatch_input_findings(on_text, name))
-    return out
+        ]
+    trigger = _mapping(_mapping(doc.get("on")).get("workflow_dispatch"))
+    return _dispatch_input_findings(_mapping(trigger.get("inputs")), name)
 
 
 #: The whole `if:` of each job of `shipmate.yml`, keyed by the engine reusable workflow it
@@ -1562,7 +1402,7 @@ def _normalize_if(value):
     return " ".join(v.split())
 
 
-def _routing_finding(text, name, engine):
+def _routing_finding(doc, name, engine):
     """One finding per `ROUTING_IFS` entry the file does not satisfy.
 
     One file gates five jobs on the event, and a wrong gate is silent in both directions: a
@@ -1571,10 +1411,9 @@ def _routing_finding(text, name, engine):
     `actions/dispatch` sees an accepted dispatch; the run page shows four skipped jobs beside
     the one that ran, which is what a healthy run also shows."""
     out = []
-    stripped = _stripped_text(text)
     for callee, expected in ROUTING_IFS.items():
-        pattern = _engine_call(engine, callee)
-        count = len(pattern.findall(stripped))
+        calls = _engine_calls(doc, engine, callee)
+        count = len(calls)
         if count != 1:
             out.append(
                 (
@@ -1588,7 +1427,7 @@ def _routing_finding(text, name, engine):
                 )
             )
             continue
-        found = _job_key(_call_region(text, pattern), "if")
+        found = calls[0][1].get("if")
         if found is None:
             out.append(
                 (
@@ -1599,12 +1438,22 @@ def _routing_finding(text, name, engine):
                     "(docs/getting-started.md).",
                 )
             )
-        elif _normalize_if(found) != _normalize_if(expected):
+        elif _scalar(found) is None:
+            out.append(
+                (
+                    WARNING,
+                    f"`{name}`'s job calling the engine's `{callee}` has an `if:` that is not a "
+                    f"single expression. Write `if: {expected}` "
+                    "(docs/getting-started.md).",
+                )
+            )
+        elif _normalize_if(str(_scalar(found))) != _normalize_if(expected):
             out.append(
                 (
                     WARNING,
                     f"`{name}`'s job calling the engine's `{callee}` is selected by "
-                    f"`{_normalize_if(found)}`, not `{_normalize_if(expected)}`. A wrong "
+                    f"`{_normalize_if(str(_scalar(found)))}`, "
+                    f"not `{_normalize_if(expected)}`. A wrong "
                     "expression routes a verb nowhere and its dispatched run completes with "
                     "every job skipped, which reads as success everywhere "
                     "(docs/getting-started.md).",
@@ -1643,7 +1492,8 @@ def _shipmate_yml_warnings(ctx):
     unreadable workflow file cannot hide it. A missing file is reported as unreadable, a
     NOTICE rather than a WARNING: the contents read cannot tell a 404 from a permission or
     API failure, neither of which is a misconfiguration. A repository without the file
-    receives no dispatch.
+    receives no dispatch. A file that does not parse is `_workflow_parse_warnings`' one
+    finding and draws none here.
 
     Without the engine repository the three engine-anchored findings give way to one notice:
     their selector would match no call, so each would report a healthy file. Dispatch wiring
@@ -1651,26 +1501,25 @@ def _shipmate_yml_warnings(ctx):
     ref = _contents_ref(ctx)
     if ref is None:
         return [SHIPMATE_YML_NO_COMMIT]
-    text = _workflow_text(f"repos/{ctx['repo']}/contents/{_SHIPMATE_YML}{ref}")
+    name = "shipmate.yml"
+    text, doc, _ = _workflow_file(ctx, name, ref)
     if text is None:
         return [SHIPMATE_YML_UNREADABLE]
-    name = "shipmate.yml"
+    if doc is None:
+        return []
     engine = ctx["engine_repo"]
     if not engine:
-        return [*_dispatch_wiring_finding(text, name), SHIPMATE_YML_NO_ENGINE]
+        return [*_dispatch_wiring_finding(doc, name), SHIPMATE_YML_NO_ENGINE]
     return [
-        *_shim_job_name_finding(text, name, engine),
-        *_dispatch_wiring_finding(text, name),
-        *_routing_finding(text, name, engine),
-        *(
-            [SHIPMATE_YML_CALLS_DRIFT]
-            if _engine_call(engine, "drift.yml").search(_stripped_text(text))
-            else []
-        ),
+        *_shim_job_name_finding(doc, name, engine),
+        *_dispatch_wiring_finding(doc, name),
+        *_routing_finding(doc, name, engine),
+        *([SHIPMATE_YML_CALLS_DRIFT] if _engine_calls(doc, engine, "drift.yml") else []),
     ]
 
 
 _shipmate_yml_warnings.label = "`shipmate.yml`"
+_shipmate_yml_warnings.parses_yaml = True
 
 
 def _one_line(s, limit=200):
@@ -1833,7 +1682,7 @@ def _config_defaults(table):
         (
             NOTICE,
             _Rendered(
-                f"`explicit = true` on {_md_escape(_fit_items(envs, ', ', 400))}: a bare "
+                f"`explicit: true` on {_md_escape(_fit_items(envs, ', ', 400))}: a bare "
                 "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
             )
             if envs
@@ -1856,7 +1705,7 @@ def _config_table(ctx):
     alone — `validate_structure`, not `validate` — because the rest need run context;
     CONFIG_VALID says so rather than letting a reader take the verdict for the whole set.
     """
-    refusal = ec.interpreter_refusal()
+    refusal = ec.runner_refusal()
     if refusal:
         # Ahead of every read, and outside the try below: the floor is a property of this
         # runner, so no revision of the file can be at fault and none is worth reading.
@@ -1892,7 +1741,7 @@ def _config_table(ctx):
             "branch's copy, which this says nothing about.",
         )
         return None, [invalid], []
-    refs = ec.references(ec.load_toml(text))
+    refs = ec.references(ec.load_config(text))
     shown = "; ".join(f"`{path}` from variable `{name}`" for path, name in refs)
     return table, [], [(NOTICE, CONFIG_REFERENCES.format(refs=shown))] if refs else []
 
@@ -1907,6 +1756,9 @@ def _config_warnings(ctx):
     environment-coverage caveat nothing else states.
     """
     return _config_table(ctx)[1]
+
+
+_config_warnings.parses_yaml = True
 
 
 def config_status(ctx):
@@ -2000,10 +1852,10 @@ def _drift_file_warnings(ctx):
     `drift.yml`, so nothing ever sweeps the repository for drift. A NOTICE, not a WARNING: a
     repository may decline drift on purpose.
 
-    Matched by the call in the comment-stripped text, never by file name: a sweep may live in
-    any file, and a commented-out call sweeps nothing. A scan that stopped at an unreadable
-    file reports only the unreadable NOTICE, never the missing one: the call may sit in a file it
-    never read.
+    Matched by a job whose `uses:` is the call (`_engine_calls`), never by file name: a sweep
+    may live in any file, and a commented-out call sweeps nothing. A scan that stopped at an
+    unreadable file reports only the unreadable NOTICE, and a file that does not parse
+    silences the missing one: either may be the drift file.
     Without the engine repository nothing is read: the selector would match no call, and the
     missing-file notice would be false.
     """
@@ -2012,23 +1864,46 @@ def _drift_file_warnings(ctx):
     ref = _contents_ref(ctx)
     if ref is None:
         return [DRIFT_FILE_NO_COMMIT]
-    call = _engine_call(ctx["engine_repo"], "drift.yml")
     callers = []
 
-    def per_file(text, name):
-        if call.search(_stripped_text(text)):
+    def per_file(doc, name):
+        if _engine_calls(doc, ctx["engine_repo"], "drift.yml"):
             callers.append(name)
         return []
 
-    out = _scan_workflow_texts(ctx, ref, per_file, DRIFT_FILE_UNREADABLE)
+    out = _scan_workflow_docs(ctx, ref, per_file, DRIFT_FILE_UNREADABLE)
     if out:
         return out
-    return [] if callers else [DRIFT_FILE_MISSING]
+    unparsed = any(doc is None for _, _, doc, _ in _workflow_files(ctx, ref))
+    return [] if callers or unparsed else [DRIFT_FILE_MISSING]
 
 
 _drift_file_warnings.label = "drift workflow files"
+_drift_file_warnings.parses_yaml = True
 # Its worst finding is a NOTICE, so a probe failure must not report above it.
 _drift_file_warnings.degrade_level = NOTICE
+
+
+def _workflow_parse_warnings(ctx):
+    """One NOTICE per workflow file at the commit under examination that does not parse as
+    YAML (`_workflow_doc`): each listed file, and `shipmate.yml` read by path when the listing
+    does not reach it. Every other workflow probe skips such a file without a word, so this
+    is its one report, and the files that do parse are still checked.
+
+    Silent when the commit or the listing cannot be read: the probes reading the files report
+    that."""
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return []
+    files = _workflow_files(ctx, ref) or []
+    if "shipmate.yml" not in [name for name, *_ in files]:
+        files = [*files, ("shipmate.yml", *_workflow_file(ctx, "shipmate.yml", ref))]
+    return [finding for *_, finding in files if finding]
+
+
+_workflow_parse_warnings.label = "workflow parse"
+_workflow_parse_warnings.parses_yaml = True
+_workflow_parse_warnings.degrade_level = NOTICE
 
 
 PROBES = (
@@ -2038,6 +1913,7 @@ PROBES = (
     _env_protection_warnings,
     _engine_environment_warnings,
     _plan_env_secret_warnings,
+    _workflow_parse_warnings,
     _pin_warnings,
     _fork_trigger_warnings,
     _shipmate_yml_warnings,
@@ -2066,8 +1942,20 @@ def _degrade_reason(e):
 
 
 def warnings(ctx):
-    out = []
+    """Every probe's findings, in `PROBES` order; a probe that raises becomes one degrade
+    line at its `degrade_level` (WARNING by default).
+
+    A runner whose python3 lacks PyYAML gets that refusal once, as a NOTICE, in place of every
+    probe marked `parses_yaml`: each would otherwise degrade on its own, or report the
+    file it could not parse as unreadable or invalid. A runner below the Python floor runs
+    them all, and the environment and config probes name the floor."""
+    # The lookup `runner_refusal` makes, whose refusal then names what this runner lacks.
+    no_yaml = importlib.util.find_spec("yaml") is None
+    refusal = (ec.runner_refusal() or "").removeprefix("::error::")
+    out = [(NOTICE, refusal)] if no_yaml else []
     for probe in PROBES:
+        if no_yaml and getattr(probe, "parses_yaml", False):
+            continue
         try:
             out.extend(probe(ctx))
         # noqa: BLE001 - doctor must never fail the run. `ec.gh_json` raises

@@ -69,9 +69,9 @@ once it reaches the apply path.
 
 ## GitHub OIDC
 
-Roles are named per identity: an `[identities.<name>]`
+Roles are named per identity: an `identities.<name>`
 table names a plan and an apply role, and every environment whose entry carries
-`identity = "<name>"` assumes them, through GitHub's OIDC provider
+`identity: <name>` assumes them, through GitHub's OIDC provider
 (`token.actions.githubusercontent.com`) — no long-lived access key anywhere. The
 role's trust policy conditions the `sub` claim on the environment claim
 (`environment:<env>-apply` for an apply role, `environment:<env>-plan` for a
@@ -97,7 +97,7 @@ nothing.
 documented shape.** GitHub Actions issues the `sub` claim with the numeric
 organization and repository ids embedded, captured from that sample repository.
 Under the split naming the environment segment reads `dev-us-plan` or
-`dev-us-apply`; an environment with `shared = true` binds the bare `dev-us`, the
+`dev-us-apply`; an environment with `shared: true` binds the bare `dev-us`, the
 form this capture shows:
 
 ```
@@ -125,25 +125,31 @@ repository renamed or recreated under an old name cannot inherit the trust.
 
 ## The environment table
 
-A cell resolves its role from the environment table — `.github/shipmate.toml` —
-and from nothing else. An `[identities.<name>]` table names the roles once, and
+A cell resolves its role from the environment table — `.github/shipmate-config.yml` —
+and from nothing else. An `identities.<name>` entry names the roles once, and
 each environment's entry names an identity and carries its region. The engine
 reads the file from the repository's default branch, so a pull request cannot
 choose which role its own plan assumes.
 [`../CONTRACT.md`](../CONTRACT.md) §Environment table is the schema of record;
 this is what it looks like for the AWS sample:
 
-```toml
-layout = "tf_vars"
+```yaml
+# .github/shipmate-config.yml
+layout: tf_vars
 
-[identities.dev]
-aws.plan  = "arn:aws:iam::9817:role/shipmate-plan"
-aws.apply = { app = "arn:aws:iam::9817:role/shipmate-apply", net-edge = "arn:aws:iam::9817:role/net-edge" }
+identities:
+  dev:
+    aws:
+      plan: arn:aws:iam::9817:role/shipmate-plan
+      apply:
+        app: arn:aws:iam::9817:role/shipmate-apply
+        net-edge: arn:aws:iam::9817:role/net-edge
 
-[environments.dev-eu]
-region    = "eu-west-1"
-identity  = "dev"
-workloads = ["app", "net-edge"]
+environments:
+  dev-eu:
+    region: eu-west-1
+    identity: dev
+    workloads: [app, net-edge]
 ```
 
 Beyond the schema:
@@ -177,23 +183,27 @@ Beyond the schema:
   a workload in the order [`../CONTRACT.md`](../CONTRACT.md) §Adding and
   removing an environment gives.
 - **Several environments may name one identity.** One edit to
-  `[identities.dev]` then retargets all of them; `shipmate doctor`'s roles lines
+  `identities.dev` then retargets all of them; `shipmate doctor`'s roles lines
   list what each environment resolves ([`../CONTRACT.md`](../CONTRACT.md)
   §Resolution).
 - **A stack that exists once is an environment of its own.** A management
   account's stack gets an identity and an environment naming it, and its one
   stack is tagged `env/mgmt`:
 
-  ```toml
-  layout = "tf_vars"
+  ```yaml
+  # .github/shipmate-config.yml
+  layout: tf_vars
 
-  [identities.management]
-  aws.plan  = "arn:aws:iam::4402:role/shipmate-plan"
-  aws.apply = "arn:aws:iam::4402:role/shipmate-apply"
+  identities:
+    management:
+      aws:
+        plan: arn:aws:iam::4402:role/shipmate-plan
+        apply: arn:aws:iam::4402:role/shipmate-apply
 
-  [environments.mgmt]
-  region   = "eu-west-1"
-  identity = "management"
+  environments:
+    mgmt:
+      region: eu-west-1
+      identity: management
   ```
 
   A stack with no `env/*` tag is unmanaged instead: shipmate never plans or

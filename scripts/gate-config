@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Resolve the gate settings the comment-ops authorization path runs on.
 
-The environments whose entry holds `gated = false`, from `.github/shipmate.toml` on the
+The environments whose entry holds `gated: false`, from `.github/shipmate-config.yml` on the
 default branch, and from nowhere else, read through the contents API: the comment-ops job
 checks out no consumer content, and that read needs none.
 
 `validate_structure` is not optional: the resolvers document a validated table and do not
-enforce it, and an unvalidated `gated = "false"` resolves as gated, exempting nothing while
+enforce it, and an unvalidated `gated: no` resolves as gated, exempting nothing while
 reading as though it did.
 """
 

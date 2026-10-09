@@ -401,7 +401,7 @@ def test_the_footer_lines_escape_every_env_name():
 
 _UNGATED_NOTICE = (
     ": ungated, permitted to apply without an approving review "
-    "(gated = false in .github/shipmate.toml)"
+    "(gated: false in .github/shipmate-config.yml)"
 )
 _NO_REVIEW_NOTICE = ": no approving review was required, so gated had nothing to enforce"
 

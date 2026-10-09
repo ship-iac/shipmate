@@ -6,8 +6,8 @@ job now lives in `plan.yml` alongside two jobs that check out and execute pull-r
 `detect` and `plan` -- so the job-id list is pinned here too. The job checks out nothing; any
 checkout step, which under `pull_request_target` would take the pull request head, changes the
 ordered step list below pins.
-Every assertion below is on a parsed value -- `yaml.safe_load`,
-then a whole `if:`/`environment:`/`with:` field -- rather than a substring of the raw file text.
+Every assertion below is on a parsed value -- a whole `if:`/`environment:`/`with:` field --
+rather than a substring of the raw file text.
 The substring form was proven vacuous: four simultaneous mutations of the summary job (all three
 trust guards inverted, `environment: shipmate-engine` commented out, the draft-skip deleted) left
 the old suite's `1 failed, 762 passed` unchanged from baseline. A YAML comment or an inverted
@@ -111,7 +111,7 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     assert workflow_yaml(WF)["jobs"]["detect"]["outputs"] == EXPECTED_DETECT_OUTPUTS
 
 
-#: The whole download step, as `yaml.safe_load` returns it. Any extra key reddens the comparison:
+#: The whole download step, as parsed. Any extra key reddens the comparison:
 #: an `if:` or a `github-token`, which the job's `contents: read` grant would not cover.
 EXPECTED_DOWNLOAD_STEP = {
     "name": "Download plan cell summaries",

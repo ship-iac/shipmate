@@ -227,6 +227,10 @@ runs:
         body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
+    - uses: $/actions/python-yaml
+      # Doctor and gate-config parse YAML; a refused commenter costs no install.
+      if: ${{ (steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized == 'true' }}
+
     - name: Mint App token for doctor
       id: doctortoken
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' }}
@@ -488,7 +492,7 @@ runs:
         SHIPMATE_REPLY_VERB: ${{ steps.parse.outputs.verb }}
         SHIPMATE_REPLY_ENV: ${{ steps.parse.outputs.env }}
         SHIPMATE_REPLY_OUTCOME: refused
-        SHIPMATE_REPLY_TEXT: "could not resolve the gate settings from `.github/shipmate.toml` on the default branch, so this command was not run. The file is not merged there, it does not validate, or a variable it references is unset or empty, this run's log says which. Fix that and comment again."
+        SHIPMATE_REPLY_TEXT: "could not resolve the gate settings from `.github/shipmate-config.yml` on the default branch, so this command was not run. The file is not merged there, it does not validate, a variable it references is unset or empty, or the runner lacks PyYAML or runs Python older than 3.12; the job log names which. Fix that and comment again."
       run: |
         set -euo pipefail
         body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
@@ -586,7 +590,7 @@ runs:
         SHIPMATE_REPLY_VERB: apply
         SHIPMATE_REPLY_ENV: ${{ steps.authz.outputs.environment }}
         SHIPMATE_REPLY_OUTCOME: notice
-        SHIPMATE_REPLY_TEXT: "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an approving review (`gated = false` in `.github/shipmate.toml`). The apply result comment shows what applied."
+        SHIPMATE_REPLY_TEXT: "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an approving review (`gated: false` in `.github/shipmate-config.yml`). The apply result comment shows what applied."
       run: |
         set -euo pipefail
         body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")

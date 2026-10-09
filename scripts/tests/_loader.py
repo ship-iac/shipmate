@@ -30,8 +30,7 @@ import subprocess
 import textwrap
 
 import pytest
-import yaml
-from _shipmate import _load
+from _shipmate import _load, load_workflow_text
 
 load_script = _load
 _SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
@@ -88,7 +87,7 @@ ENGINE_CALL_SECRETS = {
 @functools.cache
 def _parse_yaml(path):
     """Parsed engine YAML file, cached: nothing in the suite rewrites these files."""
-    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    spec = load_workflow_text(path.read_text(encoding="utf-8"))
     # Never fall back to ``{}``: a file that parses to None, emptied by a bad merge or fully
     # commented out, would hand every guard zero steps, and a guard over zero steps passes while
     # asserting nothing.
@@ -168,6 +167,15 @@ def doc_fences(pages, fence):
         text = page.read_text(encoding="utf-8")
         for m in fence.finditer(text):
             yield page, text[: m.start()].count("\n") + 1, textwrap.dedent(m.group("body"))
+
+
+#: The first line of a ```yaml fence that holds a `.github/shipmate-config.yml` example.
+CONFIG_FENCE_MARKER = "# .github/shipmate-config.yml"
+
+
+def is_config_fence(body):
+    """Whether a dedented ```yaml fence body is a config example rather than a workflow."""
+    return body.partition("\n")[0] == CONFIG_FENCE_MARKER
 
 
 def assert_every_fence_discovered(pages, fences, opener, lang):

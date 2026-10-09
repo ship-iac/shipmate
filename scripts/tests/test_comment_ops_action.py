@@ -462,11 +462,11 @@ def test_every_apply_and_unlock_step_after_the_decision_is_gated():
     names = [s.get("name") for s in steps]
     after = steps[names.index("Reject a commenter without write access") + 1 :]
     gated = {
-        s.get("name"): s.get("if")
+        s.get("name") or s["uses"]: s.get("if")
         for s in after
         if any(f"outputs.route == '{r}'" in (s.get("if") or "") for r in ("apply", "unlock"))
     }
-    assert len(gated) == 7, list(gated)
+    assert len(gated) == 8, list(gated)
     assert gated == _SHARED_ROUTE_IFS
 
 
@@ -993,10 +993,10 @@ _REPLIES = {
         "SHIPMATE_REPLY_ENV": _PARSED_ENV,
         "SHIPMATE_REPLY_OUTCOME": "refused",
         "SHIPMATE_REPLY_TEXT": (
-            "could not resolve the gate settings from `.github/shipmate.toml` on the default "
+            "could not resolve the gate settings from `.github/shipmate-config.yml` on the default "
             "branch, so this command was not run. The file is not merged there, it does not "
-            "validate, or a variable it references is unset or empty, this run's log says "
-            "which. Fix that and comment again."
+            "validate, a variable it references is unset or empty, or the runner lacks PyYAML "
+            "or runs Python older than 3.12; the job log names which. Fix that and comment again."
         ),
     },
     "Report the review exemption": {
@@ -1005,7 +1005,7 @@ _REPLIES = {
         "SHIPMATE_REPLY_OUTCOME": "notice",
         "SHIPMATE_REPLY_TEXT": (
             "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an "
-            "approving review (`gated = false` in `.github/shipmate.toml`). The apply result "
+            "approving review (`gated: false` in `.github/shipmate-config.yml`). The apply result "
             "comment shows what applied."
         ),
     },
@@ -1242,7 +1242,7 @@ def test_the_exemption_report_claims_permission_never_completion(tmp_path):
     assert body == (
         "### shipmate apply dev-eu\n\n"
         "⚪ dev-eu: ungated, permitted to apply without an approving review "
-        "(`gated = false` in `.github/shipmate.toml`). The apply result comment shows what "
+        "(`gated: false` in `.github/shipmate-config.yml`). The apply result comment shows what "
         "applied.\n\n"
         f"[run]({_RUN_URL})"
     )
@@ -1286,14 +1286,18 @@ _SHARED_ROUTE_IFS = {
         "${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock')"
         " && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}"
     ),
+    "$/actions/python-yaml": (
+        "${{ (steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply'"
+        " || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized == 'true' }}"
+    ),
 }
 
 
 def test_the_apply_route_steps_admit_exactly_apply_and_unlock():
     matched = {
-        s["name"]: s.get("if")
+        s.get("name") or s["uses"]: s.get("if")
         for s in action_steps("comment-ops")
-        if s.get("name") in _SHARED_ROUTE_IFS
+        if (s.get("name") or s["uses"]) in _SHARED_ROUTE_IFS
     }
     assert matched == _SHARED_ROUTE_IFS
 
@@ -1325,7 +1329,7 @@ def test_both_verb_steps_bind_shipmate_verb_to_the_parsed_route():
 
 
 def test_exactly_the_table_readers_receive_the_callers_variables():
-    """`gate-config` and every `doctor` probe run read `.github/shipmate.toml` through
+    """`gate-config` and every `doctor` probe run read `.github/shipmate-config.yml` through
     `parse_table`, which refuses a file holding a variable reference when
     `SHIPMATE_GITHUB_VARS` is absent. Selected over every step of both actions, so a further
     holder fails too.
@@ -1390,6 +1394,7 @@ _STEP_NAMES = [
     "Permission check failed",
     "Authorize plan",
     "Reject an unauthorized plan",
+    "$/actions/python-yaml",
     "Mint App token for doctor",
     "Doctor: App token unavailable",
     "Doctor: probe the manifest's full permission set",
@@ -1408,7 +1413,7 @@ _STEP_NAMES = [
 
 
 def test_the_action_runs_exactly_these_steps_in_this_order():
-    assert [s.get("name") for s in action_steps("comment-ops")] == _STEP_NAMES
+    assert [s.get("name") or s["uses"] for s in action_steps("comment-ops")] == _STEP_NAMES
 
 
 def _by_id(step_id):

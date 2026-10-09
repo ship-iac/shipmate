@@ -351,7 +351,7 @@ def test_unlisted_env_reason_names_the_setting():
     assert reason == (
         "not authorized: PR review is required by the branch ruleset and has not been "
         "satisfied, and `environments.prod-eu.gated` is not `false` in "
-        "`.github/shipmate.toml`; obtain the required approving review(s), then re-run "
+        "`.github/shipmate-config.yml`; obtain the required approving review(s), then re-run "
         "`shipmate apply`."
     )
 
@@ -407,8 +407,9 @@ def test_main_reads_ungated_envs_and_environment(tmp_path, monkeypatch):
     assert "authorized=false" in text.splitlines()
     assert (
         "reason=not authorized: PR review is required by the branch ruleset and has not been "
-        "satisfied, and `environments.prod-eu.gated` is not `false` in `.github/shipmate.toml`; "
-        "obtain the required approving review(s), then re-run `shipmate apply`."
+        "satisfied, and `environments.prod-eu.gated` is not `false` in "
+        "`.github/shipmate-config.yml`; obtain the required approving review(s), then re-run "
+        "`shipmate apply`."
     ) in text.splitlines()
     assert "environment=prod-eu" in text.splitlines()
 
@@ -641,7 +642,7 @@ def test_no_plan_run_id_output(tmp_path, monkeypatch):
     ],
 )
 def test_review_not_required_decision_table(decision, environment, expected):
-    """dev-eu holds `gated = false`; prod-eu is gated.
+    """dev-eu holds `gated: false`; prod-eu is gated.
 
     Mutation: compare `review_decision != "NONE"` -- the three prod-eu rows flip.
     Mutation: drop `.casefold()` -- the `DEV-EU` row is named."""

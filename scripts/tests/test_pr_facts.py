@@ -12,6 +12,7 @@ empty fact.
 """
 
 import json
+import sys
 
 import pytest
 from _loader import action_yaml, load_script
@@ -39,7 +40,7 @@ def _no_api(path):
     raise RuntimeError(f"the payload leg must make no API call (got {path!r})")
 
 
-def _main(monkeypatch, tmp_path, payload, gh=_no_api, repo="own/repo"):
+def _main(monkeypatch, tmp_path, payload, gh=_no_api, repo="own/repo", module=pf):
     """main() over `payload`, with the API stubbed. Returns (raw GITHUB_OUTPUT text, api paths
     called): raw text so key order and one-per-line are observable, and the call list so a
     refusal before any API call is observable too."""
@@ -57,9 +58,9 @@ def _main(monkeypatch, tmp_path, payload, gh=_no_api, repo="own/repo"):
         return gh(path)
 
     # The alias binds at import, so patching `pf.bm.gh_json` would never be seen.
-    monkeypatch.setattr(pf, "_gh_json", fake)
+    monkeypatch.setattr(module, "_gh_json", fake)
     try:
-        pf.main()
+        module.main()
     finally:
         text = out.read_text(encoding="utf-8")
     return text, calls
@@ -81,6 +82,16 @@ def test_payload_leg_reads_the_payload_and_makes_no_api_call(monkeypatch, tmp_pa
         "is_draft=false",
         "on_demand=false",
     ]
+
+
+def test_pr_facts_needs_no_yaml_parser(monkeypatch, tmp_path):
+    """`pr-facts` never reads the config, so no step installs a parser before it. Mutation:
+    add `import yaml` at the top of `env-config`, which `pr-facts` loads through
+    `build-matrix` -- the load raises `ImportError`."""
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    module = load_script("pr-facts")
+    text, _ = _main(monkeypatch, tmp_path, {"pull_request": _PAYLOAD_PR}, module=module)
+    assert text.splitlines()[0] == f"head_sha={'a' * 40}"
 
 
 def test_dispatch_leg_resolves_the_inputs_number_through_one_api_path(monkeypatch, tmp_path):

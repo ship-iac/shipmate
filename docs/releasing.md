@@ -194,7 +194,7 @@ the release commit, from `repo-example-stacks-aws`:
    **The scratch branch carries the whole re-pin commit.** Its workflow-file edits are
    what the dispatch loads: a new pin under an old body is the load-time rejection
    described below, not a smoke result. Its table edits are never read: every path reads
-   `.github/shipmate.toml` from the default branch, which still holds the old table.
+   `.github/shipmate-config.yml` from the default branch, which still holds the old table.
 
    The same gap has a second form the re-pin cannot reach at all: a consumer's
    allowed-actions list is a repository setting, not a file. Under

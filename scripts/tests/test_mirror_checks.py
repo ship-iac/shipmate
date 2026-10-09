@@ -199,6 +199,7 @@ EXPECTED_STEP_NAMES = [
     "Mint App installation token",
     "Create apply checks (pending / no-changes)",
     "Mirror this run's per-cell plan checks onto the head",
+    "$/actions/python-yaml",
     "Doctor: settings-drift warnings (annotations only, never blocks)",
     "Build comment + gate state",
     "Decide gate state and comment mode",
@@ -208,7 +209,7 @@ EXPECTED_STEP_NAMES = [
 
 
 def test_the_mirror_step_runs_before_the_comment_is_built():
-    assert [s["name"] for s in action_steps("summary")] == EXPECTED_STEP_NAMES
+    assert [s.get("name") or s["uses"] for s in action_steps("summary")] == EXPECTED_STEP_NAMES
 
 
 _MIRROR = "Mirror this run's per-cell plan checks onto the head"

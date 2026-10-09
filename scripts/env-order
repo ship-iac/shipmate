@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Env apply-ordering: read env-levels out of the operation's environment table.
 
-An environment's `needs` in `.github/shipmate.toml` lists the envs that must
+An environment's `needs` in `.github/shipmate-config.yml` lists the envs that must
 fully apply before it; `env-config.env_order` collects them into env -> predecessors.
 Topologically sorted into levels; deploy applies level 0 fully, then level 1, etc.
 Unlisted envs are level 0. No `needs` anywhere -> {} -> all level 0.

@@ -8,6 +8,17 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Changed — BREAKING
+
+- **The engine config is `.github/shipmate-config.yml`, written as YAML. Every value is read as written, and a duplicate key, an anchor, an alias or a tag refuses (`CONTRACT.md` §Keys). An empty `region`, and a variable reference on `shared`, `explicit` or `gated`, refuse too.**
+- **Runners need Python 3.12 or later and PyYAML ≥ 6. The engine installs `python3-yaml` where it is missing and `sudo` needs no password (`CONTRACT.md` §Runner prerequisites).**
+
+### Fixed
+
+- **`shipmate doctor` parses workflow files as YAML: an `if: >-` block scalar, a block-style `options:` list and a wholly inline `on:` mapping are read as GitHub reads them, and a file that does not parse gets one `workflow parse` notice.**
+
 ## [0.43.0] — 2026-10-08
 
 Tags `ce6faac`.
@@ -18,7 +29,7 @@ Tags `ce6faac`.
 - **`shipmate doctor` reports a notice when no workflow file calls the engine's `drift.yml`, and warns when `shipmate.yml` still does.**
 - **The plan comment names the changed stacks that carry no `env/*` tag, and a pull request changing only such stacks gets a comment.**
 - **`shipmate doctor` names the AWS accounts each environment's OIDC subject reaches.**
-- **`scripts/onboard`'s checklist reports the working tree's stacks with no `env/*` tag, the stack-tag refusals a plan would raise, workload tags against the table, and the cells no drift file sweeps, with drift queries or clauses matching no cell and sweeps above 256 cells (`docs/troubleshooting.md` §What `scripts/onboard` reports). Its `.github/shipmate.toml` item is `todo` when a `needs` entry names an environment no stack tags. None changes the exit code.**
+- **`scripts/onboard`'s checklist reports the working tree's stacks with no `env/*` tag, the stack-tag refusals a plan would raise, workload tags against the table, and the cells no drift file sweeps, with drift queries or clauses matching no cell and sweeps above 256 cells (`docs/troubleshooting.md` §What `scripts/onboard` reports). Its `.github/shipmate-config.yml` item is `todo` when a `needs` entry names an environment no stack tags. None changes the exit code.**
 
 ### Changed
 
@@ -27,7 +38,7 @@ Tags `ce6faac`.
 - **A drift Issue closed because its cell is no longer managed says the stack or environment left the repository, or the stack carries no `env/*` tag.**
 - **A stack with no `env/*` tag is unmanaged: it is skipped with a notice that counts the unmanaged stacks and names up to ten, instead of failing the run (`CONTRACT.md` §Tag grammar).**
 - **A deploy refuses when its merged pull request holds an open apply check on a stack that lost its `env/*` tag after it was planned, and names every other open check of that merge, which it does not apply either: open a new pull request that retags each stranded stack and changes every other named stack; its deploy applies all of them. Re-running the refused deploy refuses again (`docs/troubleshooting.md`).**
-- **`scripts/onboard` no longer refuses a stack with no `env/*` tag, and provisions every environment the checkout's `.github/shipmate.toml` declares as well as every one a stack tags, and names a declared entry no stack tags on its `.github/shipmate.toml` checklist item.**
+- **`scripts/onboard` no longer refuses a stack with no `env/*` tag, and provisions every environment the checkout's `.github/shipmate-config.yml` declares as well as every one a stack tags, and names a declared entry no stack tags on its `.github/shipmate-config.yml` checklist item.**
 - **`scripts/onboard` no longer refuses a `shared = true` entry that no stack tags; it provisions the bare `<env>` like any other entry.**
 - **`shipmate doctor`'s and `scripts/onboard`'s shared-environment protection messages say those rules stall every drift sweep covering the environment, and `build-matrix`'s head-repository, head-commit and `tags` refusals name a drift sweep as the workflow with no pull request.**
 
@@ -64,12 +75,12 @@ Tags `1120418`.
 
 ### Changed
 
-- **Credentials live only in `[identities.<name>]`: rewrite each environment's `aws` block as an `[identities.<name>]` table (`CONTRACT.md` §Environment table) in the re-pin commit.**
+- **Credentials live only in `identities.<name>`: rewrite each environment's `aws` block as an `identities.<name>` entry (`CONTRACT.md` §Environment table) in the re-pin commit.**
 - **A stack carrying two `workload/*` tags is refused at detect.**
 - **A workload tag outside the environment's `workloads` list is refused at detect, naming every such cell.**
 - **A draft pull request's run writes `shipmate / gate` pending, naming the draft and the two ways to plan it.**
 - **The bare-apply comment lists a held `explicit` environment once, with both reasons and the `shipmate apply <env>` command.**
-- **An invalid `.github/shipmate.toml` is refused with every structural error it holds, one annotation each.**
+- **An invalid `.github/shipmate-config.yml` is refused with every structural error it holds, one annotation each.**
 - **`scripts/onboard` takes no `--team`.**
 - **`scripts/onboard --key` is needed only while `shipmate-engine` holds no App private key.**
 - **`scripts/onboard`'s closing checklist marks each item `ok`, `todo` or `cannot check` from what the run read.**
@@ -79,12 +90,12 @@ Tags `1120418`.
 - **The plan summary's and `shipmate doctor`'s App tokens request `environments: read`; the plan-environment secret probe has no token of its own and no not-checked warning.**
 - **Comments by bots or without `shipmate` start no engine `ops` job.**
 - **The workflow file's `comment-ops` job has no concurrency group, so a later comment no longer cancels a command still waiting to run; delete the `concurrency:` block from that job.**
-- **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `[gate]` table and the App's `members` permission are removed; delete `[gate]` in the re-pin commit.**
+- **`shipmate apply`, `shipmate unlock`, `shipmate plan` and `shipmate doctor` require write or admin permission on the repository; the `gate` key and the App's `members` permission are removed; delete `gate` in the re-pin commit.**
 - **Plan, apply and doctor comments share one shape: a header, a verdict line linking the commit and the run, and one line per cell or finding. Refusals, failures, notices and help share the header and end with a run link. The help hint shows only where action is needed: on a refusal or a failure, and under an apply or doctor verdict that is not 🟢; a plan comment never shows it. The apply comment's gate, ungated and no-review lines moved to the gate check and the run log.**
 - **A stack at path `apply` or `shipmate` plans; `build-matrix` no longer refuses either.**
 - **`actions/setup` downloads Terramate with curl instead of `terramate-io/terramate-action`, which consumers may drop from their allowed-actions list; a self-hosted runner's own curl config applies.**
 - **`apply-all.yml` is gone: in the re-pin commit, replace the workflow file's `targeted` and `all` jobs with one `apply` job calling `apply.yml` with `environment`, `ref` and `pr_number` (`docs/getting-started.md`).**
-- **Every path reads `.github/shipmate.toml` through the contents API from the default branch; the could-not-be-read refusal no longer names a ref, and a failed `gh`, `git` or `terramate` call in CI annotates with its stderr below the error line.**
+- **Every path reads `.github/shipmate-config.yml` through the contents API from the default branch; the could-not-be-read refusal no longer names a ref, and a failed `gh`, `git` or `terramate` call in CI annotates with its stderr below the error line.**
 - **`shipmate doctor` checks `shipmate.yml`'s job name, dispatch wiring and routing as one probe, so one unreadable file degrades all three together, and a file that calls no engine plan workflow is reported once.**
 - **`shipmate doctor`'s `needs` and `explicit` notices end a cut list with ` … and N more` and never cut an item inside.**
 - **The `apply` and `unlock` guard refusal names the check it makes: the dispatching actor is not a `[bot]`.**
@@ -92,7 +103,7 @@ Tags `1120418`.
 
 ### Removed
 
-- **`.github/shipmate.toml` has no `schema_version` key; the engine refuses it as an unknown setting, so delete it in the re-pin commit.**
+- **`.github/shipmate-config.yml` has no `schema_version` key; the engine refuses it as an unknown setting, so delete it in the re-pin commit.**
 - **The drift workflow and `actions/build-matrix` take no `tags` input; every sweep covers every cell. In the re-pin commit, delete `tags:` from the drift job's `with:`, because an undeclared input fails the whole workflow file at load.**
 - **`scripts/onboard` takes no `--vars-at-org`; it always writes the repository `SHIPMATE_APP_ID`.**
 - **The deploy and drift workflows take no `SHIPMATE_SLACK_WEBHOOK` secret and post nothing to Slack; GitHub's Slack app (`/github subscribe <owner>/<repo> issues workflows`) posts workflow runs and drift Issue opens and closes, and does not re-post an Issue that stays open. In the re-pin commit, delete the secret's mapping from the workflow file's `deploy` and `drift` jobs, because a secret the callee does not declare fails the whole workflow file at load; the secret on `shipmate-engine` can be deleted. `scripts/onboard` no longer lists the secret, and no job refuses a variable of that name: one left set is skipped silently while its URL stays readable, so delete it and rotate the webhook.**
@@ -145,7 +156,7 @@ Tags `30ba9e7`.
   engine `apply-review.yml`.
 - **`scripts/onboard --vars-at-org` takes only `SHIPMATE_APP_ID`**; any other value, a comma
   list included, is refused. The checklist drops the older-pin caveat for
-  `[gate] approver_team`.
+  `gate.approver_team`.
 - **`apply-snapshot`'s empty-App-id refusal** uses `apply-gate`'s wording, which points at
   `docs/github-app.md`.
 
@@ -195,13 +206,13 @@ Tags `352eb83`.
 
 ### Changed — BREAKING
 
-- **`.github/shipmate.toml` takes its final key names.** Top level: `schema_version`,
-  `layout` (`tf_vars`, `workspace` or `folder`), `[environments.<name>]` and `[gate]`.
-  `[gate]` holds `approver_team`. An entry holds `region`, `tf_vars`, `aws`, `shared`,
-  `needs`, `explicit` and `gated`. A variable reference is `{ vars = "NAME" }`. Any other
+- **`.github/shipmate-config.yml` takes its final key names.** Top level: `schema_version`,
+  `layout` (`tf_vars`, `workspace` or `folder`), `environments.<name>` and `gate`.
+  `gate` holds `approver_team`. An entry holds `region`, `tf_vars`, `aws`, `shared`,
+  `needs`, `explicit` and `gated`. A variable reference is `{vars: NAME}`. Any other
   key refuses as unknown.
 - An entry name outside the env-name charset, or with a `-plan` / `-apply` suffix, refuses.
-  `explicit` and `gated` are TOML booleans and accept no variable reference.
+  `explicit` and `gated` are booleans and accept no variable reference.
 
 ## [0.36.0] — 2026-09-26
 
@@ -209,8 +220,8 @@ Tags `836b768`.
 
 ### Added
 
-- **Any string value in `.github/shipmate.toml` can name a GitHub variable** with
-  `{ var = "NAME" }`, resolved by every reader of the file. An unset or empty variable or an
+- **Any string value in `.github/shipmate-config.yml` can name a GitHub variable** with
+  `{var: NAME}`, resolved by every reader of the file. An unset or empty variable or an
   invalid name refuses. `shipmate doctor` lists every reference. The detect actions,
   `comment-ops` and `summary` take a new `github-vars` input.
 
@@ -249,7 +260,7 @@ Tags `c22c2c3`.
 ### Changed — BREAKING
 
 - **A shared environment is declared in the table** with `shared = true` in an
-  `[environments.<env>]` entry. The `SHIPMATE_SHARED_ENVS` variable is no longer read, the
+  `environments.<env>` entry. The `SHIPMATE_SHARED_ENVS` variable is no longer read, the
   `shared-envs` action inputs are gone, and `scripts/onboard` drops `--shared`. Every cell
   job binds `${{ matrix.env_binding }}`. `shipmate doctor` reads the mode from the default
   branch's file.
@@ -269,13 +280,13 @@ Tags `4172108`.
 
 ### Changed — BREAKING
 
-- **The approvers team and the ungated-environment list move into `.github/shipmate.toml`**
+- **The approvers team and the ungated-environment list move into `.github/shipmate-config.yml`**
   as `gate.approvers_team` and `gate.ungated_envs`, read from the default branch.
   `SHIPMATE_APPROVERS_TEAM` and `SHIPMATE_UNGATED_ENVS` are no longer read at any level.
 
 ### Added
 
-- **`[gate]` in `.github/shipmate.toml`**, holding `approvers_team` (a bare team slug) and
+- **`gate` in `.github/shipmate-config.yml`**, holding `approvers_team` (a bare team slug) and
   `ungated_envs` (a list of bare env names). An empty value means what it says.
 - **An optional `version` key**, which must be the integer `1`.
 
@@ -316,9 +327,9 @@ Tags `f1688c0`.
 
 ### Changed — BREAKING
 
-- **The environment table moves out of Terramate globals into `.github/shipmate.toml`,** as
+- **The environment table moves out of Terramate globals into `.github/shipmate-config.yml`,** as
   four top-level keys — `layout`, `environments`, `env_order`, `explicit_envs` — read from
-  the default branch with `tomllib`. The `globals "shipmate"` block is no longer read.
+  the default branch. The `globals "shipmate"` block is no longer read.
 
 ### Changed
 
@@ -331,13 +342,13 @@ Tags `f1688c0`.
   contents API.
 - **Reading the table needs Python 3.11 on the runner.** `scripts/env-config` refuses with
   the version it found.
-- **`scripts/onboard`'s by-hand checklist asks for `.github/shipmate.toml`.**
+- **`scripts/onboard`'s by-hand checklist asks for `.github/shipmate-config.yml`.**
 
 ### Removed
 
 - **The Terramate worktree-and-evaluate read path**: no `git worktree`, no
   `terramate experimental eval`, no second evaluation in `scripts/env-order`.
-- **The `layout = null` refusal**, which TOML cannot express.
+- **The `layout: null` refusal.**
 
 ## [0.29.0] — 2026-09-14
 

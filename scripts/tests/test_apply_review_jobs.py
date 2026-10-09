@@ -17,14 +17,14 @@ which is why they are pinned whole:
   `test_apply_dispatch_actor_guard.py` rather than a second time here, because `results:` is
   `join(needs.*.result, ',')` over that same list.
 
-Everything is asserted over `yaml.safe_load`ed structures, compared whole: a substring is
+Everything is asserted over parsed structures, compared whole: a substring is
 satisfied by a comment and by an inverted operator.
 """
 
 import re
 
 import pytest
-from _loader import ENGINE, action_yaml, workflow_yaml
+from _loader import ENGINE, step_by, workflow_yaml
 
 _MINT = "actions/create-github-app-token"
 _CHECKOUT = "actions/checkout"
@@ -86,8 +86,7 @@ def test_the_decision_output_reaches_the_callers():
     apply would then refuse. Mutation: point the workflow output at a job output that does not
     exist."""
     spec = workflow_yaml(_REVIEW_WORKFLOW)
-    # PyYAML reads the bare key `on` as the boolean True.
-    assert spec[True]["workflow_call"]["outputs"]["decision"]["value"] == (
+    assert spec["on"]["workflow_call"]["outputs"]["decision"]["value"] == (
         "${{ jobs.review.outputs.decision }}"
     )
     assert _review()["outputs"] == {"decision": "${{ steps.rd.outputs.decision }}"}
@@ -157,7 +156,7 @@ def test_the_action_feeds_every_shipmate_env_var_the_script_reads(detect, action
     assert "SHIPMATE_REVIEW_DECISION" in read, (
         f"{detect} no longer reads the review decision: {sorted(read)}"
     )
-    step = action_yaml(action)["runs"]["steps"][0]
+    step = step_by(action, id="d")
     missing = read - set(step["env"])
     assert not missing, f"the {action} action's env: block omits {sorted(missing)} for {detect}"
 

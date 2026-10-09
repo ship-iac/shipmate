@@ -24,6 +24,7 @@ import re
 
 import yaml
 from _loader import ENGINE, doc_fences, workflow_yaml
+from _shipmate import load_workflow_text
 
 CELL_ENV = "${{ matrix.env_binding }}"
 
@@ -40,7 +41,7 @@ def _fences(page):
     """
     for _, line, body in doc_fences([ENGINE / page], _FENCE):
         try:
-            yield yaml.safe_load(body)
+            yield load_workflow_text(body)
         except yaml.YAMLError as e:
             raise AssertionError(f"{page}:{line}: a ```yaml fence no longer parses: {e}") from e
 

@@ -11,6 +11,9 @@ permissions:
 jobs:
   lint-test:
     runs-on: ubuntu-latest
+    # The engine's Python floor, held whatever the image's default python3 becomes.
+    env:
+      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0

@@ -18,8 +18,9 @@ Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 The dev toolchain is [Astral](https://astral.sh)'s uv + ruff + ty, with
 pytest. uv manages the dev environment and the pinned tool versions through
 `pyproject.toml` and `uv.lock`. It is for tooling alone: shipmate ships no
-importable package (`[tool.uv] package = false`) and has no runtime
-dependencies — the helper scripts are standard library only.
+importable package (`[tool.uv] package = false`). The helper scripts' one
+runtime dependency is PyYAML, which runners provide (`CONTRACT.md` §Runner
+prerequisites); `uv` installs it into the dev environment.
 
 Get this green before opening a PR:
 
@@ -77,8 +78,10 @@ summary job — all three trust guards
 inverted, `environment:` commented out, the draft-skip deleted — left the suite
 byte-identical to green.
 
-- **Assert parsed values, not substrings of file text.** `yaml.safe_load` the
-  file, take the job or step, and compare whole expressions. A substring
+- **Assert parsed values, not substrings of file text.** Parse the file with
+  `_loader.workflow_yaml`, the YAML 1.2 workflow loader, not `yaml.safe_load`,
+  which reads the `on` key as `True`. Take the job or step, and compare whole
+  expressions. A substring
   assertion is satisfied by the same words appearing in a *comment*, and by an
   inverted operator (`==`→`!=`, `&&`→`||`) that keeps the text intact.
   `scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the model to copy.

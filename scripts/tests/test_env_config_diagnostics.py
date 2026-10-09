@@ -131,7 +131,7 @@ def test_a_tagged_environment_missing_from_the_table_refuses_without_a_scan(caps
     with pytest.raises(SystemExit) as excinfo:
         _validate(table, matrix_envs=("dev-eu", "prod-us"), tagged=None)
     assert str(excinfo.value) == (
-        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
+        "::error::layout: tf_vars derives TF_VAR_env and TF_VAR_region from the "
         "environment table, and prod-us has no entry in it."
     )
 

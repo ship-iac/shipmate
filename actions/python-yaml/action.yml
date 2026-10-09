@@ -1,0 +1,17 @@
+name: shipmate python-yaml
+description: "Install python3-yaml with passwordless sudo apt-get when the runner's python3 cannot import PyYAML. Never fails; when the install does not take it warns, and the engine script that parses YAML reports the reason: it refuses, or, in doctor, notes it once."
+runs:
+  using: composite
+  steps:
+    - name: Install python3-yaml when PyYAML is missing
+      # May degrade: the script that needs PyYAML reports it on its own, and a failing step here
+      # would skip it, leaving the gate with its generic text instead of that refusal.
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 -I -c 'import yaml' 2>/dev/null && exit 0
+        apt() { sudo -n env DEBIAN_FRONTEND=noninteractive apt-get -qq -o Acquire::Retries=3 "$@"; }
+        { apt update && apt install -y --no-install-recommends python3-yaml; } || true
+        python3 -I -c 'import yaml' 2>/dev/null && exit 0
+        echo "::warning::could not install python3-yaml on this runner; the steps that read YAML report it."
+        exit 0

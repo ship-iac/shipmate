@@ -59,7 +59,7 @@ def test_the_row_is_injected_under_the_names_tofu_reads():
 
 
 def test_an_empty_table_injects_nothing():
-    """`layout = "folder"` resolves no `tf_vars` at all, so `{}` is a legitimate row and not a
+    """`layout: folder` resolves no `tf_vars` at all, so `{}` is a legitimate row and not a
     row nothing stamped.
 
     Mutation: refuse an empty mapping, which hard-fails every folder-layout consumer.

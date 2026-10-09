@@ -1,9 +1,7 @@
-"""Two whole configuration files, parsed and validated as written.
+"""A whole configuration file, parsed and validated as written.
 
-One must validate and resolve; the other must refuse. Both are TOML text rather than
-mappings: a mapping drops the notation -- dotted keys, comment placement, the
-ordering of top-level scalars against the first `[table]` header -- which is the part TOML
-gets wrong silently.
+It is YAML text rather than a mapping: a mapping skips the parser, and with it the spelling a
+consumer actually writes -- block and flow mappings, flow lists, comments beside values.
 
 The resolution assertions here are this feature's only functional-equivalence evidence: a
 whole resolved cell, compared against a hand-written constant, for a file that went through
@@ -17,42 +15,36 @@ ec = load_script("env-config")
 
 #: Every top-level key, and every entry key but `shared`.
 CANONICAL = """\
-layout         = "tf_vars"         # "tf_vars" | "workspace" | "folder", required
+layout: tf_vars                    # tf_vars | workspace | folder, required
 
-[identities.dev]
-aws.account = "981781037707"
-aws.plan    = "shipmate-plan"      # a role name, under aws.account
-aws.apply   = "shipmate-apply"
+identities:
+  dev:
+    aws:
+      account: 981781037707
+      plan: shipmate-plan          # a role name, under aws.account
+      apply: shipmate-apply
+  prod:
+    aws:
+      plan: arn:aws:iam::981781037707:role/prod-plan
+      apply:                       # a map gives each workload its own role
+        app: arn:aws:iam::981781037707:role/prod-apply
+        net-edge: arn:aws:iam::981781037707:role/net-edge
 
-[identities.prod]
-aws.plan = "arn:aws:iam::981781037707:role/prod-plan"
-
-[identities.prod.aws.apply]        # a map gives each workload its own role
-app      = "arn:aws:iam::981781037707:role/prod-apply"
-net-edge = "arn:aws:iam::981781037707:role/net-edge"
-
-[environments.dev-eu]
-region         = "eu-west-1"
-gated          = false             # optional: a targeted apply needs no approving review
-identity       = "dev"
-
-[environments.dev-us]
-region = "us-east-1"
-needs  = ["dev-eu"]                # optional: envs that must fully apply first
-
-[environments.prod]
-region         = "eu-west-1"
-explicit       = true              # optional: a bare `shipmate apply` skips it
-identity       = "prod"
-workloads      = ["app", "net-edge"]  # the workload tags prod admits
-tf_vars.TF_VAR_tier = "core"       # optional, merged over the derived TF_VAR_*
-"""
-
-#: A top-level setting written below a header, where TOML puts it inside that table.
-MISPLACED_CONTROL = """\
-[environments.prod]
-region = "eu-west-1"
-layout = "folder"             # intended as a top-level setting
+environments:
+  dev-eu:
+    region: eu-west-1
+    gated: false                   # optional: a targeted apply needs no approving review
+    identity: dev
+  dev-us:
+    region: us-east-1
+    needs: [dev-eu]                # optional: envs that must fully apply first
+  prod:
+    region: eu-west-1
+    explicit: true                 # optional: a bare `shipmate apply` skips it
+    identity: prod
+    workloads: [app, net-edge]     # the workload tags prod admits
+    tf_vars:
+      TF_VAR_tier: core            # optional, merged over the derived TF_VAR_*
 """
 
 
@@ -66,29 +58,6 @@ def test_the_canonical_file_validates():
     table = ec.parse_table(CANONICAL)
     assert ec.validate(table, ("dev-eu", "prod")) is table
     assert ec.validate_structure(table) is table
-
-
-def test_the_misplaced_control_refuses():
-    """`layout` written below `[environments.prod]` parses as a key of that entry. The file
-    is well-formed TOML; the strict entry-key check names the misplaced key, and the file
-    declares no top-level layout.
-
-    Mutation: add `"layout"` to `_ENV_KEYS` -- the entry-key line drops out of the message.
-    """
-    table = ec.parse_table(MISPLACED_CONTROL)
-    assert table == {"environments": {"prod": {"region": "eu-west-1", "layout": "folder"}}}
-    with pytest.raises(SystemExit) as exc:
-        ec.validate(table, ())
-    assert str(exc.value) == (
-        "::error::.github/shipmate.toml declares no layout, so no cell can resolve its "
-        'environment identity. Declare layout = "tf_vars", "workspace" or "folder" on the '
-        "default branch, which is where this table is read from. A scalar written below "
-        "a [table] header lands inside that table rather than at the top level, so "
-        "layout must come before the first header.\n"
-        "::error::environment prod: layout is not a key this engine implements. "
-        "An environment holds region, tf_vars, identity, workloads, shared, needs, explicit, "
-        "gated."
-    )
 
 
 _CELLS = [

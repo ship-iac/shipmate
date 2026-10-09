@@ -37,7 +37,7 @@ _GAP_ERROR = (
     "::error::1 cell(s) carry a workload tag their environment's workloads list does not name: "
     "stacks/app in dev-eu (workload/app; dev-eu lists net). A listed workload is the only one "
     "the default branch grants a role to. Retag the stack, or add the workload to "
-    "environments.<env>.workloads in .github/shipmate.toml on the default branch, which is "
+    "environments.<env>.workloads in .github/shipmate-config.yml on the default branch, which is "
     "where this table is read from: merge it there on its own pull request first."
 )
 

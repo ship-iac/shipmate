@@ -70,7 +70,7 @@ _LOCK_NAMED = 5
 def _not_attempted_note(rows, env_name):
     """The 'apply checks stay pending' note when a row is not attempted, parameterized on the
     targeted environment: a bare `shipmate apply` excludes explicit envs
-    (`explicit = true` in `.github/shipmate.toml`), so it cannot retry one — the note must
+    (`explicit: true` in `.github/shipmate-config.yml`), so it cannot retry one — the note must
     name the targeted form. env_name is author-controlled and escaped."""
     if not any(r["status"] == "not_attempted" for r in rows):
         return ""
@@ -507,7 +507,7 @@ def _held_line(env, explicit):
 
 _UNGATED = (
     "ungated, permitted to apply without an approving review "
-    "(gated = false in .github/shipmate.toml)"
+    "(gated: false in .github/shipmate-config.yml)"
 )
 _NO_REVIEW = "no approving review was required, so gated had nothing to enforce"
 
@@ -519,7 +519,7 @@ def notices(rows, applied_ungated, review_not_required):
     failed or unrecorded row, where infrastructure may have changed, so a run with no rows
     names none. Env names are author-controlled, so `command_data`-escaped.
 
-    An ungated notice is the audit trail an apply permitted by `gated = false` under a
+    An ungated notice is the audit trail an apply permitted by `gated: false` under a
     REVIEW_REQUIRED decision leaves: `reviewDecision` is a live value with no history, so once
     the review lands nothing in the run tells an apply that waited for it from one that did not.
     It carries no completion verb for the named env -- detect derives the set from `runnable`,

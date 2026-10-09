@@ -44,6 +44,7 @@ outputs:
 runs:
   using: composite
   steps:
+    - uses: $/actions/python-yaml
     - name: Detect pending applies and order into waves
       id: detect
       shell: bash

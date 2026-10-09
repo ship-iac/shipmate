@@ -41,11 +41,9 @@ def test_a_non_string_layout_refuses():
 
 
 NO_LAYOUT = (
-    "::error::.github/shipmate.toml declares no layout, so no cell can resolve its "
-    'environment identity. Declare layout = "tf_vars", "workspace" or "folder" on the default '
-    "branch, which is where this table is read from. A scalar written below a [table] header "
-    "lands inside that table rather than at the top level, so layout must come before the "
-    "first header."
+    "::error::.github/shipmate-config.yml declares no layout, so no cell can resolve its "
+    "environment identity. Declare layout: tf_vars, layout: workspace or layout: folder on the "
+    "default branch, which is where this table is read from."
 )
 
 
@@ -75,7 +73,7 @@ def test_tf_vars_refuses_a_matrix_environment_with_no_entry():
     """Mutation: drop the coverage check -- the layout cannot derive its variables."""
     table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1"}}}
     assert _refusal(table, matrix_envs=("dev-eu", "prod-us")) == (
-        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
+        "::error::layout: tf_vars derives TF_VAR_env and TF_VAR_region from the "
         "environment table, and prod-us has no entry in it."
     )
 
@@ -84,20 +82,24 @@ def test_tf_vars_refuses_an_entry_with_no_region():
     """Mutation: check only that the entry exists, not that it carries a region."""
     table = {"layout": "tf_vars", "environments": {"dev-eu": {}}}
     assert _refusal(table, matrix_envs=("dev-eu",)) == (
-        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
+        "::error::layout: tf_vars derives TF_VAR_env and TF_VAR_region from the "
         "environment table, and dev-eu has an entry with no region."
     )
 
 
-def test_tf_vars_refuses_an_empty_region():
-    """An empty TF_VAR_region drops out of the plan fingerprint, so it is not a region.
+@pytest.mark.parametrize("layout", ["tf_vars", "folder"])
+@pytest.mark.parametrize("written", ["", " #eu-west-1", ' ""'], ids=["bare", "comment", "quoted"])
+def test_an_empty_region_refuses_in_every_layout(layout, written):
+    """`region:` and `region: #eu-west-1` load as the empty string. An empty TF_VAR_region
+    drops out of the plan fingerprint, and the credentials step needs a region, so an empty one
+    is no region in any layout.
 
-    Mutation: accept a present-but-empty region.
+    Mutation: delete the empty-region check in `_check_environment` -- the `tf_vars` cases
+    refuse as an entry with no region instead, and the `folder` cases validate.
     """
-    table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": ""}}}
-    assert _refusal(table, matrix_envs=("dev-eu",)) == (
-        '::error::layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the '
-        "environment table, and dev-eu has an entry with no region."
+    text = f"layout: {layout}\nenvironments:\n  dev-eu:\n    region:{written}\n"
+    assert _refusal(env_config.load_config(text), matrix_envs=("dev-eu",)) == (
+        "::error::environment dev-eu: region is empty. Give it a value, or remove the key."
     )
 
 
@@ -148,44 +150,93 @@ def test_a_boolean_flag_validates(key, value):
 
 
 _NOT_BOOLEAN = [
-    ("shared", "true", "str"),
-    ("shared", 1, "int"),
-    ("shared", "yes", "str"),
-    ("explicit", "true", "str"),
-    ("explicit", {"vars": "X"}, "dict"),
-    ("gated", "false", "str"),
-    ("gated", 0, "int"),
+    ("shared", "True", "'True'"),
+    ("shared", "yes", "'yes'"),
+    ("shared", "1", "'1'"),
+    ("explicit", "True", "'True'"),
+    ("explicit", "yes", "'yes'"),
+    ("gated", "FALSE", "'FALSE'"),
+    ("gated", "no", "'no'"),
 ]
 
 
-@pytest.mark.parametrize(("key", "value", "found"), _NOT_BOOLEAN, ids=range(len(_NOT_BOOLEAN)))
-def test_a_flag_that_is_not_a_boolean_refuses(key, value, found):
-    """A quoted `"true"` reads as set to a person and resolves as unset. For `explicit` that
-    is the fail-open case: the environment lands on a bare `shipmate apply`.
+@pytest.mark.parametrize(("key", "written", "found"), _NOT_BOOLEAN, ids=range(len(_NOT_BOOLEAN)))
+def test_a_flag_that_is_not_true_or_false_refuses(key, written, found):
+    """Only `true` and `false`, exactly as written, are flags. `True` or `yes` reads as set to
+    a person and would resolve as unset. For `explicit` that is the fail-open case: the
+    environment lands on a bare `shipmate apply`.
 
-    Mutations: drop the `isinstance` check from `_check_flags` -- every case validates; or
-    drop one key from the checked flags -- that key's cases validate.
+    Mutations: normalise the flag case-insensitively in `load_config` -- the `True` and
+    `FALSE` cases validate; drop the `isinstance` check from `_check_flags` -- every case
+    validates; or drop one key from `_FLAGS` -- that key's cases validate.
     """
-    table = {"layout": "folder", "environments": {"dev-eu": {key: value}}}
-    assert _refusal(table) == (
-        f"::error::environments.dev-eu.{key} must be a boolean, got {found}. Write "
-        f"{key} = true or {key} = false, unquoted."
-    )
-
-
-def test_a_referenced_flag_refuses_as_the_string_it_resolves_to():
-    """A reference resolves before validation, so `explicit = { vars = "X" }` reaches the
-    boolean check as the variable's string value, and that is the message a run prints.
-
-    Mutation: drop `explicit` from the checked flags -- this validates.
-    """
-    text = 'layout = "folder"\n[environments.prod]\nexplicit = { vars = "HOLD" }\n'
+    text = f"layout: folder\nenvironments:\n  dev-eu:\n    {key}: {written}\n"
     with pytest.raises(SystemExit) as excinfo:
-        env_config.validate_structure(env_config.parse_table(text, {"HOLD": "true"}))
+        env_config.validate_structure(env_config.load_config(text))
     assert str(excinfo.value) == (
-        "::error::environments.prod.explicit must be a boolean, got str. Write "
-        "explicit = true or explicit = false, unquoted."
+        f"::error::environments.dev-eu.{key} must be true or false, got {found}."
     )
+
+
+@pytest.mark.parametrize("key", _FLAGS)
+@pytest.mark.parametrize(
+    "written",
+    ["{vars: SECRETISH}", "[{vars: SECRETISH}]", "{a: {vars: SECRETISH}}"],
+    ids=["direct", "in-a-list", "in-a-mapping"],
+)
+def test_a_referenced_flag_refuses_before_the_variable_is_read(key, written):
+    """The flag refusal quotes what it found, and a refusal reaches run logs and doctor's
+    pull request comment, so a reference anywhere in a flag refuses before it resolves: the
+    variable's value is never quoted.
+
+    Mutations: delete the reference refusal in `_normalise_flags` -- every row's flag refusal
+    quotes `sentinel-value`; test only the flag itself with `_is_reference` -- the nested rows
+    do.
+    """
+    text = f"layout: folder\nenvironments:\n  prod:\n    {key}: {written}\n"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(text, {"SECRETISH": "sentinel-value"}))
+    assert str(excinfo.value) == (
+        f"::error::environments.prod.{key} holds a variable reference; a flag accepts no "
+        "variable reference. Write true or false."
+    )
+
+
+def test_a_referenced_layout_refuses_without_quoting_the_variable():
+    """`validate_structure` quotes a literal bad layout; a referenced one is named by its
+    variable instead.
+
+    Mutation: delete the referenced-layout check in `parse_table` -- the refusal quotes
+    `'sentinel-value'`.
+    """
+    text = "layout: {vars: LAYOUT}\n"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(text, {"LAYOUT": "sentinel-value"}))
+    assert str(excinfo.value) == (
+        "::error::.github/shipmate-config.yml layout references GitHub variable LAYOUT, whose "
+        "value is not one of tf_vars, workspace, folder."
+    )
+
+
+def test_a_layout_holding_a_nested_reference_refuses_by_type():
+    """A reference inside a list is no layout, and the literal-layout refusal would quote it
+    resolved.
+
+    Mutation: delete the layout type check in `load_config` -- the refusal quotes
+    `['sentinel-value']`.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(
+            env_config.parse_table("layout: [{vars: LAYOUT}]\n", {"LAYOUT": "sentinel-value"})
+        )
+    assert str(excinfo.value) == "::error::layout must be a string, got list."
+
+
+def test_a_referenced_layout_resolves():
+    """Mutation: refuse every referenced layout in `parse_table` -- this refuses."""
+    assert env_config.parse_table("layout: {vars: LAYOUT}\n", {"LAYOUT": "folder"}) == {
+        "layout": "folder"
+    }
 
 
 # --- 8: tf_vars names and values ----------------------------------------------------------
@@ -276,8 +327,7 @@ def test_a_folder_layout_with_no_environments_passes():
 
 
 def test_an_empty_table_refuses():
-    """An empty file is valid TOML, so the parser passes it through and this is the only site
-    that can refuse it.
+    """An empty file parses to an empty mapping, so this is the only site that can refuse it.
 
     Mutation: restore `if "layout" not in table: return table`.
     """
@@ -334,8 +384,8 @@ def test_a_whole_table_is_returned_unchanged():
 
 
 def test_an_empty_layout_refuses():
-    """TOML has no null, so the unreachable `layout = null` case is retired. An empty string
-    is the reachable neighbour: a declared layout holding a value no layout may hold.
+    """Every scalar is a string, so `layout:` with no value is the empty string: a declared
+    layout holding a value no layout may hold.
 
     Mutation: `if not table.get("layout"):` for the no-layout refusal, which reads an empty
     layout as undeclared and answers a repository that did declare one with the message
@@ -358,7 +408,7 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate.toml holds layout, identities, environments."
+        ".github/shipmate-config.yml holds layout, identities, environments."
     )
 
 
@@ -433,8 +483,8 @@ def test_the_single_entry_point_validates_ordering(table, message):
 
     Both environment suffixes are cases here, not one: the refusal exists because every
     documented environment name carries `-plan` or `-apply`, and a suffixed predecessor
-    matches no environment and orders nothing. A pasted quote is its own case: TOML quotes
-    the string itself, so a pasted `"dev-eu"` arrives with its quotes still on.
+    matches no environment and orders nothing. A pasted quote is its own case: a quoted
+    string inside single quotes, `'"dev-eu"'`, arrives with its inner quotes still on.
 
     Mutations: delete the `validate_env_name_list` call from `_check_entries` -- every
     case validates; drop either entry from the suffix tuple in `_check_env_name` -- that
@@ -462,7 +512,7 @@ def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
 
 _CYCLE_TAIL = (
     ": each of those must fully apply before the next, so the ordering has no first "
-    "environment and no apply path can sort it. Break the chain in .github/shipmate.toml."
+    "environment and no apply path can sort it. Break the chain in .github/shipmate-config.yml."
 )
 _CYCLES = [
     ({"dev": ["prod"], "prod": ["dev"]}, "dev -> prod -> dev"),
@@ -530,7 +580,7 @@ def test_a_needs_chain_deeper_than_the_env_levels_refuses_structurally():
         env_config.validate_structure(table)
     assert str(excinfo.value) == (
         "::error::needs spans 5 env levels: a -> b -> c -> d -> e. A deploy applies at most "
-        "4 env levels. Shorten the chain in .github/shipmate.toml."
+        "4 env levels. Shorten the chain in .github/shipmate-config.yml."
     )
 
 
@@ -555,7 +605,7 @@ def test_a_too_deep_needs_graph_names_one_chain_the_sorted_first_at_each_tie():
         env_config.validate_structure(table)
     assert str(excinfo.value) == (
         "::error::needs spans 5 env levels: a -> b -> c -> d -> e. A deploy applies at most "
-        "4 env levels. Shorten the chain in .github/shipmate.toml."
+        "4 env levels. Shorten the chain in .github/shipmate-config.yml."
     )
 
 
@@ -644,15 +694,15 @@ def test_the_entry_tf_vars_table_reaches_the_row():
 
 
 _ROLE_TEXT = (
-    'layout = "folder"\n\n[identities.prod]\naws.apply = {}\n\n'
-    '[environments.prod]\nregion = "eu-west-1"\nidentity = "prod"\n'
+    "layout: folder\n\nidentities:\n  prod:\n    aws:\n      apply: {}\n\n"
+    "environments:\n  prod:\n    region: eu-west-1\n    identity: prod\n"
 )
 
 
 def test_a_vars_reference_resolves():
     """Mutation: `_is_reference` reads `var` -- the mapping then reaches validation."""
     table = env_config.parse_table(
-        _ROLE_TEXT.format('{ vars = "ROLE" }'), {"ROLE": "arn:aws:iam::9817:role/r"}
+        _ROLE_TEXT.format("{vars: ROLE}"), {"ROLE": "arn:aws:iam::9817:role/r"}
     )
     assert table == {
         "layout": "folder",
@@ -663,12 +713,12 @@ def test_a_vars_reference_resolves():
 
 
 def test_a_lowercase_reference_refusal_spells_the_vars_key():
-    """Mutation: leave the refusal writing `{ var = ... }`."""
+    """Mutation: leave the refusal writing `{var: ...}`."""
     with pytest.raises(SystemExit) as excinfo:
-        env_config.parse_table(_ROLE_TEXT.format('{ vars = "role" }'), {})
+        env_config.parse_table(_ROLE_TEXT.format("{vars: role}"), {})
     assert str(excinfo.value) == (
-        "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
-        'variable "role"; GitHub variable names are uppercase. Write { vars = "ROLE" }.'
+        "::error::.github/shipmate-config.yml identities.prod.aws.apply references GitHub "
+        'variable "role"; GitHub variable names are uppercase. Write {vars: ROLE}.'
     )
 
 
@@ -682,7 +732,7 @@ def _structural(table):
 
 
 def test_three_independent_errors_refuse_as_three_lines():
-    """A misspelled key, a quoted boolean and a self-referencing `needs` in the same entry
+    """A misspelled key, a capitalised boolean and a self-referencing `needs` in the same entry
     are three typos, and one refusal names all three rather than one per run.
 
     Mutations: re-raise inside `_gather` -- only the cycle line is left, because the other
@@ -690,17 +740,16 @@ def test_three_independent_errors_refuse_as_three_lines():
     the cycle line is lost.
     """
     table = env_config.parse_table(
-        'layout = "folder"\n\n[environments.dev-eu]\nregoin = "eu-west-1"\ngated = "false"\n'
-        'needs = ["dev-eu"]\n'
+        "layout: folder\n\nenvironments:\n  dev-eu:\n    regoin: eu-west-1\n    gated: False\n"
+        "    needs: [dev-eu]\n"
     )
     assert _structural(table) == (
         "::error::environment dev-eu: regoin is not a key this engine implements. An "
         "environment holds region, tf_vars, identity, workloads, shared, needs, explicit, gated.\n"
-        "::error::environments.dev-eu.gated must be a boolean, got str. Write gated = true or "
-        "gated = false, unquoted.\n"
+        "::error::environments.dev-eu.gated must be true or false, got 'False'.\n"
         "::error::needs is cyclic: dev-eu -> dev-eu: each of those must fully apply before "
         "the next, so the ordering has no first environment and no apply path can sort it. "
-        "Break the chain in .github/shipmate.toml."
+        "Break the chain in .github/shipmate-config.yml."
     )
 
 
@@ -713,10 +762,10 @@ def test_the_lines_come_in_check_order():
     """
     table = {"colour": 1, "lyout": "folder", "environments": {"dev": {"regoin": "eu-west-1"}}}
     assert _structural(table) == (
-        "::error::colour is not a setting this engine implements. .github/shipmate.toml holds "
-        "layout, identities, environments.\n"
-        "::error::lyout is not a setting this engine implements. .github/shipmate.toml holds "
-        "layout, identities, environments.\n" + NO_LAYOUT + "\n"
+        "::error::colour is not a setting this engine implements. "
+        ".github/shipmate-config.yml holds layout, identities, environments.\n"
+        "::error::lyout is not a setting this engine implements. "
+        ".github/shipmate-config.yml holds layout, identities, environments.\n" + NO_LAYOUT + "\n"
         "::error::environment dev: regoin is not a key this engine implements. An environment "
         "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )

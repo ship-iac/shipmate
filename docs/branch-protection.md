@@ -141,15 +141,15 @@ code-owner approval. The alternative is a bypass actor on the ruleset, which
 spends exactly the control a leaked App key cannot get past.
 
 **A narrow `CODEOWNERS` leaves the environment table under ordinary review.**
-The role a cell assumes is a line in `.github/shipmate.toml` on the default
+The role a cell assumes is a line in `.github/shipmate-config.yml` on the default
 branch, not a GitHub Environment variable, so changing it is a pull request
 rather than a repository-settings change. Under a `CODEOWNERS` covering
 `/.github/workflows/` alone that pull request needs no code-owner approval — the
-rule is a no-op for changed files with no owner, and `/.github/shipmate.toml` is
+rule is a no-op for changed files with no owner, and `/.github/shipmate-config.yml` is
 not under `/.github/workflows/`. Nothing is bypassed: the table takes effect only
 once merged to the default branch, and every other control still applies. What
 moved is the bar for naming a role, from settings access to ordinary review. Add
-`/.github/shipmate.toml` to `CODEOWNERS` if you want the code-owner half on it.
+`/.github/shipmate-config.yml` to `CODEOWNERS` if you want the code-owner half on it.
 
 **If you narrow `CODEOWNERS`, land that on its own pull request first.** GitHub
 evaluates `CODEOWNERS` from the pull request's base branch, so a narrowing
@@ -204,9 +204,9 @@ fails closed rather than proceeding unreviewed.)
   `shipmate apply` stays blocked until `reviewDecision` clears — for every
   environment, unless some are exempted (next bullet). No shipmate
   config — set it on the ruleset (the `pull_request` rule).
-- **Team mode with named environments exempted** (`gated = false`): the
-  ruleset requirement is repository-wide, so `gated = false` on an
-  environment's entry in `.github/shipmate.toml` lets `shipmate apply` apply
+- **Team mode with named environments exempted** (`gated: false`): the
+  ruleset requirement is repository-wide, so `gated: false` on an
+  environment's entry in `.github/shipmate-config.yml` lets `shipmate apply` apply
   that environment without an approving review while the merge still needs one
   ([`getting-started.md`](getting-started.md) §"Applying chosen environments
   without an approving review"). What it exempts and what still blocks an apply
@@ -219,13 +219,13 @@ fails closed rather than proceeding unreviewed.)
   (`getting-started.md` §Required — apply → §Environment setup has those
   settings). This gates both pre-merge `shipmate apply <env>` and the
   post-merge `deploy` job's apply, since both run against the apply environment. An
-  env holding `shared = true` cannot be gated this way (`hardening.md` §6).
+  env holding `shared: true` cannot be gated this way (`hardening.md` §6).
   - Deployment approvals differ from PR reviews: a reviewer can approve
     their own deployment by default, so a sole maintainer still gets a
     confirm-step on a gated environment. Tick "Prevent self-review" on the
     environment for genuine four-eyes once there's a team.
-  - Pair a reviewer-gated production env with `explicit = true` on its entry in
-    `.github/shipmate.toml` so the bare `shipmate apply` skips it and
+  - Pair a reviewer-gated production env with `explicit: true` on its entry in
+    `.github/shipmate-config.yml` so the bare `shipmate apply` skips it and
     it is only ever applied via the targeted `shipmate apply <env>` (which
     then pauses for the environment reviewer).
 - **Private-repo caveat:** required reviewers (and wait timers) are free on

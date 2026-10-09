@@ -5,7 +5,7 @@ could wire a constant where a fact belongs -- `head-repo: ${{ github.repository 
 safe answer for every run, fork pull requests included, and nothing else in the system can see
 it. The wiring is engine YAML now, SHA-pinned and reviewed, so the checks move here.
 
-Every assertion is a whole hand-written value against `yaml.safe_load` output. A key-set test
+Every assertion is a whole hand-written value against parsed output. A key-set test
 passes an entry whose expression was mistyped; a substring test is satisfied by a comment.
 """
 
@@ -29,8 +29,7 @@ def _step(job_id, needle):
 
 def test_the_workflow_call_inputs_are_exactly_these():
     """Mutation: re-declare `state_suffix: { required: true, type: string }`."""
-    # `doc[True]` is not a typo: PyYAML parses the bare key `on:` as the boolean True.
-    assert workflow_yaml(WF)[True]["workflow_call"]["inputs"] == {
+    assert workflow_yaml(WF)["on"]["workflow_call"]["inputs"] == {
         "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
     }
 
@@ -39,7 +38,7 @@ def test_the_workflow_call_secrets_are_exactly_these():
     """`required: true` on any of the three would fail at load time: consumers scope the two
     engine keys to an environment rather than the repository, and a consumer who forwards no
     secrets of their own holds no `SHIPMATE_SECRETS` to pass at all."""
-    assert workflow_yaml(WF)[True]["workflow_call"]["secrets"] == {
+    assert workflow_yaml(WF)["on"]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
         "SHIPMATE_PLAN_PASSPHRASE": {"required": False},
         "SHIPMATE_SECRETS": {"required": False},
@@ -151,7 +150,7 @@ def _strings(node):
     """Every scalar string reachable in the parsed workflow, mapping keys included.
 
     Parsed, not file text: a payload expression inside a comment teaches the next reader to write
-    it back, but `safe_load` discards comments, so this cannot be satisfied by one.
+    it back, but the parser discards comments, so this cannot be satisfied by one.
     """
     if isinstance(node, dict):
         for key, value in node.items():

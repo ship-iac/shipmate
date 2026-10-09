@@ -40,7 +40,7 @@ def _step(job_id, needle):
 
 def test_the_workflow_call_inputs_are_exactly_these():
     """`tags` is an input so each drift file carries its own query. Mutation: drop `tags`."""
-    assert workflow_yaml(WF)[True]["workflow_call"]["inputs"] == {
+    assert workflow_yaml(WF)["on"]["workflow_call"]["inputs"] == {
         "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
         "tags": {"required": False, "default": "", "type": "string"},
     }
@@ -48,7 +48,7 @@ def test_the_workflow_call_inputs_are_exactly_these():
 
 def test_the_workflow_call_secrets_are_exactly_these():
     """Mutation: re-add `SHIPMATE_SLACK_WEBHOOK: { required: false }`."""
-    assert workflow_yaml(WF)[True]["workflow_call"]["secrets"] == {
+    assert workflow_yaml(WF)["on"]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
         "SHIPMATE_SECRETS": {"required": False},
     }

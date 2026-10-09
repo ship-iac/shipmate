@@ -1,4 +1,4 @@
-"""`env-config.parse_table` resolves `{ vars = "NAME" }` references against GitHub variables.
+"""`env-config.parse_table` resolves `{vars: NAME}` references against GitHub variables.
 
 Every expectation is a hand-written constant compared whole: a partial check leaves the rest
 of the table free to be rewritten. Each docstring names the mutation its test reddens on.
@@ -6,7 +6,6 @@ of the table free to be rewritten. Each docstring names the mutation its test re
 
 import base64
 import json
-import tomllib
 
 import pytest
 from _loader import load_script
@@ -14,15 +13,21 @@ from _loader import load_script
 ec = load_script("env-config")
 
 _TABLE = """\
-layout = "tf_vars"
+layout: tf_vars
 
-[identities.prod]
-aws.plan = { vars = "PROD_PLAN_ROLE" }
-aws.apply = { app = "arn:aws:iam::1:role/apply", net-edge = { vars = "NET_EDGE_ROLE" } }
+identities:
+  prod:
+    aws:
+      plan: {vars: PROD_PLAN_ROLE}
+      apply:
+        app: arn:aws:iam::1:role/apply
+        net-edge:
+          vars: NET_EDGE_ROLE
 
-[environments.prod]
-region = "eu-west-1"
-needs = [{ vars = "FIRST_ENV" }, "stage"]
+environments:
+  prod:
+    region: eu-west-1
+    needs: [{vars: FIRST_ENV}, stage]
 """
 
 _VARIABLES = {
@@ -48,11 +53,12 @@ _RESOLVED = {
     "environments": {"prod": {"region": "eu-west-1", "needs": ["dev", "stage"]}},
 }
 
-_ROLE_REF = '[identities.prod]\naws.apply = { vars = "PROD_APPLY_ROLE" }\n'
+_ROLE_REF = "identities:\n  prod:\n    aws:\n      apply: {vars: PROD_APPLY_ROLE}\n"
 
 
 def test_every_reference_is_replaced_by_its_value():
-    """Covers an identity field, a list item and a workload map value.
+    """Covers an identity field, a list item and a workload map value, and a reference in
+    flow form (`{vars: NAME}`) beside one in block form (`vars: NAME` on its own line).
     Reddens on returning the raw table, on recursing into dicts only (the `needs` item stays
     a mapping), and on stopping at depth 4 (the workload map value stays a mapping)."""
     assert ec.parse_table(_TABLE, _VARIABLES) == _RESOLVED
@@ -64,7 +70,7 @@ def test_a_reference_inside_needs_orders_by_its_value():
     assert ec.env_order(ec.parse_table(_TABLE, _VARIABLES)) == {"prod": ["dev", "stage"]}
 
 
-_NEEDS_REF = 'layout = "folder"\n[environments.prod]\nneeds = [{ vars = "FIRST_ENV" }]\n'
+_NEEDS_REF = "layout: folder\nenvironments:\n  prod:\n    needs: [{vars: FIRST_ENV}]\n"
 
 
 @pytest.mark.parametrize(
@@ -98,8 +104,8 @@ def test_a_mapping_that_merely_contains_vars_is_data():
     """An environment named `vars`, and a two-key map holding `vars`, are ordinary data.
     Reddens on detecting a reference as "a dict containing `vars`"."""
     text = (
-        '[environments.vars]\nregion = "eu-west-1"\n'
-        '[identities.prod]\naws.apply = { vars = "r", core = "s" }\n'
+        "environments:\n  vars:\n    region: eu-west-1\n"
+        "identities:\n  prod:\n    aws:\n      apply: {vars: r, core: s}\n"
     )
     assert ec.parse_table(text, {}) == {
         "environments": {"vars": {"region": "eu-west-1"}},
@@ -109,10 +115,10 @@ def test_a_mapping_that_merely_contains_vars_is_data():
 
 def test_a_one_key_vars_mapping_holding_no_string_is_data():
     """The existing validation refuses it later. Reddens on treating any one-key `vars`
-    mapping as a reference: the lookup then matches the integer against the name charset
-    and raises `TypeError`."""
-    text = "[environments.prod]\nregion = { vars = 3 }\n"
-    assert ec.parse_table(text, {}) == {"environments": {"prod": {"region": {"vars": 3}}}}
+    mapping as a reference: the lookup then matches the list against the name charset and
+    raises `TypeError`."""
+    text = "environments:\n  prod:\n    region: {vars: [a]}\n"
+    assert ec.parse_table(text, {}) == {"environments": {"prod": {"region": {"vars": ["a"]}}}}
 
 
 def _refusal(text, variables):
@@ -122,7 +128,7 @@ def _refusal(text, variables):
 
 
 _UNSET_REFUSAL = (
-    "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
+    "::error::.github/shipmate-config.yml identities.prod.aws.apply references GitHub "
     "variable PROD_APPLY_ROLE, which is not set. A reference reads repository and "
     "organization variables; the variables of a cell's <env>-plan, <env>-apply or shared "
     "<env> Environment are never read."
@@ -137,23 +143,23 @@ def test_an_unset_variable_refuses_naming_the_path_and_name():
 def test_an_empty_variable_refuses():
     """Reddens on dropping the empty check."""
     assert _refusal(_ROLE_REF, {"PROD_APPLY_ROLE": ""}) == (
-        "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
+        "::error::.github/shipmate-config.yml identities.prod.aws.apply references GitHub "
         "variable PROD_APPLY_ROLE, which is set to an empty value."
     )
 
 
 def test_a_lowercase_name_refuses_and_names_the_uppercase_spelling():
     """Reddens on uppercasing the name before the lookup, which resolves it silently."""
-    text = '[identities.prod]\naws.apply = { vars = "prod_apply_role" }\n'
+    text = "identities:\n  prod:\n    aws:\n      apply: {vars: prod_apply_role}\n"
     assert _refusal(text, {"PROD_APPLY_ROLE": "arn:aws:iam::1:role/apply"}) == (
-        "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
+        "::error::.github/shipmate-config.yml identities.prod.aws.apply references GitHub "
         'variable "prod_apply_role"; GitHub variable names are uppercase. Write '
-        '{ vars = "PROD_APPLY_ROLE" }.'
+        "{vars: PROD_APPLY_ROLE}."
     )
 
 
 @pytest.mark.parametrize(
-    ("toml_name", "name", "rendered"),
+    ("written", "name", "rendered"),
     [
         ("", "", "''"),
         ("A-B", "A-B", "'A-B'"),
@@ -162,14 +168,14 @@ def test_a_lowercase_name_refuses_and_names_the_uppercase_spelling():
         ("A\\nB", "A\nB", "'A\\nB'"),
     ],
 )
-def test_a_name_outside_the_charset_refuses_naming_the_rule(toml_name, name, rendered):
+def test_a_name_outside_the_charset_refuses_naming_the_rule(written, name, rendered):
     """`a-b` is lowercase too, but uppercasing it cannot help. The name renders escaped, so a
-    TOML `\\n` in it cannot split the `::error::` line. Reddens on dropping the charset check:
-    `""`, `A-B` and `1ROLE` then resolve to the value set for them and `a-b` refuses as
+    double-quoted `\\n` in it cannot split the `::error::` line. Reddens on dropping the charset
+    check: `""`, `A-B` and `1ROLE` then resolve to the value set for them and `a-b` refuses as
     lowercase, suggesting `A-B`. Reddens on rendering the name raw instead of with `!r`."""
-    text = f'[identities.prod]\naws.apply = {{ vars = "{toml_name}" }}\n'
+    text = f'identities:\n  prod:\n    aws:\n      apply: {{vars: "{written}"}}\n'
     assert _refusal(text, {name: "v", name.upper(): "v"}) == (
-        "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
+        "::error::.github/shipmate-config.yml identities.prod.aws.apply references GitHub "
         f"variable {rendered}, which is not a GitHub variable name ([A-Z_][A-Z0-9_]*)."
     )
 
@@ -177,7 +183,7 @@ def test_a_name_outside_the_charset_refuses_naming_the_rule(toml_name, name, ren
 def test_no_reference_never_reads_the_environment(monkeypatch):
     """Reddens on reading `SHIPMATE_GITHUB_VARS` unconditionally: absent, it refuses."""
     monkeypatch.delenv("SHIPMATE_GITHUB_VARS", raising=False)
-    text = 'layout = "tf_vars"\n[environments.prod]\nneeds = ["dev"]\n'
+    text = "layout: tf_vars\nenvironments:\n  prod:\n    needs: [dev]\n"
     assert ec.parse_table(text) == {
         "layout": "tf_vars",
         "environments": {"prod": {"needs": ["dev"]}},
@@ -185,7 +191,7 @@ def test_no_reference_never_reads_the_environment(monkeypatch):
 
 
 _NO_VARIABLES_REFUSAL = (
-    "::error::.github/shipmate.toml identities.prod.aws.apply references GitHub "
+    "::error::.github/shipmate-config.yml identities.prod.aws.apply references GitHub "
     "variable PROD_APPLY_ROLE, but this step received no GitHub variables: the engine did not "
     "pass github-vars to this step, or the repository reaches no variables at all."
 )
@@ -217,14 +223,14 @@ def test_a_root_level_vars_key_is_a_setting_not_a_reference():
     """Reddens on `references` walking from the root table, which reports it under an empty
     path; with `parse_table` also replacing from the root, the whole file resolves to the
     variable's value."""
-    assert ec.parse_table('vars = "X"\n', {"X": "v"}) == {"vars": "X"}
+    assert ec.parse_table("vars: X\n", {"X": "v"}) == {"vars": "X"}
     assert ec.references({"vars": "X"}) == []
 
 
 def test_references_lists_every_reference_sorted_by_path():
     """Reddens on dropping list recursion (the `environments.prod.needs[0]` row
     disappears)."""
-    assert ec.references(tomllib.loads(_TABLE)) == [
+    assert ec.references(ec.load_config(_TABLE)) == [
         ("environments.prod.needs[0]", "FIRST_ENV"),
         ("identities.prod.aws.apply.net-edge", "NET_EDGE_ROLE"),
         ("identities.prod.aws.plan", "PROD_PLAN_ROLE"),
@@ -236,9 +242,23 @@ _ROLE_RESOLVED = {"identities": {"prod": {"aws": {"apply": "arn:aws:iam::1:role/
 
 
 def test_read_table_resolves_references(monkeypatch):
-    """Reddens on `read_table` calling `load_toml` instead of `parse_table`."""
+    """Reddens on `read_table` calling `load_config` instead of `parse_table`."""
     monkeypatch.setenv("GITHUB_REPOSITORY", "an-org/a-repo")
     monkeypatch.setenv("SHIPMATE_GITHUB_VARS", _ENUMERATION)
     blob = {"encoding": "base64", "content": base64.b64encode(_ROLE_REF.encode()).decode()}
     monkeypatch.setattr(ec, "_run", lambda args: json.dumps(blob))
     assert ec.read_table() == _ROLE_RESOLVED
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["plan: {vars: DEV_PLAN_ROLE}", "plan:\n        vars: DEV_PLAN_ROLE"],
+    ids=["flow", "block"],
+)
+def test_a_reference_resolves_in_flow_and_block_form(written):
+    """Both spellings parse to the same one-key mapping, so this pins the reference shape.
+    Mutation: `_is_reference` requiring `len(value) == 2` -- both stay mappings."""
+    text = f"identities:\n  dev:\n    aws:\n      {written}\n"
+    assert ec.parse_table(text, {"DEV_PLAN_ROLE": "arn:aws:iam::1:role/plan"}) == {
+        "identities": {"dev": {"aws": {"plan": "arn:aws:iam::1:role/plan"}}}
+    }

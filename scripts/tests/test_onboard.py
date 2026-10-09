@@ -12,8 +12,8 @@ import subprocess
 import sys
 
 import pytest
-import yaml
 from _loader import ENGINE, load_script
+from _shipmate import load_workflow_text
 
 onboard = load_script("onboard")
 ec = load_script("env-config")
@@ -197,22 +197,23 @@ def test_dry_run_issues_no_write(monkeypatch):
 
 
 def write_table(root, entry):
-    """A `.github/shipmate.toml` under `root` with one `dev-eu` table ending in `entry`."""
+    """A `.github/shipmate-config.yml` under `root` with one `dev-eu` entry ending in `entry`,
+    which is indented as the file needs it."""
     (root / ".github").mkdir(exist_ok=True)
-    (root / ".github" / "shipmate.toml").write_text(
-        f'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n{entry}',
+    (root / ".github" / "shipmate-config.yml").write_text(
+        f"layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: eu-west-1\n{entry}",
         encoding="utf-8",
         newline="\n",
     )
 
 
 def test_a_shared_entry_no_stack_tags_is_provisioned(monkeypatch, tmp_path, capsys):
-    """A `shared = true` entry is provisioned like any other, tagged or not: its bare
+    """A `shared: true` entry is provisioned like any other, tagged or not: its bare
     environment exists before the first pull request tagging a stack into it merges.
 
     Mutation: restore the loop refusing a shared name outside the tag-derived environments.
     """
-    write_table(tmp_path, "shared = true\n")
+    write_table(tmp_path, "    shared: true\n")
     policies = {"repos/o/r/environments/dev-eu/deployment-branch-policies": ABSENT}
     _, exc = run_main(monkeypatch, tmp_path, policies, ["--dry-run"], membership=({}, {}))
     assert exc.code == 0
@@ -693,7 +694,7 @@ def test_repository_level_key_is_deleted(monkeypatch):
 
 
 def test_shared_mode_binds_one_bare_environment(monkeypatch):
-    """An environment whose table entry holds `shared = true` is one bare
+    """An environment whose table entry holds `shared: true` is one bare
     `<env>` on both paths; no `<env>-plan` is created for it.
 
     The two suffixed reads are the naming-conflict probe, which in shared mode looks for
@@ -864,7 +865,7 @@ SPLIT_CONFLICT = (
     "dev-eu",
     "the engine binds `dev-eu-plan` / `dev-eu-apply` for `dev-eu`, and `dev-eu` is also "
     "present. Nothing binds `dev-eu`, so nothing was created or changed for `dev-eu`. "
-    "Delete `dev-eu`, or set `shared = true` in `[environments.dev-eu]` so the engine "
+    "Delete `dev-eu`, or set `shared: true` in `environments.dev-eu` so the engine "
     "binds the bare `dev-eu` instead.",
 )
 SHARED_CONFLICT = (
@@ -873,7 +874,7 @@ SHARED_CONFLICT = (
     "the engine binds `dev-eu` for `dev-eu`, and `dev-eu-plan` and `dev-eu-apply` are "
     "also present. Nothing binds `dev-eu-plan` and `dev-eu-apply`, so nothing was created "
     "or changed for `dev-eu`. Delete `dev-eu-plan` and `dev-eu-apply`, or drop "
-    "`shared = true` from `[environments.dev-eu]`.",
+    "`shared: true` from `environments.dev-eu`.",
 )
 
 
@@ -934,7 +935,7 @@ def test_a_bare_env_alone_is_refused_before_the_split_pair_is_created(monkeypatc
 
 def test_the_split_pair_alone_is_refused_before_the_bare_env_is_created(monkeypatch):
     """The mirror of the case above, reached by marking a split repository's environment
-    `shared = true`: creating the bare `dev-eu` beside the pair leaves the same unused
+    `shared: true`: creating the bare `dev-eu` beside the pair leaves the same unused
     naming behind, so it is refused rather than written.
 
     Mutation: `_unused_naming` returning `[env]` unconditionally, which reads the bare
@@ -1172,9 +1173,51 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, key=True, membership=ONE
     return fake, excinfo.value
 
 
+def test_a_python_without_pyyaml_refuses_before_any_read(monkeypatch):
+    """The install command per platform, whole, and nothing read or written first.
+
+    Mutation: move the check after `_repo_facts()`, the first `gh` call -- its stub fails the
+    test."""
+
+    def unreachable(*args):
+        pytest.fail("onboard read something before refusing a missing PyYAML")
+
+    for name in ("_run", "_engine_pin", "_repo_root", "_repo_facts", "_read_key"):
+        monkeypatch.setattr(onboard, name, unreachable)
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    with pytest.raises(SystemExit) as excinfo:
+        onboard.main(["--app-id", "1"])
+    assert excinfo.value.code == (
+        "onboard needs PyYAML. Install it for the python you run onboard with: sudo apt install "
+        "python3-yaml (Debian or Ubuntu), brew install pyyaml (macOS), python -m pip install "
+        "pyyaml (Windows or any other)."
+    )
+
+
+def test_a_python_below_the_floor_refuses_before_any_read(monkeypatch):
+    """The floor in the operator's words, whole: onboard runs on their machine, so the runner
+    wording `ec.runner_refusal` gives (choose a newer `runs_on` image) does not apply.
+
+    Mutation: delete the floor check in `main` -- the PyYAML check passes and the first read's
+    stub fails the test."""
+
+    def unreachable(*args):
+        pytest.fail("onboard read something before refusing an old python")
+
+    for name in ("_run", "_engine_pin", "_repo_root", "_repo_facts", "_read_key"):
+        monkeypatch.setattr(onboard, name, unreachable)
+    monkeypatch.setattr(sys, "version_info", (3, 11, 9, "final", 0))
+    with pytest.raises(SystemExit) as excinfo:
+        onboard.main(["--app-id", "1"])
+    assert excinfo.value.code == (
+        "onboard needs Python 3.12 or later; the python you run onboard with is 3.11.9. Run "
+        "onboard with a python 3.12 or later."
+    )
+
+
 def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path):
     """`onboard` moves no pin -- `_reconcile_shim` reports `pin-only` and leaves it, and that
-    status never reaches `_exit_code`. A `.github/shipmate.toml` written here could therefore
+    status never reaches `_exit_code`. A `.github/shipmate-config.yml` written here could therefore
     hand a repository still pinned to an older engine a file that engine refuses, silently,
     because a top-level key it predates is rejected outright. So the file stays a checklist
     item for a human who merges it in the right order.
@@ -1184,7 +1227,7 @@ def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path)
     `key.pem` is this harness's own input, not something the run created. The drift file is
     the consumer's to name, so `shipmate.yml` is the only workflow file a run writes.
 
-    Mutations: write a `.github/shipmate.toml` from `_checklist`; render the `shipmate drift`
+    Mutations: write a `.github/shipmate-config.yml` from `_checklist`; render the `shipmate drift`
     fence to `.github/workflows/shipmate-drift.yml` from `main`.
     """
     run_main(monkeypatch, tmp_path, {}, [])
@@ -1260,15 +1303,15 @@ def _variable_sets(fake):
 
 
 def test_the_table_decides_which_naming_is_created(monkeypatch, tmp_path):
-    """The checkout's `.github/shipmate.toml` is the only source of the shared set: an
-    entry holding `shared = true` gets the bare environment and no split pair, and no run
+    """The checkout's `.github/shipmate-config.yml` is the only source of the shared set: an
+    entry holding `shared: true` gets the bare environment and no split pair, and no run
     writes a variable naming it.
 
     Mutations: `_resolve_shared` returning `set()` without reading the file reddens the
     shared case; writing a SHIPMATE_SHARED_ENVS variable from `_reconcile_variables`
     reddens its variable list.
     """
-    write_table(tmp_path, "shared = true\n")
+    write_table(tmp_path, "    shared: true\n")
     fake, _ = run_main(
         monkeypatch,
         tmp_path,
@@ -1291,27 +1334,24 @@ def test_without_a_table_every_environment_is_split(monkeypatch, tmp_path):
 
 
 def test_an_invalid_table_refuses_before_any_write(monkeypatch, tmp_path):
-    """`shared_envs` trusts the table's shape, and a quoted `"true"` reads as unshared, the
-    split naming. The structural check refuses first, while no write has run.
+    """`shared_envs` trusts the table's shape, and a `yes` reads as unshared, the split
+    naming. The structural check refuses first, while no write has run.
 
     Mutation: drop the `validate_structure` call in `_resolve_shared`, which reconciles
     the split pair.
     """
-    write_table(tmp_path, 'shared = "true"\n')
+    write_table(tmp_path, "    shared: yes\n")
     fake, exc = run_main(monkeypatch, tmp_path, {}, [])
     assert fake.calls == [["gh", "variable", "list", "--json", "name,value"]]
-    assert str(exc) == (
-        "::error::environments.dev-eu.shared must be a boolean, got str. "
-        "Write shared = true or shared = false, unquoted."
-    )
+    assert str(exc) == ("::error::environments.dev-eu.shared must be true or false, got 'yes'.")
 
 
 def write_referencing_table(root):
-    """A `.github/shipmate.toml` whose shared `dev-eu` takes its region from DEV_EU_REGION."""
+    """A `.github/shipmate-config.yml` whose shared `dev-eu` takes its region from DEV_EU_REGION."""
     (root / ".github").mkdir(exist_ok=True)
-    (root / ".github" / "shipmate.toml").write_text(
-        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = { vars = "DEV_EU_REGION" }\n'
-        "shared = true\n",
+    (root / ".github" / "shipmate-config.yml").write_text(
+        "layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: {vars: DEV_EU_REGION}\n"
+        "    shared: true\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -1364,7 +1404,7 @@ def test_a_failed_organization_read_names_the_table_reference(monkeypatch, tmp_p
     assert str(excinfo.value) == (
         "could not read the organization variables reaching o/r: gh: Forbidden (HTTP 403)\n"
         "A fine-grained token needs this repository's Variables read permission, and "
-        "`--slurp` needs a recent `gh`. .github/shipmate.toml environments.dev-eu.region "
+        "`--slurp` needs a recent `gh`. .github/shipmate-config.yml environments.dev-eu.region "
         "references GitHub variable DEV_EU_REGION, and onboard resolves a reference from "
         "these variables and the repository's."
     )
@@ -1374,7 +1414,7 @@ def test_resolve_shared_returns_the_table_it_validated(tmp_path):
     """`main` keeps the table for the checklist. Mutation: return `{}, set()` when there is
     no file, which reads as a table declaring nothing."""
     assert onboard._resolve_shared(tmp_path, "o/r", {}) == (None, set())
-    write_table(tmp_path, "shared = true\n")
+    write_table(tmp_path, "    shared: true\n")
     assert onboard._resolve_shared(tmp_path, "o/r", {}) == (
         {"layout": "tf_vars", "environments": {"dev-eu": {"region": "eu-west-1", "shared": True}}},
         {"dev-eu"},
@@ -1388,7 +1428,7 @@ def test_a_table_without_a_reference_makes_no_api_call(monkeypatch, tmp_path):
         raise AssertionError(f"unexpected call: {args}")
 
     monkeypatch.setattr(onboard, "_run", refuse)
-    write_table(tmp_path, "shared = true\n")
+    write_table(tmp_path, "    shared: true\n")
     assert onboard._resolve_shared(tmp_path, "o/r", {})[1] == {"dev-eu"}
 
 
@@ -1762,7 +1802,7 @@ _EXPECTED_CALLEES = {
 
 def _callees(text):
     """The engine reusable workflow each job of a rendered shim calls, in document order."""
-    doc = yaml.safe_load(text)
+    doc = load_workflow_text(text)
     return [
         job["uses"].split(_CALL_PATH, 1)[1].split("@", 1)[0]
         for job in doc["jobs"].values()
@@ -1984,7 +2024,7 @@ todo          SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
     gh secret set SHIPMATE_PLAN_PASSPHRASE
     An organization secret of that name is not visible to this read.
 
-todo          `.github/shipmate.toml`
+todo          `.github/shipmate-config.yml`
     Add one: copy the example in docs/getting-started.md §Environments for this tier.
 
 cannot check  o/r in the App installation's repository selection
@@ -2034,7 +2074,7 @@ CONFIGURED_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
 ok            SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
-ok            `.github/shipmate.toml`
+ok            `.github/shipmate-config.yml`
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
     does not hold. Check it, or add the repository, at
@@ -2109,8 +2149,8 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "drift.yml").write_bytes(FOLDERS_DRIFT)
     (tmp_path / ".github" / "CODEOWNERS").write_text("* @o/ops\n", encoding="utf-8")
-    (tmp_path / ".github" / "shipmate.toml").write_text(
-        'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n',
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: eu-west-1\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -2166,12 +2206,12 @@ def test_a_table_failing_tf_vars_coverage_is_todo_naming_the_refusal():
 
     Mutation: call `ec.validate_structure` instead of `ec.validate`.
     """
-    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nshared = false\n')
+    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    shared: false\n")
     assert onboard._table_item(ctx(table=table)) == (
         "todo",
-        "`.github/shipmate.toml`",
+        "`.github/shipmate-config.yml`",
         [
-            'layout = "tf_vars" derives TF_VAR_env and TF_VAR_region from the environment '
+            "layout: tf_vars derives TF_VAR_env and TF_VAR_region from the environment "
             "table, and dev-eu has an entry with no region."
         ],
     )
@@ -2323,7 +2363,7 @@ def test_a_shared_environment_beside_a_reviewed_one_needs_the_review_rule(capsys
 
 
 def test_an_ungated_environment_is_not_asked_for_reviewers(capsys, tmp_path):
-    """`gated = false` exempts an environment from the review requirement, so asking for
+    """`gated: false` exempts an environment from the review requirement, so asking for
     reviewers on it contradicts the table.
 
     Mutation: drop the `env not in ungated` filter from `_checklist`.
@@ -2679,10 +2719,10 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
     Mutation: always render the several-name wording -- the one-name lines differ.
     Mutation: pass `tagged` to `_table_item`'s `ec.validate` again -- the warning prints.
     """
-    write_table(tmp_path, '\n[environments.prdo]\nregion = "eu-west-1"\n')
+    write_table(tmp_path, "  prdo:\n    region: eu-west-1\n")
     run_main(monkeypatch, tmp_path, PRDO_ROUTES, ["--dry-run"])
     out = capsys.readouterr().out
-    assert checklist_items(checklist_of(out))["`.github/shipmate.toml`"] == (
+    assert checklist_items(checklist_of(out))["`.github/shipmate-config.yml`"] == (
         "ok",
         [
             "Provisioned for prdo, which no stack tags yet: its first tagging pull request",
@@ -2695,8 +2735,8 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
 
 def _table_only_detail(*names):
     """`_table_item`'s detail for a tagged `dev-eu` plus table-only `names`."""
-    entries = "".join(f'\n[environments.{n}]\nregion = "eu-west-1"\n' for n in ("dev-eu", *names))
-    table = ec.parse_table(f'layout = "tf_vars"\n{entries}')
+    entries = "".join(f"  {n}:\n    region: eu-west-1\n" for n in ("dev-eu", *names))
+    table = ec.parse_table(f"layout: tf_vars\nenvironments:\n{entries}")
     verdict, _, details = onboard._table_item(ctx(table=table, envs=sorted(["dev-eu", *names])))
     assert verdict == "ok"
     return details
@@ -2730,8 +2770,8 @@ def test_the_table_only_detail_wraps_the_whole_sentence_at_80(names, sentence):
 
 def test_a_table_whose_entries_are_all_tagged_has_no_detail():
     """Mutation: name every environment, tagged or not -- `dev-eu` is listed."""
-    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n')
-    assert onboard._table_item(ctx(table=table)) == ("ok", "`.github/shipmate.toml`", [])
+    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: eu-west-1\n")
+    assert onboard._table_item(ctx(table=table)) == ("ok", "`.github/shipmate-config.yml`", [])
 
 
 def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_path, capsys):
@@ -2742,8 +2782,8 @@ def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_
     Mutation: derive `envs` from `stacks_by_env` alone.
     """
     (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "shipmate.toml").write_text(
-        'layout = "tf_vars"\n\n[environments.prod]\nregion = "eu-west-1"\n',
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "layout: tf_vars\n\nenvironments:\n  prod:\n    region: eu-west-1\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -2805,10 +2845,11 @@ def test_a_stack_with_two_workload_tags_is_a_stack_tags_line(monkeypatch, tmp_pa
     gone; that and remove the `ec._gather` wrapper -- the refusal raises into `main`.
     """
     (tmp_path / ".github").mkdir()
-    (tmp_path / ".github" / "shipmate.toml").write_text(
-        'layout = "tf_vars"\n\n[identities.dev.aws]\n'
-        'apply = "arn:aws:iam::111111111111:role/apply"\n\n'
-        '[environments.dev-eu]\nregion = "eu-west-1"\nidentity = "dev"\nworkloads = ["core"]\n',
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "layout: tf_vars\n\nidentities:\n  dev:\n    aws:\n"
+        "      apply: arn:aws:iam::111111111111:role/apply\n\n"
+        "environments:\n  dev-eu:\n    region: eu-west-1\n    identity: dev\n"
+        "    workloads: [core]\n",
         encoding="utf-8",
         newline="\n",
     )
@@ -2826,8 +2867,9 @@ def test_a_stack_with_two_workload_tags_is_a_stack_tags_line(monkeypatch, tmp_pa
             "1 cell(s) carry a workload tag their environment's workloads list does not name: "
             "b in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
             "the default branch grants a role to. Retag the stack, or add the workload to "
-            "environments.<env>.workloads in .github/shipmate.toml on the default branch, which "
-            "is where this table is read from: merge it there on its own pull request first.",
+            "environments.<env>.workloads in .github/shipmate-config.yml on the default "
+            "branch, which is where this table is read from: merge it there on its own pull "
+            "request first.",
             "`environments.dev-eu.workloads` lists core, which no stack in dev-eu tags. Tag a",
             "stack with each, or remove it from the list.",
         ],
@@ -2880,8 +2922,9 @@ def test_a_cell_whose_workload_its_list_does_not_name_is_listed():
             "1 cell(s) carry a workload tag their environment's workloads list does not name: "
             "a in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
             "the default branch grants a role to. Retag the stack, or add the workload to "
-            "environments.<env>.workloads in .github/shipmate.toml on the default branch, which "
-            "is where this table is read from: merge it there on its own pull request first."
+            "environments.<env>.workloads in .github/shipmate-config.yml on the default "
+            "branch, which is where this table is read from: merge it there on its own pull "
+            "request first."
         ],
     )
 
@@ -2921,7 +2964,7 @@ def test_a_needs_predecessor_no_entry_declares_and_no_stack_tags_is_todo():
     context = ctx(table=table, envs=["prod", "staging"], tagged={"prod": frozenset()})
     assert onboard._table_item(context) == (
         "todo",
-        "`.github/shipmate.toml`",
+        "`.github/shipmate-config.yml`",
         [
             "Provisioned for staging, which no stack tags yet: its first tagging pull request",
             "deploys under that environment's protection. If the name is a typo, fix the",
@@ -3022,7 +3065,7 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch)
 
 
 def test_shared_mode_reports_the_unused_naming_too(monkeypatch):
-    """Running once without `shared = true` and once with it produces all three environments.
+    """Running once without `shared: true` and once with it produces all three environments.
     The second run must not silently bind the bare one: nothing binds the pair in shared
     mode, so the probe runs in shared mode as well.
 
@@ -3094,7 +3137,7 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
             "it carries protection rules (required_reviewers, wait_timer) and is shared, "
             "so the plan cells and every drift sweep covering it do not start immediately either. "
             "To gate applies alone, split it into `dev-eu-plan` and `dev-eu-apply` and "
-            "drop `shared = true` from `[environments.dev-eu]`.",
+            "drop `shared: true` from `environments.dev-eu`.",
         ),
         ("ok", "dev-eu branch policy", "main"),
     ]
@@ -3212,8 +3255,8 @@ def test_an_absent_table_leaves_coverage_uncomputed(tmp_path):
         DRIFT_ITEM,
         [
             "Coverage was not computed:",
-            "  `.github/shipmate.toml` is absent, and a drift run refuses without it; see its "
-            "item.",
+            "  `.github/shipmate-config.yml` is absent, and a drift run refuses without it; see "
+            "its item.",
             _read_line("drift.yml"),
         ],
     )
@@ -3322,9 +3365,8 @@ def test_a_dead_clause_and_an_empty_sweep_are_each_listed(tmp_path):
 
     `dead.yaml` pins the second suffix a workflow file may carry.
 
-    Mutations: drop the captured-notice lines -- `ok`; cut a block value at `,` like a flow
-    value (`elif True:` for `elif m["flow"]:`) -- the dead-clause line is gone; drop `".yaml"`
-    from `_drift_files`' suffixes -- `dead.yaml` is not read.
+    Mutations: drop the captured-notice lines -- `ok`; drop `".yaml"` from `_drift_files`'
+    suffixes -- `dead.yaml` is not read.
     """
     cells, tags = _tree(("a", "dev-eu"))
     files = {
@@ -3384,35 +3426,11 @@ def test_a_tree_error_leaves_coverage_uncomputed(tmp_path):
 
 
 def test_a_commented_out_drift_call_is_no_drift_file(tmp_path):
-    """A commented-out call sweeps nothing.
-
-    Mutation: search the raw text instead of `_stripped_text` -- the file is taken for a drift
-    file whose call `_call_region`, which strips comments, cannot find: `cannot check`.
-    """
+    """A commented-out call sweeps nothing. Documents the parser's behaviour, no mutation: a
+    comment never reaches the parsed document."""
     text = "on:\n  workflow_dispatch:\njobs:\n  drift:\n  #" + DRIFT_CALL[3:]
     context = _drift_ctx(tmp_path, {"drift.yml": text})
     assert onboard._drift_sweeps_item(context) == ("todo", DRIFT_ITEM, NO_DRIFT_FILE)
-
-
-def test_a_drift_call_split_across_lines_is_cannot_check(tmp_path):
-    """The selector's `uses:` pattern crosses a line break; `_call_region` reads line by line
-    and finds no call, so the query is unread rather than read as every cell.
-
-    Mutation: `_drift_query(dr._call_region(text, call) or "")` -- `ok`.
-    """
-    text = _drift_job().replace("    uses: ", "    uses:\n      ")
-    cells, tags = _tree(("a", "dev-eu"))
-    context = _drift_ctx(tmp_path, {"drift.yml": text}, cells=cells, tags_by_stack=tags)
-    assert onboard._drift_sweeps_item(context) == (
-        "cannot check",
-        DRIFT_ITEM,
-        [
-            "Coverage was not computed:",
-            "  drift.yml: its `uses:` value starts on a later line, which this reader does not "
-            "follow.",
-            _read_line("drift.yml"),
-        ],
-    )
 
 
 def test_a_workflow_file_that_is_not_utf8_is_cannot_check(tmp_path):
@@ -3435,19 +3453,19 @@ def test_a_workflow_file_that_is_not_utf8_is_cannot_check(tmp_path):
 
 
 def test_another_repositorys_drift_yml_is_no_drift_file(tmp_path):
-    """Mutation: select with `re.compile(r"/drift\\.yml@")` in place of `_engine_call` --
-    the file is read as a sweep of every cell."""
+    """Mutation: drop the repository from `doctor._engine_calls`' pattern -- the file is read
+    as a sweep of every cell."""
     text = _drift_job().replace("ship-iac/shipmate", "other/tools")
     context = _drift_ctx(tmp_path, {"drift.yml": text})
     assert onboard._drift_sweeps_item(context) == ("todo", DRIFT_ITEM, NO_DRIFT_FILE)
 
 
 def test_tags_outside_the_drift_job_are_not_the_query(tmp_path):
-    """An `on: push: tags:` filter and another job's `with: tags:` are outside the job block
-    `_call_region` returns.
+    """An `on: push: tags:` filter and another job's `with: tags:` are not the drift job's
+    `with.tags`.
 
-    Mutation: read `tags:` keys from the whole text instead of `_call_region` -- three keys,
-    `cannot check`.
+    Mutation: read `with.tags` from the last job (`dr._jobs(dr._mapping(doc))[-1][1]`) in
+    `_drift_file` -- `env/x` matches no cell, `todo`.
     """
     text = (
         "on:\n  push:\n    tags: [v1]\njobs:\n  drift:\n"
@@ -3469,36 +3487,66 @@ def test_tags_outside_the_drift_job_are_not_the_query(tmp_path):
             ("env/dev-eu,env/dev-us", ""),
         ),
         ("    with:\n      tags: 'env/dev-eu:workload/app'\n", ("env/dev-eu:workload/app", "")),
+        ("    with:\n      tags: env/dev-eu,env/dev-us\n", ("env/dev-eu,env/dev-us", "")),
+        ("    with:\n      tags: >-\n        env/dev-eu\n", ("env/dev-eu", "")),
         (
             "    with:\n      tags: ${{ inputs.tags }}\n",
             (None, "its `tags` is a `${{ }}` expression, which only a run resolves"),
         ),
-        (
-            "    with:\n      tags: env/a\n      tags: env/b\n",
-            (None, "its drift job sets `tags` more than once"),
-        ),
         ("    with:\n      runs_on: ubuntu-slim\n", ("", "")),
+        ("    with:\n      tags: [env/a, env/b]\n", (None, "its `tags` is not a single value")),
     ],
-    ids=["flow", "flow-quoted-comma", "block-quoted", "expression", "two-keys", "no-key"],
+    ids=[
+        "flow",
+        "flow-quoted-comma",
+        "block-quoted",
+        "block",
+        "folded",
+        "expression",
+        "no-key",
+        "not-a-scalar",
+    ],
 )
-def test_the_drift_query_is_read_without_yaml(with_lines, expected):
-    """Mutations: cut a quoted value at `,` (drop the quoted branch) -- `flow-quoted-comma`
-    and `block-quoted` keep their quotes or lose half; drop the flow cut -- `flow` reads
-    `env/dev-eu }`; drop the `${{` test -- `expression` is a query; count only the first
-    key -- `two-keys` is a query.
+def test_the_drift_query_is_read_from_the_calling_jobs_with(tmp_path, with_lines, expected):
+    """`jobs.<drift job>.with.tags`, whatever its form; a `build` job ahead of the drift job
+    hands its own workflow a `tags` input that is not the query.
+
+    Mutations: read `with.tags` from the first job (`dr._jobs(dr._mapping(doc))[0][1]`) in
+    `_drift_file` -- every row reads `env/build`; drop the `${{` test -- `expression` is a
+    query.
     """
-    text = _drift_job(with_lines)
-    region = onboard.dr._call_region(
-        text, onboard.dr._engine_call(onboard.ENGINE_SLUG, "drift.yml")
+    text = (
+        "on:\n  workflow_dispatch:\njobs:\n  build:\n    uses: ./.github/workflows/build.yml\n"
+        "    with:\n      tags: env/build\n  drift:\n" + DRIFT_CALL + with_lines
     )
-    assert onboard._drift_query(region) == expected
+    path = tmp_path / "drift.yml"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    assert onboard._drift_file(path) == ("drift.yml", *expected)
+
+
+def test_an_alias_graph_as_the_tags_query_is_read_in_bounded_time(tmp_path):
+    """Nine nested aliases of nine items expand to 9**9 leaves; the query is refused as not a
+    single value without being turned into text.
+
+    Mutation: drop the `dr._scalar(tags) is None` refusal in `_drift_query` -- `str(tags)`
+    walks every leaf and the bound fails; run it under `timeout 120`."""
+    import time
+
+    graph = "x-graph:\n  a0: &a0 [x, x, x, x, x, x, x, x, x]\n" + "".join(
+        f"  a{i}: &a{i} [{', '.join([f'*a{i - 1}'] * 9)}]\n" for i in range(1, 9)
+    )
+    path = tmp_path / "drift.yml"
+    path.write_text(graph + _drift_job("    with:\n      tags: *a8\n"), encoding="utf-8")
+    start = time.monotonic()
+    assert onboard._drift_file(path) == ("drift.yml", None, "its `tags` is not a single value")
+    assert time.monotonic() - start < 2
 
 
 def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, capsys):
     """Mutation: the item calls `report("differs", ...)` on a finding -- the run exits 2."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    (tmp_path / ".github" / "shipmate.toml").write_text(
-        'layout = "folder"\n\n[environments.dev-eu]\n', encoding="utf-8", newline="\n"
+    (tmp_path / ".github" / "shipmate-config.yml").write_text(
+        "layout: folder\n\nenvironments:\n  dev-eu: {}\n", encoding="utf-8", newline="\n"
     )
     (tmp_path / ".github" / "workflows" / "ghost.yml").write_text(
         _drift_job("    with:\n      tags: env/ghost\n"), encoding="utf-8", newline="\n"
@@ -3519,45 +3567,30 @@ def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, ca
     )
 
 
-NOT_ON_KEY_LINE = "its `tags` value is not on the key's line, which this reader does not follow"
+def test_a_workflow_file_that_does_not_parse_is_cannot_check(tmp_path):
+    """It may be a drift file, so coverage is unknown: the parser's message names why.
 
-
-@pytest.mark.parametrize(
-    ("with_lines", "reason"),
-    [
-        ("    with:\n      tags:\n        env/dev-eu\n", NOT_ON_KEY_LINE),
-        ("    with:\n      tags: >-\n        env/dev-eu\n", NOT_ON_KEY_LINE),
-        ("    with:\n      tags: |\n        env/dev-eu\n", NOT_ON_KEY_LINE),
-        (
-            "    with: {\n      tags: env/dev-eu }\n",
-            "its drift job splits a flow mapping across lines, which this reader does not follow",
-        ),
-    ],
-    ids=["next-line", "folded", "literal", "flow-split"],
-)
-def test_a_tags_value_the_line_reader_cannot_follow_is_cannot_check(tmp_path, with_lines, reason):
-    """Read as "", each would sweep every cell and mark it covered.
-
-    Mutations: treat an empty block value as "" (`if rest[:1] in (">", "|"):` in
-    `_tags_value`) -- `next-line` is `ok`; drop the split-flow test -- `flow-split` reads
-    `env/dev-eu }` as a block value and is `todo` over a query matching no cell.
+    Mutation: return None (no drift file) for a file that does not parse -- `ok`.
     """
     cells, tags = _tree(("a", "dev-eu"))
-    context = _drift_ctx(
-        tmp_path, {"drift.yml": _drift_job(with_lines)}, cells=cells, tags_by_stack=tags
-    )
+    files = {"broken.yml": "jobs:\n  a: 1\n  a: 2\n", "drift.yml": FOLDERS_DRIFT}
+    context = _drift_ctx(tmp_path, files, cells=cells, tags_by_stack=tags)
     assert onboard._drift_sweeps_item(context) == (
         "cannot check",
         DRIFT_ITEM,
-        ["Coverage was not computed:", f"  drift.yml: {reason}.", _read_line("drift.yml")],
+        [
+            "Coverage was not computed:",
+            "  broken.yml: it does not parse as YAML: duplicate key 'a' (line 3, column 3).",
+            _read_line("broken.yml", "drift.yml"),
+        ],
     )
 
 
 def test_a_file_calling_drift_yml_twice_is_cannot_check(tmp_path):
-    """`_call_region` reads the first call only, so the second job's query would go unread.
+    """One job's query alone would be read, and the second job's would go unread.
 
-    Mutation: `calls > 2` for `calls > 1` in `_drift_file` -- the first job's query alone is
-    read and the item is `ok`.
+    Mutation: `len(calls) > 2` for `len(calls) > 1` in `_drift_file` -- the first job's query
+    alone is read and the item is `ok`.
     """
     text = _drift_job("    with:\n      tags: env/dev-eu\n") + "  second:\n" + DRIFT_CALL
     cells, tags = _tree(("a", "dev-eu"))
@@ -3595,7 +3628,7 @@ def test_a_sweep_refusing_a_workload_gap_covers_no_cell(tmp_path):
             "drift.yml: 1 cell(s) carry a workload tag their environment's workloads list does "
             "not name: a in dev-eu (workload/net; dev-eu lists core). A listed workload is the "
             "only one the default branch grants a role to. Retag the stack, or add the workload "
-            "to environments.<env>.workloads in .github/shipmate.toml on the default branch, "
+            "to environments.<env>.workloads in .github/shipmate-config.yml on the default branch, "
             "which is where this table is read from: merge it there on its own pull request "
             "first.",
             "1 cell(s) no drift file sweeps:",
@@ -3611,7 +3644,7 @@ def test_a_table_failing_validation_leaves_coverage_uncomputed(tmp_path):
 
     Mutation: drop the `ec.validate` check from `_coverage_blockers` -- `ok`.
     """
-    table = ec.parse_table('layout = "tf_vars"\n\n[environments.dev-eu]\nshared = false\n')
+    table = ec.parse_table("layout: tf_vars\n\nenvironments:\n  dev-eu:\n    shared: false\n")
     cells, tags = _tree(("a", "dev-eu"))
     context = _drift_ctx(
         tmp_path, {"drift.yml": FOLDERS_DRIFT}, table=table, cells=cells, tags_by_stack=tags
@@ -3621,7 +3654,7 @@ def test_a_table_failing_validation_leaves_coverage_uncomputed(tmp_path):
         DRIFT_ITEM,
         [
             "Coverage was not computed:",
-            "  `.github/shipmate.toml` fails validation; see its item.",
+            "  `.github/shipmate-config.yml` fails validation; see its item.",
             _read_line("drift.yml"),
         ],
     )

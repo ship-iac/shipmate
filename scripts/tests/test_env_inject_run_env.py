@@ -152,7 +152,7 @@ def test_a_name_outside_the_table_is_neither_asked_for_nor_checked():
 
 
 def test_an_empty_table_runs_nothing_even_without_a_stack():
-    """`layout = "folder"` with no `tf_vars` has nothing to check.
+    """`layout: folder` with no `tf_vars` has nothing to check.
 
     Mutation: delete the `if not table: return`, which refuses on the empty `STACK`.
     """

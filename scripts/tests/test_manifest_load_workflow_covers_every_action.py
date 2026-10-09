@@ -25,8 +25,7 @@ def test_manifest_load_workflow_lists_every_action_as_a_skipped_remote_step():
     assert len(actions) > 15, f"expected the full action set, found {actions}"
 
     doc = workflow_yaml("manifest-load.yml")
-    # `on:` is YAML 1.1's true, hence the doc.get(True) fallback.
-    assert doc.get("on", doc.get(True)) == {
+    assert doc["on"] == {
         "push": {"branches": ["main"]},
         "workflow_dispatch": None,
     }

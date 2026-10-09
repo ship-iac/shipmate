@@ -430,7 +430,7 @@ def test_validate_env_rejects_dot():
 
 def test_validate_env_rejects_empty():
     # An empty env reads as a bare apply inside _review_reason, which exempts it whenever any
-    # table entry holds `gated = false` -- a bypassed refusal on a gate path. The action routes
+    # table entry holds `gated: false` -- a bypassed refusal on a gate path. The action routes
     # only an empty environment in apply mode to apply-all-detect, so an empty one arriving here
     # is an unlock or an explicitly empty or unknown mode.
     with pytest.raises(SystemExit):
@@ -504,7 +504,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
 
 def _gate(ungated):
     """A structure-valid table whose entries named in `ungated`, a comma-separated string,
-    hold `gated = false`."""
+    hold `gated: false`."""
     return {
         "layout": "folder",
         "environments": {e: {"gated": False} for e in ungated.split(",") if e},
@@ -562,7 +562,7 @@ def test_refuse_unreviewed_reuses_authorizes_selector_verbatim():
 
 
 def test_refuse_unreviewed_refuses_an_env_whose_entry_is_gated():
-    """`gated = false` on the default branch's entry is the only source, so an environment
+    """`gated: false` on the default branch's entry is the only source, so an environment
     without it is refused whatever else is set.
 
     Mutation: resolve the exemption from the process environment -- nothing sets it, so this
@@ -643,23 +643,22 @@ def test_main_exempts_an_env_whose_entry_is_ungated(monkeypatch, tmp_path):
 
 
 def test_main_validates_the_table_before_it_reads_the_gate(monkeypatch, tmp_path):
-    """A quoted `gated = "false"` reads as ungated to a person and resolves as gated. The run
-    must die naming the malformed setting, not refuse the apply as unreviewed.
+    """A `gated: no` reads as ungated to a person and resolves as gated. The run must die
+    naming the malformed setting, not refuse the apply as unreviewed.
 
     Mutation: drop `bm.ec.validate_structure(table)` from main -- the refusal passes the
     unvalidated table on and raises "not authorized" rather than naming the setting."""
     _apply_env(
         monkeypatch,
         tmp_path,
-        table={"layout": "folder", "environments": {"dev-eu": {"gated": "false"}}},
+        table={"layout": "folder", "environments": {"dev-eu": {"gated": "no"}}},
         SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
     )
     _boom_on_the_workset(monkeypatch)
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value) == (
-        "::error::environments.dev-eu.gated must be a boolean, got str. Write "
-        "gated = true or gated = false, unquoted."
+        "::error::environments.dev-eu.gated must be true or false, got 'no'."
     )
 
 
@@ -689,7 +688,7 @@ def test_main_names_a_gated_env_applied_with_no_review_required(
     monkeypatch, tmp_path, decision, table, expected
 ):
     """A null decision authorizes a gated env without a review (no rule requires one, or
-    the code-owner rule owns none of the changed files); an ungated env's `gated = false`
+    the code-owner rule owns none of the changed files); an ungated env's `gated: false`
     entry already declares it applies unreviewed, and an approval needs no disclosure.
 
     Mutation: compare `review_decision != "NONE"` in `authorize._review_not_required` -- the

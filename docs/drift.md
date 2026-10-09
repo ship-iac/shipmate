@@ -61,7 +61,7 @@ less kills the run at startup with no job and no log.
 
 **The credential split is the point.** The engine's `drift` matrix job binds the
 plan environment of the cell it is planning — the bare `<env>` for an env
-holding `shared = true`, `<env>-plan` otherwise
+holding `shared: true`, `<env>-plan` otherwise
 ([`../CONTRACT.md`](../CONTRACT.md) §Env model) — and holds no App credential.
 All it does with its result is upload one
 `drift-summary.<env>.<stack-slug>` artifact holding a `cell.json`. The `issues`
@@ -92,7 +92,7 @@ all; no consumer file can set it, and no plan run carries it.
 The engine runs `aws-actions/configure-aws-credentials` inside the `drift` job,
 in the same position as on the plan path, gated on a role resolving non-empty.
 That role is the `aws.plan` of the identity the environment names in the table,
-or its `aws.apply` for an environment holding `shared = true`, per workload where
+or its `aws.apply` for an environment holding `shared: true`, per workload where
 that field varies by workload. An environment with no entry, or naming no
 identity, or whose identity sets no such role, resolves no role and the step is
 skipped. A drift cell runs only
@@ -187,7 +187,7 @@ selects:
   ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifacts). A plan run catches such
   a pair only when it changes both.
 - A stack with an `env/*` tag carrying two `workload/*` tags fails the sweep.
-- Under `layout = "tf_vars"`, an environment a stack tags with no entry in the
+- Under `layout: tf_vars`, an environment a stack tags with no entry in the
   environment table fails the sweep.
 - The unused-entry warnings above name what the table declares and no stack
   tags.

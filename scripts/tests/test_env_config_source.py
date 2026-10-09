@@ -22,7 +22,7 @@ ec = load_script("env-config")
 
 #: The whole refusal, hand-written rather than read off the module.
 _UNREADABLE = (
-    "::error::.github/shipmate.toml could not be read from the default branch. The engine "
+    "::error::.github/shipmate-config.yml could not be read from the default branch. The engine "
     "reads the environment table from the default branch, never from this branch, so the "
     "file must be merged there before the first plan."
 )
@@ -33,7 +33,7 @@ def _blob(text, encoding="base64"):
     return {"encoding": encoding, "content": content}
 
 
-def _fake_run(monkeypatch, text="layout = 'tf_vars'\n", recorder=None, encoding="base64"):
+def _fake_run(monkeypatch, text="layout: tf_vars\n", recorder=None, encoding="base64"):
     """Replace `ec._run` with a double answering the contents API with `text` as a blob.
     `gh api` output is text, so the blob is handed back as JSON."""
 
@@ -57,14 +57,14 @@ def test_read_table_runs_the_whole_command_sequence(monkeypatch):
     calls = []
     _fake_run(monkeypatch, recorder=calls)
     ec.read_table()
-    assert calls == [["gh", "api", "repos/an-org/a-repo/contents/.github/shipmate.toml"]]
+    assert calls == [["gh", "api", "repos/an-org/a-repo/contents/.github/shipmate-config.yml"]]
 
 
 def test_the_table_is_returned_as_parsed(monkeypatch):
-    """Reddens on returning the raw stdout rather than the mapping `tomllib` parsed from it.
-    The whole mapping is compared, so a partial parse reddens here too."""
+    """Reddens on returning the raw stdout rather than the mapping parsed from it. The whole
+    mapping is compared, so a partial parse reddens here too."""
     _env(monkeypatch)
-    _fake_run(monkeypatch, 'layout = "tf_vars"\n\n[environments.dev-eu]\nregion = "eu-west-1"\n')
+    _fake_run(monkeypatch, "layout: tf_vars\n\nenvironments:\n  dev-eu:\n    region: eu-west-1\n")
     assert ec.read_table() == {
         "layout": "tf_vars",
         "environments": {"dev-eu": {"region": "eu-west-1"}},
@@ -82,7 +82,7 @@ def test_an_absent_file_refuses(monkeypatch, capsys):
     def run(args):
         raise SystemExit(
             "::error::command failed (1): gh api repos/an-org/a-repo/contents/.github/"
-            "shipmate.toml\ngh: Not Found (HTTP 404)"
+            "shipmate-config.yml\ngh: Not Found (HTTP 404)"
         )
 
     monkeypatch.setattr(ec, "_run", run)
@@ -90,7 +90,7 @@ def test_an_absent_file_refuses(monkeypatch, capsys):
         ec.read_table()
     assert str(exc.value) == _UNREADABLE
     assert capsys.readouterr().err == (
-        "command failed (1): gh api repos/an-org/a-repo/contents/.github/shipmate.toml\n"
+        "command failed (1): gh api repos/an-org/a-repo/contents/.github/shipmate-config.yml\n"
         "gh: Not Found (HTTP 404)\n"
     )
 
@@ -138,33 +138,70 @@ def test_a_non_base64_table_refuses(monkeypatch):
     assert str(exc.value) == _UNREADABLE
 
 
-def test_invalid_toml_refuses_with_the_decoder_line_number(monkeypatch):
-    """Reddens on swallowing `TOMLDecodeError` and returning a mapping, and on a message that
-    drops the decoder's own text: the line number is the only thing that locates the typo in a
-    file the runner never shows."""
+_DUPLICATE = "layout: tf_vars\nenvironments:\n  dev-eu:\n    region: eu-west-1\n  dev-eu: {}\n"
+
+
+def test_invalid_yaml_refuses_with_the_parser_line_and_column(monkeypatch):
+    """The whole refusal, one line. Mutation: catch `YAMLError` and re-raise `str(exc)` -- the
+    `is not valid YAML` prefix goes and the parser's multi-line text arrives instead. The line
+    and column are the only things that locate the typo in a file the runner never shows."""
     _env(monkeypatch)
-    _fake_run(monkeypatch, 'layout = "tf_vars"\nregion =\n')
+    _fake_run(monkeypatch, _DUPLICATE)
     with pytest.raises(SystemExit) as exc:
         ec.read_table()
-    message = str(exc.value)
-    assert message.startswith("::error::.github/shipmate.toml is not valid TOML")
-    assert "line 2" in message
+    assert str(exc.value) == (
+        "::error::.github/shipmate-config.yml is not valid YAML: duplicate key 'dev-eu' "
+        "(line 5, column 3)"
+    )
 
 
-def test_an_interpreter_below_the_floor_refuses_before_the_import(monkeypatch):
-    """`tomllib` is standard-library from 3.11 only, and nothing in the engine pins a Python.
-    Reddens on dropping the check: `tomllib` is then absent rather than reported, so an older
-    `runs_on` image fails with a bare `ModuleNotFoundError` at `detect`. The import is removed
-    here too, so a check that runs after it cannot pass."""
-    monkeypatch.setattr(sys, "version_info", (3, 10, 6, "final", 0))
-    monkeypatch.setitem(sys.modules, "tomllib", None)
+def test_a_non_mapping_root_refuses_naming_its_type():
+    """Mutation: delete the root check in `load_config` -- `references` then calls `.items()`
+    on a list and raises `AttributeError`, which no caller reports as a refusal."""
     with pytest.raises(SystemExit) as exc:
-        ec.parse_table('layout = "tf_vars"\n')
-    message = str(exc.value)
-    assert message.startswith("::error::")
-    assert "3.11" in message
-    assert "3.10.6" in message
-    assert "Runner prerequisites" in message
+        ec.parse_table("- a\n")
+    assert str(exc.value) == (
+        "::error::.github/shipmate-config.yml must hold a mapping at the top level, got list"
+    )
+
+
+def test_the_config_path_is_the_yaml_file():
+    """Every reader takes the path from here. Mutation: set `CONFIG_PATH` to
+    `.github/shipmate.yml`, the consumer's workflow file."""
+    assert ec.CONFIG_PATH == ".github/shipmate-config.yml"
+
+
+_FLOOR_REFUSAL = (
+    "::error::the engine needs Python 3.12 or later; this runner has 3.11.9. CONTRACT.md "
+    "section Runner prerequisites requires python3 >= 3.12 on every runner. Choose a newer "
+    "runs_on image."
+)
+_PYYAML_REFUSAL = (
+    "::error::the engine needs PyYAML for python3 and this runner has none. Install "
+    "python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; CONTRACT.md "
+    "section Runner prerequisites lists it."
+)
+
+
+def test_an_interpreter_below_the_floor_refuses_before_the_parser_is_looked_up(monkeypatch):
+    """Nothing in the engine pins a Python, so an older `runs_on` image must be named rather
+    than fail inside the parser. PyYAML is absent too, so the floor must be checked first.
+    Mutations: `_MIN_PYTHON = (3, 11)`, or check PyYAML before the floor -- either way the
+    PyYAML refusal arrives instead."""
+    monkeypatch.setattr(sys, "version_info", (3, 11, 9, "final", 0))
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    with pytest.raises(SystemExit) as exc:
+        ec.parse_table("layout: tf_vars\n")
+    assert str(exc.value) == _FLOOR_REFUSAL
+
+
+def test_a_runner_without_pyyaml_refuses_naming_the_prerequisite(monkeypatch):
+    """Mutation: drop the PyYAML lookup from `runner_refusal` -- `import yaml` then raises
+    `ImportError` unconverted, and no refusal names the runner prerequisite."""
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    with pytest.raises(SystemExit) as exc:
+        ec.parse_table("layout: tf_vars\n")
+    assert str(exc.value) == _PYYAML_REFUSAL
 
 
 def test_a_failing_gh_refuses(monkeypatch):
@@ -173,7 +210,7 @@ def test_a_failing_gh_refuses(monkeypatch):
     would parse it. Reddens on `_shipmate.run` returning stdout regardless of the exit code.
     `CONTRACT.md` lists a failed contents read as a refusal."""
     _env(monkeypatch)
-    stdout = json.dumps(_blob('layout = "tf_vars"\n')).encode()
+    stdout = json.dumps(_blob("layout: tf_vars\n")).encode()
 
     def fake_subprocess_run(args, capture_output=False, input=None):
         return types.SimpleNamespace(returncode=1, stdout=stdout, stderr=b"gh: boom\n")
@@ -199,19 +236,18 @@ def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
     assert capsys.readouterr().err == ""
 
 
-#: The multi-line string's indentation is what a transformation of the decoded text
-#: shows up in.
+#: The block scalar's indentation is what a transformation of the decoded text shows up in.
 _SHARED_TEXT = (
-    'layout = "tf_vars"\n'
+    "layout: tf_vars\n"
     "\n"
-    "[environments.dev-eu]\n"
-    'region = "eu-west-1"\n'
-    'note = """\n'
-    "  indented\n"
-    '"""\n'
+    "environments:\n"
+    "  dev-eu:\n"
+    "    region: eu-west-1\n"
+    "    note: |\n"
+    "      indented\n"
     "\n"
-    "[environments.prod]\n"
-    'needs = ["dev-eu"]\n'
+    "  prod:\n"
+    "    needs: [dev-eu]\n"
 )
 
 
@@ -224,16 +260,15 @@ def test_a_non_base64_answer_is_unreadable_not_empty():
 
 
 def test_contents_text_decodes_the_blob_to_its_exact_text():
-    """Reddens on returning the blob as delivered: base64 of valid TOML is not valid TOML,
-    and nothing between here and `parse_table` would notice on its own."""
+    """Reddens on returning the blob as delivered: base64 of a valid config is not a valid
+    config, and nothing between here and `parse_table` would notice on its own."""
     blob = _blob(_SHARED_TEXT)
     assert ec.contents_text("p", fetch=lambda _path: blob) == _SHARED_TEXT
 
 
 def test_contents_text_leaves_a_leading_byte_order_mark_in_place():
-    """`tomllib` refuses a U+FEFF and the contents API delivers one, so the file refuses
-    rather than parsing differently for one reader. Reddens on adding the
-    U+FEFF `removeprefix` that `_workflow_text` needs and this must not have."""
-    text = "﻿" + _SHARED_TEXT
+    """The decoded text is returned byte for byte, a leading U+FEFF included: the parser
+    reads past it. Reddens on adding a `removeprefix` here."""
+    text = "\ufeff" + _SHARED_TEXT
     blob = _blob(text)
     assert ec.contents_text("p", fetch=lambda _path: blob) == text
