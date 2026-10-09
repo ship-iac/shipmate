@@ -562,9 +562,9 @@ the engine builds — so `required: true` protects no real caller.
 
 The engine is the validator, and it is the only layer with enough context to be
 one: `actions/pr-facts` refuses a dispatched plan with no number, naming it, and
-`apply-detect` runs `validate_head_sha` and `validate_env`. It knows which values
-are legitimately empty, and its errors are annotations on the run naming the
-actual value. Keep new inputs optional for the same reason — `required` is the
+`apply-detect` and `unlock-detect` run `validate_head_sha` and `validate_env`. It
+knows which values are legitimately empty, and its errors are annotations on the
+run naming the actual value. Keep new inputs optional for the same reason — `required` is the
 default a new input drifts back to, and it reopens this exactly.
 
 `id-token: write` is there for the cells' cloud credentials, on every job whose

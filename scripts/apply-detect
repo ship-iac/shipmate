@@ -14,7 +14,7 @@ no-op), and the rest wave-ordered. A targeted `shipmate apply <env>` is explicit
 design — it never blocks on other environments; region-level sequencing across
 envs is handled separately by the bare form.
 
-Apply mode writes the same env-level output contract as the bare form
+It writes the same env-level output contract as the bare form
 (`env-order.write_env_level_waves`), with every wave at env-level 0 and levels
 1-3 empty.
 
@@ -203,15 +203,14 @@ def validate_env(value):
     dotted env would let distinct (env, slug) pairs render the same artifact name
     and cross-enrol the wrong stack into a wave.
 
-    Empty is refused for a second reason: `_review_reason` reads an empty
-    environment as a BARE apply and exempts it whenever the variable names any
-    env at all, so an unset SHIPMATE_ENV would slip past `refuse_unreviewed`
-    below. This path is single-env by construction; there is no bare form here."""
+    Empty is refused for a second reason on each caller. Here, `_review_reason`
+    reads an empty environment as a BARE apply and exempts it whenever the
+    variable names any env at all, so an unset SHIPMATE_ENV would slip past
+    `refuse_unreviewed` below; this path is single-env by construction, and
+    the bare form is apply-all-detect. In unlock-detect, an unlock releases one
+    environment's locks, and an empty one names no environment to release."""
     if not value:
-        raise SystemExit(
-            "::error::SHIPMATE_ENV is empty; the targeted apply path is single-env "
-            "and its review refusal is evaluated per environment."
-        )
+        raise SystemExit("::error::SHIPMATE_ENV is empty; this path is single-env.")
     bm.ec.check_env_name(value, f"SHIPMATE_ENV {value!r}", "the environment")
 
 
@@ -234,74 +233,6 @@ def refuse_unreviewed(env, table, decision):
         raise SystemExit(f"::error::{reason}")
 
 
-def run_unlock(repo, env, head):
-    """The unlock branch: the cells in `env` that HAVE a pending apply check, as
-    a flat queue — releasing a lock has no dependencies, so there are no waves.
-
-    Selection is by membership in the App-authored apply checks whose newest run
-    is not completed, not by removing the completed ones: every queued cell takes
-    a real state lock and may force-break one, so a stack this pull request never
-    planned — no apply check at all — must not be in range. The tree walk still
-    supplies the cells because a check-run name carries no workload.
-
-    Unlike the apply path it needs no plan run at all: a lock outlives the run
-    that stranded it, those plan artifacts may be long expired, and unlock
-    consumes no plan. The pending apply checks ARE the queue, the same authority
-    deploy-detect uses.
-
-    `all_stacks=True` evaluates tags across the whole tree, which the apply path
-    deliberately avoids (one unrelated stack's unresolvable expression would
-    block an approved plan). That trade is inverted here on purpose: unlock has
-    no plan to protect, and it must reach a cell whose plan artifacts expired
-    long ago. A stack with no `env/*` tag is in no environment, so it adds no
-    cell and cannot make unlock unavailable. For the same reason the walk passes
-    `check_names=False`: another stack's unusable `env/*` tag refuses every other
-    run, and must not strand this env's lock; `validate_env` checked `env` itself.
-
-    `env_membership` + `build_matrix([env], {env: queued}, ...)` rather than
-    `compute_cells`, which is what the bare-apply detect does with the same whole-tree walk
-    and for the same reason: `build_matrix` refuses a set above the GHA matrix limit, and
-    over `all_stacks=True` that ceiling counts every stack × every environment in the tree
-    — so a repository large enough to exceed it could never unlock ANY environment,
-    however short the queue, and the refusal would tell the operator to split a pull
-    request that does not exist. The queue is narrowed before any cell is built, so every
-    refusal `build_matrix`, `stamp_rows` and `refuse_workload_gaps` carry sees only the
-    queued stacks: the matrix limit, the slug-collision guard, two
-    `workload/*` tags, and a workload tag outside its environment's `workloads` list.
-    None of them can affect a lock release, and a stack outside the queue is not
-    released, so none of them may make `env` unable to unlock.
-
-    `refuse_unreviewed` is skipped because an approval reviews a diff and unlock
-    applies none — the run-time half of the decision `scripts/authorize` already
-    made at comment time. `cells` is written even for an empty queue, as `[]`,
-    because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
-    `fromJSON('')` is an error."""
-    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, check_names=False)
-    runs = ag.app_runs(_check_run_lines(repo, head), os.environ["SHIPMATE_APP_ID"])
-    # Not the complement of done: a name with no run is not pending, and a completed run
-    # with a bad conclusion is done being run; either would enrol a cell into a force-unlock.
-    names = {n for n, r in ag.latest_by_name(runs).items() if r["status"] != "completed"}
-    in_env = stacks_by_env.get(env, [])
-    queued = [s for s in in_env if ag.check_name(s, env) in names]
-    pending = bm.build_matrix([env], {env: queued}, tags_by_stack)
-    table = bm.env_config(pending, bm.tagged_workloads(stacks_by_env, tags_by_stack))
-    pending = bm.stamp_rows(pending, table, "apply")
-    bm.refuse_workload_gaps(pending, table)
-    print(
-        f"::notice title=apply-detect::mode=unlock env={env} head={head} "
-        f"cells={len(in_env)} pending={len(pending)}"
-    )
-    if not pending:
-        print(
-            f"::warning::no cell in {env} has a pending apply check, so no lock was "
-            "probed; a lock on a cell whose check already completed, or on a stack "
-            "applied out of band, is released out of band; see the state-lock "
-            "section of docs/troubleshooting.md."
-        )
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"cells={json.dumps(pending)}\n")
-
-
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     env = os.environ["SHIPMATE_ENV"]
@@ -309,15 +240,9 @@ def main():
 
     validate_head_sha(head)
     validate_env(env)
-    # Anything that is not exactly "unlock" takes the apply path, which is the
-    # stricter of the two — an absent or garbled mode fails closed.
-    if os.environ.get("SHIPMATE_MODE", "") == "unlock":
-        run_unlock(repo, env, head)
-        return
 
-    # Read after the unlock return, so `run_unlock`'s own `env_config` stays that
-    # path's single read. Structure-validated before the refusal reads `gated`;
-    # `validate` re-runs it below, which costs nothing and parses nothing again.
+    # Structure-validated before the refusal reads `gated`; `validate` re-runs it
+    # below, which costs nothing and parses nothing again.
     table = bm.ec.read_table()
     bm.ec.validate_structure(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")

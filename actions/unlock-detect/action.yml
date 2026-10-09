@@ -1,0 +1,34 @@
+name: shipmate unlock-detect
+description: Emits the flat queue of one environment's cells whose apply check is still pending, for the unlock job's matrix. Reads the job's GITHUB_TOKEN, which needs actions:read, checks:read and contents:read.
+inputs:
+  environment:
+    description: Target environment, e.g. dev-eu. Empty refuses.
+    required: true
+  head-sha:
+    description: PR head SHA carrying the pending apply checks.
+    required: true
+  app-id:
+    description: shipmate App id (repo/org variable); only checks authored by this App join the queue.
+    required: true
+  github-vars:
+    description: >-
+      The caller's reachable GitHub variables, serialised with toJSON. Read only when the
+      environment table holds a variable reference; empty when unwired.
+    required: false
+    default: ""
+outputs:
+  cells: { description: "The unlock queue as a flat JSON array, [] when it is empty, never the empty string.", value: "${{ steps.d.outputs.cells }}" }
+runs:
+  using: composite
+  steps:
+    - uses: $/actions/python-yaml
+    - name: Detect
+      id: d
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SHIPMATE_ENV: ${{ inputs.environment }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
+      run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/unlock-detect"

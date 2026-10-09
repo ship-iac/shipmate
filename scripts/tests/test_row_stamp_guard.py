@@ -25,6 +25,7 @@ import test_apply_all_detect as taad
 import test_apply_detect as tad
 import test_build_matrix as tbm
 import test_deploy_detect as tdd
+import test_unlock_detect as tud
 from _detect_fixtures import PLAN_SHA, _apply_check
 from _loader import SCRIPTS
 
@@ -34,8 +35,9 @@ from _loader import SCRIPTS
 _PRODUCERS = {
     "build-matrix": ("_detect",),
     "deploy-detect": ("main",),
-    "apply-detect": ("run_unlock", "main"),
+    "apply-detect": ("main",),
     "apply-all-detect": ("main",),
+    "unlock-detect": ("main",),
 }
 
 _PLAN_ENV = {
@@ -149,16 +151,14 @@ def test_the_deploy_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
 
 
 def test_the_unlock_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
-    """Call site 4: `run_unlock`, which returns from main() early -- a stamp in any main() tail
-    skips the unlock path entirely. Unlock releases a state lock, which the plan credential
-    cannot do.
+    """Call site 4: `unlock-detect` main(). Unlock releases a state lock, which the plan
+    credential cannot do.
 
-    Mutations: pass `"plan"` in `run_unlock`; drop its `stamp_rows` wrapper.
+    Mutations: pass `"plan"` at that call site; drop its `stamp_rows` wrapper.
     """
-    out = tad._unlock_env(monkeypatch, tmp_path, table=_TABLE)
-    tad._boom_on_plan_path(monkeypatch)
-    tad._stub_unlock_tree(monkeypatch, tad._DEV_EU_CELLS)
-    tad.ad.main()
+    out = tud._unlock_env(monkeypatch, tmp_path, table=_TABLE)
+    tud._stub_unlock_tree(monkeypatch, tud._DEV_EU_CELLS)
+    tud.ud.main()
     assert json.loads(tad._parsed(out)["cells"])[0] == {
         "stack": "stacks/app",
         "environment": "dev-eu",

@@ -147,7 +147,9 @@ def test_the_troubleshooting_entry_quotes_the_warning_and_the_refusal(monkeypatc
     assert quotes == [warning.removeprefix("::warning::"), refusal.removeprefix("::error::")]
 
 
-@pytest.mark.parametrize("action", ["build-matrix", "apply-detect", "deploy-detect"])
+@pytest.mark.parametrize(
+    "action", ["build-matrix", "apply-detect", "deploy-detect", "unlock-detect"]
+)
 def test_the_detect_actions_install_first(action):
     """Mutation: delete the step from one action."""
     assert action_steps(action)[0] == {"uses": _USES}
@@ -187,4 +189,11 @@ def test_exactly_the_actions_that_parse_yaml_install_it():
         for path in ACTIONS.glob("*/action.yml")
         if any(s.get("uses") == _USES for s in action_steps(path))
     }
-    assert callers == {"build-matrix", "apply-detect", "deploy-detect", "summary", "comment-ops"}
+    assert callers == {
+        "build-matrix",
+        "apply-detect",
+        "deploy-detect",
+        "unlock-detect",
+        "summary",
+        "comment-ops",
+    }

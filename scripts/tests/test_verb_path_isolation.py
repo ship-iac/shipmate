@@ -28,7 +28,7 @@ Pinned on the unlock side:
 - its `strategy`: `fail-fast: false`, so one cell that cannot determine its lock state does not
   strand its siblings' locks, and the matrix source is `cells` (`waves` is the empty string on
   the unlock path, not `{}`, so a matrix over it dies at `fromJSON`);
-- `detect`'s `apply-detect` inputs, whole, including the literal `unlock` mode;
+- `detect`'s `unlock-detect` inputs, whole;
 - `detect`'s environment pre-flight. The unlock job binds `<env>-apply`, and GitHub creates a
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an
   unlock into a missing environment would retire the reviewer gate for every later apply of
@@ -87,7 +87,7 @@ UNLOCK_STEP_ACTIONS = {
     "detect": [
         "actions/checkout",
         local_action("setup"),
-        local_action("apply-detect"),
+        local_action("unlock-detect"),
         local_action("verify-environments"),
     ],
     "unlock": [
@@ -146,13 +146,10 @@ UNLOCK_STRATEGY = {
     "matrix": {"include": "${{ fromJSON(needs.detect.outputs.cells) }}"},
 }
 
-#: The whole `with:` of unlock's `apply-detect` step. `mode` is a literal, not an expression:
-#: the file is the verb, so nothing may make it configurable. `review-decision` and
-#: `ungated-envs` are absent because `run_unlock` reads neither -- an approval reviews a diff
-#: and unlock applies none.
+#: The whole `with:` of unlock's `unlock-detect` step. GitHub only warns on an undeclared
+#: composite input, so this compare is what catches a stray key.
 DETECT_WITH = {
     "environment": "${{ inputs.environment }}",
-    "mode": "unlock",
     "head-sha": "${{ inputs.ref }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "github-vars": "${{ toJSON(vars) }}",
@@ -315,16 +312,13 @@ def test_the_unlock_matrix_reads_cells_and_never_fails_fast():
     )
 
 
-def test_the_unlock_detect_passes_the_verb_as_a_literal():
+def test_the_unlock_detect_passes_exactly_these_inputs():
+    """Mutation: add `mode: unlock` back to the step's `with:`."""
     step = next(
-        s for s in _job(UNLOCK, "detect")["steps"] if "/actions/apply-detect" in str(s.get("uses"))
+        s for s in _job(UNLOCK, "detect")["steps"] if "/actions/unlock-detect" in str(s.get("uses"))
     )
     got = step.get("with")
-    assert got == DETECT_WITH, (
-        f"unlock's apply-detect inputs are {got!r}, not {DETECT_WITH!r} -- `mode` is a "
-        "literal because the file is the verb; an expression there would make an unlock "
-        "run computable into an apply work set"
-    )
+    assert got == DETECT_WITH, f"unlock's unlock-detect inputs are {got!r}, not {DETECT_WITH!r}"
 
 
 def test_the_unlock_detect_refuses_an_unlock_into_a_missing_environment():

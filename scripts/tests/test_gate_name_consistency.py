@@ -400,6 +400,7 @@ def test_credentialed_action_steps_thread_app_credentials():
 DETECT_ACTIONS = (
     "actions/deploy-detect",
     "actions/apply-detect",
+    "actions/unlock-detect",
 )
 
 
@@ -418,7 +419,7 @@ def _detect_step_offenses(wf_name, job_name, job):
 
 
 def test_detect_action_steps_thread_app_id():
-    """Every step calling deploy-detect or apply-detect passes `app-id` in
+    """Every step calling a detect action passes `app-id` in
     its `with:`, because those scripts read `os.environ["SHIPMATE_APP_ID"]` and KeyError at
     runtime without it. Nothing else guards this threading, so a call site dropping the input
     would only surface as a runtime crash."""
