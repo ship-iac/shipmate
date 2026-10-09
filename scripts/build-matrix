@@ -249,7 +249,10 @@ def lost_env_tags(base, stacks):
 
     A heuristic, paired with the exact head-side fact that each of `stacks` carries no `env/*`
     tag now. A removed comment holding `env/` is a false positive, which only warns about a
-    stack that is already unmanaged."""
+    stack that is already unmanaged.
+
+    A nonzero `git diff`, as when `base` and `HEAD` share no merge base, exits the run through
+    `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs."""
     lost = []
     for stack in stacks:
         diff = _run(

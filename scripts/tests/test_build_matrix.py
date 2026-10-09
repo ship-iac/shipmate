@@ -343,13 +343,17 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
 
 def _fake_run(head_sha, diffs, diff_calls):
     """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with the text
-    of the `diffs` stack whose `.tm.hcl` pathspec it names, recording the diff argv."""
+    of the `diffs` stack whose `.tm.hcl` pathspec it names, recording the diff argv. A diff
+    naming no `diffs` stack raises `KeyError` with its argv."""
 
     def fake_run(args):
         if args[:2] != ["git", "diff"]:
             return f"{head_sha}\n"
         diff_calls.append(args)
-        return next(text for s, text in diffs.items() if f":(glob){s}/*.tm.hcl" in args)
+        for s, text in diffs.items():
+            if f":(glob){s}/*.tm.hcl" in args:
+                return text
+        raise KeyError(f"no `diffs` entry for {args}")
 
     return fake_run
 
@@ -1893,6 +1897,16 @@ def test_lost_env_tags_names_a_stack_whose_diff_removes_an_env_line(git_repo):
     _git("checkout", "-q", "-b", "pr")
     _commit({"s/stack.tm.hcl": _stack("[]"), "t/stack.tm.hcl": _stack("[]", "t2")}, "untag")
     assert bm.lost_env_tags(base, ["s", "t"]) == ["s"]
+
+
+def test_lost_env_tags_names_the_root_stack(git_repo):
+    """Terramate lists the root stack as `.`, so its pathspec is `:(glob)./*.tm.hcl`.
+    Mutation: `stack.removeprefix(".")` in both pathspecs -- `:(glob)/*.tm.hcl` lies outside
+    the repository and `git diff` exits 128."""
+    base = _commit({"stack.tm.hcl": _stack('["env/dev"]')}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stack.tm.hcl": _stack("[]")}, "untag")
+    assert bm.lost_env_tags(base, ["."]) == ["."]
 
 
 def test_lost_env_tags_ignores_an_env_directory_in_the_file_header(git_repo):
