@@ -1,10 +1,9 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, spy_env_config, stub_read_table
+from _detect_fixtures import APP_ID, _parsed, spy_env_config, stub_read_table
 from _detect_fixtures import check_run as _check
 from _loader import load_script
-from test_apply_detect import _parsed
 
 ud = load_script("unlock-detect")
 

@@ -5,6 +5,7 @@ from _detect_fixtures import (
     APP_ID,
     PLAN_SHA,
     _apply_check,
+    _parsed,
     _record,
     completed_names,
 )
@@ -700,10 +701,6 @@ def test_main_names_a_gated_env_applied_with_no_review_required(
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
     assert json.loads(_parsed(out)["review_not_required_envs"]) == expected
-
-
-def _parsed(out):
-    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
 
 
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):

@@ -26,8 +26,8 @@ Pinned on the unlock side:
   rejected dispatch from fanning out, since a skipped `detect` reads its outputs as empty
   strings and `'' != '[]'` is true;
 - its `strategy`: `fail-fast: false`, so one cell that cannot determine its lock state does not
-  strand its siblings' locks, and the matrix source is `cells` (`waves` is the empty string on
-  the unlock path, not `{}`, so a matrix over it dies at `fromJSON`);
+  strand its siblings' locks, and the matrix source is `cells` (the unlock detect job declares
+  only `cells`, so any other `needs.detect.outputs.*` reads '' and `fromJSON('')` fails);
 - `detect`'s `unlock-detect` inputs, whole;
 - `detect`'s environment pre-flight. The unlock job binds `<env>-apply`, and GitHub creates a
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an

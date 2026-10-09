@@ -809,7 +809,11 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
 def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
     tmp_path, monkeypatch, capsys
 ):
-    """Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing."""
+    """The notice is the line that explains a run too deep for the pre-declared wave jobs, so it
+    prints before `env_level_waves` refuses.
+
+    Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
+    """
     stacks = [f"stacks/s{i}" for i in range(aad.ad.wv.MAX_WAVES + 1)]
     with pytest.raises(SystemExit, match="dependency levels"):
         _run_main(
