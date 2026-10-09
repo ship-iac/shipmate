@@ -640,8 +640,8 @@ environments:
 
 ### Refusals
 
-Every condition below refuses at detect, before any cell starts, and one
-refusal names every structural error the file holds. `shipmate doctor` reports
+Every condition below refuses at detect, before any cell starts. A file that
+loads and resolves gets one refusal naming every structural error it holds. `shipmate doctor` reports
 every structural row, the ones judged on the file alone, on the pull request that
 introduces it. The absent-file, runner, `tf_vars` coverage, workload-tag and
 variable rows depend on the run as well as the file, so they are not structural.

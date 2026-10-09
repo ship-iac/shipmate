@@ -996,7 +996,7 @@ _REPLIES = {
             "could not resolve the gate settings from `.github/shipmate-config.yml` on the default "
             "branch, so this command was not run. The file is not merged there, it does not "
             "validate, a variable it references is unset or empty, or the runner lacks PyYAML "
-            "or Python 3.12; the job log names which. Fix that and comment again."
+            "or runs Python older than 3.12; the job log names which. Fix that and comment again."
         ),
     },
     "Report the review exemption": {
