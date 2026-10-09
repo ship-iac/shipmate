@@ -645,6 +645,24 @@ def test_main_names_the_gated_envs_applied_with_no_review_required(
     assert json.loads(parsed["review_not_required_envs"]) == expected
 
 
+def test_main_labels_only_the_ungated_envs_applied_unreviewed(tmp_path, monkeypatch):
+    """The review hold is bypassed, so the gated dev-eu stays runnable and only the label
+    rule keeps it out of the report.
+
+    Mutation: label every runnable env whenever any env is ungated under REVIEW_REQUIRED --
+    dev-eu is named."""
+    monkeypatch.setattr(aad.ad.az, "_review_reason", lambda *a, **k: None)
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "dev-us"],
+        ungated="dev-us",
+        decision="REVIEW_REQUIRED",
+    )
+    assert _wave_envs(parsed) == ["dev-eu", "dev-us"]
+    assert json.loads(parsed["applied_ungated_envs"]) == ["dev-us"]
+
+
 def test_main_holds_every_env_unreviewed_when_the_list_is_unset(tmp_path, monkeypatch):
     # REVIEW_REQUIRED with no list exempts nothing, so nothing applies. The audit line stays
     # empty, because no env was permitted to apply without a review.

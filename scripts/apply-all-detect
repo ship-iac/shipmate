@@ -88,10 +88,12 @@ def main():
     bm.refuse_workload_gaps(runnable, table)
     # From `runnable`, never from `pending & ungated`: an ungated env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
-    applied_ungated = (
-        sorted({c["environment"] for c in runnable})
-        if ungated and decision == "REVIEW_REQUIRED"
-        else []
+    applied_ungated = sorted(
+        {
+            c["environment"]
+            for c in runnable
+            if ad.az._ungated_exemption(decision, c["environment"], ungated)
+        }
     )
     # From `runnable` for the same reason.
     no_review_required = sorted(
