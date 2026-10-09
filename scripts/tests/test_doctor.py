@@ -2984,6 +2984,35 @@ def test_an_unparseable_file_does_not_stop_the_scan_of_the_others(monkeypatch):
     assert fork_level == doctor.WARNING and fork.startswith("`b.yml` triggers on")
 
 
+def test_a_file_nested_too_deeply_is_one_notice_and_the_others_are_still_checked(monkeypatch):
+    """`deep.yml` nests past the recursion limit and is listed first: it gets its one parse
+    NOTICE, and `b.yml` behind it still draws its pin finding. The mark depends on the stack
+    depth, so the column is matched as a number.
+
+    Mutation: drop the `except RecursionError` in `_shipmate._parse` -- `RecursionError`
+    escapes `_workflow_file` and both probes raise."""
+    import re
+
+    deep = "on: push\nx: " + "[" * 5000 + "]" * 5000 + "\n"
+    b = _STEPS + "      - uses: acme/engine/actions/setup@v2\n"
+    responses = {
+        **_fork_responses({"deep.yml": deep, "b.yml": b, "shipmate.yml": _SHIPMATE_WF}),
+        f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v9.9.9"},
+        f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    [(level, notice)] = doctor._workflow_parse_warnings(ctx)
+    assert level == doctor.NOTICE
+    assert re.fullmatch(
+        r"`deep\.yml` could not be parsed as YAML \(the document nests too deeply "
+        r"\(line 2, column \d+\)\): doctor skipped its checks\.",
+        notice,
+    ), notice
+    [(pin_level, pin)] = doctor._pin_warnings(ctx)
+    assert pin_level == doctor.WARNING and pin.startswith("`b.yml` pins `acme/engine@v2`")
+
+
 @pytest.mark.parametrize(
     ("other", "expected"),
     [
@@ -3002,26 +3031,57 @@ def test_the_drift_file_is_missing_only_when_every_file_parsed(monkeypatch, othe
     assert doctor._drift_file_warnings(_ctx()) == expected
 
 
-def test_an_alias_graph_costs_its_fixed_paths_only(monkeypatch):
-    """A pull request author controls `shipmate.yml`, and nine nested aliases of nine items
-    expand to 9**9 leaves. Every probe reads fixed paths, so the file is checked in bounded
-    time with the findings it has without the graph.
+#: Nine nested aliases of nine items, 9**9 leaves when expanded; `*a8` is the whole graph.
+_ALIAS_GRAPH = "x-graph:\n  a0: &a0 [x, x, x, x, x, x, x, x, x]\n" + "".join(
+    f"  a{i}: &a{i} [{', '.join([f'*a{i - 1}'] * 9)}]\n" for i in range(1, 9)
+)
+_GRAPH_JOB = "  graph:\n    runs-on: ubuntu-latest\n    steps:\n"
 
-    Mutation: walk the whole document in `_workflow_doc` (`json.dumps(doc)` before the
-    return) -- the run does not finish; run it under `timeout 120`."""
+
+@pytest.mark.parametrize(
+    "place",
+    [
+        pytest.param(lambda wf: wf, id="unused-key"),
+        pytest.param(lambda wf: wf + "  graph:\n    uses: *a8\n", id="job-uses"),
+        pytest.param(lambda wf: wf + _GRAPH_JOB + "      - uses: *a8\n", id="step-uses"),
+        pytest.param(
+            lambda wf: wf.replace("    if: github.event_name == 'push'\n", "    if: *a8\n", 1),
+            id="job-if",
+        ),
+        pytest.param(
+            lambda wf: wf.replace("    name: shipmate\n", "    name: *a8\n", 1), id="job-name"
+        ),
+        pytest.param(
+            lambda wf: wf + _GRAPH_JOB + "      - with:\n          allow-unsafe-pr-checkout: *a8\n",
+            id="unsafe-checkout",
+        ),
+    ],
+)
+def test_an_alias_graph_costs_bounded_time_wherever_it_sits(monkeypatch, request, place):
+    """A pull request author controls `shipmate.yml`. A graph under an unused key is never
+    read; one at a fixed path a probe reads is never turned into text (`_scalar`). Either
+    way every probe finishes in bounded time without degrading, and the unused key changes
+    no finding.
+
+    Mutations: walk the whole document in `_workflow_doc` (a recursive leaf count before the
+    return) -- `unused-key` takes about a minute; `str(value)` in place of `str(_scalar(value))`
+    at one site -- its row runs past the bound: `_engine_calls` (`job-uses`), `_pin_findings`
+    (`job-uses`, `step-uses`), `_routing_finding` (`job-if`), `_shim_job_name_finding`
+    (`job-name`), `_unsafe_checkout_warnings` (`unsafe-checkout`). Run them under
+    `timeout 120`."""
     import time
 
-    graph = "x-graph:\n  a0: &a0 [x, x, x, x, x, x, x, x, x]\n" + "".join(
-        f"  a{i}: &a{i} [{', '.join([f'*a{i - 1}'] * 9)}]\n" for i in range(1, 9)
-    )
-    plain = _healthy_responses()
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: plain[path])
-    without = doctor.warnings(_ctx())
-    aliased = _healthy_responses(**{"shipmate.yml": _SHIPMATE_WF + graph})
-    monkeypatch.setattr(doctor, "_gh_json", lambda path: aliased[path])
+    unused = request.node.callspec.id == "unused-key"
+    text = place(_ALIAS_GRAPH + _SHIPMATE_WF)
+    assert ("*a8" in text) != unused, "the row must place the graph at its path"
+    responses = _healthy_responses(**{"shipmate.yml": text})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     start = time.monotonic()
-    assert doctor.warnings(_ctx()) == without == []
+    out = doctor.warnings(_ctx())
     assert time.monotonic() - start < 2
+    assert not [t for _, t in out if "could not verify" in t], out
+    if unused:
+        assert out == []
 
 
 def test_a_runner_without_pyyaml_gets_one_notice_for_every_probe_that_parses(monkeypatch):

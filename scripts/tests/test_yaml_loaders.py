@@ -129,6 +129,19 @@ def test_the_workflow_loader_refuses_a_bad_explicit_tag_value_as_a_yaml_error(te
     assert yaml_error_text(exc.value) == expected
 
 
+@pytest.mark.parametrize("load", [load_workflow_text, load_config_text])
+def test_a_document_nested_past_the_recursion_limit_is_a_yaml_error(load):
+    """Composing recurses once per level, and a caller isolating a file that does not parse
+    catches `YAMLError` alone. The mark is wherever the reader stopped, which depends on the
+    stack depth, so only the problem is compared.
+
+    Mutation: drop the `except RecursionError` in `_parse` -- `RecursionError` escapes."""
+    with pytest.raises(yaml.YAMLError) as exc:
+        load("x: " + "[" * 5000 + "]" * 5000 + "\n")
+    assert isinstance(exc.value, yaml.MarkedYAMLError)
+    assert exc.value.problem == "the document nests too deeply"
+
+
 def test_the_workflow_loader_resolves_aliases_and_ignores_unknown_tags():
     """Reddens on dropping the `add_multi_constructor` line: `!foo` then has no constructor
     and raises."""

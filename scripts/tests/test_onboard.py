@@ -3473,8 +3473,18 @@ def test_tags_outside_the_drift_job_are_not_the_query(tmp_path):
             (None, "its `tags` is a `${{ }}` expression, which only a run resolves"),
         ),
         ("    with:\n      runs_on: ubuntu-slim\n", ("", "")),
+        ("    with:\n      tags: [env/a, env/b]\n", (None, "its `tags` is not a single value")),
     ],
-    ids=["flow", "flow-quoted-comma", "block-quoted", "block", "folded", "expression", "no-key"],
+    ids=[
+        "flow",
+        "flow-quoted-comma",
+        "block-quoted",
+        "block",
+        "folded",
+        "expression",
+        "no-key",
+        "not-a-scalar",
+    ],
 )
 def test_the_drift_query_is_read_from_the_calling_jobs_with(tmp_path, with_lines, expected):
     """`jobs.<drift job>.with.tags`, whatever its form; a `build` job ahead of the drift job
@@ -3491,6 +3501,24 @@ def test_the_drift_query_is_read_from_the_calling_jobs_with(tmp_path, with_lines
     path = tmp_path / "drift.yml"
     path.write_text(text, encoding="utf-8", newline="\n")
     assert onboard._drift_file(path) == ("drift.yml", *expected)
+
+
+def test_an_alias_graph_as_the_tags_query_is_read_in_bounded_time(tmp_path):
+    """Nine nested aliases of nine items expand to 9**9 leaves; the query is refused as not a
+    single value without being turned into text.
+
+    Mutation: drop the `dr._scalar(tags) is None` refusal in `_drift_query` -- `str(tags)`
+    walks every leaf and the bound fails; run it under `timeout 120`."""
+    import time
+
+    graph = "x-graph:\n  a0: &a0 [x, x, x, x, x, x, x, x, x]\n" + "".join(
+        f"  a{i}: &a{i} [{', '.join([f'*a{i - 1}'] * 9)}]\n" for i in range(1, 9)
+    )
+    path = tmp_path / "drift.yml"
+    path.write_text(graph + _drift_job("    with:\n      tags: *a8\n"), encoding="utf-8")
+    start = time.monotonic()
+    assert onboard._drift_file(path) == ("drift.yml", None, "its `tags` is not a single value")
+    assert time.monotonic() - start < 2
 
 
 def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, capsys):

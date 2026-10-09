@@ -1006,6 +1006,8 @@ def _drift_query(job):
     tags = dr._mapping(job.get("with")).get("tags")
     if tags is None:
         return "", ""
+    if dr._scalar(tags) is None:
+        return None, "its `tags` is not a single value"
     if "${{" in str(tags):
         return None, "its `tags` is a `${{ }}` expression, which only a run resolves"
     return str(tags), ""

@@ -47,6 +47,7 @@ Probes:
 
 import collections
 import contextlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -875,7 +876,8 @@ def _workflow_doc(text, name):
 
     Read with the YAML 1.2 core loader GitHub's own parser matches: a file that loads here is
     typed as GitHub types it. The probes read fixed paths of the result and never walk it
-    whole, so an alias graph costs what its fixed paths cost.
+    whole, and a value they turn into text passes `_scalar` first, so an alias graph costs
+    what its fixed paths cost, at those paths too.
     """
     from yaml import YAMLError
 
@@ -960,6 +962,12 @@ def _mapping(value):
     return value if isinstance(value, dict) else {}
 
 
+def _scalar(value):
+    """`value` when it is a scalar (a string, bool, number or null), else `None`. A fixed path
+    may hold an alias graph, and `str()` of one visits every leaf it expands to."""
+    return value if value is None or isinstance(value, (str, bool, int, float)) else None
+
+
 def _jobs(doc):
     """[(job id, job)] of the workflow `doc`, each job a mapping."""
     return [(job_id, _mapping(job)) for job_id, job in _mapping(doc.get("jobs")).items()]
@@ -979,7 +987,9 @@ def _engine_calls(doc, engine, callee):
     the engine repository `engine`, at any ref. Another repository's workflow of the same name
     is not the engine's."""
     call = re.compile(rf"{_engine_slug(engine)}/\.github/workflows/{re.escape(callee)}@.+")
-    return [(job_id, job) for job_id, job in _jobs(doc) if call.fullmatch(str(job.get("uses")))]
+    return [
+        (job_id, job) for job_id, job in _jobs(doc) if call.fullmatch(str(_scalar(job.get("uses"))))
+    ]
 
 
 def _pin_findings(doc, fname, ctx, seen):
@@ -995,7 +1005,7 @@ def _pin_findings(doc, fname, ctx, seen):
     out = []
     engine = ctx["engine_repo"]
     for site in _call_sites(doc):
-        m = _PIN.fullmatch(str(site.get("uses")))
+        m = _PIN.fullmatch(str(_scalar(site.get("uses"))))
         if m is None:
             continue
         slug, ref = f"{m.group('owner')}/{m.group('repo')}", m.group("ref")
@@ -1119,7 +1129,7 @@ def _unsafe_checkout_warnings(doc, name):
     it the single most consequential line a consumer can add: that third party's
     default is the outermost guard on this path."""
     values = [
-        str(_mapping(site.get("with"))[_UNSAFE_CHECKOUT]).lower()
+        str(_scalar(_mapping(site.get("with"))[_UNSAFE_CHECKOUT])).lower()
         for site in _call_sites(doc)
         if _UNSAFE_CHECKOUT in _mapping(site.get("with"))
     ]
@@ -1222,7 +1232,7 @@ def _shim_job_name_finding(doc, name, engine):
     if not calls:
         return []
     job_id, job = calls[0]
-    if str(job.get("name") or job_id) == _SHIM_JOB_NAME:
+    if str(_scalar(job.get("name")) or job_id) == _SHIM_JOB_NAME:
         return []
     # `name` is the engine's own file name, never repository data.
     return [
@@ -1425,12 +1435,13 @@ def _routing_finding(doc, name, engine):
                     "(docs/getting-started.md).",
                 )
             )
-        elif _normalize_if(str(found)) != _normalize_if(expected):
+        elif _normalize_if(str(_scalar(found))) != _normalize_if(expected):
             out.append(
                 (
                     WARNING,
                     f"`{name}`'s job calling the engine's `{callee}` is selected by "
-                    f"`{_normalize_if(str(found))}`, not `{_normalize_if(expected)}`. A wrong "
+                    f"`{_normalize_if(str(_scalar(found)))}`, "
+                    f"not `{_normalize_if(expected)}`. A wrong "
                     "expression routes a verb nowhere and its dispatched run completes with "
                     "every job skipped, which reads as success everywhere "
                     "(docs/getting-started.md).",
@@ -1926,10 +1937,10 @@ def warnings(ctx):
     probe marked `parses_yaml`: each would otherwise degrade on its own, or report the
     file it could not parse as unreadable or invalid. A runner below the Python floor runs
     them all, and the environment and config probes name the floor."""
-    refusal = ec.runner_refusal()
-    # `runner_refusal` checks the floor first, so on a supported Python it names PyYAML.
-    no_yaml = refusal is not None and sys.version_info >= ec._MIN_PYTHON
-    out = [(NOTICE, refusal.removeprefix("::error::"))] if no_yaml else []
+    # The lookup `runner_refusal` makes, whose refusal then names what this runner lacks.
+    no_yaml = importlib.util.find_spec("yaml") is None
+    refusal = (ec.runner_refusal() or "").removeprefix("::error::")
+    out = [(NOTICE, refusal)] if no_yaml else []
     for probe in PROBES:
         if no_yaml and getattr(probe, "parses_yaml", False):
             continue

@@ -250,9 +250,16 @@ def _loaders():
 
 
 def _parse(loader_class, text):
+    """The single document in `text`. Composing and constructing recurse once per nesting
+    level, so a document nested past Python's recursion limit is refused as a `YAMLError`
+    at the point the reader reached, like any other document that does not parse."""
+    from yaml.composer import ComposerError
+
     loader = loader_class(text)
     try:
         return loader.get_single_data()
+    except RecursionError:
+        _refuse(ComposerError, "the document nests too deeply", loader.get_mark())
     finally:
         loader.dispose()
 
