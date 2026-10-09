@@ -1010,7 +1010,8 @@ The list names every such cell, with an apply check or without.
 If the untag was deliberate ([`../CONTRACT.md`](../CONTRACT.md) §Taking a stack out
 of CI), do not retag. Apply the stranded change by hand, then open a pull
 request that changes every listed stack and merge it; its deploy applies them.
-When the message lists no other cell, no pull request is needed.
+When the message lists no other cell and no stranded stack needs a retag, no
+pull request is needed.
 
 The refused deploy's apply checks stay open on the merged pull request and are
 never read again. Do not re-run the refused deploy: it checks out the same

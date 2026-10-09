@@ -971,22 +971,22 @@ under `layout: tf_vars`. The trade-off is accepted: a forgotten tag on a new
 stack is a notice and a line in the plan comment, not a refusal, and the gate
 goes green over a stack that plans nothing. When a pull request removes a
 stack's last `env/*` tag, plan detect also writes a `::warning::` naming it,
-because the same green gate then hides a live stack's unapplied change. A deploy refuses when its merged
-pull request holds an open apply check for a stack and environment the merge
-no longer pairs: the stack, changed by that pull request, lost that `env/*` tag
-(or every one) after the pull request was planned, so no cell would ever apply
-its reviewed change. The refusal applies nothing, so it also names every other
-cell of that merge, as `<stack> / <env>`. A new pull request that retags each
-stranded stack and changes every other named stack plans the current default
-branch, and its deploy applies all of them. After a deliberate untag, the
-stranded change is applied by hand instead, and the pull request changes only
-the named stacks, or is not needed when none is named. Re-running the refused
-deploy checks out the same commit and refuses again
-([`docs/troubleshooting.md`](docs/troubleshooting.md) §A deploy refused an
-apply check on a stack that lost its env tag). A check of a stack that is no
-longer a stack at the merge commit, deleted on the default branch after
-planning, is not refused: it strands with nothing said, because no remedy exists
-for a deleted stack.
+because the same green gate then hides a live stack's unapplied change. A
+deploy refuses when its merged pull request holds an open apply check for a
+stack and environment the merge no longer pairs: the stack, changed by that
+pull request, lost that `env/*` tag (or every one) after the pull request was
+planned, so no cell would ever apply its reviewed change. The refusal applies
+nothing, so it also names every other cell of that merge, as `<stack> / <env>`.
+A new pull request that retags each stranded stack and changes every other
+named stack plans the current default branch, and its deploy applies all of
+them. After a deliberate untag, the stranded change is applied by hand instead,
+and the pull request still changes every named stack, or is not needed when
+none is named. Re-running the refused deploy checks out the same commit and
+refuses again ([`docs/troubleshooting.md`](docs/troubleshooting.md) §A deploy
+refused an apply check on a stack that lost its env tag). A check of a stack
+that is no longer a stack at the merge commit, deleted on the default branch
+after planning, is not refused: it strands with nothing said, because no remedy
+exists for a deleted stack.
 
 **A drift sweep's `tags` query narrows what the sweep plans, never what it
 scans.** Engine `drift.yml` takes it as an input, one literal query per drift
