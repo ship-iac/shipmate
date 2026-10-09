@@ -1627,8 +1627,7 @@ def _subject_accounts(table):
     """
     shared, accounts = ec.shared_envs(table), {}
     for env, path, _, role in ec.resolved_roles(table):
-        names = ec.env_names(env, env in shared)
-        found = accounts.setdefault(names.get("shared") or names[path], set())
+        found = accounts.setdefault(ec.env_binding(env, env in shared, path), set())
         fields = role.split(":")
         if len(fields) > 4 and fields[4]:
             found.add(fields[4])

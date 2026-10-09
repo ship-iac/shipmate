@@ -439,6 +439,12 @@ def env_names(env, shared):
     return {"plan": f"{env}-plan", "apply": f"{env}-apply"}
 
 
+def env_binding(env, shared, path):
+    """The GitHub Environment a cell of `env` on `path` binds: the bare `env` when `shared`,
+    `<env>-<path>` otherwise. A `path` other than `plan` or `apply` raises KeyError."""
+    return env_names(env, shared)["shared" if shared else path]
+
+
 def explicit_envs(table):
     """Environments a bare `shipmate apply` skips: each needs its own `shipmate apply <env>`.
 
@@ -1100,9 +1106,9 @@ def resolve(table, env, path, workload):
     `path` is the calling detect's path, never inferred; a shared environment resolves
     `aws.apply` on both paths, and `config_path` reports the path actually consulted rather
     than the one requested. `env_binding` is the GitHub Environment the cell's job binds,
-    taken from `env_names`: the bare `env` when shared, `<env>-<path>` otherwise. A `path`
-    other than `plan` or `apply` raises KeyError. A reference in the table was resolved from
-    a repository or organization variable by `parse_table`.
+    taken from `env_binding`. A `path` other than `plan` or `apply` raises KeyError. A
+    reference in the table was resolved from a repository or organization variable by
+    `parse_table`.
 
     The role comes from the identity the entry names. An empty `role_arn` means the caller
     skips the credentials step: no entry, no identity, no role for the path, a tag outside
@@ -1122,7 +1128,7 @@ def resolve(table, env, path, workload):
         "cred_region": entry.get("region", "") if "identity" in entry else "",
         "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("tf_vars", {})},
         "config_path": config_path,
-        "env_binding": env_names(env, shared)["shared" if shared else path],
+        "env_binding": env_binding(env, shared, path),
     }
 
 
