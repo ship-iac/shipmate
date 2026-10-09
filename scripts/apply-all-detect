@@ -6,8 +6,9 @@ the tree's stacks whose `apply / <stack> / <env>` check is on the head, each
 applying from the plan run its own check records, and the environment entries'
 `needs` bucket the pending ones into env-levels exactly as on the
 merge-deploy path. Env membership comes from stack tags
-(build-matrix.env_membership) so check names are only ever constructed forward,
-never reverse-parsed; a stack with no `env/*` tag is in no environment and adds no cell.
+(build-matrix.env_membership) so this module only ever constructs check names
+forward, never reverse-parses them (deploy-detect's stranded-check refusal is the
+one site that does); a stack with no `env/*` tag is in no environment and adds no cell.
 
 Three exclusions distinguish the bare form from deploy:
 - envs whose entry holds `explicit: true` (typically prod) are removed

@@ -355,20 +355,19 @@ def _existence(*names, table=CANONICAL):
 _MISSING_PLAN = (
     doctor.WARNING,
     "GitHub Environment `dev-eu-plan` does not exist: the plan jobs for stacks tagged "
-    "`env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of its "
-    "protection rules. Create it.",
+    "`env:dev-eu` run in an environment GitHub auto-creates empty, with no secrets and none "
+    "of its protection rules. Create it.",
 )
 _MISSING_APPLY = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu-apply` does not exist: the apply jobs for stacks tagged "
-    "`env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of its "
-    "protection rules. Create it.",
+    "GitHub Environment `dev-eu-apply` does not exist: an apply of stacks tagged "
+    "`env:dev-eu` is refused before any wave until it exists. Create it.",
 )
 _MISSING_SHARED = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu` does not exist: the plan and apply jobs for stacks "
-    "tagged `env:dev-eu` bind a name GitHub auto-creates empty, with no secrets and none of "
-    "its protection rules. Create it.",
+    "GitHub Environment `dev-eu` does not exist: the plan jobs for stacks tagged "
+    "`env:dev-eu` run in an environment GitHub auto-creates empty, with no secrets and none "
+    "of its protection rules, and their apply then runs in it too. Create it.",
 )
 #: The shared-mode NOTICE for a bare `dev-eu` with no approval rules.
 _SHARED_UNREVIEWED = (
@@ -602,20 +601,6 @@ def test_both_namings_present_report_only_the_selected_namings_gaps(monkeypatch)
     assert doctor._environment_warnings(_ctx()) == []
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu", "dev-eu-plan"))
     assert doctor._environment_warnings(_ctx()) == [_MISSING_APPLY]
-
-
-def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
-    """With `dev-eu-plan` present and `dev-eu-apply` absent the apply
-    binds a name GitHub auto-creates empty and proceeds. "cannot apply" sends the
-    reader looking for a failed run."""
-    monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan"))
-    out = doctor._environment_warnings(_ctx())
-    assert len(out) == 1
-    level, text = out[0]
-    assert level == doctor.WARNING
-    assert "`dev-eu-apply` does not exist" in text
-    assert "cannot apply" not in text
-    assert "auto-creates empty" in text
 
 
 def test_shared_environment_produces_no_existence_finding(monkeypatch):

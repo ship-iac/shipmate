@@ -11,6 +11,7 @@ checked-out tree.
 
 import json
 import os
+import re
 
 from _shipmate import _load
 
@@ -213,6 +214,7 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, all_stacks=False):
 
 
 _ZERO_SHA = "0" * 40
+_ENV_TAG_LITERAL = re.compile(f'"env/{ec._ENV_ENTRY.pattern}"')
 
 
 def _list_stacks(all_stacks, base):
@@ -239,6 +241,59 @@ def unmanaged_stacks(tags_by_stack):
     grammar)."""
     return sorted(
         s for s, tags in tags_by_stack.items() if not any(t.startswith("env/") for t in tags)
+    )
+
+
+def lost_env_tags(base, stacks):
+    """The sorted subset of `stacks` whose diff from the merge base of `base` to `HEAD` removes
+    a line holding a complete tag literal `"env/<name>"`, `<name>` in the environment-name
+    charset, from the stack's own Terramate files (`<stack>/*.tm.hcl`, `<stack>/*.tm`; no
+    `**`, so a child stack and a `.tf` are out). A backend key such as
+    `"env/${global.x}/state"` is not a tag literal.
+
+    A heuristic, paired with the exact head-side fact that each of `stacks` carries no `env/*`
+    tag now. A removed comment or string holding exactly `"env/<name>"` is a false positive,
+    which only warns about a stack that is already unmanaged.
+
+    A nonzero `git diff`, as when `base` and `HEAD` share no merge base, exits the run through
+    `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs."""
+    lost = []
+    for stack in stacks:
+        diff = _run(
+            [
+                "git",
+                "diff",
+                "-U0",
+                f"{base}...HEAD",
+                "--",
+                f":(glob){stack}/*.tm.hcl",
+                f":(glob){stack}/*.tm",
+            ]
+        )
+        if any(
+            line.startswith("-") and _ENV_TAG_LITERAL.search(line) for line in diff.splitlines()
+        ):
+            lost.append(stack)
+    return sorted(lost)
+
+
+def warn_lost_env_tags(all_stacks, base, unmanaged):
+    """One `::warning::` naming the `unmanaged` stacks a pull request untagged.
+
+    Plan detect only: deploy-detect's base is the push's `before`, which would warn about the
+    same removal again on the merge, and a drift sweep scans the whole tree with no base."""
+    if all_stacks or not base or base == _ZERO_SHA or not unmanaged:
+        return
+    lost = lost_env_tags(base, unmanaged)
+    if not lost:
+        return
+    more = len(lost) - UNMANAGED_NAMES
+    print(
+        f"::warning::{len(lost)} stack(s) lost their last env/* tag in this pull request, so "
+        f"shipmate no longer plans or deploys them: {', '.join(lost[:UNMANAGED_NAMES])}"
+        + (f", and {more} more" if more > 0 else "")
+        + ". If that is deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; "
+        "otherwise restore the tag."
     )
 
 
@@ -575,6 +630,7 @@ def _detect():
         refuse_workload_gaps(cells, table)
     if errors:
         raise SystemExit("\n".join(errors))
+    warn_lost_env_tags(all_stacks, base, unmanaged)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")

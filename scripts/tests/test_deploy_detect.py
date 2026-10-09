@@ -444,8 +444,11 @@ _REMEDY = (
     "Open a new pull request that retags each stranded stack and changes every other listed "
     "stack (any edit that `terramate list --changed` marks, such as a comment line); its plan "
     "and deploy apply the current default branch for all of them, this merged change "
-    "included. Re-running this deploy checks out the same commit and refuses again. This "
-    "deploy's apply checks are never read again and stay open on the merged pull request."
+    "included. If an untag was deliberate, apply that stranded change by hand instead of "
+    "retagging; the pull request still changes every listed stack, and with none listed no "
+    "pull request is needed. Re-running this deploy checks out the same commit and refuses "
+    "again. This deploy's apply checks are never read again and stay open on the merged pull "
+    "request."
 )
 
 
@@ -456,7 +459,7 @@ def test_main_refuses_a_pending_apply_check_on_an_unmanaged_stack(tmp_path, monk
     the managed stack's pending check is not either.
 
     Mutation: drop the `refuse_stranded_checks` call from `main` -- the deploy writes waves.
-    Mutation: drop the not-applied-either sentence -- `stacks/app`'s open check goes unnamed."""
+    Mutation: drop the not-applied-either sentence -- the `stacks/app` cell goes unnamed."""
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -474,12 +477,35 @@ def test_main_refuses_a_pending_apply_check_on_an_unmanaged_stack(tmp_path, monk
     assert str(exc_info.value) == (
         "::error::deploy aborted: apply / stacks/gone / dev-eu, apply / stacks/gone / dev-us: "
         "the stack of each lost its env/* tag after this pull request was planned, so its "
-        "reviewed change was not applied. This deploy applies nothing, so these open checks of "
-        "this merge are not applied either: apply / stacks/app / dev-eu. " + _REMEDY
+        "reviewed change was not applied. This deploy applies nothing, so these other cells of "
+        "this merge are not applied either: stacks/app / dev-eu. " + _REMEDY
     )
 
 
-def test_a_refusal_with_no_other_open_cell_names_none(tmp_path, monkeypatch):
+def test_the_refusal_names_a_pending_cell_that_has_no_apply_check(tmp_path, monkeypatch):
+    """`stacks/new` is a pending cell of this merge with no apply check of its own. It is still
+    named, so the remedy pull request changes its stack and its merged change applies.
+
+    Mutation: keep only the `pending` cells whose check name is in `open_names` -- the
+    sentence drops `stacks/new / dev-eu`."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[],
+            checks=[_apply_check("stacks/app"), _apply_check("stacks/gone")],
+            stacks={"stacks/app": ["env/dev-eu"], "stacks/new": ["env/dev-eu"], "stacks/gone": []},
+            deps={"stacks/app": set(), "stacks/new": set(), "stacks/gone": set()},
+        )
+    assert str(exc_info.value) == (
+        "::error::deploy aborted: apply / stacks/gone / dev-eu: the stack of each lost its "
+        "env/* tag after this pull request was planned, so its reviewed change was not "
+        "applied. This deploy applies nothing, so these other cells of this merge are not "
+        "applied either: stacks/app / dev-eu, stacks/new / dev-eu. " + _REMEDY
+    )
+
+
+def test_a_refusal_with_no_other_cell_names_none(tmp_path, monkeypatch):
     """Mutation: render the not-applied-either sentence with an empty list -- the message
     gains `either: .`."""
     with pytest.raises(SystemExit) as exc_info:
@@ -501,8 +527,8 @@ def test_a_refusal_with_no_other_open_cell_names_none(tmp_path, monkeypatch):
 _PARTIAL_UNTAG_MESSAGE = (
     "::error::deploy aborted: apply / stacks/app / prod: the stack of each lost its env/* tag "
     "after this pull request was planned, so its reviewed change was not applied. This deploy "
-    "applies nothing, so these open checks of this merge are not applied either: "
-    "apply / stacks/app / dev-eu. " + _REMEDY
+    "applies nothing, so these other cells of this merge are not applied either: "
+    "stacks/app / dev-eu. " + _REMEDY
 )
 
 

@@ -1,4 +1,6 @@
 import json
+import pathlib
+import subprocess
 import sys
 
 import pytest
@@ -339,6 +341,23 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
     assert "fork pull requests are not supported" in bm.fork_pr_error("", "acme/iac", False)
 
 
+def _fake_run(head_sha, diffs, diff_calls):
+    """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with the text
+    of the `diffs` stack whose `.tm.hcl` pathspec it names, recording the diff argv. A diff
+    naming no `diffs` stack raises `KeyError` with its argv."""
+
+    def fake_run(args):
+        if args[:2] != ["git", "diff"]:
+            return f"{head_sha}\n"
+        diff_calls.append(args)
+        for s, text in diffs.items():
+            if f":(glob){s}/*.tm.hcl" in args:
+                return text
+        raise KeyError(f"no `diffs` entry for {args}")
+
+    return fake_run
+
+
 def _run_main(
     monkeypatch,
     tmp_path,
@@ -351,6 +370,9 @@ def _run_main(
     stacks=None,
     tree=None,
     read_table=None,
+    unmanaged=(),
+    diffs=None,
+    diff_calls=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -360,6 +382,10 @@ def _run_main(
     it is None. `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that
     tree instead of the double, and leaves `called`, `cells` and `tree` unused. `read_table`
     replaces the default-branch read, which otherwise answers `table`.
+
+    The double returns `unmanaged` as the scan's unmanaged stacks. `diffs`, `{stack: diff
+    text}`, answers each `git diff` naming that stack's `.tm.hcl` pathspec and appends its argv
+    to `diff_calls`; it needs `head_sha`.
 
     `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
     run past the head-checkout refusal looks like; without it the run states no head and is
@@ -383,11 +409,14 @@ def _run_main(
         "SHIPMATE_HEAD_SHA",
         "SHIPMATE_NO_PULL_REQUEST",
         "SHIPMATE_TAGS",
+        "SHIPMATE_BASE_SHA",
     ):
         monkeypatch.delenv(k, raising=False)
     if head_sha is not None:
         monkeypatch.setenv("SHIPMATE_HEAD_SHA", head_sha)
-        monkeypatch.setattr(bm, "_run", lambda args: f"{head_sha}\n")
+        monkeypatch.setattr(
+            bm, "_run", _fake_run(head_sha, diffs or {}, [] if diff_calls is None else diff_calls)
+        )
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     called = [] if called is None else called
@@ -400,7 +429,7 @@ def _run_main(
         names = [{"environment": e, "stack": s} for s, e in cells] if tree is None else tree
         # The real `compute_cells` returns the env->workloads map beside the rows, and `main`
         # forwards it as `tagged` only under `all_stacks`. The rows tag no workload.
-        return {e: frozenset() for _, e in cells}, rows, names, []
+        return {e: frozenset() for _, e in cells}, rows, names, list(unmanaged)
 
     if stacks is None:
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
@@ -1817,3 +1846,215 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         "cells": '[{"environment": "dev-eu", "stack": "stacks/app"}]',
         "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
     }
+
+
+def _git(*args):
+    return subprocess.run(["git", *args], check=True, capture_output=True, text=True).stdout
+
+
+def _commit(files, message):
+    """Writes `files` (`{path: text}`, `None` deletes) and commits them, returning the SHA."""
+    for path, text in files.items():
+        target = pathlib.Path(path)
+        if text is None:
+            target.unlink()
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(text.encode())
+    _git("add", "-A")
+    _git("commit", "-q", "-m", message)
+    return _git("rev-parse", "HEAD").strip()
+
+
+@pytest.fixture
+def git_repo(tmp_path, monkeypatch):
+    """An empty repository in `tmp_path` as the cwd, on branch `main`, with this machine's git
+    config out of the way and an identity CI runners lack."""
+    (tmp_path / "gitconfig").write_bytes(b"")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
+    for k in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(k, "shipmate tests")
+    for k in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(k, "tests@example.invalid")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    _git("init", "-q", "-b", "main")
+    return repo
+
+
+def _stack(tags, name="s"):
+    return f'stack {{\n  name = "{name}"\n  tags = {tags}\n}}\n'
+
+
+def test_lost_env_tags_names_a_stack_whose_diff_removes_an_env_line(git_repo):
+    """`s` drops `env/dev`; `t` edits its name. Mutation: drop the tag-literal condition --
+    `t` appears."""
+    base = _commit(
+        {"s/stack.tm.hcl": _stack('["env/dev"]'), "t/stack.tm.hcl": _stack("[]", "t")}, "base"
+    )
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/stack.tm.hcl": _stack("[]"), "t/stack.tm.hcl": _stack("[]", "t2")}, "untag")
+    assert bm.lost_env_tags(base, ["s", "t"]) == ["s"]
+
+
+def test_lost_env_tags_names_the_root_stack(git_repo):
+    """Terramate lists the root stack as `.`, so its pathspec is `:(glob)./*.tm.hcl`.
+    Mutation: `stack.removeprefix(".")` in both pathspecs -- `:(glob)/*.tm.hcl` lies outside
+    the repository and `git diff` exits 128."""
+    base = _commit({"stack.tm.hcl": _stack('["env/dev"]')}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stack.tm.hcl": _stack("[]")}, "untag")
+    assert bm.lost_env_tags(base, ["."]) == ["."]
+
+
+def test_lost_env_tags_ignores_an_env_directory_in_the_file_header(git_repo):
+    """The diff's `--- a/stacks/env/app/...` header holds `env/app`, unquoted. Mutation: drop
+    the quotes from `_ENV_TAG_LITERAL`."""
+    base = _commit({"stacks/env/app/stack.tm.hcl": _stack("[]")}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"stacks/env/app/stack.tm.hcl": _stack("[]", "renamed")}, "edit")
+    assert bm.lost_env_tags(base, ["stacks/env/app"]) == []
+
+
+def test_lost_env_tags_diffs_from_the_merge_base(git_repo):
+    """`main` tags the stack after the branch point; the branch only renames it. Mutation:
+    `f"{base}..HEAD"` -- the two-dot diff reverses `main`'s tag into a removal."""
+    _commit({"s/stack.tm.hcl": _stack("[]")}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/stack.tm.hcl": _stack("[]", "renamed")}, "edit")
+    _git("checkout", "-q", "main")
+    base = _commit({"s/stack.tm.hcl": _stack('["env/dev"]')}, "tag on main")
+    _git("checkout", "-q", "pr")
+    assert bm.lost_env_tags(base, ["s"]) == []
+
+
+def test_lost_env_tags_reads_only_the_stacks_own_terramate_files(git_repo):
+    """A child stack's retag and the parent's `.tf` losing `"env/prod"` both remove an `env/`
+    tag literal under the parent's directory. Mutation: pathspec `f"{stack}/"`."""
+    base = _commit(
+        {
+            "stacks/app/stack.tm.hcl": _stack("[]"),
+            "stacks/app/main.tf": 'locals {\n  key = "env/prod"\n}\n',
+            "stacks/app/child/stack.tm.hcl": _stack('["env/dev"]', "child"),
+        },
+        "base",
+    )
+    _git("checkout", "-q", "-b", "pr")
+    _commit(
+        {
+            "stacks/app/main.tf": "locals {\n}\n",
+            "stacks/app/child/stack.tm.hcl": _stack('["env/prod"]', "child"),
+        },
+        "retag child",
+    )
+    assert bm.lost_env_tags(base, ["stacks/app"]) == []
+
+
+def test_lost_env_tags_ignores_an_env_prefixed_backend_key(git_repo):
+    """An untagged stack's `.tm.hcl` drops a backend key under `env/`, not a tag literal.
+    Mutation: test `"env/" in line` instead of the tag-literal pattern -- `s` appears."""
+    key = '  key = "env/${global.x}/state"\n'
+    base = _commit({"s/stack.tm.hcl": _stack("[]"), "s/backend.tm.hcl": key}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/backend.tm.hcl": "\n"}, "drop key")
+    assert bm.lost_env_tags(base, ["s"]) == []
+
+
+_LOST_ENV_WARNING = (
+    "::warning::1 stack(s) lost their last env/* tag in this pull request, so shipmate no "
+    "longer plans or deploys them: stacks/gone. If that is deliberate (CONTRACT.md §Taking a "
+    "stack out of CI), nothing is wrong; otherwise restore the tag."
+)
+_REMOVED_ENV_LINE = '@@ -3 +3 @@\n-  tags = ["env/dev"]\n+  tags = []\n'
+_PR_ENV = {
+    "GITHUB_EVENT_NAME": "pull_request",
+    "GITHUB_REPOSITORY": "acme/iac",
+    "SHIPMATE_HEAD_REPO": "acme/iac",
+    "SHIPMATE_BASE_SHA": "b" * 40,
+}
+
+
+def test_detect_warns_about_a_stack_that_lost_its_last_env_tag(monkeypatch, tmp_path, capsys):
+    """Mutation: drop the call in `_detect`."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        unmanaged=["stacks/gone"],
+        diffs={"stacks/gone": _REMOVED_ENV_LINE},
+    )
+    assert _LOST_ENV_WARNING in capsys.readouterr().out.splitlines()
+
+
+def test_detect_diffs_only_the_unmanaged_stacks(monkeypatch, tmp_path):
+    """`stacks/app` is a changed, tagged stack whose diff also removes an `env/` line (a
+    retag). Mutation: pass every changed stack instead of `unmanaged`."""
+    diff_calls = []
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        unmanaged=["stacks/gone"],
+        diffs={"stacks/gone": _REMOVED_ENV_LINE, "stacks/app": _REMOVED_ENV_LINE},
+        diff_calls=diff_calls,
+    )
+    assert diff_calls == [
+        [
+            "git",
+            "diff",
+            "-U0",
+            f"{'b' * 40}...HEAD",
+            "--",
+            ":(glob)stacks/gone/*.tm.hcl",
+            ":(glob)stacks/gone/*.tm",
+        ]
+    ]
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"SHIPMATE_ALL_STACKS": "true"},
+        {"SHIPMATE_BASE_SHA": "0" * 40},
+        {"SHIPMATE_BASE_SHA": ""},
+    ],
+    ids=["all-stacks", "zero-base", "no-base"],
+)
+def test_detect_runs_no_diff_without_a_pull_request_base(monkeypatch, tmp_path, capsys, env):
+    """A drift sweep, a force-push or first push, and a run with no base. Mutation: drop each
+    clause of the guard in turn -- its case diffs and warns."""
+    diff_calls = []
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_PR_ENV, **env},
+        head_sha="cafe1234",
+        unmanaged=["stacks/gone"],
+        diffs={"stacks/gone": _REMOVED_ENV_LINE},
+        diff_calls=diff_calls,
+    )
+    assert diff_calls == []
+    assert "::warning::" not in capsys.readouterr().out
+
+
+def test_detect_names_the_first_ten_lost_stacks(monkeypatch, tmp_path, capsys):
+    """Mutation: slice with `UNMANAGED_NAMES + 1` -- `stacks/u10` is named."""
+    lost = [f"stacks/u{i:02}" for i in range(11)]
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        unmanaged=lost,
+        diffs=dict.fromkeys(lost, _REMOVED_ENV_LINE),
+    )
+    assert (
+        "::warning::11 stack(s) lost their last env/* tag in this pull request, so shipmate no "
+        f"longer plans or deploys them: {', '.join(lost[:10])}, and 1 more. If that is "
+        "deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise "
+        "restore the tag."
+    ) in capsys.readouterr().out.splitlines()

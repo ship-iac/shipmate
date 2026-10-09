@@ -21,7 +21,10 @@ does with that wiring.
   stack out of CI). `scripts/onboard` provisions every environment the table
   declares and every one a stack tags. So declare an environment in the table
   and run `scripts/onboard` before the first pull request tagging a stack into
-  it merges: that merge deploys. Until a stack tags it, `scripts/onboard` names
+  it merges. Otherwise that merge's deploy refuses, because the `<env>-apply` it
+  binds does not exist; or, for a `shared: true` entry, it applies in the bare
+  `<env>` the pull request's plan auto-created, without the default-branch
+  policy `scripts/onboard` sets. Until a stack tags it, `scripts/onboard` names
   it on its `.github/shipmate-config.yml` checklist item, and every whole-tree run (the
   drift sweep, `shipmate unlock`, a bare `shipmate apply`) warns that the table
   declares an environment no stack tags; that warning is expected.

@@ -981,29 +981,37 @@ the environment exists and that its policy actually names the default branch.
 ```text
 ::error::deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
 after this pull request was planned, so its reviewed change was not applied. This deploy
-applies nothing, so these open checks of this merge are not applied either:
-apply / <other stack> / <env>. Open a new pull request that retags each stranded stack
-and changes every other listed stack (any edit that `terramate list --changed` marks,
-such as a comment line); its plan and deploy apply the current default branch for all of
-them, this merged change included. Re-running this deploy checks out the same commit and
-refuses again. This deploy's apply checks are never read again and stay open on the
-merged pull request.
+applies nothing, so these other cells of this merge are not applied either:
+<other stack> / <env>. Open a new pull request that retags each stranded stack and
+changes every other listed stack (any edit that `terramate list --changed` marks, such
+as a comment line); its plan and deploy apply the current default branch for all of
+them, this merged change included. If an untag was deliberate, apply that stranded
+change by hand instead of retagging; the pull request still changes every listed stack,
+and with none listed no pull request is needed. Re-running this deploy checks out the
+same commit and refuses again. This deploy's apply checks are never read again and stay
+open on the merged pull request.
 ```
 
 The message is one line; it is wrapped here. The not-applied-either sentence is
-present only when the merge has other open checks. The merged pull request
+present only when the merge has other cells to apply. The merged pull request
 changed a stack, and another pull request removed that stack's `env/*` tag, or
 one of them, and merged first. The merged change reached the default branch,
 but no cell of this deploy carries it. The refusal makes the stranded change
 visible instead of skipping it with a notice on a path no operator watches, and
-because it applies nothing, every other open check of the merge stays
-unapplied too.
+because it applies nothing, every other cell of the merge stays unapplied too.
+The list names every such cell, with an apply check or without.
 
 1. Open a new pull request that retags each stranded stack and changes every
    other listed stack, for example with a comment line.
 2. Review its plan: it plans the current default branch, this merged change
    included.
 3. Merge it. Its deploy applies all of them.
+
+If the untag was deliberate ([`../CONTRACT.md`](../CONTRACT.md) §Taking a stack out
+of CI), do not retag. Apply the stranded change by hand, then open a pull
+request that changes every listed stack and merge it; its deploy applies them.
+When the message lists no other cell and no stranded stack needs a retag, no
+pull request is needed.
 
 The refused deploy's apply checks stay open on the merged pull request and are
 never read again. Do not re-run the refused deploy: it checks out the same
