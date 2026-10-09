@@ -104,7 +104,10 @@ def main():
         }
     )
 
-    per_level = eo.env_level_waves(runnable, order, ad.run_graph_deps())
+    deps = ad.run_graph_deps()
+    # Before the padding, whose over-depth refusal is where this line helps most.
+    print(ad.dag_shape_notice(deps))
+    per_level = eo.env_level_waves(runnable, order, deps)
     level_counts = [sum(map(len, w.values())) for w in per_level]
     print(
         f"::notice title=apply-all-detect::head={head} "

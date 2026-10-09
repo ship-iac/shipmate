@@ -353,6 +353,28 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
     )
 
 
+def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
+    tmp_path, monkeypatch, capsys
+):
+    """The notice is the line that explains a run too deep for the pre-declared wave jobs, so it
+    prints before `env_level_waves` refuses.
+
+    Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
+    """
+    stacks = [f"stacks/s{i}" for i in range(dd.ad.wv.MAX_WAVES + 1)]
+    with pytest.raises(SystemExit, match="dependency levels"):
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[_cell(s) for s in stacks],
+            checks=[_apply_check(s) for s in stacks],
+            deps={s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)},
+        )
+    assert capsys.readouterr().out.splitlines() == [
+        "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
+    ]
+
+
 def test_main_takes_the_ordering_map_from_the_loaded_table(tmp_path, monkeypatch):
     """The merge path orders its env-levels from the mapping it already loaded, not from the
     checked-out tree. The assertion is on a populated split, because the broken shape returns
