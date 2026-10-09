@@ -2676,6 +2676,19 @@ def test_the_lock_item_names_managed_stacks_only(monkeypatch, tmp_path, capsys):
     )
 
 
+def test_onboard_scans_the_whole_tree_with_the_env_tag_check_on(monkeypatch):
+    """Mutation: `_env_membership` passes `check_names=False`."""
+    calls = []
+
+    def membership(all_stacks=False, base="", check_names=True):
+        calls.append({"all_stacks": all_stacks, "base": base, "check_names": check_names})
+        return {}, {}
+
+    monkeypatch.setattr(onboard.bm, "env_membership", membership)
+    onboard._env_membership()
+    assert calls == [{"all_stacks": True, "base": "", "check_names": True}]
+
+
 def test_an_untagged_stack_is_adopted_through_the_real_membership(monkeypatch, tmp_path, capsys):
     """`onboard` scans the whole tree through build-matrix's own `env_membership`: an
     untagged stack beside a tagged one is named in the notice, and the run goes on.

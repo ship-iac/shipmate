@@ -291,6 +291,15 @@ def test_no_unmanaged_stack_prints_nothing(monkeypatch, capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_compute_cells_refuses_a_changed_stacks_env_tag_no_environment_can_take(monkeypatch):
+    """Mutation: `compute_cells` passes `check_names=False` to `env_membership`."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/c"])
+    monkeypatch.setattr(bm, "_tags", lambda s: ["env/a.b"])
+    with pytest.raises(SystemExit) as e:
+        bm.compute_cells(all_stacks=False, base="deadbeef")
+    assert str(e.value) == "::error::stack 'stacks/c' tag 'env/a.b'" + _CHARSET
+
+
 def test_compute_cells_leaves_an_unmanaged_stack_out_of_cells_and_tree(monkeypatch):
     """The fourth element lists it, and no cell or tree entry names it, so drift closes its
     Issues. Mutation: add unmanaged stacks to `tree`."""
