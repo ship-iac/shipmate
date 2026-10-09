@@ -441,7 +441,8 @@ def env_names(env, shared):
 
 def env_binding(env, shared, path):
     """The GitHub Environment a cell of `env` on `path` binds: the bare `env` when `shared`,
-    `<env>-<path>` otherwise. A `path` other than `plan` or `apply` raises KeyError."""
+    `<env>-<path>` otherwise. When not `shared`, a `path` other than `plan` or `apply` raises
+    KeyError."""
     return env_names(env, shared)["shared" if shared else path]
 
 
