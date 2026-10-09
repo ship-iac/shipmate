@@ -662,5 +662,6 @@ def test_review_not_required_decision_table(decision, environment, expected):
 def test_ungated_exemption_decision_table(decision, environment, expected):
     """dev-eu holds `gated: false`; prod-eu is gated.
 
-    Mutation: drop the `in ungated_envs` clause -- the prod-eu row goes true."""
+    Mutation: drop the `in ungated_envs` clause -- the prod-eu row goes true.
+    Mutation: drop `.casefold()` -- the `DEV-EU` row goes false."""
     assert az._ungated_exemption(decision, environment, frozenset({"dev-eu"})) is expected
