@@ -58,7 +58,7 @@ ec = _load("env-config")
 bm = _load("build-matrix")
 dr = _load("doctor")
 
-GATE = "shipmate / gate"
+GATE = dr.GATE
 #: The one repository variable this script writes.
 APP_ID_VAR = "SHIPMATE_APP_ID"
 REPORT = []

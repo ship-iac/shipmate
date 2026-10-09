@@ -5573,3 +5573,23 @@ def test_status_never_fails_the_run(monkeypatch):
 
     monkeypatch.setattr(doctor, "_contents_text", boom)
     assert doctor.config_status(_ctx()) == []
+
+
+def test_workflow_scans_in_one_run_share_one_read_of_each_file(monkeypatch):
+    """Two probes scanning the same commit read the listing and each file once between them,
+    and the second still sees every file.
+
+    Mutation: drop the `ref not in cache` check in `_workflow_files`; each path is read twice."""
+    responses = _fork_responses({"a.yml": "x", "b.yml": "y"})
+    reads = []
+
+    def gh(path):
+        reads.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    ctx = _ctx()
+    for _ in range(2):
+        names = doctor._scan_workflow_texts(ctx, _REF, lambda text, name: [name], None)
+        assert names == ["a.yml", "b.yml"]
+    assert sorted(reads) == sorted(responses)

@@ -29,8 +29,8 @@ def test_maps_each_cell_to_its_app_authored_check_ids():
     ]
     out = apply_snapshot.snapshot(WAVES, runs, APP_ID)
     assert out == {
-        "stacks/dns\x00dev-eu": [1],
-        "stacks/app\x00dev-eu": [2],
+        "apply / stacks/dns / dev-eu": [1],
+        "apply / stacks/app / dev-eu": [2],
     }
 
 
@@ -41,7 +41,7 @@ def test_ignores_same_name_checks_authored_by_another_identity():
         check("apply / stacks/app / dev-eu", 2),
     ]
     out = apply_snapshot.snapshot(WAVES, runs, APP_ID)
-    assert out["stacks/dns\x00dev-eu"] == [1]
+    assert out["apply / stacks/dns / dev-eu"] == [1]
 
 
 def test_keeps_every_pre_existing_duplicate_for_a_cell():
@@ -51,7 +51,7 @@ def test_keeps_every_pre_existing_duplicate_for_a_cell():
         check("apply / stacks/app / dev-eu", 2),
     ]
     out = apply_snapshot.snapshot(WAVES, runs, APP_ID)
-    assert out["stacks/dns\x00dev-eu"] == [1, 5]
+    assert out["apply / stacks/dns / dev-eu"] == [1, 5]
 
 
 def test_a_single_cell_with_no_apply_check_fails_the_whole_run():

@@ -12,8 +12,8 @@ apply_complete = load_script("apply-complete")
 
 
 SNAP = {
-    "stacks/dns\x00dev-eu": [1],
-    "stacks/app\x00dev-eu": [2, 3],
+    "apply / stacks/dns / dev-eu": [1],
+    "apply / stacks/app / dev-eu": [2, 3],
 }
 
 
@@ -75,8 +75,8 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
     substring with each without naming them: a different stack ("stacks/my-app") and a
     different env ("prod-dev-eu"). None of it may complete anything."""
     snap = {
-        "stacks/app\x00dev-eu": [2, 3],
-        "app\x00dev-eu": [99],
+        "apply / stacks/app / dev-eu": [2, 3],
+        "apply / app / dev-eu": [99],
     }
     jobs = [
         job("L0 / apply / stacks/my-app / dev-eu", "success"),
@@ -112,7 +112,7 @@ def test_skipped_and_failure_are_terminal_and_neither_completes_nor_blocks():
 
 
 LIVE_SNAP = {
-    f"tenant-{n}\x00dev-{r}": [n * 10 + i]
+    f"apply / tenant-{n} / dev-{r}": [n * 10 + i]
     for i, r in enumerate(("eu", "us"))
     for n, _ in enumerate("abcd", 1)
 }
@@ -121,7 +121,7 @@ LIVE_SNAP = {
 def _live_jobs(stale):
     return [
         job(
-            f"L0 / apply / {key.split(chr(0))[0]} / {key.split(chr(0))[1]}",
+            f"L0 / {key}",
             None if key == stale else "success",
         )
         for key in LIVE_SNAP
@@ -130,11 +130,13 @@ def _live_jobs(stale):
 
 def test_the_live_shape_reports_exactly_the_unpropagated_cell():
     ids, unresolved, unmatched, unsuccessful = apply_complete.to_complete(
-        LIVE_SNAP, _live_jobs("tenant-2\x00dev-us")
+        LIVE_SNAP, _live_jobs("apply / tenant-2 / dev-us")
     )
     assert (unmatched, unsuccessful) == ([], [])
     assert unresolved == ["tenant-2 / dev-us"]
-    assert ids == sorted(i for k, v in LIVE_SNAP.items() if k != "tenant-2\x00dev-us" for i in v)
+    assert ids == sorted(
+        i for k, v in LIVE_SNAP.items() if k != "apply / tenant-2 / dev-us" for i in v
+    )
 
 
 def _run(snapshot, jobs):
@@ -148,7 +150,7 @@ def _run(snapshot, jobs):
 
 
 def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
-    done = _run(LIVE_SNAP, _live_jobs("tenant-2\x00dev-us"))
+    done = _run(LIVE_SNAP, _live_jobs("apply / tenant-2 / dev-us"))
     assert done.returncode == apply_complete.UNRESOLVED_EXIT
     assert apply_complete.RETRY_PREFIX in done.stderr
     assert "tenant-2 / dev-us" in done.stderr
@@ -157,7 +159,7 @@ def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
 def test_main_prints_the_ids_and_exits_zero_when_every_cell_resolved():
     done = _run(
         SNAP,
-        [job(f"L0 / apply / {k.split(chr(0))[0]} / {k.split(chr(0))[1]}", "success") for k in SNAP],
+        [job(f"L0 / {k}", "success") for k in SNAP],
     )
     assert done.returncode == 0
     assert done.stdout.split() == ["1", "2", "3"]
@@ -283,9 +285,9 @@ python3() { "$PYEXE" "$@"; }
 """
 
 HARNESS_SNAP = {
-    "dns\x00dev-eu": [11],
-    "app\x00dev-eu": [22],
-    "web\x00dev-eu": [33],
+    "apply / dns / dev-eu": [11],
+    "apply / app / dev-eu": [22],
+    "apply / web / dev-eu": [33],
 }
 
 

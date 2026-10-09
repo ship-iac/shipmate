@@ -16,15 +16,9 @@ from _shipmate import _load
 
 ag = _load("apply-gate")
 
-SEP = "\x00"
-
-
-def _key(stack, env):
-    return f"{stack}{SEP}{env}"
-
 
 def snapshot(waves, check_runs, app_id):
-    """{cell key: [check id, ...]} for every cell in this run's waves.
+    """{apply check name: [check id, ...]} for every cell in this run's waves.
 
     Every wanted cell must have one. A cell that has none fails the run here,
     before wave0 and so before anything applies. Skipping it would let that
@@ -49,7 +43,7 @@ def snapshot(waves, check_runs, app_id):
                 "SHA before apply; this cell would apply with nothing to complete "
                 "afterwards, stranding its check pending. Re-plan."
             )
-        out[_key(stack, env)] = ids
+        out[name] = ids
     return out
 
 

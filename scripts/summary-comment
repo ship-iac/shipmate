@@ -49,11 +49,9 @@ UNMANAGED_LINE_CAP = 1000
 UNMANAGED_NAMES = 10
 CELL_KEYS = ("stack", "environment", "changed")
 
-#: The consumer names its plan-calling job `shipmate`, and GitHub names a called workflow's
-#: check runs `<caller job> / <callee job>`. A plan cell's callee job name is already
-#: `<stack> / <env>`, so its check is this prefix plus that. `shipmate doctor` reports a job
-#: carrying another name.
-PLAN_CHECK_PREFIX = "shipmate / "
+#: A plan cell's callee job name is already `<stack> / <env>`, so its check is this prefix
+#: plus that.
+PLAN_CHECK_PREFIX = ag.CALLER_PREFIX
 
 # A plan line's change sign, possibly indented: `+`, `-`, `~`, or the
 # replace forms `-/+` / `+/-`. The sign moves to column 0 (GitHub's diff

@@ -130,7 +130,7 @@ runs:
         # Cosmetic: apply-comment falls back to the workflow-run URL per row. Mirror
         # actions/summary's treatment of a cosmetic API listing -- warn and degrade to an empty
         # file, never fail the step.
-        if ! gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs" --jq '.jobs[] | {name, html_url}' > jobs.jsonl; then
+        if ! gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" --jq '.jobs[] | {name, html_url}' > jobs.jsonl; then
           echo "::warning::run jobs listing failed; per-cell log links degrade to the workflow-run URL"
           : > jobs.jsonl
         fi

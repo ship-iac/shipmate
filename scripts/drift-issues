@@ -45,7 +45,7 @@ from urllib.parse import quote
 
 from _shipmate import _load, cell_summaries, current_run_url
 
-_run = _load("build-matrix")._run
+_run = _load("env-config")._run
 
 CELL_KEYS = (
     "stack",
