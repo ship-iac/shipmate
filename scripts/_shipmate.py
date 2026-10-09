@@ -179,9 +179,12 @@ def _refuse(cls, message, mark):
 
 
 def _check_keys(node, key_of):
-    """Refuse a non-scalar key before `key_of` constructs it, then a duplicate of `key_of`."""
+    """Refuse a non-scalar key before `key_of` constructs it, then a duplicate of `key_of`.
+    A node that is no mapping (`!!map [1]`) is left to the constructor's own refusal."""
     from yaml.constructor import ConstructorError
 
+    if node.id != "mapping":
+        return
     seen = set()
     for key, _ in node.value:
         if key.id != "scalar":
@@ -190,6 +193,20 @@ def _check_keys(node, key_of):
         if value in seen:
             _refuse(ConstructorError, f"duplicate key {value!r}", key.start_mark)
         seen.add(value)
+
+
+def _construct_object(self, node, deep=False):
+    """`WorkflowLoader.construct_object`: SafeLoader's, refusing as a `ConstructorError` at
+    `node` the plain exceptions its scalar constructors raise on an explicit tag with a bad
+    value (`!!int abc`), which a caller catching `YAMLError` would miss."""
+    from yaml import SafeLoader
+    from yaml.constructor import ConstructorError
+
+    try:
+        return SafeLoader.construct_object(self, node, deep)
+    except (ValueError, LookupError, AttributeError, TypeError):
+        tag = node.tag.replace("tag:yaml.org,2002:", "!!")
+        _refuse(ConstructorError, f"{node.value!r} is not a valid {tag}", node.start_mark)
 
 
 @functools.cache
@@ -228,6 +245,7 @@ def _loaders():
         WorkflowLoader.add_implicit_resolver(tag, re.compile(pattern), list(first))
     WorkflowLoader.add_constructor("tag:yaml.org,2002:int", _core_int)
     WorkflowLoader.add_multi_constructor("!", _untagged)
+    WorkflowLoader.construct_object = _construct_object
     return ConfigLoader, WorkflowLoader
 
 

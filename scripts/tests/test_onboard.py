@@ -1173,6 +1173,27 @@ def run_main(monkeypatch, tmp_path, extra_routes, argv, key=True, membership=ONE
     return fake, excinfo.value
 
 
+def test_a_python_without_pyyaml_refuses_before_any_read(monkeypatch):
+    """The install command per platform, whole, and nothing read or written first.
+
+    Mutation: move the check after `_repo_facts()`, the first `gh` call -- its stub fails the
+    test."""
+
+    def unreachable(*args):
+        pytest.fail("onboard read something before refusing a missing PyYAML")
+
+    for name in ("_run", "_engine_pin", "_repo_root", "_repo_facts", "_read_key"):
+        monkeypatch.setattr(onboard, name, unreachable)
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    with pytest.raises(SystemExit) as excinfo:
+        onboard.main(["--app-id", "1"])
+    assert excinfo.value.code == (
+        "onboard needs PyYAML. Install it for the python you run onboard with: sudo apt install "
+        "python3-yaml (Debian or Ubuntu), brew install pyyaml (macOS), python -m pip install "
+        "pyyaml (Windows or any other)."
+    )
+
+
 def test_a_whole_run_writes_one_file_and_no_configuration(monkeypatch, tmp_path):
     """`onboard` moves no pin -- `_reconcile_shim` reports `pin-only` and leaves it, and that
     status never reaches `_exit_code`. A `.github/shipmate-config.yml` written here could therefore
@@ -3323,9 +3344,8 @@ def test_a_dead_clause_and_an_empty_sweep_are_each_listed(tmp_path):
 
     `dead.yaml` pins the second suffix a workflow file may carry.
 
-    Mutations: drop the captured-notice lines -- `ok`; cut a block value at `,` like a flow
-    value (`elif True:` for `elif m["flow"]:`) -- the dead-clause line is gone; drop `".yaml"`
-    from `_drift_files`' suffixes -- `dead.yaml` is not read.
+    Mutations: drop the captured-notice lines -- `ok`; drop `".yaml"` from `_drift_files`'
+    suffixes -- `dead.yaml` is not read.
     """
     cells, tags = _tree(("a", "dev-eu"))
     files = {
@@ -3385,35 +3405,11 @@ def test_a_tree_error_leaves_coverage_uncomputed(tmp_path):
 
 
 def test_a_commented_out_drift_call_is_no_drift_file(tmp_path):
-    """A commented-out call sweeps nothing.
-
-    Mutation: search the raw text instead of `_stripped_text` -- the file is taken for a drift
-    file whose call `_call_region`, which strips comments, cannot find: `cannot check`.
-    """
+    """A commented-out call sweeps nothing. Documents the parser's behaviour, no mutation: a
+    comment never reaches the parsed document."""
     text = "on:\n  workflow_dispatch:\njobs:\n  drift:\n  #" + DRIFT_CALL[3:]
     context = _drift_ctx(tmp_path, {"drift.yml": text})
     assert onboard._drift_sweeps_item(context) == ("todo", DRIFT_ITEM, NO_DRIFT_FILE)
-
-
-def test_a_drift_call_split_across_lines_is_cannot_check(tmp_path):
-    """The selector's `uses:` pattern crosses a line break; `_call_region` reads line by line
-    and finds no call, so the query is unread rather than read as every cell.
-
-    Mutation: `_drift_query(dr._call_region(text, call) or "")` -- `ok`.
-    """
-    text = _drift_job().replace("    uses: ", "    uses:\n      ")
-    cells, tags = _tree(("a", "dev-eu"))
-    context = _drift_ctx(tmp_path, {"drift.yml": text}, cells=cells, tags_by_stack=tags)
-    assert onboard._drift_sweeps_item(context) == (
-        "cannot check",
-        DRIFT_ITEM,
-        [
-            "Coverage was not computed:",
-            "  drift.yml: its `uses:` value starts on a later line, which this reader does not "
-            "follow.",
-            _read_line("drift.yml"),
-        ],
-    )
 
 
 def test_a_workflow_file_that_is_not_utf8_is_cannot_check(tmp_path):
@@ -3436,19 +3432,19 @@ def test_a_workflow_file_that_is_not_utf8_is_cannot_check(tmp_path):
 
 
 def test_another_repositorys_drift_yml_is_no_drift_file(tmp_path):
-    """Mutation: select with `re.compile(r"/drift\\.yml@")` in place of `_engine_call` --
-    the file is read as a sweep of every cell."""
+    """Mutation: drop the repository from `doctor._engine_calls`' pattern -- the file is read
+    as a sweep of every cell."""
     text = _drift_job().replace("ship-iac/shipmate", "other/tools")
     context = _drift_ctx(tmp_path, {"drift.yml": text})
     assert onboard._drift_sweeps_item(context) == ("todo", DRIFT_ITEM, NO_DRIFT_FILE)
 
 
 def test_tags_outside_the_drift_job_are_not_the_query(tmp_path):
-    """An `on: push: tags:` filter and another job's `with: tags:` are outside the job block
-    `_call_region` returns.
+    """An `on: push: tags:` filter and another job's `with: tags:` are not the drift job's
+    `with.tags`.
 
-    Mutation: read `tags:` keys from the whole text instead of `_call_region` -- three keys,
-    `cannot check`.
+    Mutation: read `with.tags` from the last job (`dr._jobs(dr._mapping(doc))[-1][1]`) in
+    `_drift_file` -- `env/x` matches no cell, `todo`.
     """
     text = (
         "on:\n  push:\n    tags: [v1]\njobs:\n  drift:\n"
@@ -3470,29 +3466,31 @@ def test_tags_outside_the_drift_job_are_not_the_query(tmp_path):
             ("env/dev-eu,env/dev-us", ""),
         ),
         ("    with:\n      tags: 'env/dev-eu:workload/app'\n", ("env/dev-eu:workload/app", "")),
+        ("    with:\n      tags: env/dev-eu,env/dev-us\n", ("env/dev-eu,env/dev-us", "")),
+        ("    with:\n      tags: >-\n        env/dev-eu\n", ("env/dev-eu", "")),
         (
             "    with:\n      tags: ${{ inputs.tags }}\n",
             (None, "its `tags` is a `${{ }}` expression, which only a run resolves"),
         ),
-        (
-            "    with:\n      tags: env/a\n      tags: env/b\n",
-            (None, "its drift job sets `tags` more than once"),
-        ),
         ("    with:\n      runs_on: ubuntu-slim\n", ("", "")),
     ],
-    ids=["flow", "flow-quoted-comma", "block-quoted", "expression", "two-keys", "no-key"],
+    ids=["flow", "flow-quoted-comma", "block-quoted", "block", "folded", "expression", "no-key"],
 )
-def test_the_drift_query_is_read_without_yaml(with_lines, expected):
-    """Mutations: cut a quoted value at `,` (drop the quoted branch) -- `flow-quoted-comma`
-    and `block-quoted` keep their quotes or lose half; drop the flow cut -- `flow` reads
-    `env/dev-eu }`; drop the `${{` test -- `expression` is a query; count only the first
-    key -- `two-keys` is a query.
+def test_the_drift_query_is_read_from_the_calling_jobs_with(tmp_path, with_lines, expected):
+    """`jobs.<drift job>.with.tags`, whatever its form; a `build` job ahead of the drift job
+    hands its own workflow a `tags` input that is not the query.
+
+    Mutations: read `with.tags` from the first job (`dr._jobs(dr._mapping(doc))[0][1]`) in
+    `_drift_file` -- every row reads `env/build`; drop the `${{` test -- `expression` is a
+    query.
     """
-    text = _drift_job(with_lines)
-    region = onboard.dr._call_region(
-        text, onboard.dr._engine_call(onboard.ENGINE_SLUG, "drift.yml")
+    text = (
+        "on:\n  workflow_dispatch:\njobs:\n  build:\n    uses: ./.github/workflows/build.yml\n"
+        "    with:\n      tags: env/build\n  drift:\n" + DRIFT_CALL + with_lines
     )
-    assert onboard._drift_query(region) == expected
+    path = tmp_path / "drift.yml"
+    path.write_text(text, encoding="utf-8", newline="\n")
+    assert onboard._drift_file(path) == ("drift.yml", *expected)
 
 
 def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, capsys):
@@ -3520,45 +3518,30 @@ def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, ca
     )
 
 
-NOT_ON_KEY_LINE = "its `tags` value is not on the key's line, which this reader does not follow"
+def test_a_workflow_file_that_does_not_parse_is_cannot_check(tmp_path):
+    """It may be a drift file, so coverage is unknown: the parser's message names why.
 
-
-@pytest.mark.parametrize(
-    ("with_lines", "reason"),
-    [
-        ("    with:\n      tags:\n        env/dev-eu\n", NOT_ON_KEY_LINE),
-        ("    with:\n      tags: >-\n        env/dev-eu\n", NOT_ON_KEY_LINE),
-        ("    with:\n      tags: |\n        env/dev-eu\n", NOT_ON_KEY_LINE),
-        (
-            "    with: {\n      tags: env/dev-eu }\n",
-            "its drift job splits a flow mapping across lines, which this reader does not follow",
-        ),
-    ],
-    ids=["next-line", "folded", "literal", "flow-split"],
-)
-def test_a_tags_value_the_line_reader_cannot_follow_is_cannot_check(tmp_path, with_lines, reason):
-    """Read as "", each would sweep every cell and mark it covered.
-
-    Mutations: treat an empty block value as "" (`if rest[:1] in (">", "|"):` in
-    `_tags_value`) -- `next-line` is `ok`; drop the split-flow test -- `flow-split` reads
-    `env/dev-eu }` as a block value and is `todo` over a query matching no cell.
+    Mutation: return None (no drift file) for a file that does not parse -- `ok`.
     """
     cells, tags = _tree(("a", "dev-eu"))
-    context = _drift_ctx(
-        tmp_path, {"drift.yml": _drift_job(with_lines)}, cells=cells, tags_by_stack=tags
-    )
+    files = {"broken.yml": "jobs:\n  a: 1\n  a: 2\n", "drift.yml": FOLDERS_DRIFT}
+    context = _drift_ctx(tmp_path, files, cells=cells, tags_by_stack=tags)
     assert onboard._drift_sweeps_item(context) == (
         "cannot check",
         DRIFT_ITEM,
-        ["Coverage was not computed:", f"  drift.yml: {reason}.", _read_line("drift.yml")],
+        [
+            "Coverage was not computed:",
+            "  broken.yml: it does not parse as YAML: duplicate key 'a' (line 3, column 3).",
+            _read_line("broken.yml", "drift.yml"),
+        ],
     )
 
 
 def test_a_file_calling_drift_yml_twice_is_cannot_check(tmp_path):
-    """`_call_region` reads the first call only, so the second job's query would go unread.
+    """One job's query alone would be read, and the second job's would go unread.
 
-    Mutation: `calls > 2` for `calls > 1` in `_drift_file` -- the first job's query alone is
-    read and the item is `ok`.
+    Mutation: `len(calls) > 2` for `len(calls) > 1` in `_drift_file` -- the first job's query
+    alone is read and the item is `ok`.
     """
     text = _drift_job("    with:\n      tags: env/dev-eu\n") + "  second:\n" + DRIFT_CALL
     cells, tags = _tree(("a", "dev-eu"))

@@ -41,6 +41,7 @@ sweep that run refuses. Each is a checklist item; none changes the exit code.
 
 import argparse
 import contextlib
+import importlib.util
 import io
 import json
 import pathlib
@@ -49,7 +50,17 @@ import sys
 import textwrap
 import urllib.parse
 
-from _shipmate import APP_ID_VAR, ENGINE_ENV, REPO_RE, _load, gate_check, review_count, utf8_output
+from _shipmate import (
+    APP_ID_VAR,
+    ENGINE_ENV,
+    REPO_RE,
+    _load,
+    gate_check,
+    load_workflow_text,
+    review_count,
+    utf8_output,
+    yaml_error_text,
+)
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
 from _shipmate import approval_rules as _approval_rules
 from _shipmate import run as _run
@@ -972,57 +983,35 @@ def _adoption_item(ctx):
     )
 
 
+#: onboard's refusal on a python without PyYAML, ahead of any read or write.
+PYYAML_MISSING = (
+    "onboard needs PyYAML. Install it for the python you run onboard with: sudo apt install "
+    "python3-yaml (Debian or Ubuntu), brew install pyyaml (macOS), python -m pip install "
+    "pyyaml (Windows or any other)."
+)
+
 _NO_DRIFT_FILE = [
     "Add one workflow file per drift sweep from the `shipmate drift` fence in",
     "docs/getting-started.md, under any name in `.github/workflows/`, with the same",
     "pin as `shipmate.yml`. Without one, no stack is checked for drift (docs/drift.md).",
 ]
 
-#: A `tags:` key at the start of a line (block form) or after `{` or `,` (flow form).
-_TAGS_KEY = re.compile(r"""(?:^[ \t]*|(?P<flow>[{,])[ \t]*)["']?tags["']?[ \t]*:""", re.M)
 
+def _drift_query(job):
+    """(the `tags` query the drift job `job` passes, "") or (None, why it cannot be read).
 
-def _tags_value(rest, flow):
-    """The value written after one `tags:` key (`rest`, the stripped remainder of its line),
-    or None when it starts on a later line: empty, or a `>`/`|` block scalar."""
-    if rest[:1] in ("'", '"'):
-        return rest[1:].partition(rest[0])[0]
-    if flow:
-        return re.split(r"[,}]", rest, maxsplit=1)[0].rstrip()
-    if not rest or rest[0] in ">|":
-        return None
-    return rest
-
-
-def _drift_query(region):
-    """(the `tags` query of the drift job `region`, "") or (None, why it cannot be read).
-    `region` is None when the selector matched a call `_call_region` cannot find line by line.
-
-    No key is "", which sweeps every cell. A block value runs to the end of the line, so
-    `env/a,env/b` is one OR query; a flow value stops at `,` or `}` unless quoted. A value on
-    a later line or a flow mapping split across lines is unread, never "".
+    Read from the job's own `with.tags`. No value is "", which sweeps every cell, and the value
+    is one query whatever it holds: `env/a,env/b` is one OR query.
     """
-    if region is None:
-        return None, "its `uses:` value starts on a later line, which this reader does not follow"
-    if any(line.count("{") > line.count("}") for line in region.splitlines()):
-        return (
-            None,
-            "its drift job splits a flow mapping across lines, which this reader does not follow",
-        )
-    values = [
-        _tags_value(region[m.end() :].partition("\n")[0].strip(), m["flow"])
-        for m in _TAGS_KEY.finditer(region)
-    ]
-    if None in values:
-        return None, "its `tags` value is not on the key's line, which this reader does not follow"
-    if len(values) > 1:
-        return None, "its drift job sets `tags` more than once"
-    if values and "${{" in values[0]:
+    tags = dr._mapping(job.get("with")).get("tags")
+    if tags is None:
+        return "", ""
+    if "${{" in str(tags):
         return None, "its `tags` is a `${{ }}` expression, which only a run resolves"
-    return (values[0] if values else ""), ""
+    return str(tags), ""
 
 
-def _drift_file(path, call):
+def _drift_file(path):
     """`_drift_files`' entry for one workflow file, or None when it is no drift file."""
     try:
         if not path.is_file():
@@ -1032,23 +1021,27 @@ def _drift_file(path, call):
         return path.name, None, "it is not UTF-8 text, so it was not read"
     except OSError as exc:
         return path.name, None, f"it could not be read: {exc}"
-    calls = len(list(call.finditer(dr._stripped_text(text))))
-    if calls > 1:
+    from yaml import YAMLError
+
+    try:
+        doc = load_workflow_text(text)
+    except YAMLError as exc:
+        return path.name, None, f"it does not parse as YAML: {yaml_error_text(exc)}"
+    calls = dr._engine_calls(dr._mapping(doc), ENGINE_SLUG, "drift.yml")
+    if len(calls) > 1:
         return path.name, None, "it calls `drift.yml` more than once"
     if calls:
-        return path.name, *_drift_query(dr._call_region(text, call))
+        return path.name, *_drift_query(calls[0][1])
     return None
 
 
 def _drift_files(root):
     """[(file name, `tags` query or None, why None)] for each `.yml`/`.yaml` file in the
-    working tree's `.github/workflows/` whose comment-stripped text calls the engine's
-    `drift.yml`, by doctor's own selector, so the two cannot disagree on what a drift file is.
-    The query is read from the calling job alone (`_call_region`). A file that cannot be
-    read, or calls `drift.yml` more than once, is listed with None; so is the directory when
-    it cannot be listed."""
+    working tree's `.github/workflows/` with a job calling the engine's `drift.yml`, matched by
+    doctor's own `_engine_calls`, so the two cannot disagree on what a drift file is. A file
+    that cannot be read, does not parse (it may be a drift file) or calls `drift.yml` more
+    than once is listed with None; so is the directory when it cannot be listed."""
     workflows = pathlib.Path(root) / ".github" / "workflows"
-    call = dr._engine_call(ENGINE_SLUG, "drift.yml")
     # Python 3.11-3.13 re-raise a `stat` PermissionError from `is_dir`/`is_file`.
     try:
         if not workflows.is_dir():
@@ -1056,7 +1049,7 @@ def _drift_files(root):
         paths = sorted(workflows.iterdir())
     except OSError as exc:
         return [(".github/workflows/", None, f"it could not be listed: {exc}")]
-    found = [_drift_file(path, call) for path in paths if path.suffix in (".yml", ".yaml")]
+    found = [_drift_file(path) for path in paths if path.suffix in (".yml", ".yaml")]
     return [entry for entry in found if entry is not None]
 
 
@@ -1226,6 +1219,8 @@ def main(argv=None):
     if not _APP_ID_RE.fullmatch(args.app_id):
         raise SystemExit(f"--app-id must be all digits: {args.app_id!r}")
     _DRY = args.dry_run
+    if importlib.util.find_spec("yaml") is None:
+        raise SystemExit(PYYAML_MISSING)
 
     # The local reads first: a bad key path or an unreadable engine pin must fail in under
     # a second, before the first API call creates anything.

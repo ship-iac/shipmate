@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining twelve
+shipmate:doctor -->`, upserted in place like the plan comment) combining thirteen
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -67,6 +67,10 @@ live probes.
 - **Whether the `shipmate-engine` environment exists, and whether its deployment
   branch policy actually names the default branch.** See `hardening.md` #16 and
   `github-app.md` §Key-exposure boundary.
+- **A workflow file that does not parse as YAML.** One note per file, read at the
+  commit under examination, naming the parser's message; `shipmate.yml` is read
+  even when the listing does not reach it. The probes below skip such a file and
+  still check every file that parses.
 - **A workflow file other than `shipmate.yml` declares the `pull_request_target`
   trigger.** It runs at the base ref with the repository's secrets, and a
   workflow that also acts on content the pull request author controls from a job
@@ -144,15 +148,16 @@ live probes.
 - **Whether the shipmate App installation still grants the manifest's full
   permission set.**
 - **Whether any workflow file calls the engine's `drift.yml`.** Read at the
-  commit under examination, like the pin probe. A file counts by the call in
-  its text, not by its name, and a call only inside a `#` comment does not
-  count. A call counts only when it names the engine repository doctor runs
+  commit under examination, like the pin probe. A file counts by a job whose
+  `uses:` is the call, not by its name, and a call only inside a `#` comment does
+  not count. A call counts only when it names the engine repository doctor runs
   from, in any letter case: a fork, a renamed engine or a wrapper workflow does
   not count. With none, no stack is ever checked for drift, which is a note:
   a repository may decline drift on purpose. The note keeps the verdict at ⚪
   with the help hint, never 🟢 no problems found.
   An unreadable file leaves the question unverified, a note, since the call
-  may sit in a file the probe could not read. So does an engine repository that
+  may sit in a file the probe could not read; a file that does not parse
+  silences the missing-file note for the same reason. So does an engine repository that
   could not be determined, since no call can then be recognised.
 
 The report carries those findings together with the warning and failure
@@ -160,7 +165,7 @@ annotations GitHub already recorded on this commit's workflow runs — shipmate'
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only eleven of the twelve probes can produce a finding from the plan path's
+Only twelve of the thirteen probes can produce a finding from the plan path's
 own `annotate`-mode run (`actions/summary`). The App-permission-drift probe
 only has something to report when a full-manifest permission-set mint was
 actually attempted, which only `shipmate doctor` does. It is effectively
@@ -315,14 +320,13 @@ that causes it merges:
 | `drift sweeps` | no workflow file calls the engine's `drift.yml`; a stack × environment cell is in no drift file's `tags` query; a query, or one clause of it, matches no cell; or a sweep refuses: its query has an empty term, selects more than 256 cells, or keeps a cell whose `workload/*` tag its environment's `workloads` list does not name (checked only when that entry names an `identity`). A refused sweep runs no cell, so that file's cells count as unswept. |
 
 `drift sweeps` reads every `.yml` and `.yaml` file in `.github/workflows/` and
-treats one as a drift file when it calls the engine's `drift.yml`, as
-`shipmate doctor` does. It reads this checkout's copies; a drift run reads the
-default branch's. It reports `cannot check` and computes no coverage when a
-drift file's `tags` is a `${{ }}` expression, is set more than once, or starts
-on the line after its key (including a `>` or `|` block scalar); when its job
-splits a flow mapping across lines; when a file calls `drift.yml` more than once
-or its `uses:` value is on the line after the key; when a file or the directory
-cannot be read, or a file is not UTF-8; when `.github/shipmate.toml` is absent
+treats one as a drift file when a job's `uses:` calls the engine's `drift.yml`,
+as `shipmate doctor` does; the query is that job's `with.tags`. It reads this
+checkout's copies; a drift run reads the default branch's. It reports `cannot
+check` and computes no coverage when a drift file's `tags` is a `${{ }}`
+expression; when a file calls `drift.yml` more than once; when a file or the
+directory cannot be read, a file is not UTF-8, or a file does not parse as YAML,
+since it may be a drift file; when `.github/shipmate.toml` is absent
 or fails validation, since a drift run refuses before any cell then; or when `stack tags` reports a two-tag stack or a slug collision,
 which leaves the tree incomplete.
 

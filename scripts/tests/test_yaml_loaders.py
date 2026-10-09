@@ -107,6 +107,28 @@ def test_the_workflow_loader_refuses_a_non_scalar_key_as_a_yaml_error():
     assert yaml_error_text(exc.value) == "a key must be a plain value (line 1, column 3)"
 
 
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("x: !!int abc\n", "'abc' is not a valid !!int (line 1, column 4)"),
+        ("x: !!float abc\n", "'abc' is not a valid !!float (line 1, column 4)"),
+        ("x: !!bool maybe\n", "'maybe' is not a valid !!bool (line 1, column 4)"),
+        ("x: !!timestamp nope\n", "'nope' is not a valid !!timestamp (line 1, column 4)"),
+        ("x:\n  y: !!float ''\n", "'' is not a valid !!float (line 2, column 6)"),
+        ("x: !!set [1]\n", "expected a mapping node, but found sequence (line 1, column 4)"),
+    ],
+)
+def test_the_workflow_loader_refuses_a_bad_explicit_tag_value_as_a_yaml_error(text, expected):
+    """A caller isolates a file that does not parse by catching `YAMLError` alone.
+
+    Reddens on deleting `WorkflowLoader.construct_object`: the scalar rows raise `ValueError`,
+    `KeyError`, `AttributeError` or `IndexError`. Reddens on deleting the mapping-node check in
+    `_check_keys`: `!!set [1]` raises `TypeError`."""
+    with pytest.raises(yaml.YAMLError) as exc:
+        load_workflow_text(text)
+    assert yaml_error_text(exc.value) == expected
+
+
 def test_the_workflow_loader_resolves_aliases_and_ignores_unknown_tags():
     """Reddens on dropping the `add_multi_constructor` line: `!foo` then has no constructor
     and raises."""

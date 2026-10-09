@@ -1158,12 +1158,12 @@ and this run (`at an unknown commit in [run #<n>](<run url>)` when the commit
 is not a 40-character lowercase hex SHA). Each finding and harvested annotation
 carries the same circles. Under any verdict but 🟢 the report ends with the help
 hint ``Comment `shipmate help` for the available commands.``; a 🟢 report has
-no footer. It combines twelve live settings probes, listed in
+no footer. It combines thirteen live settings probes, listed in
 `docs/troubleshooting.md` §shipmate doctor with their scopes and degrade paths,
 and a harvest of the warning and failure annotations GitHub already recorded on
 this commit's workflow runs (shipmate's own and any other Actions workflow run
 on that commit; third-party-app-authored check runs are excluded).
-Only eleven of the twelve probes can produce a finding from the plan path's own
+Only twelve of the thirteen probes can produce a finding from the plan path's own
 `annotate`-mode invocation: the App-permission-drift probe reports only on a
 full-manifest permission-set mint, which only `shipmate doctor` attempts. An
 empty harvest is

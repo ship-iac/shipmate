@@ -1229,6 +1229,18 @@ def _wf_file(text):
     return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
 
 
+#: The head of a workflow file whose one job runs the steps a test appends, one
+#: `      - uses: <value>` line each.
+_STEPS = "on: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+
+
+def _doc(text):
+    """The parsed workflow `text`, as the `shipmate.yml` probe hands it to each finder."""
+    doc, finding = doctor._workflow_doc(text, "shipmate.yml")
+    assert finding is None, finding
+    return doc
+
+
 _SHA = "a" * 40
 _OTHER_SHA = "b" * 40
 
@@ -1311,7 +1323,9 @@ _SHIPMATE_DRIFT_WF = (
 def test_tag_pin_warned(monkeypatch):
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
-        f"{_WF_DIR}/plan.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+            _STEPS + "      - uses: acme/engine/actions/setup@v2\n"
+        ),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._pin_warnings(_ctx())
@@ -1320,12 +1334,38 @@ def test_tag_pin_warned(monkeypatch):
     assert "tag or branch" in out[0][1] and "acme/engine@v2" in out[0][1]
 
 
+def test_a_pin_counts_under_a_job_and_a_step_and_not_in_a_comment(monkeypatch):
+    """A job's `uses:` (a reusable workflow) and a step's (an action) each pin the engine; a
+    commented-out line pins nothing.
+
+    Mutations: have `_call_sites` yield only the jobs -- the `v2` step pin is missed; only
+    the steps -- the `v1` job pin is missed."""
+    text = (
+        "on: push\njobs:\n"
+        "  call:\n    uses: acme/engine/.github/workflows/plan.yml@v1\n"
+        "  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+        "      # - uses: acme/engine/actions/setup@v3\n"
+        "      - uses: acme/engine/actions/setup@v2\n"
+    )
+    responses = {
+        f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(text),
+    }
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert [t.split("`")[3] for _, t in doctor._pin_warnings(_ctx())] == [
+        "acme/engine@v1",
+        "acme/engine@v2",
+    ]
+
+
 def test_quoted_tag_pin_warned(monkeypatch):
     # Some YAML formatters quote the `uses:` value -- the anchor must not
     # make those pins invisible to the probe.
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
-        f"{_WF_DIR}/plan.yml{_REF}": _wf_file('uses: "acme/engine/actions/setup@v2"\n'),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+            _STEPS + '      - uses: "acme/engine/actions/setup@v2"\n'
+        ),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._pin_warnings(_ctx())
@@ -1344,7 +1384,9 @@ def test_non_file_workflow_entry_skipped(monkeypatch):
             {"name": "sub.yml", "type": "dir"},
             {"name": "plan.yml", "type": "file"},
         ],
-        f"{_WF_DIR}/plan.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+            _STEPS + "      - uses: acme/engine/actions/setup@v2\n"
+        ),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._pin_warnings(_ctx())
@@ -1356,7 +1398,9 @@ def test_non_file_workflow_entry_skipped(monkeypatch):
 def test_stale_sha_pin_warned(monkeypatch):
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
-        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: acme/engine/actions/setup@{_SHA}\n"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+            _STEPS + f"      - uses: acme/engine/actions/setup@{_SHA}\n"
+        ),
         "repos/acme/engine/releases/latest": {"tag_name": "v1.4.0"},
         "repos/acme/engine/commits/v1.4.0": {"sha": _OTHER_SHA},
     }
@@ -1392,7 +1436,8 @@ def test_current_sha_pin_silent(monkeypatch):
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml", "notes.md"),
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
-            f"uses: acme/engine/actions/setup@{_SHA}\nuses: acme/engine/actions/summary@{_SHA}\n"
+            _STEPS + f"      - uses: acme/engine/actions/setup@{_SHA}\n"
+            f"      - uses: acme/engine/actions/summary@{_SHA}\n"
         ),
         "repos/acme/engine/releases/latest": {"tag_name": "v1.4.0"},
         "repos/acme/engine/commits/v1.4.0": {"sha": _SHA},
@@ -1409,9 +1454,9 @@ def test_pin_probe_ignores_another_orgs_shared_action(monkeypatch):
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
         f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
-            "uses: other/shared/actions/lint@v1\n"
-            "uses: other/shared/.github/actions/scan@main\n"
-            f"uses: {_ENGINE_REPO}/actions/setup@{_SHA}\n"
+            _STEPS + "      - uses: other/shared/actions/lint@v1\n"
+            "      - uses: other/shared/.github/actions/scan@main\n"
+            f"      - uses: {_ENGINE_REPO}/actions/setup@{_SHA}\n"
         ),
         f"repos/{_ENGINE_REPO}/releases/latest": {"tag_name": "v1.4.0"},
         f"repos/{_ENGINE_REPO}/commits/v1.4.0": {"sha": _OTHER_SHA},
@@ -1461,7 +1506,9 @@ def test_ctx_from_env_reads_the_engine_repo_and_the_harvest_flags(monkeypatch, t
 def test_unreadable_release_degrades_to_note(monkeypatch):
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
-        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: acme/engine/actions/setup@{_SHA}\n"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+            _STEPS + f"      - uses: acme/engine/actions/setup@{_SHA}\n"
+        ),
     }
 
     def gh(path):
@@ -1500,7 +1547,7 @@ def test_workflow_file_read_failure_keeps_the_pins_found_so_far(monkeypatch):
     # note appended, not be discarded, and not escalate to the generic degrade.
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("a.yml", "b.yml"),
-        f"{_WF_DIR}/a.yml{_REF}": _wf_file("uses: acme/engine/actions/setup@v2\n"),
+        f"{_WF_DIR}/a.yml{_REF}": _wf_file(_STEPS + "      - uses: acme/engine/actions/setup@v2\n"),
     }
 
     def gh(path):
@@ -1539,7 +1586,7 @@ def test_pin_probe_reads_the_commit_under_examination(monkeypatch):
     def gh(path):
         seen.append(path)
         if path.endswith(f"plan.yml{_REF}"):
-            return _wf_file(f"uses: acme/engine/actions/setup@{_SHA}\n")
+            return _wf_file(_STEPS + f"      - uses: acme/engine/actions/setup@{_SHA}\n")
         if path == "repos/acme/engine/releases/latest":
             return {"tag_name": "v1.4.0"}
         if path == "repos/acme/engine/commits/v1.4.0":
@@ -2221,7 +2268,7 @@ def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
 def test_the_shim_job_name_row_keeps_the_engine_placeholders():
     """Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;stack&gt;` shows."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
-    [(level, finding)] = doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO)
+    [(level, finding)] = doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO)
     assert doctor._finding_row(level, finding) == (
         f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s calling job is not named "
         "`shipmate`. GitHub names a called workflow's check runs `<caller job> / <callee job>`, "
@@ -2475,17 +2522,15 @@ _FORK_WARNED = [
         ["labeler.yml"],
         id="another_workflow_is_still_warned_about_alongside_shipmate_yml",
     ),
-    # `_on_block`'s column-0 anchoring. Any key ending in `on` is an unanchored match --
-    # `python-version: 3.12` is `versi` + `on:` -- and matching it retargets the block this
-    # probe reads onto a line that can never name an event, so the trigger goes unreported.
+    # A key ending in `on` is not the top-level `on:` -- `python-version: 3.12` belongs to
+    # `env` -- and reading it as the trigger would leave the real one unreported.
     pytest.param(
         {"label.yml": "env:\n  python-version: 3.12\non:\n  pull_request_target:\n"},
         ["label.yml"],
         id="an_indented_on_is_not_the_top_level_one",
     ),
-    # `_on_block` promises neither ends the block, and workflows written by hand put a
-    # column-0 comment block right above their events -- the same author style one line
-    # lower would otherwise read as an empty trigger.
+    # Workflows written by hand put a column-0 comment block right above their events, and
+    # it must not read as an empty trigger.
     pytest.param(
         {"label.yml": "on:\n\n# runs at the base ref\n  pull_request_target:\n"},
         ["label.yml"],
@@ -2524,9 +2569,9 @@ _FORK_WARNED = [
         ["allow-unsafe-pr-checkout"],
         id="unsafe_pr_checkout_as_an_expression_is_warned",
     ),
-    # A line-anchored key misses this, and flow style is not exotic authoring: the engine's
-    # own `.github/workflows/apply.yml` writes `with: { fetch-depth: 0, ref: ... }`. Missing it
-    # is fail-open on the outermost guard of the plan path.
+    # Flow style is not exotic authoring: the engine's own `.github/workflows/apply.yml`
+    # writes `with: { fetch-depth: 0, ref: ... }`. Missing it is fail-open on the outermost
+    # guard of the plan path.
     pytest.param(
         {
             "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -2550,6 +2595,17 @@ _FORK_WARNED = [
         },
         ["allow-unsafe-pr-checkout"],
         id="a_false_in_one_job_does_not_silence_a_true_in_another",
+    ),
+    # A job calling a reusable workflow hands it inputs through the job's own `with:`, so
+    # the input is read there as well as under a step.
+    pytest.param(
+        {
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n"
+            "    uses: acme/tools/.github/workflows/build.yml@v1\n"
+            "    with:\n      allow-unsafe-pr-checkout: true\n"
+        },
+        ["allow-unsafe-pr-checkout", "label.yml"],
+        id="unsafe_pr_checkout_in_a_jobs_own_with_is_warned",
     ),
 ]
 
@@ -2650,9 +2706,8 @@ _FORK_SILENT = [
         },
         id="a_capitalised_false_is_silent",
     ),
-    # The other half of recognising flow style: the value must stop at `,`/`}`,
-    # or a flow-style `false` reads as `false }` and the safest shape a consumer
-    # can write is reported.
+    # The other half of recognising flow style: a flow-style `false` is the safest shape a
+    # consumer can write.
     pytest.param(
         {
             "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -2663,11 +2718,7 @@ _FORK_SILENT = [
         },
         id="a_flow_style_false_is_silent",
     ),
-    # The line a careful repository writes *because* it does not have one. Two independent
-    # things keep it quiet -- the comment strip empties the line, and the key anchor rejects a
-    # key with `set ` in front -- so only removing BOTH reddens this row.
-    # `a_trailing_comment_after_a_false_value_is_silent` pins the strip,
-    # `a_key_merely_ending_in_the_input_name_is_not_reported` the anchor.
+    # The line a careful repository writes *because* it does not have one.
     pytest.param(
         {
             "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -2676,9 +2727,8 @@ _FORK_SILENT = [
         },
         id="commented_out_unsafe_pr_checkout_is_silent",
     ),
-    # The comment strip is what makes the value comparison read `false` rather
-    # than `false  # deliberate`, which is not the literal and would be reported
-    # -- a false positive on the safest shape a consumer can write.
+    # The value is `false`, not `false  # deliberate`: a finding here would be a false
+    # positive on the safest shape a consumer can write.
     pytest.param(
         {
             "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
@@ -2687,15 +2737,22 @@ _FORK_SILENT = [
         },
         id="a_trailing_comment_after_a_false_value_is_silent",
     ),
-    # The key anchor -- a line start, `{` or `,` -- is what makes this the input
-    # and not a longer key that happens to end in the same characters: a different
-    # input entirely, and reporting it names a line the reader cannot find.
+    # A longer key that happens to end in the same characters is a different input
+    # entirely, and reporting it names a line the reader cannot find.
     pytest.param(
         {
             "shipmate.yml": "on:\n  pull_request_target:\njobs:\n  x:\n    steps:\n"
             "      - with:\n          no-allow-unsafe-pr-checkout: true\n",
         },
         id="a_key_merely_ending_in_the_input_name_is_not_reported",
+    ),
+    pytest.param(
+        {
+            "label.yml": "on:\n  pull_request:\njobs:\n  x:\n"
+            "    uses: acme/tools/.github/workflows/build.yml@v1\n"
+            "    with:\n      allow-unsafe-pr-checkout: false\n"
+        },
+        id="a_false_in_a_jobs_own_with_is_silent",
     ),
 ]
 
@@ -2726,10 +2783,11 @@ def _wf_bytes(data):
     return {"encoding": "base64", "content": base64.b64encode(data).decode()}
 
 
-def test_a_byte_order_mark_does_not_hide_the_on_block(monkeypatch):
-    """A BOM'd workflow carries U+FEFF in front of its column-0 `on:`, which
-    reads as no top-level trigger block at all -- silence over a real
-    `pull_request_target`."""
+def test_a_byte_order_mark_does_not_hide_the_on_key(monkeypatch):
+    """A BOM'd workflow carries U+FEFF in front of its `on:`, which the parser skips: the
+    key must not read as U+FEFF + `on`, silence over a real `pull_request_target`.
+
+    Documents the parser's behaviour, no mutation: doctor strips nothing."""
     responses = _fork_responses({"label.yml": ""})
     responses[f"{_WF_DIR}/label.yml{_REF}"] = _wf_bytes(
         b"\xef\xbb\xbfon:\n  pull_request_target:\n"
@@ -2754,20 +2812,6 @@ def test_an_invalid_utf8_byte_does_not_abort_the_scan(monkeypatch):
 
     responses[f"{_WF_DIR}/label.yml{_REF}"] = _wf_bytes(b"on: [pull_request_targ\xe9et]\n")
     assert doctor._fork_trigger_warnings(_ctx()) == []
-
-
-def test_strip_comment_ends_a_line_at_a_comment():
-    assert (
-        doctor._strip_comment('workflows: ["x"]  # was pull_request_target') == 'workflows: ["x"]  '
-    )
-    assert doctor._strip_comment("# whole line") == ""
-
-
-def test_strip_comment_keeps_a_hash_inside_a_token():
-    """The docstring promises a `#` inside a token is not a comment marker.
-    Nothing else in the suite exercises that half, and a matcher that stripped
-    at every `#` would still pass every other test here."""
-    assert doctor._strip_comment("branches: [release#1]") == "branches: [release#1]"
 
 
 def test_fork_trigger_unreadable_file_degrades_to_a_note(monkeypatch):
@@ -2810,7 +2854,7 @@ _WRONG_JOB_NAME_TEXT = (
 
 
 def test_a_shim_whose_job_carries_the_contract_name_is_silent():
-    assert doctor._shim_job_name_finding(_SHIPMATE_WF, "shipmate.yml", _ENGINE_REPO) == []
+    assert doctor._shim_job_name_finding(_doc(_SHIPMATE_WF), "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_shim_whose_job_is_named_something_else_is_reported():
@@ -2818,7 +2862,7 @@ def test_a_shim_whose_job_is_named_something_else_is_reported():
     vacuously if the probe reports nothing for everything, so it is paired with the silent
     case above."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == [
+    assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
 
@@ -2830,7 +2874,7 @@ def test_a_shim_with_no_job_name_takes_the_job_id_and_is_silent():
     text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
         "    name: shipmate\n", "", 1
     )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
+    assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_job_name_beats_a_job_id_that_is_the_contract_name():
@@ -2845,7 +2889,7 @@ def test_a_job_name_beats_a_job_id_that_is_the_contract_name():
     text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
         "    name: shipmate\n", "    name: terraform\n", 1
     )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == [
+    assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
 
@@ -2854,49 +2898,24 @@ def test_a_job_id_that_is_not_the_contract_name_is_reported():
     """The other half of the job-id fallback: with no `name:` the id IS the display name, so
     an id that is not `shipmate` produces the wrong check names."""
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1)
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == [
+    assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
 
 
-def test_a_name_below_the_uses_line_is_still_the_jobs_name():
-    """The whole job block is read, in both directions: the documented file writes `name:`
-    above its `uses:` line, and either side of it is the same job's name. Mutation: end the
-    region at the `uses:` line rather than at the end of the job block."""
-    uses_line = f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
-        uses_line, uses_line + "    name: shipmate\n", 1
-    )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
-
-
 def test_a_name_deeper_in_the_block_is_not_the_jobs_name():
-    """Only a direct child of the job is its name. A `name:` under `with:` is an input, and
-    taking it would silence the finding for a job called something else entirely."""
+    """Only the job's own `name:` is its name. A `name:` under `with:` is an input, and
+    taking it would silence the finding for a job called something else entirely.
+
+    Mutation: `job.get("name") or _mapping(job.get("with")).get("name") or job_id` in
+    `_shim_job_name_finding`."""
     anchor = "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
     text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
         anchor, f"{anchor}    with:\n      name: shipmate\n", 1
     )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == [
+    assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
-
-
-def test_a_quoted_job_name_is_silent():
-    """Formatters quote scalars, so the value carries one layer of YAML quoting the comparison
-    must strip. Mutation: drop the `.strip("\\"'")` on the matched value."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", '    name: "shipmate"\n', 1)
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
-
-
-def test_a_trailing_comment_after_the_job_name_is_silent():
-    """The block is comment-stripped before it is read, so a trailing comment is not part of
-    the name. A probe that fires on this shape fires on a correct repository. Mutation: read
-    the raw text in `_call_region`."""
-    text = _SHIPMATE_WF.replace(
-        "    name: shipmate\n", "    name: shipmate  # the name the plan links resolve\n"
-    )
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent():
@@ -2904,17 +2923,129 @@ def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_silent():
     hole ask the reader's question twice."""
     assert (
         doctor._shim_job_name_finding(
-            "on:\n  pull_request_target:\njobs:\n  x:\n", "shipmate.yml", _ENGINE_REPO
+            _doc("on:\n  pull_request_target:\njobs:\n  x:\n"), "shipmate.yml", _ENGINE_REPO
         )
         == []
     )
 
 
-def test_an_unparseable_shim_reports_nothing_and_does_not_crash():
-    """doctor reads consumer text with regexes precisely because a consumer file may not
-    parse. A YAML parser raises here; this probe must return the finding it can see."""
-    text = _SHIPMATE_WF.replace("  plan:\n", "  plan:\n    on: [ unbalanced\n", 1)
-    assert doctor._shim_job_name_finding(text, "shipmate.yml", _ENGINE_REPO) == []
+#: `_SHIPMATE_WF` with a flow sequence that never closes, and the parse NOTICE it earns, whole.
+_UNPARSEABLE_WF = _SHIPMATE_WF.replace("  plan:\n", "  plan:\n    on: [ unbalanced\n", 1)
+_UNPARSEABLE_TEXT = (
+    "`shipmate.yml` could not be parsed as YAML (expected ',' or ']', but got ':' "
+    "(line 32, column 9)): doctor skipped its checks."
+)
+
+
+def _healthy_responses(**files):
+    """A healthy repository's responses, with each `{name}: text` workflow file replacing or
+    joining `_quiet_new_probes()`' two."""
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
+        ),
+        **_quiet_new_probes(),
+    }
+    names = {"shipmate.yml": None, "shipmate-drift.yml": None, **files}
+    responses[f"{_WF_DIR}{_REF}"] = _wf_listing(*names)
+    for name, text in files.items():
+        responses[f"{_WF_DIR}/{name}{_REF}"] = _wf_file(text)
+    return responses
+
+
+def test_an_unparseable_shipmate_yml_is_one_notice_from_the_parse_probe(monkeypatch):
+    """Every probe reading `shipmate.yml` skips it, and the `workflow parse` probe reports it
+    once.
+
+    Mutations: have `_scan_workflow_docs` and `_shipmate_yml_warnings` return the parse
+    finding of a file that does not parse (four copies); return `[]` from
+    `_workflow_parse_warnings` (none)."""
+    responses = _healthy_responses(**{"shipmate.yml": _UNPARSEABLE_WF})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor.warnings(_ctx()) == [(doctor.NOTICE, _UNPARSEABLE_TEXT)]
+
+
+def test_an_unparseable_file_does_not_stop_the_scan_of_the_others(monkeypatch):
+    """`a.yml` does not parse and is listed first; `b.yml` behind it still draws its pin and
+    fork-trigger findings.
+
+    Mutation: `break` at the first file whose doc is None in `_scan_workflow_docs`."""
+    b = (
+        "on: [pull_request_target]\njobs:\n  x:\n    runs-on: ubuntu-latest\n    steps:\n"
+        "      - uses: acme/engine/actions/setup@v2\n"
+    )
+    responses = _fork_responses({"a.yml": "on: [ unbalanced\n", "b.yml": b})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    ctx = _ctx()
+    [(pin_level, pin)] = doctor._pin_warnings(ctx)
+    assert pin_level == doctor.WARNING and pin.startswith("`b.yml` pins `acme/engine@v2`")
+    [(fork_level, fork)] = doctor._fork_trigger_warnings(ctx)
+    assert fork_level == doctor.WARNING and fork.startswith("`b.yml` triggers on")
+
+
+@pytest.mark.parametrize(
+    ("other", "expected"),
+    [
+        ("on: [ unbalanced\n", []),
+        ("on: push\njobs:\n  x:\n    runs-on: ubuntu-latest\n", [doctor.DRIFT_FILE_MISSING]),
+    ],
+    ids=["one_file_does_not_parse", "every_file_parses"],
+)
+def test_the_drift_file_is_missing_only_when_every_file_parsed(monkeypatch, other, expected):
+    """A file that does not parse may be the drift file, so its presence silences the notice.
+
+    Mutation: `return [] if callers else [DRIFT_FILE_MISSING]` in `_drift_file_warnings` --
+    the first row reports the file missing."""
+    responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF, "other.yml": other})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._drift_file_warnings(_ctx()) == expected
+
+
+def test_an_alias_graph_costs_its_fixed_paths_only(monkeypatch):
+    """A pull request author controls `shipmate.yml`, and nine nested aliases of nine items
+    expand to 9**9 leaves. Every probe reads fixed paths, so the file is checked in bounded
+    time with the findings it has without the graph.
+
+    Mutation: walk the whole document in `_workflow_doc` (`json.dumps(doc)` before the
+    return) -- the run does not finish; run it under `timeout 120`."""
+    import time
+
+    graph = "x-graph:\n  a0: &a0 [x, x, x, x, x, x, x, x, x]\n" + "".join(
+        f"  a{i}: &a{i} [{', '.join([f'*a{i - 1}'] * 9)}]\n" for i in range(1, 9)
+    )
+    plain = _healthy_responses()
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: plain[path])
+    without = doctor.warnings(_ctx())
+    aliased = _healthy_responses(**{"shipmate.yml": _SHIPMATE_WF + graph})
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: aliased[path])
+    start = time.monotonic()
+    assert doctor.warnings(_ctx()) == without == []
+    assert time.monotonic() - start < 2
+
+
+def test_a_runner_without_pyyaml_gets_one_notice_for_every_probe_that_parses(monkeypatch):
+    """The runner refusal once, as a NOTICE, in place of the workflow, config and environment
+    probes; nothing claims the Python version is at fault, the report's config section
+    included.
+
+    Mutations: delete the up-front check in `warnings` -- the four workflow probes and the
+    parse probe degrade and the config probe blames the runner's Python; drop
+    `_environment_warnings.parses_yaml` -- the environment probes' notice says this runner's
+    Python refuses the table."""
+    responses = _healthy_responses()
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    ctx = _ctx()
+    assert doctor.warnings(ctx) == [
+        (
+            doctor.NOTICE,
+            "the engine needs PyYAML for python3 and this runner has none. Install "
+            "python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; "
+            "CONTRACT.md section Runner prerequisites lists it.",
+        )
+    ]
+    assert doctor.config_status(ctx) == []
 
 
 def test_the_shipmate_yml_probe_is_registered_and_runs_its_three_finders_in_order(monkeypatch):
@@ -3024,16 +3155,16 @@ _SHORT_OPTIONS_TEXT = (
 
 
 def test_a_workflow_file_without_the_dispatch_trigger_is_reported():
-    out = doctor._dispatch_wiring_finding(_WF_NO_TRIGGER, "shipmate.yml")
+    out = doctor._dispatch_wiring_finding(_doc(_WF_NO_TRIGGER), "shipmate.yml")
     assert out == [(doctor.WARNING, _NO_TRIGGER_TEXT)]
 
 
 def test_a_dispatch_trigger_without_pr_number_is_reported_on_its_own():
     """Its own finding with its own text and its own remedy: the trigger is
     there, so a reader told only "the file cannot be dispatched" would add
-    what it already has. The key is looked for inside the `on:` block, which is
-    why this fixture also forwards `pr_number` from a `with:` block below."""
-    out = doctor._dispatch_wiring_finding(_WF_NO_PR_NUMBER, "shipmate.yml")
+    what it already has. Inputs are read from `on.workflow_dispatch.inputs`, and this
+    fixture also forwards `pr_number` from a job's `with:`, which declares nothing."""
+    out = doctor._dispatch_wiring_finding(_doc(_WF_NO_PR_NUMBER), "shipmate.yml")
     assert out == [(doctor.WARNING, _NO_PR_NUMBER_TEXT)]
     assert _NO_PR_NUMBER_TEXT != _NO_TRIGGER_TEXT
 
@@ -3044,9 +3175,9 @@ def test_the_dispatch_probe_reports_a_required_input_other_than_verb():
     with HTTP 422 and no run — which is how every `shipmate unlock` failed while the old
     apply file still required the retired plan-run input.
 
-    Mutation: drop the `_required_inputs` finding, and a file that refuses every unlock
-    passes."""
-    assert doctor._dispatch_wiring_finding(_WF_REQUIRED_REF, "shipmate.yml") == [
+    Mutation: drop the requiredness finding from `_dispatch_input_findings`, and a file
+    that refuses every unlock passes."""
+    assert doctor._dispatch_wiring_finding(_doc(_WF_REQUIRED_REF), "shipmate.yml") == [
         (doctor.WARNING, _REQUIRED_REF_TEXT)
     ]
 
@@ -3056,11 +3187,29 @@ def test_the_dispatch_probe_reports_a_required_input_the_consumer_declared():
     `actions/dispatch` names: a consumer may declare inputs of its own, and no dispatch body
     carries a value for one, so a required one answers HTTP 422 to every commented verb.
 
-    Mutation: iterate `_DISPATCH_INPUTS[1:]` in `_required_inputs` again, and a consumer's
-    own input is the one shape the probe cannot see."""
-    assert doctor._dispatch_wiring_finding(_WF_REQUIRED_TAGS, "shipmate.yml") == [
+    Mutation: iterate `_DISPATCH_INPUTS[1:]` instead of `inputs` for requiredness, and a
+    consumer's own input is the one shape the probe cannot see."""
+    assert doctor._dispatch_wiring_finding(_doc(_WF_REQUIRED_TAGS), "shipmate.yml") == [
         (doctor.WARNING, _REQUIRED_TAGS_TEXT)
     ]
+
+
+@pytest.mark.parametrize(
+    ("required", "expected"),
+    [
+        ("true", [(doctor.WARNING, _REQUIRED_REF_TEXT)]),
+        ("false", []),
+        ('"false"', []),
+    ],
+    ids=["bool-true", "bool-false", "string-false"],
+)
+def test_only_a_boolean_true_makes_an_input_required(required, expected):
+    """Mutation: read `required` by truthiness (`bool(...)` for `is True`) -- the string
+    `"false"` is reported required."""
+    ref = "      ref:\n        description: PR head SHA\n        required: false\n"
+    assert ref in _SHIPMATE_WF
+    text = _SHIPMATE_WF.replace(ref, ref.replace("false", required), 1)
+    assert doctor._dispatch_wiring_finding(_doc(text), "shipmate.yml") == expected
 
 
 def test_the_dispatch_probe_reports_a_changed_verb_option_list():
@@ -3068,29 +3217,36 @@ def test_the_dispatch_probe_reports_a_changed_verb_option_list():
     missing `unlock` refuses that verb at the dispatch form and at the API.
 
     Mutation: check only that `options:` is present."""
-    assert doctor._dispatch_wiring_finding(_WF_SHORT_OPTIONS, "shipmate.yml") == [
+    assert doctor._dispatch_wiring_finding(_doc(_WF_SHORT_OPTIONS), "shipmate.yml") == [
         (doctor.WARNING, _SHORT_OPTIONS_TEXT)
     ]
 
 
 @pytest.mark.parametrize(
     "options",
-    ["[plan,apply,unlock]", "[ plan, apply, unlock ]", "[plan, apply,  unlock]"],
+    [
+        "[plan,apply,unlock]",
+        "[ plan, apply, unlock ]",
+        "[plan, apply,  unlock]",
+        "\n          - plan\n          - apply\n          - unlock",
+    ],
+    ids=["flow-tight", "flow-padded", "flow-uneven", "block"],
 )
-def test_the_dispatch_probe_accepts_any_spacing_in_the_option_list(options):
-    """All three are the same YAML sequence as the fence's, so all three route every verb. A
-    probe that reported them would tell a healthy repository to write what its file already
-    means, and the next finding from this probe would be read as noise too.
+def test_the_dispatch_probe_accepts_any_spelling_of_the_option_list(options):
+    """All four are the same YAML sequence as the fence's, the block-style list included, so
+    all four route every verb. A probe that reported them would tell a healthy repository to
+    write what its file already means, and the next finding from this probe would be read as
+    noise too.
 
-    Mutation: compare the whitespace-collapsed `options:` text against `_VERB_OPTIONS`
-    instead of the parsed options against `_VERB_OPTION_LIST`."""
+    Mutation: compare the parsed options against the flow string `_VERB_OPTIONS` instead of
+    `_VERB_OPTION_LIST` -- every row reddens."""
     assert yaml.safe_load(options) == ["plan", "apply", "unlock"], (
         "the fixture must be the same sequence the fence declares, or it proves nothing"
     )
     text = _SHIPMATE_WF.replace(
         "        options: [plan, apply, unlock]\n", f"        options: {options}\n", 1
     )
-    assert doctor._dispatch_wiring_finding(text, "shipmate.yml") == []
+    assert doctor._dispatch_wiring_finding(_doc(text), "shipmate.yml") == []
 
 
 def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported_once(monkeypatch):
@@ -3110,16 +3266,16 @@ def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported_once(mon
 
 
 def test_a_dispatchable_workflow_file_is_silent():
-    assert doctor._dispatch_wiring_finding(_SHIPMATE_WF, "shipmate.yml") == []
+    assert doctor._dispatch_wiring_finding(_doc(_SHIPMATE_WF), "shipmate.yml") == []
 
 
 def test_an_input_of_the_consumers_own_is_not_read_as_the_verbs():
     """A consumer may declare inputs beside the four, and one written above `verb` carries
-    its own `options:`. The verb list is read from `verb`'s own
-    block, so this file is healthy.
+    its own `options:`. The verb list is read from `verb`'s own declaration, so this file
+    is healthy.
 
-    Mutation: read the first `options:` in the `on:` block, and the consumer's list is what
-    the probe pins."""
+    Mutation: read `options` from the first input declared (`next(iter(inputs.values()))`),
+    and the consumer's list is what the probe pins."""
     text = _SHIPMATE_WF.replace(
         "      verb:\n",
         "      tags:\n"
@@ -3130,7 +3286,7 @@ def test_an_input_of_the_consumers_own_is_not_read_as_the_verbs():
         "      verb:\n",
         1,
     )
-    assert doctor._dispatch_wiring_finding(text, "shipmate.yml") == []
+    assert doctor._dispatch_wiring_finding(_doc(text), "shipmate.yml") == []
 
 
 def test_the_documented_workflow_file_is_dispatchable_and_correctly_named(monkeypatch):
@@ -3146,17 +3302,18 @@ def test_the_documented_workflow_file_is_dispatchable_and_correctly_named(monkey
 
 
 def test_a_flow_style_on_value_is_silent():
-    """The whole `on:` value as one flow mapping, with no line start in front of either key;
-    the documented block-style fence cannot cover it. A line-anchored regex sees neither, and
-    because ABSENCE is this probe's finding it reports a correctly wired file as declaring
-    no `workflow_dispatch` trigger.
+    """The whole `on:` value as one flow mapping, which the documented block-style fence
+    cannot cover. Because ABSENCE is this probe's finding, an input it fails to read is a
+    correctly wired file reported as declaring none.
 
-    Every input is written flow-style too, `verb` first: each one's requiredness is judged
-    over its own key's remainder, so `verb`'s `required: true` must not read as the three
-    optional ones'."""
+    Every input is written flow-style too, `verb` first, so `verb`'s `required: true` must
+    not read as the three optional ones'.
+
+    Mutations: read every input's `required` from `verb`'s declaration -- the three optional
+    inputs are reported required; read `inputs` as `{}` -- all four are reported missing."""
     text = (
         "name: shipmate\n"
-        "on:{ pull_request_target: , workflow_dispatch: { inputs: { verb: { type: choice, "
+        "on: { pull_request_target: {}, workflow_dispatch: { inputs: { verb: { type: choice, "
         "options: [plan, apply, unlock], required: true }, environment: "
         "{ required: false, default: '' }, ref: { required: false, default: '' }, "
         "pr_number: { required: false, default: '' } } } }\n"
@@ -3165,18 +3322,16 @@ def test_a_flow_style_on_value_is_silent():
         "    name: shipmate\n"
         f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
     )
-    assert doctor._dispatch_wiring_finding(text, "shipmate.yml") == []
+    assert doctor._dispatch_wiring_finding(_doc(text), "shipmate.yml") == []
 
 
 def test_a_workflow_dispatch_line_under_jobs_does_not_satisfy_the_trigger():
-    """The reason the trigger is looked for inside the `on:` block: no such key
-    exists under `jobs:`, but a whole-file regex is satisfied by any line that
-    spells it, and the file is then reported healthy while `shipmate plan`
-    reaches nothing."""
+    """The trigger is an event `on:` names: a `workflow_dispatch` key under a job declares
+    nothing, and the file reported healthy would leave `shipmate plan` reaching nothing."""
     text = _WF_NO_TRIGGER.replace(
         "  plan:\n", "  plan:\n    env:\n      workflow_dispatch: yes\n", 1
     )
-    out = doctor._dispatch_wiring_finding(text, "shipmate.yml")
+    out = doctor._dispatch_wiring_finding(_doc(text), "shipmate.yml")
     assert out == [(doctor.WARNING, _NO_TRIGGER_TEXT)]
 
 
@@ -3269,7 +3424,7 @@ def test_the_routing_probe_is_silent_on_the_documented_file():
 
     Mutation: edit any one of the five `ROUTING_IFS` expressions."""
     text = _documented_workflow_file()
-    assert doctor._routing_finding(text, "shipmate.yml", _PUBLISHED_ENGINE) == []
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _PUBLISHED_ENGINE) == []
 
 
 def test_the_routing_probe_reports_a_job_whose_if_was_edited():
@@ -3279,7 +3434,7 @@ def test_the_routing_probe_reports_a_job_whose_if_was_edited():
     Mutation: compare the found expression as a prefix of the expected one instead of whole,
     and this edit passes."""
     text = _SHIPMATE_WF.replace(" && inputs.verb == 'apply'\n", "\n", 1)
-    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == [
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _EDITED_IF_TEXT)
     ]
 
@@ -3295,7 +3450,7 @@ def test_the_routing_finding_row_keeps_the_expected_if_intact():
         "",
         1,
     )
-    [(level, finding)] = doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO)
+    [(level, finding)] = doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO)
     assert doctor._finding_row(level, finding) == (
         f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s job calling the engine's "
         "`plan.yml` declares no `if:`, so it then runs on every one of this file's triggers, so "
@@ -3305,13 +3460,28 @@ def test_the_routing_finding_row_keeps_the_expected_if_intact():
     )
 
 
+def test_a_folded_if_equal_to_the_expected_expression_is_silent():
+    """A `>-` block scalar folds its lines into one expression, here wrapped in `${{ }}`;
+    equal once normalised, so the file routes as published.
+
+    Mutation: compare `str(found)` with `expected` without `_normalize_if` -- the `${{ }}`
+    wrapper reads as a different expression."""
+    text = _SHIPMATE_WF.replace(
+        "    if: github.event_name == 'push'\n",
+        "    if: >-\n      ${{ github.event_name ==\n      'push' }}\n",
+        1,
+    )
+    assert text != _SHIPMATE_WF
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == []
+
+
 def test_the_routing_probe_reports_a_missing_job():
     """A verb whose job is not in the file at all: the dispatch is accepted, every job is
     skipped, and the run is green.
 
     Mutation: skip a callee the file does not call (`if count == 0: continue`)."""
     text = _SHIPMATE_WF[: _SHIPMATE_WF.index("  unlock:\n")]
-    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == [
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _wrong_count_text("unlock.yml", 0))
     ]
 
@@ -3326,7 +3496,7 @@ def test_the_routing_probe_reports_two_jobs_calling_one_callee():
         "    if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'\n"
         f"    uses: {_ENGINE_REPO}/.github/workflows/apply.yml@{_SHA}\n"
     )
-    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == [
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _wrong_count_text("apply.yml", 2))
     ]
 
@@ -3334,9 +3504,9 @@ def test_the_routing_probe_reports_two_jobs_calling_one_callee():
 def test_another_repositorys_plan_workflow_is_not_routed():
     """A third party's `plan.yml` is not a second job calling the engine's.
 
-    Mutation: drop the repository from `_engine_call`'s pattern -- a count-2 finding."""
+    Mutation: drop the repository from `_engine_calls`' pattern -- a count-2 finding."""
     text = _SHIPMATE_WF + "  lint:\n    uses: someorg/tf-tools/.github/workflows/plan.yml@v2\n"
-    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == []
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_the_shipmate_yml_probe_without_the_engine_repo_still_checks_dispatch_wiring(
@@ -3359,32 +3529,6 @@ def test_the_shipmate_yml_probe_without_the_engine_repo_still_checks_dispatch_wi
     ]
 
 
-def _quote_uses_values(text):
-    return "\n".join(
-        f'    uses: "{ln[len("    uses: ") :]}"' if ln.startswith("    uses: ") else ln
-        for ln in text.split("\n")
-    )
-
-
-@pytest.mark.parametrize(
-    "spell",
-    [
-        pytest.param(lambda t: t.replace("    uses: ", "    'uses': "), id="quoted_key"),
-        pytest.param(lambda t: t.replace("    uses: ", "    uses : "), id="space_before_colon"),
-        pytest.param(_quote_uses_values, id="quoted_value"),
-    ],
-)
-def test_the_engine_call_reads_every_yaml_spelling_of_uses(spell):
-    """GitHub reads each of these as the same `uses:` key and value.
-
-    Mutations: drop the quotes around `uses` in `_USES` -- `quoted_key` reddens; drop
-    `[ \\t]*` before its colon -- `space_before_colon`; drop the value's opening quote --
-    `quoted_value`."""
-    text = spell(_SHIPMATE_WF)
-    assert text != _SHIPMATE_WF
-    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == []
-
-
 _MIXED_CASE_ENGINE = "Acme/Engine"
 
 
@@ -3394,7 +3538,7 @@ def test_a_mixed_case_engine_slug_is_routed():
     Mutation: drop `(?i:` from `_engine_slug` -- five count-0 findings."""
     text = _SHIPMATE_WF.replace(f"{_ENGINE_REPO}/", f"{_MIXED_CASE_ENGINE}/")
     assert _MIXED_CASE_ENGINE in text
-    assert doctor._routing_finding(text, "shipmate.yml", _ENGINE_REPO) == []
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_mixed_case_engine_slug_satisfies_the_drift_probe(monkeypatch):
@@ -3408,7 +3552,9 @@ def test_a_mixed_case_engine_pin_is_judged(monkeypatch):
     """Mutation: drop `(?i:` from `_engine_slug` -- the pin is skipped as a third party's."""
     responses = {
         f"{_WF_DIR}{_REF}": _wf_listing("plan.yml"),
-        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(f"uses: {_MIXED_CASE_ENGINE}/actions/setup@v2\n"),
+        f"{_WF_DIR}/plan.yml{_REF}": _wf_file(
+            _STEPS + f"      - uses: {_MIXED_CASE_ENGINE}/actions/setup@v2\n"
+        ),
     }
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._pin_warnings(_ctx()) == [
@@ -3424,7 +3570,8 @@ def test_the_shipmate_yml_probe_reads_that_file_alone(monkeypatch):
     """An unreadable workflow file listed before `shipmate.yml` cannot hide it: the probe
     reads the one file by path, never the directory listing or another file.
 
-    Mutation: call `_scan_workflow_texts` again, and the result is the unreadable notice."""
+    Mutation: read it through `_scan_workflow_docs` again, and the result is the unreadable
+    notice."""
     responses = {
         **_fork_responses({"aaa.yml": "", "shipmate.yml": _WF_NO_TRIGGER}),
         f"{_WF_DIR}/aaa.yml{_REF}": {"encoding": "none", "content": ""},
@@ -3444,7 +3591,7 @@ def test_a_repository_without_shipmate_yml_draws_the_unreadable_notice(monkeypat
     """No file means no verb reaches anything, and the contents read cannot tell a 404 from
     any other failure, so the probe says it could not read the file rather than nothing.
 
-    Mutation: return `[]` when `_workflow_text` returns None."""
+    Mutation: return `[]` when `_workflow_file` reads no text."""
     responses = _fork_responses({"ci.yml": _SHIPMATE_WF})
 
     def gh(path):
@@ -3559,7 +3706,7 @@ def test_a_drift_call_in_a_file_of_any_name_satisfies_the_drift_probe(monkeypatc
 def test_another_repositorys_drift_workflow_draws_the_missing_drift_notice(monkeypatch):
     """A third party's `drift.yml` sweeps nothing shipmate reports on.
 
-    Mutation: drop the repository from `_engine_call`'s pattern -- the probe goes silent."""
+    Mutation: drop the repository from `_engine_calls`' pattern -- the probe goes silent."""
     other = _SHIPMATE_DRIFT_WF.replace(
         f"{_ENGINE_REPO}/.github/workflows/drift.yml@{_SHA}",
         "someorg/tf-tools/.github/workflows/drift.yml@v2",
@@ -3585,9 +3732,8 @@ def test_the_drift_probe_without_the_engine_repo_is_a_note(monkeypatch):
 
 
 def test_a_commented_out_drift_call_draws_the_missing_drift_notice(monkeypatch):
-    """A call only inside a `#` comment sweeps nothing.
-
-    Mutation: search the raw text instead of `_stripped_text(text)`."""
+    """A call only inside a `#` comment sweeps nothing. Documents the parser's behaviour, no
+    mutation: a comment never reaches the parsed document."""
     commented = _SHIPMATE_DRIFT_WF.replace("    uses: ", "    # uses: ", 1)
     assert "# uses: acme/engine/.github/workflows/drift.yml@" in commented
     assert _drift_probe(monkeypatch, {"shipmate-drift.yml": commented}) == [_NO_DRIFT_FILE]
@@ -3648,12 +3794,12 @@ def test_drift_is_not_a_verb_shipmate_yml_offers():
     verbs and an option list still carrying `drift` offers one no job selects.
 
     Mutation: re-add `"drift"` to `_VERB_OPTION_LIST` -- both assertions redden."""
-    assert doctor._dispatch_wiring_finding(_SHIPMATE_WF, "shipmate.yml") == []
+    assert doctor._dispatch_wiring_finding(_doc(_SHIPMATE_WF), "shipmate.yml") == []
     old = _SHIPMATE_WF.replace(
         "        options: [plan, apply, unlock]\n",
         "        options: [plan, apply, unlock, drift]\n",
     )
-    assert doctor._dispatch_wiring_finding(old, "shipmate.yml") == [
+    assert doctor._dispatch_wiring_finding(_doc(old), "shipmate.yml") == [
         (doctor.WARNING, _SHORT_OPTIONS_TEXT)
     ]
 
@@ -3661,7 +3807,7 @@ def test_drift_is_not_a_verb_shipmate_yml_offers():
 def test_shipmate_yml_without_a_drift_job_draws_no_routing_finding():
     """Mutation: re-add the `drift.yml` entry to `ROUTING_IFS` -- a zero-count finding."""
     assert "drift.yml" not in _SHIPMATE_WF
-    assert doctor._routing_finding(_SHIPMATE_WF, "shipmate.yml", _ENGINE_REPO) == []
+    assert doctor._routing_finding(_doc(_SHIPMATE_WF), "shipmate.yml", _ENGINE_REPO) == []
 
 
 _SHIPMATE_YML_CALLS_DRIFT_TEXT = (
@@ -3700,6 +3846,7 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
         doctor._env_protection_warnings,
         doctor._engine_environment_warnings,
         doctor._plan_env_secret_warnings,
+        doctor._workflow_parse_warnings,
         doctor._pin_warnings,
         doctor._fork_trigger_warnings,
         doctor._shipmate_yml_warnings,
@@ -5571,23 +5718,35 @@ def test_status_never_fails_the_run(monkeypatch):
 
 
 def test_workflow_scans_in_one_run_share_one_read_of_each_file(monkeypatch):
-    """Two probes scanning the same commit read the listing and each file once between them,
-    and the second still sees every file.
+    """Two scans of the same commit, the `shipmate.yml` probe and the parse probe read the
+    listing and each file once between them, parse each file once, and the second scan still
+    sees every file.
 
-    Mutation: drop the `ref not in cache` check in `_workflow_files`; each path is read twice."""
-    responses = _fork_responses({"a.yml": "x", "b.yml": "y"})
-    reads = []
+    Mutations: drop the `ref not in cache` check in `_workflow_files` -- the listing is read
+    twice; drop the `(name, ref) not in cache` check in `_workflow_file` -- every file is
+    read and parsed more than once."""
+    responses = _fork_responses({"a.yml": "on: push\n", "shipmate.yml": _SHIPMATE_WF})
+    reads, parsed = [], []
 
     def gh(path):
         reads.append(path)
         return responses[path]
 
+    def load(text):
+        parsed.append(text)
+        return doctor_load(text)
+
+    doctor_load = doctor.load_workflow_text
     monkeypatch.setattr(doctor, "_gh_json", gh)
+    monkeypatch.setattr(doctor, "load_workflow_text", load)
     ctx = _ctx()
     for _ in range(2):
-        names = doctor._scan_workflow_texts(ctx, _REF, lambda text, name: [name], None)
-        assert names == ["a.yml", "b.yml"]
+        names = doctor._scan_workflow_docs(ctx, _REF, lambda doc, name: [name], None)
+        assert names == ["a.yml", "shipmate.yml"]
+    doctor._shipmate_yml_warnings(ctx)
+    doctor._workflow_parse_warnings(ctx)
     assert sorted(reads) == sorted(responses)
+    assert sorted(parsed) == sorted(["on: push\n", _SHIPMATE_WF])
 
 
 def test_a_failed_shared_read_fails_every_probe_that_asks(monkeypatch):
