@@ -242,6 +242,55 @@ def unmanaged_stacks(tags_by_stack):
     )
 
 
+def lost_env_tags(base, stacks):
+    """The sorted subset of `stacks` whose diff from the merge base of `base` to `HEAD` removes
+    a line holding `env/` from the stack's own Terramate files (`<stack>/*.tm.hcl`,
+    `<stack>/*.tm`; no `**`, so a child stack and a `.tf` holding `"env/prod/state"` are out).
+
+    A heuristic, paired with the exact head-side fact that each of `stacks` carries no `env/*`
+    tag now. A removed comment holding `env/` is a false positive, which only warns about a
+    stack that is already unmanaged."""
+    lost = []
+    for stack in stacks:
+        diff = _run(
+            [
+                "git",
+                "diff",
+                "-U0",
+                f"{base}...HEAD",
+                "--",
+                f":(glob){stack}/*.tm.hcl",
+                f":(glob){stack}/*.tm",
+            ]
+        )
+        if any(
+            line.startswith("-") and not line.startswith("---") and "env/" in line
+            for line in diff.splitlines()
+        ):
+            lost.append(stack)
+    return sorted(lost)
+
+
+def warn_lost_env_tags(all_stacks, base, unmanaged):
+    """One `::warning::` naming the `unmanaged` stacks a pull request untagged.
+
+    Plan detect only: deploy-detect's base is the push's `before`, which would warn about the
+    same removal again on the merge, and a drift sweep scans the whole tree with no base."""
+    if all_stacks or not base or base == _ZERO_SHA or not unmanaged:
+        return
+    lost = lost_env_tags(base, unmanaged)
+    if not lost:
+        return
+    more = len(lost) - UNMANAGED_NAMES
+    print(
+        f"::warning::{len(lost)} stack(s) lost their last env/* tag in this pull request, so "
+        f"shipmate no longer plans or deploys them: {', '.join(lost[:UNMANAGED_NAMES])}"
+        + (f", and {more} more" if more > 0 else "")
+        + ". If that is deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; "
+        "otherwise restore the tag."
+    )
+
+
 def env_membership(all_stacks=False, base=""):
     """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT tag
     grammar: env/<name>). A stack with no `env/*` tag is unmanaged: it is in the tag map,
@@ -575,6 +624,7 @@ def _detect():
         refuse_workload_gaps(cells, table)
     if errors:
         raise SystemExit("\n".join(errors))
+    warn_lost_env_tags(all_stacks, base, unmanaged)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
