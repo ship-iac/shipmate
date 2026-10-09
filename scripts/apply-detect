@@ -195,20 +195,16 @@ def validate_head_sha(value):
 
 
 def validate_env(value):
-    """The `plan.<env>.<slug>` artifact name is unambiguous only because an env
-    name never contains '.' — with env first, the first '.' after the `plan.`
-    prefix is the env<->slug boundary. Terramate accepts '.' in a tag, so
-    `env_membership` checks every tag-derived name; `SHIPMATE_ENV` arrives from a
-    dispatch input instead, and is checked here with the same `check_env_name`. A
-    dotted env would let distinct (env, slug) pairs render the same artifact name
-    and cross-enrol the wrong stack into a wave.
+    """Refuse an empty `SHIPMATE_ENV`, or one `check_env_name` rejects.
 
-    Empty is refused for a second reason on each caller. Here, `_review_reason`
-    reads an empty environment as a BARE apply and exempts it whenever the
-    variable names any env at all, so an unset SHIPMATE_ENV would slip past
-    `refuse_unreviewed` below; this path is single-env by construction, and
-    the bare form is apply-all-detect. In unlock-detect, an unlock releases one
-    environment's locks, and an empty one names no environment to release."""
+    Empty is refused because each caller acts on exactly one environment. The
+    `plan.<env>.<slug>` artifact name is unambiguous only because an env name never
+    contains '.' — with env first, the first '.' after the `plan.` prefix is the
+    env<->slug boundary. Terramate accepts '.' in a tag, so `env_membership` checks
+    every tag-derived name; `SHIPMATE_ENV` arrives from a dispatch input instead, and
+    is checked here with the same `check_env_name`. A dotted env would let distinct
+    (env, slug) pairs render the same artifact name and cross-enrol the wrong stack
+    into a wave."""
     if not value:
         raise SystemExit("::error::SHIPMATE_ENV is empty; this path is single-env.")
     bm.ec.check_env_name(value, f"SHIPMATE_ENV {value!r}", "the environment")
@@ -239,6 +235,8 @@ def main():
     head = os.environ["SHIPMATE_HEAD_SHA"]
 
     validate_head_sha(head)
+    # `_review_reason` reads an empty env as a bare apply, exempt when any entry is
+    # ungated, so an empty SHIPMATE_ENV must be refused before `refuse_unreviewed`.
     validate_env(env)
 
     # Structure-validated before the refusal reads `gated`; `validate` re-runs it
