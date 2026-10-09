@@ -605,9 +605,12 @@ def test_both_namings_present_report_only_the_selected_namings_gaps(monkeypatch)
 
 
 def test_split_missing_half_does_not_claim_the_jobs_cannot_run(monkeypatch):
-    """With `dev-eu-plan` present and `dev-eu-apply` absent the apply
-    binds a name GitHub auto-creates empty and proceeds. "cannot apply" sends the
-    reader looking for a failed run."""
+    """With `dev-eu-plan` present and `dev-eu-apply` absent, the finding names the
+    binding GitHub would auto-create empty, not "cannot apply": `verify-environments`
+    refuses the apply before any wave, while a plan job binding a missing name runs.
+
+    Mutation: `cannot {role}` in place of `bind a name GitHub auto-creates empty` in
+    `_missing` reddens it."""
     monkeypatch.setattr(doctor, "_gh_json", _existence("dev-eu-plan"))
     out = doctor._environment_warnings(_ctx())
     assert len(out) == 1

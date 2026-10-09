@@ -352,8 +352,9 @@ def _env_noun(role):
 
 def _missing(name, env, role):
     """One absent environment of the selected naming. It does not say the jobs
-    "cannot {role}": the binding resolves to a name GitHub auto-creates empty, so
-    they run."""
+    "cannot {role}": a plan job runs in the environment GitHub auto-creates empty,
+    and `verify-environments` refuses an apply before any wave, so "cannot" would
+    misstate which job fails."""
     jobs = "plan and apply" if role == "shared" else role
     return (
         f"GitHub Environment `{name}` does not exist: the {jobs} jobs for stacks tagged "
