@@ -94,14 +94,6 @@ def test_slug_alike_paths_never_enrol_each_other():
     assert [c["stack"] for c in cells] == ["a-b"]
 
 
-def test_cells_from_checks_rejects_dotted_env():
-    # Env names come from tags here, but apply-cell still downloads `plan.<env>.<slug>`, so a
-    # dotted env would still render two distinct cells to one artifact name. Enforced at this
-    # trust boundary, as in apply-detect.
-    with pytest.raises(SystemExit):
-        aad.cells_from_checks(set(), {"dev.eu": ["stacks/app"]}, {})
-
-
 def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeypatch):
     """A completed+success check of the same name from another identity (github-actions, app id
     15368) must not count the cell as applied. It is also the newer run of that name, so only
@@ -207,7 +199,7 @@ def _membership_double(tree, tags, calls):
     `calls` when one is given. The real signature, so a keyword `env_membership` no longer
     takes raises here as it would on a runner."""
 
-    def _membership(all_stacks=False, base=""):
+    def _membership(all_stacks=False, base="", check_names=True):
         return tree, tags
 
     def _record(*args, **kwargs):

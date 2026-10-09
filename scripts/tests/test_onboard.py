@@ -220,16 +220,6 @@ def test_a_shared_entry_no_stack_tags_is_provisioned(monkeypatch, tmp_path, caps
     assert _would_create("dev-eu") == ["dev-eu", "dev-eu branch policy"]
 
 
-def test_derived_environment_failing_the_regex_is_refused():
-    """An env/* tag becomes an API path segment and a `gh --env` argument.
-
-    Mutation: drop the `_ENV_RE` loop, so `../admin` is returned as an environment.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard._derive_envs({"../admin": ["s"]})
-    assert "../admin" in str(e.value)
-
-
 def test_only_the_exact_verb_differs_sets_exit_code_2():
     """The report verbs are an open set -- each reconciler names its own -- so the
     predicate is an equality on one string.

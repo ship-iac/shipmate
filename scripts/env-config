@@ -910,8 +910,8 @@ def validate_env_name_list(envs, key):
 
 
 def check_env_name(e, label, matched):
-    """Refuse a name no environment can take: an entry key, a list element or a stack's
-    `env/<name>` tag.
+    """Refuse a name no environment can take: an entry key, a list element, a stack's
+    `env/<name>` tag or a dispatched `SHIPMATE_ENV`.
 
     Guards a name outside the charset, and one carrying a `-plan`/`-apply` environment
     suffix -- each is matched against the bare logical env name, matches nothing, and so

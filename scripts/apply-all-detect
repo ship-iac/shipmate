@@ -42,14 +42,9 @@ def cells_from_checks(check_names, stacks_by_env, tags_by_stack):
     """All-envs workset: per env (from tags, never from a parse of a check
     name), the tree's candidates whose forward-constructed check name is on the
     head — exactly the single-env path's matching and workload handling, run
-    over every env.
-
-    `validate_env` still gates each env name: apply-cell downloads
-    `plan.<env>.<slug>`, so a dotted env would still render two distinct cells
-    to one artifact name."""
+    over every env."""
     cells = []
     for env in sorted(stacks_by_env):
-        ad.validate_env(env)
         paths = ad.paths_with_checks(env, stacks_by_env[env], check_names)
         cells.extend(ad.cells_for_env(env, paths, tags_by_stack))
     return cells

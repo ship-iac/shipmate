@@ -421,20 +421,31 @@ def test_validate_head_sha_accepts_valid():
     ad.validate_head_sha("0123456789abcdef0123456789abcdef01234567")  # This must not raise.
 
 
-def test_validate_env_rejects_dot():
-    # A '.' in env would break plan.<env>.<slug> disambiguation, which works env-first only
-    # because env has no '.'. Fail loud at the trust boundary.
-    with pytest.raises(SystemExit):
-        ad.validate_env("dev.eu")
+@pytest.mark.parametrize("value", ["Dev-EU", "dev/eu"])
+def test_validate_env_refuses_a_name_no_environment_can_take(value):
+    """Mutation: refuse only a `.` in `value` -- `Dev-EU` passes."""
+    with pytest.raises(SystemExit) as e:
+        ad.validate_env(value)
+    assert str(e.value) == (
+        f"::error::SHIPMATE_ENV {value!r} is not an environment name; entries are bare "
+        "logical env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces "
+        "or path separators."
+    )
 
 
 def test_validate_env_rejects_empty():
-    # An empty env reads as a bare apply inside _review_reason, which exempts it whenever any
-    # table entry holds `gated: false` -- a bypassed refusal on a gate path. The action routes
-    # only an empty environment in apply mode to apply-all-detect, so an empty one arriving here
-    # is an unlock or an explicitly empty or unknown mode.
-    with pytest.raises(SystemExit):
+    """An empty env reads as a bare apply inside _review_reason, which exempts it whenever any
+    table entry holds `gated: false` -- a bypassed refusal on a gate path. The action routes
+    only an empty environment in apply mode to apply-all-detect, so an empty one arriving here
+    is an unlock or an explicitly empty or unknown mode.
+
+    Mutation: run the name check before the empty check -- `""` gets the charset message."""
+    with pytest.raises(SystemExit) as e:
         ad.validate_env("")
+    assert str(e.value) == (
+        "::error::SHIPMATE_ENV is empty; the targeted apply path is single-env "
+        "and its review refusal is evaluated per environment."
+    )
 
 
 def test_validate_env_accepts_normal():
@@ -757,8 +768,8 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
     check."""
     seen = {}
 
-    def _membership(all_stacks=False, base=""):
-        seen.update(all_stacks=all_stacks, base=base)
+    def _membership(all_stacks=False, base="", check_names=True):
+        seen.update(all_stacks=all_stacks, base=base, check_names=check_names)
         stacks_by_env, tags_by_stack = {}, {}
         for c in cells:
             stacks_by_env.setdefault(c["environment"], []).append(c["stack"])
@@ -812,7 +823,7 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
     ad.main()
     # all_stacks=True is the point: a cell whose plan artifacts expired long ago is exactly the
     # cell that can hold a stranded lock.
-    assert seen == {"all_stacks": True, "base": ""}
+    assert seen == {"all_stacks": True, "base": "", "check_names": False}
     assert json.loads(_parsed(out)["cells"]) == [
         {
             "stack": "stacks/app",
@@ -1060,6 +1071,37 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
     )
     monkeypatch.setattr(
         ad.bm, "_tags", lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else []
+    )
+    ad.main()
+    assert json.loads(_parsed(out)["cells"]) == [
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "workload": "app",
+            "role_arn": "",
+            "cred_region": "",
+            "tf_vars": {},
+            "config_path": "apply",
+            "env_binding": "dev-eu-apply",
+        }
+    ]
+
+
+def test_unlock_tolerates_an_unusable_env_tag_elsewhere_in_the_tree(monkeypatch, tmp_path):
+    """Through the real env_membership: `stacks/other` carries `env/a.b`, which refuses every
+    other run, and must not make `dev-eu` unable to unlock.
+
+    Mutation: pass `check_names=True` from `run_unlock` -- the tag refusal fires."""
+    out = _unlock_env(monkeypatch, tmp_path)
+    _boom_on_plan_path(monkeypatch)
+    _stub_one_pending_check(monkeypatch)
+    monkeypatch.setattr(
+        ad.bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/other"]
+    )
+    monkeypatch.setattr(
+        ad.bm,
+        "_tags",
+        lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else ["env/a.b"],
     )
     ad.main()
     assert json.loads(_parsed(out)["cells"]) == [

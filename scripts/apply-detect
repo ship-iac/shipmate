@@ -197,11 +197,11 @@ def validate_head_sha(value):
 def validate_env(value):
     """The `plan.<env>.<slug>` artifact name is unambiguous only because an env
     name never contains '.' — with env first, the first '.' after the `plan.`
-    prefix is the env<->slug boundary. Terramate tag grammar forbids '.' in tags
-    (the source of env names), but that is an upstream tool's invariant; enforce
-    it here at the trust boundary rather than trusting it silently. A dotted env
-    would let distinct (env, slug) pairs render the same artifact name and
-    cross-enrol the wrong stack into a wave.
+    prefix is the env<->slug boundary. Terramate accepts '.' in a tag, so
+    `env_membership` checks every tag-derived name; `SHIPMATE_ENV` arrives from a
+    dispatch input instead, and is checked here with the same `check_env_name`. A
+    dotted env would let distinct (env, slug) pairs render the same artifact name
+    and cross-enrol the wrong stack into a wave.
 
     Empty is refused for a second reason: `_review_reason` reads an empty
     environment as a BARE apply and exempts it whenever the variable names any
@@ -212,11 +212,7 @@ def validate_env(value):
             "::error::SHIPMATE_ENV is empty; the targeted apply path is single-env "
             "and its review refusal is evaluated per environment."
         )
-    if "." in value:
-        raise SystemExit(
-            f"::error::SHIPMATE_ENV must not contain '.' (would break plan.<env>.<slug> "
-            f"artifact-name disambiguation): {value!r}"
-        )
+    bm.ec.check_env_name(value, f"SHIPMATE_ENV {value!r}", "the environment")
 
 
 def refuse_unreviewed(env, table, decision):
@@ -258,7 +254,9 @@ def run_unlock(repo, env, head):
     block an approved plan). That trade is inverted here on purpose: unlock has
     no plan to protect, and it must reach a cell whose plan artifacts expired
     long ago. A stack with no `env/*` tag is in no environment, so it adds no
-    cell and cannot make unlock unavailable.
+    cell and cannot make unlock unavailable. For the same reason the walk passes
+    `check_names=False`: another stack's unusable `env/*` tag refuses every other
+    run, and must not strand this env's lock; `validate_env` checked `env` itself.
 
     `env_membership` + `build_matrix([env], {env: queued}, ...)` rather than
     `compute_cells`, which is what the bare-apply detect does with the same whole-tree walk
@@ -278,7 +276,7 @@ def run_unlock(repo, env, head):
     made at comment time. `cells` is written even for an empty queue, as `[]`,
     because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
     `fromJSON('')` is an error."""
-    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
+    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, check_names=False)
     runs = ag.app_runs(_check_run_lines(repo, head), os.environ["SHIPMATE_APP_ID"])
     # Not the complement of done: a name with no run is not pending, and a completed run
     # with a bad conclusion is done being run; either would enrol a cell into a force-unlock.
