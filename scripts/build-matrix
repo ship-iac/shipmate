@@ -297,10 +297,15 @@ def warn_lost_env_tags(all_stacks, base, unmanaged):
     )
 
 
-def env_membership(all_stacks=False, base=""):
+def env_membership(all_stacks=False, base="", check_names=True):
     """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT tag
     grammar: env/<name>). A stack with no `env/*` tag is unmanaged: it is in the tag map,
-    in no environment, and named in one notice scoped to what this call scanned."""
+    in no environment, and named in one notice scoped to what this call scanned.
+
+    `check_names` refuses an `env/<name>` tag whose name `ec.check_env_name` refuses.
+    Terramate accepts `.` and `/` in a tag, and under `layout: folder` or `workspace` no
+    table entry need check the name: a stack `c` tagged `env/a.b` and a stack `b.c` tagged
+    `env/a` would both render the artifact `plan.a.b.c`."""
     stacks = _list_stacks(all_stacks, base)
     tags_by_stack = {s: _tags(s) for s in stacks}
     unmanaged = unmanaged_stacks(tags_by_stack)
@@ -316,7 +321,10 @@ def env_membership(all_stacks=False, base=""):
     for s in stacks:
         for t in tags_by_stack[s]:
             if t.startswith("env/"):
-                stacks_by_env.setdefault(t[len("env/") :], []).append(s)
+                name = t[len("env/") :]
+                if check_names:
+                    ec.check_env_name(name, f"stack {s!r} tag 'env/{name}'", "a tag")
+                stacks_by_env.setdefault(name, []).append(s)
     return stacks_by_env, tags_by_stack
 
 
@@ -547,7 +555,7 @@ def plan_workflow_error(event_name):
         f"::error::this repository has no `{PLAN_WORKFLOW}`, the one path `CONTRACT.md` "
         "lets the consumer's workflow file live at, and this refusal is what enforces it. "
         "That exact filename is matched literally by `shipmate doctor`, whose `shipmate.yml` "
-        "probe checks its job name, dispatch wiring, event routing and leftover drift call, and by "
+        "probe checks its job name, dispatch wiring, event routing and drift call, and by "
         "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
         "under any other name draws that probe's could-not-read notice and doctor's own "
         "`pull_request_target` warning, and is reached by no `shipmate` command at "

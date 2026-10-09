@@ -19,8 +19,13 @@ section below names the SHA the release tags.
 
 - **A pull request that removes a stack's last `env/*` tag gets a warning on its plan run naming the stack.**
 
+### Changed
+
+- **`shipmate doctor`'s `shipmate.yml` drift-call warning says what such a job does: it runs on that file's triggers.**
+
 ### Fixed
 
+- **An `env/<name>` tag whose name the environment table could not hold (a `.`, a `/`, a `-plan`/`-apply` suffix) refuses the run; before, under `layout: folder` or `workspace`, a dotted name could make two cells share one plan artifact.**
 - **`shipmate doctor` parses workflow files as YAML: an `if: >-` block scalar, a block-style `options:` list and a wholly inline `on:` mapping are read as GitHub reads them, and a file that does not parse gets one `workflow parse` notice.**
 - **A deploy refused for an apply check on a stack that lost its `env/*` tag names every unapplied cell of the merge, and offers a remedy for a deliberate untag (`docs/troubleshooting.md` §A deploy refused an apply check on a stack that lost its env tag).**
 - **`shipmate doctor`'s missing-environment finding says that a missing apply environment refuses the apply before any wave.**

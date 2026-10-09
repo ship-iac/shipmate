@@ -444,9 +444,8 @@ _ORDERING = [
     ),
     (
         _needs(["Dev"]),
-        "::error::environments.prod.needs entry 'Dev' is not an environment name; entries are "
-        "bare logical env names (lowercase letters, digits, '-' and '_'), with no quotes, "
-        "spaces or path separators.",
+        "::error::environments.prod.needs entry 'Dev' is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
     (
         _needs(["dev-eu-plan"]),
@@ -462,15 +461,13 @@ _ORDERING = [
     ),
     (
         _needs(["dev eu"]),
-        "::error::environments.prod.needs entry 'dev eu' is not an environment name; entries "
-        "are bare logical env names (lowercase letters, digits, '-' and '_'), with no quotes, "
-        "spaces or path separators.",
+        "::error::environments.prod.needs entry 'dev eu' is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
     (
         _needs(['"dev-eu"']),
-        "::error::environments.prod.needs entry '\"dev-eu\"' is not an environment name; "
-        "entries are bare logical env names (lowercase letters, digits, '-' and '_'), with no "
-        "quotes, spaces or path separators.",
+        "::error::environments.prod.needs entry '\"dev-eu\"' is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
 ]
 
@@ -487,7 +484,7 @@ def test_the_single_entry_point_validates_ordering(table, message):
     string inside single quotes, `'"dev-eu"'`, arrives with its inner quotes still on.
 
     Mutations: delete the `validate_env_name_list` call from `_check_entries` -- every
-    case validates; drop either entry from the suffix tuple in `_check_env_name` -- that
+    case validates; drop either entry from the suffix tuple in `check_env_name` -- that
     suffix's case validates; or widen `_ENV_ENTRY` to `.+` -- the space, quote and
     uppercase cases validate.
     """
@@ -503,7 +500,7 @@ def test_a_tier_word_that_is_not_the_trailing_suffix_is_accepted():
     matched with their hyphen, so `plan-eu` and `apply-svc` survive a containment test too
     and pin the leading-word half rather than this one.
 
-    Mutation: `e.endswith(suffix)` -> `suffix in e` in `_check_env_name` -- `eu-plan-1`
+    Mutation: `e.endswith(suffix)` -> `suffix in e` in `check_env_name` -- `eu-plan-1`
     then refuses.
     """
     table = _needs(["dev", "plan-eu", "apply-svc", "eu-plan-1"])
@@ -630,15 +627,13 @@ def test_env_order_reads_needs_off_every_entry_holding_it():
 _ENTRY_NAMES = [
     (
         "Prod",
-        "::error::environments.Prod is not an environment name; entries are bare logical env "
-        "names (lowercase letters, digits, '-' and '_'), with no quotes, spaces or path "
-        "separators.",
+        "::error::environments.Prod is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
     (
         "dev eu",
-        "::error::environments.dev eu is not an environment name; entries are bare logical "
-        "env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces or path "
-        "separators.",
+        "::error::environments.dev eu is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
     (
         "dev-plan",

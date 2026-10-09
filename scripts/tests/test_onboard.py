@@ -173,15 +173,6 @@ def test_empty_key_file_is_refused(tmp_path):
     assert "empty" in str(e.value)
 
 
-def test_no_environment_name_derives_no_environment():
-    """A repository adopted before any stack carries an env tag, with no table entry yet,
-    has nothing to bind, and that is not an error.
-
-    Mutation: restore the refusal of an empty set.
-    """
-    assert onboard._derive_envs(set()) == []
-
-
 def test_dry_run_issues_no_write(monkeypatch):
     """`--dry-run` reads and reports; it must not run a single write command.
 
@@ -218,16 +209,6 @@ def test_a_shared_entry_no_stack_tags_is_provisioned(monkeypatch, tmp_path, caps
     _, exc = run_main(monkeypatch, tmp_path, policies, ["--dry-run"], membership=({}, {}))
     assert exc.code == 0
     assert _would_create("dev-eu") == ["dev-eu", "dev-eu branch policy"]
-
-
-def test_derived_environment_failing_the_regex_is_refused():
-    """An env/* tag becomes an API path segment and a `gh --env` argument.
-
-    Mutation: drop the `_ENV_RE` loop, so `../admin` is returned as an environment.
-    """
-    with pytest.raises(SystemExit) as e:
-        onboard._derive_envs({"../admin": ["s"]})
-    assert "../admin" in str(e.value)
 
 
 def test_only_the_exact_verb_differs_sets_exit_code_2():
@@ -524,7 +505,6 @@ def test_main_calls_every_stage_in_order():
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
         "_resolve_shared(root, repo, variables)",
-        "_derive_envs(set(stacks_by_env) | set((table or {}).get('environments', {})))",
         "_shim_on_default(repo, default_branch)",
         "_engine_secrets(repo)",
         "_repo_secrets()",
@@ -2684,6 +2664,19 @@ def test_the_lock_item_names_managed_stacks_only(monkeypatch, tmp_path, capsys):
             "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
+
+
+def test_onboard_scans_the_whole_tree_with_the_env_tag_check_on(monkeypatch):
+    """Mutation: `_env_membership` passes `check_names=False`."""
+    calls = []
+
+    def membership(all_stacks=False, base="", check_names=True):
+        calls.append({"all_stacks": all_stacks, "base": base, "check_names": check_names})
+        return {}, {}
+
+    monkeypatch.setattr(onboard.bm, "env_membership", membership)
+    onboard._env_membership()
+    assert calls == [{"all_stacks": True, "base": "", "check_names": True}]
 
 
 def test_an_untagged_stack_is_adopted_through_the_real_membership(monkeypatch, tmp_path, capsys):

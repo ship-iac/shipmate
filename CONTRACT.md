@@ -955,7 +955,11 @@ Terramate refuses an uppercase letter in a tag, so an environment name is
 lowercase letters, digits, `-` and `_` — never uppercase. The `environments`
 table's own keys and each `needs` item are held to that charset and to the
 `-plan`/`-apply` suffix rule, and an uppercase name is refused rather than left to
-match nothing.
+match nothing. An `env/<name>` tag takes an environment-table name (lowercase
+letters, digits, `-`, `_`, no `-plan`/`-apply` suffix). A run whose scan includes
+a stack carrying any other `env/*` tag refuses: plan and deploy scan the changed
+stacks, drift and a bare `shipmate apply` the whole tree. A targeted
+`shipmate apply` and `shipmate unlock` check only the environment they act on.
 
 A stack with no `env/*` tag is unmanaged: plan, deploy, apply and drift skip
 it, and plan, deploy and drift print a notice counting the unmanaged stacks they
@@ -1702,7 +1706,7 @@ wiring, whose checks of the plan-calling job
 name, dispatch wiring and event routing observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
 and whether the job it reaches is the one that verb names, and whose fourth
-check reports a drift job left in it — and they report rather than fail.
+check reports a drift job in it — and they report rather than fail.
 
 The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
@@ -1892,9 +1896,12 @@ apply-cell downloads it — both construct the name forward from the
 `(env, slug)` pair; no component reverse-parses it. No detect matches on it
 at all: the apply workset comes from the head's own apply checks.
 
-The delimiter is `.` and the environment comes first on purpose. Terramate tag
-values (the source of every env name) cannot contain `.`, so the first `.`
-after the `plan.` prefix is always the env↔slug boundary. This makes the name
+The delimiter is `.` and the environment comes first on purpose. Terramate
+accepts `.` in a tag, but the engine refuses an env name outside the
+environment-name charset, which has no `.`, where tags become environments
+(`build-matrix.env_membership`) and where a dispatched env arrives
+(`apply-detect.validate_env`). So the first `.` after the `plan.` prefix is
+always the env↔slug boundary. This makes the name
 unambiguous across all `(slug, env)` pairs. A delimiter that can appear in both
 fields cannot: with `-`, `(stacks/app-dev, eu)` and `(stacks/app, dev-eu)` would
 both render `plan-stacks-app-dev-eu`, letting apply-detect enrol the wrong stack
@@ -1920,8 +1927,8 @@ verbatim as:
 - `apply-summary.<env>.<slug>`
 
 using the same dot-delimited, env-first grammar as `plan.<env>.<slug>` above
-(the `.` delimiter is unambiguous for the same reason: an env name cannot
-contain `.`). `apply-cell` uploads it (`if: always()`, so a blocked cell
+(the `.` delimiter is unambiguous for the same reason: the engine refuses an
+env name containing `.`). `apply-cell` uploads it (`if: always()`, so a blocked cell
 still reports); `actions/apply-summary` downloads every `apply-summary.*`
 artifact for the run with the glob pattern `apply-summary.*`. It contains
 verbatim:

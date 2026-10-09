@@ -209,6 +209,35 @@ def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
     assert tags_by_stack == tags
 
 
+_CHARSET = (
+    " is not an environment name: "
+    "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
+)
+
+
+@pytest.mark.parametrize(
+    ("tag", "message"),
+    [
+        ("env/a.b", "::error::stack 'stacks/c' tag 'env/a.b'" + _CHARSET),
+        ("env/../admin", "::error::stack 'stacks/c' tag 'env/../admin'" + _CHARSET),
+        (
+            "env/prod-apply",
+            "::error::stack 'stacks/c' tag 'env/prod-apply' carries the environment suffix "
+            "'-apply'; a tag is matched against the bare logical env name; write 'prod' instead.",
+        ),
+    ],
+    ids=["dot", "path", "suffix"],
+)
+def test_env_membership_refuses_a_tag_no_environment_can_take(monkeypatch, tag, message):
+    """Mutations: drop the `check_env_name` call -- `env/a.b` passes; refuse only on
+    `is_env_name` -- `env/prod-apply` passes."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/c"])
+    monkeypatch.setattr(bm, "_tags", lambda s: [tag] if s == "stacks/c" else ["env/dev-eu"])
+    with pytest.raises(SystemExit) as e:
+        bm.env_membership(all_stacks=True)
+    assert str(e.value) == message
+
+
 _UNMANAGED_TREE = {
     "stacks/app": ["env/dev-eu"],
     "stacks/zeta": ["workload/net"],
@@ -260,6 +289,15 @@ def test_no_unmanaged_stack_prints_nothing(monkeypatch, capsys):
     monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
     bm.env_membership(all_stacks=True)
     assert capsys.readouterr().out == ""
+
+
+def test_compute_cells_refuses_a_changed_stacks_env_tag_no_environment_can_take(monkeypatch):
+    """Mutation: `compute_cells` passes `check_names=False` to `env_membership`."""
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/c"])
+    monkeypatch.setattr(bm, "_tags", lambda s: ["env/a.b"])
+    with pytest.raises(SystemExit) as e:
+        bm.compute_cells(all_stacks=False, base="deadbeef")
+    assert str(e.value) == "::error::stack 'stacks/c' tag 'env/a.b'" + _CHARSET
 
 
 def test_compute_cells_leaves_an_unmanaged_stack_out_of_cells_and_tree(monkeypatch):
@@ -729,8 +767,8 @@ def test_a_renamed_plan_workflow_is_refused(monkeypatch, tmp_path):
         "::error::this repository has no `.github/workflows/shipmate.yml`, the one path "
         "`CONTRACT.md` lets the consumer's workflow file live at, and this refusal is what "
         "enforces it. That exact filename is matched literally by `shipmate doctor`, whose "
-        "`shipmate.yml` probe checks its job name, dispatch wiring, event routing and leftover "
-        "drift call, and by "
+        "`shipmate.yml` probe checks its job name, dispatch wiring, event routing and drift "
+        "call, and by "
         "`actions/dispatch`, which sends every commented verb to it. A consumer workflow "
         "under any other name draws that probe's could-not-read notice and doctor's own "
         "`pull_request_target` warning, and is reached by no `shipmate` command at "

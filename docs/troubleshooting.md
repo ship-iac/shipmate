@@ -91,7 +91,7 @@ live probes.
   leaves all four unverified together. A call counts only when it names the
   engine repository doctor runs from, in any letter case: a fork, a renamed
   engine or a wrapper workflow does not count. When that repository could not
-  be determined, the job-name, routing and leftover-drift checks are a note
+  be determined, the job-name, routing and drift-call checks are a note
   saying so, and the dispatch check still runs:
   - Whether its plan-calling job is named `shipmate`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
@@ -125,10 +125,10 @@ live probes.
     completes green with nothing done, and a job whose `if:` is too wide runs on
     an event it was never meant to see. The fence in
     [`getting-started.md`](getting-started.md) has every expression.
-  - Whether it still calls the engine's `drift.yml`. Drift runs from its own
-    workflow file; a drift job left in `shipmate.yml` sweeps beside it. Move the
-    job to its own file and delete it, the `schedule` trigger and the `drift` verb
-    option from `shipmate.yml` ([`drift.md`](drift.md)).
+  - Whether it calls the engine's `drift.yml`. A drift job in `shipmate.yml`
+    runs on that file's triggers. Move the drift job to a workflow file of its
+    own, and drop the `schedule` trigger and the `drift` verb option from
+    `shipmate.yml` ([`drift.md`](drift.md)).
 - **Whether `.github/shipmate-config.yml` at the commit under examination is valid.**
   Read through the API at that commit, never from the default branch and never
   substituted by it, so a malformed or misplaced setting is reported on the pull

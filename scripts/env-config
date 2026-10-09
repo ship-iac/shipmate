@@ -453,7 +453,7 @@ def ungated_envs(table):
     """Environments a targeted apply reaches without an approving review.
 
     Only `gated: false` exempts one; anything else is gated, the protected direction.
-    Entry names are lowercase by `_check_env_name`, so the set already matches the
+    Entry names are lowercase by `check_env_name`, so the set already matches the
     casefolded env name `authorize` compares against it.
     """
     return frozenset(
@@ -778,7 +778,7 @@ def _report_unused(table, tagged):
     adding or removing an environment takes two pull requests; refusing an unused entry
     would deadlock both. Names are matched exactly, as `resolve`, `_check_dry_coverage` and
     apply-all-detect's exclusions match them. An uppercase entry name never gets here:
-    `_check_env_name` refuses it, so an unused entry is a lowercase one no stack tags.
+    `check_env_name` refuses it, so an unused entry is a lowercase one no stack tags.
 
     A `needs` predecessor no stack tags gets its own warning, because the key is fail-open: it
     reads as ordering something while the run orders nothing. The charset rule catches only
@@ -891,7 +891,7 @@ def validate_env_name_list(envs, key):
 
     The list rule `needs` follows. `key` names the setting in every message. Guards a bare
     string, which would otherwise be iterated character by character, a non-list value, and
-    each element under `_check_env_name`.
+    each element under `check_env_name`.
     """
     if not isinstance(envs, list):
         raise SystemExit(
@@ -905,12 +905,13 @@ def validate_env_name_list(envs, key):
             f"got non-string element(s) {bad!r}"
         )
     for e in envs:
-        _check_env_name(e, f"{key} entry {e!r}", key)
+        check_env_name(e, f"{key} entry {e!r}", key)
     return envs
 
 
-def _check_env_name(e, label, matched):
-    """Refuse a name no environment can take, as an entry key or a list element.
+def check_env_name(e, label, matched):
+    """Refuse a name no environment can take: an entry key, a list element, a stack's
+    `env/<name>` tag or a dispatched `SHIPMATE_ENV`.
 
     Guards a name outside the charset, and one carrying a `-plan`/`-apply` environment
     suffix -- each is matched against the bare logical env name, matches nothing, and so
@@ -922,9 +923,8 @@ def _check_env_name(e, label, matched):
     """
     if not is_env_name(e):
         raise SystemExit(
-            f"::error::{label} is not an environment name; entries are bare "
-            f"logical env names (lowercase letters, digits, '-' and '_'), with no "
-            f"quotes, spaces or path separators."
+            f"::error::{label} is not an environment name: lowercase letters, digits, '-' "
+            "and '_', with no quotes, spaces or path separators."
         )
     for suffix in ("-plan", "-apply"):
         if e.endswith(suffix):
@@ -942,7 +942,7 @@ def _check_entries(environments, errors, identities):
     `_check_environment` takes it."""
     for env in sorted(environments):
         with _gather(errors):
-            _check_env_name(env, f"environments.{env}", "an entry name")
+            check_env_name(env, f"environments.{env}", "an entry name")
     for env in sorted(environments):
         _check_environment(environments[env], env, errors, identities)
     order = {}
