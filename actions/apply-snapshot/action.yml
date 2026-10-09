@@ -12,7 +12,7 @@ inputs:
     required: true
 outputs:
   snapshot:
-    description: JSON object mapping each cell's stack/env key (NUL-joined, matching scripts/apply-complete's SEP) to its list of pre-existing App-authored apply-check ids.
+    description: JSON object mapping each cell's apply check name to its list of pre-existing App-authored apply-check ids.
     value: ${{ steps.snap.outputs.snapshot }}
 runs:
   using: composite

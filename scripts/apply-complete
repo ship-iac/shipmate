@@ -53,7 +53,6 @@ from _shipmate import _load
 
 ag = _load("apply-gate")
 
-SEP = "\x00"
 UNRESOLVED_EXIT = 75  # EX_TEMPFAIL; not 2, which CPython itself exits with.
 # The one channel that says "ask me again, and here is why". The caller greps this prefix out
 # of stderr to annotate what it gave up on after its retries, so it is a line-anchored
@@ -66,20 +65,19 @@ def to_complete(snapshot, jobs):
     unresolved = []
     unmatched = []
     unsuccessful = []
-    for key, ids in snapshot.items():
-        stack, env = key.split(SEP)
-        suffix = ag.check_name(stack, env)
+    for check, ids in snapshot.items():
+        label = check.removeprefix(ag.APPLY_PREFIX)
         matched = [
-            j for j in jobs if (name := j.get("name", "")) == suffix or name.endswith(f"/ {suffix}")
+            j for j in jobs if (name := j.get("name", "")) == check or name.endswith(f"/ {check}")
         ]
         if any(j.get("conclusion") == "success" for j in matched):
             out.extend(ids)
         elif not matched:
-            unmatched.append(f"{stack} / {env}")
+            unmatched.append(label)
         elif any(j.get("conclusion") is None for j in matched):
-            unresolved.append(f"{stack} / {env}")
+            unresolved.append(label)
         else:
-            unsuccessful.append(f"{stack} / {env}")
+            unsuccessful.append(label)
     return sorted(out), sorted(unresolved), sorted(unmatched), sorted(unsuccessful)
 
 

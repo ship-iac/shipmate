@@ -550,6 +550,14 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
+    checked = []
+    real_existing = doctor._existing_env_names
+
+    def existing(ctx):
+        checked.append(1)
+        return real_existing(ctx)
+
+    monkeypatch.setattr(doctor, "_existing_env_names", existing)
     ctx = _ctx(default_branch="release/v1")
     found = (
         doctor._environment_warnings(ctx)
@@ -561,11 +569,11 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
     assert asked == [
         listing,
         on_default,
-        listing,
         f"repos/{_REPO}/environments/dev-eu",
-        listing,
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
+    # The listing is read once per run, so each probe's existence check is counted here.
+    assert len(checked) == 3
 
 
 def test_a_missing_environment_is_named_by_the_selected_naming(monkeypatch):
@@ -5573,3 +5581,43 @@ def test_status_never_fails_the_run(monkeypatch):
 
     monkeypatch.setattr(doctor, "_contents_text", boom)
     assert doctor.config_status(_ctx()) == []
+
+
+def test_workflow_scans_in_one_run_share_one_read_of_each_file(monkeypatch):
+    """Two probes scanning the same commit read the listing and each file once between them,
+    and the second still sees every file.
+
+    Mutation: drop the `ref not in cache` check in `_workflow_files`; each path is read twice."""
+    responses = _fork_responses({"a.yml": "x", "b.yml": "y"})
+    reads = []
+
+    def gh(path):
+        reads.append(path)
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    ctx = _ctx()
+    for _ in range(2):
+        names = doctor._scan_workflow_texts(ctx, _REF, lambda text, name: [name], None)
+        assert names == ["a.yml", "b.yml"]
+    assert sorted(reads) == sorted(responses)
+
+
+def test_a_failed_shared_read_fails_every_probe_that_asks(monkeypatch):
+    """A failed read is kept and re-raised to each later reader, so each probe degrades on its
+    own and the endpoint is not asked again.
+
+    Mutation: keep `(None, None)` for a failed read in `_read_once`; the second reader gets
+    None back instead of the failure."""
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        raise SystemExit("::error::command failed (1): gh api " + path)
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    ctx = _ctx()
+    for _ in range(2):
+        with pytest.raises(SystemExit):
+            doctor._existing_env_names(ctx)
+    assert asked == [f"repos/{_REPO}/environments?per_page=100"]

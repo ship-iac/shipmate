@@ -31,6 +31,10 @@ import re
 import sys
 
 APPLY_PREFIX = "apply / "
+#: The consumer names its engine-calling job `shipmate`, and GitHub names a called workflow's
+#: check runs `<caller job> / <callee job>`. `shipmate doctor` reports a job carrying another
+#: name, and `CONTRACT.md` §Check names states it.
+CALLER_PREFIX = "shipmate / "
 DONE_CONCLUSIONS = {"success", "neutral"}
 
 

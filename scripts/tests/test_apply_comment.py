@@ -1348,7 +1348,7 @@ def test_check_name_grammar_matches_apply_cells_construction():
     snap = load_script("apply-snapshot")
     waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]}
     run = {"id": 7, "name": "apply / stacks/app / dev-eu", "app": {"id": int(APP_ID)}}
-    assert snap.snapshot(waves, [run], APP_ID) == {"stacks/app\x00dev-eu": [7]}
+    assert snap.snapshot(waves, [run], APP_ID) == {"apply / stacks/app / dev-eu": [7]}
     row = _row(environment="dev-eu", stack="stacks/app")
     assert ac._check_name(row) == "apply / stacks/app / dev-eu"
 

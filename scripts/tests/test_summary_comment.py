@@ -148,17 +148,17 @@ CHECKS = {
 RUN_URL = "https://gh/run/1"
 
 
-def test_plan_check_prefix_is_the_shim_job_name():
+def test_caller_prefix_is_the_shim_job_name():
     """The shim's calling job name is a contract literal, restated here rather than imported.
 
-    Reddens on any edit to `PLAN_CHECK_PREFIX` -- the whole value is compared against a
-    hand-written constant.
+    Reddens on any edit to apply-gate's `CALLER_PREFIX` -- the whole value is compared against
+    a hand-written constant.
     """
-    assert sc.PLAN_CHECK_PREFIX == "shipmate / "
+    assert sc.ag.CALLER_PREFIX == "shipmate / "
 
 
 def test_check_url_resolves_by_env_and_stack_with_run_url_fallback():
-    """Reddens on `PLAN_CHECK_PREFIX = ""` or `"shipmate/"`: the prefixed name misses."""
+    """Reddens on `CALLER_PREFIX = ""` or `"shipmate/"`: the prefixed name misses."""
     assert sc.check_url(_cell(), CHECKS, RUN_URL) == "https://ck/app-eu"
     assert sc.check_url(_cell(environment="prod"), CHECKS, RUN_URL) == RUN_URL
 
@@ -166,7 +166,7 @@ def test_check_url_resolves_by_env_and_stack_with_run_url_fallback():
 def test_check_url_ignores_an_unprefixed_check_and_falls_back_to_the_run_url():
     """A shim job named anything but `shipmate` degrades every plan link to the run URL.
 
-    The old two-segment name is not a match, so this reddens on `PLAN_CHECK_PREFIX = ""`
+    The old two-segment name is not a match, so this reddens on `CALLER_PREFIX = ""`
     for the reason the constant exists, not on a plain absent-name miss.
     """
     cell = _cell(stack="a", environment="dev")

@@ -49,8 +49,8 @@ import sys
 import textwrap
 import urllib.parse
 
+from _shipmate import APP_ID_VAR, ENGINE_ENV, REPO_RE, _load, gate_check, review_count, utf8_output
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
-from _shipmate import ENGINE_ENV, REPO_RE, _load, gate_check, review_count, utf8_output
 from _shipmate import approval_rules as _approval_rules
 from _shipmate import run as _run
 
@@ -58,9 +58,7 @@ ec = _load("env-config")
 bm = _load("build-matrix")
 dr = _load("doctor")
 
-GATE = "shipmate / gate"
-#: The one repository variable this script writes.
-APP_ID_VAR = "SHIPMATE_APP_ID"
+GATE = dr.GATE
 REPORT = []
 _DRY = False
 

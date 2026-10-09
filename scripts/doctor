@@ -138,9 +138,24 @@ HARVEST_PENDING = (
 )
 
 
+def _read_once(ctx, path):
+    """`_gh_json(path)`, read once per run and kept on `ctx`. A failure is kept too and
+    re-raised to every probe that asks, so `warnings()` still degrades each probe on its own."""
+    reads = ctx.setdefault("gh_reads", {})
+    if path not in reads:
+        try:
+            reads[path] = (_gh_json(path), None)
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - re-raised to every reader below
+            reads[path] = (None, e)
+    value, error = reads[path]
+    if error is not None:
+        raise error
+    return value
+
+
 def _gate_rule_warnings(ctx):
     repo, default_branch = ctx["repo"], ctx["default_branch"]
-    rules = _gh_json(f"repos/{repo}/rules/branches/{default_branch}?per_page=100")
+    rules = _read_once(ctx, f"repos/{repo}/rules/branches/{default_branch}?per_page=100")
     chk, params = gate_check(rules, GATE)
     if chk is None:
         return [
@@ -197,15 +212,12 @@ def _review_rule_warnings(ctx):
     whatever else is set: a sole maintainer cannot approve their own last push, so cannot
     merge, and the sole-maintainer note is then omitted.
 
-    Re-reads `rules/branches` rather than sharing `_gate_rule_warnings`'
-    response, for `_existing_env_names`' per-probe-degrade reason.
-
     Two limits, both stated in the finding text or the docs rather than probed:
     the endpoint returns rulesets only (classic branch protection reads as no
     rule), and `require_code_owner_review` is a no-op for changed files no
     `CODEOWNERS` entry owns."""
     branch = ctx["default_branch"]
-    rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
+    rules = _read_once(ctx, f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
     found = readable = code_owner = last_push = False
     for rule in rules:
         if rule.get("type") != "pull_request":
@@ -276,16 +288,13 @@ def _existing_env_names(ctx):
     on a present one passes as healthy. A failure of this listing is the
     caller's precondition and propagates to `warnings()`' degrade note.
 
-    Re-read per probe rather than shared through `ctx`: `warnings()` degrades
-    per probe, so one endpoint failure must not silence the others.
-
     per_page=100 covers >=50 logical env pairs, and `ec.gh_json` does not
     multi-page merge, so a repository past that raises rather than reports on half
     the names: each environment past the page would read as absent. `total_count` is
     read strictly -- a listing missing the key is a listing whose completeness is
     unknown, and the KeyError degrades every environment probe loudly."""
-    listing = _gh_json(f"repos/{ctx['repo']}/environments?per_page=100")
-    names = {e["name"] for e in listing.get("environments", [])}
+    listing = _read_once(ctx, f"repos/{ctx['repo']}/environments?per_page=100")
+    names = {e["name"] for e in listing.get("environments") or []}
     if listing["total_count"] > len(names):
         raise SystemExit(
             f"::error::the environments listing is truncated ({listing['total_count']} "
@@ -867,21 +876,19 @@ def _scan_workflow_texts(ctx, ref, per_file, unreadable):
     only signal, and it is a NOTICE, so a pin-freshness report can name stale
     pins in the files it read while saying nothing about the rest.
 
-    Each probe calls this with its own reads rather than sharing one — a
-    module-level cache would outlive a single probe run and couple two probes'
-    failure modes — so each costs one listing plus one read per file.
+    The reads are kept on `ctx` (`_workflow_files`), so the probes sharing a run
+    share one listing plus one read per file; a module-level cache would outlive
+    the run.
 
     Every caller's `unreadable` constant is a NOTICE, never a WARNING: the
     directory may not exist on the ref being read — the first shipmate pull
     request is the one that adds it — or the token cannot see it, or the API is
     transiently failing. None of those is a misconfiguration to warn about."""
-    base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
-    names, readable = _workflow_names(f"{base}{ref}")
-    if not readable:
+    files = _workflow_files(ctx, ref)
+    if files is None:
         return [unreadable]
     out = []
-    for name in names:
-        text = _workflow_text(f"{base}/{name}{ref}")
+    for name, text in files:
         if text is None:
             out.append(unreadable)
             break
@@ -889,9 +896,26 @@ def _scan_workflow_texts(ctx, ref, per_file, unreadable):
     return out
 
 
+def _workflow_files(ctx, ref):
+    """[(name, text)] for the workflow files at `ref`, ending at the first unreadable file
+    (its text None); None when the listing is unreadable. Read once per run, kept on `ctx`."""
+    cache = ctx.setdefault("workflow_files", {})
+    if ref not in cache:
+        base = f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}"
+        names, readable = _workflow_names(f"{base}{ref}")
+        files = [] if readable else None
+        for name in names if readable else ():
+            text = _workflow_text(f"{base}/{name}{ref}")
+            files.append((name, text))
+            if text is None:
+                break
+        cache[ref] = files
+    return cache[ref]
+
+
 def _pins_in_text(text, fname, ctx, seen):
     """Tag/branch-pin warnings for one workflow file, recording its SHA pins in
-    `seen` ({slug: {(file, sha)}}) for the freshness comparison.
+    `seen` ({(file, sha)}) for the freshness comparison.
 
     Only pins of the engine's own repository are considered. Every finding here
     is worded about the engine — a moving ref letting the engine change under
@@ -914,19 +938,19 @@ def _pins_in_text(text, fname, ctx, seen):
                 )
             )
             continue
-        seen.setdefault(engine, set()).add((fname, ref.lower()))
+        seen.add((fname, ref.lower()))
     return out
 
 
 def _pins_in_workflows(ctx):
-    """(warnings, {slug: {(file, sha)}}) for every engine action pin found in
+    """(warnings, {(file, sha)}) for every engine action pin found in
     the consumer's workflow files at the commit under examination. The engine's
     owner/repo comes from `ctx["engine_repo"]`, which the step that runs this action
     passes in from `job.workflow_repository` — shipmate never hardcodes an org. Either
     precondition missing, or an unreadable listing or file, degrades to a NOTICE
     rather than an error; the preconditions are checked before any API call,
     since without them no read could be interpreted anyway."""
-    seen = {}
+    seen = set()
     if not ctx["engine_repo"]:
         return [PIN_NO_ENGINE], seen
     ref = _contents_ref(ctx)
@@ -960,27 +984,28 @@ def _latest_release_sha(slug):
 
 
 def _pin_warnings(ctx):
-    out, seen = _pins_in_workflows(ctx)
-    for slug, pins in sorted(seen.items()):
-        tag, sha = _latest_release_sha(slug)
-        if not sha:
-            # NOTICE, not WARNING: degrade, don't alarm.
-            out.append(
-                (
-                    NOTICE,
-                    f"could not read `{slug}`'s latest release: engine pin freshness not verified.",
-                )
+    out, pins = _pins_in_workflows(ctx)
+    if not pins:
+        return out
+    slug = ctx["engine_repo"]
+    tag, sha = _latest_release_sha(slug)
+    if not sha:
+        # NOTICE, not WARNING: degrade, don't alarm.
+        out.append(
+            (
+                NOTICE,
+                f"could not read `{slug}`'s latest release: engine pin freshness not verified.",
             )
-            continue
-        differing = sorted({(f, ref) for f, ref in pins if ref != sha})
-        for fname, ref in differing:
-            out.append(
-                (
-                    WARNING,
-                    f"`{fname}` pins `{slug}@{ref[:7]}`, which differs from the latest "
-                    f"release {tag} (`{sha[:7]}`). Re-pin to pick up fixes.",
-                )
+        )
+        return out
+    for fname, ref in sorted((f, ref) for f, ref in pins if ref != sha):
+        out.append(
+            (
+                WARNING,
+                f"`{fname}` pins `{slug}@{ref[:7]}`, which differs from the latest "
+                f"release {tag} (`{sha[:7]}`). Re-pin to pick up fixes.",
             )
+        )
     return out
 
 
@@ -1892,9 +1917,9 @@ def config_status(ctx):
     would read as a second opinion.
 
     The examined commit's table is read a second time rather than shared with the probe:
-    `ctx` holds only the default branch's (`_default_branch_table`) and cannot carry this one
-    (`test_the_config_probe_feeds_nothing_a_run_reads`), and a module-level cache would
-    outlive a single run for the reason `_scan_workflow_texts` gives. `_contents_ref` pins
+    the only table `ctx` carries is the default branch's (`_default_branch_table`), and it
+    cannot carry this one (`test_the_config_probe_feeds_nothing_a_run_reads`); a module-level
+    cache would outlive a single run. `_contents_ref` pins
     a 40-char SHA, so both reads see the same bytes.
 
     Never raises: `report` mode renders this outside `warnings()`' degrade handler, and
@@ -2238,8 +2263,14 @@ def harvest_sections(annotations):
             continue
         if a.get("title") == DOCTOR_TITLE:
             continue
-        by_check.setdefault(a.get("check_name") or "(unnamed check)", []).append(a)
+        by_check.setdefault(_check_label(a), []).append(a)
     return by_check
+
+
+def _check_label(annotation):
+    """One label for both the harvest and the truncation count: `_harvest_lines`
+    intersects their keys, so two spellings would silently drop the truncation note."""
+    return annotation.get("check_name") or "(unnamed check)"
 
 
 def _plan_runs_line(ctx):
@@ -2292,7 +2323,7 @@ def _truncated_checks(annotations):
     dropping notices and DOCTOR_TITLE rows first would both under- and
     over-count the real GitHub-side truncation."""
     counts = collections.Counter(
-        (a.get("check_name") or "(unnamed check)", a.get("annotation_level"))
+        (_check_label(a), a.get("annotation_level"))
         for a in annotations
         if a.get("annotation_level") in HARVEST_LEVELS
     )

@@ -72,7 +72,7 @@ behaviour, no observable would fail.
 
 `scripts/apply-complete` is a third consumer of the identical grammar: given
 the pre-flight snapshot of check ids a run may complete, it matches each
-snapshotted `<stack>`/`<env>` pair's `apply / <stack> / <env>` name against
+snapshotted `apply / <stack> / <env>` check name against
 the same run's job-name listing (the same `/`-boundary suffix idiom as
 `scripts/apply-comment`'s log-link match, not a second invention) to decide
 which cells the run's own job conclusions actually earned. A rename of the
