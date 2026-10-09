@@ -11,6 +11,7 @@ checked-out tree.
 
 import json
 import os
+import re
 
 from _shipmate import _load
 
@@ -213,6 +214,7 @@ def build_matrix(envs, stacks_by_env, tags_by_stack, all_stacks=False):
 
 
 _ZERO_SHA = "0" * 40
+_ENV_TAG_LITERAL = re.compile(f'"env/{ec._ENV_ENTRY.pattern}"')
 
 
 def _list_stacks(all_stacks, base):
@@ -244,12 +246,14 @@ def unmanaged_stacks(tags_by_stack):
 
 def lost_env_tags(base, stacks):
     """The sorted subset of `stacks` whose diff from the merge base of `base` to `HEAD` removes
-    a line holding `env/` from the stack's own Terramate files (`<stack>/*.tm.hcl`,
-    `<stack>/*.tm`; no `**`, so a child stack and a `.tf` holding `"env/prod/state"` are out).
+    a line holding a complete tag literal `"env/<name>"`, `<name>` in the environment-name
+    charset, from the stack's own Terramate files (`<stack>/*.tm.hcl`, `<stack>/*.tm`; no
+    `**`, so a child stack and a `.tf` are out). A backend key such as
+    `"env/${global.x}/state"` is not a tag literal.
 
     A heuristic, paired with the exact head-side fact that each of `stacks` carries no `env/*`
-    tag now. A removed comment holding `env/` is a false positive, which only warns about a
-    stack that is already unmanaged.
+    tag now. A removed comment or string holding exactly `"env/<name>"` is a false positive,
+    which only warns about a stack that is already unmanaged.
 
     A nonzero `git diff`, as when `base` and `HEAD` share no merge base, exits the run through
     `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs."""
@@ -267,8 +271,7 @@ def lost_env_tags(base, stacks):
             ]
         )
         if any(
-            line.startswith("-") and not line.startswith("---") and "env/" in line
-            for line in diff.splitlines()
+            line.startswith("-") and _ENV_TAG_LITERAL.search(line) for line in diff.splitlines()
         ):
             lost.append(stack)
     return sorted(lost)

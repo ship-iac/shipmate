@@ -1889,8 +1889,8 @@ def _stack(tags, name="s"):
 
 
 def test_lost_env_tags_names_a_stack_whose_diff_removes_an_env_line(git_repo):
-    """`s` drops `env/dev`; `t` edits its name. Mutation: drop the `env/` condition -- `t`
-    appears."""
+    """`s` drops `env/dev`; `t` edits its name. Mutation: drop the tag-literal condition --
+    `t` appears."""
     base = _commit(
         {"s/stack.tm.hcl": _stack('["env/dev"]'), "t/stack.tm.hcl": _stack("[]", "t")}, "base"
     )
@@ -1910,8 +1910,8 @@ def test_lost_env_tags_names_the_root_stack(git_repo):
 
 
 def test_lost_env_tags_ignores_an_env_directory_in_the_file_header(git_repo):
-    """The diff's `--- a/stacks/env/app/...` header holds `env/`. Mutation: drop the `---`
-    exclusion."""
+    """The diff's `--- a/stacks/env/app/...` header holds `env/app`, unquoted. Mutation: drop
+    the quotes from `_ENV_TAG_LITERAL`."""
     base = _commit({"stacks/env/app/stack.tm.hcl": _stack("[]")}, "base")
     _git("checkout", "-q", "-b", "pr")
     _commit({"stacks/env/app/stack.tm.hcl": _stack("[]", "renamed")}, "edit")
@@ -1931,12 +1931,12 @@ def test_lost_env_tags_diffs_from_the_merge_base(git_repo):
 
 
 def test_lost_env_tags_reads_only_the_stacks_own_terramate_files(git_repo):
-    """A child stack's retag and the parent's `.tf` losing `"env/prod/state"` both remove an
-    `env/` line under the parent's directory. Mutation: pathspec `f"{stack}/"`."""
+    """A child stack's retag and the parent's `.tf` losing `"env/prod"` both remove an `env/`
+    tag literal under the parent's directory. Mutation: pathspec `f"{stack}/"`."""
     base = _commit(
         {
             "stacks/app/stack.tm.hcl": _stack("[]"),
-            "stacks/app/main.tf": 'locals {\n  key = "env/prod/state"\n}\n',
+            "stacks/app/main.tf": 'locals {\n  key = "env/prod"\n}\n',
             "stacks/app/child/stack.tm.hcl": _stack('["env/dev"]', "child"),
         },
         "base",
@@ -1950,6 +1950,16 @@ def test_lost_env_tags_reads_only_the_stacks_own_terramate_files(git_repo):
         "retag child",
     )
     assert bm.lost_env_tags(base, ["stacks/app"]) == []
+
+
+def test_lost_env_tags_ignores_an_env_prefixed_backend_key(git_repo):
+    """An untagged stack's `.tm.hcl` drops a backend key under `env/`, not a tag literal.
+    Mutation: test `"env/" in line` instead of the tag-literal pattern -- `s` appears."""
+    key = '  key = "env/${global.x}/state"\n'
+    base = _commit({"s/stack.tm.hcl": _stack("[]"), "s/backend.tm.hcl": key}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/backend.tm.hcl": "\n"}, "drop key")
+    assert bm.lost_env_tags(base, ["s"]) == []
 
 
 _LOST_ENV_WARNING = (
