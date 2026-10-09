@@ -479,8 +479,8 @@ One quoting rule: a string value starting with `{`, `[`, `*`, `&`, `!` or `#`
 is quoted (`"{workload}-plan"`). Unquoted, YAML reads the character as syntax:
 `{` and `[` open a mapping or list, which is meant only in a reference
 (`{vars: NAME}`) and in the `workloads` and `needs` lists; `*`, `&` and `!` an
-alias, anchor or tag, each refused; and `#` a comment that empties the value. A
-`tf_vars` value may be empty, so there a `#`-led value is not refused.
+alias, anchor or tag, each refused; and `#` a comment that empties the value. Only a
+`tf_vars` value may be empty, so only there is a `#`-led value not refused.
 
 **An identity names credentials once.** `identities.<name>` holds three
 fields, each optional, all under `aws`:
@@ -610,8 +610,10 @@ environments:
   job that reads the file binds one. comment-ops and the plan `summary` job
   bind `shipmate-engine`, so a variable of the same name on that Environment
   shadows the repository value in those two jobs, and nowhere else.
-- **Values.** A resolved value is always a string, so `shared`, `explicit`,
-  and `gated` refuse a reference through their own type checks. The name is
+- **Values.** A resolved value is always a string. `shared`, `explicit` and
+  `gated` accept no reference: one refuses before it resolves, so the refusal
+  never quotes the variable's value. A referenced `layout` whose value is not a
+  layout refuses naming the variable, not the value. The name is
   uppercase (`[A-Z_][A-Z0-9_]*`), as GitHub stores it.
 - **Variables only, never secrets.** A resolved value is not hidden: it lands in
   job outputs, the detect `matrix` among them, and in step logs, and
@@ -650,8 +652,9 @@ variable rows depend on the run as well as the file, so they are not structural.
 | The file is not valid YAML, or holds a duplicate key, an anchor, an alias, a tag or tab indentation | the parser's message, with its line and column, is the refusal. A duplicate key would otherwise win silently, and the file gains nothing from anchors, aliases or tags |
 | The runner's Python is older than 3.12, or cannot import PyYAML | §Runner prerequisites requires both; the refusal names the missing one, and the version found |
 | The table declares no `layout` | it is the only source of a cell's environment identity, and a `layout` indented under another key lands inside it rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
-| `layout` is not `tf_vars`, `workspace` or `folder` | a typo would silently disable injection |
-| `layout: tf_vars` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
+| `layout` is not `tf_vars`, `workspace` or `folder` | a typo would silently disable injection. A referenced `layout` is named by its variable, never its value |
+| `layout: tf_vars` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables |
+| An empty `region` (`region:`, or `region: #eu-west-1`, which YAML reads as empty) | an empty region derives no `TF_VAR_region` the fingerprint can tell apart, and the credentials step needs one |
 | A cell's `workload/<name>` tag its environment's `workloads` does not list | a listed workload is the only one the default branch grants a role to. One refusal names every such cell. Checked only for the cells the run plans, applies or unlocks: a completed, excluded or held cell is not refused, and neither is an untagged cell, a tag in an environment naming no identity, or one in an environment writing no list |
 | An environment name outside the env-name charset, or carrying a `-plan`/`-apply` suffix | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing |
 | An environment key other than `region`, `tf_vars`, `identity`, `workloads`, `shared`, `needs`, `explicit`, `gated` | catches a misspelled key and a top-level setting indented under an entry; credentials live in `identities.<name>`, never in an entry |
@@ -664,7 +667,7 @@ variable rows depend on the run as well as the file, so they are not structural.
 | For one workload, a role name on one path and a full ARN on the other | the account rule is per workload over both paths; write both as ARNs |
 | For one workload, a role name and no account | a name becomes `arn:aws:iam::<account>:role/<name>` and has no account to go in it |
 | For one workload, a full ARN and an account | an ARN carries its own account, so the file would hold two for one role |
-| `shared`, `explicit` or `gated` that is not `true` or `false` | any other value would otherwise resolve to the default: `shared: yes` binds the split pair the repository believes it gave up, `explicit: True` puts the environment on a bare `shipmate apply`, and `gated: no` leaves it gated. A reference refuses the same way, even one resolving to `true` |
+| `shared`, `explicit` or `gated` that is not `true` or `false` | any other value would otherwise resolve to the default: `shared: yes` binds the split pair the repository believes it gave up, `explicit: True` puts the environment on a bare `shipmate apply`, and `gated: no` leaves it gated. A variable reference refuses before it resolves, even one that would resolve to `true`, so the refusal never quotes its value |
 | A shared environment naming an identity that sets `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths; the file would read as a read-only plan role while every plan cell assumes the apply role |
 | `tf_vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape | a string where a mapping is required, and the reverse |

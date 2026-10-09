@@ -288,11 +288,15 @@ def test_an_identity_that_names_nothing_refuses(identities, identity, names):
 
 @pytest.mark.parametrize("region", [None, ""], ids=["absent", "empty"])
 def test_an_identity_without_a_region_refuses(region):
-    """Mutation: drop the region check -- both cases validate, and the credentials step fails
-    mid-run."""
+    """An empty region is also refused as empty, ahead of this message.
+
+    Mutation: drop the region check -- the absent case validates, and the credentials step
+    fails mid-run."""
     entry = {"identity": "dev"} if region is None else {"identity": "dev", "region": region}
+    empty = "::error::environment dev-eu: region is empty. Give it a value, or remove the key.\n"
     assert _refusal(_identity({"apply": _ARN}, **{"dev-eu": entry})) == (
-        "::error::environment dev-eu names identity dev but sets no region, and the "
+        ("" if region is None else empty)
+        + "::error::environment dev-eu names identity dev but sets no region, and the "
         "credentials step requires one. Set region."
     )
 

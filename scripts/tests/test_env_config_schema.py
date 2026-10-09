@@ -87,15 +87,19 @@ def test_tf_vars_refuses_an_entry_with_no_region():
     )
 
 
-def test_tf_vars_refuses_an_empty_region():
-    """An empty TF_VAR_region drops out of the plan fingerprint, so it is not a region.
+@pytest.mark.parametrize("layout", ["tf_vars", "folder"])
+@pytest.mark.parametrize("written", ["", " #eu-west-1", ' ""'], ids=["bare", "comment", "quoted"])
+def test_an_empty_region_refuses_in_every_layout(layout, written):
+    """`region:` and `region: #eu-west-1` load as the empty string. An empty TF_VAR_region
+    drops out of the plan fingerprint, and the credentials step needs a region, so an empty one
+    is no region in any layout.
 
-    Mutation: accept a present-but-empty region.
+    Mutation: delete the empty-region check in `_check_environment` -- the `tf_vars` cases
+    refuse as an entry with no region instead, and the `folder` cases validate.
     """
-    table = {"layout": "tf_vars", "environments": {"dev-eu": {"region": ""}}}
-    assert _refusal(table, matrix_envs=("dev-eu",)) == (
-        "::error::layout: tf_vars derives TF_VAR_env and TF_VAR_region from the "
-        "environment table, and dev-eu has an entry with no region."
+    text = f"layout: {layout}\nenvironments:\n  dev-eu:\n    region:{written}\n"
+    assert _refusal(env_config.load_config(text), matrix_envs=("dev-eu",)) == (
+        "::error::environment dev-eu: region is empty. Give it a value, or remove the key."
     )
 
 
@@ -151,7 +155,6 @@ _NOT_BOOLEAN = [
     ("shared", "1", "'1'"),
     ("explicit", "True", "'True'"),
     ("explicit", "yes", "'yes'"),
-    ("explicit", "{vars: X}", "{'vars': 'X'}"),
     ("gated", "FALSE", "'FALSE'"),
     ("gated", "no", "'no'"),
 ]
@@ -175,18 +178,65 @@ def test_a_flag_that_is_not_true_or_false_refuses(key, written, found):
     )
 
 
-def test_a_referenced_flag_refuses_as_the_string_it_resolves_to():
-    """A reference resolves after the flags are read, so `explicit: {vars: X}` reaches the
-    check as the variable's string value, and that is the message a run prints.
+@pytest.mark.parametrize("key", _FLAGS)
+@pytest.mark.parametrize(
+    "written",
+    ["{vars: SECRETISH}", "[{vars: SECRETISH}]", "{a: {vars: SECRETISH}}"],
+    ids=["direct", "in-a-list", "in-a-mapping"],
+)
+def test_a_referenced_flag_refuses_before_the_variable_is_read(key, written):
+    """The flag refusal quotes what it found, and a refusal reaches run logs and doctor's
+    pull request comment, so a reference anywhere in a flag refuses before it resolves: the
+    variable's value is never quoted.
 
-    Mutation: drop `explicit` from `_FLAGS` -- this validates.
+    Mutations: delete the reference refusal in `_normalise_flags` -- every row's flag refusal
+    quotes `sentinel-value`; test only the flag itself with `_is_reference` -- the nested rows
+    do.
     """
-    text = "layout: folder\nenvironments:\n  prod:\n    explicit: {vars: HOLD}\n"
+    text = f"layout: folder\nenvironments:\n  prod:\n    {key}: {written}\n"
     with pytest.raises(SystemExit) as excinfo:
-        env_config.validate_structure(env_config.parse_table(text, {"HOLD": "true"}))
+        env_config.validate_structure(env_config.parse_table(text, {"SECRETISH": "sentinel-value"}))
     assert str(excinfo.value) == (
-        "::error::environments.prod.explicit must be true or false, got 'true'."
+        f"::error::environments.prod.{key} holds a variable reference; a flag accepts no "
+        "variable reference. Write true or false."
     )
+
+
+def test_a_referenced_layout_refuses_without_quoting_the_variable():
+    """`validate_structure` quotes a literal bad layout; a referenced one is named by its
+    variable instead.
+
+    Mutation: delete the referenced-layout check in `parse_table` -- the refusal quotes
+    `'sentinel-value'`.
+    """
+    text = "layout: {vars: LAYOUT}\n"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(text, {"LAYOUT": "sentinel-value"}))
+    assert str(excinfo.value) == (
+        "::error::.github/shipmate-config.yml layout references GitHub variable LAYOUT, whose "
+        "value is not one of tf_vars, workspace, folder."
+    )
+
+
+def test_a_layout_holding_a_nested_reference_refuses_by_type():
+    """A reference inside a list is no layout, and the literal-layout refusal would quote it
+    resolved.
+
+    Mutation: delete the layout type check in `load_config` -- the refusal quotes
+    `['sentinel-value']`.
+    """
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(
+            env_config.parse_table("layout: [{vars: LAYOUT}]\n", {"LAYOUT": "sentinel-value"})
+        )
+    assert str(excinfo.value) == "::error::layout must be a string, got list."
+
+
+def test_a_referenced_layout_resolves():
+    """Mutation: refuse every referenced layout in `parse_table` -- this refuses."""
+    assert env_config.parse_table("layout: {vars: LAYOUT}\n", {"LAYOUT": "folder"}) == {
+        "layout": "folder"
+    }
 
 
 # --- 8: tf_vars names and values ----------------------------------------------------------

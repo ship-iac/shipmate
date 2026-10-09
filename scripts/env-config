@@ -77,8 +77,10 @@ def load_config(text):
     with a bare `ModuleNotFoundError` instead of naming the runner prerequisite.
 
     Every scalar is a string. An environment's `shared`, `explicit` or `gated` holding exactly
-    `true` or `false` becomes a bool here, before any reference resolves; any other value stays
-    as written for `validate_structure` to refuse.
+    `true` or `false` becomes a bool here, before any reference resolves; one holding a
+    variable reference anywhere in it refuses here, and so does a `layout` that is neither a
+    string nor a reference, so the refusals that quote those values never quote a resolved
+    one. Any other value stays as written for `validate_structure` to refuse.
     """
     refusal = runner_refusal()
     if refusal:
@@ -96,13 +98,24 @@ def load_config(text):
             f"::error::{CONFIG_PATH} must hold a mapping at the top level, got "
             f"{type(parsed).__name__}"
         )
+    if "layout" in parsed and not _is_reference(parsed["layout"]):
+        _string(parsed["layout"], "layout")
     environments = parsed.get("environments")
-    for entry in environments.values() if isinstance(environments, dict) else ():
+    for env, entry in environments.items() if isinstance(environments, dict) else ():
         if isinstance(entry, dict):
-            for key in _FLAGS:
-                if entry.get(key) in ("true", "false"):
-                    entry[key] = entry[key] == "true"
+            _normalise_flags(env, entry)
     return parsed
+
+
+def _normalise_flags(env, entry):
+    for key in _FLAGS:
+        if any(_is_reference(node) for _, node in _walk(entry.get(key), key)):
+            raise SystemExit(
+                f"::error::environments.{env}.{key} holds a variable reference; a flag accepts "
+                "no variable reference. Write true or false."
+            )
+        if entry.get(key) in ("true", "false"):
+            entry[key] = entry[key] == "true"
 
 
 def _is_reference(value):
@@ -208,7 +221,14 @@ def parse_table(text, variables=None):
         return parsed
     if variables is None:
         variables = _environ_variables(*refs[0])
-    return {key: _replace(value, key, variables) for key, value in parsed.items()}
+    table = {key: _replace(value, key, variables) for key, value in parsed.items()}
+    # `validate_structure` quotes a bad layout, and no refusal may quote a resolved value.
+    if _is_reference(parsed.get("layout")) and table["layout"] not in _LAYOUTS:
+        raise SystemExit(
+            f"::error::{CONFIG_PATH} layout references GitHub variable "
+            f"{parsed['layout']['vars']}, whose value is not one of {', '.join(_LAYOUTS)}."
+        )
+    return table
 
 
 #: The one refusal `read_table` raises when the table cannot be read.
@@ -388,9 +408,9 @@ def _check_vars(entry, env, errors):
 def _check_flags(entry, env, errors):
     """`shared`, `explicit` and `gated` hold `true` or `false`, one message per flag.
 
-    `load_config` turned those two spellings into bools, so anything else here reads as set to
-    a person and resolves as unset; for `explicit` that puts the environment on a bare
-    `shipmate apply`. A reference resolves after that, so it refuses here too.
+    `load_config` turned those two spellings into bools and refused any value holding a
+    reference, so anything else here is written in the file. It reads as set to a person and
+    resolves as unset; for `explicit` that puts the environment on a bare `shipmate apply`.
     """
     for key in _FLAGS:
         if key in entry and not isinstance(entry[key], bool):
@@ -460,7 +480,11 @@ def _check_environment(entry, env, errors, identities):
             )
     if "region" in entry:
         with _gather(errors):
-            _string(entry["region"], f"environment {env}: region")
+            if _string(entry["region"], f"environment {env}: region") == "":
+                raise SystemExit(
+                    f"::error::environment {env}: region is empty. Give it a value, or remove "
+                    "the key."
+                )
     if "tf_vars" in entry:
         _check_vars(entry, env, errors)
     _check_flags(entry, env, errors)
