@@ -9,9 +9,11 @@ Also holds the subprocess runner, which ``env-config`` wraps for the CI scripts,
 scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
 switch for their console output. It also holds the ruleset and environment readers and the
 names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json`` summaries and builds
-this run's page link.
+this run's page link. It parses YAML: the strings-only config loader and the YAML 1.2
+workflow loader, both importing PyYAML only when first called.
 """
 
+import functools
 import glob
 import importlib.util
 import io
@@ -141,6 +143,134 @@ def current_run_url():
         f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
         f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     )
+
+
+_CORE_RESOLVERS = (
+    ("tag:yaml.org,2002:bool", r"^(?:true|True|TRUE|false|False|FALSE)$", "tTfF"),
+    ("tag:yaml.org,2002:int", r"^(?:[-+]?[0-9]+|0o[0-7]+|0x[0-9a-fA-F]+)$", "-+0123456789"),
+    (
+        "tag:yaml.org,2002:float",
+        r"^(?:[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)(?:[eE][-+]?[0-9]+)?"
+        r"|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$",
+        "-+0123456789.",
+    ),
+    ("tag:yaml.org,2002:null", r"^(?:~|null|Null|NULL|)$", ("~", "n", "N", "")),
+)
+
+
+def _core_int(loader, node):
+    # SafeLoader's own int constructor reads `08` as YAML 1.1 octal and raises.
+    value = loader.construct_scalar(node)
+    if value.startswith(("0o", "0x")):
+        return int(value[2:], 8 if value[1] == "o" else 16)
+    return int(value, 10)
+
+
+def _untagged(loader, _suffix, node):
+    if node.id == "mapping":
+        return loader.construct_mapping(node, deep=True)
+    if node.id == "sequence":
+        return loader.construct_sequence(node, deep=True)
+    return loader.construct_scalar(node)
+
+
+def _refuse(cls, message, mark):
+    raise cls(None, None, message, mark)
+
+
+def _check_keys(node, key_of):
+    """Refuse a non-scalar key before `key_of` constructs it, then a duplicate of `key_of`."""
+    from yaml.constructor import ConstructorError
+
+    seen = set()
+    for key, _ in node.value:
+        if key.id != "scalar":
+            _refuse(ConstructorError, "a key must be a plain value", key.start_mark)
+        value = key_of(key)
+        if value in seen:
+            _refuse(ConstructorError, f"duplicate key {value!r}", key.start_mark)
+        seen.add(value)
+
+
+@functools.cache
+def _loaders():
+    import yaml
+    from yaml.composer import ComposerError
+
+    class ConfigLoader(yaml.BaseLoader):
+        # An AliasEvent carries an `anchor` too, so the alias check comes first or every
+        # alias is reported as an anchor.
+        def compose_node(self, parent, index):
+            event = self.peek_event()
+            if isinstance(event, yaml.AliasEvent):
+                _refuse(ComposerError, "an alias is not allowed", event.start_mark)
+            if getattr(event, "anchor", None) is not None:
+                _refuse(ComposerError, "an anchor is not allowed", event.start_mark)
+            if getattr(event, "tag", None) is not None:
+                _refuse(
+                    ComposerError,
+                    f"a tag ({event.tag}) is not allowed",
+                    event.start_mark,
+                )
+            return super().compose_node(parent, index)
+
+        def construct_mapping(self, node, deep=False):
+            _check_keys(node, lambda key: key.value)
+            return super().construct_mapping(node, deep)
+
+    class WorkflowLoader(yaml.SafeLoader):
+        def construct_mapping(self, node, deep=False):
+            _check_keys(node, lambda key: self.construct_object(key, deep=True))
+            return super().construct_mapping(node, deep)
+
+    WorkflowLoader.yaml_implicit_resolvers = {}
+    for tag, pattern, first in _CORE_RESOLVERS:
+        WorkflowLoader.add_implicit_resolver(tag, re.compile(pattern), list(first))
+    WorkflowLoader.add_constructor("tag:yaml.org,2002:int", _core_int)
+    WorkflowLoader.add_multi_constructor("!", _untagged)
+    return ConfigLoader, WorkflowLoader
+
+
+def _parse(loader_class, text):
+    loader = loader_class(text)
+    try:
+        return loader.get_single_data()
+    finally:
+        loader.dispose()
+
+
+def load_config_text(text):
+    """Parse the shipmate config: every scalar is a string, an empty document is `{}`.
+
+    Built on `yaml.BaseLoader`, which has no implicit types and no merge keys, so `<<` is an
+    ordinary key and the duplicate-key check sees every key a mapping holds. Aliases, anchors
+    and explicit tags are refused while composing; a duplicate or non-scalar key while
+    constructing. A leading U+FEFF and CRLF line ends are accepted. Raises `yaml.YAMLError`,
+    and `ModuleNotFoundError` when PyYAML is absent.
+    """
+    doc = _parse(_loaders()[0], text)
+    return {} if doc is None else doc
+
+
+def load_workflow_text(text):
+    """Parse a GitHub workflow or action file by the YAML 1.2 core schema, as GitHub does.
+
+    `true`/`false` in three casings are booleans; decimal, `0o` and `0x` integers, floats and
+    `null`/`~`/empty are typed; every other scalar, `on`, `yes`, `no`, `08` and `1_000`
+    included, is a string. Aliases resolve, an unknown local tag (`!foo`) reads as untagged,
+    `<<` is an ordinary key, and a duplicate or non-scalar key is refused. Raises
+    `yaml.YAMLError`, and `ModuleNotFoundError` when PyYAML is absent.
+    """
+    return _parse(_loaders()[1], text)
+
+
+def yaml_error_text(exc):
+    """`exc` on one line: `{problem} (line {L}, column {C})`, 1-based, from a marked error;
+    otherwise `str(exc)` with its newlines replaced by spaces."""
+    mark = getattr(exc, "problem_mark", None)
+    if mark is None:
+        return str(exc).replace("\n", " ")
+    return f"{exc.problem} (line {mark.line + 1}, column {mark.column + 1})"
 
 
 def _load(fname):
