@@ -142,13 +142,6 @@ def _env_membership():
     return bm.env_membership(all_stacks=True)
 
 
-def _derive_envs(names):
-    """Names arrive checked (tags by `build-matrix.env_membership`, table keys by
-    `env-config.validate_structure`): they become API path segments and `gh --env` arguments.
-    """
-    return sorted(names)
-
-
 def _repo_root():
     """The consumer checkout's root.
 
@@ -1249,7 +1242,9 @@ def main(argv=None):
     # Table entries no stack tags yet are provisioned too, so the first pull request tagging a
     # stack into one finds its environments in place: otherwise its deploy refuses, or, for a
     # `shared: true` entry, applies in the bare environment its plan auto-created.
-    envs = _derive_envs(set(stacks_by_env) | set((table or {}).get("environments", {})))
+    # Names arrive checked (tags by `build-matrix.env_membership`, table keys by
+    # `env-config.validate_structure`): they become API path segments and `gh --env` arguments.
+    envs = sorted(set(stacks_by_env) | set((table or {}).get("environments", {})))
     ctx = {
         "repo": repo,
         "default_branch": default_branch,

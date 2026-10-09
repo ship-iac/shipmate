@@ -173,15 +173,6 @@ def test_empty_key_file_is_refused(tmp_path):
     assert "empty" in str(e.value)
 
 
-def test_no_environment_name_derives_no_environment():
-    """A repository adopted before any stack carries an env tag, with no table entry yet,
-    has nothing to bind, and that is not an error.
-
-    Mutation: restore the refusal of an empty set.
-    """
-    assert onboard._derive_envs(set()) == []
-
-
 def test_dry_run_issues_no_write(monkeypatch):
     """`--dry-run` reads and reports; it must not run a single write command.
 
@@ -514,7 +505,6 @@ def test_main_calls_every_stage_in_order():
         "_variables()",
         "_refuse_diverging_app_id(args.app_id, variables)",
         "_resolve_shared(root, repo, variables)",
-        "_derive_envs(set(stacks_by_env) | set((table or {}).get('environments', {})))",
         "_shim_on_default(repo, default_branch)",
         "_engine_secrets(repo)",
         "_repo_secrets()",
