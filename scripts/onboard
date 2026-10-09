@@ -73,7 +73,6 @@ GATE = dr.GATE
 REPORT = []
 _DRY = False
 
-#: Environment names are interpolated into API paths and `gh --env` arguments.
 _VERSION_RE = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
 _APP_ID_RE = re.compile(r"[0-9]+")
 #: The default branch is rendered unquoted into a YAML flow list and a GitHub branch filter:
@@ -144,6 +143,9 @@ def _env_membership():
 
 
 def _derive_envs(names):
+    """Names arrive checked (tags by `build-matrix.env_membership`, table keys by
+    `env-config.validate_structure`): they become API path segments and `gh --env` arguments.
+    """
     return sorted(names)
 
 
