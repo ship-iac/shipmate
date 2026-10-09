@@ -19,6 +19,10 @@ section below names the SHA the release tags.
 
 - **A pull request that removes a stack's last `env/*` tag gets a warning on its plan run naming the stack.**
 
+### Changed
+
+- **`shipmate doctor`'s `shipmate.yml` drift-call warning says what such a job does: it runs on that file's triggers.**
+
 ### Fixed
 
 - **An `env/<name>` tag whose name the environment table could not hold (a `.`, a `/`, a `-plan`/`-apply` suffix) refuses the run; before, under `layout: folder` or `workspace`, a dotted name could make two cells share one plan artifact.**

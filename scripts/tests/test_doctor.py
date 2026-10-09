@@ -3611,7 +3611,7 @@ def test_the_shipmate_yml_probe_without_the_engine_repo_still_checks_dispatch_wi
         (doctor.WARNING, _NO_TRIGGER_TEXT),
         (
             "notice",
-            "the workflow file's job name, event routing and leftover drift call not verified: "
+            "the workflow file's job name, event routing and drift call not verified: "
             "the engine repository could not be determined.",
         ),
     ]
@@ -3728,12 +3728,12 @@ def test_the_workflow_directory_degrades_read_as_written():
         (
             "notice",
             "could not read `.github/workflows/shipmate.yml`: the workflow file's job name, "
-            "dispatch wiring, event routing and leftover drift call not verified.",
+            "dispatch wiring, event routing and drift call not verified.",
         ),
         (
             "notice",
-            "the workflow file's job name, dispatch wiring, event routing and leftover drift "
-            "call not verified: the commit under examination could not be determined.",
+            "the workflow file's job name, dispatch wiring, event routing and drift call "
+            "not verified: the commit under examination could not be determined.",
         ),
     )
 
@@ -3899,15 +3899,17 @@ def test_shipmate_yml_without_a_drift_job_draws_no_routing_finding():
 
 
 _SHIPMATE_YML_CALLS_DRIFT_TEXT = (
-    "`shipmate.yml` still calls the engine's `drift.yml`: move the drift job to its own "
-    "workflow file and delete it, the `schedule` trigger and the `drift` verb option from "
-    "`shipmate.yml` (docs/drift.md)."
+    "`shipmate.yml` calls the engine's `drift.yml`. A drift job there runs on that file's "
+    "triggers: with no `if:`, on every pull request, comment, push and dispatched verb. Move "
+    "the drift job to a workflow file of its own, and drop the `schedule` trigger and the "
+    "`drift` verb option from `shipmate.yml` (docs/drift.md)."
 )
 
 
-def test_a_drift_job_left_in_shipmate_yml_is_warned(monkeypatch):
-    """A `shipmate.yml` still carrying the drift job sweeps beside the drift file, so every
-    sweep runs twice. One WARNING names the move; the published file draws none.
+def test_a_drift_job_in_shipmate_yml_is_warned(monkeypatch):
+    """A drift job in `shipmate.yml` runs on that file's triggers, and `_routing_finding`
+    checks only the `ROUTING_IFS` callees, so nothing else reports it. One WARNING names
+    the move; the published file draws none.
 
     Mutation: drop the drift-call check from `_shipmate_yml_warnings` -- the first assertion
     reddens."""

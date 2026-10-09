@@ -1470,25 +1470,24 @@ def _routing_finding(doc, name, engine):
 
 _SHIPMATE_YML = f"{_WORKFLOWS_DIR}/shipmate.yml"
 SHIPMATE_YML_UNREADABLE, SHIPMATE_YML_NO_COMMIT = _unverified(
-    "the workflow file's job name, dispatch wiring, event routing and leftover drift call",
+    "the workflow file's job name, dispatch wiring, event routing and drift call",
     _SHIPMATE_YML,
 )
 # Dispatch wiring reads no engine slug, so it is not in this subject.
-SHIPMATE_YML_NO_ENGINE = _no_engine(
-    "the workflow file's job name, event routing and leftover drift call"
-)
+SHIPMATE_YML_NO_ENGINE = _no_engine("the workflow file's job name, event routing and drift call")
 
 
 SHIPMATE_YML_CALLS_DRIFT = (
     WARNING,
-    "`shipmate.yml` still calls the engine's `drift.yml`: move the drift job to its own "
-    "workflow file and delete it, the `schedule` trigger and the `drift` verb option from "
-    "`shipmate.yml` (docs/drift.md).",
+    "`shipmate.yml` calls the engine's `drift.yml`. A drift job there runs on that file's "
+    "triggers: with no `if:`, on every pull request, comment, push and dispatched verb. Move "
+    "the drift job to a workflow file of its own, and drop the `schedule` trigger and the "
+    "`drift` verb option from `shipmate.yml` (docs/drift.md).",
 )
 
 
 def _shipmate_yml_warnings(ctx):
-    """The job-name, dispatch-wiring, routing and leftover-drift-job findings over the
+    """The job-name, dispatch-wiring, routing and drift-call findings over the
     consumer's `shipmate.yml` alone, in that order, from one read at the commit under
     examination (`_contents_ref`): a pull request that fixes the file must not still be
     reported for the old state.
