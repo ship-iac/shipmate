@@ -2775,9 +2775,9 @@ def test_a_table_whose_entries_are_all_tagged_has_no_detail():
 
 
 def test_a_table_entry_is_provisioned_before_any_stack_tags_it(monkeypatch, tmp_path, capsys):
-    """Its `<env>-apply` must carry the default-branch policy before the first pull request
-    tagging a stack into it merges, or that merge deploys into an environment GitHub
-    auto-creates with none.
+    """It is provisioned before the first pull request tagging a stack into it merges.
+    Otherwise that merge's deploy refuses on a missing `<env>-apply`, or, for a `shared: true`
+    entry, applies in the bare `<env>` its plan auto-created, with no default-branch policy.
 
     Mutation: derive `envs` from `stacks_by_env` alone.
     """

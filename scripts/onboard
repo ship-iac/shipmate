@@ -763,7 +763,7 @@ def _table_item(ctx):
     except SystemExit as e:
         return "todo", item, [ln.removeprefix("::error::") for ln in str(e).splitlines()]
     # Not env-config's unused-entry warning: it says to remove an entry that onboard asks the
-    # consumer to declare before tagging, and removing it reopens the auto-created environment.
+    # consumer to declare before tagging.
     lines = []
     untagged = [e for e in ctx["envs"] if e not in ctx["tagged"]]
     if len(untagged) == 1:
@@ -1248,8 +1248,9 @@ def main(argv=None):
     variables = _variables()
     _refuse_diverging_app_id(args.app_id, variables)
     table, shared = _resolve_shared(root, repo, variables)
-    # Table entries no stack tags yet are provisioned too: the first pull request tagging a
-    # stack into one deploys on merge, into an `<env>-apply` GitHub would otherwise auto-create.
+    # Table entries no stack tags yet are provisioned too, so the first pull request tagging a
+    # stack into one finds its environments in place: otherwise its deploy refuses, or, for a
+    # `shared: true` entry, applies in the bare environment its plan auto-created.
     envs = _derive_envs(set(stacks_by_env) | set((table or {}).get("environments", {})))
     ctx = {
         "repo": repo,

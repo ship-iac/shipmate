@@ -1007,7 +1007,7 @@ def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monke
     """The line yields to cell lines near HARD_CAP, so `unmanaged=false` and the upsert's
     create-skip is not bypassed for a line the body does not carry.
 
-    Mutation: `named = bool(line)` in `main` (the rendered-or-not ignored) reddens it."""
+    Mutation: `named = bool(line)` in `build_comment` (the rendered-or-not ignored) reddens it."""
     cells = [_cell(stack=f"stacks/{'s' * 400}{i:03}") for i in range(130)]
     _run_main(tmp_path, monkeypatch, cells)
     pad = sc.HARD_CAP - 10 - len((tmp_path / "comment.md").read_text(encoding="utf-8"))
