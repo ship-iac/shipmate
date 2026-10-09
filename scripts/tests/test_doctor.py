@@ -367,8 +367,7 @@ _MISSING_SHARED = (
     doctor.WARNING,
     "GitHub Environment `dev-eu` does not exist: the plan jobs for stacks tagged "
     "`env:dev-eu` run in an environment GitHub auto-creates empty, with no secrets and none "
-    "of its protection rules, and their apply is refused before any wave until it exists. "
-    "Create it.",
+    "of its protection rules, and their apply then runs in it too. Create it.",
 )
 #: The shared-mode NOTICE for a bare `dev-eu` with no approval rules.
 _SHARED_UNREVIEWED = (
