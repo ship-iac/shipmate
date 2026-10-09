@@ -39,8 +39,10 @@ DONE_CONCLUSIONS = {"success", "neutral"}
 
 
 def check_name(stack, env):
-    """The apply check's name, `apply / <stack> / <env>`: built forward, never parsed back.
-    `stack` is the stack path, so a deploy that knows only the path rebuilds it exactly."""
+    """The apply check's name, `apply / <stack> / <env>`: built forward. One site parses it
+    back: `deploy-detect.refuse_stranded_checks`, because after the merge the env a stack lost
+    exists only in its check's name. `stack` is the stack path, so a deploy that knows only
+    the path rebuilds it exactly."""
     return f"{APPLY_PREFIX}{stack} / {env}"
 
 

@@ -58,11 +58,17 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
     """Refuse each open apply check of a stack this scan covers (a stack of a `tree` cell, or
     `unmanaged`) whose `(stack, env)` is no `tree` cell: the stack lost that `env/*` tag on
     the default branch after its pull request was planned, so no cell carries its reviewed
-    change and nothing else would ever complete the check. The gate fails closed. A check of
-    a stack absent from the scan is skipped silently: this merge's diff did not touch it.
+    change and nothing else would ever complete the check. The gate fails closed.
 
-    The refusal applies nothing, so the message also names every `pending` cell's check: those
-    stay unapplied too, and the remedy pull request must change their stacks as well.
+    A check of a stack absent from the scan is skipped silently, for one of two causes. This
+    merge's diff did not touch the stack, because an identical change landed first: a correct
+    skip. Or the stack is no longer a stack at the merge commit, deleted on the default branch
+    after planning: its check strands with nothing said. The deploy does not refuse that case,
+    because no remedy exists for a deleted stack.
+
+    The refusal applies nothing, so the message also names every `pending` cell as
+    `<stack> / <env>`, with an apply check or without: those stay unapplied too, and the
+    remedy pull request must change their stacks as well.
 
     A check names its env only in its name, and after the merge no env set holds the one a
     stack lost (under `folder` or `workspace` a table may declare none), so the env is the
@@ -83,9 +89,9 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
                 stranded.append(name)
     if not stranded:
         return
-    others = sorted(ad.ag.check_name(c["stack"], c["environment"]) for c in pending)
+    others = sorted(f"{c['stack']} / {c['environment']}" for c in pending)
     also = (
-        f" This deploy applies nothing, so these open checks of this merge are not applied "
+        f" This deploy applies nothing, so these other cells of this merge are not applied "
         f"either: {', '.join(others)}."
         if others
         else ""
@@ -96,9 +102,11 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
         f"applied.{also} Open a new pull request that retags each stranded stack and changes "
         "every other listed stack (any edit that `terramate list --changed` marks, such as a "
         "comment line); its plan and deploy apply the current default branch for all of "
-        "them, this merged change included. Re-running this deploy checks out the same commit "
-        "and refuses again. This deploy's apply checks are never read again and stay open on "
-        "the merged pull request."
+        "them, this merged change included. If an untag was deliberate, apply that stranded "
+        "change by hand instead of retagging; the pull request still changes every listed "
+        "stack, and with none listed no pull request is needed. Re-running this deploy checks "
+        "out the same commit and refuses again. This deploy's apply checks are never read "
+        "again and stay open on the merged pull request."
     )
 
 
