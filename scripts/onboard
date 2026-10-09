@@ -392,8 +392,10 @@ def _reconcile_key(ctx):
 def _env_names(env, shared):
     """[(environment name, role)] for one derived environment; a shared one is reconciled
     as an apply environment."""
-    names = ec.env_names(env, env in shared)
-    return [(name, "apply" if role == "shared" else role) for role, name in names.items()]
+    return [
+        (name, "apply" if role == "shared" else role)
+        for role, name in ec.env_names(env, env in shared).items()
+    ]
 
 
 def _unused_naming(env, shared):
