@@ -351,16 +351,20 @@ def _env_noun(role):
 
 
 def _missing(name, env, role):
-    """One absent environment of the selected naming. It does not say the jobs
-    "cannot {role}": a plan job runs in the environment GitHub auto-creates empty,
-    and `verify-environments` refuses an apply before any wave, so "cannot" would
-    misstate which job fails."""
-    jobs = "plan and apply" if role == "shared" else role
-    return (
-        f"GitHub Environment `{name}` does not exist: the {jobs} jobs for stacks tagged "
-        f"`env:{env}` bind a name GitHub auto-creates empty, with no secrets and none "
-        "of its protection rules. Create it."
+    """One absent environment of the selected naming, said per role: a plan job runs in
+    the environment GitHub auto-creates empty, and `verify-environments` refuses an
+    apply binding it before any wave."""
+    plan = (
+        f"the plan jobs for stacks tagged `env:{env}` run in an environment GitHub "
+        "auto-creates empty, with no secrets and none of its protection rules"
     )
+    refused = "is refused before any wave until it exists"
+    effect = {
+        "plan": plan,
+        "apply": f"an apply of stacks tagged `env:{env}` {refused}",
+        "shared": f"{plan}, and their apply {refused}",
+    }[role]
+    return f"GitHub Environment `{name}` does not exist: {effect}. Create it."
 
 
 DEFAULT_TABLE_UNREADABLE = (
