@@ -505,7 +505,7 @@ def test_the_refusal_names_a_pending_cell_that_has_no_apply_check(tmp_path, monk
     )
 
 
-def test_a_refusal_with_no_other_open_cell_names_none(tmp_path, monkeypatch):
+def test_a_refusal_with_no_other_cell_names_none(tmp_path, monkeypatch):
     """Mutation: render the not-applied-either sentence with an empty list -- the message
     gains `either: .`."""
     with pytest.raises(SystemExit) as exc_info:
