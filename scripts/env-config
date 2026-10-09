@@ -1107,7 +1107,8 @@ def resolve(table, env, path, workload):
     `path` is the calling detect's path, never inferred; a shared environment resolves
     `aws.apply` on both paths, and `config_path` reports the path actually consulted rather
     than the one requested. `env_binding` is the GitHub Environment the cell's job binds,
-    taken from `env_binding`. A `path` other than `plan` or `apply` raises KeyError. A
+    taken from `env_binding`. A `path` other than `plan` or `apply` raises KeyError for an
+    unshared environment; a shared one resolves it as `apply`, bound to the bare `env`. A
     reference in the table was resolved from a repository or organization variable by
     `parse_table`.
 
