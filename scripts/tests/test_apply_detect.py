@@ -427,9 +427,8 @@ def test_validate_env_refuses_a_name_no_environment_can_take(value):
     with pytest.raises(SystemExit) as e:
         ad.validate_env(value)
     assert str(e.value) == (
-        f"::error::SHIPMATE_ENV {value!r} is not an environment name; entries are bare "
-        "logical env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces "
-        "or path separators."
+        f"::error::SHIPMATE_ENV {value!r} is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
     )
 
 

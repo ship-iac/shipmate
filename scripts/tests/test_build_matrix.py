@@ -210,8 +210,8 @@ def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
 
 
 _CHARSET = (
-    " is not an environment name; entries are bare logical env names (lowercase letters, "
-    "digits, '-' and '_'), with no quotes, spaces or path separators."
+    " is not an environment name: "
+    "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
 )
 
 

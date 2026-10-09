@@ -444,9 +444,8 @@ _ORDERING = [
     ),
     (
         _needs(["Dev"]),
-        "::error::environments.prod.needs entry 'Dev' is not an environment name; entries are "
-        "bare logical env names (lowercase letters, digits, '-' and '_'), with no quotes, "
-        "spaces or path separators.",
+        "::error::environments.prod.needs entry 'Dev' is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
     (
         _needs(["dev-eu-plan"]),
@@ -462,15 +461,13 @@ _ORDERING = [
     ),
     (
         _needs(["dev eu"]),
-        "::error::environments.prod.needs entry 'dev eu' is not an environment name; entries "
-        "are bare logical env names (lowercase letters, digits, '-' and '_'), with no quotes, "
-        "spaces or path separators.",
+        "::error::environments.prod.needs entry 'dev eu' is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
     (
         _needs(['"dev-eu"']),
-        "::error::environments.prod.needs entry '\"dev-eu\"' is not an environment name; "
-        "entries are bare logical env names (lowercase letters, digits, '-' and '_'), with no "
-        "quotes, spaces or path separators.",
+        "::error::environments.prod.needs entry '\"dev-eu\"' is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
 ]
 
@@ -630,15 +627,13 @@ def test_env_order_reads_needs_off_every_entry_holding_it():
 _ENTRY_NAMES = [
     (
         "Prod",
-        "::error::environments.Prod is not an environment name; entries are bare logical env "
-        "names (lowercase letters, digits, '-' and '_'), with no quotes, spaces or path "
-        "separators.",
+        "::error::environments.Prod is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
     (
         "dev eu",
-        "::error::environments.dev eu is not an environment name; entries are bare logical "
-        "env names (lowercase letters, digits, '-' and '_'), with no quotes, spaces or path "
-        "separators.",
+        "::error::environments.dev eu is not an environment name: "
+        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
     ),
     (
         "dev-plan",

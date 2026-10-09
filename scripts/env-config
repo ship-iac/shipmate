@@ -923,9 +923,8 @@ def check_env_name(e, label, matched):
     """
     if not is_env_name(e):
         raise SystemExit(
-            f"::error::{label} is not an environment name; entries are bare "
-            f"logical env names (lowercase letters, digits, '-' and '_'), with no "
-            f"quotes, spaces or path separators."
+            f"::error::{label} is not an environment name: lowercase letters, digits, '-' "
+            "and '_', with no quotes, spaces or path separators."
         )
     for suffix in ("-plan", "-apply"):
         if e.endswith(suffix):
