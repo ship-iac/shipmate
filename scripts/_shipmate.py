@@ -35,7 +35,8 @@ ENGINE_ENV = "shipmate-engine"
 # Named `APP_KEY_NAME`, not `..._SECRET`: ruff's S105 hardcoded-password rule fires on a
 # "SECRET" token in the binding name, and this is a secret's *name*.
 APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
-#: The repository variable holding the App id, which the workflows read.
+#: The repository variable onboard and register-app write the App id to. Workflows hand it to
+#: the run-time scripts under the same literal name (`test_detect_app_scoping.py`).
 APP_ID_VAR = "SHIPMATE_APP_ID"
 
 

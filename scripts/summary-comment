@@ -49,10 +49,6 @@ UNMANAGED_LINE_CAP = 1000
 UNMANAGED_NAMES = 10
 CELL_KEYS = ("stack", "environment", "changed")
 
-#: A plan cell's callee job name is already `<stack> / <env>`, so its check is this prefix
-#: plus that.
-PLAN_CHECK_PREFIX = ag.CALLER_PREFIX
-
 # A plan line's change sign, possibly indented: `+`, `-`, `~`, or the
 # replace forms `-/+` / `+/-`. The sign moves to column 0 (GitHub's diff
 # highlighting keys on the first character) and `~` becomes `!` (orange).
@@ -217,7 +213,7 @@ def check_url(cell, checks, run_url):
     grammar; never parsed back. Falls back to the workflow-run URL when the name is absent
     (a consumer file whose plan-calling job is not named `shipmate`).
     """
-    run = checks.get(f"{PLAN_CHECK_PREFIX}{cell['stack']} / {cell['environment']}")
+    run = checks.get(f"{ag.CALLER_PREFIX}{cell['stack']} / {cell['environment']}")
     return run["html_url"] if run and run.get("html_url") else run_url
 
 

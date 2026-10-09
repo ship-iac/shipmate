@@ -550,6 +550,14 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
         return responses[path]
 
     monkeypatch.setattr(doctor, "_gh_json", gh)
+    checked = []
+    real_existing = doctor._existing_env_names
+
+    def existing(ctx):
+        checked.append(1)
+        return real_existing(ctx)
+
+    monkeypatch.setattr(doctor, "_existing_env_names", existing)
     ctx = _ctx(default_branch="release/v1")
     found = (
         doctor._environment_warnings(ctx)
@@ -564,6 +572,8 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
         f"repos/{_REPO}/environments/dev-eu",
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
+    # The listing is read once per run, so each probe's existence check is counted here.
+    assert len(checked) == 3
 
 
 def test_a_missing_environment_is_named_by_the_selected_naming(monkeypatch):

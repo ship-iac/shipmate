@@ -65,10 +65,10 @@ def to_complete(snapshot, jobs):
     unresolved = []
     unmatched = []
     unsuccessful = []
-    for suffix, ids in snapshot.items():
-        label = suffix.removeprefix(ag.APPLY_PREFIX)
+    for check, ids in snapshot.items():
+        label = check.removeprefix(ag.APPLY_PREFIX)
         matched = [
-            j for j in jobs if (name := j.get("name", "")) == suffix or name.endswith(f"/ {suffix}")
+            j for j in jobs if (name := j.get("name", "")) == check or name.endswith(f"/ {check}")
         ]
         if any(j.get("conclusion") == "success" for j in matched):
             out.extend(ids)
