@@ -475,10 +475,12 @@ as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pa
 (§Comment-ops). The three hold `true` or `false`, bare or quoted; `shared` and
 `explicit` default to `false`, `gated` to `true`.
 
-One quoting rule: a value starting with `{`, `[`, `*`, `&`, `!` or `#` is quoted
-(`"{workload}-plan"`). Unquoted, YAML reads the character as syntax: a flow
-mapping or list, an alias, anchor or tag (each refused), or a comment that
-empties the value.
+One quoting rule: a string value starting with `{`, `[`, `*`, `&`, `!` or `#`
+is quoted (`"{workload}-plan"`). Unquoted, YAML reads the character as syntax:
+`{` and `[` open a mapping or list, which is meant only in a reference
+(`{vars: NAME}`) and in the `workloads` and `needs` lists; `*`, `&` and `!` an
+alias, anchor or tag, each refused; and `#` a comment that empties the value. A
+`tf_vars` value may be empty, so there a `#`-led value is not refused.
 
 **An identity names credentials once.** `identities.<name>` holds three
 fields, each optional, all under `aws`:
@@ -1798,8 +1800,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
   PyYAML ≥ 6 importable by it), `git`, `curl`, `jq`, `openssl`, `gh`, and GNU
   coreutils (`setup` hashes the Terramate download with `sha256sum`).
-- Every GitHub-hosted Ubuntu image satisfies this, including the minimal
-  `ubuntu-slim` image; PyYAML arrives through the install below. That image's
+- Every GitHub-hosted Ubuntu image from 24.04 on, including the minimal
+  `ubuntu-slim` image, satisfies this; PyYAML arrives through the install
+  below. The `ubuntu-slim` image's
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. The CLI is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`

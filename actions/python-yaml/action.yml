@@ -1,5 +1,5 @@
 name: shipmate python-yaml
-description: Install python3-yaml with passwordless sudo apt-get when the runner's python3 cannot import PyYAML. Never fails; when the install does not take it warns, and the engine script that parses YAML reports the reason; it refuses, or doctor notes it once.
+description: "Install python3-yaml with passwordless sudo apt-get when the runner's python3 cannot import PyYAML. Never fails; when the install does not take it warns, and the engine script that parses YAML reports the reason: it refuses, or, in doctor, notes it once."
 runs:
   using: composite
   steps:
