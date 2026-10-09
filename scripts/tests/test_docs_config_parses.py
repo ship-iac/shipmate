@@ -32,6 +32,7 @@ from collections import Counter
 import pytest
 import yaml
 from _loader import CONFIG_FENCE_MARKER, ENGINE, doc_fences, is_config_fence, load_script
+from _shipmate import load_workflow_text
 
 DOCS = ENGINE / "docs"
 ec = load_script("env-config")
@@ -86,7 +87,7 @@ def test_no_unmarked_fence_is_a_config_file():
         if is_config_fence(body):
             continue
         try:
-            doc = yaml.safe_load(body)
+            doc = load_workflow_text(body)
         except yaml.YAMLError:
             continue
         if isinstance(doc, dict) and {"layout", "identities", "environments"} & set(doc):

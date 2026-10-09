@@ -2,7 +2,7 @@ import sys
 
 import pytest
 import yaml
-from _loader import ACTIONS, WORKFLOWS, load_script
+from _loader import ACTIONS, WORKFLOWS, load_script, workflow_yaml
 from _shipmate import load_config_text, load_workflow_text, yaml_error_text
 
 
@@ -164,6 +164,14 @@ def test_the_workflow_loader_matches_safe_load_on_every_engine_file(path):
     engine files then reads as a string."""
     text = path.read_text(encoding="utf-8")
     assert load_workflow_text(text) == _safe_load_with_on(text)
+
+
+def test_the_guard_harness_parses_workflows_with_the_workflow_loader():
+    """The guards read engine files the way doctor reads a consumer's, so `on` stays a string
+    key. Reddens on parsing `_loader._parse_yaml` with `yaml.safe_load`: `on` becomes `True`."""
+    doc = workflow_yaml("plan.yml")
+    assert "on" in doc
+    assert True not in doc
 
 
 def test_shipmate_imports_without_pyyaml_and_the_loader_raises(monkeypatch):

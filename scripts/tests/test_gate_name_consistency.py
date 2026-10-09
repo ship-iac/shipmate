@@ -279,7 +279,7 @@ def _reusable_target_name(uses):
 
 
 def _declares_app_private_key_secret(workflow_doc):
-    on = workflow_doc.get("on") or workflow_doc.get(True) or {}
+    on = workflow_doc.get("on") or {}
     wc = (on or {}).get("workflow_call") or {}
     secrets = wc.get("secrets") or {}
     return "SHIPMATE_APP_PRIVATE_KEY" in secrets
@@ -297,7 +297,7 @@ def test_app_key_secret_interface_is_never_required():
     offenders = []
     for wf in sorted(WORKFLOWS.glob("*.yml")):
         doc = workflow_yaml(wf)
-        on = doc.get("on") or doc.get(True) or {}
+        on = doc.get("on") or {}
         decl = ((on.get("workflow_call") or {}).get("secrets") or {}).get(
             "SHIPMATE_APP_PRIVATE_KEY"
         )

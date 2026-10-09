@@ -86,8 +86,7 @@ def test_the_decision_output_reaches_the_callers():
     apply would then refuse. Mutation: point the workflow output at a job output that does not
     exist."""
     spec = workflow_yaml(_REVIEW_WORKFLOW)
-    # PyYAML reads the bare key `on` as the boolean True.
-    assert spec[True]["workflow_call"]["outputs"]["decision"]["value"] == (
+    assert spec["on"]["workflow_call"]["outputs"]["decision"]["value"] == (
         "${{ jobs.review.outputs.decision }}"
     )
     assert _review()["outputs"] == {"decision": "${{ steps.rd.outputs.decision }}"}

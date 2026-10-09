@@ -12,8 +12,8 @@ import subprocess
 import sys
 
 import pytest
-import yaml
 from _loader import ENGINE, load_script
+from _shipmate import load_workflow_text
 
 onboard = load_script("onboard")
 ec = load_script("env-config")
@@ -1781,7 +1781,7 @@ _EXPECTED_CALLEES = {
 
 def _callees(text):
     """The engine reusable workflow each job of a rendered shim calls, in document order."""
-    doc = yaml.safe_load(text)
+    doc = load_workflow_text(text)
     return [
         job["uses"].split(_CALL_PATH, 1)[1].split("@", 1)[0]
         for job in doc["jobs"].values()

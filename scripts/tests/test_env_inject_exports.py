@@ -348,7 +348,7 @@ def _declared_engine_secrets(workflows=WORKFLOWS):
     names = set()
     for path in sorted(workflows.glob("*.yml")):
         spec = workflow_yaml(path)
-        on = spec.get(True, spec.get("on"))
+        on = spec.get("on")
         call = on.get("workflow_call") if isinstance(on, dict) else None
         names |= set(((call or {}).get("secrets") or {}).keys())
     return names

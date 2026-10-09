@@ -4,9 +4,9 @@ import os
 import pathlib
 
 import pytest
-import yaml
 from _loader import ENGINE as _ENGINE
 from _loader import action_steps, load_script, run_lines, step_by
+from _shipmate import load_workflow_text
 
 sc = load_script("summary-comment")
 
@@ -954,7 +954,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_UNMANAGED": "${{ inputs.unmanaged-stacks }}",
     }
     # Mutation: `required: true` (GitHub does not enforce it, but it misdocuments a draft run).
-    decl = yaml.safe_load(src)["inputs"]["unmanaged-stacks"]
+    decl = load_workflow_text(src)["inputs"]["unmanaged-stacks"]
     assert {k: v for k, v in decl.items() if k != "description"} == {
         "required": False,
         "default": "",

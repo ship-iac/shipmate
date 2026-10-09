@@ -26,7 +26,7 @@ def _step(needle):
 def test_the_workflow_declares_no_inputs_and_one_secret():
     """Mutation: add any `workflow_call` input, or make the secret `required: true` -- which
     fails at load time for every consumer scoping the key to an environment."""
-    call = workflow_yaml(WF)[True]["workflow_call"]
+    call = workflow_yaml(WF)["on"]["workflow_call"]
     assert call.get("inputs") is None
     assert call["secrets"] == {"SHIPMATE_APP_PRIVATE_KEY": {"required": False}}
 

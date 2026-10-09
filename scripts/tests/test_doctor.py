@@ -4,8 +4,8 @@ import os
 import sys
 
 import pytest
-import yaml
 from _loader import ACTIONS, ENGINE, SCRIPTS, load_script
+from _shipmate import load_workflow_text
 from test_env_config_yaml_fixtures import CANONICAL
 
 doctor = load_script("doctor")
@@ -3300,7 +3300,7 @@ def test_the_dispatch_probe_accepts_any_spelling_of_the_option_list(options):
 
     Mutation: compare the parsed options against the flow string `_VERB_OPTIONS` instead of
     `_VERB_OPTION_LIST` -- every row reddens."""
-    assert yaml.safe_load(options) == ["plan", "apply", "unlock"], (
+    assert load_workflow_text(options) == ["plan", "apply", "unlock"], (
         "the fixture must be the same sequence the fence declares, or it proves nothing"
     )
     text = _SHIPMATE_WF.replace(
@@ -3465,7 +3465,7 @@ def test_the_routing_table_matches_the_documented_workflow_file():
 
     Mutation: change one clause of one `if:` in the fence; change one entry of `ROUTING_IFS`.
     """
-    jobs = yaml.safe_load(_documented_workflow_file())["jobs"]
+    jobs = load_workflow_text(_documented_workflow_file())["jobs"]
     documented = {
         job["uses"].split("/.github/workflows/", 1)[1].split("@", 1)[0]: doctor._normalize_if(
             job.get("if")

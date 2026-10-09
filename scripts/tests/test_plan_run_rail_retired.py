@@ -36,12 +36,8 @@ PER_CELL_PLAN_RUN = "${{ matrix.plan_run_id }}"
 
 
 def _inputs(spec):
-    """Input names per trigger, for the triggers that declare any.
-
-    `on:` is YAML 1.1's `on`/`yes`/`y` family, so `yaml.safe_load` hands the key
-    back as `True`; reading only the string spelling would find nothing.
-    """
-    on = spec.get("on", spec.get(True)) or {}
+    """Input names per trigger, for the triggers that declare any."""
+    on = spec.get("on") or {}
     found = {}
     for trigger in ("workflow_call", "workflow_dispatch"):
         block = on.get(trigger) if isinstance(on, dict) else None

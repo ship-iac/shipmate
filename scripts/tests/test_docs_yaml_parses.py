@@ -1,7 +1,8 @@
-"""Guards every ```yaml fence in README.md and docs/*.md. Each must load via yaml.safe_load, and
-must load to a mapping: the fences are workflow files, and one that loads to a bare string or
-None is a mangled paste rather than a workflow. Discovery must lose none of them, so a fence the
-pairing logic drops fails the guard rather than going unchecked.
+"""Guards every ```yaml fence in README.md and docs/*.md. Each must load via the engine's
+workflow loader, `load_workflow_text`, and must load to a mapping: the fences are workflow files,
+and one that loads to a bare string or None is a mangled paste rather than a workflow. Discovery
+must lose none of them, so a fence the pairing logic drops fails the guard rather than going
+unchecked.
 
 Threat model: the realistic failure is an accidental bad paste, or a later edit that outdents a
 line and breaks a block's indentation. Reviewers reading prose do not reliably see either. This
@@ -27,6 +28,7 @@ from _loader import (
     load_script,
     workflow_yaml,
 )
+from _shipmate import load_workflow_text
 
 DOCS = ENGINE / "docs"
 
@@ -63,7 +65,7 @@ def test_every_fence_was_discovered():
 def test_yaml_fence_loads_to_a_mapping(page, line, body):
     where = f"{page.relative_to(ENGINE).as_posix()}:{line}"
     try:
-        doc = yaml.safe_load(body)
+        doc = load_workflow_text(body)
     except yaml.YAMLError as exc:
         pytest.fail(f"{where} ```yaml fence does not parse: {exc}")
     assert isinstance(doc, dict), (
@@ -106,7 +108,7 @@ def test_documented_wrapper_passes_engine_secrets_by_name(page, line, body):
     entry whose value expression was mistyped, and reading the expected set out of the callee
     would pass whatever that file says.
     """
-    for job_name, target, job in _engine_workflow_calls(yaml.safe_load(body)):
+    for job_name, target, job in _engine_workflow_calls(load_workflow_text(body)):
         where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
         assert target in ENGINE_CALL_SECRETS, (
             f"{where} calls `{target}`, which _loader.ENGINE_CALL_SECRETS does not "
@@ -126,7 +128,7 @@ def test_the_wrapper_snippets_are_still_being_found():
     found = sorted(
         (page.relative_to(ENGINE).as_posix(), target)
         for page, _, body in _FENCES
-        for _, target, _ in _engine_workflow_calls(yaml.safe_load(body))
+        for _, target, _ in _engine_workflow_calls(load_workflow_text(body))
     )
     assert found == [
         ("docs/getting-started.md", "apply.yml"),
@@ -145,7 +147,7 @@ def _workflow_call_inputs(target):
     to come from the file it is checking. The hand-written side is the documented wrapper.
     """
     doc = workflow_yaml(target)
-    on = doc.get("on", doc.get(True))
+    on = doc.get("on")
     return (on["workflow_call"].get("inputs") or {}) if isinstance(on, dict) else {}
 
 
@@ -168,7 +170,7 @@ def test_documented_wrapper_passes_exactly_the_declared_engine_inputs(page, line
 
     Mutation: a bare `with:` under the getting-started `plan` job.
     """
-    for job_name, target, job in _engine_workflow_calls(yaml.safe_load(body)):
+    for job_name, target, job in _engine_workflow_calls(load_workflow_text(body)):
         where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
         assert (WORKFLOWS / target).is_file(), (
             f"{where} calls `{target}`, which this engine does not ship -- the pasted "
@@ -204,7 +206,7 @@ def _workflow_call_secrets(target):
     registry itself.
     """
     doc = workflow_yaml(target)
-    on = doc.get("on", doc.get(True))
+    on = doc.get("on")
     return (on["workflow_call"].get("secrets") or {}) if isinstance(on, dict) else {}
 
 
@@ -276,7 +278,7 @@ def test_documented_wrapper_grants_every_permission_the_callee_requests(page, li
     Mutations: drop `id-token: write` from the plan shim, `actions: read` from the drift shim,
     `issues: write` from the comment-ops shim.
     """
-    for job_name, target, job in _engine_workflow_calls(yaml.safe_load(body)):
+    for job_name, target, job in _engine_workflow_calls(load_workflow_text(body)):
         where = f"{page.relative_to(ENGINE).as_posix()}:{line} job `{job_name}`"
         granted = job.get("permissions") or {}
         assert isinstance(granted, dict), (
@@ -308,7 +310,7 @@ def test_the_documented_wrapper_grants_no_permissions_at_the_top_level():
     fence = load_script("onboard")._fence(
         (DOCS / "getting-started.md").read_text(encoding="utf-8"), "shipmate"
     )
-    doc = yaml.safe_load(fence)
+    doc = load_workflow_text(fence)
     assert doc["permissions"] == {}, (
         f"the documented workflow file grants {doc['permissions']!r} at the top level; a job "
         "that loses its own block would inherit it"
@@ -316,12 +318,8 @@ def test_the_documented_wrapper_grants_no_permissions_at_the_top_level():
 
 
 def _dispatch_inputs(doc):
-    """(input name, spec) per `workflow_dispatch` input in a fence.
-
-    `on:` is YAML 1.1's `y`/`yes`/`on` family, so `yaml.safe_load` gives the key back as `True`.
-    Reading only the string spelling would silently find nothing.
-    """
-    on = doc.get("on", doc.get(True)) if isinstance(doc, dict) else None
+    """(input name, spec) per `workflow_dispatch` input in a fence."""
+    on = doc.get("on") if isinstance(doc, dict) else None
     wd = on.get("workflow_dispatch") if isinstance(on, dict) else None
     for name, spec in ((wd.get("inputs") if isinstance(wd, dict) else None) or {}).items():
         yield name, spec if isinstance(spec, dict) else {}
@@ -365,7 +363,7 @@ def test_the_documented_wrapper_inputs_are_exactly_these():
     found = sorted(
         (page.relative_to(ENGINE).as_posix(), doc.get("name"), name, *shape)
         for page, _, body in _FENCES
-        for doc in [yaml.safe_load(body)]
+        for doc in [load_workflow_text(body)]
         for name, spec in _dispatch_inputs(doc)
         for shape in [
             (

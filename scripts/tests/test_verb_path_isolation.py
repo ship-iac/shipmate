@@ -169,9 +169,7 @@ PREFLIGHT_WITH = {
 
 
 def _inputs(workflow):
-    # pyyaml parses a bare `on:` key as boolean True.
-    spec = workflow_yaml(workflow)
-    on = spec.get("on") or spec.get(True)
+    on = workflow_yaml(workflow).get("on")
     return (on["workflow_call"].get("inputs") or {}) if isinstance(on, dict) else {}
 
 

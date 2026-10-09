@@ -19,6 +19,7 @@ import ast
 import pytest
 import yaml
 from _loader import ACTIONS, ENGINE, SCRIPTS, WORKFLOWS
+from _shipmate import _loaders
 
 #: U+2014 em dash, U+2013 en dash, U+00B7 middle dot.
 BANNED = ("—", "–", "·")
@@ -82,7 +83,7 @@ def _yaml_files():
 
 def _yaml_hits(path):
     """Composed, not loaded, so each scalar keeps the line it starts on."""
-    root = yaml.compose(path.read_text(encoding="utf-8"), Loader=yaml.SafeLoader)
+    root = yaml.compose(path.read_text(encoding="utf-8"), Loader=_loaders()[1])
     hits, stack = [], [root]
     while stack:
         node = stack.pop()

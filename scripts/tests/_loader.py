@@ -30,8 +30,7 @@ import subprocess
 import textwrap
 
 import pytest
-import yaml
-from _shipmate import _load
+from _shipmate import _load, load_workflow_text
 
 load_script = _load
 _SCRIPTS = pathlib.Path(__file__).resolve().parents[1]
@@ -88,7 +87,7 @@ ENGINE_CALL_SECRETS = {
 @functools.cache
 def _parse_yaml(path):
     """Parsed engine YAML file, cached: nothing in the suite rewrites these files."""
-    spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+    spec = load_workflow_text(path.read_text(encoding="utf-8"))
     # Never fall back to ``{}``: a file that parses to None, emptied by a bad merge or fully
     # commented out, would hand every guard zero steps, and a guard over zero steps passes while
     # asserting nothing.
