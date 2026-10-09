@@ -3085,8 +3085,8 @@ def test_an_alias_graph_costs_bounded_time_wherever_it_sits(monkeypatch, request
 
 
 def test_a_runner_without_pyyaml_gets_one_notice_for_every_probe_that_parses(monkeypatch):
-    """The runner refusal once, as a NOTICE, in place of the workflow, config and environment
-    probes; nothing claims the Python version is at fault, the report's config section
+    """The runner refusal once, as a NOTICE, in place of the workflow, config, environment and
+    review probes; nothing claims the Python version is at fault, the report's config section
     included.
 
     Mutations: delete the up-front check in `warnings` -- the four workflow probes and the
@@ -3106,6 +3106,30 @@ def test_a_runner_without_pyyaml_gets_one_notice_for_every_probe_that_parses(mon
         )
     ]
     assert doctor.config_status(ctx) == []
+
+
+def test_a_runner_without_pyyaml_skips_the_count_zero_review_finding(monkeypatch):
+    """At count 0 the review probe names the gated environments from the default branch's
+    table, which this runner cannot parse: the one PyYAML NOTICE stands in for it.
+
+    Mutation: drop `_review_rule_warnings.parses_yaml` -- the unreadable table reads as no
+    gated environment and the sole-maintainer NOTICE follows."""
+    responses = _healthy_responses()
+    responses[f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100"] = [
+        _gate_rule()[0],
+        _pull_request_rule(code_owner=True, count=0),
+    ]
+    responses[_CONFIG_ON_DEFAULT] = _wf_file(_GATED_AND_UNGATED_TABLE)
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    monkeypatch.setitem(sys.modules, "yaml", None)
+    assert doctor.warnings(_ctx()) == [
+        (
+            doctor.NOTICE,
+            "the engine needs PyYAML for python3 and this runner has none. Install "
+            "python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; "
+            "CONTRACT.md section Runner prerequisites lists it.",
+        )
+    ]
 
 
 def test_the_shipmate_yml_probe_is_registered_and_runs_its_three_finders_in_order(monkeypatch):
@@ -3496,6 +3520,25 @@ def test_the_routing_probe_reports_a_job_whose_if_was_edited():
     text = _SHIPMATE_WF.replace(" && inputs.verb == 'apply'\n", "\n", 1)
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _EDITED_IF_TEXT)
+    ]
+
+
+def test_the_routing_probe_reports_an_if_that_is_not_one_expression():
+    """A list under `if:` is no expression to compare, so it gets its own wording rather than
+    a rendered `None`.
+
+    Mutation: drop the non-scalar branch -- the finding says the job is selected by `None`."""
+    text = _SHIPMATE_WF.replace(
+        "    if: github.event_name == 'push'\n", "    if: [github.event_name == 'push']\n", 1
+    )
+    assert text != _SHIPMATE_WF
+    assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
+        (
+            doctor.WARNING,
+            "`shipmate.yml`'s job calling the engine's `deploy.yml` has an `if:` that is not a "
+            "single expression. Write `if: github.event_name == 'push'` "
+            "(docs/getting-started.md).",
+        )
     ]
 
 

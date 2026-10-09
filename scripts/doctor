@@ -253,6 +253,9 @@ def _review_rule_warnings(ctx):
     return out + _no_review_findings(ctx, branch, code_owner, last_push)
 
 
+_review_rule_warnings.parses_yaml = True
+
+
 def _no_review_findings(ctx, branch, code_owner, last_push):
     """The count-0 finding. Gated environments are every one the default branch's table lists
     or a cell declares, less its `gated: false` entries.
@@ -1432,6 +1435,15 @@ def _routing_finding(doc, name, engine):
                     f"`{name}`'s job calling the engine's `{callee}` declares no `if:`, so it "
                     "then runs on every one of this file's triggers, so a `push` starts a plan "
                     f"and an `issue_comment` starts an apply. Add `if: {expected}` "
+                    "(docs/getting-started.md).",
+                )
+            )
+        elif _scalar(found) is None:
+            out.append(
+                (
+                    WARNING,
+                    f"`{name}`'s job calling the engine's `{callee}` has an `if:` that is not a "
+                    f"single expression. Write `if: {expected}` "
                     "(docs/getting-started.md).",
                 )
             )
