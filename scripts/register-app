@@ -33,7 +33,7 @@ import threading
 import urllib.parse
 import webbrowser
 
-from _shipmate import REPO_RE, utf8_output
+from _shipmate import APP_ID_VAR, REPO_RE, utf8_output
 from _shipmate import run as _run
 
 #: `code` is interpolated into the `app-manifests/<code>/conversions` API path and arrives over
@@ -188,8 +188,8 @@ def main(argv=None):
     # otherwise lose a key that exists only in this process.
     print(f"App created: id={app_id} slug={app.get('slug')}")
     _write_key(args.out, app["pem"])
-    _run(["gh", "variable", "set", "SHIPMATE_APP_ID", "--repo", args.repo, "--body", app_id])
-    print(f"Stored SHIPMATE_APP_ID (variable) and wrote the private key to {args.out}.")
+    _run(["gh", "variable", "set", APP_ID_VAR, "--repo", args.repo, "--body", app_id])
+    print(f"Stored {APP_ID_VAR} (variable) and wrote the private key to {args.out}.")
     print(
         "Next: install the App (docs/github-app.md §4), then run scripts/onboard in each "
         "consumer checkout to place that key and the rest."

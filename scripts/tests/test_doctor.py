@@ -561,9 +561,7 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
     assert asked == [
         listing,
         on_default,
-        listing,
         f"repos/{_REPO}/environments/dev-eu",
-        listing,
         f"repos/{_REPO}/environments/dev-eu/secrets?per_page=100",
     ]
 
@@ -5593,3 +5591,23 @@ def test_workflow_scans_in_one_run_share_one_read_of_each_file(monkeypatch):
         names = doctor._scan_workflow_texts(ctx, _REF, lambda text, name: [name], None)
         assert names == ["a.yml", "b.yml"]
     assert sorted(reads) == sorted(responses)
+
+
+def test_a_failed_shared_read_fails_every_probe_that_asks(monkeypatch):
+    """A failed read is kept and re-raised to each later reader, so each probe degrades on its
+    own and the endpoint is not asked again.
+
+    Mutation: keep `(None, None)` for a failed read in `_read_once`; the second reader gets
+    None back instead of the failure."""
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        raise SystemExit("::error::command failed (1): gh api " + path)
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    ctx = _ctx()
+    for _ in range(2):
+        with pytest.raises(SystemExit):
+            doctor._existing_env_names(ctx)
+    assert asked == [f"repos/{_REPO}/environments?per_page=100"]
