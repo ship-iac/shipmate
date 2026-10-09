@@ -718,6 +718,34 @@ Two locks this verb does not reach:
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
 
+### `could not install python3-yaml`, or `the engine needs PyYAML`
+
+The engine's scripts parse YAML with PyYAML, through the runner's `python3`.
+Before the first step that parses YAML, the engine's `python-yaml` action
+checks that `python3` imports it. When it does not, the action installs
+`python3-yaml` with `sudo -n apt-get`. When that install does not take, the
+step warns and the job continues:
+
+> could not install python3-yaml on this runner; the steps that read YAML report it.
+
+The script that needs the parser then refuses with:
+
+> the engine needs PyYAML for python3 and this runner has none. Install python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; CONTRACT.md section Runner prerequisites lists it.
+
+On a plan, the gate's description is `detect failed: ` followed by the start
+of this refusal, cut to the 140 characters a commit status holds.
+`shipmate doctor` prints it once as a notice and skips its probes that parse
+YAML.
+
+The install needs a Debian or Ubuntu runner with passwordless `sudo`. Fix:
+
+- A self-hosted runner without passwordless `sudo`, or not on Debian or
+  Ubuntu: preinstall PyYAML 6 or later for the image's `python3` (the
+  `python3-yaml` package on Debian or Ubuntu).
+- A runner with passwordless `sudo` on Debian or Ubuntu: the step log shows
+  `apt-get`'s own error. A package-mirror outage clears on a re-run of the
+  failed job.
+
 ### `Terramate install failed`
 
 The `Install Terramate` step in `actions/setup` failed. Every annotation starts

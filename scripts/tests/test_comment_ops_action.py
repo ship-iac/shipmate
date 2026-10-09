@@ -1384,6 +1384,7 @@ _STEP_NAMES = [
     "Reject malformed / reserved command",
     "Post help",
     "Acknowledge a command that changes no infrastructure",
+    "$/actions/python-yaml",
     "Read the commenter's repository permission",
     "Authorize the commenter's permission",
     "Reject a commenter without write access",
@@ -1408,7 +1409,7 @@ _STEP_NAMES = [
 
 
 def test_the_action_runs_exactly_these_steps_in_this_order():
-    assert [s.get("name") for s in action_steps("comment-ops")] == _STEP_NAMES
+    assert [s.get("name") or s["uses"] for s in action_steps("comment-ops")] == _STEP_NAMES
 
 
 def _by_id(step_id):

@@ -24,7 +24,7 @@ satisfied by a comment and by an inverted operator.
 import re
 
 import pytest
-from _loader import ENGINE, action_yaml, workflow_yaml
+from _loader import ENGINE, step_by, workflow_yaml
 
 _MINT = "actions/create-github-app-token"
 _CHECKOUT = "actions/checkout"
@@ -156,7 +156,7 @@ def test_the_action_feeds_every_shipmate_env_var_the_script_reads(detect, action
     assert "SHIPMATE_REVIEW_DECISION" in read, (
         f"{detect} no longer reads the review decision: {sorted(read)}"
     )
-    step = action_yaml(action)["runs"]["steps"][0]
+    step = step_by(action, id="d")
     missing = read - set(step["env"])
     assert not missing, f"the {action} action's env: block omits {sorted(missing)} for {detect}"
 

@@ -44,6 +44,7 @@ outputs:
 runs:
   using: composite
   steps:
+    - uses: $/actions/python-yaml
     - name: Detect
       id: d
       shell: bash

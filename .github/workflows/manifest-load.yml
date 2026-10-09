@@ -53,6 +53,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/pr-facts@main
       - if: false
+        uses: ship-iac/shipmate/actions/python-yaml@main
+      - if: false
         uses: ship-iac/shipmate/actions/setup@main
       - if: false
         uses: ship-iac/shipmate/actions/state@main

@@ -144,6 +144,8 @@ runs:
           fi
         done < mirror.jsonl
 
+    - uses: $/actions/python-yaml
+
     - name: "Doctor: settings-drift warnings (annotations only, never blocks)"
       id: doctor
       shell: bash

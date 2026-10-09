@@ -899,7 +899,7 @@ def test_doctor_runs_before_the_upsert_and_records_warned_once():
     )
     assert doctor["id"] == "doctor"
     assert run_lines(doctor) == _DOCTOR_RUN
-    names = [s["name"] for s in action_steps("summary")]
+    names = [s.get("name") for s in action_steps("summary")]
     assert names.index(doctor["name"]) < names.index("Upsert sticky comment")
 
 

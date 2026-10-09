@@ -1809,11 +1809,12 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 ## Runner prerequisites
 
 - shipmate's actions are composite actions: their steps run under `bash`
-  and call standard-library-only Python scripts, `git`, `curl`, `jq`, `openssl`,
-  and the `gh` CLI. A runner must therefore provide: `bash`, `python3`
-  (Python ≥ 3.11), `git`, `curl`, `jq`, `openssl`, `gh`, and GNU coreutils
-  (`setup` hashes the Terramate download with `sha256sum`).
-- Every GitHub-hosted Ubuntu image satisfies this, including the minimal
+  and call Python scripts, `git`, `curl`, `jq`, `openssl`, and the `gh` CLI. A
+  runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
+  PyYAML ≥ 6 importable by it), `git`, `curl`, `jq`, `openssl`, `gh`, and GNU
+  coreutils (`setup` hashes the Terramate download with `sha256sum`).
+- Every GitHub-hosted Ubuntu image satisfies this, PyYAML through the
+  install below, including the minimal
   `ubuntu-slim` image, whose
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. That one is load-bearing: the default-branch probe in
@@ -1824,15 +1825,19 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   on `ubuntu-slim` unconditionally: their workflows take no runner input.
   `docs/aws.md` §Runner choice lists them. An account that cannot use that
   label leaves them waiting for a runner.
-- The Python scripts have no third-party dependencies — nothing is
-  `pip install`ed at runtime, so no Python setup step (or network access
-  to a package index) is required or performed.
-- The 3.11 floor is load-bearing rather than nominal: `.github/shipmate.toml`
-  is read with `tomllib`, which the standard library gained in 3.11. Nothing in
-  the engine installs or pins a Python, so `scripts/env-config` checks
-  `sys.version_info` ahead of the import and refuses with the version it found
-  and this clause. A `runs_on:` image older than that — `ubuntu-22.04` ships
-  3.10 — fails at `detect`.
+- PyYAML is the scripts' one third-party dependency; they parse the config
+  and workflow files with it. Before the first step that parses YAML, the
+  engine's `python-yaml` action checks that `python3` imports it and, when it
+  does not, installs `python3-yaml` with `sudo -n apt-get`. That works on a
+  Debian or Ubuntu runner with passwordless `sudo`, as GitHub-hosted Ubuntu
+  runners are. Any other runner must preinstall PyYAML ≥ 6 for its
+  `python3`. The install never fails the step: when it does not take, the step
+  warns, and the script that needs the parser refuses, naming this section.
+  Nothing is `pip install`ed.
+- Nothing in the engine installs or pins a Python, so `scripts/env-config`
+  checks `sys.version_info` before reading the config and refuses with the
+  version it found and this section. A `runs_on:` image older than 3.12 —
+  `ubuntu-22.04` ships 3.10 — fails at `detect`.
 - Engine steps use GitHub's `$/` self-repository syntax, which needs runner 2.336.0 or newer,
   and shipmate supports it on github.com only. A self-hosted runner below that version, and
   GitHub Enterprise Server, cannot run the engine. The error such a runner shows is unmeasured.

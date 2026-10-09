@@ -18,8 +18,9 @@ Contribution etiquette and licensing: [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 The dev toolchain is [Astral](https://astral.sh)'s uv + ruff + ty, with
 pytest. uv manages the dev environment and the pinned tool versions through
 `pyproject.toml` and `uv.lock`. It is for tooling alone: shipmate ships no
-importable package (`[tool.uv] package = false`) and has no runtime
-dependencies — the helper scripts are standard library only.
+importable package (`[tool.uv] package = false`). The helper scripts' one
+runtime dependency is PyYAML, which runners provide (`CONTRACT.md` §Runner
+prerequisites); `uv` installs it into the dev environment.
 
 Get this green before opening a PR:
 

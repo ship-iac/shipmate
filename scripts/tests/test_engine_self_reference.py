@@ -22,7 +22,7 @@ LOCAL_PREFIX = "$/actions/"
 REMOTE_PREFIX = "ship-iac/shipmate/"
 #: Composite actions today. Hand-written: the two tests globbing `actions/*/action.yml` assert
 #: nothing at all if that glob matches nothing.
-ACTION_COUNT = 20
+ACTION_COUNT = 21
 SHA_PIN = re.compile(r"ship-iac/shipmate/[^@\s'\"]+@[0-9a-f]{40}")
 
 
@@ -163,7 +163,11 @@ def test_composite_actions_reach_nested_actions_through_the_local_path_only():
         for step in doc["runs"].get("steps") or []:
             if _uses(step).startswith("$/"):
                 local.add(_uses(step))
-    assert local == {local_action("state"), local_action("verify-app-key")}
+    assert local == {
+        local_action("python-yaml"),
+        local_action("state"),
+        local_action("verify-app-key"),
+    }
 
 
 #: Every engine action referenced from a workflow step or a composite action step, hand-written
@@ -183,6 +187,7 @@ LOCAL_ACTIONS = {
     "gate-refresh",
     "plan-cell",
     "pr-facts",
+    "python-yaml",
     "setup",
     "state",
     "summary",
