@@ -432,11 +432,11 @@ def shared_envs(table):
 
 
 def env_names(env, shared):
-    """[(GitHub Environment name, role)] one logical env binds, `shared` being
-    `shared_envs`' set: `[(env, "shared")]`, or the `<env>-plan` / `<env>-apply` pair."""
-    if env in shared:
-        return [(env, "shared")]
-    return [(f"{env}-plan", "plan"), (f"{env}-apply", "apply")]
+    """{role: GitHub Environment name} one logical env binds: `{"shared": env}` when
+    `shared` is true, else `{"plan": "<env>-plan", "apply": "<env>-apply"}`, plan first."""
+    if shared:
+        return {"shared": env}
+    return {"plan": f"{env}-plan", "apply": f"{env}-apply"}
 
 
 def explicit_envs(table):
@@ -1114,7 +1114,6 @@ def resolve(table, env, path, workload):
     environments = _mapping(table.get("environments", {}), "environments")
     entry = _mapping(environments.get(env, {}), f"environment {env}")
     shared, config_path = _consulted(table, env, path)
-    names = {role: name for name, role in env_names(env, {env} if shared else set())}
     role = ""
     if "identity" in entry and outside_workloads(table, env, workload) is None:
         role = _role(table["identities"][entry["identity"]], entry, config_path, workload)
@@ -1123,7 +1122,7 @@ def resolve(table, env, path, workload):
         "cred_region": entry.get("region", "") if "identity" in entry else "",
         "tf_vars": {**_derived(table.get("layout"), env, entry), **entry.get("tf_vars", {})},
         "config_path": config_path,
-        "env_binding": names["shared" if shared else path],
+        "env_binding": env_names(env, shared)["shared" if shared else path],
     }
 
 
