@@ -7,7 +7,7 @@ silently break that route: a cell step or action dropping the identity input, a 
 one of the old names on the job (which beats `$GITHUB_ENV`), and an `env-inject` step that runs
 after the plan it was supposed to feed. All leave a green run and a wrong fingerprint.
 
-Every assertion is a whole hand-written value against `yaml.safe_load` output. A membership check
+Every assertion is a whole hand-written value against parsed output. A membership check
 passes an entry whose expression was mistyped; a substring check is satisfied by a comment.
 """
 

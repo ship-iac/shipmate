@@ -170,7 +170,7 @@ never used.
 
   | Repo layout | Env identity injected | Mechanism |
   |-------------|--------------------------------------------------|-----------|
-  | **Variable-driven backend**, `layout = "tf_vars"` (one stack config deployed N×; backend path `…/${var.env}/${var.region}/…`) | `TF_VAR_env`, `TF_VAR_region` | OpenTofu variables drive the backend path and resources |
+  | **Variable-driven backend**, `layout: tf_vars` (one stack config deployed N×; backend path `…/${var.env}/${var.region}/…`) | `TF_VAR_env`, `TF_VAR_region` | OpenTofu variables drive the backend path and resources |
   | **Workspace-per-env** | `TF_WORKSPACE` | OpenTofu auto-selects (and auto-creates) the named workspace |
   | **Folder-per-env/region** (leaf per env×region, hardcoded state) | *none* | env/region are fixed by the leaf's path; each leaf owns its state |
 
@@ -183,7 +183,7 @@ never used.
   change). Membership in an environment is always by tag, regardless of layout.
 
   **The environment table supplies those values.** Every repository declares a
-  `layout` in `.github/shipmate.toml`, and every cell takes its identity from
+  `layout` in `.github/shipmate-config.yml`, and every cell takes its identity from
   that file on the repository's default branch (§Environment table). There is no
   second source.
 - **One writer puts those variables in the cell's process.**
@@ -245,7 +245,7 @@ never used.
   A repository may therefore mix modes freely — some envs shared, some split —
   and no workflow file names either.
 - **A logical env may opt into one shared environment (shared mode).**
-  `shared = true` in its `[environments.<env>]` entry makes both paths bind the
+  `shared: true` in its `environments.<env>` entry makes both paths bind the
   bare `<env>` — one environment, no suffix. The price is stated in
   `docs/hardening.md` (§6 and §7–9): a protection rule on a shared environment
   gates the plan cells and every drift sweep covering it too, so the reviewer gate is
@@ -255,14 +255,14 @@ never used.
     pull request cannot move its own cells between the two namings. Changing it
     is an ordinary pull request to the default branch, under the same review as
     any other change to the table.
-  - `shared` must be a TOML boolean: a quoted `"true"` refuses at detect
-    rather than reading as unshared. An absent key and `shared = false` both
-    mean split.
+  - `shared` must be `true` or `false`: any other value (`yes`, `True`) refuses
+    at detect rather than reading as unshared. An absent key and `shared: false`
+    both mean split.
   - **`-plan` and `-apply` are reserved suffixes for logical env names.** A
     logical env literally named `foo-apply` makes the naming undecidable (is an
     existing `foo-apply` that env's shared environment, or `foo`'s apply
     environment?) and binds `foo-apply-apply` on the apply path. An
-    `[environments.<name>]` entry or a `needs` item carrying the suffix refuses;
+    `environments.<name>` entry or a `needs` item carrying the suffix refuses;
     an `env/<name>` stack tag is not checked.
 - **A binding that disagrees with the environment names is invisible to the
   fingerprint, on every layout.** Both sides derive a cell's variables from
@@ -285,7 +285,7 @@ never used.
   every cell in the incoming matrix, lists the repository's environments once,
   and fails the run naming every binding the repository does not have, plus
   both ways to fix it: create that environment, or correct the environment's
-  entry in `.github/shipmate.toml`. It is what refuses a binding naming no
+  entry in `.github/shipmate-config.yml`. It is what refuses a binding naming no
   environment: it compares existence, not table content, and a cell resolves its variables
   from the table whatever it bound. It runs once per `apply-env-level.yml` call,
   so an env-ordered deploy can have completed an earlier level's applies before a
@@ -315,7 +315,7 @@ never used.
   below) and GitHub Environment configuration. Adding a new environment is
   purely a data change: add its entry to the environment table, create its
   GitHub Environments (`<env>-plan` and `<env>-apply`, or one bare `<env>`
-  when its entry holds `shared = true`), then tag the stacks that belong to it. The
+  when its entry holds `shared: true`), then tag the stacks that belong to it. The
   table entry merges on its own pull request, before the tags — §Adding and
   removing an environment has why the order is not optional. No workflow YAML is
   edited to add or remove an environment — every cell job binds the row's
@@ -351,7 +351,7 @@ never used.
   chain — `tm_try(env.TF_VAR_env, env.env, "dev")`. To let `run.env` own a
   variable, leave it out of the table's `tf_vars`.
   - What the row does not hold stays the consumer's. `TF_VAR_env` is an
-    ordinary variable under `layout = "folder"`, and `TF_WORKSPACE` is the
+    ordinary variable under `layout: folder`, and `TF_WORKSPACE` is the
     table's only under `workspace` or through a `tf_vars` entry. Under the
     `tf_vars` and `folder` layouts, a `run.env` `TF_WORKSPACE` selects the same
     workspace at plan and apply, and the cell actions run `scripts/state-path`
@@ -384,7 +384,7 @@ never used.
 ## Environment table
 
 A repository declares its environments, their regions and the credentials they
-name in `.github/shipmate.toml`, read with `tomllib` from the standard library.
+name in `.github/shipmate-config.yml`, a YAML file read with PyYAML.
 The file is required, and so is `layout`: it is the only source of a cell's
 environment identity (the layout's variables), so a repository without one has
 nothing for its cells to run as. The two absences refuse at the same site,
@@ -397,13 +397,12 @@ offending key and the three that are allowed. An engine refuses a key
 it does not implement, so a repository moves its pin before it adds a key a newer
 release introduces.
 
-Reading it needs Python 3.11, because `tomllib` arrived there. That is the floor
-§Runner prerequisites already states; nothing in the engine installs or pins a
-Python, so `scripts/env-config` checks `sys.version_info` before the import and
-refuses with the required version, the version found and the contract clause.
+Reading it needs Python 3.12 and PyYAML, as §Runner prerequisites states.
+`scripts/env-config` checks both before the parse and refuses naming the
+contract clause, and the version found when the Python is older.
 
 **The engine reads the file from the repository's default branch, never from the
-branch under test.** `scripts/env-config` reads `.github/shipmate.toml` through
+branch under test.** `scripts/env-config` reads `.github/shipmate-config.yml` through
 the contents API with no ref, which GitHub answers from the default branch, and
 resolves each cell's environment identity and credential from what that returns.
 A pull request cannot change which role
@@ -424,17 +423,16 @@ the workflow file, on the default branch.
 
 Every failure to read it refuses the run: a failed contents read (the file
 absent on the default branch, or a token without contents read), a file over
-1 MB, and a body that is not valid TOML — `tomllib`'s message, which carries a
-line number, is surfaced as the refusal. "This repository has no file" and "the
+1 MB, and a body that is not valid YAML — the parser's message, with its line
+and column, is surfaced as the refusal. "This repository has no file" and "the
 file could not be read" cannot be told apart without reading it, so treating a
 read failure as absence would hand the decision back to branch content.
 
 ### Keys
 
-Dotted keys are canonical: one `[table]` header per identity and per
-environment, with the credential fields written as `aws.plan` inside it. A
-separate `[identities.dev.aws]` header parses to exactly the same mapping, but
-mixing the two notations for one identity is a parse error (§TOML placement).
+The file is read with a strings-only YAML loader: every value stays exactly as
+written, so `111111111111`, `4402` and `false` need no quotes, and an account id
+keeps a leading `0`. Indentation is the one structure rule.
 
 ```yaml
 # .github/shipmate-config.yml
@@ -469,30 +467,32 @@ environments:
 ```
 
 An environment entry holds `region`, `tf_vars`, `identity`, `workloads`,
-`shared`, `needs`, `explicit` and `gated`, and nothing else. `shared = true`
+`shared`, `needs`, `explicit` and `gated`, and nothing else. `shared: true`
 binds the environment
 as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pair
-(§Env model, shared mode). `explicit = true` keeps the environment out of a bare
-`shipmate apply`, and `gated = false` exempts it from the review requirement
-(§Comment-ops). The three are TOML booleans; `shared` and `explicit` default to
-`false`, `gated` to `true`.
+(§Env model, shared mode). `explicit: true` keeps the environment out of a bare
+`shipmate apply`, and `gated: false` exempts it from the review requirement
+(§Comment-ops). The three hold `true` or `false`, bare or quoted; `shared` and
+`explicit` default to `false`, `gated` to `true`.
 
-TOML bare keys admit letters, digits, `_` and `-`, so an ordinary environment
-name needs no quoting. Quote anything outside that set.
+One quoting rule: a value starting with `{`, `[`, `*`, `&`, `!` or `#` is quoted
+(`"{workload}-plan"`). Unquoted, YAML reads the character as syntax: a flow
+mapping or list, an alias, anchor or tag (each refused), or a comment that
+empties the value.
 
-**An identity names credentials once.** `[identities.<name>]` holds three
+**An identity names credentials once.** `identities.<name>` holds three
 fields, each optional, all under `aws`:
 
 | Field | Holds |
 | --- | --- |
-| `aws.account` | the 12-digit account id, as a quoted string |
+| `aws.account` | the 12-digit account id |
 | `aws.plan` | the plan path's role |
 | `aws.apply` | the apply path's role |
 
 - **A field is a string or a map keyed by workload**
-  (`{ core = "111111111111", network = "222222222222" }`). A workload name, as a
+  (`{core: 111111111111, network: 222222222222}`). A workload name, as a
   map key or a `workloads` element, follows the environment-name charset, and
-  `vars`, `role` and `region` are reserved: `{ vars = "…" }` is a variable
+  `vars`, `role` and `region` are reserved: `{vars: …}` is a variable
   reference, and a `role` or `region` key would read as a setting of the field
   rather than as a workload.
 - **A role is a role name or a full ARN.** A name (`shipmate-plan`, or under an
@@ -512,7 +512,7 @@ fields, each optional, all under `aws`:
   apply-only access. An identity setting neither `aws.plan` nor `aws.apply`
   refuses.
 
-**An environment names one identity** with `identity = "<name>"`, and the
+**An environment names one identity** with `identity: <name>`, and the
 credentials step then authenticates against the environment's `region`, which
 such an entry must set. An identity varies by workload when any field is a map
 or a role carries `{workload}`. `workloads` lists the workload tags the
@@ -533,45 +533,30 @@ from one refuses.
 In the fence above, `dev-eu` is the first row, `prod` the second and `sbx` the
 third.
 
-**The file is data.** TOML has no expression language: no functions, no way to
-derive one entry from another. The file has two indirections, a variable
-reference (§Variable references) and one placeholder, `{workload}`; each fills a
-value from a closed source (a named variable; the environment's `workloads`),
-and neither derives one entry from another. A repository with many environments
+**The file is data.** It has no expression language: no anchors, aliases or
+tags, no functions, no way to derive one entry from another. The file has two
+indirections, a variable reference (§Variable references) and one placeholder,
+`{workload}`; each fills a value from a closed source (a named variable; the
+environment's `workloads`), and neither derives one entry from another. A repository with many environments
 repeats `identity`, `workloads`, `region` and its flags on each entry,
 deliberately — an audit of one environment reads one entry. There is no
-`[defaults]` table and no merge rule between environments: an environment holds
+`defaults` entry and no merge rule between environments: an environment holds
 no credential field, the identity it names arrives whole, and an identity reaches
 only the environments that name it. The cost is that one edit to an identity
 retargets every environment naming it; `shipmate doctor`'s roles lines list what
 each environment resolves (§Resolution).
 
-### TOML placement
-
-Two properties of the format decide how a mistake presents, and both fail
-closed.
-
-- **A top-level setting must come above the first `[table]` header.** A scalar
-  written below one lands inside *that* header's table: `layout` written after
-  `[identities.dev]` becomes `identities.dev.layout`. One mistake therefore
-  refuses in
-  several places. A misplaced `layout` always reaches the missing-`layout`
-  refusal, which checks before anything reads `environments`, and also refuses
-  as an unimplemented environment key, identity key or identity field, depending
-  on the header it fell under.
-  `docs/troubleshooting.md` has the message for each position.
-- **Declaring one table twice is a parse error.** A dotted `aws.plan` under
-  `[identities.dev]` plus a later `[identities.dev.aws]` header refuses with
-  *"Cannot declare ('identities', 'dev', 'aws') twice"*. Pick one notation per
-  identity. Duplicate keys refuse the same way.
-
-A leading UTF-8 byte-order mark refuses: `tomllib` rejects it, and the one
-read mechanism — the contents-API read that detect, comment-ops' gate resolve and
-`shipmate doctor` share — delivers those bytes rather than stripping them.
+**An indentation mistake nests a key under the previous one.** A setting
+indented too far lands inside the entry above it: `layout` indented under
+`identities.dev` becomes `identities.dev.layout`. The strict key checks catch it,
+in several places: a misplaced `layout` always reaches the missing-`layout`
+refusal, and also refuses as an unimplemented environment key, identity key or
+identity field, depending on where it landed. `docs/troubleshooting.md` has the
+message for each position.
 
 **An identity is optional.** An environment naming none runs no credentials
 step — which is how the three credential-free sample repositories work. A file
-holding only `layout = "workspace"` is a complete, warning-free table.
+holding only `layout: workspace` is a complete, warning-free table.
 
 **What each layout derives**, before the environment's own `tf_vars` merges over it:
 
@@ -607,8 +592,8 @@ environments:
       TF_VAR_account: {vars: PROD_ACCOUNT}
 ```
 
-- **Shape.** Exactly `{ vars = "NAME" }`: a mapping with one key, `vars`,
-  holding a string, named after GitHub's `vars` context. It is valid at every
+- **Shape.** Exactly `{vars: NAME}`, in flow or block form: a mapping with one
+  key, `vars`, holding a string, named after GitHub's `vars` context. It is valid at every
   string position, list items and an identity map's values included,
   and it replaces the whole string before `{workload}` is filled. Any other
   mapping is ordinary data for the checks in §Refusals.
@@ -644,7 +629,7 @@ environments:
 - **Plan and apply.** A cell's role and credentials region are outside the
   apply-match fingerprint (§Apply-match fingerprint): a variable feeding either,
   changed between plan and apply, reaches the apply with no re-plan. A
-  referenced `[environments.<env>.tf_vars]` value is inside it, and so is
+  referenced `environments.<env>.tf_vars` value is inside it, and so is
   `region` under the `tf_vars` layout, which derives `TF_VAR_region`: changing
   that variable between plan and apply refuses the apply as stale, and a re-plan
   clears it.
@@ -654,21 +639,21 @@ environments:
 Every condition below refuses at detect, before any cell starts, and one
 refusal names every structural error the file holds. `shipmate doctor` reports
 every structural row, the ones judged on the file alone, on the pull request that
-introduces it. The absent-file, interpreter, `tf_vars` coverage, workload-tag and
+introduces it. The absent-file, runner, `tf_vars` coverage, workload-tag and
 variable rows depend on the run as well as the file, so they are not structural.
 
 | Condition | Why |
 |---|---|
-| `.github/shipmate.toml` is absent from the default branch, or unreadable | absence and a failed read cannot be told apart, so neither may be read as "this repository has no table" |
-| The file is not valid TOML | `tomllib`'s message, with its line number, is the refusal |
-| The runner's Python is older than 3.11 | `tomllib` arrived there; §Runner prerequisites already requires it, and the refusal names the version found |
-| The table declares no `layout` | it is the only source of a cell's environment identity, and a scalar written below a `[table]` header lands inside that table rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
+| `.github/shipmate-config.yml` is absent from the default branch, or unreadable | absence and a failed read cannot be told apart, so neither may be read as "this repository has no table" |
+| The file is not valid YAML, or holds a duplicate key, an anchor, an alias, a tag or tab indentation | the parser's message, with its line and column, is the refusal. A duplicate key would otherwise win silently, and the file gains nothing from anchors, aliases or tags |
+| The runner's Python is older than 3.12, or cannot import PyYAML | §Runner prerequisites requires both; the refusal names the missing one, and the version found |
+| The table declares no `layout` | it is the only source of a cell's environment identity, and a `layout` indented under another key lands inside it rather than at the top level, so a misplaced `layout` arrives here as an undeclared one |
 | `layout` is not `tf_vars`, `workspace` or `folder` | a typo would silently disable injection |
-| `layout = "tf_vars"` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
+| `layout: tf_vars` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables, and an empty region derives nothing the fingerprint can tell apart |
 | A cell's `workload/<name>` tag its environment's `workloads` does not list | a listed workload is the only one the default branch grants a role to. One refusal names every such cell. Checked only for the cells the run plans, applies or unlocks: a completed, excluded or held cell is not refused, and neither is an untagged cell, a tag in an environment naming no identity, or one in an environment writing no list |
 | An environment name outside the env-name charset, or carrying a `-plan`/`-apply` suffix | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing |
-| An environment key other than `region`, `tf_vars`, `identity`, `workloads`, `shared`, `needs`, `explicit`, `gated` | catches a misspelled key and a top-level setting written below an entry's header; credentials live in `[identities.<name>]`, never in an entry |
-| `identity` that is not a string, or names no `[identities.<name>]` table | the refusal lists the identities the file declares |
+| An environment key other than `region`, `tf_vars`, `identity`, `workloads`, `shared`, `needs`, `explicit`, `gated` | catches a misspelled key and a top-level setting indented under an entry; credentials live in `identities.<name>`, never in an entry |
+| `identity` that is not a string, or names no `identities.<name>` entry | the refusal lists the identities the file declares |
 | An environment naming an identity with no non-empty string `region` | the credentials step authenticates against the environment's region and requires one |
 | `workloads` on an environment naming no identity | without an identity a workload tag is inert, so the list would admit nothing |
 | `workloads` that is not a non-empty list of distinct strings | membership is read from this list alone, so a shape it cannot mean is refused rather than guessed at |
@@ -677,16 +662,16 @@ variable rows depend on the run as well as the file, so they are not structural.
 | For one workload, a role name on one path and a full ARN on the other | the account rule is per workload over both paths; write both as ARNs |
 | For one workload, a role name and no account | a name becomes `arn:aws:iam::<account>:role/<name>` and has no account to go in it |
 | For one workload, a full ARN and an account | an ARN carries its own account, so the file would hold two for one role |
-| `shared`, `explicit` or `gated` that is not a TOML boolean | a quoted value would otherwise resolve to the default: `shared = "true"` binds the split pair the repository believes it gave up, `explicit = "true"` puts the environment on a bare `shipmate apply`, and `gated = "false"` leaves it gated. A reference resolves to a string and refuses the same way |
+| `shared`, `explicit` or `gated` that is not `true` or `false` | any other value would otherwise resolve to the default: `shared: yes` binds the split pair the repository believes it gave up, `explicit: True` puts the environment on a bare `shipmate apply`, and `gated: no` leaves it gated. A reference refuses the same way, even one resolving to `true` |
 | A shared environment naming an identity that sets `aws.plan` | shared mode has one environment, and it resolves `aws.apply` on both paths; the file would read as a read-only plan role while every plan cell assumes the apply role |
 | `tf_vars` naming anything outside `TF_VAR_*` / `TF_WORKSPACE`, or holding a non-string | see the allowlist above |
 | Malformed shape | a string where a mapping is required, and the reverse |
 | An identity key other than `aws`, or an `aws` field other than `account`, `plan`, `apply` | an identity holds only `aws.account`, `aws.plan` and `aws.apply`, and the refusal names them |
 | An identity setting neither `aws.plan` nor `aws.apply` | it grants no credential; apply-only is legal, all-empty is not |
 | An identity field that is neither a string nor a map keyed by workload, or a map value that is not a string | a field resolves to one string per cell, so no other shape has a meaning |
-| A workload name, as a map key or a `workloads` element, outside the env-name charset, or `vars`, `role` or `region` | a workload name is a Terramate tag; `{ vars = "…" }` is a variable reference, and a `role` or `region` key would read as a setting of the field rather than as a workload |
+| A workload name, as a map key or a `workloads` element, outside the env-name charset, or `vars`, `role` or `region` | a workload name is a Terramate tag; `{vars: …}` is a variable reference, and a `role` or `region` key would read as a setting of the field rather than as a workload |
 | An empty string or an empty map in an identity field | that resolves to a skipped credentials step, not to a credential |
-| `aws.account` that is not a 12-digit string | a TOML integer drops a leading `0` |
+| `aws.account` that is not 12 digits | an AWS account id is exactly 12 digits, a leading `0` included |
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
 | A top-level key other than `layout`, `identities`, `environments` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
@@ -860,7 +845,7 @@ artifact, so it can never be blocked on one.
 ## AWS OIDC (optional)
 
 The engine is cloud-agnostic by default and ships no credential of its own. A
-consumer opts in per environment, by naming an `[identities.<name>]` table from
+consumer opts in per environment, by naming an identity (`identities.<name>`) from
 that environment's entry on the default branch (§Environment table). The table
 chooses on every path: a reference in it is resolved from a repository or
 organization variable (§Variable references), and no variable the table does
@@ -877,7 +862,7 @@ job each request `id-token: write` and run
 `aws-actions/configure-aws-credentials`, gated on a role resolving non-empty,
 before the cell step. The step reads the row, which the detect resolved from the
 identity's `aws.apply` on the first two and its `aws.plan` on the other two,
-except that a shared environment (`shared = true`) resolves `aws.apply` on
+except that a shared environment (`shared: true`) resolves `aws.apply` on
 every path. The `snapshot` and `complete` jobs deliberately get no token.
 
 On the apply path the engine passes through whatever role the environment
@@ -887,8 +872,8 @@ something the engine resolves further or validates.
 
 **An environment resolves the roles of the identity its entry names, and nothing
 else.** An identity is a role named once and picked up by every environment that
-names it, so one edit to `[identities.<name>]` retargets all of them. The reach
-is bounded and visible: only the entries carrying `identity = "<name>"`, and
+names it, so one edit to `identities.<name>` retargets all of them. The reach
+is bounded and visible: only the entries carrying `identity: <name>`, and
 `shipmate doctor`'s roles lines list every role each one resolves
 (§Resolution). An environment with no entry, or naming no identity, resolves
 none. The only bound on what a resolved role may do is its own trust-policy
@@ -977,7 +962,7 @@ checklist item. The plan
 comment names the unmanaged stacks a pull request changes, under its verdict. A
 `workload/*` tag on an unmanaged stack is never checked. An `env/<name>` tag
 whose environment has no entry in the environment table still refuses the run
-under `layout = "tf_vars"`. The trade-off is accepted: a forgotten tag on a new
+under `layout: tf_vars`. The trade-off is accepted: a forgotten tag on a new
 stack is a notice and a line in the plan comment, not a refusal, and the gate
 goes green over a stack that plans nothing. A deploy refuses when its merged
 pull request holds an open apply check for a stack and environment the merge
@@ -1098,7 +1083,7 @@ hint:
 A notice asks nothing, so its footer is `[run](<run url>)` alone.
 
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
-the command (grammar, authorization, an unresolvable `.github/shipmate.toml`),
+the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
 `🔴 failed: <reason>` when it could not (an App token mint, a workflow
 dispatch, an errored read or decision of the commenter's permission), and
 `⚪ <text>` for a notice. `scripts/reply-comment` renders all three.
@@ -1214,14 +1199,14 @@ and intended for repositories the installing organization controls.
 The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies every environment that has a
 reviewed plan for the current PR head, in `needs` env-levels (see Env
-apply order, below), except environments whose entry holds `explicit = true`
-in `.github/shipmate.toml` and environments held for review (below). Explicit
+apply order, below), except environments whose entry holds `explicit: true`
+in `.github/shipmate-config.yml` and environments held for review (below). Explicit
 environments (typically production) must always be named: their
 `apply / <stack> / <env>` checks stay pending under a bare apply — so
 `shipmate / gate` keeps gating the merge — until someone runs
 `shipmate apply <env>` for them. An entry without `explicit`, or with
-`explicit = false`, is part of a bare apply. Any value but a TOML boolean fails
-loud, a quoted `"true"` included: read as not explicit, it would put the
+`explicit: false`, is part of a bare apply. Any value but `true` or `false`
+fails loud, `yes` and `True` included: read as not explicit, it would put the
 environment on a bare apply.
 
 `explicit` constrains the bare pre-merge `shipmate apply` only. The
@@ -1262,7 +1247,7 @@ its own actionable rejection reason:
   requiring zero approvals reports no decision even when an approval exists,
   but a `CHANGES_REQUESTED` review still blocks. Any other value — including
   an absent or empty decision — fails closed with a wiring-error reason. An
-  environment whose entry holds `gated = false` is exempt from this requirement,
+  environment whose entry holds `gated: false` is exempt from this requirement,
   and from no other (below);
 - **undiverged**: at least one `apply / <stack> / <env>` check on the pull
   request's current head names the plan run its plan came from (each check
@@ -1296,7 +1281,7 @@ dispatch the consumer's `shipmate.yml` with `verb: apply`; the optional
 share the same App-minted `workflow_dispatch` mechanism and the same per-env
 `apply-<env>-<stack>` concurrency groups.
 
-`gated = false` on an entry in `.github/shipmate.toml` lets that environment be
+`gated: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
 on the apply checks:
 
@@ -1319,20 +1304,20 @@ absent decision still fails closed. Nor does it touch the `<env>-apply`
 environment's required reviewers — that is a different control, gating the
 deployment rather than the code review (see `docs/hardening.md`).
 
-`gated` is a TOML boolean. Any other value — a quoted `"false"`, `0`, a variable
+`gated` holds `true` or `false`. Any other value — `no`, `False`, `0`, a variable
 reference — is a loud configuration error naming `environments.<env>.gated`: a
 silently inert value would leave an operator believing an environment is ungated
 when it is not. The entry's own name is held to the env-name charset and the
 `-plan` / `-apply` suffix rule, so an entry no stack's tag can name is refused
 rather than left to exempt nothing.
 
-**Absent means gated**: an entry without `gated`, or with `gated = true`, keeps
+**Absent means gated**: an entry without `gated`, or with `gated: true`, keeps
 the ruleset's review requirement. There is no second source for an absent key
 to fall through to.
 
 Opting in takes two things, and the setting alone is not enough:
 
-1. `gated = false` on the environment's entry on the default branch, and
+1. `gated: false` on the environment's entry on the default branch, and
 2. the consumer's `shipmate.yml` pinning its `.github/workflows/apply.yml@`
    reference (the `apply` job) to the same commit as its `comment-ops.yml`
    reference, as §Consumption's one-change rule requires. `comment-ops.yml`
@@ -1344,7 +1329,7 @@ Opting in takes two things, and the setting alone is not enough:
 before it authorizes, and each apply form's detect resolves it again before it
 enforces —
 `scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
-three reading `.github/shipmate.toml` on the **default branch** through the same
+three reading `.github/shipmate-config.yml` on the **default branch** through the same
 `env-config` reader. The comment-ops job checks out no consumer content, and
 that reader needs none: it reads the file through the contents API. What keeps
 the three from disagreeing is not a shared spelling but a shared reader: the
@@ -1363,7 +1348,7 @@ dispatch while a bare apply spans many environments:
 Both engine workflows re-read `reviewDecision` themselves in a `review` job,
 which calls `apply-review.yml`, rather than trusting a dispatch input, and that
 job is unconditional — the
-default branch's `gated = false` entries are the only source of this policy, and only
+default branch's `gated: false` entries are the only source of this policy, and only
 engine-owned scripts read it.
 
 - **Targeted `shipmate apply <env>`** — the env is known at comment time, so
@@ -1399,12 +1384,12 @@ warning while that review is off. With the table unreadable, doctor reports only
 the sole-maintainer note, or only the code-owner warning when that review is off.
 
 What bounds the exemption is the default branch, not an admin boundary. Anyone who
-can open a pull request can propose `gated = false`; what they cannot do is have it take
+can open a pull request can propose `gated: false`; what they cannot do is have it take
 effect on that pull request, because all three readers resolve the file from the
 default branch. Relaxing the gate is therefore a merged commit, under whatever
 the branch ruleset requires of one, rather than a line in the pull request that
 benefits from it. `shipmate doctor` validates the file it is in and reports a malformed
-entry, but does not list the `gated = false` entries; its count-0 finding names
+entry, but does not list the `gated: false` entries; its count-0 finding names
 their complement, the gated environments. `gated` accepts no variable
 reference (§Variable references), so the decision stays a merged commit.
 
@@ -1813,11 +1798,10 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
   PyYAML ≥ 6 importable by it), `git`, `curl`, `jq`, `openssl`, `gh`, and GNU
   coreutils (`setup` hashes the Terramate download with `sha256sum`).
-- Every GitHub-hosted Ubuntu image satisfies this, PyYAML through the
-  install below, including the minimal
-  `ubuntu-slim` image, whose
+- Every GitHub-hosted Ubuntu image satisfies this, including the minimal
+  `ubuntu-slim` image; PyYAML arrives through the install below. That image's
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
-  names the GitHub CLI. That one is load-bearing: the default-branch probe in
+  names the GitHub CLI. The CLI is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and the control jobs below call `gh api` on the comment, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
@@ -1832,7 +1816,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   Debian or Ubuntu runner with passwordless `sudo`, as GitHub-hosted Ubuntu
   runners are. Any other runner must preinstall PyYAML ≥ 6 for its
   `python3`. The install never fails the step: when it does not take, the step
-  warns, and the script that needs the parser refuses, naming this section.
+  warns, and the script that needs the parser refuses, naming this section;
+  `shipmate doctor` notes it once instead and skips the checks that parse YAML.
   Nothing is `pip install`ed.
 - Nothing in the engine installs or pins a Python, so `scripts/env-config`
   checks `sys.version_info` before reading the config and refuses with the
@@ -2163,7 +2148,7 @@ per step, so the annotations view can show fewer than were printed; the step's
 log text holds every line:
 
 - **ungated** — `<env>: ungated, permitted to apply without an approving review
-  (gated = false in .github/shipmate.toml)`, one per environment the
+  (gated: false in .github/shipmate-config.yml)`, one per environment the
   all-environments run was permitted to apply without an approving review. It
   is the audit trail such an apply leaves: `reviewDecision` is a live
   value with no history, so once the review lands nothing else in a run
@@ -2384,11 +2369,11 @@ reaches the process.
 | --- | --- | --- |
 | plan cells, drift cells | `<env>-plan` | the read key |
 | apply cells, unlock cells | `<env>-apply` | the write key |
-| any of the above when the env's entry holds `shared = true` | bare `<env>` | one value for both paths |
+| any of the above when the env's entry holds `shared: true` | bare `<env>` | one value for both paths |
 
 Drift reads and unlock writes, so each lands on the tier that matches what it
 does. **The read/write split needs the split environments**: an environment
-holding `shared = true` has one key serving both paths and forfeits
+holding `shared: true` has one key serving both paths and forfeits
 the split, consistent with what it already forfeits in §Env model.
 
 ### Values that differ between the two tiers
@@ -2694,9 +2679,9 @@ Why the cache depends on a committed lock:
 A repository may declare a partial order over its GitHub Environments so that
 one environment's stacks fully apply before another's — for example, "`eu`
 fully green, then `us`." The order is each entry's `needs` in
-`.github/shipmate.toml`: the list of environments that must complete their
-applies first (its predecessors), as `needs = ["dev-eu"]` under
-`[environments.dev-us]`. An environment without `needs` has no predecessors, and
+`.github/shipmate-config.yml`: the list of environments that must complete their
+applies first (its predecessors), as `needs: [dev-eu]` under
+`environments.dev-us`. An environment without `needs` has no predecessors, and
 one that is no environment's predecessor either is unordered relative to
 everything else. It is read from the default branch, like every other setting
 in that file, so a feature branch cannot reorder its own applies.

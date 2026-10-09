@@ -42,7 +42,7 @@ apply result comments and the drift issues.
 A comment-triggered apply runs only for a commenter with write or admin
 permission, on a pull request that is not a draft, is mergeable and satisfies
 the branch ruleset's review policy, and only against a reviewed plan for the
-pull request's current head. An environment whose entry holds `gated = false`
+pull request's current head. An environment whose entry holds `gated: false`
 is exempt from the review requirement and from nothing else.
 
 [`CONTRACT.md`](../CONTRACT.md) §Comment-ops holds the grammar, what each verb
@@ -61,7 +61,7 @@ and an apply or `doctor` comment whose verdict is not 🟢, end by pointing at
 ## Dynamic environments
 
 Environments are not hardcoded into workflow YAML. An environment is
-defined by its `[environments.<name>]` table in `.github/shipmate.toml`, the
+defined by its `environments.<name>` entry in `.github/shipmate-config.yml`, the
 GitHub Environments named after it (`<env>-plan` and `<env>-apply`, or one shared
 `<env>` — `../CONTRACT.md` §Env model) plus tags applied to the stacks that
 belong to it. Adding a new environment is a data change (add the table entry,
@@ -130,7 +130,7 @@ Each drift sweep is a workflow file of its own: on its schedule or a
 backend's state is cached at the path `tofu init` records; a remote backend (for
 example S3) owns its state, and the engine's state restore/save steps are
 skipped. Credentials are opt-in per environment: an environment that names no
-`[identities.<name>]` table resolves no role, and no cloud credential enters
+`identities.<name>` entry resolves no role, and no cloud credential enters
 the job, which is how the sample repos run credential-free. The plan and drift
 cells assume the identity's `aws.plan` role, or its `aws.apply` in a shared
 environment, while running branch-authored code —

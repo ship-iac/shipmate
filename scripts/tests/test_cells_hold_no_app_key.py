@@ -42,7 +42,7 @@ def _strings(node):
     """Every scalar string reachable in a parsed subtree, mapping keys included.
 
     Walking the parsed tree rather than the file text is the point: an `env:` value, a `with:`
-    value and a `run:` body are all reached, while a YAML comment, which `safe_load` discards,
+    value and a `run:` body are all reached, while a YAML comment, which the parser discards,
     can no longer satisfy the guard.
     """
     if isinstance(node, dict):

@@ -5,7 +5,7 @@ could wire a constant where a fact belongs -- `head-repo: ${{ github.repository 
 safe answer for every run, fork pull requests included, and nothing else in the system can see
 it. The wiring is engine YAML now, SHA-pinned and reviewed, so the checks move here.
 
-Every assertion is a whole hand-written value against `yaml.safe_load` output. A key-set test
+Every assertion is a whole hand-written value against parsed output. A key-set test
 passes an entry whose expression was mistyped; a substring test is satisfied by a comment.
 """
 
@@ -150,7 +150,7 @@ def _strings(node):
     """Every scalar string reachable in the parsed workflow, mapping keys included.
 
     Parsed, not file text: a payload expression inside a comment teaches the next reader to write
-    it back, but `safe_load` discards comments, so this cannot be satisfied by one.
+    it back, but the parser discards comments, so this cannot be satisfied by one.
     """
     if isinstance(node, dict):
         for key, value in node.items():

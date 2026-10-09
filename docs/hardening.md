@@ -92,13 +92,13 @@ compares all five of those expressions, whole, against the fence `getting-starte
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
 | 16 | `shipmate-engine` Environment exists, deployment branch policy restricted to the default branch | Environment | Repository-secret App key readable by any branch |
 | 17 | Deployment branch policy restricted to the default branch on every `<env>-apply` | Environment | Branch-authored workflow claiming apply-environment secrets directly |
-| 18 | An identity named by each environment you want cloud access from, with separate `aws.plan` and `aws.apply` roles in `.github/shipmate.toml` (§7–9) | Environment table | Opting in per environment. An identity is a role named once and picked up by every environment that names it, so one edit to `[identities.<name>]` retargets every environment carrying `identity = "<name>"`; `shipmate doctor`'s roles lines show what the branch's table resolves for each environment, and in them a referenced role shows the value comment-ops resolves, where a `shipmate-engine` Environment variable of the same name wins; a cell never reads that variable. What each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate.toml` (`branch-protection.md`) |
+| 18 | An identity named by each environment you want cloud access from, with separate `aws.plan` and `aws.apply` roles in `.github/shipmate-config.yml` (§7–9) | Environment table | Opting in per environment. An identity is a role named once and picked up by every environment that names it, so one edit to `identities.<name>` retargets every environment carrying `identity: <name>`; `shipmate doctor`'s roles lines show what the branch's table resolves for each environment, and in them a referenced role shows the value comment-ops resolves, where a `shipmate-engine` Environment variable of the same name wins; a cell never reads that variable. What each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate-config.yml` (`branch-protection.md`) |
 | 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops`, and on each drift file's `drift` job | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
 default split naming (`<env>-plan` + `<env>-apply`). A logical env whose
-`[environments.<env>]` entry holds `shared = true` binds one bare `<env>` on
+`environments.<env>` entry holds `shared: true` binds one bare `<env>` on
 both paths instead (CONTRACT.md §Env model). On such an environment:
 
 - **Row 6 is forfeited.** A protection rule gates every job that binds the
@@ -148,9 +148,9 @@ row 6 — the one row that is unforgeable at apply time.
 **What is left when row 6 is unavailable.** It is a coherent posture rather than
 a broken one:
 
-- production's entry in `.github/shipmate.toml` without `gated = false`, so no
+- production's entry in `.github/shipmate-config.yml` without `gated: false`, so no
   apply reaches it without an approving review on the pull request;
-- production's entry holding `explicit = true`, so before the merge
+- production's entry holding `explicit: true`, so before the merge
   a bare `shipmate apply` skips it and only the targeted `shipmate apply <env>`
   reaches it — the setting constrains that path only. The post-merge deploy
   applies every cell whose apply check is still pending, explicit environments
@@ -296,9 +296,9 @@ get self-service applies on a low-blast-radius tier. The two per-environment
 controls below do different jobs, and an organization can want either without
 the other:
 
-- **`gated = false` exempts an environment from the code review before apply,
+- **`gated: false` exempts an environment from the code review before apply,
   and from nothing else.** It is a flag on the environment's entry in
-  `.github/shipmate.toml` on the default branch, and the ruleset still
+  `.github/shipmate-config.yml` on the default branch, and the ruleset still
   requires the review before the merge. What it exempts and what still decides
   is in `CONTRACT.md` §Comment-ops; the recipe is in `docs/getting-started.md`.
 - **Environment `required_reviewers` on `<env>-apply` (§6) gates the
@@ -315,7 +315,7 @@ Two things to know before relying on it:
   it as code. Anyone who can push a branch can still *propose* the entry, so
   this bounds when it takes effect, not who may ask.
 - **The setting is inert at `required_approving_review_count: 0`.** Every
-  environment is already ungated there, so `gated = false` on some narrows nothing. It
+  environment is already ungated there, so `gated: false` on some narrows nothing. It
   can only relax an existing requirement, never create one: every environment
   still marked gated can apply without an approving review, and is held only
   where a code-owner review is required for the changed files. What
@@ -333,7 +333,7 @@ code-owner review for a changed file that has an owner; with no `CODEOWNERS`
 file, an entry that does not parse, or IaC paths left unowned, the setting
 is a no-op and the App's own approving review satisfies the count on its own.
 Write a `CODEOWNERS` entry covering the paths the stacks and the Terramate
-configuration live in, and `/.github/shipmate.toml` with them — that one file
+configuration live in, and `/.github/shipmate-config.yml` with them — that one file
 names every cloud role the repository can assume. Confirm on a real pull request
 that the reviewer requirement appears. `shipmate doctor` warns when the rule
 requires approvals but not code-owner review — it does not check `CODEOWNERS`
@@ -417,7 +417,7 @@ costs, so the choice is made with the price visible:
   same repository restore ("A cache entry planted by an unreviewed apply" under
   "What none of this fixes").
 - **Shared mode is the strongest form of ungated.** A logical env holding
-  `shared = true` binds one bare `<env>` for plan and apply, and a
+  `shared: true` binds one bare `<env>` for plan and apply, and a
   reviewer on it stalls that environment's plan cells and every drift sweep covering it — so the gate
   is not merely unset, it is unavailable, and no later decision can turn it on
   without splitting the environment again. The same environment is what plan-time
@@ -427,12 +427,12 @@ costs, so the choice is made with the price visible:
   while every pull request targets a branch it names. Who may flip this posture
   on is a separate question from what it costs — see §7–9.
 
-Pair every environment you gate with `explicit = true` on its entry in
-`.github/shipmate.toml`, whichever ones those are, so a bare
+Pair every environment you gate with `explicit: true` on its entry in
+`.github/shipmate-config.yml`, whichever ones those are, so a bare
 `shipmate apply` skips it and it is reached only by the targeted
 `shipmate apply <env>`. Left off, a bare `shipmate apply` fans out into that
 environment and stalls there waiting for the reviewer nobody expected to be
-asked. The entry is the bare environment name — `[environments.staging]`, not
+asked. The entry is the bare environment name — `environments.staging`, not
 `staging-plan` or `staging-apply`. The name is matched against the environment
 name carried by the apply checks (see CONTRACT.md), and an entry carrying either
 suffix is a configuration error the engine rejects loudly.
@@ -579,7 +579,7 @@ no split of its own.
   Nothing refuses this: one role on both paths is a legitimate shape for an
   environment whose single role really is meant for both, so the engine cannot
   tell the two intents apart. Decide it here, in the file, and pin it with a
-  `CODEOWNERS` entry over `/.github/shipmate.toml` (§3–5).
+  `CODEOWNERS` entry over `/.github/shipmate-config.yml` (§3–5).
 - **Plan environments must have no approval-type protection rules (required
   reviewers, wait timers) and no deployment branch policy.** An approval rule
   blocks every plan cell outright, and a branch policy blocks every plan cell
@@ -653,7 +653,7 @@ no split of its own.
   workflow file is part of what the policy matches) is the escape hatch; it is
   consumer-side, unsupported by the engine, and out of scope here.
 - **Read the key at the granularity of what it spends, not of where it is
-  set.** `shared = true` is one line per environment entry, which invites
+  set.** `shared: true` is one line per environment entry, which invites
   reading a shared cell as a setting you can revisit. The OIDC consequence is
   not revisitable. What each shared cell gives up is not a knob on that cell —
   it is shipmate's ability to say *plan may read, apply may write* for that
@@ -664,10 +664,10 @@ no split of its own.
   genuinely acceptable, split everywhere you would ever want a reviewer or a
   read-only plan role.
 - **The key is default-branch content.** The engine reads `shared` from the
-  default branch's `.github/shipmate.toml`, so sharing an environment is a
+  default branch's `.github/shipmate-config.yml`, so sharing an environment is a
   merged pull request under row 4, like naming a role in row 18 — and row 4's
   code-owner half is a no-op unless a `CODEOWNERS` entry covers
-  `/.github/shipmate.toml`. One line moves plan cells running unreviewed branch
+  `/.github/shipmate-config.yml`. One line moves plan cells running unreviewed branch
   code onto the apply role, and every drift sweep covering that environment with them — the cell
   resolves its identity's `aws.apply` for the bare `<env>` it now binds, and an
   identity setting `aws.plan` refuses there, so a shared environment's identity
@@ -1147,7 +1147,7 @@ for exactly the exposure control 1 exists to limit.
   request's configuration in a job that can write the default branch's Actions
   cache, because it saves state (`CONTRACT.md` §State backend) and providers
   (§Terramate safeguards). Where an environment applies without an approving
-  review (`gated = false`, or a gated environment under a ruleset that requires
+  review (`gated: false`, or a gated environment under a ruleset that requires
   none), code in that apply can save a provider or state entry that other plan,
   drift and apply cells restore, in every environment and on every later pull
   request. Nothing verifies a restored archive: the lock file verifies provider
@@ -1186,7 +1186,7 @@ for exactly the exposure control 1 exists to limit.
 - **Branch-controlled configuration.** Stack tags come from the pull request
   branch. They shape what the engine does; they do not constrain what it is
   allowed to do. `needs` and `explicit` are not on this list:
-  they live in `.github/shipmate.toml`, read from the default branch with the
+  they live in `.github/shipmate-config.yml`, read from the default branch with the
   rest of it, so a branch can neither reorder its own apply waves nor
   drop its own exclusion.
 - **The gate is an assertion, not a proof.** The App identity and pull request

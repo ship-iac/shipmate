@@ -22,7 +22,7 @@ does with that wiring.
   declares and every one a stack tags. So declare an environment in the table
   and run `scripts/onboard` before the first pull request tagging a stack into
   it merges: that merge deploys. Until a stack tags it, `scripts/onboard` names
-  it on its `.github/shipmate.toml` checklist item, and every whole-tree run (the
+  it on its `.github/shipmate-config.yml` checklist item, and every whole-tree run (the
   drift sweep, `shipmate unlock`, a bare `shipmate apply`) warns that the table
   declares an environment no stack tags; that warning is expected.
 - **Nothing to set for the Terramate and OpenTofu versions.** They are in
@@ -136,11 +136,11 @@ leave it off.
 It writes:
 
 - `shipmate-engine` and, for every environment the checkout's
-  `.github/shipmate.toml` declares and every one your stacks' `env/<name>` tags
+  `.github/shipmate-config.yml` declares and every one your stacks' `env/<name>` tags
   declare, an `<env>-plan` / `<env>-apply` pair — each apply environment scoped to
   the default branch, with the App key on `shipmate-engine` and any
   repository-level copy of that key deleted. An environment whose entry in the
-  checkout's `.github/shipmate.toml` holds `shared = true` gets one bare `<env>`
+  checkout's `.github/shipmate-config.yml` holds `shared: true` gets one bare `<env>`
   instead, under the same default-branch policy, so set it only where every
   pull request targets the default branch (plan cells for any other base are
   refused; [`hardening.md`](hardening.md) rows 8 and 17, §7–9);
@@ -184,7 +184,7 @@ or a stack carrying two `workload/*` tags or two stack paths that slug alike
 leave no whole tree to cover
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
 
-The checklist reads the working tree: stack tags, `.github/shipmate.toml` and
+The checklist reads the working tree: stack tags, `.github/shipmate-config.yml` and
 `.github/workflows/`. Re-run `scripts/onboard --app-id <id> --dry-run` after retagging a stack
 or adding, editing or deleting a drift file.
 
@@ -211,8 +211,8 @@ request with "GitHub Environment `<env>-apply` does not exist" until the apply
 tier is done.
 
 **One environment instead of two.** To share a single bare `<env>` between
-plan and apply, set `shared = true` in its `[environments.<env>]` entry of
-`.github/shipmate.toml`, create `<env>` alone (no `-plan`, no `-apply`), and
+plan and apply, set `shared: true` in its `environments.<env>` entry of
+`.github/shipmate-config.yml`, create `<env>` alone (no `-plan`, no `-apply`), and
 re-run `scripts/onboard` after adding or removing the key: onboard creates the
 bare `<env>` only for the entries it reads. It costs that env's reviewer gate
 and OIDC subject split until the environment is split again
@@ -250,7 +250,7 @@ creates all of them, including `shipmate-engine` and its branch policy:
   can reach whatever role a plan cell resolves; what refuses it is that role's
   own trust-policy claim condition ([`hardening.md`](hardening.md) §7–9).
 - **The environment identity your layout injects comes from the environment
-  table**, `.github/shipmate.toml` on your repository's default branch
+  table**, `.github/shipmate-config.yml` on your repository's default branch
   ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). It is required: a
   repository without one has nothing for its cells to run as, and every run
   refuses. `layout` is the discriminator — `tf_vars` derives `TF_VAR_env` and
@@ -293,13 +293,13 @@ creates all of them, including `shipmate-engine` and its branch policy:
   Choose how finely to split environments before writing those trust policies
   ([`hardening.md`](hardening.md) §7–9).
 
-  An environment applies without an approving review through `gated = false`
-  on its own `[environments.<name>]` entry (§"Applying chosen environments
+  An environment applies without an approving review through `gated: false`
+  on its own `environments.<name>` entry (§"Applying chosen environments
   without an approving review").
 
-  **A value can come from a GitHub variable.** Write `{ vars = "NAME" }` in
+  **A value can come from a GitHub variable.** Write `{vars: NAME}` in
   place of any string, list items included
-  (`aws.apply = { vars = "PROD_APPLY_ROLE" }`), and define the name as a
+  (`apply: {vars: PROD_APPLY_ROLE}`), and define the name as a
   repository or organization variable. A resolved value is printed in job
   outputs and logs, so reference variables only, never secrets. Never define it
   on `shipmate-engine`: comment-ops and the plan summary bind that Environment,
@@ -657,9 +657,9 @@ rules from Settings → Environments → `<name>` (or the API):
   every apply environment where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
   does not make it for you.
-- **Pair a reviewer-gated environment with `explicit = true` in
-  `.github/shipmate.toml`.**
-  Set it on the bare env's entry (`[environments.prod]` — neither `prod-plan`
+- **Pair a reviewer-gated environment with `explicit: true` in
+  `.github/shipmate-config.yml`.**
+  Set it on the bare env's entry (`environments.prod` — neither `prod-plan`
   nor `prod-apply`). A bare `shipmate apply` then skips it. While
   `shipmate / gate` is a required check, it is only ever reached via the
   targeted `shipmate apply prod`, which pauses for the environment reviewer;
@@ -802,7 +802,7 @@ that needs neither sets nothing.
 configuration stay the first option for endpoints, sizes and resource settings.
 These channels exist for inputs that genuinely come from outside the repository
 — credentials, and values the repository should not hold. Do not re-create your
-stacks' configuration as GitHub variables. A value in `.github/shipmate.toml`
+stacks' configuration as GitHub variables. A value in `.github/shipmate-config.yml`
 can name a variable instead ([`../CONTRACT.md`](../CONTRACT.md) §Variable
 references).
 
@@ -912,7 +912,7 @@ the last green check, so the PR merges itself:
 Properties that fall out of the existing gate semantics:
 
 - **Explicit environments still gate.** An environment whose entry holds
-  `explicit = true` is skipped by the bare `shipmate apply` and its apply checks
+  `explicit: true` is skipped by the bare `shipmate apply` and its apply checks
   stay pending — gate stays pending, so auto-merge waits until someone runs the
   targeted `shipmate apply <env>`. Arming auto-merge never weakens the
   apply-before-merge guarantee; it only removes the final click.
@@ -939,8 +939,8 @@ Properties that fall out of the existing gate semantics:
 
 The branch ruleset's review requirement is repository-wide, so requiring an
 approval before merge also requires one before every apply. To keep a low-tier
-environment self-service while the rest stay gated, set `gated = false` on its
-entry in `.github/shipmate.toml`:
+environment self-service while the rest stay gated, set `gated: false` on its
+entry in `.github/shipmate-config.yml`:
 
 ```yaml
 # .github/shipmate-config.yml

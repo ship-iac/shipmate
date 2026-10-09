@@ -8,6 +8,17 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Changed — BREAKING
+
+- **The environment table moves from `.github/shipmate.toml` to `.github/shipmate-config.yml`, written as YAML. Every value is read as written, and a duplicate key, an anchor, an alias or a tag refuses (`CONTRACT.md` §Keys).**
+- **Runners need Python 3.12 or later and PyYAML ≥ 6. The engine installs `python3-yaml` where it is missing and `sudo` needs no password (`CONTRACT.md` §Runner prerequisites).**
+
+### Fixed
+
+- **`shipmate doctor` parses workflow files as YAML: an `if: >-` block scalar, a block-style `options:` list and a wholly inline `on:` mapping are read as GitHub reads them, and a file that does not parse gets one `workflow parse` notice.**
+
 ## [0.43.0] — 2026-10-08
 
 Tags `ce6faac`.

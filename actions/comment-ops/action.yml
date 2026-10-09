@@ -228,8 +228,7 @@ runs:
         gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
 
     - uses: $/actions/python-yaml
-      # doctor and gate-config parse YAML; plan and help comments, and a commenter `access`
-      # refused, skip the apt install.
+      # Only doctor and gate-config parse YAML; a commenter `access` refused costs no install.
       if: ${{ (steps.parse.outputs.route == 'doctor' || steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.access.outputs.authorized == 'true' }}
 
     - name: Mint App token for doctor

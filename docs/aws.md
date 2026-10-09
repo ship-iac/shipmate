@@ -69,9 +69,9 @@ once it reaches the apply path.
 
 ## GitHub OIDC
 
-Roles are named per identity: an `[identities.<name>]`
+Roles are named per identity: an `identities.<name>`
 table names a plan and an apply role, and every environment whose entry carries
-`identity = "<name>"` assumes them, through GitHub's OIDC provider
+`identity: <name>` assumes them, through GitHub's OIDC provider
 (`token.actions.githubusercontent.com`) — no long-lived access key anywhere. The
 role's trust policy conditions the `sub` claim on the environment claim
 (`environment:<env>-apply` for an apply role, `environment:<env>-plan` for a
@@ -97,7 +97,7 @@ nothing.
 documented shape.** GitHub Actions issues the `sub` claim with the numeric
 organization and repository ids embedded, captured from that sample repository.
 Under the split naming the environment segment reads `dev-us-plan` or
-`dev-us-apply`; an environment with `shared = true` binds the bare `dev-us`, the
+`dev-us-apply`; an environment with `shared: true` binds the bare `dev-us`, the
 form this capture shows:
 
 ```
@@ -125,8 +125,8 @@ repository renamed or recreated under an old name cannot inherit the trust.
 
 ## The environment table
 
-A cell resolves its role from the environment table — `.github/shipmate.toml` —
-and from nothing else. An `[identities.<name>]` table names the roles once, and
+A cell resolves its role from the environment table — `.github/shipmate-config.yml` —
+and from nothing else. An `identities.<name>` entry names the roles once, and
 each environment's entry names an identity and carries its region. The engine
 reads the file from the repository's default branch, so a pull request cannot
 choose which role its own plan assumes.
@@ -183,7 +183,7 @@ Beyond the schema:
   a workload in the order [`../CONTRACT.md`](../CONTRACT.md) §Adding and
   removing an environment gives.
 - **Several environments may name one identity.** One edit to
-  `[identities.dev]` then retargets all of them; `shipmate doctor`'s roles lines
+  `identities.dev` then retargets all of them; `shipmate doctor`'s roles lines
   list what each environment resolves ([`../CONTRACT.md`](../CONTRACT.md)
   §Resolution).
 - **A stack that exists once is an environment of its own.** A management

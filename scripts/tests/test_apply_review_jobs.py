@@ -17,7 +17,7 @@ which is why they are pinned whole:
   `test_apply_dispatch_actor_guard.py` rather than a second time here, because `results:` is
   `join(needs.*.result, ',')` over that same list.
 
-Everything is asserted over `yaml.safe_load`ed structures, compared whole: a substring is
+Everything is asserted over parsed structures, compared whole: a substring is
 satisfied by a comment and by an inverted operator.
 """
 
