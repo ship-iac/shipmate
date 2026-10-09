@@ -78,8 +78,10 @@ summary job — all three trust guards
 inverted, `environment:` commented out, the draft-skip deleted — left the suite
 byte-identical to green.
 
-- **Assert parsed values, not substrings of file text.** `yaml.safe_load` the
-  file, take the job or step, and compare whole expressions. A substring
+- **Assert parsed values, not substrings of file text.** Parse the file with
+  `_loader.workflow_yaml`, the YAML 1.2 workflow loader, not `yaml.safe_load`,
+  which reads the `on` key as `True`. Take the job or step, and compare whole
+  expressions. A substring
   assertion is satisfied by the same words appearing in a *comment*, and by an
   inverted operator (`==`→`!=`, `&&`→`||`) that keeps the text intact.
   `scripts/tests/test_apply_cell_failsafe_wiring_guard.py` is the model to copy.

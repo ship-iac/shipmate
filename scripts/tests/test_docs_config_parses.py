@@ -9,8 +9,8 @@ and that refuses at `detect` for the consumer who copies it. One such example sh
 declaring the same environment twice.
 
 The marker line is the selector, so losing it would drop a fence silently. Two guards stand
-behind it: a hand-written per-page count of config fences, and a check that no unmarked
-```yaml fence on these pages parses to a mapping with a top-level config key.
+behind it: a hand-written per-page count of config fences, and a check that every unmarked
+```yaml fence on these pages parses, to anything but a mapping with a top-level config key.
 
 Every fence must be a complete file, not a fragment. `validate_structure` judges a whole
 table -- it requires `layout` -- so a fragment would refuse for a reason that says nothing about
@@ -32,7 +32,7 @@ from collections import Counter
 import pytest
 import yaml
 from _loader import CONFIG_FENCE_MARKER, ENGINE, doc_fences, is_config_fence, load_script
-from _shipmate import load_workflow_text
+from _shipmate import load_workflow_text, yaml_error_text
 
 DOCS = ENGINE / "docs"
 ec = load_script("env-config")
@@ -80,19 +80,29 @@ def test_each_page_holds_its_config_fences():
 
 
 def test_no_unmarked_fence_is_a_config_file():
-    """A config example without its marker would be published unchecked. Mutation: delete one
-    fence's marker line and edit the count above to match -- this guard alone catches it."""
-    unmarked = []
+    """A config example without its marker would be published unchecked, and one that also
+    does not parse shows no config key to recognise it by, so every unmarked fence must parse.
+    `test_docs_yaml_parses.py` does not read CONTRACT.md, so for its fences this is the only
+    parse check.
+
+    Mutations, each with the count above edited to match: delete one fence's marker line --
+    listed as unmarked; delete a CONTRACT.md fence's marker line and give it a second `prod:`
+    under `environments` -- listed as not parsing."""
+    unmarked, broken = [], []
     for page, line, body in _ALL:
         if is_config_fence(body):
             continue
         try:
             doc = load_workflow_text(body)
-        except yaml.YAMLError:
+        except yaml.YAMLError as exc:
+            broken.append(f"{_where(page, line)}: {yaml_error_text(exc)}")
             continue
         if isinstance(doc, dict) and {"layout", "identities", "environments"} & set(doc):
             unmarked.append(_where(page, line))
-    assert unmarked == [], f"config fences without the `{CONFIG_FENCE_MARKER}` line: {unmarked}"
+    assert (unmarked, broken) == ([], []), (
+        f"config fences without the `{CONFIG_FENCE_MARKER}` line: {unmarked}; "
+        f"```yaml fences that do not parse: {broken}"
+    )
 
 
 @pytest.mark.parametrize(
