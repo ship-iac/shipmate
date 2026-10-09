@@ -22,6 +22,8 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **`shipmate doctor` parses workflow files as YAML: an `if: >-` block scalar, a block-style `options:` list and a wholly inline `on:` mapping are read as GitHub reads them, and a file that does not parse gets one `workflow parse` notice.**
+- **A deploy refused for an apply check on a stack that lost its `env/*` tag names every unapplied cell of the merge, and offers a remedy for a deliberate untag (`docs/troubleshooting.md` §A deploy refused an apply check on a stack that lost its env tag).**
+- **`shipmate doctor`'s missing-environment finding says that a missing apply environment refuses the apply before any wave.**
 
 ## [0.43.0] — 2026-10-08
 
