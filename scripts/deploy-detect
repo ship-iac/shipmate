@@ -114,7 +114,11 @@ def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
     head = _merged_head(repo, merge_sha)
-    ad.validate_head_sha(head, f"the merged pull request's head SHA from commits/{merge_sha}/pulls")
+    ad.validate_head_sha(
+        head,
+        "the deploy's head SHA (the merged pull request's head from "
+        f"commits/{merge_sha}/pulls, else GITHUB_SHA)",
+    )
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
     _, cells, tree, unmanaged = bm.compute_cells(

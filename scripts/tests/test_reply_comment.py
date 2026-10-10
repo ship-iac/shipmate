@@ -21,6 +21,7 @@ def _main(**reply):
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_RUN_ID": "7777",
+        "PR_NUMBER": "",
         **{f"SHIPMATE_REPLY_{k.upper()}": v for k, v in reply.items()},
     }
     return subprocess.run(
@@ -148,5 +149,4 @@ def test_any_argument_is_refused_before_any_work(monkeypatch, capsys, argv):
     """Mutations: accept `--post` as a no-op (`["--post"]` red); delete the argv check (every
     case then posts, exit 0)."""
     assert _post(monkeypatch, *argv) == ("::error::usage: reply-comment", [])
-    assert capsys.readouterr().out == ""
     assert capsys.readouterr().out == ""

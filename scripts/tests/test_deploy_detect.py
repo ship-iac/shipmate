@@ -127,7 +127,7 @@ def _run_main(
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
-    into `urls` are the ones the work set itself asks for.
+    into `urls` are the ones the work set itself asks for; `head` is what the stub returns.
 
     `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
     the double, and leaves `cells` unused.
@@ -231,8 +231,9 @@ def test_main_refuses_a_malformed_merged_head_before_any_api_read(tmp_path, monk
             head="1/../../x",
         )
     assert str(exc_info.value) == (
-        "::error::the merged pull request's head SHA from commits/merge123/pulls must be a "
-        "40-char lowercase hex SHA (got: '1/../../x')"
+        "::error::the deploy's head SHA (the merged pull request's head from "
+        "commits/merge123/pulls, else GITHUB_SHA) must be a 40-char lowercase hex SHA "
+        "(got: '1/../../x')"
     )
     assert urls == []
 

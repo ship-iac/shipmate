@@ -6,8 +6,9 @@ Five jobs: ``load_script`` for the extension-less helpers;
 ``step_by`` for the YAML-shape guards; ``doc_fences`` and ``assert_every_fence_discovered`` for
 the docs fence guards; ``bash_only``, ``run_step``, ``write_python3_shim`` and
 ``run_with_gh_recorder`` for the tests that execute a step's bash; and ``github_outputs`` for
-reading back what a helper or step wrote to ``GITHUB_OUTPUT``. The parser is load-bearing,
-because a guard that silently parses to ``[]`` asserts nothing, so it has one definition.
+reading back what a helper or step wrote to ``GITHUB_OUTPUT``. The YAML parser behind
+``action_yaml`` and ``workflow_yaml`` is load-bearing, because a guard that silently parses to
+``[]`` asserts nothing, so it has one definition.
 
 Loading a helper script
 -----------------------
