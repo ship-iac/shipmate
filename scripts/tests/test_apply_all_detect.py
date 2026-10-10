@@ -827,3 +827,22 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
     assert capsys.readouterr().out.splitlines() == [
         "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
     ]
+
+
+def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
+    tmp_path, monkeypatch, capsys
+):
+    """apply-comment's held remedy tells reviewers to read the run log's apply-all-detect notice,
+    so the title is pinned whole on both sides. Mutations: `title=apply-all-detect` ->
+    `title=apply-detect` in apply-detect -- the line differs; `apply-all-detect notice` ->
+    `apply-detect notice` in apply-comment's `_HELD_REMEDY` -- the title is absent from it."""
+    _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED")
+    notices = [
+        line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice title=")
+    ]
+    assert notices == [
+        f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, 0] "
+        "excluded_explicit=[] skipped_after_explicit=[] review_held=[] applied_ungated=[] "
+        "review_decision='APPROVED'"
+    ]
+    assert "apply-all-detect notice" in load_script("apply-comment")._HELD_REMEDY

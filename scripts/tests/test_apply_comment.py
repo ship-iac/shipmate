@@ -1352,7 +1352,7 @@ def test_check_name_grammar_matches_apply_cells_construction():
     assert ac._check_name(row) == "apply / stacks/app / dev-eu"
 
 
-def test_env_level_count_matches_env_orders():
+def test_env_level_count_matches_waves():
     # apply-comment keeps its own copy of the constant, so the equality is pinned here
     # rather than by construction.
     assert ac.MAX_ENV_LEVELS == wv.MAX_ENV_LEVELS

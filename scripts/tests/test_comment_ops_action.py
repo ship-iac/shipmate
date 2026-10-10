@@ -283,8 +283,6 @@ def test_a_check_run_in_that_shape_yields_its_plan_run():
             "started_at": "2026-08-24T00:00:00Z",
             "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"}),
             "app": {"id": 4326562},
-            "app_slug": "shipmate",
-            "app_id": 4326562,
         }
     )
     mapping = load_script("apply-gate").plan_records([line], "4326562")

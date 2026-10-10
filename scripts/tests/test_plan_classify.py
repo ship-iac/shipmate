@@ -79,7 +79,6 @@ def test_fingerprint_empty_tfvar_matches_absent_with_others():
 def test_fingerprint_stacks_flavor_matches_tfvar_only_algo():
     # Base algo is sorted TF_VAR_* name->value JSON; TF_WORKSPACE unset must not change it.
     import hashlib
-    import json
 
     env = {"TF_VAR_env": "dev-eu", "TF_VAR_region": "eu-west-1"}
     base = hashlib.sha256(

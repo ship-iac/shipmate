@@ -1,6 +1,6 @@
 name: apply-review
 # Re-reads the review decision server-side, in its own job away from branch-controlled HCL
-# (CONTRACT.md §Comment-ops). a targeted `apply-detect` refuses and a bare one holds on it; this
+# (CONTRACT.md §Comment-ops). A targeted `apply-detect` refuses and a bare one holds on it; this
 # workflow only fetches it.
 on:
   workflow_call:

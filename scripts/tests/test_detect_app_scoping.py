@@ -36,8 +36,10 @@ def _source(name):
 
 
 def test_the_detects_reach_completed_applies_through_the_scoped_predicate():
-    """Mutation: replace `ag.app_done_names(lines, app_id)` in any detect's main() with
-    `ag.done_names(ag.parse_jsonl(lines))` -- that detect no longer carries the call."""
+    """Mutation: replace `ad.ag.app_done_names(lines, app_id)` in deploy-detect's main() with
+    `ad.ag.done_names(ad.ag.parse_jsonl(lines))` -- deploy-detect no longer carries the call.
+    apply-detect calls it from both `main` and `bare_main`, so one replacement there leaves the
+    substring present; its two call sites are pinned by the forged-check tests named above."""
     for name in DETECTS:
         assert _SCOPED_CALL in _source(name), f"{name} no longer calls app_done_names"
 
