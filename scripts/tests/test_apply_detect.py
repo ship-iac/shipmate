@@ -1,3 +1,4 @@
+import contextlib
 import json
 
 import pytest
@@ -251,6 +252,36 @@ def _stub_apply(monkeypatch, deps, checks):
     return urls
 
 
+class _Stop(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"), [("", ["bare_main"]), ("dev-eu", ["refuse_unreviewed"])]
+)
+def test_main_routes_an_empty_env_to_the_bare_form_and_never_to_the_review_refusal(
+    monkeypatch, tmp_path, environment, expected
+):
+    """`_review_reason` reads an empty env as a bare apply, exempt when any entry is ungated, so
+    an empty env reaching `refuse_unreviewed` is a bypassed refusal.
+
+    Mutation: route on `env is None` instead of `not env` -- the empty case reaches
+    `validate_env`'s SystemExit. Mutation: `if env:` -- dev-eu records `bare_main`, and the
+    empty case reaches that SystemExit."""
+    _apply_env(monkeypatch, tmp_path, SHIPMATE_ENV=environment)
+    calls = []
+    monkeypatch.setattr(ad, "bare_main", lambda: calls.append("bare_main"))
+
+    def _refuse(*a):
+        calls.append("refuse_unreviewed")
+        raise _Stop
+
+    monkeypatch.setattr(ad, "refuse_unreviewed", _refuse)
+    with contextlib.suppress(_Stop):
+        ad.main()
+    assert calls == expected
+
+
 def test_workset_never_resolves_a_slug_back_to_a_stack():
     """`a/b` and `a-b` slug identically, and only `a-b` carries an apply check, so only `a-b`
     is in the workset. A pull request adding `a-b` beside an unchanged `a/b` never shows the
@@ -399,8 +430,8 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
 
 
 def test_validate_head_sha_rejects_short():
-    """Without `source` the refusal names SHIPMATE_HEAD_SHA, the variable apply-detect,
-    apply-all-detect and unlock-detect read.
+    """Without `source` the refusal names SHIPMATE_HEAD_SHA, the variable both apply-detect
+    forms and unlock-detect read.
 
     Mutation: change `source`'s default -- the whole message differs."""
     with pytest.raises(SystemExit) as exc_info:
@@ -441,8 +472,8 @@ def test_validate_env_refuses_a_name_no_environment_can_take(value):
 
 
 def test_validate_env_rejects_empty():
-    """An empty env reads as a bare apply inside _review_reason, which exempts it whenever any
-    table entry holds `gated: false` -- a bypassed refusal on a gate path.
+    """Each caller acts on one environment: `main` routes an empty env to `bare_main` before
+    this, and unlock-detect has no all-environments form.
 
     Mutation: run the name check before the empty check -- `""` gets the charset message."""
     with pytest.raises(SystemExit) as e:

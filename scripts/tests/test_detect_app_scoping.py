@@ -1,11 +1,13 @@
-"""The three detects must reach "already applied" only through the App-scoped
+"""The detects must reach "already applied" only through the App-scoped
 predicate. The `env:` line that hands each script `SHIPMATE_APP_ID` is pinned
 whole by `test_detect_wiring_guard.py`.
 
 This is structural, and not observable from a unit test of the predicate:
 `app_done_names` can be correct while a detect's `main()` calls something else.
 The behavioural pin on each `main()` is its detect's
-test_a_forged_completed_check_does_not_mark_a_cell_applied.
+test_a_forged_completed_check_does_not_mark_a_cell_applied; apply-detect holds two
+(`main` and `bare_main`), which these file-text checks cannot tell apart, so its pins
+are that test in test_apply_detect.py and in test_apply_all_detect.py.
 
 The script checks here are substring and regex matches on file text, not parsed
 call sites: a comment or docstring carrying `app_done_names(` satisfies the
@@ -22,7 +24,7 @@ import re
 
 from _loader import SCRIPTS
 
-DETECTS = ("apply-detect", "deploy-detect", "apply-all-detect")
+DETECTS = ("apply-detect", "deploy-detect")
 
 # The App-scoped predicate, and the unscoped one that ignores authorship entirely.
 _SCOPED_CALL = "app_done_names("

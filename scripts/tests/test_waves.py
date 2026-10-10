@@ -223,7 +223,7 @@ def test_env_level_waves_refuses_an_env_beyond_the_cap():
 
 
 def test_env_level_waves_refuses_a_cyclic_stack_graph():
-    """deploy-detect, apply-detect and apply-all-detect sort the stack graph only here.
+    """deploy-detect and both apply-detect forms sort the stack graph only here.
 
     Mutation: `levels` for `stack_levels` in `env_level_waves` -- a raw `CycleError`
     escapes instead of the `SystemExit`."""

@@ -156,9 +156,9 @@ def env_level_waves(cells, order, deps):
 
     Cells are bucketed by their env's level in `order`, then stack-wave-ordered
     within it. Env-levels apply fully in order: level 0 entirely before level 1,
-    and so on. Shared by deploy-detect (merge path) and apply-all-detect (bare
-    `shipmate apply`), and by apply-detect (targeted `shipmate apply`), which
-    passes an empty order: that puts every cell at level 0.
+    and so on. Shared by deploy-detect (merge path) and both apply-detect forms: the bare
+    `shipmate apply`, and the targeted `shipmate apply <env>`, which passes an
+    empty order: that puts every cell at level 0.
 
     Refuses an env beyond MAX_ENV_LEVELS before bucketing: the loop below keys on
     `range(MAX_ENV_LEVELS)`, so an over-deep env falls out of every level and its
@@ -181,7 +181,7 @@ def env_level_waves(cells, order, deps):
 def write_env_level_waves(fh, per_level):
     """Emit envlevel{0..N}_waves (JSON) + envlevel{0..N}_empty flags for a list
     of per-env-level wave dicts, to a GITHUB_OUTPUT file handle. Shared by
-    deploy-detect, apply-detect and apply-all-detect so the env-level output contract
+    deploy-detect and both apply-detect forms so the env-level output contract
     that the reusable apply-env-level.yml consumes stays single-sourced -- a format
     drift between the detect paths would silently break that shared consumer."""
     for lvl, w in enumerate(per_level):

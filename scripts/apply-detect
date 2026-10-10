@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-"""Apply detect: a dispatched single-env apply's work set + waves.
+"""Apply detect: a dispatched apply's work set + waves, bare or targeted.
 
 The dispatched workflow is the consumer's `shipmate.yml`, whose `apply` job
 the `verb: apply` body selects; the engine's own `apply.yml` is `workflow_call`
 and is what that job calls.
 
-Unlike deploy-detect (merge-driven, all envs), the work set here is scoped to
-ONE environment and sourced from the head's own apply checks: a run-graph stack
+Both forms source the work set from the head's own apply checks: a stack
 belongs to this run when `apply / <path> / <env>` is among the App-authored
 checks on the head, and the plan run it applies from is the one that check
 records. Cells whose apply check already completed are dropped (idempotent
-no-op), and the rest wave-ordered. A targeted `shipmate apply <env>` is explicit by
-design — it never blocks on other environments; region-level sequencing across
-envs is handled separately by the bare form.
+no-op), and the rest wave-ordered. Both write the env-level output contract
+deploy-detect writes (`waves.write_env_level_waves`).
 
-It writes the same env-level output contract as the bare form
-(`waves.write_env_level_waves`). It passes `waves.env_level_waves` an empty order,
-which puts every cell at env-level 0 and leaves levels 1-3 empty.
+An empty `SHIPMATE_ENV` selects the bare form, `bare_main`: every environment's
+pending cells, bucketed into env-levels by the entries' `needs`, after the
+exclusions its docstring names.
 
-Before any of that, the PR's review decision — read server-side by the `review`
-job, narrowed by `gated: false` on the environment's entry — must authorize this
-environment, or the run refuses.
+A named environment selects the targeted form, scoped to that ONE environment.
+A targeted `shipmate apply <env>` is explicit by design — it never blocks on
+other environments. It passes `waves.env_level_waves` an empty order, which puts
+every cell at env-level 0 and leaves levels 1-3 empty. Before any of that, the
+PR's review decision — read server-side by the `review` job, narrowed by
+`gated: false` on the environment's entry — must authorize this environment, or
+the run refuses.
 """
 
 import json
@@ -117,6 +119,18 @@ def with_plan_runs(cells, check_run_lines, app_id):
     return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest in named]
 
 
+def cells_from_checks(check_names, stacks_by_env, tags_by_stack):
+    """All-envs workset: per env (from tags, never from a parse of a check
+    name), the tree's candidates whose forward-constructed check name is on the
+    head — exactly the targeted path's matching and workload handling, run
+    over every env."""
+    cells = []
+    for env in sorted(stacks_by_env):
+        paths = paths_with_checks(env, stacks_by_env[env], check_names)
+        cells.extend(cells_for_env(env, paths, tags_by_stack))
+    return cells
+
+
 def filter_pending(cells, completed_names):
     return [c for c in cells if ag.check_name(c["stack"], c["environment"]) not in completed_names]
 
@@ -185,14 +199,15 @@ def validate_head_sha(value, source="SHIPMATE_HEAD_SHA"):
 def validate_env(value):
     """Refuse an empty `SHIPMATE_ENV`, or one `check_env_name` rejects.
 
-    Empty is refused because each caller acts on exactly one environment. The
-    `plan.<env>.<slug>` artifact name is unambiguous only because an env name never
-    contains '.' — with env first, the first '.' after the `plan.` prefix is the
-    env<->slug boundary. Terramate accepts '.' in a tag, so `env_membership` checks
-    every tag-derived name; `SHIPMATE_ENV` arrives from a dispatch input instead, and
-    is checked here with the same `check_env_name`. A dotted env would let distinct
-    (env, slug) pairs render the same artifact name and cross-enrol the wrong stack
-    into a wave."""
+    Empty is refused because each caller acts on exactly one environment: `main`
+    routes an empty env to `bare_main` before calling this, and unlock-detect has no
+    all-environments form. The `plan.<env>.<slug>` artifact name is unambiguous only
+    because an env name never contains '.' — with env first, the first '.' after the
+    `plan.` prefix is the env<->slug boundary. Terramate accepts '.' in a tag, so
+    `env_membership` checks every tag-derived name; `SHIPMATE_ENV` arrives from a
+    dispatch input instead, and is checked here with the same `check_env_name`. A
+    dotted env would let distinct (env, slug) pairs render the same artifact name
+    and cross-enrol the wrong stack into a wave."""
     if not value:
         raise SystemExit("::error::SHIPMATE_ENV is empty; this path is single-env.")
     bm.ec.check_env_name(value, f"SHIPMATE_ENV {value!r}", "the environment")
@@ -217,14 +232,124 @@ def refuse_unreviewed(env, table, decision):
         raise SystemExit(f"::error::{reason}")
 
 
-def main():
+def bare_main():
+    """The bare `shipmate apply` work set -> env-levels -> waves.
+
+    The pre-merge equivalent of deploy-detect, sourced like the targeted form:
+    cells are the tree's stacks whose `apply / <stack> / <env>` check is on the
+    head, each applying from the plan run its own check records, and the
+    environment entries' `needs` bucket the pending ones into env-levels exactly as
+    on the merge-deploy path. Env membership comes from stack tags
+    (build-matrix.env_membership) so this form only ever constructs check names
+    forward, never reverse-parses them (deploy-detect's stranded-check refusal is
+    the one site that does); a stack with no `env/*` tag is in no environment and
+    adds no cell.
+
+    Three exclusions distinguish the bare form from deploy:
+    - envs whose entry holds `explicit: true` (typically prod) are removed
+      before env-levels are built; their apply checks stay pending, so
+      `shipmate / gate` keeps gating the merge until a targeted
+      `shipmate apply <env>` completes them. `excluded_envs` names every one with
+      pending work, including those also held for review;
+    - envs ordered (transitively) after an env not applying this run — held or
+      excluded as explicit — are skipped with a notice — their ordering
+      precondition cannot be met this run, exactly like a failed predecessor
+      level;
+    - envs the PR's review decision does not authorize are held until it carries
+      an approving review, dropped the same way; an entry holding
+      `gated: false` is exempt from that hold.
+    """
     repo = os.environ["GITHUB_REPOSITORY"]
-    env = os.environ["SHIPMATE_ENV"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
 
     validate_head_sha(head)
-    # `_review_reason` reads an empty env as a bare apply, exempt when any entry is
-    # ungated, so an empty SHIPMATE_ENV must be refused before `refuse_unreviewed`.
+
+    stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
+    app_id = os.environ["SHIPMATE_APP_ID"]
+    lines = _check_run_lines(repo, head)
+    cells = cells_from_checks(apply_check_names(lines, app_id), stacks_by_env, tags_by_stack)
+    table = bm.env_config(cells, bm.tagged_workloads(stacks_by_env, tags_by_stack))
+    cells = bm.stamp_rows(cells, table, "apply")
+
+    pending = filter_pending(cells, ag.app_done_names(lines, app_id))
+
+    order = bm.ec.env_order(table)
+    pending_envs = {c["environment"] for c in pending}
+    ungated = bm.ec.ungated_envs(table)
+    decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
+    # An absent decision reads as '' and holds every env. It is reachable only through
+    # wiring drift: the review job has no `if:`, and a failed one skips this script.
+    held = sorted(e for e in pending_envs if az._review_reason(decision, e, ungated))
+    explicit = bm.ec.explicit_envs(table)
+    stopped = pending_envs & set(explicit + held)
+    skipped = sorted(wv.blocked_envs(order, stopped, pending_envs - stopped))
+    # Every pending explicit env, held or not: the comment names a held one's
+    # explicit command under the hold. A held env that is not explicit stays out.
+    excluded = sorted(pending_envs & set(explicit))
+    dropped = set(excluded) | set(skipped) | set(held)
+    # The plan runs attach to `runnable`, not `pending`: an excluded or held env's checks
+    # stay pending by design for a later targeted apply, and that apply refuses on its own
+    # over a record-less cell, so refusing here would strand the envs that CAN apply.
+    runnable = with_plan_runs(
+        [c for c in pending if c["environment"] not in dropped], lines, app_id
+    )
+    bm.refuse_workload_gaps(runnable, table)
+    # From `runnable`, never from `pending & ungated`: an ungated env can still be
+    # excluded or skipped, and claiming it applied is worse than saying nothing.
+    applied_ungated = sorted(
+        {
+            c["environment"]
+            for c in runnable
+            if az._ungated_exemption(decision, c["environment"], ungated)
+        }
+    )
+    # From `runnable` for the same reason.
+    no_review_required = sorted(
+        {
+            c["environment"]
+            for c in runnable
+            if az._review_not_required(decision, c["environment"], ungated)
+        }
+    )
+
+    deps = run_graph_deps()
+    # Before the padding, whose over-depth refusal is where this line helps most.
+    print(dag_shape_notice(deps))
+    per_level = wv.env_level_waves(runnable, order, deps)
+    level_counts = [sum(map(len, w.values())) for w in per_level]
+    # The title is what `apply-comment`'s held-env remedy and CONTRACT.md tell reviewers to
+    # read; rename all three together.
+    print(
+        f"::notice title=apply-all-detect::head={head} "
+        f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
+        f"excluded_explicit={excluded} skipped_after_explicit={skipped} "
+        f"review_held={held} applied_ungated={applied_ungated} "
+        # The hold cause: an everything-held run is otherwise indistinguishable
+        # from a CHANGES_REQUESTED one, and an absent decision (a mis-wired
+        # review job) renders visibly as ''.
+        f"review_decision={decision!r}"
+    )
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        wv.write_env_level_waves(fh, per_level)
+        fh.write(f"head_sha={head}\n")
+        fh.write(f"excluded_envs={json.dumps(excluded)}\n")
+        fh.write(f"skipped_envs={json.dumps(skipped)}\n")
+        fh.write(f"review_held_envs={json.dumps(held)}\n")
+        fh.write(f"applied_ungated_envs={json.dumps(applied_ungated)}\n")
+        fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
+
+
+def main():
+    env = os.environ["SHIPMATE_ENV"]
+    # Routed before `refuse_unreviewed`: `_review_reason` reads an empty env as a bare
+    # apply, exempt when any entry is ungated, so it must never reach the targeted refusal.
+    if not env:
+        bare_main()
+        return
+    repo = os.environ["GITHUB_REPOSITORY"]
+    head = os.environ["SHIPMATE_HEAD_SHA"]
+
+    validate_head_sha(head)
     validate_env(env)
 
     # Structure-validated before the refusal reads `gated`; `validate` re-runs it

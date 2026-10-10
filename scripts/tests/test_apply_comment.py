@@ -342,7 +342,7 @@ def test_the_short_form_of_an_all_held_run_says_nothing_applied():
 
 
 def test_the_short_form_of_an_empty_queue_keeps_the_explicit_and_skipped_lines():
-    """apply-all-detect drops explicit envs from `runnable`, so an explicit-only-pending
+    """The bare apply drops explicit envs from `runnable`, so an explicit-only-pending
     repository is all-levels-empty and carries `excluded_envs` at once: the lines are the only
     sign of it.
 

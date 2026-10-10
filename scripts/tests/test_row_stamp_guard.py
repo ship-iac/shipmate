@@ -35,8 +35,7 @@ from _loader import SCRIPTS, github_outputs
 _PRODUCERS = {
     "build-matrix": ("_detect",),
     "deploy-detect": ("main",),
-    "apply-detect": ("main",),
-    "apply-all-detect": ("main",),
+    "apply-detect": ("main", "bare_main"),
     "unlock-detect": ("main",),
 }
 
@@ -188,7 +187,7 @@ def test_the_targeted_apply_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
 
 
 def test_the_bare_apply_all_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
-    """Call site 6: `apply-all-detect` main(), which reaches `cells_for_env` through its own
+    """Call site 6: `apply-detect` bare_main(), which reaches `cells_for_env` through
     `cells_from_checks`.
 
     Mutations: pass `"plan"` at that call site; drop its `stamp_rows` wrapper.
