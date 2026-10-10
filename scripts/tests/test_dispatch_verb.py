@@ -305,13 +305,8 @@ def test_every_route_comment_ops_can_dispatch_is_accepted_here(tmp_path):
     to VERBS.
     """
     parse = load_script("comment-parse")
-    # `doctor` and `help` are answered in place, and `destroy` is reserved.
-    # What is left is exactly what can reach a dispatch.
-    routes = {
-        verb
-        for verb, spec in parse.VERBS.items()
-        if spec["status"] == parse.ACTIVE and verb not in ("doctor", "help")
-    }
+    # `doctor` and `help` are answered in place; what is left is exactly what can reach a dispatch.
+    routes = {verb for verb in parse.VERBS if verb not in ("doctor", "help")}
     assert routes == {"apply", "plan", "unlock"}, (
         f"comment-parse dispatches routes {sorted(routes)}; extend the case list deliberately"
     )

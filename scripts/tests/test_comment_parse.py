@@ -18,18 +18,9 @@ def test_valid_apply():
         "valid": True,
         "verb": "apply",
         "env": "dev-eu",
-        "tag_filter": None,
         "route": "apply",
         "error": None,
     }
-
-
-def test_tag_filter_rejected_not_yet_supported():
-    # Parsed for forward compatibility, but no component honors it, so it is rejected rather
-    # than silently applying the whole env.
-    r = cp.parse("shipmate apply dev-eu workload:app")
-    assert r["is_command"] and not r["valid"] and "tag-filter" in r["error"]
-    assert r["verb"] == "apply" and r["env"] == "dev-eu" and r["tag_filter"] == "workload:app"
 
 
 def test_leading_trailing_whitespace_and_crlf():
@@ -64,20 +55,6 @@ def test_help_rejects_an_env():
     assert not r["valid"] and "takes no arguments" in r["error"]
 
 
-def test_plan_rejects_an_env_with_a_tag_filter():
-    # Reached through the no-arguments branch, not the tag branch: with `args: ""` a tag is
-    # already an argument.
-    r = cp.parse("shipmate plan dev-eu workload:app")
-    assert r["is_command"] and not r["valid"]
-    assert "takes no arguments" in r["error"]
-
-
-def test_reserved_verb_destroy_is_rejected():
-    r = cp.parse("shipmate destroy dev-eu")
-    assert r["is_command"] and not r["valid"] and "reserved" in r["error"]
-    assert r["route"] is None
-
-
 def test_unknown_verb_is_rejected():
     r = cp.parse("shipmate frobnicate dev-eu")
     assert r["is_command"] and not r["valid"] and "unknown verb" in r["error"]
@@ -91,7 +68,6 @@ def test_bare_apply_targets_all_envs():
         "valid": True,
         "verb": "apply",
         "env": None,
-        "tag_filter": None,
         "route": "apply",
         "error": None,
     }
@@ -102,19 +78,6 @@ def test_bare_apply_with_whitespace_and_crlf():
     assert r["valid"] and r["env"] is None
 
 
-def test_bare_apply_with_tag_filter_rejected():
-    # A tag cannot be mistaken for an env, because ':' is outside the env charset, so bare plus
-    # tag parses env=None and still rejects on the unsupported tag.
-    r = cp.parse("shipmate apply workload:app")
-    assert r["is_command"] and not r["valid"] and "tag-filter" in r["error"]
-    assert r["env"] is None and r["tag_filter"] == "workload:app"
-
-
-def test_bare_reserved_verb_rejected():
-    r = cp.parse("shipmate destroy")
-    assert r["is_command"] and not r["valid"] and "reserved" in r["error"]
-
-
 def test_bare_plan_is_valid():
     r = cp.parse("shipmate plan")
     assert r == {
@@ -122,7 +85,6 @@ def test_bare_plan_is_valid():
         "valid": True,
         "verb": "plan",
         "env": None,
-        "tag_filter": None,
         "route": "plan",
         "error": None,
     }
@@ -154,15 +116,33 @@ def test_shipmatey_prefix_is_not_a_command():
     assert not r["is_command"]
 
 
-def test_env_uppercase_rejected():
-    """Uppercase is outside the lowercase-only env charset, so the env group does not match, but
-    it does fit the tag charset, which allows uppercase, so this falls through to the tag branch
-    rather than to "malformed". Pinned as a deliberate choice: the user sees a "tag-filter is
-    not yet supported" error, not a missing or invalid env one."""
-    r = cp.parse("shipmate apply DEV-EU")
-    assert r["is_command"] and not r["valid"]
-    assert r["env"] is None and r["tag_filter"] == "DEV-EU"
-    assert "tag-filter" in r["error"]
+_MALFORMED = "malformed: expected `shipmate <verb> [env]` (try `shipmate help`)"
+
+
+@pytest.mark.parametrize(
+    "body", ["shipmate apply dev-eu foo", "shipmate apply DEV-EU", "shipmate unlock DEV-EU"]
+)
+def test_env_uppercase_rejected(body):
+    """Uppercase is outside the lowercase-only env charset, and nothing may follow the env, so
+    these fail the grammar outright. Pinned as a deliberate choice: the user sees the malformed
+    error with its help hint, not a missing or invalid env one.
+
+    Mutation: restore the `(?: (?P<tag>[A-Za-z0-9][A-Za-z0-9/_:.-]*))?` group in `_CMD`, and
+    every case parses and gets a verb-specific error instead.
+    """
+    r = cp.parse(body)
+    assert (r["is_command"], r["valid"], r["route"], r["error"]) == (True, False, None, _MALFORMED)
+
+
+def test_destroy_is_an_unknown_verb():
+    """Mutation: re-add `destroy` to `VERBS`, and it gets a route or a verb-specific error."""
+    r = cp.parse("shipmate destroy")
+    assert (r["is_command"], r["valid"], r["route"], r["error"]) == (
+        True,
+        False,
+        None,
+        "unknown verb `destroy` (try `shipmate help`)",
+    )
 
 
 def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
@@ -174,7 +154,6 @@ def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
         "valid": True,
         "verb": "apply",
         "env": "dev-eu",
-        "tag_filter": None,
         "route": "apply",
         "error": None,
     }
@@ -187,7 +166,6 @@ def test_pure_garbage_shipmate_line_still_errors():
 
 def test_registry_shape():
     for verb, spec in cp.VERBS.items():
-        assert spec["status"] in (cp.ACTIVE, cp.RESERVED), verb
         assert spec["args"] in ("", "[env]", "<env>"), verb
         assert spec["desc"].strip(), verb
 
@@ -202,7 +180,7 @@ def test_route_per_verb():
 
 @pytest.mark.parametrize(
     "verb",
-    sorted(v for v, s in cp.VERBS.items() if s["status"] == cp.ACTIVE and s["args"] == ""),
+    sorted(v for v, s in cp.VERBS.items() if s["args"] == ""),
 )
 def test_no_arg_verb_rejects_arguments(verb):
     r = cp.parse(f"shipmate {verb} dev-eu")
@@ -223,16 +201,16 @@ def test_unknown_verb_points_at_help():
     [
         "shipmate Doctor",  # The verb charset is lowercase-only.
         "shipmate  apply",  # A double space.
-        "shipmate apply dev-eu --auto",  # A token outside both optional charsets.
+        "shipmate apply dev-eu --auto",  # A token after the env.
         "shipmate apply dev-eu; rm -rf /",
+        "shipmate apply dev_eu",  # '_' is outside the env charset.
+        "shipmate plan Foo",
     ],
 )
 def test_malformed_command_points_at_help(body):
     """Everything that fails _CMD outright lands on the malformed message, and every one of
     these is a typo the verb list resolves, so it carries the same `shipmate help` hint the
-    unknown-verb path does. `shipmate apply dev_eu` is not one of them: '_' is in the tag
-    charset, so it parses as a tag-filter and gets the "not yet supported" error pinned
-    above."""
+    unknown-verb path does."""
     r = cp.parse(body)
     assert r["is_command"] is True
     assert r["valid"] is False
@@ -246,7 +224,6 @@ def test_help_markdown_lists_every_verb():
     for verb, spec in cp.VERBS.items():
         assert f"shipmate {verb}" in md
         assert spec["desc"].split(".")[0] in md
-    assert "reserved" in md  # Reserved verbs are shown as such, not hidden.
 
 
 def test_help_has_no_bare_command_line():
@@ -280,19 +257,17 @@ _HELP = (
     "\n"
     "Comment one of these on a pull request:\n"
     "\n"
-    "| command | status | what it does |\n"
-    "| --- | --- | --- |\n"
-    "| `shipmate apply [env]` |  | Apply the reviewed plan for one environment, or every "
+    "| command | what it does |\n"
+    "| --- | --- |\n"
+    "| `shipmate apply [env]` | Apply the reviewed plan for one environment, or every "
     "non-explicit environment when the environment is omitted. |\n"
-    "| `shipmate destroy [env]` | reserved | Destroy an environment's stacks (not yet "
-    "implemented). |\n"
-    "| `shipmate doctor` |  | Report setup problems: repository settings, environments, App "
+    "| `shipmate doctor` | Report setup problems: repository settings, environments, App "
     "permissions, and warnings from this commit's workflow runs. |\n"
-    "| `shipmate help` |  | Show this command list. |\n"
-    "| `shipmate plan` |  | Plan this pull request's changed stacks on demand: the same plan a "
+    "| `shipmate help` | Show this command list. |\n"
+    "| `shipmate plan` | Plan this pull request's changed stacks on demand: the same plan a "
     "push produces, including on a draft. Re-planning is safe and replaces the plan of record "
     "for the current head. |\n"
-    "| `shipmate unlock <env>` |  | Release a state lock stranded by a cancelled or killed "
+    "| `shipmate unlock <env>` | Release a state lock stranded by a cancelled or killed "
     "apply, so the environment's stacks can apply again. Does not re-apply, and does not "
     "recover a partial apply. |\n"
     "\n"
@@ -326,18 +301,18 @@ def _main_output(tmp_path, monkeypatch, body):
     return out.read_text(encoding="utf-8").splitlines()
 
 
-def test_main_names_a_reserved_verb_it_does_not_route(tmp_path, monkeypatch):
-    """`shipmate destroy` is refused, but its reply is headed `### shipmate destroy`.
+def test_main_writes_no_verb_for_destroy(tmp_path, monkeypatch):
+    """`shipmate destroy` is an unknown verb, so its reply is headed `### shipmate` alone.
 
-    Mutation: write the route as the verb.
+    Mutation: re-add `destroy` to `VERBS`, and the output names it.
     """
     assert _main_output(tmp_path, monkeypatch, "shipmate destroy") == [
         "is_command=true",
         "valid=false",
-        "verb=destroy",
+        "verb=",
         "env=",
         "route=",
-        "error=verb `destroy` is reserved and not yet implemented",
+        "error=unknown verb `destroy` (try `shipmate help`)",
     ]
 
 
@@ -362,7 +337,7 @@ def test_main_writes_no_verb_for_a_malformed_line(tmp_path, monkeypatch):
         "verb=",
         "env=",
         "route=",
-        "error=malformed: expected `shipmate <verb> [env] [tag-filter]` (try `shipmate help`)",
+        "error=malformed: expected `shipmate <verb> [env]` (try `shipmate help`)",
     ]
 
 
@@ -418,17 +393,6 @@ def test_unlock_without_an_env_is_rejected():
     assert "requires an environment" in r["error"]
 
 
-def test_plan_appears_in_the_help_output_as_active():
-    """`plan` renders as a no-argument command, backticked, with an empty status column -- the
-    rendering active verbs get."""
-    assert "| `shipmate plan` |  |" in cp.help_markdown(_RUN_URL)
-
-
 def test_unlock_appears_in_the_help_output():
     md = cp.help_markdown(_RUN_URL)
     assert "shipmate unlock <env>" in md
-
-
-def test_unlock_rejects_a_tag_filter():
-    r = cp.parse("shipmate unlock dev-eu workload:app")
-    assert not r["valid"]
