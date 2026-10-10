@@ -23,7 +23,6 @@ satisfied by a comment and by an inverted operator.
 
 import re
 
-import pytest
 from _loader import ENGINE, step_by, workflow_yaml
 
 _MINT = "actions/create-github-app-token"
@@ -141,22 +140,16 @@ def test_detect_needs_review_and_refuses_to_run_after_it_failed():
     assert detect.get("if") == _DETECT_IF
 
 
-#: Each apply-form script, and the action whose script step runs it.
-_DETECTS = (("apply-all-detect", "apply-detect"), ("apply-detect", "apply-detect"))
+def test_the_apply_detect_action_feeds_every_shipmate_env_var_the_script_reads():
+    """Derived from the script's own source, both forms' reads, not a second hand-written list:
+    a renamed read on either side is the regression this catches.
 
-
-@pytest.mark.parametrize(("detect", "action"), _DETECTS)
-def test_the_action_feeds_every_shipmate_env_var_the_script_reads(detect, action):
-    """Derived from the script's own source, not a second hand-written list: a renamed read on
-    either side is the regression this catches.
-
-    Mutation: delete `SHIPMATE_HEAD_SHA` from `apply-detect`'s script step -- both rows redden."""
-    read = _shipmate_reads(detect)
-    assert "SHIPMATE_REVIEW_DECISION" in read, (
-        f"{detect} no longer reads the review decision: {sorted(read)}"
-    )
-    missing = sorted(read - set(step_by(action, id="d")["env"]))
-    assert not missing, f"the {action} action's env: block omits {missing} for {detect}"
+    Mutations: delete `SHIPMATE_HEAD_SHA` from `apply-detect`'s script step; add a read of
+    `os.environ["SHIPMATE_X"]` to `bare_main`."""
+    read = _shipmate_reads("apply-detect")
+    assert "SHIPMATE_REVIEW_DECISION" in read, f"no review decision read: {sorted(read)}"
+    missing = sorted(read - set(step_by("apply-detect", id="d")["env"]))
+    assert not missing, f"the apply-detect action's env: block omits {missing}"
 
 
 def test_the_unlock_action_feeds_every_shipmate_env_var_its_script_reads():

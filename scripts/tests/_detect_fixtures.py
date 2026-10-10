@@ -71,9 +71,9 @@ def stub_read_table(monkeypatch, configs, base=None, order=None, explicit=(), re
     """Stub `read_table` on every `env-config` instance in `configs`, carrying `order`
     as each entry's `needs` and `explicit` as each named entry's `explicit: true`.
 
-    Shared by the two ordering detects so neither can drift back to stubbing `env-order`'s
-    readers: a double there answers whatever the test asked for even when the caller has
-    stopped passing the mapping at all. One entry is appended to `reads` per call, which is
+    Shared by the two ordering detects so neither can drift back to stubbing an ordering
+    reader in `waves`: a double there answers whatever the test asked for even when the caller
+    has stopped passing the mapping at all. One entry is appended to `reads` per call, which is
     how the one-parse-per-operation count is taken -- and the count needs every instance,
     because `_load` re-executes a module per caller, so a stub on one `env-config` object
     cannot see a read through another.

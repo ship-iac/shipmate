@@ -132,7 +132,7 @@ def _run_main(
     `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
     the double, and leaves `cells` unused.
 
-    `order` is folded into the stubbed table rather than stubbed on `eo`: the ordering map is
+    `order` is folded into the stubbed table rather than stubbed on `wv`: the ordering map is
     a field of the mapping this path loads, so a double on the reader would mask a caller
     that stopped passing the table. One entry is appended to `reads` per `read_table` call.
 
@@ -188,7 +188,7 @@ def _run_main(
 def _wave_cells(parsed):
     return [
         c
-        for lvl in range(dd.eo.MAX_ENV_LEVELS)
+        for lvl in range(dd.wv.MAX_ENV_LEVELS)
         for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
         for i in range(dd.ad.wv.MAX_WAVES)
         for c in w[f"wave{i}"]

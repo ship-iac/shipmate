@@ -1,6 +1,6 @@
 name: apply-review
 # Re-reads the review decision server-side, in its own job away from branch-controlled HCL
-# (CONTRACT.md §Comment-ops). `apply-detect` refuses and `apply-all-detect` holds on it; this
+# (CONTRACT.md §Comment-ops). A targeted `apply-detect` refuses and a bare one holds on it; this
 # workflow only fetches it.
 on:
   workflow_call:
@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           # NONE: no review rule, or code-owner review owns no changed file. Nothing here proves the
           # PR exists, and a number matching none returns a null `pullRequest`, no errors, exit 0:
-          # MISSING_PR. Targeted, apply-detect refuses it; bare, apply-all-detect holds every env.
+          # MISSING_PR. Targeted, apply-detect refuses it; bare, it holds every env.
           # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
           rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
             -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \

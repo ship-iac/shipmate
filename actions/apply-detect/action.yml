@@ -50,9 +50,4 @@ runs:
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
-      run: |
-        # An empty environment is the bare form.
-        if [ -z "$SHIPMATE_ENV" ]; then
-          exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-all-detect"
-        fi
-        exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"
+      run: exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"

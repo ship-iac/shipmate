@@ -1,3 +1,4 @@
+import contextlib
 import json
 
 import pytest
@@ -79,8 +80,8 @@ def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
     # The recovery shape: one cell re-planned by a later run while its sibling is still named
     # by the first. Each must apply from the run that planned it, and each must be bound to
     # the plan text reviewed for IT -- one shared digest would let a sibling's text vouch for
-    # this cell's plan. Mutation: read `plan_hashes` from `plan_runs_by_name` inside
-    # `with_plan_runs` -- the digests become run ids, red.
+    # this cell's plan. Mutation: write `"plan_sha256": run` in `with_plan_runs` -- the
+    # digests become run ids, red.
     lines = _lines(_APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256="b" * 64))
     out = ad.with_plan_runs(_TWO_CELLS, lines, APP_ID)
     assert out == [
@@ -100,7 +101,7 @@ def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
 
 
 def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
-    """The cell IS in `plan_runs`, so the missing-plan-run arm cannot absorb this: the two
+    """The cell's record carries a run, so the missing-plan-run arm cannot absorb this: the two
     refusals name different causes and different remedies, and a reader told "no plan run"
     would go looking for a check that exists."""
     with pytest.raises(SystemExit) as exc_info:
@@ -123,6 +124,7 @@ def test_a_cell_whose_check_names_no_plan_run_refuses():
     # head_sha is the platform dependency this path exists to drop, and a silent default
     # applies a cell from nowhere. `stacks/dns` carries no check, and the message is the
     # missing-run one: a cell with no check at all is not a cell whose digest went missing.
+    # Mutation: raise the missing-digest refusal before the missing-run one -- red.
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, _lines(_APP_CHECK), APP_ID)
     assert str(exc_info.value) == (
@@ -250,6 +252,36 @@ def _stub_apply(monkeypatch, deps, checks):
     return urls
 
 
+class _Stop(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"), [("", ["bare_main"]), ("dev-eu", ["refuse_unreviewed"])]
+)
+def test_main_routes_an_empty_env_to_the_bare_form_and_never_to_the_review_refusal(
+    monkeypatch, tmp_path, environment, expected
+):
+    """`_review_reason` reads an empty env as a bare apply, exempt when any entry is ungated, so
+    an empty env reaching `refuse_unreviewed` is a bypassed refusal.
+
+    Mutation: route on `env is None` instead of `not env` -- the empty case reaches
+    `validate_env`'s SystemExit. Mutation: `if env:` -- dev-eu records `bare_main`, and the
+    empty case reaches that SystemExit."""
+    _apply_env(monkeypatch, tmp_path, SHIPMATE_ENV=environment)
+    calls = []
+    monkeypatch.setattr(ad, "bare_main", lambda: calls.append("bare_main"))
+
+    def _refuse(*a):
+        calls.append("refuse_unreviewed")
+        raise _Stop
+
+    monkeypatch.setattr(ad, "refuse_unreviewed", _refuse)
+    with contextlib.suppress(_Stop):
+        ad.main()
+    assert calls == expected
+
+
 def test_workset_never_resolves_a_slug_back_to_a_stack():
     """`a/b` and `a-b` slug identically, and only `a-b` carries an apply check, so only `a-b`
     is in the workset. A pull request adding `a-b` beside an unchanged `a/b` never shows the
@@ -354,8 +386,8 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
 
 
 def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path):
-    """Mutation: `wv.levels` for `wv.stack_levels` inside `env-order.waves_by_env_level` -- a
-    raw `CycleError` escapes instead of this `SystemExit`."""
+    """Mutation: `levels` for `stack_levels` in both `dag_shape_notice` and
+    `waves.env_level_waves` -- a raw `CycleError` escapes instead of this `SystemExit`."""
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
@@ -372,13 +404,14 @@ def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path)
 
 
 def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, capsys):
-    """`main` reaches `waves_by_env_level`'s padding, so a chain too deep for the pre-declared
+    """`main` reaches `env_level_waves`' padding, so a chain too deep for the pre-declared
     wave jobs refuses before any output instead of emitting wave0..wave7 with the deepest cells
     dropped. The DAG-shape notice still prints first: it is the line that explains the depth.
 
-    Mutation: bucket the cells in `main` without `waves_by_env_level` (`wv.assign_waves` and
-    unpadded waves into `write_env_level_waves`) -- the run writes the waves and exits 0.
-    Mutation: print the DAG-shape notice after `waves_by_env_level` -- the notice is missing.
+    Mutation: bucket the cells in `main` without `env_level_waves` (one unpadded
+    `{waveN: cells}` dict from `wv.assign_waves` into `write_env_level_waves`) -- the run
+    writes the waves and exits 0.
+    Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
     """
     depth = ad.wv.MAX_WAVES + 1
     stacks = [f"stacks/s{i}" for i in range(depth)]
@@ -397,8 +430,8 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
 
 
 def test_validate_head_sha_rejects_short():
-    """Without `source` the refusal names SHIPMATE_HEAD_SHA, the variable apply-detect,
-    apply-all-detect and unlock-detect read.
+    """Without `source` the refusal names SHIPMATE_HEAD_SHA, the variable both apply-detect
+    forms and unlock-detect read.
 
     Mutation: change `source`'s default -- the whole message differs."""
     with pytest.raises(SystemExit) as exc_info:
@@ -439,8 +472,8 @@ def test_validate_env_refuses_a_name_no_environment_can_take(value):
 
 
 def test_validate_env_rejects_empty():
-    """An empty env reads as a bare apply inside _review_reason, which exempts it whenever any
-    table entry holds `gated: false` -- a bypassed refusal on a gate path.
+    """Each caller acts on one environment: `main` routes an empty env to `bare_main` before
+    this, and unlock-detect has no all-environments form.
 
     Mutation: run the name check before the empty check -- `""` gets the charset message."""
     with pytest.raises(SystemExit) as e:
@@ -717,7 +750,8 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     `envlevelN_empty`, `head_sha` and `review_not_required_envs`; a targeted apply is env-level
     0 alone, so levels 1-3 must say `true` or apply.yml runs them into `fromJSON('')`.
 
-    Mutation: pass `{env: 1}` to `waves_by_env_level` -- the cells land in `envlevel1`."""
+    Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
+    `envlevel1`."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()

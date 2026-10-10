@@ -25,7 +25,7 @@ the stack path, never a display name — so the code that *creates* the apply
 check (`pending-checks`, run by `actions/summary`),
 *completes* it (`scripts/apply-complete`, run by `actions/apply-complete` in
 `apply-env-level.yml`'s `complete` job), *filters the still-pending queue*
-(`deploy-detect` / `apply-detect` / `apply-all-detect` / `unlock-detect`, which
+(`deploy-detect` / `apply-detect` / `unlock-detect`, which
 only ever have the path), and *reports it* (`apply-comment`) all reconstruct the identical name
 from the one value they share.
 
@@ -1345,7 +1345,7 @@ Opting in takes two things, and the setting alone is not enough:
 **One source, three readers.** `actions/comment-ops` resolves the ungated set
 before it authorizes, and each apply form's detect resolves it again before it
 enforces —
-`scripts/gate-config`, `scripts/apply-detect` and `scripts/apply-all-detect`, all
+`scripts/gate-config` and both forms of `scripts/apply-detect`, all
 three reading `.github/shipmate-config.yml` on the **default branch** through the same
 `env-config` reader. The comment-ops job checks out no consumer content, and
 that reader needs none: it reads the file through the contents API. What keeps
@@ -2134,7 +2134,7 @@ footer lines and, under any verdict but 🟢, the hint.
   shows the gate's state.
 
 There is no separate "nothing pending" input: the expected cell set is the
-same waves JSON `apply-detect` / `apply-all-detect` already compute, and a
+same waves JSON both `apply-detect` forms already compute, and a
 cell counts as attempted when its artifact actually downloaded or its apply
 check is already done — the render can never claim nothing is pending while
 holding evidence that an apply ran.

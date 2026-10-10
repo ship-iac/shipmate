@@ -23,6 +23,8 @@ import json
 import os
 import sys
 
+from _shipmate import current_run_url
+
 _HOLD = "hold"
 _POST = "post"
 _NOTHING = "nothing-changed"
@@ -181,11 +183,7 @@ def main():
         return
     body = {"state": state, "context": "shipmate / gate", "description": desc[:140]}
     # This job runs inside the plan run, so this run's URL is the right target.
-    server, repo, run_id = (
-        os.environ.get(k, "") for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")
-    )
-    if server and repo and run_id:
-        body["target_url"] = f"{server}/{repo}/actions/runs/{run_id}"
+    body["target_url"] = current_run_url()
     json.dump(body, sys.stdout)
 
 

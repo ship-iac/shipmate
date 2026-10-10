@@ -8,7 +8,6 @@ from _loader import ENGINE as _ENGINE
 from _loader import load_script, workflow_yaml
 
 ac = load_script("apply-comment")
-eo = load_script("env-order")
 wv = load_script("waves")
 
 RUN_URL = "https://gh/run/1"
@@ -343,7 +342,7 @@ def test_the_short_form_of_an_all_held_run_says_nothing_applied():
 
 
 def test_the_short_form_of_an_empty_queue_keeps_the_explicit_and_skipped_lines():
-    """apply-all-detect drops explicit envs from `runnable`, so an explicit-only-pending
+    """The bare apply drops explicit envs from `runnable`, so an explicit-only-pending
     repository is all-levels-empty and carries `excluded_envs` at once: the lines are the only
     sign of it.
 
@@ -1353,10 +1352,10 @@ def test_check_name_grammar_matches_apply_cells_construction():
     assert ac._check_name(row) == "apply / stacks/app / dev-eu"
 
 
-def test_env_level_count_matches_env_orders():
+def test_env_level_count_matches_waves():
     # apply-comment keeps its own copy of the constant, so the equality is pinned here
     # rather than by construction.
-    assert ac.MAX_ENV_LEVELS == eo.MAX_ENV_LEVELS
+    assert ac.MAX_ENV_LEVELS == wv.MAX_ENV_LEVELS
 
 
 def test_wave_job_name_matches_the_apply_check_grammar():

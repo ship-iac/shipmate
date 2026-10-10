@@ -175,7 +175,7 @@ def test_the_unlock_refuses_over_the_queue_only(monkeypatch, tmp_path):
 
 
 def test_the_bare_apply_refuses_over_the_runnable_cells_only(monkeypatch, tmp_path):
-    """Call site 6: `apply-all-detect` main(). prod-eu is explicit, so its cell stays pending
+    """Call site 6: `apply-detect` bare_main(). prod-eu is explicit, so its cell stays pending
     for a targeted apply and does not run here.
 
     Mutation: pass `pending` instead of `runnable` -- the prod-eu cell is recorded too."""

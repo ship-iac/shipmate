@@ -14,11 +14,9 @@
   enumeration holds every repository and organization variable, so a new holder is a decision.
 """
 
-import os
-
 import pytest
 import yaml
-from _loader import WORKFLOWS, action_yaml, bash_only, run_step, workflow_yaml
+from _loader import WORKFLOWS, action_yaml, workflow_yaml
 
 #: The whole `env:` of the step that runs each detect script.
 _SCRIPT_ENV = {
@@ -127,14 +125,9 @@ def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(act
     assert steps[0]["env"] == _SCRIPT_ENV[action]
 
 
-#: The whole `run:` of `apply-detect`'s script step.
-_APPLY_DETECT_RUN = """\
-# An empty environment is the bare form.
-if [ -z "$SHIPMATE_ENV" ]; then
-  exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-all-detect"
-fi
-exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"
-"""
+#: The whole `run:` of `apply-detect`'s script step. The script routes an empty environment
+#: to the bare form itself; test_apply_detect's route test pins that.
+_APPLY_DETECT_RUN = 'exec python3 "$GITHUB_ACTION_PATH/../../scripts/apply-detect"'
 
 
 def _script_step(action):
@@ -142,39 +135,8 @@ def _script_step(action):
 
 
 def test_the_apply_detect_step_runs_exactly_this_script():
-    """Mutation: `-z` -> `-n` in the script step's `if`."""
+    """Mutation: restore the `if [ -z "$SHIPMATE_ENV" ]` branch to a second script."""
     assert _script_step("apply-detect")["run"] == _APPLY_DETECT_RUN
-
-
-@bash_only
-@pytest.mark.parametrize(
-    ("environment", "argv"),
-    [
-        ("dev-eu", ["/ap/../../scripts/apply-detect"]),
-        ("", ["/ap/../../scripts/apply-all-detect"]),
-    ],
-)
-def test_the_apply_detect_action_picks_the_script_by_environment(tmp_path, environment, argv):
-    """Mutation: `-z` -> `-n`.
-    Mutation: swap the two script names."""
-    stubs = tmp_path / "bin"
-    stubs.mkdir()
-    record = tmp_path / "argv.txt"
-    stub = stubs / "python3"
-    stub.write_text(
-        '#!/bin/bash\nprintf "%s\\n" "$@" > "$RECORD"\n', encoding="utf-8", newline="\n"
-    )
-    stub.chmod(0o755)
-    env = {
-        **os.environ,
-        "PATH": f"{stubs}{os.pathsep}{os.environ.get('PATH', '')}",
-        "GITHUB_ACTION_PATH": "/ap",
-        "RECORD": str(record),
-        "SHIPMATE_ENV": environment,
-    }
-    result = run_step(tmp_path, _script_step("apply-detect")["run"], env)
-    assert result.returncode == 0, result.stderr
-    assert record.read_text(encoding="utf-8").splitlines() == argv
 
 
 @pytest.mark.parametrize("action", _TABLE_READERS)

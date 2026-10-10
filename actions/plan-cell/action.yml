@@ -131,7 +131,7 @@ runs:
         # Shared stderr would interleave two failures line by line.
         cat show-text.err show-json.err >&2
         [ "$rc" -eq 0 ] || exit "$rc"
-        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify" plan.json
+        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify"
 
     - name: Encrypt plan artifact at rest (no-op without a passphrase)
       shell: bash

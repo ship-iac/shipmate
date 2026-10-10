@@ -13,7 +13,7 @@ from _detect_fixtures import (
 )
 from _loader import github_outputs, load_script
 
-aad = load_script("apply-all-detect")
+aad = load_script("apply-detect")
 
 HEAD = "a" * 40
 CHECK_RUNS_URL = f"repos/o/r/commits/{HEAD}/check-runs?filter=all&per_page=100"
@@ -97,7 +97,7 @@ def test_slug_alike_paths_never_enrol_each_other():
 def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeypatch):
     """A completed+success check of the same name from another identity (github-actions, app id
     15368) must not count the cell as applied. It is also the newer run of that name, so only
-    the App filter keeps the cell in, and main() is what feeds that filter its app id -- so
+    the App filter keeps the cell in, and bare_main() is what feeds that filter its app id -- so
     this is the behavioural pin on the threading test_detect_app_scoping only sees
     structurally."""
     parsed = _run_main(
@@ -122,20 +122,17 @@ def test_membership_is_read_over_the_whole_tree_with_no_other_keyword(tmp_path, 
 
 
 def test_reuses_single_sourced_helpers():
-    """The `is not None` halves pin only that these functions still exist in the modules this
-    script reaches them through, not that main() calls them rather than a private copy. What
-    pins that is the `not hasattr` halves below, which say no second route can exist, plus the
-    behavioural main() tests above. Env-level bucketing and the GITHUB_OUTPUT writer live in
-    env-order, shared with deploy-detect, so this script never loads deploy-detect."""
-    assert aad.ad.paths_with_checks is not None
-    assert aad.ad.cells_for_env is not None
-    assert aad.ad.with_plan_runs is not None
-    assert aad.eo.waves_by_env_level is not None
-    assert aad.eo.env_level_waves is not None
-    assert aad.eo.write_env_level_waves is not None
-    # No local apply-gate alias. test_detect_app_scoping pins which route main() takes, and
-    # this only asserts the second one does not exist.
-    assert not hasattr(aad, "ag")
+    """The `is not None` lines pin only that the bare form's helpers still exist under these
+    names; the behavioural bare_main() tests above pin that it calls them. Env-level bucketing
+    and the GITHUB_OUTPUT writer live in waves, shared with deploy-detect, so this module never
+    loads deploy-detect.
+
+    Mutation: add a module-level `dd = None` to apply-detect -- the `dd` line reddens."""
+    assert aad.paths_with_checks is not None
+    assert aad.cells_for_env is not None
+    assert aad.with_plan_runs is not None
+    assert aad.wv.env_level_waves is not None
+    assert aad.wv.write_env_level_waves is not None
     assert not hasattr(aad, "dd")
     assert not hasattr(aad, "cells_from_artifacts")
 
@@ -161,7 +158,7 @@ ALL_PENDING = ["dev-eu", "dev-us", "prod-eu"]
 )
 def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, expected):
     """`None` is the unset variable. Mutations: drop `ungated` from the `_review_reason` call
-    -- REVIEW_REQUIRED holds dev-eu and dev-us too; `if not ad.az._review_reason(...)` --
+    -- REVIEW_REQUIRED holds dev-eu and dev-us too; `if not az._review_reason(...)` --
     every row inverts; `sorted(..., reverse=True)` -- the multi-env rows reorder."""
     parsed = _run_main(
         tmp_path, monkeypatch, envs=ALL_PENDING, ungated="dev-eu,dev-us", decision=decision
@@ -188,7 +185,7 @@ def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, exp
 def test_main_holds_everything_unreviewed_when_no_env_is_ungated(
     tmp_path, monkeypatch, decision, expected
 ):
-    """Mutations: `if not ad.az._review_reason(...)` -- every row inverts;
+    """Mutations: `if not az._review_reason(...)` -- every row inverts;
     `sorted(..., reverse=True)` -- the multi-env rows reorder."""
     parsed = _run_main(tmp_path, monkeypatch, envs=ALL_PENDING, decision=decision)
     assert json.loads(parsed["review_held_envs"]) == expected
@@ -228,13 +225,13 @@ def _run_main(
     membership=None,
     deps=None,
 ):
-    """main() over the head's apply checks, with everything the script reaches from GitHub or
-    Terramate stubbed. Defaults to one pending `stacks/app` check per env in `envs`. Returns
-    parsed GITHUB_OUTPUT, and appends each `gh api` path requested to `urls` when one is
-    given.
+    """main() with an empty SHIPMATE_ENV, which is bare_main(), over the head's apply checks,
+    with everything the script reaches from GitHub or Terramate stubbed. Defaults to one
+    pending `stacks/app` check per env in `envs`. Returns parsed GITHUB_OUTPUT, and appends
+    each `gh api` path requested to `urls` when one is given.
 
     `order`, `explicit` and `ungated` are folded into the stubbed table rather than stubbed
-    on `eo`: all three are fields of the mapping this path loads, so a double on any reader
+    on `wv`: all three are fields of the mapping this path loads, so a double on any reader
     would mask a caller that stopped passing the table. One entry is appended to `reads` per
     `read_table` call. Each `env_membership` call appends its `(args, kwargs)` to `membership`
     when one is given. `deps` replaces the run-graph, which defaults to the tree's stacks with
@@ -242,6 +239,7 @@ def _run_main(
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
+        "SHIPMATE_ENV": "",
         "SHIPMATE_HEAD_SHA": HEAD,
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
@@ -272,8 +270,8 @@ def _run_main(
 
     tree = tree or {e: ["stacks/app"] for e in envs}
     deps = deps or {p: set() for ps in tree.values() for p in ps}
-    monkeypatch.setattr(aad.ad, "run_graph_deps", lambda: deps)
-    monkeypatch.setattr(aad.ad.bm, "_run", _run)
+    monkeypatch.setattr(aad, "run_graph_deps", lambda: deps)
+    monkeypatch.setattr(aad.bm, "_run", _run)
     monkeypatch.setattr(
         aad.bm, "env_membership", _membership_double(tree, tags or {"stacks/app": []}, membership)
     )
@@ -285,9 +283,9 @@ def _run_main(
 def _wave_cells(parsed):
     return [
         c
-        for lvl in range(aad.eo.MAX_ENV_LEVELS)
+        for lvl in range(aad.wv.MAX_ENV_LEVELS)
         for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
-        for i in range(aad.ad.wv.MAX_WAVES)
+        for i in range(aad.wv.MAX_WAVES)
         for c in w[f"wave{i}"]
     ]
 
@@ -323,7 +321,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
 
 
 def test_main_passes_the_whole_tree_workload_map(tmp_path, monkeypatch):
-    """Mutation: pass `set(stacks_by_env)` at `main`'s `env_config` call -- the spy records
+    """Mutation: pass `set(stacks_by_env)` at `bare_main`'s `env_config` call -- the spy records
     the environment set."""
     seen = spy_env_config(monkeypatch, aad.bm)
     _run_main(
@@ -653,7 +651,7 @@ def test_main_labels_only_the_ungated_envs_applied_unreviewed(tmp_path, monkeypa
 
     Mutation: label every runnable env whenever any env is ungated under REVIEW_REQUIRED --
     dev-eu is named."""
-    monkeypatch.setattr(aad.ad.az, "_review_reason", lambda *a, **k: None)
+    monkeypatch.setattr(aad.az, "_review_reason", lambda *a, **k: None)
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -746,7 +744,7 @@ def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monk
     the same mapping, from the default branch, that supplies every cell's identity.
 
     Every assertion is on a populated value, because the broken shape returns the empty
-    default rather than raising. Mutation: replace `main`'s `bm.ec.env_order(table)` and
+    default rather than raising. Mutation: replace `bare_main`'s `bm.ec.env_order(table)` and
     `bm.ec.explicit_envs(table)` with the bare `{}` and `[]` -- dev-us drops to
     env-level 0 and prod-eu applies instead of being excluded.
     """
@@ -769,7 +767,7 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
     its own would make that three reads of the default branch, each able to disagree with the
     others if the branch moves mid-run.
 
-    Mutation: add `bm.ec.read_table()` beside `main`'s `bm.ec.env_order` call -- the count
+    Mutation: add `bm.ec.read_table()` beside `bare_main`'s `bm.ec.env_order` call -- the count
     becomes 2.
     """
     reads = []
@@ -788,7 +786,7 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
 def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
     """A bare apply runs every non-explicit env at once, so it needs the line as much as a deploy.
 
-    Mutation: delete `main`'s DAG-shape notice print -- the line is missing.
+    Mutation: delete `bare_main`'s DAG-shape notice print -- the line is missing.
     """
     _run_main(
         tmp_path,
@@ -814,7 +812,7 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
 
     Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
     """
-    stacks = [f"stacks/s{i}" for i in range(aad.ad.wv.MAX_WAVES + 1)]
+    stacks = [f"stacks/s{i}" for i in range(aad.wv.MAX_WAVES + 1)]
     with pytest.raises(SystemExit, match="dependency levels"):
         _run_main(
             tmp_path,
@@ -829,3 +827,22 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
     assert capsys.readouterr().out.splitlines() == [
         "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
     ]
+
+
+def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
+    tmp_path, monkeypatch, capsys
+):
+    """apply-comment's held remedy tells reviewers to read the run log's apply-all-detect notice,
+    so the title is pinned whole on both sides. Mutations: `title=apply-all-detect` ->
+    `title=apply-detect` in apply-detect -- the line differs; `apply-all-detect notice` ->
+    `apply-detect notice` in apply-comment's `_HELD_REMEDY` -- the title is absent from it."""
+    _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED")
+    notices = [
+        line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice title=")
+    ]
+    assert notices == [
+        f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, 0] "
+        "excluded_explicit=[] skipped_after_explicit=[] review_held=[] applied_ungated=[] "
+        "review_decision='APPROVED'"
+    ]
+    assert "apply-all-detect notice" in load_script("apply-comment")._HELD_REMEDY

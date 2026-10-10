@@ -466,7 +466,7 @@ def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_
         # Not exempt at all.
         ("REVIEW_REQUIRED", "prod-eu", "dev-eu", PR_OK, "false"),
         ("REVIEW_REQUIRED", "dev-eu", "", PR_OK, "false"),
-        # Bare apply: partitioned per env by apply-all-detect, which reports it.
+        # Bare apply: partitioned per env by apply-detect's bare form, which reports it.
         ("REVIEW_REQUIRED", "", "dev-eu", PR_OK, "false"),
         # Exempt from review, refused anyway (unmergeable). Reporting a permitted apply over
         # a refused one would be a false audit line.
