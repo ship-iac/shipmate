@@ -63,7 +63,7 @@ runs:
         say_no_run_started() {
           GH_TOKEN="$COMMENT_TOKEN" SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME=failed \
             SHIPMATE_REPLY_TEXT="the command was authorized, but dispatching its workflow failed, so no run started. The error is in this run's log." \
-            python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post || true
+            python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || true
         }
         # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
         # the input arrives with the empty string. Refuse rather than default: a default runs one

@@ -907,7 +907,7 @@ _PARSED_ENV = "${{ steps.parse.outputs.env }}"
 
 #: Every reply step's shell body, hand-written: reply-comment renders and posts the comment, so
 #: no step formats a header, verdict or footer of its own.
-_REPLY_RUN = 'set -euo pipefail\npython3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post\n'
+_REPLY_RUN = 'set -euo pipefail\npython3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"\n'
 
 #: Each reply step's header words, outcome and text, hand-written. `refused` where the engine
 #: decided not to run the command, `failed` where it could not.
@@ -1010,8 +1010,8 @@ def test_every_reply_step_names_its_header_outcome_and_text():
 
 
 #: A run line that posts a comment: an issue-comment endpoint at the end of a path
-#: (`/comments/<id>/reactions` is not one), a `reply-comment --post`, or an `upsert-comment`.
-_POSTS = re.compile(r'/comments\b(?!/)|reply-comment" --post\b|scripts/upsert-comment\b')
+#: (`/comments/<id>/reactions` is not one), a `reply-comment`, or an `upsert-comment`.
+_POSTS = re.compile(r"/comments\b(?!/)|scripts/reply-comment\b|scripts/upsert-comment\b")
 
 #: The steps that post a comment reply-comment does not render: help prints its own frame, and
 #: the doctor report is a sticky upsert of doctor's own body.
@@ -1024,7 +1024,7 @@ def test_every_step_posting_a_comment_is_a_reply_step_or_a_named_poster():
 
     Mutations: add a step running `gh api -X POST
     "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=x` with no reply env; add one
-    running `reply-comment" --post` with no reply env -- each red."""
+    running `scripts/reply-comment` with no reply env -- each red."""
     posters = {
         s["name"]
         for s in action_steps("comment-ops")

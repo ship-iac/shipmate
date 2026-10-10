@@ -1103,7 +1103,7 @@ The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
 `🔴 failed: <reason>` when it could not (an App token mint, a workflow
 dispatch, an errored read or decision of the commenter's permission), and
-`⚪ <text>` for a notice. `scripts/reply-comment --post` renders and posts all three.
+`⚪ <text>` for a notice. `scripts/reply-comment` renders and posts all three.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
