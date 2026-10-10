@@ -1,0 +1,48 @@
+name: shipmate cell-init
+description: Restore the stack's provider cache and run `tofu init` for one cell. Its own step in each cell, so init output stays out of the caller's later steps (apply-cell's apply.txt is reviewer-facing comment data).
+inputs:
+  stack:
+    description: Stack path, e.g. stacks/app.
+    required: true
+outputs:
+  cache-hit:
+    description: '"true" when the provider cache restore found an exact match. Empty when the stack has no lock file and the restore was skipped.'
+    value: ${{ steps.provider-cache.outputs.cache-hit }}
+  cache-primary-key:
+    description: The provider cache key the restore read, computed before `init -reconfigure` can rewrite the committed lock. The key a saving cell writes under. Empty when the restore was skipped or the cache service was unavailable.
+    value: ${{ steps.provider-cache.outputs.cache-primary-key }}
+  init-outcome:
+    description: The outcome of `tofu init` itself, not of this action. A cache step failing first skips init, and the caller then reports "an earlier step failed" rather than a failed init.
+    value: ${{ steps.init.outcome }}
+runs:
+  using: composite
+  steps:
+    - name: Provider cache key
+      id: provider-cache-key
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/provider-cache-key"
+
+    - name: Restore provider cache
+      id: provider-cache
+      if: ${{ steps.provider-cache-key.outputs.digest != '' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+        key: tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ steps.provider-cache-key.outputs.digest }}
+
+    - name: Initialize the stack
+      id: init
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+
+    - name: Name the restored provider cache entry
+      if: ${{ failure() && steps.init.outcome == 'failure' && steps.provider-cache.outputs.cache-hit == 'true' }}
+      shell: bash
+      env:
+        KEY: ${{ steps.provider-cache.outputs.cache-primary-key }}
+      run: |
+        echo "::error::OpenTofu's init failed after restoring provider cache entry $KEY. If the log above says a cached package does not match the content of the downloaded package, delete the entry with gh cache delete $KEY --repo $GITHUB_REPOSITORY and re-run."

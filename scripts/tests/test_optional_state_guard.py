@@ -80,8 +80,10 @@ def test_apply_cell_saves_state_to_the_located_path():
 def test_a_failed_init_skips_locate_and_restore(cell):
     """A one-line `run:` fails the step on a non-zero init, so the default `success()` condition
     skips what follows. An `always()` or `failure()` on either would locate or restore state for
-    a stack init could not set up. Mutation: `if: always()` on `Locate state`."""
-    init = step_by(cell, name="Initialize the stack")
+    a stack init could not set up. The init runs inside `actions/cell-init`; the cell's call step
+    carries no `if:` either, pinned whole in test_provider_cache.py. Mutations: `if: always()` on
+    `Locate state`; drop `-reconfigure` from `cell-init`'s init."""
+    init = step_by("cell-init", id="init")
     assert init["run"] == _INIT_RUN
     assert "if" not in init
     assert {

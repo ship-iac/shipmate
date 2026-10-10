@@ -12,7 +12,7 @@ passes an entry whose expression was mistyped; a substring check is satisfied by
 """
 
 import pytest
-from _loader import WORKFLOWS, action_steps, action_yaml, run_lines, workflow_yaml
+from _loader import WORKFLOWS, action_steps, action_yaml, local_action, run_lines, workflow_yaml
 
 #: The jobs that run a cell, hand-written. `test_the_registry_names_every_job_that_runs_a_cell`
 #: derives the same set from the files, so a twelfth cell job reds rather than going unguarded.
@@ -147,14 +147,19 @@ def test_every_cell_step_passes_the_identity_input_from_its_matrix_row(workflow,
 def test_each_cell_action_injects_before_it_runs_terramate(action):
     """Order is the property, not presence: a correctly written step placed after the plan
     injects nothing that matters. The first `terramate run` is the bound -- `unlock-cell` has
-    three, and its init is already too late.
+    three, and its init is already too late. A `cell-init` call counts as one: its init runs
+    `terramate run` inside that action.
 
-    Mutation: move the `env-inject` step to the end of one action's step list.
+    Mutations: move the `env-inject` step to the end of one action's step list; move plan-cell's
+    Inject below its `cell-init` call.
     """
     steps = action_steps(action)
     injects = [i for i, s in enumerate(steps) if s.get("name") == _INJECT_STEP]
     terramate = [
-        i for i, s in enumerate(steps) if any("terramate run" in ln for ln in run_lines(s))
+        i
+        for i, s in enumerate(steps)
+        if s.get("uses") == local_action("cell-init")
+        or any("terramate run" in ln for ln in run_lines(s))
     ]
     assert len(injects) == 1, f"{action}: {len(injects)} '{_INJECT_STEP}' steps"
     assert terramate, f"{action}: no step runs terramate"

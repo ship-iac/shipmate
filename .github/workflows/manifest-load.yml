@@ -37,6 +37,8 @@ jobs:
       - if: false
         uses: ship-iac/shipmate/actions/build-matrix@main
       - if: false
+        uses: ship-iac/shipmate/actions/cell-init@main
+      - if: false
         uses: ship-iac/shipmate/actions/comment-ops@main
       - if: false
         uses: ship-iac/shipmate/actions/deploy-detect@main

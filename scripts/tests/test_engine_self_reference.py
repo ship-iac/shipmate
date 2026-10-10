@@ -22,7 +22,7 @@ LOCAL_PREFIX = "$/actions/"
 REMOTE_PREFIX = "ship-iac/shipmate/"
 #: Composite actions today. Hand-written: the two tests globbing `actions/*/action.yml` assert
 #: nothing at all if that glob matches nothing.
-ACTION_COUNT = 22
+ACTION_COUNT = 23
 SHA_PIN = re.compile(r"ship-iac/shipmate/[^@\s'\"]+@[0-9a-f]{40}")
 
 
@@ -164,6 +164,7 @@ def test_composite_actions_reach_nested_actions_through_the_local_path_only():
             if _uses(step).startswith("$/"):
                 local.add(_uses(step))
     assert local == {
+        local_action("cell-init"),
         local_action("python-yaml"),
         local_action("state"),
         local_action("verify-app-key"),
@@ -179,6 +180,7 @@ LOCAL_ACTIONS = {
     "apply-snapshot",
     "apply-summary",
     "build-matrix",
+    "cell-init",
     "comment-ops",
     "deploy-detect",
     "dispatch",

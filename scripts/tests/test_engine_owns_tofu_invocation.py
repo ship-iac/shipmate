@@ -82,9 +82,10 @@ _FORCE_UNLOCK = [*_WRAPPER, "tofu", "force-unlock", "-force", "$LOCK_ID"]
 
 #: Every `terramate run` each cell is expected to make, in order.
 _EXPECTED = {
-    "plan-cell": [_INIT, _LOCATE, _PLAN],
-    "drift-cell": [_INIT, _LOCATE, _PLAN],
-    "apply-cell": [_INIT, _LOCATE, _APPLY],
+    "cell-init": [_INIT],
+    "plan-cell": [_LOCATE, _PLAN],
+    "drift-cell": [_LOCATE, _PLAN],
+    "apply-cell": [_LOCATE, _APPLY],
     "unlock-cell": [_INIT, _PROBE, _FORCE_UNLOCK],
 }
 #: The plan-text render, one constant for the two sides of the plan-text binding: plan-cell writes
@@ -98,6 +99,7 @@ _SHOW_JSON = ["tofu", "-chdir=$STACK", "show", "-json", "stack.otplan"]
 #: wrapper, which `_EXPECTED` does not claim. Rendering a stored plan needs no wrapper: it reads a
 #: file and touches neither state nor the stack graph.
 _EXPECTED_BARE = {
+    "cell-init": [],
     "plan-cell": [
         [*_SHOW_TEXT, ">", "plan.txt", "2>", "show-text.err", "&"],
         [*_SHOW_JSON, ">", "plan.json", "2>", "show-json.err", "&"],
@@ -189,8 +191,9 @@ def test_each_cell_runs_exactly_the_engines_own_terramate_run_invocations():
     cell that way with every test green.
 
     So: one regex selector, one expected list, no second selector to disagree with the first.
-    Comparing the whole list also pins the count, and pins init-before-plan/apply ordering,
-    without either being asserted separately.
+    Comparing the whole list also pins the count and the order within an action. The init runs
+    in `cell-init`, a separate action, so its place before each cell's plan or apply is
+    test_cell_step_order.py's to pin.
 
     `shlex.split` is called without `comments=True`: shlex ends a word at a `#` anywhere inside
     it, bash only at the start of a word. `-out=stack.otplan#||tofu apply …` is one bash word
@@ -200,6 +203,8 @@ def test_each_cell_runs_exactly_the_engines_own_terramate_run_invocations():
     that a trailing inline comment on one of these lines now reds; no cell has one, and
     whole-line comments are stripped by `_command_lines`. Do not re-add `comments=True` to clear
     such a red.
+
+    Mutation: add a second `tofu init` line to plan-cell's Plan step.
     """
     for cell, expected in _EXPECTED.items():
         lines = [ln for ln in _command_lines(cell) if re.search(r"terramate\s+run\b", ln)]
