@@ -231,20 +231,25 @@ def test_summary_doctor_step_reads_the_head_sha_it_was_given():
     assert "SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}" in block
 
 
-def test_unreadable_head_sha_marks_the_harvest_failed_before_exiting():
-    """The read-only degrade path for an unreadable PR head SHA must record harvest_failed=true, and
-    head_sha/plan_run_ids, to GITHUB_OUTPUT before it exits, or the render step reads an empty
-    SHIPMATE_HARVEST_FAILED and the sticky comment claims the warning harvest ran clean.
+#: The gather step's whole env, hand-written. The listing and the annotations read with the App
+#: token, the head and the downloads with the workflow token
+#: (test_doctor.py::test_each_call_carries_its_own_token).
+_GATHERDOC_ENV = {
+    "GH_TOKEN": "${{ github.token }}",
+    "SHIPMATE_APP_TOKEN": "${{ steps.doctortoken.outputs.token }}",
+    "PR_NUMBER": "${{ inputs.pr-number }}",
+    "SHIPMATE_DOCTOR_MODE": "check-ids",
+    "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+}
 
-    Sliced from the `if [[ ! "$head"` condition itself, not from the step's start, and pinned to a
-    single `exit 0` in the step: all three substrings also appear elsewhere in the step for other
-    paths, so a slice from the start stays green with the degrade branch deleted."""
-    block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
-    assert block.count("exit 0") == 1
-    degrade = block.split('if [[ ! "$head"', 1)[1].split("exit 0", 1)[0]
-    assert "head_sha=" in degrade
-    assert "plan_run_ids=" in degrade
-    assert "harvest_failed=true" in degrade
+
+def test_the_gather_step_runs_doctor_check_ids_with_exactly_this_env():
+    """The gather work runs in doctor's check-ids mode, pinned there by the
+    `test_doctor.py` check-ids tests; this pins the step that reaches it.
+    Mutation: bind `SHIPMATE_APP_TOKEN` to `${{ github.token }}` -- red."""
+    step = step_by("comment-ops", id="gatherdoc")
+    assert step["env"] == _GATHERDOC_ENV
+    assert step["run"] == 'python3 "$GITHUB_ACTION_PATH/../../scripts/doctor"'
 
 
 def test_harvest_failed_env_falls_back_to_true_when_gatherdoc_did_not_run():
@@ -256,60 +261,6 @@ def test_harvest_failed_env_falls_back_to_true_when_gatherdoc_did_not_run():
         "SHIPMATE_HARVEST_FAILED: ${{ steps.gatherdoc.outputs.harvest_failed || 'true' }}"
         in _ACTION
     )
-
-
-def test_the_check_runs_projection_carries_every_field_this_step_answers_from_it():
-    """One listing answers every question doctor asks about this head, so its projection carries all
-    of them: `status` for the harvest-pending flag (without it every run reads as unfinished and the
-    report tells every commenter to come back later, forever), `started_at` for check-ids' ranking,
-    `external_id` for the plan record each apply check carries, the nested `app` object
-    apply-gate's fail-closed App filter and doctor's reducer both match the App id on, and
-    `app_slug`, which doctor's reducer reads to keep `github-actions` runs."""
-    assert _projection(_gatherdoc_step()["run"]) == _CHECK_RUNS_PROJECTION
-
-
-def test_a_check_run_in_that_shape_yields_its_plan_run():
-    """Why `_CHECK_RUNS_PROJECTION` carries `app: {id: .app.id}`: `plan_records` filters on the
-    NESTED id, so a projection carrying only `external_id` maps every name to nothing. This test
-    cannot see the projection -- it is a hand-written line, reddening on the reader rather than on
-    projection drift, and
-    test_the_check_runs_projection_carries_every_field_this_step_answers_from_it is what pins the
-    file."""
-    line = json.dumps(
-        {
-            "id": 7,
-            "name": "apply / stacks/app / dev-eu",
-            "status": "completed",
-            "started_at": "2026-08-24T00:00:00Z",
-            "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"}),
-            "app": {"id": 4326562},
-        }
-    )
-    mapping = load_script("apply-gate").plan_records([line], "4326562")
-    assert mapping == {"apply / stacks/app / dev-eu": ("1281", None)}
-
-
-def test_the_plan_records_are_read_from_the_listing_before_any_cell_download():
-    """The runs to download from are derived from the listing, so the listing has to be fetched
-    first — and read through apply-gate's `--plan-runs` mode, the one reader of the `external_id`
-    record."""
-    body = _code(_gatherdoc_step()["run"])
-    assert body.index("> check-runs.jsonl") < body.index("gh run download")
-
-
-def test_the_doctor_lookup_reads_the_record_through_the_one_reader():
-    """`plan_records`, behind apply-gate's `--plan-runs` mode, is the only reader of the
-    `external_id` record; a second reader here would be a second definition of what a usable record
-    is."""
-    body = _code(_gatherdoc_step()["run"])
-    assert '"$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs' in body
-
-
-def test_the_doctor_lookup_asks_the_plan_workflow_for_nothing():
-    """doctor read the cell summaries of the newest successful run of `.github/workflows/plan.yml`,
-    which a consumer is free to rename and which says nothing about whether that run planned this
-    head. The head's own apply checks name their plan runs, so no workflow-path lookup is left."""
-    assert "workflows/plan.yml" not in _code(_gatherdoc_step()["run"])
 
 
 def test_the_render_step_reads_the_harvest_pending_flag_the_reduction_wrote():
@@ -330,24 +281,6 @@ def test_the_render_step_reads_the_id_set_the_gather_step_published():
     loud. test_doctor_step_supplies_every_env_var_doctor_reads only checks that the NAME appears
     somewhere in the action."""
     assert "SHIPMATE_PLAN_RUN_IDS: ${{ steps.gatherdoc.outputs.plan_run_ids }}" in _ACTION
-
-
-def test_harvest_flag_is_set_inside_the_loop_and_written_once_after_it():
-    """The annotations loop's per-id failure fallback (`echo '[]'`) is byte-identical to "this check
-    run had no annotations", so the loop must flip the shared `harvest_failed` shell variable -- and
-    that variable must be written to GITHUB_OUTPUT exactly once, after the loop, so a harvest with
-    zero check-run ids still writes it and a per-id failure is not overwritten by a later clean
-    iteration.
-
-    Kills both mutations: dropping the in-loop `harvest_failed=true` fails the loop-body assertion,
-    and moving the GITHUB_OUTPUT write inside the loop fails the ordering and loop-body redirect
-    assertions."""
-    block = _ACTION.split("id: gatherdoc", 1)[1].split("- name:", 1)[0]
-    assert block.count("harvest_failed=$harvest_failed") == 1
-    assert block.index("harvest_failed=$harvest_failed") > block.index("done < check-ids.tsv")
-    loop_body = block.split("while IFS=", 1)[1].split("done <", 1)[0]
-    assert "harvest_failed=true" in loop_body
-    assert '>> "$GITHUB_OUTPUT"' not in loop_body
 
 
 def _steps_conditioned_on(route):
@@ -533,27 +466,6 @@ def _code(block):
     *runs*; the prose explaining why an operator was removed would otherwise keep tripping a
     substring check for that operator."""
     return "\n".join(ln for ln in block.splitlines() if not ln.strip().startswith("#"))
-
-
-#: The gatherdoc listing's whole jq projection, hand-written.
-_CHECK_RUNS_PROJECTION = (
-    ".check_runs[] | {id, name, status, started_at, external_id, "
-    "app: {id: .app.id}, app_slug: .app.slug}"
-)
-
-
-def _gatherdoc_step():
-    step = step_by("comment-ops", id="gatherdoc")
-    assert step.get("run"), "the gatherdoc step runs no shell"
-    return step
-
-
-def _projection(body):
-    """The check-runs listing's jq expression. One line carries it; the step's other `--jq` reads
-    the head SHA."""
-    lines = [ln for ln in body.splitlines() if "--jq '.check_runs[]" in ln]
-    assert len(lines) == 1, f"{len(lines)} check-runs projections in the step"
-    return lines[0].split("--jq '", 1)[1].rsplit("'", 1)[0]
 
 
 def _report_ctx():

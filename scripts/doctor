@@ -10,9 +10,10 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
 - report: render the sticky PR comment on demand — the thirteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
-- check-ids: reduce a check-runs JSONL listing to the (id, name) pairs worth
-  fetching annotations for, one call ahead of `report`. Runs before the rest
-  of doctor's env contract is read.
+- check-ids: gather what `report` reads, one step ahead of it: the PR head SHA,
+  the (id, name) pairs worth fetching annotations for and their annotations, and
+  the cell summaries of the plan runs this head's apply checks record. Runs
+  before the rest of doctor's env contract is read.
 
 An index only — one bullet per entry in PROBES, pinned by
 test_probe_count_is_stated_correctly_in_the_docs. Each probe's own docstring
@@ -52,7 +53,6 @@ import json
 import os
 import pathlib
 import re
-import sys
 
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
 from _shipmate import ENGINE_ENV as _ENGINE_ENV
@@ -63,6 +63,7 @@ from _shipmate import (
     gate_check,
     load_workflow_text,
     review_count,
+    run,
     utf8_output,
     yaml_error_text,
 )
@@ -2107,14 +2108,150 @@ def harvest_pending(lines, app_id=""):
 
 
 def _write_step_output(name, value):
-    """Append `name=<bool>` to the calling action step's GITHUB_OUTPUT. Silently
-    skipped when GITHUB_OUTPUT is unset, so every mode stays runnable outside a
-    runner."""
+    """Append `name=<value>` to the calling action step's GITHUB_OUTPUT, a bool as
+    `true`/`false`. Silently skipped when GITHUB_OUTPUT is unset, so every mode stays
+    runnable outside a runner."""
     path = os.environ.get("GITHUB_OUTPUT")
     if not path:
         return
+    if isinstance(value, bool):
+        value = "true" if value else "false"
     with open(path, "a", encoding="utf-8") as fh:
-        fh.write(f"{name}={'true' if value else 'false'}\n")
+        fh.write(f"{name}={value}\n")
+
+
+#: The check-runs listing's jq projection: every field `latest_check_ids`, `harvest_pending`
+#: and `ag.plan_records` read, the nested `app.id` included.
+_CHECK_RUNS_JQ = (
+    ".check_runs[] | {id, name, status, started_at, external_id, "
+    "app: {id: .app.id}, app_slug: .app.slug}"
+)
+
+
+def _degrade(e, warning):
+    ec.log_failure(e)
+    print(f"::warning::{warning}")
+
+
+def _head_sha(repo):
+    """The PR head SHA, or "" when it cannot be read."""
+    try:
+        return run(
+            ["gh", "api", f"repos/{repo}/pulls/{os.environ['PR_NUMBER']}", "--jq", ".head.sha"]
+        ).strip()
+    except (Exception, SystemExit) as e:  # noqa: BLE001 - the caller degrades on ""
+        ec.log_failure(e)
+        return ""
+
+
+def _harvest(repo, head, app_id):
+    """(check-runs JSONL lines, harvest failed): writes `check-ids.tsv`, `ann/<id>.json` per
+    id and the `harvest_pending` output. An `ann/<id>.json` of `[]` reads as "no annotations",
+    so a failed fetch writes it AND flips the flag, or the harvest looks complete."""
+    app_token = os.environ.get("SHIPMATE_APP_TOKEN")
+    lines, ids, failed = [], [], False
+    try:
+        with _gh_token(app_token):
+            listing = run(
+                [
+                    "gh",
+                    "api",
+                    "--paginate",
+                    f"repos/{repo}/commits/{head}/check-runs?filter=all&per_page=100",
+                    "--jq",
+                    _CHECK_RUNS_JQ,
+                ]
+            )
+        lines = listing.splitlines()
+    except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor degrades, never fails
+        _degrade(e, "check-runs listing failed; doctor reports settings probes only")
+        failed = True
+    else:
+        try:
+            ids = latest_check_ids(lines, app_id)
+            _write_step_output("harvest_pending", harvest_pending(lines, app_id))
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor degrades, never fails
+            _degrade(e, "doctor check-ids reduction failed; doctor reports settings probes only")
+            ids, failed = [], True
+    pathlib.Path("check-ids.tsv").write_bytes("".join(f"{i}\t{n}\n" for i, n in ids).encode())
+    pathlib.Path("ann").mkdir(exist_ok=True)
+    for cid, _name in ids:
+        # per_page=100, no --paginate: --paginate concatenates the pages' JSON arrays, which
+        # json.loads rejects. 100 covers GHA's 10-per-level-per-step annotation caps.
+        try:
+            with _gh_token(app_token):
+                body = run(["gh", "api", f"repos/{repo}/check-runs/{cid}/annotations?per_page=100"])
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor degrades, never fails
+            _degrade(
+                e, f"annotations fetch failed for check run {cid}; doctor reports a partial harvest"
+            )
+            body, failed = "[]\n", True
+        (pathlib.Path("ann") / f"{cid}.json").write_bytes(body.encode())
+    return lines, failed
+
+
+def _download_cells(repo, lines, app_id):
+    """The decimal plan run ids this head's apply checks record, each one's cell summaries
+    downloaded into `doctor-cells/<run id>/`. Read from the listing, so a renamed plan
+    workflow cannot silently empty the environment probes."""
+    try:
+        records = ag.plan_records(lines, app_id)
+    except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor skips the environment probes
+        _degrade(
+            e,
+            "the plan records on this commit's apply checks could not be read; "
+            "doctor skips the environment probes",
+        )
+        records = {}
+    # The id reaches a `gh` argv and a directory name, so only a decimal string passes.
+    run_ids = sorted(
+        {r for r, _ in records.values() if isinstance(r, str) and re.fullmatch(r"[0-9]+", r)}
+    )
+    pathlib.Path("doctor-cells").mkdir(exist_ok=True)
+    for rid in run_ids:
+        # -R: this job checks out nothing, so gh has no remote to infer the repo from. One
+        # directory per run: one cell planned in two runs has one artifact name in both.
+        try:
+            run(
+                [
+                    "gh",
+                    "run",
+                    "download",
+                    rid,
+                    "-R",
+                    repo,
+                    "-p",
+                    "cell-summary.*",
+                    "-D",
+                    f"doctor-cells/{rid}",
+                ]
+            )
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor degrades, never fails
+            _degrade(
+                e,
+                f"the cell summaries of plan run {rid} could not be downloaded; "
+                "doctor's environment probes may be incomplete",
+            )
+    return run_ids
+
+
+def check_ids():
+    """check-ids mode: no `gh` failure fails it, so the render step still runs. Each failed
+    call is a `::warning::`; `harvest_failed` is written once, after every call that can set
+    it. The listing and the annotations read with SHIPMATE_APP_TOKEN, the head and the
+    downloads with the ambient GH_TOKEN (the workflow token)."""
+    repo = os.environ["GITHUB_REPOSITORY"]
+    app_id = os.environ.get("SHIPMATE_APP_ID", "")
+    head = _head_sha(repo)
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        print("::warning::could not read the PR head SHA; doctor reports settings probes only")
+        for name, value in (("head_sha", ""), ("plan_run_ids", ""), ("harvest_failed", True)):
+            _write_step_output(name, value)
+        return
+    _write_step_output("head_sha", head)
+    lines, failed = _harvest(repo, head, app_id)
+    _write_step_output("harvest_failed", failed)
+    _write_step_output("plan_run_ids", " ".join(_download_cells(repo, lines, app_id)))
 
 
 def load_annotations(ctx):
@@ -2442,13 +2579,7 @@ def main():
     if mode not in MODES:
         raise SystemExit(f"SHIPMATE_DOCTOR_MODE must be one of {', '.join(MODES)} (got: {mode!r})")
     if mode == "check-ids":
-        app_id = os.environ.get("SHIPMATE_APP_ID", "")
-        lines = sys.stdin.read().splitlines()
-        for cid, name in latest_check_ids(lines, app_id):
-            print(f"{cid}\t{name}")
-        # A step output, NOT stdout: stdout is the (id, name) TSV
-        # load_annotations parses, and an extra field would land in a check name.
-        _write_step_output("harvest_pending", harvest_pending(lines, app_id))
+        check_ids()
         return
     ctx = ctx_from_env()
     found = warnings(ctx)
