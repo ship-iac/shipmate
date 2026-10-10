@@ -1815,7 +1815,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - shipmate's actions are composite actions: their steps run under `bash`
   and call Python scripts, `git`, `curl`, `jq`, `openssl`, and the `gh` CLI. A
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
-  PyYAML ≥ 6 importable by it), `git`, `curl`, `jq`, `openssl`, `gh`, and GNU
+  PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and GNU
   coreutils (`setup` hashes the Terramate download with `sha256sum`).
 - Every GitHub-hosted Ubuntu image from 24.04 on, including the minimal
   `ubuntu-slim` image, satisfies this; PyYAML arrives through the install
