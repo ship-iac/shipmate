@@ -1,5 +1,10 @@
 name: shipmate setup
-description: Install pinned Terramate + OpenTofu and point OpenTofu at a provider plugin cache directory.
+description: Install the pinned Terramate and, unless `tofu` is "false", the pinned OpenTofu; point OpenTofu at a provider plugin cache directory.
+inputs:
+  tofu:
+    description: Whether to install OpenTofu. "false" for jobs that never run it.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -46,6 +51,7 @@ runs:
           printf 'tofu_sha256<<SHIPMATE_EOF\n%s\nSHIPMATE_EOF\n' "$TOFU_SHA256"
         } >> "$GITHUB_OUTPUT"
     - name: Install OpenTofu
+      if: ${{ inputs.tofu != 'false' }}
       uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
       with:
         tofu_version: ${{ steps.versions.outputs.tofu }}

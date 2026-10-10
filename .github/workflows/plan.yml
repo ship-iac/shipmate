@@ -58,6 +58,7 @@ jobs:
           ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
       - uses: $/actions/setup
+        with: { tofu: "false" }
       # Before the two terramate steps, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.
       - id: matrix
