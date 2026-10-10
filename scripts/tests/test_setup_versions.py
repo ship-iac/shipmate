@@ -119,9 +119,11 @@ def test_the_only_input_is_the_tofu_switch():
 
 
 def test_only_the_opentofu_install_is_gated_on_the_tofu_input():
-    """Composite inputs are strings, so anything but "false" installs OpenTofu.
+    """Composite inputs are strings, and expression string comparison ignores case, so
+    anything but "false" in any case installs OpenTofu.
 
-    Mutation: `!=` -> `==` in the `Install OpenTofu` step's `if:`.
+    Mutations: `!=` -> `==` in the `Install OpenTofu` step's `if:`; add
+    `if: ${{ inputs.tofu != 'false' }}` to `Install Terramate`.
     """
     got = {s.get("name"): s.get("if") for s in action_steps(_ACTION)}
     assert got == {
