@@ -36,11 +36,7 @@ ag = _load("apply-gate")
 # COUPLING: the only parser of tofu's lock output in the engine, shared with
 # actions/unlock-cell so the note and the unlock can never name different locks.
 li = _load("lock-info")
-
-# COUPLED to waves.MAX_ENV_LEVELS, whose module docstring lists the GHA slots that move
-# with it; pinned equal by test_apply_comment. A local constant rather than a
-# `_load("waves")`, which would widen this renderer's pin closure.
-MAX_ENV_LEVELS = 4
+wv = _load("waves")
 
 CELL_KEYS = ("stack", "environment", "result", "reason")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
@@ -252,7 +248,7 @@ def _expected_cells():
     (environment, stack) -- a wave element is
     `{"stack": "<stack path>", "environment": "<env>"}`."""
     raw_values = [
-        os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") or "" for i in range(MAX_ENV_LEVELS)
+        os.environ.get(f"SHIPMATE_ENVLEVEL{i}_WAVES", "") or "" for i in range(wv.MAX_ENV_LEVELS)
     ]
     expected = set()
     for raw in raw_values:
@@ -306,19 +302,12 @@ def load_check_maps(path, app_id):
 
     Every failure degrades to no data with a warning, never propagates: for
     comment-ops the comment IS the feedback channel, so losing this one display
-    axis must not cost the whole render. An empty SHIPMATE_APP_ID gets its own
-    warning before the file is read, since the file is not at fault. The
-    catch-all covers a malformed line (parse_jsonl's SystemExit), a missing or
-    unreadable file (OSError), a non-numeric SHIPMATE_APP_ID (ValueError from
+    axis must not cost the whole render. The catch-all covers a malformed line
+    (parse_jsonl's SystemExit), a missing or unreadable file (OSError), an empty
+    SHIPMATE_APP_ID (from_app's SystemExit), a non-numeric one (ValueError from
     `int(app_id)`), and a valid-JSON line of the wrong shape reaching
     `latest_by_name` (KeyError/TypeError/AttributeError). See apply_check_state
     for why no data is the safe state."""
-    if not app_id:
-        print(
-            "::warning::SHIPMATE_APP_ID is empty, so the apply result comment falls back "
-            "to artifact-only status (see docs/github-app.md)."
-        )
-        return set(), set()
     try:
         with open(path, encoding="utf-8") as fh:
             runs = ag.app_runs(fh, app_id)
@@ -329,13 +318,6 @@ def load_check_maps(path, app_id):
             "the apply result comment falls back to artifact-only status"
         )
         return set(), set()
-
-
-def _check_name(row):
-    """This row's apply check name, forward-built per the CONTRACT grammar
-    `apply / <stack> / <env>`; this module never parses one back (the one site that does is
-    named in `apply-gate.check_name`)."""
-    return ag.check_name(row["stack"], row["environment"])
 
 
 def apply_check_state(rows, present, done):
@@ -366,7 +348,7 @@ def apply_check_state(rows, present, done):
     stranded -- and downgrading on check state would let an unrelated run's
     green check hide a real failure in this one."""
     for row in rows:
-        name = _check_name(row)
+        name = ag.check_name(row["stack"], row["environment"])
         if row["status"] == "applied" and name in present and name not in done:
             row["status"] = "unrecorded"
         elif row["status"] == "not_attempted" and name in done:
@@ -413,7 +395,7 @@ def _job_url(row, jobs, run_url):
     level prepends its own job name and the prefix differs per route. Matched on
     a ` / ` boundary, not a bare `endswith`, so `reapply / ...` cannot
     false-positive. No match -> the workflow-run URL."""
-    target = _check_name(row)
+    target = ag.check_name(row["stack"], row["environment"])
     url = None
     for job in jobs:
         name = job.get("name", "")

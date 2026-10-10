@@ -22,11 +22,10 @@ Bumping it needs, per new level N:
 - the same two slots in the `detect` job `outputs:` of .github/workflows/apply.yml
   and .github/workflows/deploy.yml, and an `envlevelN` job in each;
 - an `envlevelN-waves` input on apply.yml's `summary` step and on
-  actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line;
-- scripts/apply-comment's own `MAX_ENV_LEVELS`.
+  actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line.
 
-A module, never a program: the detects and `env-config` `_load` it. It runs nothing
-on import -- it only defines functions and constants.
+A module, never a program: the detects, `env-config` and `apply-comment` `_load` it.
+It runs nothing on import -- it only defines functions and constants.
 """
 
 import json

@@ -34,16 +34,18 @@ _SCRIPT_DEFAULTED = frozenset({"CELLS"})
 
 _SUBSCRIPT_RE = re.compile(r'os\.environ\[\s*f?([\'"])([A-Za-z0-9_{}]+)\1\s*\]')
 _GET_RE = re.compile(r'os\.environ\.get\(\s*f?([\'"])([A-Za-z0-9_{}]+)\1')
-_RANGE_RE = re.compile(r"range\((\d+|[A-Z][A-Z0-9_]*)\)")
+_RANGE_RE = re.compile(r"range\((\d+|(?:[a-z]+\.)?[A-Z][A-Z0-9_]*)\)")
 _PLACEHOLDER_RE = re.compile(r"\{[^}]*\}")
 
 
 def _range_width(token):
-    """The N in a `range(N)` bound: a literal, or a module constant of `scripts/apply-comment`
-    read off the loaded module."""
+    """The N in a `range(N)` bound: a literal, or a constant of `scripts/apply-comment` or of a
+    module it loads (`wv.MAX_ENV_LEVELS`), read off the loaded module."""
     if token.isdigit():
         return int(token)
-    width = getattr(_APPLY_COMMENT, token, None)
+    width = _APPLY_COMMENT
+    for attr in token.split("."):
+        width = getattr(width, attr, None)
     assert isinstance(width, int), f"range({token}) is not an int constant of apply-comment"
     return width
 
