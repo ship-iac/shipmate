@@ -25,6 +25,7 @@ section below names the SHA the release tags.
 - **Per-cell jobs and the apply, drift and unlock detect jobs check out only the commit they run, so a stack that reads git history in a plan, apply, drift or unlock cell sees one commit.**
 - **An empty run-graph with pending applies refuses naming the first stack that is not a run-graph node, instead of saying the run-graph produced no levels.**
 - **build-matrix's `all-stacks` and `no-pull-request` inputs are one `sweep` input, read only when exactly `true`.**
+- **The apply review re-read displays as `review` instead of `review / decision`.**
 
 ### Fixed
 

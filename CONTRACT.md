@@ -85,8 +85,7 @@ job displays as `<caller job> / <callee job>`, applied at every level, and GHA
 cannot suppress a level. The apply leaf is therefore three deep, e.g.
 `post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
 short and non-redundant (`L0`..`L3` for env-levels in `apply.yml` /
-`deploy.yml`, `review / decision` for
-the review re-read `apply.yml` calls from `apply-review.yml`) rather than
+`deploy.yml`) rather than
 repeating the verb the leaf already carries; the consumer's calling job supplies the outermost
 segment (`post-merge` on the deploy path). Its file is named `shipmate`, so the
 pull request's checks UI renders that workflow name and then the job path
@@ -325,7 +324,7 @@ never used.
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
-  the apply path (`apply.yml`, `apply-review.yml`,
+  the apply path (`apply.yml`,
   `apply-env-level.yml`, `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -1362,8 +1361,8 @@ input without failing there.
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:
 
-Both engine workflows re-read `reviewDecision` themselves in a `review` job,
-which calls `apply-review.yml`, rather than trusting a dispatch input, and that
+`apply.yml` re-reads `reviewDecision` itself in a `review` job,
+rather than trusting a dispatch input, and that
 job is unconditional — the
 default branch's `gated: false` entries are the only source of this policy, and only
 engine-owned scripts read it.
@@ -1685,7 +1684,7 @@ The four jobs:
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
-- **`apply.yml` / `apply-review.yml` / `apply-env-level.yml` /
+- **`apply.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (reading the review decision, completing apply
@@ -1825,7 +1824,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and the control jobs below call `gh api` on the comment, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
-- The engine's ten control jobs, which run neither `tofu` nor `terramate`, run
+- The engine's eight control jobs, which run neither `tofu` nor `terramate`, run
   on `ubuntu-slim` unconditionally: their workflows take no runner input.
   `docs/aws.md` §Runner choice lists them. An account that cannot use that
   label leaves them waiting for a runner.

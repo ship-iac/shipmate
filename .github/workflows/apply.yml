@@ -35,14 +35,45 @@ jobs:
     # comment that authorized this apply and the dispatch: the decision is re-read here, so an
     # approval dismissed in between holds.
     needs: [guard]
-    uses: ./.github/workflows/apply-review.yml
+    # Re-reads the decision server-side, away from branch-controlled HCL (CONTRACT.md
+    # §Comment-ops). A targeted `apply-detect` refuses and a bare one holds on it; this job only
+    # fetches it.
+    runs-on: ubuntu-slim
+    # Reaches the App key the same way `summary` does.
+    environment: shipmate-engine
     permissions: {}
-    with:
-      pr_number: ${{ inputs.pr_number }}
-    # Named, never `inherit`: the callee's `shipmate-engine` binding supplies the key only when
-    # the name is mapped here, even to an empty value.
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+    outputs:
+      decision: ${{ steps.rd.outputs.decision }}
+    steps:
+      - name: Verify the App key arrived
+        uses: $/actions/verify-app-key
+        with:
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      - id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: read
+      - id: rd
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          # NONE: no review rule, or code-owner review owns no changed file. Nothing here proves the
+          # PR exists, and a number matching none returns a null `pullRequest`, no errors, exit 0:
+          # MISSING_PR. Targeted, apply-detect refuses it; bare, it holds every env.
+          # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
+          rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
+            -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
+            --jq '.data.repository.pullRequest | if type == "object" then (.reviewDecision // "NONE") else "MISSING_PR" end')
+          echo "decision=$rd" >> "$GITHUB_OUTPUT"
 
   detect:
     # A `review` that FAILS is caught by `!failure()`, so nothing applies and the run is visibly

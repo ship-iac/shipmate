@@ -70,8 +70,7 @@ _APP_KEY_PASSPHRASE_AND_SECRETS = {**_APP_KEY_AND_PASSPHRASE, **_CONSUMER_SECRET
 #: load-time failure, which is why each entry is the callee's exact declaration set: `plan.yml`
 #: encrypts plan artifacts and mints the gate, so it takes both engine secrets; `drift.yml`
 #: mints but encrypts nothing, so it takes no passphrase; `comment-ops.yml` runs no cell, so it
-#: and `apply-review.yml`, which only reads a review decision, are the entries taking no consumer
-#: envelope. Every other callee runs a cell, and
+#: is the entry taking no consumer envelope. Every other callee runs a cell, and
 #: `SHIPMATE_SECRETS` is how a consumer's own secrets reach it.
 ENGINE_CALL_SECRETS = {
     "plan.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
@@ -80,7 +79,6 @@ ENGINE_CALL_SECRETS = {
     "apply.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     "deploy.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
     "apply-env-level.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
-    "apply-review.yml": _APP_KEY,
     # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the
     # whole block: `unlock-cell` runs `tofu init`, which a consumer's backend may configure
     # from a plain TF_VAR_*.
