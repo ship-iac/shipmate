@@ -236,22 +236,6 @@ runs:
           echo "the pull request was a draft when this run started and was not planned; the sticky plan comment was left as it is"
           exit 0
         fi
-        marker='<!-- shipmate:summary -->'
-        # Marker plus any Bot author: the bot login derives from the App name, which an org may
-        # slug differently. `startswith`, not `contains`: doctor's report can quote the marker
-        # in repository data, and a `contains` match would PATCH the plan body over it.
-        if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
-               --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
-               > summary-comment-ids.txt; then
-          # A failed listing skips the post and the next run recovers. `Create/refresh gate`
-          # is a later step, so the gate is still written.
-          echo "::warning::could not list this pull request's comments; the sticky plan comment was not updated this run"
-          exit 0
-        fi
-        # --paginate runs --jq per page, so take the first id. Via a file, not a pipe into `head`:
-        # EPIPE under `pipefail` would need a `|| true` that masks a listing failure, and the empty
-        # id would then create a second marker-bearing Bot comment.
-        id=$(head -n1 summary-comment-ids.txt)
         # gate-state collapses every untrustworthy-plan case into comment_mode=hold. Keep the
         # existing comment rather than show an incomplete picture; `Create/refresh gate` fails
         # the gate on those cases, so the pull request still shows that something is wrong.
@@ -259,21 +243,19 @@ runs:
           echo "::warning::the plan job ($PLAN_RESULT) did not produce a trustworthy set of cell summaries; the sticky plan comment was left as it is"
           exit 0
         fi
-        nothing_changed=false
-        if [ "$MODE" = "nothing-changed" ]; then
-          nothing_changed=true
+        # Nothing changed: only an existing comment is kept current, or it would keep showing
+        # applies that no longer exist. A doctor warning (the comment links the run page its
+        # annotations live on) or an unmanaged stacks line still posts.
+        args=("$PR" comment.md)
+        if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ]; then
+          args+=(--update-only)
         fi
-        # Nothing changed and no comment to keep current: post nothing. A doctor warning (the comment
-        # links the run page its annotations live on) or an unmanaged stacks line still posts. An
-        # existing comment is kept current, or it would keep showing applies that no longer exist.
-        if [ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ]; then
+        result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "${args[@]}")
+        if [ "$result" = "list-failed" ]; then
+          # The next run recovers. `Create/refresh gate` is a later step, so the gate is still written.
+          echo "::warning::could not list this pull request's comments; the sticky plan comment was not updated this run"
+        elif [ "$result" = "skipped" ]; then
           echo "nothing changed, no existing plan comment, no doctor findings; nothing to post"
-          exit 0
-        fi
-        if [ -n "$id" ]; then
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md >/dev/null
-        else
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -F body=@comment.md >/dev/null
         fi
 
     - name: Create/refresh gate

@@ -394,38 +394,21 @@ runs:
         fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md
         # `retry_hint` is resolved by the job-summary write, the one place that knows whether
-        # the summary actually carries the report, so the listing-failure branch stays a single
-        # `echo`: a nested `if` inside that asserted degrade block would hide the warning.
+        # the summary actually carries the report, so the listing-failure branch stays one `echo`.
         retry_hint="comment shipmate doctor again to retry"
         # The job summary is written first so the run page keeps the report when the comment
-        # listing (exit 0 by design) or the PATCH/POST fails. Reviewer-facing only, never fatal,
-        # and not `|| true` (a guard forbids it here); `:-` keeps `set -u` alive when unset.
+        # listing (degraded by design) or the PATCH/POST fails. Reviewer-facing only, so it warns
+        # rather than fails; `:-` keeps `set -u` alive when unset.
         if [ -z "${GITHUB_STEP_SUMMARY:-}" ] || ! cat doctor.md >> "$GITHUB_STEP_SUMMARY"; then
           echo "::warning::could not publish the doctor report to this job's summary; it survives only as the pull request comment"
         else
           retry_hint="read it in this job's summary, or $retry_hint"
         fi
-        marker='<!-- shipmate:doctor -->'
-        # Marker plus Bot author, since the App's bot login is org-dependent. `startswith`, not
-        # `contains`: the sticky plan comment can quote the marker in `tofu plan` output, and a
-        # `contains` match would PATCH the doctor report over the plan comment.
-        if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-               --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
-               > doctor-comment-ids.txt; then
+        result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR_NUMBER" doctor.md)
+        if [ "$result" = "list-failed" ]; then
           # `retry_hint` names the surface that survived, so the commenter need not re-run 30-60s
-          # of probes for a report this run already rendered. A failed listing skips the post so
-          # the next run can recover.
+          # of probes for a report this run already rendered. The next run can recover.
           echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run: $retry_hint"
-          exit 0
-        fi
-        # --paginate runs --jq per page, so take the first id. Via a file, not a pipe into `head`:
-        # EPIPE under `pipefail` would need a `|| true` that masks a listing failure, and the empty
-        # id would then create a second marker-bearing Bot comment.
-        id=$(head -n1 doctor-comment-ids.txt)
-        if [ -n "$id" ]; then
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@doctor.md >/dev/null
-        else
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@doctor.md >/dev/null
         fi
 
     - name: Mint App token (checks:read)

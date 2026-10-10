@@ -1484,10 +1484,12 @@ check/status/comment/issue that crosses a workflow-run boundary:
   post-merge inline in `deploy.yml` — all three via App token.
 - **The sticky plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
-  `shipmate[bot]`), upserted in place by `actions/summary`.
+  `shipmate[bot]`), upserted in place by `actions/summary` through
+  `scripts/upsert-comment`, which reads the marker from the body's first line
+  and matches it only at the start of a comment.
 - **The `shipmate doctor` sticky report** — App-authored (its own marker +
   Bot-author lookup, same posture as the plan comment), upserted in place by
-  `actions/comment-ops`.
+  `actions/comment-ops` through the same `scripts/upsert-comment`.
 - **The apply result comment** — posted fresh by `actions/apply-summary` on
   every comment-ops apply run (targeted and bare); unlike the sticky plan
   comment it is never upserted against a marker, so a failure-then-retry
