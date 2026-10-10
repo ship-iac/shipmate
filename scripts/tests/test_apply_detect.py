@@ -396,8 +396,15 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
 
 
 def test_validate_head_sha_rejects_short():
-    with pytest.raises(SystemExit):
+    """Without `source` the refusal names SHIPMATE_HEAD_SHA, the variable apply-detect,
+    apply-all-detect and unlock-detect read.
+
+    Mutation: change `source`'s default -- the whole message differs."""
+    with pytest.raises(SystemExit) as exc_info:
         ad.validate_head_sha("abc123")
+    assert str(exc_info.value) == (
+        "::error::SHIPMATE_HEAD_SHA must be a 40-char lowercase hex SHA (got: 'abc123')"
+    )
 
 
 def test_validate_head_sha_rejects_uppercase():

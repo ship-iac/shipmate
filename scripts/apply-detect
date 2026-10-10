@@ -185,13 +185,12 @@ def dag_shape_notice(deps):
     )
 
 
-def validate_head_sha(value):
-    """Guard against a malformed SHIPMATE_HEAD_SHA retargeting the gh api URLs
-    built from it (e.g. `/`, `?`, `..`). Safe to echo — not a secret."""
+def validate_head_sha(value, source="SHIPMATE_HEAD_SHA"):
+    """Refuse a head SHA that is not 40 lowercase hex characters, so a malformed value
+    cannot retarget the gh api URLs built from it (e.g. `/`, `?`, `..`). `source` names
+    where the value came from in the refusal. Safe to echo — not a secret."""
     if not _SHA_RE.fullmatch(value):
-        raise SystemExit(
-            f"::error::SHIPMATE_HEAD_SHA must be a 40-char lowercase hex SHA (got: {value!r})"
-        )
+        raise SystemExit(f"::error::{source} must be a 40-char lowercase hex SHA (got: {value!r})")
 
 
 def validate_env(value):
