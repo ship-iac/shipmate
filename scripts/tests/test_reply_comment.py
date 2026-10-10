@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 
+import pytest
 from _loader import SCRIPTS, load_script
 
 rc = load_script("reply-comment")
@@ -78,4 +79,73 @@ def test_an_unknown_outcome_exits_non_zero_and_prints_no_body():
     assert result.stdout == ""
     assert result.stderr == (
         "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed or notice (got: refuse)\n"
+    )
+
+
+def _post(monkeypatch, *argv, pr="42", outcome="refused"):
+    """Run `main` in-process with `argv`; return (exit code, captured `run` calls)."""
+    calls = []
+    monkeypatch.setattr(rc, "run", lambda args: calls.append(args) or '{"id": 1}')
+    monkeypatch.setattr(sys, "argv", ["reply-comment", *argv])
+    for key, value in {
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_REPOSITORY": "org/repo",
+        "GITHUB_RUN_ID": "7777",
+        "PR_NUMBER": pr,
+        "SHIPMATE_REPLY_VERB": "apply",
+        "SHIPMATE_REPLY_ENV": "dev-eu",
+        "SHIPMATE_REPLY_OUTCOME": outcome,
+        "SHIPMATE_REPLY_TEXT": "no",
+    }.items():
+        monkeypatch.setenv(key, value)
+    try:
+        rc.main()
+    except SystemExit as exc:
+        return exc.code, calls
+    return 0, calls
+
+
+def test_post_sends_the_body_to_the_pull_request_and_prints_nothing(monkeypatch, capsys):
+    """The whole argv, hand-written.
+
+    Mutations: take the issue number from `GITHUB_RUN_ID`; drop `-X POST`; print the body
+    instead of posting it.
+    """
+    code, calls = _post(monkeypatch, "--post")
+    assert code == 0
+    assert calls == [
+        [
+            "gh",
+            "api",
+            "-X",
+            "POST",
+            "repos/org/repo/issues/42/comments",
+            "-f",
+            f"body=### shipmate apply dev-eu\n\n🔴 refused: no\n\n{_FOOTER}",
+        ]
+    ]
+    assert capsys.readouterr().out == ""
+
+
+def test_post_with_an_unknown_outcome_posts_nothing(monkeypatch):
+    """Mutation: post before validating the outcome."""
+    assert _post(monkeypatch, "--post", outcome="refuse") == (1, [])
+
+
+@pytest.mark.parametrize("pr", ["1; x", ""])
+def test_post_refuses_a_pull_request_number_that_is_not_digits(monkeypatch, pr):
+    """`PR_NUMBER` is bound into the API path, and dispatch passes its input unvalidated.
+
+    Mutation: drop the check.
+    """
+    code, calls = _post(monkeypatch, "--post", pr=pr)
+    assert code not in (0, None)
+    assert calls == []
+
+
+def test_without_post_the_body_is_printed_and_nothing_is_posted(monkeypatch, capsys):
+    """Mutation: always post."""
+    assert _post(monkeypatch) == (0, [])
+    assert capsys.readouterr().out == (
+        f"### shipmate apply dev-eu\n\n🔴 refused: no\n\n{_FOOTER}\n"
     )

@@ -17,6 +17,7 @@ from _loader import (
     run_lines,
     run_step,
     step_by,
+    write_python3_shim,
 )
 
 DISPATCH_ACTION = "dispatch"
@@ -133,9 +134,8 @@ RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" > argv.txt\necho '{}'\n"
 
 def _create_stub_commands(tmp_path):
     """Create stub `gh` and `python3` commands on PATH; returns (dir, python3, gh)."""
+    write_python3_shim(tmp_path)
     python3_path = tmp_path / "python3"
-    python3_path.write_text(f'#!/bin/bash\nexec "{__import__("sys").executable}" "$@"\n')
-    python3_path.chmod(0o755)
 
     gh_path = tmp_path / "gh"
     gh_path.write_text("#!/bin/bash\necho '{}'\n")  # The default stub succeeds.

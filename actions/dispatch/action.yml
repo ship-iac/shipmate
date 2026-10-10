@@ -59,14 +59,11 @@ runs:
         set -euo pipefail
         # Every refusal below lands on a run whose checks attach to the dispatch ref, so the pull
         # request would show nothing. The footer links this run, never the API's answer: that has
-        # no bounded length. `|| return 0`, `|| true`: a cosmetic failure cannot mask the status.
+        # no bounded length. `|| true`: a cosmetic failure cannot mask the status.
         say_no_run_started() {
-          local body
-          body=$(SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME=failed \
+          GH_TOKEN="$COMMENT_TOKEN" SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME=failed \
             SHIPMATE_REPLY_TEXT="the command was authorized, but dispatching its workflow failed, so no run started. The error is in this run's log." \
-            python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment") || return 0
-          GH_TOKEN="$COMMENT_TOKEN" gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            -f body="$body" >/dev/null || true
+            python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post || true
         }
         # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
         # the input arrives with the empty string. Refuse rather than default: a default runs one

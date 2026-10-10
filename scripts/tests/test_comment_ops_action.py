@@ -20,8 +20,10 @@ from _loader import (
     action_yaml,
     bash_only,
     load_script,
+    run_lines,
     run_step,
     step_by,
+    write_python3_shim,
 )
 
 _ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
@@ -930,14 +932,9 @@ _FOOTER = f"[run]({_RUN_URL}). Comment `shipmate help` for the available command
 _PARSED_VERB = "${{ steps.parse.outputs.verb }}"
 _PARSED_ENV = "${{ steps.parse.outputs.env }}"
 
-#: Every reply step's shell body, hand-written: the comment comes from reply-comment alone, so
+#: Every reply step's shell body, hand-written: reply-comment renders and posts the comment, so
 #: no step formats a header, verdict or footer of its own.
-_REPLY_RUN = (
-    "set -euo pipefail\n"
-    'body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")\n'
-    'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" '
-    ">/dev/null\n"
-)
+_REPLY_RUN = 'set -euo pipefail\npython3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post\n'
 
 #: Each reply step's header words, outcome and text, hand-written. `refused` where the engine
 #: decided not to run the command, `failed` where it could not.
@@ -1039,8 +1036,9 @@ def test_every_reply_step_names_its_header_outcome_and_text():
     assert got == {name: {**_REPLY_POST_ENV, **reply} for name, reply in _REPLIES.items()}
 
 
-#: An issue-comment endpoint at the end of a path; `/comments/<id>/reactions` is not one.
-_COMMENT_ENDPOINT = re.compile(r"/comments\b(?!/)")
+#: A run line that posts a comment: an issue-comment endpoint at the end of a path
+#: (`/comments/<id>/reactions` is not one), a `reply-comment --post`, or an `upsert-comment`.
+_POSTS = re.compile(r'/comments\b(?!/)|reply-comment" --post\b|scripts/upsert-comment\b')
 
 #: The steps that post a comment reply-comment does not render: help prints its own frame, and
 #: the doctor report is a sticky upsert of doctor's own body.
@@ -1049,15 +1047,15 @@ _NON_REPLY_POSTERS = {"Post help", "Doctor: render and upsert the sticky comment
 
 def test_every_step_posting_a_comment_is_a_reply_step_or_a_named_poster():
     """The reply guards above select by `SHIPMATE_REPLY_OUTCOME`, so a new step posting a
-    hand-formatted comment without it escapes them; this selects by the endpoint instead.
+    hand-formatted comment without it escapes them; this selects by what a run line posts with.
 
-    Mutation: add a step whose `run` is `gh api -X POST
-    "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: x"` with no
-    reply env -- red."""
+    Mutations: add a step running `gh api -X POST
+    "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=x` with no reply env; add one
+    running `reply-comment" --post` with no reply env -- each red."""
     posters = {
         s["name"]
         for s in action_steps("comment-ops")
-        if _COMMENT_ENDPOINT.search(s.get("run") or "")
+        if any(_POSTS.search(line) for line in run_lines(s))
     }
     assert posters == set(_REPLIES) | _NON_REPLY_POSTERS
 
@@ -1125,12 +1123,8 @@ def _run_as_wired(tmp_path, step, context):
     """Run `step`'s shipped body under its own `env:`, each `${{ X }}` in it replaced by
     `context[X]`, against a `gh` that saves the comment body, with `GITHUB_OUTPUT` at
     `github_output`; return the process result."""
-    for tool, text in (
-        ("gh", _BODY_GH),
-        ("python3", f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'),
-    ):
-        (tmp_path / tool).write_text(text, encoding="utf-8", newline="\n")
-        (tmp_path / tool).chmod(0o755)
+    (tmp_path / "gh").write_text(_BODY_GH, encoding="utf-8", newline="\n")
+    write_python3_shim(tmp_path)
     context = {"github.token": "test_token", "inputs.pr-number": "42", **context}
     env = {
         **os.environ,
