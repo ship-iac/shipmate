@@ -23,6 +23,7 @@ section below names the SHA the release tags.
 
 - **`shipmate doctor`'s `shipmate.yml` drift-call warning says what such a job does: it runs on that file's triggers.**
 - **Per-cell jobs and the apply, drift and unlock detect jobs check out only the commit they run, so a stack that reads git history in a plan, apply, drift or unlock cell sees one commit.**
+- **An empty run-graph with pending applies refuses naming the first stack that is not a run-graph node, instead of saying the run-graph produced no levels.**
 
 ### Fixed
 

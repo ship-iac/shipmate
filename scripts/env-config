@@ -847,7 +847,7 @@ def untagged_workloads(table, tagged):
 
 
 def env_order(table):
-    """`{env: [predecessors]}` from each entry's `needs`: the order `env-order` sorts."""
+    """`{env: [predecessors]}` from each entry's `needs`: the order `waves.env_levels` sorts."""
     return {
         env: entry["needs"]
         for env, entry in sorted(table.get("environments", {}).items())
@@ -878,17 +878,17 @@ def _check_depth(order, environments):
     the sorted-first at every tie."""
     from _shipmate import _load
 
-    eo = _load("env-order")
-    levels = eo.env_levels(order, sorted(set(environments).union(*order.values())))
+    wv = _load("waves")
+    levels = wv.env_levels(order, sorted(set(environments).union(*order.values())))
     depth = max(levels.values(), default=0)
-    if depth < eo.MAX_ENV_LEVELS:
+    if depth < wv.MAX_ENV_LEVELS:
         return
     chain = [min(e for e, lv in levels.items() if lv == depth)]
     while levels[chain[-1]]:
         chain.append(min(p for p in order[chain[-1]] if levels[p] == levels[chain[-1]] - 1))
     raise SystemExit(
         f"::error::needs spans {depth + 1} env levels: {' -> '.join(reversed(chain))}. "
-        f"A deploy applies at most {eo.MAX_ENV_LEVELS} env levels. Shorten the chain in "
+        f"A deploy applies at most {wv.MAX_ENV_LEVELS} env levels. Shorten the chain in "
         f"{CONFIG_PATH}."
     )
 

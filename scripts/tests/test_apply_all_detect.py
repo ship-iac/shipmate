@@ -126,13 +126,12 @@ def test_reuses_single_sourced_helpers():
     script reaches them through, not that main() calls them rather than a private copy. What
     pins that is the `not hasattr` halves below, which say no second route can exist, plus the
     behavioural main() tests above. Env-level bucketing and the GITHUB_OUTPUT writer live in
-    env-order, shared with deploy-detect, so this script never loads deploy-detect."""
+    waves, shared with deploy-detect, so this script never loads deploy-detect."""
     assert aad.ad.paths_with_checks is not None
     assert aad.ad.cells_for_env is not None
     assert aad.ad.with_plan_runs is not None
-    assert aad.eo.waves_by_env_level is not None
-    assert aad.eo.env_level_waves is not None
-    assert aad.eo.write_env_level_waves is not None
+    assert aad.wv.env_level_waves is not None
+    assert aad.wv.write_env_level_waves is not None
     # No local apply-gate alias. test_detect_app_scoping pins which route main() takes, and
     # this only asserts the second one does not exist.
     assert not hasattr(aad, "ag")
@@ -234,7 +233,7 @@ def _run_main(
     given.
 
     `order`, `explicit` and `ungated` are folded into the stubbed table rather than stubbed
-    on `eo`: all three are fields of the mapping this path loads, so a double on any reader
+    on `wv`: all three are fields of the mapping this path loads, so a double on any reader
     would mask a caller that stopped passing the table. One entry is appended to `reads` per
     `read_table` call. Each `env_membership` call appends its `(args, kwargs)` to `membership`
     when one is given. `deps` replaces the run-graph, which defaults to the tree's stacks with
@@ -285,7 +284,7 @@ def _run_main(
 def _wave_cells(parsed):
     return [
         c
-        for lvl in range(aad.eo.MAX_ENV_LEVELS)
+        for lvl in range(aad.wv.MAX_ENV_LEVELS)
         for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
         for i in range(aad.ad.wv.MAX_WAVES)
         for c in w[f"wave{i}"]

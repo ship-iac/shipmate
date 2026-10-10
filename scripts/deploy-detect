@@ -19,7 +19,7 @@ import time
 from _shipmate import _load
 
 bm = _load("build-matrix")
-eo = _load("env-order")
+wv = _load("waves")
 # No apply-gate load of its own: the App-scoped "already applied" query is
 # ad.ag.app_done_names, and test_detect_app_scoping pins this script to it.
 ad = _load("apply-detect")
@@ -143,7 +143,7 @@ def main():
     deps = ad.run_graph_deps()
     # Before the padding, whose over-depth refusal is where this line helps most.
     print(ad.dag_shape_notice(deps))
-    per_level = eo.env_level_waves(pending, bm.ec.env_order(table), deps)
+    per_level = wv.env_level_waves(pending, bm.ec.env_order(table), deps)
     level_counts = [sum(map(len, w.values())) for w in per_level]
     print(
         f"::notice title=deploy-detect::base={os.environ.get('SHIPMATE_BASE_SHA', '')} "
@@ -153,7 +153,7 @@ def main():
     # Output names must be hyphen-free: `steps.d.outputs.head-sha` parses the '-'
     # as subtraction, breaking the composite action's outputs block. Underscores.
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        eo.write_env_level_waves(fh, per_level)
+        wv.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
 
 

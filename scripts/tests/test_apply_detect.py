@@ -354,8 +354,8 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
 
 
 def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path):
-    """Mutation: `wv.levels` for `wv.stack_levels` inside `env-order.waves_by_env_level` -- a
-    raw `CycleError` escapes instead of this `SystemExit`."""
+    """Mutation: `levels` for `stack_levels` in both `dag_shape_notice` and
+    `waves.env_level_waves` -- a raw `CycleError` escapes instead of this `SystemExit`."""
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
@@ -372,13 +372,14 @@ def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path)
 
 
 def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, capsys):
-    """`main` reaches `waves_by_env_level`'s padding, so a chain too deep for the pre-declared
+    """`main` reaches `env_level_waves`' padding, so a chain too deep for the pre-declared
     wave jobs refuses before any output instead of emitting wave0..wave7 with the deepest cells
     dropped. The DAG-shape notice still prints first: it is the line that explains the depth.
 
-    Mutation: bucket the cells in `main` without `waves_by_env_level` (`wv.assign_waves` and
-    unpadded waves into `write_env_level_waves`) -- the run writes the waves and exits 0.
-    Mutation: print the DAG-shape notice after `waves_by_env_level` -- the notice is missing.
+    Mutation: bucket the cells in `main` without `env_level_waves` (one unpadded
+    `{waveN: cells}` dict from `wv.assign_waves` into `write_env_level_waves`) -- the run
+    writes the waves and exits 0.
+    Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
     """
     depth = ad.wv.MAX_WAVES + 1
     stacks = [f"stacks/s{i}" for i in range(depth)]
@@ -717,7 +718,8 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     `envlevelN_empty`, `head_sha` and `review_not_required_envs`; a targeted apply is env-level
     0 alone, so levels 1-3 must say `true` or apply.yml runs them into `fromJSON('')`.
 
-    Mutation: pass `{env: 1}` to `waves_by_env_level` -- the cells land in `envlevel1`."""
+    Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
+    `envlevel1`."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()

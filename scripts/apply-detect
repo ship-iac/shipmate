@@ -15,8 +15,8 @@ design — it never blocks on other environments; region-level sequencing across
 envs is handled separately by the bare form.
 
 It writes the same env-level output contract as the bare form
-(`env-order.write_env_level_waves`), with every wave at env-level 0 and levels
-1-3 empty.
+(`waves.write_env_level_waves`). It passes `waves.env_level_waves` an empty order,
+which puts every cell at env-level 0 and leaves levels 1-3 empty.
 
 Before any of that, the PR's review decision — read server-side by the `review`
 job, narrowed by `gated: false` on the environment's entry — must authorize this
@@ -34,7 +34,6 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 bm = _load("build-matrix")
 wv = _load("waves")
-eo = _load("env-order")
 ag = _load("apply-gate")
 az = _load("authorize")
 
@@ -271,7 +270,7 @@ def main():
 
     # Before the padding, whose over-depth refusal is where this line helps most.
     print(dag_shape_notice(deps))
-    per_level = eo.waves_by_env_level(pending, deps, {})
+    per_level = wv.env_level_waves(pending, {}, deps)
     w0 = per_level[0]
     print(
         f"::notice title=apply-detect::env={env} head={head} "
@@ -279,7 +278,7 @@ def main():
         f"waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        eo.write_env_level_waves(fh, per_level)
+        wv.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
         fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
 

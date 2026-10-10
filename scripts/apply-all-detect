@@ -32,7 +32,7 @@ from _shipmate import _load
 
 ad = _load("apply-detect")
 bm = _load("build-matrix")
-eo = _load("env-order")
+wv = _load("waves")
 # No apply-gate load of its own -- see deploy-detect and test_detect_app_scoping. The
 # apply-gate functions this path needs are reached through `ad.ag`, so there is no
 # second apply-gate instance.
@@ -74,7 +74,7 @@ def main():
     held = sorted(e for e in pending_envs if ad.az._review_reason(decision, e, ungated))
     explicit = bm.ec.explicit_envs(table)
     stopped = pending_envs & set(explicit + held)
-    skipped = sorted(eo.blocked_envs(order, stopped, pending_envs - stopped))
+    skipped = sorted(wv.blocked_envs(order, stopped, pending_envs - stopped))
     # Every pending explicit env, held or not: the comment names a held one's
     # explicit command under the hold. A held env that is not explicit stays out.
     excluded = sorted(pending_envs & set(explicit))
@@ -107,7 +107,7 @@ def main():
     deps = ad.run_graph_deps()
     # Before the padding, whose over-depth refusal is where this line helps most.
     print(ad.dag_shape_notice(deps))
-    per_level = eo.env_level_waves(runnable, order, deps)
+    per_level = wv.env_level_waves(runnable, order, deps)
     level_counts = [sum(map(len, w.values())) for w in per_level]
     print(
         f"::notice title=apply-all-detect::head={head} "
@@ -120,7 +120,7 @@ def main():
         f"review_decision={decision!r}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        eo.write_env_level_waves(fh, per_level)
+        wv.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
         fh.write(f"excluded_envs={json.dumps(excluded)}\n")
         fh.write(f"skipped_envs={json.dumps(skipped)}\n")

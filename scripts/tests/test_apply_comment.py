@@ -8,7 +8,6 @@ from _loader import ENGINE as _ENGINE
 from _loader import load_script, workflow_yaml
 
 ac = load_script("apply-comment")
-eo = load_script("env-order")
 wv = load_script("waves")
 
 RUN_URL = "https://gh/run/1"
@@ -1356,7 +1355,7 @@ def test_check_name_grammar_matches_apply_cells_construction():
 def test_env_level_count_matches_env_orders():
     # apply-comment keeps its own copy of the constant, so the equality is pinned here
     # rather than by construction.
-    assert ac.MAX_ENV_LEVELS == eo.MAX_ENV_LEVELS
+    assert ac.MAX_ENV_LEVELS == wv.MAX_ENV_LEVELS
 
 
 def test_wave_job_name_matches_the_apply_check_grammar():

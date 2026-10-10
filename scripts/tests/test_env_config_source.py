@@ -272,3 +272,17 @@ def test_contents_text_leaves_a_leading_byte_order_mark_in_place():
     text = "\ufeff" + _SHARED_TEXT
     blob = _blob(text)
     assert ec.contents_text("p", fetch=lambda _path: blob) == text
+
+
+def test_loading_env_config_loads_no_other_helper(monkeypatch):
+    """`build-matrix` aliases `env-config._run`, which terminates only because this module
+    `_load`s nothing at import; its one `_load` stays inside `_check_depth`.
+
+    Mutation: move `_check_depth`'s `from _shipmate import _load` and `_load("waves")` to
+    module top -- the patched `_load` raises while `env-config` loads."""
+
+    def _refuse(fname):
+        raise AssertionError(f"env-config loaded {fname} at import")
+
+    monkeypatch.setattr("_shipmate._load", _refuse)
+    assert load_script("env-config").CONFIG_PATH == ".github/shipmate-config.yml"
