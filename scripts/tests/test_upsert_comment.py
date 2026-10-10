@@ -36,7 +36,14 @@ def _head(cid, head):
 
 
 def _upsert(
-    monkeypatch, tmp_path, listing, *flags, first_line=SUMMARY, list_fails=False, write_fails=False
+    monkeypatch,
+    tmp_path,
+    listing,
+    *flags,
+    first_line=SUMMARY,
+    list_fails=False,
+    write_fails=False,
+    pr="7",
 ):
     """Run `main` in-process against a fake API; return (exit code, `run` calls)."""
     body = tmp_path / "comment.md"
@@ -55,7 +62,7 @@ def _upsert(
 
     monkeypatch.setattr(uc, "run", fake_run)
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
-    monkeypatch.setattr(sys, "argv", ["upsert-comment", "7", str(body), *flags])
+    monkeypatch.setattr(sys, "argv", ["upsert-comment", pr, str(body), *flags])
     try:
         uc.main()
     except SystemExit as exc:
@@ -184,6 +191,16 @@ def test_a_first_line_that_is_not_a_whole_marker_is_refused_before_any_call(
     code, calls = _upsert(monkeypatch, tmp_path, [], first_line=first_line)
     path = tmp_path / "comment.md"
     assert code == f"::error::{path}: the first line must be a shipmate marker (got: {first_line})"
+    assert calls == []
+
+
+@pytest.mark.parametrize("pr", ["7a", "", "../1"])
+def test_a_pull_request_number_that_is_not_digits_is_refused_before_any_call(
+    monkeypatch, tmp_path, pr
+):
+    """`PR` is bound into the API path. Mutation: delete the check."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], pr=pr)
+    assert code == f"::error::PR must be a pull request number (got: {pr})"
     assert calls == []
 
 

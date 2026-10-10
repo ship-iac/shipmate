@@ -2,7 +2,8 @@
 """Create or update the sticky comment a body file names on a pull request.
 
 Usage: `upsert-comment PR BODYFILE [--update-only]`, with `gh` (`GH_TOKEN`) against
-`GITHUB_REPOSITORY`.
+`GITHUB_REPOSITORY`. A PR that is not all digits exits 1 with `::error::` before the body file is
+read or any `gh` call, because it is bound into the API path.
 
 The marker is BODYFILE's first line, which must be a whole `<!-- shipmate:<name> -->` with a
 1-40 letter lowercase name; anything else exits 1 with `::error::` before any `gh` call. The
@@ -61,6 +62,9 @@ def main():
     if len(args) not in (2, 3) or args[2:] not in ([], ["--update-only"]):
         sys.exit("::error::usage: upsert-comment PR BODYFILE [--update-only]")
     pr, path = args[0], args[1]
+    # Bound into the API path.
+    if not (pr.isascii() and pr.isdigit()):
+        sys.exit(f"::error::PR must be a pull request number (got: {pr})")
     with open(path, encoding="utf-8") as f:
         marker = f.readline().rstrip("\r\n")
     if not MARKER.fullmatch(marker):
