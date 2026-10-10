@@ -290,76 +290,11 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
-        APP_TOKEN: ${{ steps.doctortoken.outputs.token }}
+        SHIPMATE_APP_TOKEN: ${{ steps.doctortoken.outputs.token }}
         PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_DOCTOR_MODE: check-ids
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
-      run: |
-        set -euo pipefail
-        head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha' || echo "")
-        if [[ ! "$head" =~ ^[0-9a-f]{40}$ ]]; then
-          echo "::warning::could not read the PR head SHA; doctor reports settings probes only"
-          {
-            echo "head_sha="
-            echo "plan_run_ids="
-            echo "harvest_failed=true"
-          } >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        echo "head_sha=$head" >> "$GITHUB_OUTPUT"
-        # Harvest: latest shipmate-authored check run per name (check-ids filters on app slug/id), then
-        # its annotations; never fails. harvest_failed is written once, after every step that could flip
-        # it: an empty ann/<id>.json reads as "no annotations", so a failed fetch must not look complete.
-        mkdir -p ann
-        : > check-ids.tsv
-        harvest_failed=false
-        if GH_TOKEN="$APP_TOKEN" gh api --paginate \
-             "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
-             --jq '.check_runs[] | {id, name, status, started_at, external_id, app: {id: .app.id}, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
-          # check-ids mode also writes `harvest_pending`, true while any shipmate check run on
-          # this commit is incomplete, so a report requested mid-run says so instead of printing
-          # an all-clear nothing refreshes.
-          if ! python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" < check-runs.jsonl > check-ids.tsv; then
-            echo "::warning::doctor check-ids reduction failed; doctor reports settings probes only"
-            : > check-ids.tsv
-            harvest_failed=true
-          fi
-        else
-          echo "::warning::check-runs listing failed; doctor reports settings probes only"
-          harvest_failed=true
-        fi
-        # per_page=100, no --paginate: --paginate concatenates the pages' JSON arrays, which
-        # json.loads rejects. 100 covers GHA's 10-per-level-per-step annotation caps.
-        while IFS=$'\t' read -r id _name; do
-          [ -z "$id" ] && continue
-          if ! GH_TOKEN="$APP_TOKEN" gh api "repos/$GITHUB_REPOSITORY/check-runs/$id/annotations?per_page=100" \
-               > "ann/$id.json"; then
-            echo '[]' > "ann/$id.json"
-            echo "::warning::annotations fetch failed for check run $id; doctor reports a partial harvest"
-            harvest_failed=true
-          fi
-        done < check-ids.tsv
-        echo "harvest_failed=$harvest_failed" >> "$GITHUB_OUTPUT"
-        # Declared environment set: the cell summaries of the plan runs this head's own apply
-        # checks name, read from the check-runs listing, so a renamed plan workflow cannot
-        # silently empty the environment probes. With no records doctor says so and skips them.
-        if ! python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs \
-             < check-runs.jsonl > plan_runs.json; then
-          echo '{}' > plan_runs.json
-          echo "::warning::the plan records on this commit's apply checks could not be read; doctor skips the environment probes"
-        fi
-        run_ids=$(python3 -c 'import json,sys; print("\n".join(sorted(set(json.load(sys.stdin).values()))))' \
-                    < plan_runs.json || echo "")
-        # -R because this job checks out nothing, so gh has no remote to infer the repo from. One
-        # directory per run: a cell planned in two runs has one artifact name in both, and those
-        # identical names would collide in one shared directory.
-        mkdir -p doctor-cells
-        while read -r rid; do
-          [ -n "$rid" ] || continue
-          gh run download "$rid" -R "$GITHUB_REPOSITORY" -p 'cell-summary.*' -D "doctor-cells/$rid" \
-            || echo "::warning::the cell summaries of plan run $rid could not be downloaded; doctor's environment probes may be incomplete"
-        done <<< "$run_ids"
-        echo "plan_run_ids=$(printf '%s' "$run_ids" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/doctor"
 
     - name: "Doctor: render and upsert the sticky comment"
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' && steps.doctortoken.outcome == 'success' }}

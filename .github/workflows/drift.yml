@@ -38,12 +38,10 @@ jobs:
       - id: m
         uses: $/actions/build-matrix
         with:
-          base-sha: ""
-          all-stacks: "true"
+          # `sweep` skips build-matrix's head-repository and head-commit refusals. A sweep has
+          # no pull request; a plan workflow must never set this.
+          sweep: "true"
           tags: ${{ inputs.tags }}
-          # Skips build-matrix's head-repository and head-commit refusals. A sweep has no pull
-          # request; a plan workflow must never set this.
-          no-pull-request: "true"
           github-vars: ${{ toJSON(vars) }}
 
   drift:

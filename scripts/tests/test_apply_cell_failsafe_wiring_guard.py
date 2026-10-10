@@ -5,15 +5,16 @@ the generic "an earlier step failed" reason, or worse a neighbouring fail-safe's
 of its own.
 
 Everything here is derived from the shipped source itself -- step order, ids and the Compose
-step's `env:` mappings from action.yml, the FAILSAFES list from scripts/apply-cell-summary --
-rather than a hand-maintained list of the current ids, because a hardcoded list is itself
-the kind of thing that silently goes stale.
+step's `env:` mappings from action.yml, the inner outcomes `cell-init` exports from its own
+action.yml, the FAILSAFES list from scripts/apply-cell-summary -- rather than a hand-maintained
+list of the current ids, because a hardcoded list is itself the kind of thing that silently goes
+stale.
 """
 
 import ast
 import re
 
-from _loader import SCRIPTS, action_steps, step_by
+from _loader import SCRIPTS, action_steps, action_yaml, step_by
 
 #: Ids in the guarded range that are deliberately not fail-safes wired into the Compose step's
 #: decision, such as a step added only to expose an output with no bearing on whether the apply
@@ -27,28 +28,52 @@ def _steps():
     return action_steps("apply-cell")
 
 
+_OUTCOME = re.compile(r"steps\.([A-Za-z0-9_-]+)\.outcome")
+_INIT_OUTPUT = re.compile(r"steps\.init\.outputs\.([A-Za-z0-9_-]+-outcome)")
+
+
+def _cell_init_outcomes():
+    """`cell-init`'s outputs that re-export an inner step's `outcome`, as {output: inner id}."""
+    outputs = action_yaml("cell-init")["outputs"]
+    return {
+        name: m.group(1)
+        for name, spec in outputs.items()
+        if (m := _OUTCOME.fullmatch(str(spec["value"]).strip("${} ")))
+    }
+
+
 def _ids_between_slug_and_apply():
     """Every id'd step strictly between "Stack slug" (id: ids, the first step, apply-cell minting
     no App token of its own) and "Apply the stored plan" (id: apply): the range whose steps can
-    halt the apply and so must be attributable in the Compose decision."""
+    halt the apply and so must be attributable in the Compose decision. The `cell-init` call
+    (id: init) stands for the inner steps whose outcome that action exports, so each keeps its
+    own identity."""
     steps = _steps()
     ids = [s.get("id") for s in steps]
     start = ids.index("ids")
     end = ids.index("apply")
     assert start < end, "id 'ids' must precede id 'apply' in actions/apply-cell/action.yml"
-    return [s.get("id") for s in steps[start + 1 : end] if s.get("id")]
+    out = []
+    for step_id in (s.get("id") for s in steps[start + 1 : end]):
+        if step_id == "init":
+            out.extend(_cell_init_outcomes().values())
+        elif step_id:
+            out.append(step_id)
+    return out
 
 
 def _compose_env_id_mapping():
-    """Map each `steps.<id>.outcome`, or `steps.<id>.outputs.init-outcome` for the `cell-init`
-    call, referenced in the Compose step's `env:` block back to its env var name, both
-    directions."""
+    """Map each `steps.<id>.outcome` referenced in the Compose step's `env:` block, or each
+    `steps.init.outputs.<x>-outcome` traced through `cell-init`'s outputs to the inner step id,
+    back to its env var name, both directions."""
     env_block = step_by("apply-cell", name="Compose cell summary").get("env") or {}
-    pattern = re.compile(r"steps\.([A-Za-z0-9_-]+)\.(?:outcome|outputs\.init-outcome)")
+    inner = _cell_init_outcomes()
     envvar_to_id = {}
     for var_name, expr in env_block.items():
-        m = pattern.search(str(expr))
-        if m:
+        if m := _INIT_OUTPUT.search(str(expr)):
+            if m.group(1) in inner:
+                envvar_to_id[var_name] = inner[m.group(1)]
+        elif m := _OUTCOME.search(str(expr)):
             envvar_to_id[var_name] = m.group(1)
     id_to_envvar = {step_id: var_name for var_name, step_id in envvar_to_id.items()}
     return envvar_to_id, id_to_envvar
@@ -142,10 +167,15 @@ def test_current_failsafe_set_is_exactly_the_nine_known_ids():
     }
 
 
-def test_init_outcome_is_inits_own_and_not_the_cell_init_composites():
+def test_cell_init_outcomes_are_its_inner_steps_and_not_the_composites():
     """The composite's outcome is not init's: a failed cache key or restore step skips init, and
-    the cell must report that as an earlier failure, not as a failed init. The widened mapping
-    above also accepts the old form, so the expression is pinned whole here. Mutation: point
-    `INIT_OUTCOME` at `steps.init.outcome`."""
+    the cell must report that as an earlier failure, not as a failed init. The mapping above also
+    accepts `steps.init.outcome`, so the three expressions are pinned whole here. Mutations:
+    point `INIT_OUTCOME` at `steps.init.outcome`; point `LOCATE_OUTCOME` at
+    `steps.init.outputs.restore-outcome`."""
     env_block = step_by("apply-cell", name="Compose cell summary")["env"]
-    assert env_block["INIT_OUTCOME"] == "${{ steps.init.outputs.init-outcome }}"
+    assert {k: env_block[k] for k in ("INIT_OUTCOME", "LOCATE_OUTCOME", "RESTORE_OUTCOME")} == {
+        "INIT_OUTCOME": "${{ steps.init.outputs.init-outcome }}",
+        "LOCATE_OUTCOME": "${{ steps.init.outputs.locate-outcome }}",
+        "RESTORE_OUTCOME": "${{ steps.init.outputs.restore-outcome }}",
+    }

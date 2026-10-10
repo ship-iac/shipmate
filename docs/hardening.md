@@ -931,7 +931,7 @@ steps compare the statement against the tree they are actually standing in,
 failing the run when the two differ.
 
 Both refuse by default: a run that states no commit at all is refused, not
-planned (the one exception is `no-pull-request: "true"`, which only engine
+planned (the one exception is `sweep: "true"`, which only engine
 `drift.yml` passes, for a drift sweep that has no pull request to state
 anything about). The direction is the point. A plan workflow that forgot the
 `ref:` would plan the base branch, report no changes for a pull request it had
@@ -989,7 +989,7 @@ applies.
 step unless the `head-repo` input states a head repository equal to this
 repository — and it refuses by default, so a run that states nothing is refused
 rather than planned. No input, variable or setting permits a fork: the one
-opt-out, `no-pull-request: "true"`, says the run has no pull request at all, and
+opt-out, `sweep: "true"`, says the run has no pull request at all, and
 only engine `drift.yml` passes it. Both values are set in engine-owned,
 SHA-pinned YAML, so there is nothing a consumer can wire wrong and nothing a
 pull request author can edit. A fork's plan is refused before any stack is

@@ -2,10 +2,15 @@ name: shipmate build-matrix
 description: Compute the changed stack x environment plan matrix (fails above 256 cells).
 inputs:
   base-sha:
-    description: Base commit to diff against for change detection (PR base SHA).
-    required: true
-  all-stacks:
-    description: When 'true', enumerate every stack (drift) instead of only changed.
+    description: >-
+      Base commit to diff against for change detection (PR base SHA). A sweep leaves it
+      empty.
+    required: false
+    default: ""
+  sweep:
+    description: >-
+      Set to 'true' only in a drift sweep: every stack is enumerated, the head-repository and
+      head-commit checks are skipped, and `tags` is allowed. Never set it in a plan wrapper.
     required: false
     default: "false"
   head-repo:
@@ -22,21 +27,13 @@ inputs:
       the base or the dispatch ref plans a different tree and reports no changes.
     required: false
     default: ""
-  no-pull-request:
-    description: >-
-      Set to 'true' only in a workflow with no pull-request context (a drift sweep). A
-      no-pull-request of 'true' is what skips the head-repository and head-commit checks. Never
-      set it in a plan wrapper.
-    required: false
-    default: "false"
   tags:
     description: >-
       Tag query narrowing the cells this run covers, over Terramate's on-disk tag form; not
       a Terramate query. ',' is OR and ':' is AND, so 'env/dev-eu,env/dev-us' is either
       environment and 'env/dev-eu:workload/app' is both. A cell matches against its stack's
       tags with every other `env/*` tag removed, so 'env/a:env/b' matches nothing. Empty (the
-      default) covers every cell. Allowed only alongside no-pull-request (a drift sweep),
-      because narrowing a plan run would leave changed stacks with no plan cell and no apply
+      default) covers every cell. Allowed only in a sweep, because narrowing a plan run would leave changed stacks with no plan cell and no apply
       check. Every clause matching no cell is named in a notice, with the terms no stack
       carries; a query matching no cell leaves the run empty with a notice; an empty term
       fails the run.
@@ -79,10 +76,9 @@ runs:
         # API; no permission beyond the job's own contents: read.
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_BASE_SHA: ${{ inputs.base-sha }}
-        SHIPMATE_ALL_STACKS: ${{ inputs.all-stacks }}
         SHIPMATE_HEAD_REPO: ${{ inputs.head-repo }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
-        SHIPMATE_NO_PULL_REQUEST: ${{ inputs.no-pull-request }}
+        SHIPMATE_SWEEP: ${{ inputs.sweep }}
         SHIPMATE_TAGS: ${{ inputs.tags }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/build-matrix"

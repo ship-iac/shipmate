@@ -59,16 +59,9 @@ def test_the_apply_half_is_split_across_its_four_attributable_steps():
     # Written out here rather than compared against _STEP_IDS: the harness concatenates the
     # bodies in that constant's order, so a swap made in both places would leave every runtime
     # assertion in this file green and this the only test able to catch it. Locating and
-    # restoring state sit between init and the render, and the harness leaves them out: neither
+    # restoring state run inside `cell-init` after init, and the harness leaves them out: neither
     # touches the stored plan.
-    assert tuple(ids[start : start + 6]) == (
-        "digest-input",
-        "init",
-        "locate-state",
-        "restore-state",
-        "plan-digest",
-        "apply",
-    )
+    assert tuple(ids[start : start + 4]) == ("digest-input", "init", "plan-digest", "apply")
 
 
 def test_apply_step_captures_pipestatus_and_exits_on_it():

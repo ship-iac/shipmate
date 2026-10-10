@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import sys
@@ -1700,17 +1699,17 @@ def _ann(level="warning", title="t", message="m", check="shipmate · plan / ship
 
 
 def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
-    ga = ', "app_slug": "github-actions", "app_id": 15368}'
+    ga = ', "app_slug": "github-actions", "app": {"id": 15368}}'
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "2026-07-26T10:00:00Z"' + ga,
         '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z"' + ga,
         '{"id": 3, "name": "dns / dev-eu", "started_at": "2026-07-26T10:30:00Z"' + ga,
-        # The shipmate App's own check runs (the apply checks) are kept via `app_id`.
+        # The shipmate App's own check runs (the apply checks) are kept via `app.id`.
         '{"id": 4, "name": "apply / app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
-        + '"app_slug": "shipmate", "app_id": 999}',
+        + '"app_slug": "shipmate", "app": {"id": 999}}',
         # Third-party apps are dropped: they are outside the harvest's scope.
         '{"id": 5, "name": "codecov/project", "started_at": "2026-07-26T10:00:00Z", '
-        + '"app_slug": "codecov", "app_id": 254}',
+        + '"app_slug": "codecov", "app": {"id": 254}}',
     ]
     assert doctor.latest_check_ids(lines, app_id="999") == [
         (2, "app / dev-eu"),
@@ -1726,22 +1725,43 @@ def test_mirrored_app_check_does_not_displace_the_annotation_bearing_one():
     stay harvested."""
     autoplan = (
         '{"id": 1, "name": "app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
-        '"app_slug": "github-actions", "app_id": 15368}'
+        '"app_slug": "github-actions", "app": {"id": 15368}}'
     )
     # Later than the autoplan's: the mirror is created after it, and this keeps
     # the guard independent of whether GitHub populates started_at on a create.
     mirror = (
         '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z", '
-        '"app_slug": "shipmate", "app_id": 999}'
+        '"app_slug": "shipmate", "app": {"id": 999}}'
     )
     apply_check = (
         '{"id": 3, "name": "apply / app / dev-eu", "started_at": "2026-07-26T11:30:00Z", '
-        '"app_slug": "shipmate", "app_id": 999}'
+        '"app_slug": "shipmate", "app": {"id": 999}}'
     )
     assert doctor.latest_check_ids([autoplan, mirror, apply_check], app_id="999") == [
         (1, "app / dev-eu"),
         (3, "apply / app / dev-eu"),
     ]
+
+
+def test_the_app_is_matched_on_its_nested_app_id_alone():
+    """An App row carries no `app_slug` here, so only `app.id` can keep the `apply / ` run.
+
+    Mutation: match `run.get("app_id")` in `_parse_check_run` -- the apply row is lost."""
+    lines = [
+        '{"id": 2, "name": "app / dev-eu", "started_at": "t", "app": {"id": 999}}',
+        '{"id": 3, "name": "apply / app / dev-eu", "started_at": "t", "app": {"id": 999}}',
+    ]
+    assert doctor.latest_check_ids(lines, app_id="999") == [(3, "apply / app / dev-eu")]
+
+
+def test_a_check_run_whose_app_is_not_an_object_is_skipped_without_raising():
+    """Mutation: read `run["app"]["id"]` unguarded in `_parse_check_run` -- TypeError."""
+    lines = [
+        '{"id": 3, "name": "apply / app / dev-eu", "started_at": "t", "app": "shipmate"}',
+        '{"id": 4, "name": "apply / db / dev-eu", "started_at": "t"}',
+    ]
+    assert doctor.latest_check_ids(lines, app_id="999") == []
+    assert doctor.harvest_pending(lines, app_id="999") is False
 
 
 def test_harvest_drops_notices_and_doctors_own_annotations():
@@ -2067,14 +2087,14 @@ def test_harvest_pending_ignores_third_party_check_runs():
     # every report claim the commit's runs had not finished.
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
-        '{"id": 5, "name": "codecov/project", "app_slug": "codecov", "app_id": 254, '
+        '{"id": 5, "name": "codecov/project", "app_slug": "codecov", "app": {"id": 254}, '
         + '"status": "in_progress"}',
     ]
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is False
 
 
 _QUEUED_APP_APPLY = (
-    '{"id": 3, "name": "apply / app / dev-eu", "app_slug": "shipmate", "app_id": 999, '
+    '{"id": 3, "name": "apply / app / dev-eu", "app_slug": "shipmate", "app": {"id": 999}, '
     '"status": "queued"}'
 )
 
@@ -2106,7 +2126,7 @@ def test_harvest_pending_counts_a_queued_app_run_outside_the_apply_checks():
     """Mutation: skip every App-authored run -- False."""
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
-        '{"id": 6, "name": "db / dev-eu", "app_slug": "shipmate", "app_id": 999, '
+        '{"id": 6, "name": "db / dev-eu", "app_slug": "shipmate", "app": {"id": 999}, '
         '"status": "queued"}',
     ]
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
@@ -2124,35 +2144,462 @@ def test_harvest_pending_counts_a_queued_run_ranked_below_a_completed_one():
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
 
 
-def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_path, capsys):
-    """The reduction already reads every check run on the commit, so it also decides the
-    pending flag, which reaches the render step as the gather step's output. The TSV on
-    stdout must stay exactly (id, name) pairs: `load_annotations` splits each line on the
-    first tab and would otherwise fold the flag into a check name."""
-    out_file = tmp_path / "gh-output"
-    out_file.write_text("", encoding="utf-8")
-    monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "check-ids")
-    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
-    monkeypatch.setenv("GITHUB_OUTPUT", str(out_file))
-    monkeypatch.setattr(
-        "sys.stdin",
-        io.StringIO(
-            '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED + "\n"
-            '{"id": 2, "name": "db / dev-eu", "app_slug": "github-actions", "status": "queued"}\n'
-        ),
+_PR = "42"
+_WORKFLOW_KEY = "workflow-token"
+_APP_KEY = "app-token"
+#: The check-runs listing's whole jq projection, hand-written.
+_CHECK_RUNS_PROJECTION = (
+    ".check_runs[] | {id, name, status, started_at, external_id, "
+    "app: {id: .app.id}, app_slug: .app.slug}"
+)
+_HEAD_ARGV = ("gh", "api", f"repos/{_REPO}/pulls/{_PR}", "--jq", ".head.sha")
+_LISTING_ARGV = (
+    "gh",
+    "api",
+    "--paginate",
+    f"repos/{_REPO}/commits/{_HEAD}/check-runs?filter=all&per_page=100",
+    "--jq",
+    _CHECK_RUNS_PROJECTION,
+)
+_HARVEST_FAILED = "command failed (1): gh api"
+
+
+def _ann_argv(cid):
+    return ("gh", "api", f"repos/{_REPO}/check-runs/{cid}/annotations?per_page=100")
+
+
+def _download_argv(rid):
+    return (
+        "gh",
+        "run",
+        "download",
+        rid,
+        "-R",
+        _REPO,
+        "-p",
+        "cell-summary.*",
+        "-D",
+        f"doctor-cells/{rid}",
     )
-    doctor.main()
-    assert capsys.readouterr().out.splitlines() == ["1\tapp / dev-eu", "2\tdb / dev-eu"]
-    assert "harvest_pending=true" in out_file.read_text(encoding="utf-8")
 
 
-def test_check_ids_mode_runs_without_a_github_output(monkeypatch, capsys):
-    # The modes stay runnable outside a runner: no GITHUB_OUTPUT, no crash.
+class _Unexpected(BaseException):
+    """An argv the test did not answer. A BaseException other than SystemExit, so no degrade
+    in check-ids mode can swallow it."""
+
+
+def _listing(*rows):
+    return "".join(json.dumps(r) + "\n" for r in rows)
+
+
+def _workflow_run(cid, name, status="completed"):
+    return {
+        "id": cid,
+        "name": name,
+        "status": status,
+        "started_at": "t",
+        "app_slug": "github-actions",
+    }
+
+
+def _apply_check(cid, name, plan_run):
+    return {
+        "id": cid,
+        "name": name,
+        "status": "queued",
+        "started_at": "t",
+        "external_id": json.dumps({"plan_run": plan_run}),
+        "app": {"id": int(_APP_ID)},
+        "app_slug": "shipmate",
+    }
+
+
+def _run_check_ids(monkeypatch, tmp_path, answers, *, github_output=True):
+    """[(argv, GH_TOKEN)] check-ids mode called `run` with, in order, answered from `answers`
+    ({argv: stdout, a BaseException to raise, or a callable of the argv}). A download absent
+    from `answers` succeeds; any other unanswered argv raises `_Unexpected`."""
+    calls = []
+
+    def fake_run(args, secrets=(), stdin=None):
+        key = tuple(args)
+        calls.append((key, os.environ.get("GH_TOKEN")))
+        answer = answers.get(key, "" if key[:3] == ("gh", "run", "download") else _Unexpected(key))
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer(key) if callable(answer) else answer
+
+    monkeypatch.setattr(doctor, "run", fake_run)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "check-ids")
-    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
-    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    monkeypatch.setenv("GH_TOKEN", _WORKFLOW_KEY)
+    monkeypatch.setenv("SHIPMATE_APP_TOKEN", _APP_KEY)
+    monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
+    monkeypatch.setenv("PR_NUMBER", _PR)
+    if github_output:
+        monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "gh-output"))
+    else:
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     doctor.main()
-    assert capsys.readouterr().out == ""
+    return calls
+
+
+def _outputs(tmp_path):
+    return (tmp_path / "gh-output").read_text(encoding="utf-8")
+
+
+def _warnings(capsys):
+    return [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("::warning::")]
+
+
+def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_path):
+    """The reduction already reads every check run on the commit, so it also decides the
+    pending flag, which reaches the render step as the gather step's output. check-ids.tsv
+    stays exactly (id, name) pairs: `load_annotations` splits each line on the first tab.
+    Mutation: write `harvest_pending` as `false` unconditionally -- red."""
+    _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {
+            _HEAD_ARGV: _HEAD + "\n",
+            _LISTING_ARGV: _listing(
+                _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu", status="queued")
+            ),
+            _ann_argv(1): "[]",
+            _ann_argv(2): "[]",
+        },
+    )
+    assert (tmp_path / "check-ids.tsv").read_text(encoding="utf-8") == (
+        "1\tapp / dev-eu\n2\tdb / dev-eu\n"
+    )
+    assert _outputs(tmp_path) == (
+        f"head_sha={_HEAD}\nharvest_pending=true\nharvest_failed=false\nplan_run_ids=\n"
+    )
+
+
+def test_check_ids_mode_runs_without_a_github_output(monkeypatch, tmp_path):
+    """The modes stay runnable outside a runner: no GITHUB_OUTPUT, no crash.
+    Mutation: `_write_step_output` opens `os.environ["GITHUB_OUTPUT"]` unguarded -- KeyError."""
+    _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: ""},
+        github_output=False,
+    )
+    assert not (tmp_path / "gh-output").exists()
+
+
+def test_an_unreadable_head_sha_marks_the_harvest_failed_and_reads_nothing_else(
+    monkeypatch, tmp_path, capsys
+):
+    """The render step reads an empty SHIPMATE_HARVEST_FAILED as a clean harvest only if this
+    path forgets to write it, so the three outputs are written before anything else is read.
+    Mutation: write `harvest_failed` as `false` on this path -- red."""
+    calls = _run_check_ids(monkeypatch, tmp_path, {_HEAD_ARGV: "not-a-sha\n"})
+    assert [argv for argv, _ in calls] == [_HEAD_ARGV]
+    assert _outputs(tmp_path) == "head_sha=\nplan_run_ids=\nharvest_failed=true\n"
+    assert _warnings(capsys) == [
+        "::warning::could not read the PR head SHA; doctor reports settings probes only"
+    ]
+
+
+def test_a_failed_check_runs_listing_marks_the_harvest_failed(monkeypatch, tmp_path, capsys):
+    """Mutation: drop `failed = True` from the listing's degrade -- red."""
+    _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: SystemExit(_HARVEST_FAILED)},
+    )
+    assert _outputs(tmp_path) == f"head_sha={_HEAD}\nharvest_failed=true\nplan_run_ids=\n"
+    assert _warnings(capsys) == [
+        "::warning::check-runs listing failed; doctor reports settings probes only"
+    ]
+    assert (tmp_path / "check-ids.tsv").read_text(encoding="utf-8") == ""
+
+
+def test_a_failed_reduction_marks_the_harvest_failed(monkeypatch, tmp_path, capsys):
+    """Mutation: drop `failed = True` from the reduction's degrade -- red."""
+
+    def boom(lines, app_id=""):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(doctor, "latest_check_ids", boom)
+    _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: _listing(_workflow_run(1, "app / dev-eu"))},
+    )
+    assert _outputs(tmp_path) == f"head_sha={_HEAD}\nharvest_failed=true\nplan_run_ids=\n"
+    assert _warnings(capsys) == [
+        "::warning::doctor check-ids reduction failed; doctor reports settings probes only"
+    ]
+
+
+def test_a_failed_annotations_fetch_writes_an_empty_payload_and_fetches_the_rest(
+    monkeypatch, tmp_path, capsys
+):
+    """An `ann/<id>.json` of `[]` reads as "no annotations", so the failure also flips
+    `harvest_failed`, and the next id is still fetched. The fetch raises SystemExit, as
+    `_shipmate.run` does on a nonzero exit.
+    Mutations: return from `_harvest` on the first failed fetch -- id 2's payload is missing,
+    red; catch `Exception` only at that call site -- SystemExit escapes, red."""
+    _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {
+            _HEAD_ARGV: _HEAD + "\n",
+            _LISTING_ARGV: _listing(
+                _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")
+            ),
+            _ann_argv(1): SystemExit(_HARVEST_FAILED),
+            _ann_argv(2): '[{"message": "w"}]',
+        },
+    )
+    assert (tmp_path / "ann" / "1.json").read_text(encoding="utf-8") == "[]\n"
+    assert (tmp_path / "ann" / "2.json").read_text(encoding="utf-8") == '[{"message": "w"}]'
+    assert _outputs(tmp_path) == (
+        f"head_sha={_HEAD}\nharvest_pending=false\nharvest_failed=true\nplan_run_ids=\n"
+    )
+    assert _warnings(capsys) == [
+        "::warning::annotations fetch failed for check run 1; doctor reports a partial harvest"
+    ]
+
+
+def test_harvest_failed_is_written_once_after_every_fetch(monkeypatch, tmp_path):
+    """A per-id write would let a later clean fetch append `false` after an earlier `true`.
+    Mutation: write `harvest_failed` inside the annotations loop -- three lines, red."""
+    _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {
+            _HEAD_ARGV: _HEAD + "\n",
+            _LISTING_ARGV: _listing(
+                _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")
+            ),
+            _ann_argv(1): SystemExit(_HARVEST_FAILED),
+            _ann_argv(2): "[]",
+        },
+    )
+    assert [ln for ln in _outputs(tmp_path).splitlines() if ln.startswith("harvest_failed=")] == [
+        "harvest_failed=true"
+    ]
+
+
+def test_each_call_carries_its_own_token(monkeypatch, tmp_path):
+    """The App token reads the check runs and their annotations; the workflow token reads the
+    head and downloads the artifacts, as the step's env before this mode did.
+    Mutations: read the head under the App token -- red; read the listing under the ambient
+    workflow token -- red."""
+    calls = _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {
+            _HEAD_ARGV: _HEAD + "\n",
+            _LISTING_ARGV: _listing(
+                _workflow_run(1, "app / dev-eu"), _apply_check(9, "apply / app / dev-eu", "1281")
+            ),
+            _ann_argv(1): "[]",
+            _ann_argv(9): "[]",
+        },
+    )
+    assert calls == [
+        (_HEAD_ARGV, _WORKFLOW_KEY),
+        (_LISTING_ARGV, _APP_KEY),
+        (_ann_argv(1), _APP_KEY),
+        (_ann_argv(9), _APP_KEY),
+        (_download_argv("1281"), _WORKFLOW_KEY),
+    ]
+
+
+def test_the_check_runs_listing_carries_the_whole_projection(monkeypatch, tmp_path):
+    """One listing answers every question doctor asks about this head, so its projection carries
+    all of them: `status` for the harvest-pending flag (without it every run reads as unfinished,
+    forever), `started_at` for check-ids' ranking, `external_id` for the plan record each apply
+    check carries, the nested `app` object apply-gate's fail-closed App filter and doctor's
+    reducer both match the App id on, and `app_slug`, which the reducer reads to keep
+    `github-actions` runs. Mutation: drop `external_id` from `_CHECK_RUNS_JQ` -- red."""
+    calls = _run_check_ids(monkeypatch, tmp_path, {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: ""})
+    listing = [argv for argv, _ in calls if "--paginate" in argv]
+    assert len(listing) == 1
+    assert listing[0][-2:] == ("--jq", _CHECK_RUNS_PROJECTION)
+
+
+def test_a_check_run_in_the_projected_shape_yields_its_plan_run():
+    """Why the projection carries `app: {id: .app.id}`: `plan_records` filters on the NESTED id,
+    so a projection carrying only `external_id` maps every name to nothing. A hand-written line,
+    reddening on the reader rather than on projection drift;
+    test_the_check_runs_listing_carries_the_whole_projection pins the projection.
+    Mutation: read `app_id` at the top level in `apply-gate`'s `from_app` -- red."""
+    line = json.dumps(
+        {
+            "id": 7,
+            "name": "apply / stacks/app / dev-eu",
+            "status": "completed",
+            "started_at": "2026-08-24T00:00:00Z",
+            "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"}),
+            "app": {"id": 4326562},
+        }
+    )
+    mapping = load_script("apply-gate").plan_records([line], "4326562")
+    assert mapping == {"apply / stacks/app / dev-eu": ("1281", None)}
+
+
+def test_the_plan_records_are_read_from_the_listing_before_any_download(monkeypatch, tmp_path):
+    """The runs to download from come from the head's own apply checks, read through
+    apply-gate's `plan_records`, the one reader of the `external_id` record, so no workflow
+    file name (`plan.yml`) is asked about. Mutation: issue a `gh run download` before the
+    `plan_records` call -- red."""
+    log = []
+    real = doctor.ag.plan_records
+
+    def recording(lines, app_id):
+        log.append(("plan_records", list(lines), app_id))
+        return real(lines, app_id)
+
+    monkeypatch.setattr(doctor.ag, "plan_records", recording)
+    listing = _listing(_apply_check(9, "apply / app / dev-eu", "1281"))
+    calls = _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {
+            _HEAD_ARGV: _HEAD + "\n",
+            _LISTING_ARGV: lambda argv: log.append(("listing",)) or listing,
+            _ann_argv(9): "[]",
+            _download_argv("1281"): lambda argv: log.append(("download",)) or "",
+        },
+    )
+    assert log == [
+        ("listing",),
+        ("plan_records", listing.splitlines(), _APP_ID),
+        ("download",),
+    ]
+    assert not any("plan.yml" in part for argv, _ in calls for part in argv)
+
+
+def test_a_non_decimal_plan_run_id_never_reaches_gh(monkeypatch, tmp_path):
+    """A run id lands in a `gh` argv and a directory name, so only a decimal string passes.
+    `plan_records` filters already; this pins doctor's own check against a reader that stops.
+    Mutation: drop the `re.fullmatch(r"[0-9]+", r)` filter -- red."""
+    monkeypatch.setattr(
+        doctor.ag,
+        "plan_records",
+        lambda lines, app_id: {"a": ("12/../x", None), "b": ("7", None), "c": (None, None)},
+    )
+    calls = _run_check_ids(monkeypatch, tmp_path, {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: ""})
+    assert [argv for argv, _ in calls if argv[:3] == ("gh", "run", "download")] == [
+        _download_argv("7")
+    ]
+    assert _outputs(tmp_path).splitlines()[-1] == "plan_run_ids=7"
+
+
+def test_unreadable_plan_records_skip_the_downloads(monkeypatch, tmp_path, capsys):
+    """`plan_records` raises SystemExit on a malformed listing line; doctor still renders.
+    Mutation: catch `Exception` only at that call site -- SystemExit escapes, red."""
+
+    def malformed(lines, app_id):
+        raise SystemExit("::error::malformed JSON line")
+
+    monkeypatch.setattr(doctor.ag, "plan_records", malformed)
+    calls = _run_check_ids(monkeypatch, tmp_path, {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: ""})
+    assert not [argv for argv, _ in calls if argv[:3] == ("gh", "run", "download")]
+    assert _outputs(tmp_path).splitlines()[-1] == "plan_run_ids="
+    assert _warnings(capsys) == [
+        "::warning::the plan records on this commit's apply checks could not be read; "
+        "doctor skips the environment probes"
+    ]
+
+
+#: (check name, check-run id, `external_id` record). The same cell planned twice on this head,
+#: where the newer check names run 1290; a cell only the older run planned; and one whose newest
+#: check carries a legacy bare-hex record, naming no plan run.
+_PLANNED = [
+    ("apply / stacks/app / dev-eu", 1, json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"})),
+    ("apply / stacks/app / dev-eu", 2, json.dumps({"fingerprint": "a" * 64, "plan_run": "1290"})),
+    ("apply / stacks/db / dev-us", 3, json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"})),
+    ("apply / stacks/cache / dev-ap", 4, "b" * 64),
+]
+#: What each run's `cell-summary.<env>.<slug>` artifact holds. The two copies of the replanned
+#: cell differ only in the plan they describe, exactly as two runs of the same cell do.
+_ARTIFACTS = {
+    "1281": [
+        ("cell-summary.dev-eu.stacks-app", "stacks/app", "dev-eu", 1),
+        ("cell-summary.dev-us.stacks-db", "stacks/db", "dev-us", 7),
+        ("cell-summary.dev-ap.stacks-cache", "stacks/cache", "dev-ap", 3),
+    ],
+    "1290": [("cell-summary.dev-eu.stacks-app", "stacks/app", "dev-eu", 2)],
+}
+
+
+def _download_cells(monkeypatch, tmp_path, undownloadable=()):
+    """(surviving summaries, plan_run_ids) after check-ids mode, with `gh run download` faked to
+    extract `_ARTIFACTS[rid]` into `-D`, or to fail for a run in `undownloadable`.
+
+    Each surviving summary is `(artifact name, run directory, add count)`, sorted: a mapping
+    keyed on the artifact name would collapse two runs' copies of one cell into one."""
+
+    def download(argv):
+        rid, target = argv[3], tmp_path / argv[-1]
+        if rid in undownloadable:
+            raise SystemExit(f"command failed (1): gh run download {rid}")
+        for name, stack, env, add in _ARTIFACTS[rid]:
+            (target / name).mkdir(parents=True)
+            (target / name / "cell.json").write_text(
+                json.dumps({"stack": stack, "environment": env, "add": add}), encoding="utf-8"
+            )
+        return ""
+
+    rows = [
+        {**_apply_check(cid, name, "0"), "external_id": record} for name, cid, record in _PLANNED
+    ]
+    _run_check_ids(
+        monkeypatch,
+        tmp_path,
+        {
+            _HEAD_ARGV: _HEAD + "\n",
+            _LISTING_ARGV: _listing(*rows),
+            **{_ann_argv(cid): "[]" for _, cid, _ in _PLANNED},
+            **{_download_argv(rid): download for rid in _ARTIFACTS},
+        },
+    )
+    cells = sorted(
+        (
+            cj.parent.name,
+            cj.parent.parent.name,
+            json.loads(cj.read_text(encoding="utf-8"))["add"],
+        )
+        for cj in (tmp_path / "doctor-cells").glob("*/**/cell.json")
+    )
+    return cells, _outputs(tmp_path).splitlines()[-1]
+
+
+def test_every_plan_run_the_head_recorded_is_downloaded(monkeypatch, tmp_path):
+    """A cell planned in an earlier run than its siblings is still a declared environment:
+    downloading only one run's summaries hides every environment only that run planned. Both
+    runs' copies of the replanned cell survive; one shared directory lets one overwrite the
+    other. Mutation: download every run into `doctor-cells` itself -- red."""
+    cells, run_ids = _download_cells(monkeypatch, tmp_path)
+    assert cells == [
+        ("cell-summary.dev-ap.stacks-cache", "1281", 3),
+        ("cell-summary.dev-eu.stacks-app", "1281", 1),
+        ("cell-summary.dev-eu.stacks-app", "1290", 2),
+        ("cell-summary.dev-us.stacks-db", "1281", 7),
+    ]
+    assert run_ids == "plan_run_ids=1281 1290"
+
+
+def test_a_run_whose_summaries_cannot_be_downloaded_is_a_warning_not_a_failure(
+    monkeypatch, tmp_path, capsys
+):
+    """doctor degrades rather than fails: a diagnostics command that dies over one missing
+    artifact reports nothing at all, so the run is warned about and every other run's
+    environments still reach the probes.
+    Mutation: catch `Exception` only at the download -- SystemExit escapes, red."""
+    cells, run_ids = _download_cells(monkeypatch, tmp_path, undownloadable=("1281",))
+    assert cells == [("cell-summary.dev-eu.stacks-app", "1290", 2)]
+    assert run_ids == "plan_run_ids=1281 1290"
+    assert _warnings(capsys) == [
+        "::warning::the cell summaries of plan run 1281 could not be downloaded; "
+        "doctor's environment probes may be incomplete"
+    ]
 
 
 def test_harvest_pending_note_says_runs_had_not_finished():

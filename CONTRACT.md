@@ -85,8 +85,7 @@ job displays as `<caller job> / <callee job>`, applied at every level, and GHA
 cannot suppress a level. The apply leaf is therefore three deep, e.g.
 `post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
 short and non-redundant (`L0`..`L3` for env-levels in `apply.yml` /
-`deploy.yml`, `review / decision` for
-the review re-read `apply.yml` calls from `apply-review.yml`) rather than
+`deploy.yml`) rather than
 repeating the verb the leaf already carries; the consumer's calling job supplies the outermost
 segment (`post-merge` on the deploy path). Its file is named `shipmate`, so the
 pull request's checks UI renders that workflow name and then the job path
@@ -325,7 +324,7 @@ never used.
   default-branch ref (see `docs/github-app.md` §Key-exposure boundary).
   It appears only inside the engine's reusable workflows — `plan.yml`'s
   `summary` job, `comment-ops.yml`'s `ops` job, `drift.yml`'s `issues` job, and
-  the apply path (`apply.yml`, `apply-review.yml`,
+  the apply path (`apply.yml`,
   `apply-env-level.yml`, `deploy.yml`). No consumer file names it: the consumer's `shipmate.yml`
   and each drift workflow file pass the key by name and bind no environment of
   their own. Each of those
@@ -1008,7 +1007,7 @@ workflow file:
   such clause and the terms no stack carries. A query matching no cell is an
   empty sweep with a notice, not a refusal.
 - `build-matrix` refuses a query on any run that does not pass
-  `no-pull-request: true`, which only engine `drift.yml` passes: on a plan run
+  `sweep: true`, which only engine `drift.yml` passes: on a plan run
   it would drop changed stacks, and a dropped stack gets no apply check while
   `shipmate / gate` greens.
 
@@ -1362,8 +1361,8 @@ input without failing there.
 The decision has two seats, because `authorize` returns one verdict per
 dispatch while a bare apply spans many environments:
 
-Both engine workflows re-read `reviewDecision` themselves in a `review` job,
-which calls `apply-review.yml`, rather than trusting a dispatch input, and that
+`apply.yml` re-reads `reviewDecision` itself in a `review` job,
+rather than trusting a dispatch input, and that
 job is unconditional — the
 default branch's `gated: false` entries are the only source of this policy, and only
 engine-owned scripts read it.
@@ -1670,8 +1669,8 @@ The four jobs:
   there is no wiring a consumer can get wrong, and no event name is involved:
   the drift path already triggers on both `schedule` and `workflow_dispatch`,
   so a dispatched plan would be indistinguishable from a manual drift run. The
-  drift path (`all-stacks`) is unaffected because engine `drift.yml` states that
-  it has no pull request (`no-pull-request: "true"`), which is the only opt-out
+  drift path is unaffected because engine `drift.yml` states that it is a sweep
+  with no pull request (`sweep: "true"`), which is the only opt-out
   and appears in no other engine workflow.
 - **`summary`** (engine, `environment: shipmate-engine`) — it calls
   `actions/summary`, which downloads this same run's cell summaries and, under
@@ -1685,7 +1684,7 @@ The four jobs:
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
-- **`apply.yml` / `apply-review.yml` / `apply-env-level.yml` /
+- **`apply.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
   jobs that mint an App token (reading the review decision, completing apply
@@ -1815,7 +1814,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - shipmate's actions are composite actions: their steps run under `bash`
   and call Python scripts, `git`, `curl`, `jq`, `openssl`, and the `gh` CLI. A
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
-  PyYAML ≥ 6 importable by it), `git`, `curl`, `jq`, `openssl`, `gh`, and GNU
+  PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and GNU
   coreutils (`setup` hashes the Terramate download with `sha256sum`).
 - Every GitHub-hosted Ubuntu image from 24.04 on, including the minimal
   `ubuntu-slim` image, satisfies this; PyYAML arrives through the install
@@ -1825,7 +1824,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and the control jobs below call `gh api` on the comment, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
-- The engine's ten control jobs, which run neither `tofu` nor `terramate`, run
+- The engine's eight control jobs, which run neither `tofu` nor `terramate`, run
   on `ubuntu-slim` unconditionally: their workflows take no runner input.
   `docs/aws.md` §Runner choice lists them. An account that cannot use that
   label leaves them waiting for a runner.
@@ -2601,7 +2600,7 @@ squash-merge drops the PR-head SHA from `main`):
 | `git-uncommitted` | **no** — skipped under `--no-recursive` | never disabled by the engine, but do not rely on it: a dirty tree does not block a cell. |
 
 **Mechanism (engine-controlled).** Every `terramate run` a cell makes — in
-`plan-cell`, `apply-cell`, `drift-cell` and `unlock-cell`, including
+`cell-init`, `plan-cell`, `apply-cell`, `drift-cell` and `unlock-cell`, including
 `scripts/env-inject`'s `run.env` check and the `scripts/state-path` call —
 passes `--disable-safeguards=git-out-of-sync`. The policy is versioned in the engine
 actions (pinned by SHA), so consumers get the correct policy for free by pinning.

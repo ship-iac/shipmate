@@ -336,12 +336,16 @@ def test_an_unstated_head_repository_is_refused_naming_the_input():
     # Pinning the message, not the refusal: letting an empty value fall through to the
     # equality check refuses too, with the fork wording, which tells a consumer who forgot
     # the input to push their branch to where it already is.
-    err = bm.fork_pr_error("acme/iac", "   ", False)
-    assert err.startswith("::error::")
-    assert "head-repo" in err
-    assert "no-pull-request" in err
-    assert "docs/getting-started.md" in err
-    assert "fork pull requests are not supported" not in err
+    assert bm.fork_pr_error("acme/iac", "   ", False) == _UNSTATED_HEAD_REPO
+
+
+_UNSTATED_HEAD_REPO = (
+    "::error::this run did not state its head repository. The `head-repo` input of "
+    "shipmate's `build-matrix` action must be the pull request's head repository full "
+    "name (`owner/repo`), so this run can be checked against a fork head. See "
+    "`docs/getting-started.md` for the wiring. A workflow with no pull request at all "
+    "(a drift sweep) passes `sweep: true` instead."
+)
 
 
 #: Values that are not the bool True, so every refusal helper must still refuse on them.
@@ -360,7 +364,7 @@ def test_only_the_bool_true_skips_the_three_refusals(monkeypatch, value):
     """main() parses the input to a bool, so a raw string here is a caller that forgot to parse.
     A truthy check would skip the fork refusal for "false".
 
-    Mutation: `if no_pull_request is True:` -> `if no_pull_request:` in any of the three
+    Mutation: `if sweep is True:` -> `if sweep:` in any of the three
     helpers -- its str-false, str-true and one rows redden."""
     monkeypatch.setattr(bm, "_run", lambda args: "basebase\n")
     assert bm.fork_pr_error("acme/iac", "outsider/iac", value).startswith("::error::")
@@ -439,13 +443,12 @@ def _run_main(
         (tmp_path / ".github" / "workflows" / "shipmate.yml").write_text("", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     for k in (
-        "SHIPMATE_ALL_STACKS",
         "GITHUB_EVENT_NAME",
         "GITHUB_REPOSITORY",
         "GITHUB_EVENT_PATH",
         "SHIPMATE_HEAD_REPO",
         "SHIPMATE_HEAD_SHA",
-        "SHIPMATE_NO_PULL_REQUEST",
+        "SHIPMATE_SWEEP",
         "SHIPMATE_TAGS",
         "SHIPMATE_BASE_SHA",
     ):
@@ -512,7 +515,7 @@ def test_main_passes_the_three_environment_values_to_the_guard(monkeypatch, tmp_
             "GITHUB_EVENT_NAME": "pull_request",
             "GITHUB_REPOSITORY": "acme/iac",
             "SHIPMATE_HEAD_REPO": "outsider/iac",
-            "SHIPMATE_NO_PULL_REQUEST": "true",
+            "SHIPMATE_SWEEP": "true",
         },
     )
     assert seen == [("acme/iac", "outsider/iac", True)]
@@ -569,7 +572,7 @@ def test_main_does_not_enumerate_stacks_for_a_fork(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/iac")
     monkeypatch.setenv("SHIPMATE_HEAD_REPO", "outsider/iac")
-    monkeypatch.delenv("SHIPMATE_NO_PULL_REQUEST", raising=False)
+    monkeypatch.delenv("SHIPMATE_SWEEP", raising=False)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
     # The assertion names the rejection so this guard cannot pass on somebody
     # else's SystemExit.
@@ -594,14 +597,13 @@ def test_main_plans_a_same_repository_pull_request(monkeypatch, tmp_path):
 
 
 def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
-    # all-stacks, no pull request context: every stack must still be enumerated
-    # off the opt-out alone, with no head repository stated.
+    # A sweep has no pull request context: every stack must still be enumerated
+    # off `sweep` alone, with no head repository stated.
     outputs, called = _run_main(
         monkeypatch,
         tmp_path,
         {
-            "SHIPMATE_ALL_STACKS": "true",
-            "SHIPMATE_NO_PULL_REQUEST": "true",
+            "SHIPMATE_SWEEP": "true",
             "GITHUB_EVENT_NAME": "schedule",
             "GITHUB_REPOSITORY": "acme/iac",
         },
@@ -634,11 +636,13 @@ def test_an_unstated_head_is_refused_naming_the_input(monkeypatch):
     refusal alone: it names the input and the drift opt-out, never the mismatch wording."""
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail("probed with no stated head"))
     for head in ("", "   "):
-        err = bm.head_checkout_error(head, False)
-        assert err.startswith("::error::")
-        assert "head-sha" in err
-        assert "no-pull-request" in err
-        assert "checked out" not in err
+        assert bm.head_checkout_error(head, False) == (
+            "::error::this run did not state the commit it is planning. The `head-sha` input "
+            "of shipmate's `build-matrix` action must be the pull request's head commit, so "
+            "this checkout can be checked against it. Wire it to the `head-sha` output of "
+            "shipmate's `pr-facts` action; see `docs/getting-started.md`. A workflow with no "
+            "pull request at all (a drift sweep) passes `sweep: true` instead."
+        )
 
 
 def test_the_opt_out_skips_the_head_checkout_check(monkeypatch):
@@ -653,35 +657,56 @@ def test_the_opt_out_skips_the_head_checkout_check(monkeypatch):
     ("value", "opted_out"),
     [
         pytest.param("true", True, id="true"),
-        pytest.param("True", True, id="capitalised"),
-        pytest.param(" TRUE ", True, id="padded-upper"),
+        pytest.param("True", False, id="capitalised"),
+        pytest.param(" true", False, id="padded"),
+        pytest.param(" TRUE ", False, id="padded-upper"),
         pytest.param("false", False, id="manifest-default"),
         pytest.param("False", False, id="capitalised-false"),
         pytest.param(" false ", False, id="padded-false"),
         pytest.param("yes", False, id="yes"),
         pytest.param("1", False, id="one"),
         pytest.param("", False, id="empty"),
-        pytest.param("no-pull-request", False, id="input-name"),
+        pytest.param("sweep", False, id="input-name"),
     ],
 )
 def test_main_parses_the_opt_out_once_for_all_three_guards(monkeypatch, tmp_path, value, opted_out):
-    """Case- and whitespace-insensitive, so a `no-pull-request: True` does not redden a sweep
-    over YAML capitalisation. Only "true" opts out: the manifest default is the non-empty string
-    "false", so anything that treats a non-empty value as the opt-out would plan every unstated
-    run unchecked.
+    """Only the exact string "true" is a sweep: the manifest default is the non-empty string
+    "false", so anything that treats a non-empty value as a sweep would plan every unstated
+    run unchecked, and a capitalised or padded value fails closed into the refusals.
 
-    Mutations: drop `.strip()` or `.lower()` from main's parse -- a padded or capitalised row
-    reddens; parse with `bool(...)` -- every non-empty `False` row reddens; pass the raw variable
-    to one guard -- that guard records a string."""
+    Mutations: `.lower()` on main's read -- the capitalised row reddens; `.strip()` -- the
+    padded row reddens; parse with `bool(...)` -- every non-empty `False` row reddens; pass
+    the raw variable to `tag_filter_error` -- every row reddens."""
     seen = []
     for name in ("fork_pr_error", "head_checkout_error", "tag_filter_error"):
         monkeypatch.setattr(bm, name, lambda *args, _n=name: seen.append((_n, args[-1])) or "")
-    _run_main(monkeypatch, tmp_path, {"SHIPMATE_NO_PULL_REQUEST": value})
+    _run_main(monkeypatch, tmp_path, {"SHIPMATE_SWEEP": value})
     assert seen == [
         ("fork_pr_error", opted_out),
         ("head_checkout_error", opted_out),
         ("tag_filter_error", opted_out),
     ]
+
+
+def test_a_capitalised_sweep_refuses_a_run_with_no_head_repository(monkeypatch, tmp_path):
+    """`sweep: True` is not a sweep, so a run stating no head repository meets the fork
+    refusal instead of being planned unchecked.
+
+    Mutation: `.lower()` on main's read of `SHIPMATE_SWEEP` -- the run plans."""
+    called = []
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            {
+                "GITHUB_EVENT_NAME": "schedule",
+                "GITHUB_REPOSITORY": "acme/iac",
+                "SHIPMATE_SWEEP": "True",
+            },
+            called=called,
+        )
+    assert str(exc_info.value) == _UNSTATED_HEAD_REPO
+    assert called == []
 
 
 def test_main_refuses_a_run_that_states_no_head(monkeypatch, tmp_path):
@@ -821,23 +846,23 @@ def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
 
 
 def test_build_matrix_action_declares_its_inputs():
-    """No input here can turn a refusal off: `head-repo` and `head-sha` are what the two
-    refusals key on and an empty value refuses either, while `no-pull-request` only states
-    that there is no pull request at all, and `tags` is refused unless the run states that
-    too. All are settable only by this repository's own default-branch workflow, which a
-    pull-request author cannot edit, and the direction is chosen so a forgotten input
-    refuses (plan wrapper) or reddens the sweep (drift), never plans a fork.
+    """`sweep: "true"` is the one input that skips a refusal: it skips the head-repository and
+    head-commit refusals, and only engine `drift.yml` sets it, in engine-owned YAML a
+    pull-request author cannot edit. No other input turns a refusal off: `head-repo` and
+    `head-sha` are what those two refusals key on and an empty value refuses either, and `tags`
+    is refused outside a sweep. The direction is chosen so a forgotten input refuses (plan
+    wrapper) or reddens the sweep (drift), never plans a fork.
 
-    Hand-written, name -> default; descriptions are prose and not pinned."""
+    Hand-written, name -> default; descriptions are prose and not pinned. Mutation: restore
+    `no-pull-request` as a second input."""
     from _loader import action_yaml
 
     doc = action_yaml("build-matrix")
     assert {name: spec.get("default") for name, spec in doc["inputs"].items()} == {
-        "base-sha": None,
-        "all-stacks": "false",
+        "base-sha": "",
+        "sweep": "false",
         "head-repo": "",
         "head-sha": "",
-        "no-pull-request": "false",
         "tags": "",
         "github-vars": "",
     }
@@ -845,17 +870,16 @@ def test_build_matrix_action_declares_its_inputs():
 
 def test_build_matrix_action_hands_the_script_the_names_it_reads():
     """The whole `env:` block against a hand-written constant: the script reads
-    SHIPMATE_HEAD_REPO, SHIPMATE_HEAD_SHA and SHIPMATE_NO_PULL_REQUEST by name, so a renamed
+    SHIPMATE_HEAD_REPO, SHIPMATE_HEAD_SHA and SHIPMATE_SWEEP by name, so a renamed
     key here leaves every plan run unstated -- refused, but only in production."""
     from _loader import action_steps
 
     (step,) = [s for s in action_steps("build-matrix") if s.get("id") == "build"]
     assert step["env"] == {
         "SHIPMATE_BASE_SHA": "${{ inputs.base-sha }}",
-        "SHIPMATE_ALL_STACKS": "${{ inputs.all-stacks }}",
         "SHIPMATE_HEAD_REPO": "${{ inputs.head-repo }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
-        "SHIPMATE_NO_PULL_REQUEST": "${{ inputs.no-pull-request }}",
+        "SHIPMATE_SWEEP": "${{ inputs.sweep }}",
         "SHIPMATE_TAGS": "${{ inputs.tags }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
         "GH_TOKEN": "${{ github.token }}",
@@ -889,7 +913,7 @@ def test_the_cells_output_is_the_scanned_tree_not_the_matrix(monkeypatch, tmp_pa
         {
             "GITHUB_EVENT_NAME": "schedule",
             "GITHUB_REPOSITORY": "acme/iac",
-            "SHIPMATE_NO_PULL_REQUEST": "true",
+            "SHIPMATE_SWEEP": "true",
         },
         cells=(("stacks/app", "dev-eu"),),
         tree=[
@@ -940,7 +964,7 @@ def test_the_three_outputs_agree_on_one_cell_list(monkeypatch, tmp_path, cells):
         {
             "GITHUB_EVENT_NAME": "schedule",
             "GITHUB_REPOSITORY": "acme/iac",
-            "SHIPMATE_NO_PULL_REQUEST": "true",
+            "SHIPMATE_SWEEP": "true",
         },
         cells=cells,
     )
@@ -960,7 +984,7 @@ def test_the_plan_workflow_path_is_the_one_consumer_file():
     assert bm.PLAN_WORKFLOW == ".github/workflows/shipmate.yml"
 
 
-#: The plan and drift legs of one call site. Hand-written; `all_stacks` is the only difference
+#: The plan and drift legs of one call site. Hand-written; `sweep` is the only difference
 #: between them, and it is what decides whether an environment absent from the scan is evidence.
 _TWO_ENV_TABLE = {
     "layout": "folder",
@@ -980,7 +1004,7 @@ _UNUSED_DEV_US = (
 def test_a_plan_run_says_nothing_about_an_environment_outside_the_changed_set(
     monkeypatch, tmp_path, capsys
 ):
-    """`all_stacks=False` scans the CHANGED stacks only, so `dev-us` having no stack in that
+    """A run that is not a sweep scans the CHANGED stacks only, so `dev-us` having no stack in that
     set says nothing about whether any stack tags it.
 
     Mutation: pass `tagged` unconditionally at the call site. Every plan run then
@@ -1001,7 +1025,7 @@ def test_a_plan_run_says_nothing_about_an_environment_outside_the_changed_set(
 
 
 def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, capsys):
-    """The same call site with `all_stacks=true` -- drift -- has scanned the whole tree, so the
+    """The same call site with `sweep: true` -- drift -- has scanned the whole tree, so the
     absence is evidence. Mutation: pass `None` unconditionally there; drift then never reports
     an unused entry and the diagnostic reaches no production path at all."""
     _run_main(
@@ -1010,8 +1034,7 @@ def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, ca
         {
             "GITHUB_EVENT_NAME": "schedule",
             "GITHUB_REPOSITORY": "acme/iac",
-            "SHIPMATE_ALL_STACKS": "true",
-            "SHIPMATE_NO_PULL_REQUEST": "true",
+            "SHIPMATE_SWEEP": "true",
         },
         table=_TWO_ENV_TABLE,
     )
@@ -1021,8 +1044,7 @@ def test_a_whole_tree_run_does_report_the_unused_entry(monkeypatch, tmp_path, ca
 _DRIFT_ENV = {
     "GITHUB_EVENT_NAME": "schedule",
     "GITHUB_REPOSITORY": "acme/iac",
-    "SHIPMATE_ALL_STACKS": "true",
-    "SHIPMATE_NO_PULL_REQUEST": "true",
+    "SHIPMATE_SWEEP": "true",
 }
 #: `stacks/net` alone tags `workload/net`, and `stacks/web` alone sits in dev-us.
 _WORKLOAD_TREE = {
@@ -1204,7 +1226,7 @@ def test_a_runner_without_pyyaml_reaches_the_refusal_output(monkeypatch, tmp_pat
 def test_an_exit_that_is_not_a_refusal_writes_no_refusal(monkeypatch, tmp_path):
     """Mutation: drop the `isinstance` check -- `int.startswith` raises `AttributeError`."""
 
-    def exit_one(repository, head_repo, no_pull_request):
+    def exit_one(repository, head_repo, sweep):
         raise SystemExit(1)
 
     monkeypatch.setattr(bm, "fork_pr_error", exit_one)
@@ -1735,7 +1757,7 @@ def test_a_tag_filter_does_not_hide_a_workload_from_drift(monkeypatch, tmp_path,
 
 _TAG_FILTER_ERROR = (
     "::error::the `tags` filter is only for a workflow with no pull request at all "
-    "(a drift sweep), and this run did not pass `no-pull-request: true`. In a plan "
+    "(a drift sweep), and this run did not pass `sweep: true`. In a plan "
     "job it would drop changed stacks from the matrix: a dropped stack gets no plan "
     "cell and no apply check, `shipmate / gate` greens over it, and the change merges "
     "and never applies. Remove the input from the plan job."
@@ -1743,7 +1765,7 @@ _TAG_FILTER_ERROR = (
 
 
 def test_main_refuses_a_tag_filter_on_a_plan_run_and_does_not_enumerate(monkeypatch, tmp_path):
-    """A `tags` value with no `no-pull-request` aborts before the stacks are listed.
+    """A `tags` value outside a sweep aborts before the stacks are listed.
 
     Mutation: drop `tag_filter_error` from `main`'s `or` chain -- the run plans a narrowed
     matrix and `called` records the enumeration.
@@ -1766,35 +1788,9 @@ def test_main_refuses_a_tag_filter_on_a_plan_run_and_does_not_enumerate(monkeypa
     assert called == []
 
 
-def test_all_stacks_does_not_exempt_the_tag_filter_refusal(monkeypatch, tmp_path):
-    """`all-stacks: true` plus `tags` on a plan run is still refused.
-
-    Mutation: add `all_stacks` to the exemption -- a plan wrapper setting both would drop
-    changed stacks from the matrix, so they get no plan cell and no apply check,
-    `shipmate / gate` greens, and the change merges unapplied.
-    """
-    called = []
-    with pytest.raises(SystemExit) as exc_info:
-        _run_main(
-            monkeypatch,
-            tmp_path,
-            {
-                "GITHUB_EVENT_NAME": "pull_request",
-                "GITHUB_REPOSITORY": "acme/iac",
-                "SHIPMATE_HEAD_REPO": "acme/iac",
-                "SHIPMATE_ALL_STACKS": "true",
-                "SHIPMATE_TAGS": "env/dev-eu",
-            },
-            called=called,
-            head_sha="cafe1234",
-        )
-    assert str(exc_info.value) == _TAG_FILTER_ERROR
-    assert called == []
-
-
 def test_the_tag_filter_refusal_is_keyed_on_the_value():
     """A composite action's `required:`/`default:` is not enforced by GitHub Actions, so the
-    refusal reads the value: any non-empty query outside a no-pull-request run is refused,
+    refusal reads the value: any non-empty query outside a sweep is refused,
     and an absent input arrives as "" and is no filter at all.
 
     Mutation: `tag_filter_error` returns "" unconditionally -- the first case reddens."""
@@ -1864,8 +1860,8 @@ def test_main_writes_the_unmanaged_count_and_the_first_ten_paths(
 
 
 def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tmp_path):
-    """The plan path (`all_stacks=False`) is what the comment line reads. Mutation: write
-    `unmanaged` only under `all_stacks` -- the key is missing."""
+    """The plan path (not a sweep) is what the comment line reads. Mutation: write
+    `unmanaged` only in a sweep -- the key is missing."""
     outputs, _ = _run_main(
         monkeypatch,
         tmp_path,
@@ -2056,11 +2052,11 @@ def test_detect_diffs_only_the_unmanaged_stacks(monkeypatch, tmp_path):
 @pytest.mark.parametrize(
     "env",
     [
-        {"SHIPMATE_ALL_STACKS": "true"},
+        {"SHIPMATE_SWEEP": "true"},
         {"SHIPMATE_BASE_SHA": "0" * 40},
         {"SHIPMATE_BASE_SHA": ""},
     ],
-    ids=["all-stacks", "zero-base", "no-base"],
+    ids=["sweep", "zero-base", "no-base"],
 )
 def test_detect_runs_no_diff_without_a_pull_request_base(monkeypatch, tmp_path, capsys, env):
     """A drift sweep, a force-push or first push, and a run with no base. Mutation: drop each

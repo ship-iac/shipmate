@@ -27,9 +27,10 @@ save; `-type f` dropped from the check's `find`; `restore-keys` added to the res
 dropped from the key step's `env:`; `actions/cache/save` of the cache directory added to another
 action; the combined `actions/cache` action used anywhere; `failure() &&`,
 `steps.init.outcome == 'failure'` or the `cache-hit` clause dropped from the annotation's `if:`;
-the `cache-primary-key` output deleted, `cache-hit` mapped to `steps.provider-cache-key`, or
-`init-outcome` mapped to `steps.provider-cache.outcome`; one cell's call step `id` changed to
-`cell-init`.
+the `cache-primary-key` output deleted, `cache-hit` mapped to `steps.provider-cache-key`,
+`init-outcome` mapped to `steps.provider-cache.outcome`, or `restore-outcome` mapped to
+`steps.init.outcome`; one cell's call step `id` changed to `cell-init`, its `env:` passed
+`inputs.stack`, or its `env:` and `slug:` values swapped.
 """
 
 import os
@@ -79,19 +80,28 @@ _INIT_STEP = {
 
 #: What each cell reads back. `init-outcome` is init's own outcome, not the composite's: a failed
 #: key or restore step skips init, and apply-cell-summary must not call that a failed init.
+#: `restore-outcome` is the state restore's own: apply-cell's `Save state` runs only on its
+#: `success`, so any other mapping could save state that was never restored.
 _OUTPUTS = {
     "cache-hit": "${{ steps.provider-cache.outputs.cache-hit }}",
     "cache-primary-key": "${{ steps.provider-cache.outputs.cache-primary-key }}",
     "init-outcome": "${{ steps.init.outcome }}",
+    "state-path": "${{ steps.locate-state.outputs.path }}",
+    "locate-outcome": "${{ steps.locate-state.outcome }}",
+    "restore-outcome": "${{ steps.restore-state.outcome }}",
 }
 
-#: The one step each cell runs in place of the four `cell-init` holds. Every
+#: The one step each cell runs in place of the six `cell-init` holds. Every
 #: `steps.init.outputs.*` read in the cell resolves through its `id`.
 _CALL = {
     "name": "Initialize the stack",
     "id": "init",
     "uses": local_action(_INIT_ACTION),
-    "with": {"stack": "${{ inputs.stack }}"},
+    "with": {
+        "stack": "${{ inputs.stack }}",
+        "env": "${{ inputs.env }}",
+        "slug": "${{ steps.ids.outputs.slug }}",
+    },
 }
 
 _CELLS = ["apply-cell", "drift-cell", "plan-cell"]
@@ -138,14 +148,16 @@ def test_init_runs_unconditionally_under_the_id_the_outputs_read():
 
 def test_cell_init_exposes_the_restore_key_and_inits_own_outcome():
     """Mutations: delete the `cache-primary-key` output; map `cache-hit` to
-    `steps.provider-cache-key`; map `init-outcome` to `steps.provider-cache.outcome`."""
+    `steps.provider-cache-key`; map `init-outcome` to `steps.provider-cache.outcome`; map
+    `restore-outcome` to `steps.init.outcome`."""
     outputs = action_yaml(_INIT_ACTION)["outputs"]
     assert {name: spec["value"] for name, spec in outputs.items()} == _OUTPUTS
 
 
 @pytest.mark.parametrize("cell", _CELLS)
 def test_each_cell_initializes_through_cell_init_under_id_init(cell):
-    """Mutation: change one cell's call `id` to `cell-init`."""
+    """Mutations: change one cell's call `id` to `cell-init`; pass `env: ${{ inputs.stack }}`;
+    swap the `env:` and `slug:` values."""
     assert step_by(cell, name="Initialize the stack") == _CALL
 
 

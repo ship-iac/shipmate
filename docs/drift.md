@@ -85,7 +85,7 @@ repository — the fork refusal on the plan path
 ([`hardening.md`](hardening.md) §"Contributors without push access") — nor the
 commit it is planning, because a `workflow_dispatch` of a sweep and a dispatched
 plan are the same event and the event name cannot tell them apart. A sweep has
-neither to state, so engine `drift.yml` passes `no-pull-request: "true"`. It is
+neither to state, so engine `drift.yml` passes `sweep: "true"`. It is
 set in engine-owned YAML, in the one workflow with no pull-request context at
 all; no consumer file can set it, and no plan run carries it.
 
@@ -119,7 +119,7 @@ ahead rather than stale.
 
 ## What it costs
 
-`build-matrix` runs with `all-stacks: "true"` and an empty `base-sha`, so a
+`build-matrix` runs with `sweep: "true"` and an empty `base-sha`, so a
 sweep without a `tags` query plans every stack × environment in the repository,
 on every run — runner minutes scale with the whole tree, not the changed set. Each cell is a
 `tofu init` plus a `tofu plan` against real state, which also means real backend

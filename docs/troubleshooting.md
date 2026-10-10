@@ -745,6 +745,7 @@ The `Install Terramate` step in `actions/setup` failed. Every annotation starts
 | Annotation ends with | Cause and remedy |
 |---|---|
 | "curl is not installed on the runner." | The runner has no `curl`. Install it on the runner image. |
+| "curl exited 2 on an option it does not know; shipmate needs curl 7.71 or later (CONTRACT.md §Runner prerequisites)." | The runner's curl is older than 7.71 and rejects `--retry-all-errors`. A re-run cannot help: upgrade curl on the runner image. |
 | "<url> answered HTTP 404 (curl exit <rc>); check VERSIONS and the runner's OS and architecture." | No release asset exists for that version, OS and architecture. A re-run cannot help. |
 | "<url> answered HTTP <code> (curl exit <rc>); re-run the failed job." | The download failed. `<code>` is the failed download's own status; `000` means no response arrived. Re-run the failed job. |
 | "tar could not extract terramate from <url>." | The downloaded archive did not unpack. |
@@ -767,8 +768,8 @@ for that version: the asset differs from the pinned one, or the runner is not
 Linux `amd64` or `arm64`. A re-run downloads the same asset.
 
 curl retries HTTP 408, 429, 500, 502, 503 and 504 responses, timeouts and stalls
-three times before the step fails. curl 7.71 and newer also retries connection
-resets and TLS errors (`--retry-all-errors`); an older curl runs without that flag.
+three times before the step fails. It also retries connection resets and TLS
+errors (`--retry-all-errors`), which is why setup needs curl 7.71 or later.
 
 ### `Failed to install provider`: `existing cached package ... does not match the content of the downloaded package`
 
@@ -956,7 +957,7 @@ than one — and the dispatch comment on the pull request already links the run.
 
 The refusal keys on the `head-repo` input, and it refuses by default: a run
 that states no head repository is refused too, with a message naming the input.
-No input allows a fork; engine `drift.yml`'s `no-pull-request: "true"`, which
+No input allows a fork; engine `drift.yml`'s `sweep: "true"`, which
 says the run has no pull request at all, is the only opt-out
 (`docs/drift.md`). [`hardening.md`](hardening.md) §Contributors without push
 access states why, and what a fork's plan cell would receive.

@@ -36,7 +36,9 @@ def _guard(step):
 
 def test_save_state_runs_on_cancellation():
     # always(), not !cancelled(), so a cancelled apply's partial state persists.
-    assert _guard(_save_state_step()) == "always() && steps.restore-state.outcome == 'success'"
+    assert (
+        _guard(_save_state_step()) == "always() && steps.init.outputs.restore-outcome == 'success'"
+    )
 
 
 def test_save_state_not_gated_by_not_cancelled():
@@ -46,4 +48,4 @@ def test_save_state_not_gated_by_not_cancelled():
 
 def test_save_state_still_requires_successful_restore():
     # Never save a state that was never restored, the restore itself having failed.
-    assert "steps.restore-state.outcome == 'success'" in _guard(_save_state_step())
+    assert "steps.init.outputs.restore-outcome == 'success'" in _guard(_save_state_step())
