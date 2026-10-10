@@ -120,9 +120,16 @@ def test_dispatch_leg_resolves_the_inputs_number_through_one_api_path(monkeypatc
 
 
 def test_a_run_with_neither_source_is_refused(monkeypatch, tmp_path):
+    """Mutation: change one word of the remedy sentence in `scripts/pr-facts` (red)."""
     with pytest.raises(SystemExit) as exc:
         _main(monkeypatch, tmp_path, {"inputs": {}})
-    assert "neither a pull request nor a pr_number" in str(exc.value)
+    assert str(exc.value) == (
+        "::error::this run has neither a pull request nor a pr_number input, so there is nothing "
+        "to plan. A pull-request event supplies the first and a dispatched plan the second. "
+        "Declare a `pr_number` input under `.github/workflows/shipmate.yml`'s "
+        "`workflow_dispatch` trigger, and dispatch with `verb: plan` "
+        "(see `docs/getting-started.md`)."
+    )
 
 
 def test_on_demand_marks_the_dispatch_leg_only(monkeypatch):

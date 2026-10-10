@@ -1,12 +1,14 @@
 """Shared test-side helpers: load a ``scripts/`` helper, read an engine YAML file or a docs code
 fence, or run a shipped shell body.
 
-Four jobs: ``load_script`` for the extension-less helpers;
+Five jobs: ``load_script`` for the extension-less helpers;
 ``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus ``action_yaml``, ``workflow_yaml``, ``action_steps`` and
 ``step_by`` for the YAML-shape guards; ``doc_fences`` and ``assert_every_fence_discovered`` for
-the docs fence guards; and ``bash_only``, ``run_step``, ``write_python3_shim`` and
-``run_with_gh_recorder`` for the tests that execute a step's bash. The parser is load-bearing,
-because a guard that silently parses to ``[]`` asserts nothing, so it has one definition.
+the docs fence guards; ``bash_only``, ``run_step``, ``write_python3_shim`` and
+``run_with_gh_recorder`` for the tests that execute a step's bash; and ``github_outputs`` for
+reading back what a helper or step wrote to ``GITHUB_OUTPUT``. The YAML parser behind
+``action_yaml`` and ``workflow_yaml`` is load-bearing, because a guard that silently parses to
+``[]`` asserts nothing, so it has one definition.
 
 Loading a helper script
 -----------------------
@@ -344,3 +346,12 @@ def run_step(tmp_path, body, env, *, cwd=None, timeout=30):
         encoding="utf-8",
         timeout=timeout,
     )
+
+
+def github_outputs(path):
+    """The ``key=value`` lines a helper or step wrote to its ``GITHUB_OUTPUT`` file, as a dict.
+
+    Strict: a line without ``=`` (a ``name<<DELIM`` block, or a value that carried a newline)
+    raises ``ValueError``, so no assertion can pass over a line the parser dropped.
+    """
+    return dict(ln.split("=", 1) for ln in path.read_text(encoding="utf-8").splitlines())

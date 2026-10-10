@@ -10,7 +10,7 @@ entry in that module's `_SHARED_ROUTE_IFS` and by the comparison below.
 """
 
 import pytest
-from _loader import load_script, run_lines, step_by
+from _loader import github_outputs, load_script, step_by
 
 #: The whole `env:` of the resolve step, hand-written. `GH_TOKEN` is the workflow token: the
 #: contents read needs no App token. The file on the default branch is the only source;
@@ -35,9 +35,10 @@ def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
     failure just long enough for the report step to post one, which then re-raises it: a
     green run over a command this action never authorized is not a verdict it may render.
 
-    Mutations: delete `continue-on-error` from the resolve step, so the report never runs;
-    delete the `exit 1`, so the job ends green with nothing applied and nothing refused; drop
-    `--post`, so the reply is printed to the log and never posted.
+    Mutations: delete `continue-on-error` from the resolve step, so the report never runs; drop
+    a binding from the report's `env:`. The report's whole `run:` body, `exit 1` included, is
+    pinned by `test_every_reply_step_posts_the_body_reply_comment_rendered` in
+    test_comment_ops_action.py, which reddens when the `exit 1` is deleted.
     """
     assert step_by("comment-ops", name="Resolve gate configuration")["continue-on-error"] is True
     report = step_by("comment-ops", name="Gate configuration unreadable")
@@ -46,9 +47,6 @@ def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
-    lines = run_lines(report)
-    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post' in lines
-    assert lines[-1] == "exit 1"
 
 
 def test_the_resolve_step_carries_the_id_authorize_reads():
@@ -85,7 +83,7 @@ def _resolve(monkeypatch, tmp_path, table):
     out = tmp_path / "out.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     gc.main()
-    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    return github_outputs(out)
 
 
 def test_the_file_is_the_only_source(monkeypatch, tmp_path):

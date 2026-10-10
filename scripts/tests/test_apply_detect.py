@@ -5,12 +5,11 @@ from _detect_fixtures import (
     APP_ID,
     PLAN_SHA,
     _apply_check,
-    _parsed,
     _record,
     completed_names,
 )
 from _detect_fixtures import check_run as _check
-from _loader import load_script
+from _loader import github_outputs, load_script
 
 ad = load_script("apply-detect")
 
@@ -265,7 +264,9 @@ def test_apply_path_never_enrols_a_slug_alike_stack(monkeypatch, tmp_path):
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"a/b": set(), "a-b": set()}, [_apply_check("a-b")])
     ad.main()
-    assert [c["stack"] for c in json.loads(_parsed(out)["envlevel0_waves"])["wave0"]] == ["a-b"]
+    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
+        "a-b"
+    ]
 
 
 def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
@@ -276,7 +277,7 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
     ad.main()
     assert (
-        len(json.loads(_parsed(out)["envlevel0_waves"])["wave0"]) == 1
+        len(json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]) == 1
     )  # Not vacuous: a cell exists.
     assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
 
@@ -295,7 +296,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(_parsed(out)["envlevel0_waves"])["wave0"]] == [
+    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
         "stacks/app"
     ]
 
@@ -313,7 +314,7 @@ def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(_parsed(out)["envlevel0_waves"])["wave0"]] == [
+    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
         "stacks/app"
     ]
 
@@ -333,7 +334,7 @@ def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
         ],
     )
     ad.main()
-    assert [c["stack"] for c in json.loads(_parsed(out)["envlevel0_waves"])["wave0"]] == [
+    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
         "stacks/app"
     ]
 
@@ -396,8 +397,15 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
 
 
 def test_validate_head_sha_rejects_short():
-    with pytest.raises(SystemExit):
+    """Without `source` the refusal names SHIPMATE_HEAD_SHA, the variable apply-detect,
+    apply-all-detect and unlock-detect read.
+
+    Mutation: change `source`'s default -- the whole message differs."""
+    with pytest.raises(SystemExit) as exc_info:
         ad.validate_head_sha("abc123")
+    assert str(exc_info.value) == (
+        "::error::SHIPMATE_HEAD_SHA must be a 40-char lowercase hex SHA (got: 'abc123')"
+    )
 
 
 def test_validate_head_sha_rejects_uppercase():
@@ -487,7 +495,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
         lambda stack: evaluated.append(stack) or ["env/dev-eu", "workload/net-edge"],
     )
     ad.main()
-    parsed = dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    parsed = github_outputs(out)
     assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
         {
             "stack": "stacks/app",
@@ -642,7 +650,7 @@ def test_main_exempts_an_env_whose_entry_is_ungated(monkeypatch, tmp_path):
     )
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
-    assert json.loads(_parsed(out)["envlevel0_waves"])["wave0"][0]["stack"] == "stacks/app"
+    assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"][0]["stack"] == "stacks/app"
 
 
 def test_main_validates_the_table_before_it_reads_the_gate(monkeypatch, tmp_path):
@@ -700,7 +708,7 @@ def test_main_names_a_gated_env_applied_with_no_review_required(
     out = _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
     ad.main()
-    assert json.loads(_parsed(out)["review_not_required_envs"]) == expected
+    assert json.loads(github_outputs(out)["review_not_required_envs"]) == expected
 
 
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):

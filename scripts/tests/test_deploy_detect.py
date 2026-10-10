@@ -3,7 +3,7 @@ import json
 import pytest
 from _detect_fixtures import APP_ID, _apply_check, spy_env_config, stub_read_table
 from _detect_fixtures import check_run as _check
-from _loader import load_script
+from _loader import github_outputs, load_script
 
 dd = load_script("deploy-detect")
 
@@ -123,10 +123,11 @@ def _run_main(
     table=None,
     reads=None,
     stacks=None,
+    head=HEAD,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
-    into `urls` are the ones the work set itself asks for.
+    into `urls` are the ones the work set itself asks for; `head` is what the stub returns.
 
     `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
     the double, and leaves `cells` unused.
@@ -156,7 +157,7 @@ def _run_main(
             urls.append(args[-1])
         return jsonl
 
-    monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: HEAD)
+    monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: head)
     # `compute_cells` returns (env->workloads map, rows, tree names, unmanaged stacks); a double
     # returning fewer
     # unpacks into the wrong names and fails somewhere unrelated.
@@ -181,7 +182,7 @@ def _run_main(
     monkeypatch.setattr(dd.bm, "_run", _run)
     monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
     dd.main()
-    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    return github_outputs(out)
 
 
 def _wave_cells(parsed):
@@ -211,6 +212,30 @@ def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path,
     )
     assert len(_wave_cells(parsed)) == 1  # Not vacuous: a cell exists.
     assert urls == [CHECK_RUNS_URL]
+
+
+def test_main_refuses_a_malformed_merged_head_before_any_api_read(tmp_path, monkeypatch):
+    """The merged head is interpolated into the check-run listing's URL, so a malformed one
+    is refused before any `gh api` path is requested.
+
+    Mutation: delete the `ad.validate_head_sha` call -- the listing URL lands in `urls`.
+    Mutation: move the call after `_check_run_lines` -- the listing URL lands in `urls`."""
+    urls = []
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[_cell("stacks/app")],
+            checks=[_apply_check("stacks/app")],
+            urls=urls,
+            head="1/../../x",
+        )
+    assert str(exc_info.value) == (
+        "::error::the deploy's head SHA (the merged pull request's head from "
+        "commits/merge123/pulls, else GITHUB_SHA) must be a 40-char lowercase hex SHA "
+        "(got: '1/../../x')"
+    )
+    assert urls == []
 
 
 def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeypatch):

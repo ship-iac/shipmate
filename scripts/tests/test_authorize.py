@@ -2,7 +2,7 @@ import json
 
 import pytest
 from _loader import SCRIPTS as _D
-from _loader import load_script
+from _loader import github_outputs, load_script
 
 az = load_script("authorize")
 
@@ -434,9 +434,7 @@ def _main_output(tmp_path, monkeypatch, *, pr=PR_OK, plan_runs=RUNS_OK, **env):
     for key, value in base.items():
         monkeypatch.setenv(key, value)
     az.main()
-    return dict(
-        ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines() if "=" in ln
-    )
+    return github_outputs(out)
 
 
 def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_path, monkeypatch):

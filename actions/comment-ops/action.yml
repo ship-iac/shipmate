@@ -88,7 +88,7 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.parse.outputs.error }}
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
 
     - name: Post help
       if: ${{ steps.parse.outputs.route == 'help' }}
@@ -163,7 +163,7 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.access.outputs.reason }}
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
 
     - name: Permission check failed
       # A failed step skips every later `success()`-gated step, so without `failure()` here
@@ -179,7 +179,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "could not decide the commenter's permission on this repository, so this command was not run. This run's log has the error; comment again."
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
         exit 1
 
     - name: Authorize plan
@@ -221,7 +221,7 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.planauthz.outputs.reason }}
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
 
     - uses: $/actions/python-yaml
       # Doctor and gate-config parse YAML; a refused commenter costs no install.
@@ -261,7 +261,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository, with every permission it requests accepted? Ask an org admin to install it, or to add any permission the App's settings lack and accept the request (docs/github-app.md, Re-approve after permission changes), then re-run `shipmate doctor`."
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
 
     - name: "Doctor: probe the manifest's full permission set"
       id: fullmint
@@ -441,7 +441,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository (with checks:read)? Ask an org admin to install it, then retry."
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
 
     - name: Resolve gate configuration
       id: gate
@@ -472,7 +472,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "could not resolve the gate settings from `.github/shipmate-config.yml` on the default branch, so this command was not run. The file is not merged there, it does not validate, a variable it references is unset or empty, or the runner lacks PyYAML or runs Python older than 3.12; the job log names which. Fix that and comment again."
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
         # The resolve's own failure, re-raised: `continue-on-error` above kept the job alive
         # long enough to post this, and a green run over an unauthorized command is not a
         # verdict this action may render.
@@ -569,7 +569,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an approving review (`gated: false` in `.github/shipmate-config.yml`). The apply result comment shows what applied."
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
 
     - name: Reject with reason
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
@@ -583,4 +583,4 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.authz.outputs.reason }}
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"

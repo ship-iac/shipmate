@@ -5,7 +5,7 @@ import sys
 
 import pytest
 from _detect_fixtures import spy_env_config
-from _loader import action_yaml, load_script
+from _loader import action_yaml, github_outputs, load_script
 
 bm = load_script("build-matrix")
 
@@ -476,7 +476,7 @@ def _run_main(
         monkeypatch.setattr(bm, "_tags", lambda s: stacks[s])
     monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
     bm.main()
-    parsed = dict(line.split("=", 1) for line in out.read_text(encoding="utf-8").splitlines())
+    parsed = github_outputs(out)
     return parsed, called
 
 

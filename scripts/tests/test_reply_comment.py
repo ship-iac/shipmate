@@ -14,11 +14,14 @@ _FOOTER = f"[run]({_RUN_URL}). Comment `shipmate help` for the available command
 
 
 def _main(**reply):
+    """Run the script as a subprocess. It installs no gh stub, so only refusals that exit before
+    any `gh` call may use it."""
     env = {
         **os.environ,
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_RUN_ID": "7777",
+        "PR_NUMBER": "",
         **{f"SHIPMATE_REPLY_{k.upper()}": v for k, v in reply.items()},
     }
     return subprocess.run(
@@ -59,18 +62,15 @@ def test_an_empty_verb_drops_the_env_from_the_header():
     )
 
 
-def test_main_prints_the_body_from_the_environment_with_the_env_escaped():
-    """The whole stdout of a run, through the environment variables the action sets.
-
-    Mutation: drop `_md_escape` from the header's env.
-    """
-    result = _main(verb="apply", env="a<b", outcome="refused", text="`x` <y>")
-    assert result.returncode == 0, result.stderr
-    assert result.stdout == f"### shipmate apply a&lt;b\n\n🔴 refused: `x` <y>\n\n{_FOOTER}\n"
+def test_the_header_env_is_escaped_and_the_text_is_not():
+    """Mutation: drop `_md_escape` from the header's env."""
+    assert rc.body("apply", "a<b", "refused", "`x` <y>", _RUN_URL) == (
+        f"### shipmate apply a&lt;b\n\n🔴 refused: `x` <y>\n\n{_FOOTER}"
+    )
 
 
-def test_an_unknown_outcome_exits_non_zero_and_prints_no_body():
-    """A caller capturing stdout must get nothing to post.
+def test_an_unknown_outcome_exits_non_zero_and_prints_nothing():
+    """The refusal is the whole stderr, and stdout stays empty.
 
     Mutation: default an unknown outcome to `refused`.
     """
@@ -105,13 +105,13 @@ def _post(monkeypatch, *argv, pr="42", outcome="refused"):
     return 0, calls
 
 
-def test_post_sends_the_body_to_the_pull_request_and_prints_nothing(monkeypatch, capsys):
+def test_main_posts_the_body_to_the_pull_request_and_prints_nothing(monkeypatch, capsys):
     """The whole argv, hand-written.
 
-    Mutations: take the issue number from `GITHUB_RUN_ID`; drop `-X POST`; print the body
-    instead of posting it.
+    Mutations: take the issue number from `GITHUB_RUN_ID`; drop `-X POST`; `print(text); return`
+    before the post.
     """
-    code, calls = _post(monkeypatch, "--post")
+    code, calls = _post(monkeypatch)
     assert code == 0
     assert calls == [
         [
@@ -127,35 +127,26 @@ def test_post_sends_the_body_to_the_pull_request_and_prints_nothing(monkeypatch,
     assert capsys.readouterr().out == ""
 
 
-def test_post_with_an_unknown_outcome_posts_nothing(monkeypatch):
+def test_an_unknown_outcome_posts_nothing(monkeypatch):
     """Mutation: post before validating the outcome."""
-    assert _post(monkeypatch, "--post", outcome="refuse") == (1, [])
+    assert _post(monkeypatch, outcome="refuse") == (1, [])
 
 
 @pytest.mark.parametrize("pr", ["1; x", "", "0", "007"])
-def test_post_refuses_a_value_that_is_not_a_pull_request_number(monkeypatch, pr):
+def test_a_value_that_is_not_a_pull_request_number_posts_nothing(monkeypatch, pr):
     """`PR_NUMBER` is bound into the API path, and dispatch passes its input unvalidated.
 
-    Mutations: drop the check; check with `isdigit()` (`0` and `007` red).
+    Mutations: drop the check; check with `isdigit()` (`0` and `007` red); move the check after
+    the `run`.
     """
-    code, calls = _post(monkeypatch, "--post", pr=pr)
+    code, calls = _post(monkeypatch, pr=pr)
     assert code not in (0, None)
     assert calls == []
 
 
-def test_without_post_the_body_is_printed_and_nothing_is_posted(monkeypatch, capsys):
-    """Mutation: always post."""
-    assert _post(monkeypatch) == (0, [])
-    assert capsys.readouterr().out == (
-        f"### shipmate apply dev-eu\n\n🔴 refused: no\n\n{_FOOTER}\n"
-    )
-
-
-@pytest.mark.parametrize("argv", [["--psot"], ["--post", "x"], ["x", "--post"]])
-def test_any_argv_but_none_or_post_is_refused_before_any_work(monkeypatch, capsys, argv):
-    """A typo must not degrade to printing a reply nobody posts.
-
-    Mutation: delete the argv check (each case then prints or posts, exit 0).
-    """
-    assert _post(monkeypatch, *argv) == ("::error::usage: reply-comment [--post]", [])
+@pytest.mark.parametrize("argv", [["--post"], ["--psot"], ["--post", "x"], ["x"]])
+def test_any_argument_is_refused_before_any_work(monkeypatch, capsys, argv):
+    """Mutations: accept `--post` as a no-op (`["--post"]` red); delete the argv check (every
+    case then posts, exit 0)."""
+    assert _post(monkeypatch, *argv) == ("::error::usage: reply-comment", [])
     assert capsys.readouterr().out == ""
