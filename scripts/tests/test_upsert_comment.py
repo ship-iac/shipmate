@@ -194,14 +194,45 @@ def test_a_first_line_that_is_not_a_whole_marker_is_refused_before_any_call(
     assert calls == []
 
 
-@pytest.mark.parametrize("pr", ["7a", "", "../1"])
-def test_a_pull_request_number_that_is_not_digits_is_refused_before_any_call(
+@pytest.mark.parametrize("pr", ["7a", "", "../1", "0", "007"])
+def test_a_value_that_is_not_a_pull_request_number_is_refused_before_any_call(
     monkeypatch, tmp_path, pr
 ):
-    """`PR` is bound into the API path. Mutation: delete the check."""
+    """`PR` is bound into the API path. Mutations: delete the check; check with `isdigit()`
+    (`0` and `007` red)."""
     code, calls = _upsert(monkeypatch, tmp_path, [], pr=pr)
     assert code == f"::error::PR must be a pull request number (got: {pr})"
     assert calls == []
+
+
+def test_the_pull_request_number_is_checked_before_the_body_file_is_read(monkeypatch, tmp_path):
+    """Mutation: open BODYFILE above the PR check (FileNotFoundError instead of the refusal)."""
+    missing = tmp_path / "missing.md"
+    monkeypatch.setattr(uc, "run", lambda args: pytest.fail(f"unexpected gh call: {args}"))
+    monkeypatch.setattr(sys, "argv", ["upsert-comment", "0", str(missing)])
+    with pytest.raises(SystemExit) as exc:
+        uc.main()
+    assert exc.value.code == "::error::PR must be a pull request number (got: 0)"
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["not json", '{"id": 5}', '{"head": "x"}', '{"id": 5, "head": null}', "[1]", "5"],
+)
+def test_an_unparseable_listing_line_prints_list_failed_and_writes_nothing(
+    monkeypatch, tmp_path, capsys, line
+):
+    """The caller degrades on `list-failed`; a traceback would fail its step instead.
+
+    Mutation: drop the `try`/`except` around the line's parse.
+    """
+    code, calls = _upsert(monkeypatch, tmp_path, [line])
+    assert code == 0
+    assert calls == [LIST_ARGV]
+    assert capsys.readouterr() == (
+        "list-failed\n",
+        f"unparseable comment listing line: {line!r}\n",
+    )
 
 
 @pytest.mark.parametrize("flags", [["--update"], ["--update-only", "x"]])

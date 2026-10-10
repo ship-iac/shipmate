@@ -2,8 +2,8 @@
 """Create or update the sticky comment a body file names on a pull request.
 
 Usage: `upsert-comment PR BODYFILE [--update-only]`, with `gh` (`GH_TOKEN`) against
-`GITHUB_REPOSITORY`. A PR that is not all digits exits 1 with `::error::` before the body file is
-read or any `gh` call, because it is bound into the API path.
+`GITHUB_REPOSITORY`. A PR that is not a pull-request number exits 1 with `::error::` before the
+body file is read or any `gh` call, because it is bound into the API path.
 
 The marker is BODYFILE's first line, which must be a whole `<!-- shipmate:<name> -->` with a
 1-40 letter lowercase name; anything else exits 1 with `::error::` before any `gh` call. The
@@ -21,9 +21,10 @@ Prints exactly one word and exits 0:
 - `updated`: the first match was PATCHed.
 - `created`: no match, so the body was POSTed.
 - `skipped`: no match under `--update-only`; nothing written.
-- `list-failed`: the listing failed, on any page, so nothing was written; gh's error goes to
-  stderr without `::error::`, because the caller degrades on it. A POST here would create a second
-  sticky that later runs could PATCH instead of this one.
+- `list-failed`: the listing failed on any page, or printed a line that is not an `{id, head}`
+  object, so nothing was written; the error goes to stderr without `::error::`, because the
+  caller degrades on it. A POST here would create a second sticky that later runs could PATCH
+  instead of this one.
 
 A failed PATCH or POST exits 1 with `::error::`. gh's response to a write never reaches stdout.
 """
@@ -33,7 +34,7 @@ import os
 import re
 import sys
 
-from _shipmate import run, utf8_output
+from _shipmate import is_pr_number, run, utf8_output
 
 MARKER = re.compile(r"<!-- shipmate:[a-z]{1,40} -->")
 JQ = '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}'
@@ -43,16 +44,21 @@ def find_existing(repo, pr, marker):
     """The id of the first Bot comment whose body starts with `marker`, or None.
 
     Raises SystemExit when the listing fails: `run` returns stdout only on exit 0, so a failure
-    on a later page yields no ids at all rather than the earlier pages' ones.
+    on a later page yields no ids at all rather than the earlier pages' ones. A line that does
+    not parse raises SystemExit too, so it degrades like a failed listing instead of a traceback.
     """
     out = run(
         ["gh", "api", "--paginate", "--jq", JQ, f"repos/{repo}/issues/{pr}/comments?per_page=100"]
     )
     for line in out.splitlines():
         if line.strip():
-            comment = json.loads(line)
-            if comment["head"].startswith(marker):
-                return comment["id"]
+            try:
+                comment = json.loads(line)
+                cid, matched = comment["id"], comment["head"].startswith(marker)
+            except (ValueError, LookupError, TypeError, AttributeError) as exc:
+                raise SystemExit(f"unparseable comment listing line: {line!r}") from exc
+            if matched:
+                return cid
     return None
 
 
@@ -63,7 +69,7 @@ def main():
         sys.exit("::error::usage: upsert-comment PR BODYFILE [--update-only]")
     pr, path = args[0], args[1]
     # Bound into the API path.
-    if not (pr.isascii() and pr.isdigit()):
+    if not is_pr_number(pr):
         sys.exit(f"::error::PR must be a pull request number (got: {pr})")
     with open(path, encoding="utf-8") as f:
         marker = f.readline().rstrip("\r\n")

@@ -7,7 +7,8 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 
 Also holds the subprocess runner, which ``env-config`` wraps for the CI scripts, the secret
 scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
-switch for their console output. It also holds the ruleset and environment readers and the
+switch for their console output. It also holds the pull-request number check that ``pr-facts``,
+``reply-comment`` and ``upsert-comment`` share, the ruleset and environment readers and the
 names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json`` summaries and builds
 this run's page link. It parses YAML: the strings-only config loader and the YAML 1.2
 workflow loader, both importing PyYAML only when first called.
@@ -40,6 +41,7 @@ APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 #: The repository variable onboard and register-app write the App id to. Workflows hand it to
 #: the run-time scripts under the same literal name (`test_detect_app_scoping.py`).
 APP_ID_VAR = "SHIPMATE_APP_ID"
+_PR_NUMBER = re.compile(r"[1-9][0-9]{0,9}")
 
 
 def gate_check(rules, gate):
@@ -135,6 +137,14 @@ def cell_summaries(cells_dir, keys, skew):
         if missing:
             raise SystemExit(f"::error::cell summary {p} missing keys {missing} {skew}")
         yield p, cell
+
+
+def is_pr_number(value):
+    """Whether `value` is a pull-request number as GitHub numbers them.
+
+    Bounded and anchored, with no leading zero, because callers bind it into an API path.
+    """
+    return _PR_NUMBER.fullmatch(value) is not None
 
 
 def current_run_url():

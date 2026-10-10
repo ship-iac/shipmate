@@ -781,8 +781,9 @@ entry is deleted
 provider cache").
 
 1. Read the key from the cell's error annotation, `OpenTofu's init failed
-   after restoring provider cache entry <key>`, or from the `Restore provider
-   cache` lines of its `Initialize the stack` step log. It starts `tofu-providers-`.
+   after restoring provider cache entry <key>`, or from the line
+   `Cache restored from key: <key>` in its `Initialize the stack` step log.
+   It starts `tofu-providers-`.
 2. Delete the entry: `gh cache delete <key> --repo <owner>/<repo>`.
 3. Re-run the failed jobs. The cells download their providers, and the next
    drift or apply cell saves a fresh entry.

@@ -5,7 +5,7 @@ import sys
 
 import pytest
 from _loader import ENGINE
-from _shipmate import approval_rules, gate_check, review_count, utf8_output
+from _shipmate import approval_rules, gate_check, is_pr_number, review_count, utf8_output
 
 
 def test_utf8_output_switches_both_streams_from_cp1252_to_utf8(monkeypatch):
@@ -101,3 +101,23 @@ def test_approval_rules_report_a_typeless_rule_as_unknown():
     typeless rules vanish."""
     env = {"protection_rules": [{"type": "wait_timer"}, {}, {"type": ""}, {"type": None}]}
     assert approval_rules(env) == ["?", "wait_timer"]
+
+
+def test_is_pr_number_accepts_github_numbers_only():
+    """Mutations: pattern `[0-9]+` (`0`, `007` and the eleven digits red); `match` for
+    `fullmatch` (`7a` and `7\\n` red)."""
+    table = ["1", "7", "42", "1234567890", "0", "007", "12345678901", "", "7a", "-1", "7\n", "١"]
+    assert {v: is_pr_number(v) for v in table} == {
+        "1": True,
+        "7": True,
+        "42": True,
+        "1234567890": True,
+        "0": False,
+        "007": False,
+        "12345678901": False,
+        "": False,
+        "7a": False,
+        "-1": False,
+        "7\n": False,
+        "١": False,
+    }

@@ -1,5 +1,5 @@
 name: shipmate cell-init
-description: Restore the stack's provider cache and run `tofu init` for one cell. Its own step in each cell, so init output stays out of the caller's later steps (apply-cell's apply.txt is reviewer-facing comment data).
+description: Restore the stack's provider cache and run `tofu init` for one cell. Its own step in each cell, so init output stays out of the caller's later steps.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.

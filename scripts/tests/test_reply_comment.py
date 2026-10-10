@@ -132,11 +132,11 @@ def test_post_with_an_unknown_outcome_posts_nothing(monkeypatch):
     assert _post(monkeypatch, "--post", outcome="refuse") == (1, [])
 
 
-@pytest.mark.parametrize("pr", ["1; x", ""])
-def test_post_refuses_a_pull_request_number_that_is_not_digits(monkeypatch, pr):
+@pytest.mark.parametrize("pr", ["1; x", "", "0", "007"])
+def test_post_refuses_a_value_that_is_not_a_pull_request_number(monkeypatch, pr):
     """`PR_NUMBER` is bound into the API path, and dispatch passes its input unvalidated.
 
-    Mutation: drop the check.
+    Mutations: drop the check; check with `isdigit()` (`0` and `007` red).
     """
     code, calls = _post(monkeypatch, "--post", pr=pr)
     assert code not in (0, None)
@@ -149,3 +149,13 @@ def test_without_post_the_body_is_printed_and_nothing_is_posted(monkeypatch, cap
     assert capsys.readouterr().out == (
         f"### shipmate apply dev-eu\n\n🔴 refused: no\n\n{_FOOTER}\n"
     )
+
+
+@pytest.mark.parametrize("argv", [["--psot"], ["--post", "x"], ["x", "--post"]])
+def test_any_argv_but_none_or_post_is_refused_before_any_work(monkeypatch, capsys, argv):
+    """A typo must not degrade to printing a reply nobody posts.
+
+    Mutation: delete the argv check (each case then prints or posts, exit 0).
+    """
+    assert _post(monkeypatch, *argv) == ("::error::usage: reply-comment [--post]", [])
+    assert capsys.readouterr().out == ""

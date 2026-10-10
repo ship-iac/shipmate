@@ -22,18 +22,13 @@ state it.
 
 import json
 import os
-import re
 
-from _shipmate import _load
+from _shipmate import _load, is_pr_number
 
 bm = _load("build-matrix")
 
 # The one `gh api` definition, aliased rather than copied.
 _gh_json = bm.gh_json
-
-#: A pull-request number as GitHub numbers them. Bounded and anchored: this
-#: value is interpolated into an API path.
-_NUMBER = re.compile(r"[1-9][0-9]{0,9}")
 
 #: The output keys, in the order they are written. Named once so the action's
 #: outputs and this list cannot drift apart silently.
@@ -98,7 +93,7 @@ def from_payload(pr):
 
 def from_api(number, repository):
     """The facts for a dispatched plan, read from the API by number."""
-    if not _NUMBER.fullmatch(number):
+    if not is_pr_number(number):
         raise SystemExit(
             f"::error::the plan workflow's pr_number input must be a pull-request number "
             f"(got: {number!r}). A dispatched plan sends it; a hand-dispatched run has to "

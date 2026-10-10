@@ -12,9 +12,9 @@ The bash sites in `actions/comment-ops` and `actions/dispatch` post their replie
 - `SHIPMATE_REPLY_TEXT`: the reason or notice, engine-authored and printed unescaped.
 
 Without arguments the body goes to stdout. With `--post` it is POSTed with `gh` (`GH_TOKEN`) as a
-comment on pull request `PR_NUMBER` of `GITHUB_REPOSITORY`, and gh's response is discarded. A
-`PR_NUMBER` that is not all digits exits 1 before any `gh` call; a failed POST exits 1 with
-gh's stderr.
+comment on pull request `PR_NUMBER` of `GITHUB_REPOSITORY`, and gh's response is discarded. Any
+other argument exits 1 with `::error::usage` before anything else. A `PR_NUMBER` that is not a
+pull-request number exits 1 before any `gh` call; a failed POST exits 1 with gh's stderr.
 
 The footer links this run (`current_run_url()`), then `FOOTER_HINT` on a refusal or a failure;
 a notice asks nothing of the reader, so it carries no hint.
@@ -23,7 +23,7 @@ a notice asks nothing of the reader, so it carries no hint.
 import os
 import sys
 
-from _shipmate import _load, current_run_url, run, utf8_output
+from _shipmate import _load, current_run_url, is_pr_number, run, utf8_output
 
 sc = _load("summary-comment")
 
@@ -38,6 +38,9 @@ def body(verb, env, outcome, text, run_url):
 
 def main():
     utf8_output()
+    if sys.argv[1:] not in ([], ["--post"]):
+        sys.exit("::error::usage: reply-comment [--post]")
+    post = bool(sys.argv[1:])
     outcome = os.environ.get("SHIPMATE_REPLY_OUTCOME", "")
     if outcome not in VERDICTS:
         print(
@@ -46,9 +49,8 @@ def main():
         )
         sys.exit(1)
     pr = os.environ.get("PR_NUMBER", "")
-    post = sys.argv[1:] == ["--post"]
     # Bound into the API path; dispatch hands its input through unvalidated.
-    if post and not (pr.isascii() and pr.isdigit()):
+    if post and not is_pr_number(pr):
         print(f"::error::PR_NUMBER must be a pull request number (got: {pr})", file=sys.stderr)
         sys.exit(1)
     text = body(
