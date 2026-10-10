@@ -1,3 +1,5 @@
+import json
+
 from _loader import load_script
 
 pc = load_script("plan-classify")
@@ -84,3 +86,15 @@ def test_fingerprint_stacks_flavor_matches_tfvar_only_algo():
         json.dumps(dict(sorted(env.items())), sort_keys=True).encode()
     ).hexdigest()
     assert pc.fingerprint(env) == base
+
+
+def test_main_classifies_the_plan_json_in_the_working_directory(tmp_path, monkeypatch):
+    """Mutation: open `"plan.jsonx"` in `main`."""
+    plan = {"resource_changes": [_rc("create"), _rc("update"), _rc("delete", "create")]}
+    (tmp_path / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
+    pc.main(["plan-classify"])
+    assert (tmp_path / "out").read_text(encoding="utf-8") == (
+        "changed=true\nadd=2\nchange=1\ndestroy=1\n"
+    )

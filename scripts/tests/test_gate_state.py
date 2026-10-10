@@ -239,6 +239,7 @@ def test_main_holds_the_gate_when_the_planned_count_env_is_absent(tmp_path, monk
 
 
 def test_gate_links_to_this_run(tmp_path, monkeypatch, capsys):
+    """Mutation: set `target_url` to `os.environ["GITHUB_SERVER_URL"]` alone."""
     # The summary job runs inside the plan run, so this run's URL holds the plan logs and the
     # plan artifacts the gate points at.
     body = _main_body(tmp_path, monkeypatch, capsys)
