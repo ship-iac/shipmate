@@ -87,12 +87,12 @@ def test_build_matrix_reads_the_facts_job_and_states_no_constant():
     }
 
 
-def test_the_plan_workflow_never_sets_no_pull_request():
-    """`no-pull-request: "true"` skips build-matrix's head-repository and head-commit refusals.
+def test_the_plan_workflow_never_sets_sweep():
+    """`sweep: "true"` skips build-matrix's head-repository and head-commit refusals.
     drift.yml is required to carry it; a plan workflow must never. Mutation: add the key."""
     for job in workflow_yaml(WF)["jobs"].values():
         for step in job.get("steps") or []:
-            assert "no-pull-request" not in (step.get("with") or {})
+            assert "sweep" not in (step.get("with") or {})
 
 
 def test_every_checkout_takes_the_head_the_facts_job_named():

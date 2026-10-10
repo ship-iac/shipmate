@@ -106,9 +106,9 @@ def test_the_detect_job_is_deliberately_ungated():
     assert "if" not in workflow_yaml(WF)["jobs"]["detect"]
 
 
-def test_the_sweep_states_no_pull_request_and_no_head():
+def test_the_sweep_call_states_sweep_and_its_query():
     """A sweep has no pull request, and carries its file's query to build-matrix.
-    Mutations: drop `no-pull-request`, and build-matrix refuses every drift run; drop
+    Mutations: `sweep: "false"`, and build-matrix refuses every drift run; drop
     `tags: ${{ inputs.tags }}`, and every drift file sweeps every cell."""
     step = next(
         s
@@ -116,10 +116,8 @@ def test_the_sweep_states_no_pull_request_and_no_head():
         if "actions/build-matrix" in str(s.get("uses", ""))
     )
     assert step["with"] == {
-        "base-sha": "",
-        "all-stacks": "true",
+        "sweep": "true",
         "tags": "${{ inputs.tags }}",
-        "no-pull-request": "true",
         "github-vars": "${{ toJSON(vars) }}",
     }
 

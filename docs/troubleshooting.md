@@ -957,7 +957,7 @@ than one — and the dispatch comment on the pull request already links the run.
 
 The refusal keys on the `head-repo` input, and it refuses by default: a run
 that states no head repository is refused too, with a message naming the input.
-No input allows a fork; engine `drift.yml`'s `no-pull-request: "true"`, which
+No input allows a fork; engine `drift.yml`'s `sweep: "true"`, which
 says the run has no pull request at all, is the only opt-out
 (`docs/drift.md`). [`hardening.md`](hardening.md) §Contributors without push
 access states why, and what a fork's plan cell would receive.

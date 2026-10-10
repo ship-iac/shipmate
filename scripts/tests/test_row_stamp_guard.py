@@ -45,8 +45,7 @@ _PLAN_ENV = {
     "SHIPMATE_HEAD_REPO": "acme/iac",
 }
 _DRIFT_ENV = {
-    "SHIPMATE_ALL_STACKS": "true",
-    "SHIPMATE_NO_PULL_REQUEST": "true",
+    "SHIPMATE_SWEEP": "true",
     "GITHUB_EVENT_NAME": "schedule",
     "GITHUB_REPOSITORY": "acme/iac",
 }
@@ -107,7 +106,7 @@ def test_the_plan_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
 
 
 def test_the_drift_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
-    """Call site 2: the same `build-matrix` line, reached with `all-stacks: true`. Drift plans
+    """Call site 2: the same `build-matrix` line, reached with `sweep: true`. Drift plans
     and never applies, and a drift sweep is the run nobody watches.
 
     Mutations: as above -- one argument and one wrapper, so both cases red together.

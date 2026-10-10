@@ -84,7 +84,7 @@ def test_the_plan_matrix_refuses_over_the_stamped_cells(monkeypatch, tmp_path):
 
 
 def test_the_drift_matrix_refuses_over_the_stamped_cells(monkeypatch, tmp_path):
-    """Call site 2: the same line, reached with `all-stacks: true`.
+    """Call site 2: the same line, reached with `sweep: true`.
 
     Mutations: as above."""
     calls = _spy(monkeypatch, tbm.bm)

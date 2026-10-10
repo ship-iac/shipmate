@@ -1008,7 +1008,7 @@ workflow file:
   such clause and the terms no stack carries. A query matching no cell is an
   empty sweep with a notice, not a refusal.
 - `build-matrix` refuses a query on any run that does not pass
-  `no-pull-request: true`, which only engine `drift.yml` passes: on a plan run
+  `sweep: true`, which only engine `drift.yml` passes: on a plan run
   it would drop changed stacks, and a dropped stack gets no apply check while
   `shipmate / gate` greens.
 
@@ -1670,8 +1670,8 @@ The four jobs:
   there is no wiring a consumer can get wrong, and no event name is involved:
   the drift path already triggers on both `schedule` and `workflow_dispatch`,
   so a dispatched plan would be indistinguishable from a manual drift run. The
-  drift path (`all-stacks`) is unaffected because engine `drift.yml` states that
-  it has no pull request (`no-pull-request: "true"`), which is the only opt-out
+  drift path is unaffected because engine `drift.yml` states that it is a sweep
+  with no pull request (`sweep: "true"`), which is the only opt-out
   and appears in no other engine workflow.
 - **`summary`** (engine, `environment: shipmate-engine`) — it calls
   `actions/summary`, which downloads this same run's cell summaries and, under
