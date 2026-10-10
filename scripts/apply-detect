@@ -59,13 +59,8 @@ def cells_for_env(env, paths, tags_by_stack):
     the environment's generic role; the map itself is REQUIRED, so a caller that
     stops deriving it raises here instead of silently applying every cell with
     the generic role. A stack carrying two `workload/*` tags refuses (`workload_of`)."""
-    workloads = {p: bm.workload_of(tags_by_stack.get(p, []), p) for p in paths}
     return [
-        {
-            "stack": p,
-            "environment": env,
-            "workload": workloads[p],
-        }
+        {"stack": p, "environment": env, "workload": bm.workload_of(tags_by_stack.get(p, []), p)}
         for p in paths
     ]
 
@@ -96,17 +91,12 @@ def with_plan_runs(cells, check_run_lines, app_id):
     request is already merged — a remedy phrased as "re-plan on this pull
     request" would send a post-merge operator to a pull request that no longer
     accepts commits."""
-    plan_runs = ag.plan_runs_by_name(check_run_lines, app_id)
-    plan_hashes = ag.plan_hashes_by_name(check_run_lines, app_id)
-    named = [
-        (
-            c,
-            plan_runs.get(ag.check_name(c["stack"], c["environment"])),
-            plan_hashes.get(ag.check_name(c["stack"], c["environment"])),
-        )
-        for c in cells
-    ]
-    missing = [ag.check_name(c["stack"], c["environment"]) for c, run, _ in named if not run]
+    records = ag.plan_records(check_run_lines, app_id)
+    named = []
+    for c in cells:
+        name = ag.check_name(c["stack"], c["environment"])
+        named.append((c, name, *records.get(name, (None, None))))
+    missing = [name for _, name, run, _ in named if not run]
     if missing:
         raise SystemExit(
             f"::error::apply aborted: no plan run recorded for {', '.join(missing)}: the "
@@ -115,7 +105,7 @@ def with_plan_runs(cells, check_run_lines, app_id):
             "request, then apply again; if that pull request has already merged, a new pull "
             "request touching them plans and applies them afresh."
         )
-    unbound = [ag.check_name(c["stack"], c["environment"]) for c, _, digest in named if not digest]
+    unbound = [name for _, name, _, digest in named if not digest]
     if unbound:
         raise SystemExit(
             f"::error::apply aborted: no plan-text digest recorded for {', '.join(unbound)}: "
@@ -124,7 +114,7 @@ def with_plan_runs(cells, check_run_lines, app_id):
             "their pull request, then apply again; if that pull request has already merged, a "
             "new pull request touching them plans and applies them afresh."
         )
-    return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, run, digest in named]
+    return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest in named]
 
 
 def filter_pending(cells, completed_names):

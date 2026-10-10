@@ -3,9 +3,9 @@
 
 Reads check-runs as JSON Lines on stdin (one check-run object per line, as
 emitted by `gh api --paginate ... --jq '.check_runs[]'`). With `--plan-runs` it
-prints the `plan_runs_by_name` mapping on stdout for comment-ops' reviewed-plan
-lookup and decides nothing; otherwise it writes a single verdict to
-GITHUB_OUTPUT:
+prints the run projection of `plan_records`, `{name: plan run id}`, on stdout for
+comment-ops' reviewed-plan lookup and decides nothing; otherwise it writes a single
+verdict to GITHUB_OUTPUT:
 
 - `complete`   — every apply check's latest run is completed with a good
                  conclusion (success, or neutral for no-change cells); the
@@ -129,60 +129,38 @@ def app_done_names(check_run_lines, app_id):
     return done_names(app_runs(check_run_lines, app_id))
 
 
-def _records_by_name(check_run_lines, app_id):
-    """Map each App-authored apply check name to the decoded `external_id` record
-    pending-checks wrote on it. Runs app_done_names' primitives -- parse_jsonl, the
-    fail-closed from_app filter, and latest_by_name's newest-by-id grouping -- so only the
-    newest App-authored run per name is consulted, and the two public projections below read
-    one record shape rather than each re-deriving it. Each call re-runs the chain; nothing
-    here is memoized.
+def plan_records(check_run_lines, app_id):
+    """Map each App-authored apply check name to `(plan run id, plan-text sha256)`, read from
+    the `external_id` record pending-checks wrote on it. Runs app_done_names' primitives --
+    parse_jsonl, the fail-closed from_app filter, and latest_by_name's newest-by-id grouping --
+    so only the newest App-authored run per name is consulted.
 
-    A name is absent when that newest run carries no decodable record: a
-    null/empty/non-JSON external_id (a bare hex digest included), or one that decodes
-    to something other than an object. No JSONDecodeError escapes."""
+    A name is absent when that newest run carries no decodable record: a null/empty/non-JSON
+    external_id (a bare hex digest included), or one that decodes to something other than an
+    object. No JSONDecodeError escapes. A present name's run is its decimal-digit `plan_run`
+    and its digest the 64-lowercase-hex `plan_sha256` that the trusted summary job published;
+    either is None when the record carries no such value. Absence is not an error here: each
+    caller decides per cell what a missing run or an unbound plan text means.
+
+    `--plan-runs` prints `{name: run}` for every record whose run is not None and does not
+    narrow it for any other reason: authorize reads that projection as PLAN_RUN_JSON and
+    answers an empty mapping with "no reviewed plan for the current PR head". A name dropped
+    from it for a policy that is not its own, a missing digest included, surfaces as that
+    message."""
     out = {}
     for name, run in latest_by_name(app_runs(check_run_lines, app_id)).items():
         try:
             record = json.loads(run.get("external_id") or "")
         except json.JSONDecodeError:
             continue
-        if isinstance(record, dict):
-            out[name] = record
-    return out
-
-
-def plan_runs_by_name(check_run_lines, app_id):
-    """Map each App-authored apply check name to the plan run id that produced its plan, read
-    from the check-run's `external_id` record written by pending-checks.
-
-    A name is absent when its newest run's record has no decimal-digit `plan_run`, or no
-    usable record at all. Absence is not an error here, and each caller decides per cell what
-    a missing plan run means.
-
-    The return shape is `{name: run id}` and does not narrow for any other reason: authorize
-    reads it as PLAN_RUN_JSON and answers an empty mapping with "no reviewed plan for the
-    current PR head". A name dropped here for a policy that is not its own surfaces as that
-    message."""
-    out = {}
-    for name, record in _records_by_name(check_run_lines, app_id).items():
+        if not isinstance(record, dict):
+            continue
         plan_run = record.get("plan_run")
-        if isinstance(plan_run, str) and re.fullmatch(r"[0-9]+", plan_run):
-            out[name] = plan_run
-    return out
-
-
-def plan_hashes_by_name(check_run_lines, app_id):
-    """Map each App-authored apply check name to the sha256 of the plan text the trusted
-    summary job published for it, read from the same `external_id` record.
-
-    A name is absent when its newest run records no 64-lowercase-hex `plan_sha256`. Absence is
-    not an error here; each caller decides what an unbound plan text means for the action it
-    is about to take."""
-    out = {}
-    for name, record in _records_by_name(check_run_lines, app_id).items():
         digest = record.get("plan_sha256")
-        if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest):
-            out[name] = digest
+        out[name] = (
+            plan_run if isinstance(plan_run, str) and re.fullmatch(r"[0-9]+", plan_run) else None,
+            digest if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) else None,
+        )
     return out
 
 
@@ -199,7 +177,8 @@ def main():
         raise SystemExit(f"::error::unknown argument(s) {mode}")
     app_id = os.environ["SHIPMATE_APP_ID"]
     if mode:
-        print(json.dumps(plan_runs_by_name(sys.stdin, app_id)))
+        records = plan_records(sys.stdin, app_id)
+        print(json.dumps({name: run for name, (run, _) in records.items() if run is not None}))
         return
     runs = app_runs(sys.stdin, app_id)
     v = verdict(runs)

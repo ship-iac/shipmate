@@ -328,52 +328,54 @@ def _ext(name, id, external_id, app_id=999, started_at="2026-07-18T10:00:00Z"):
 LEGACY_HEX = "a3f" + "b" * 61
 
 
-def test_plan_runs_newest_app_run_supplies_the_id():
-    # id order and started_at order deliberately disagree: the higher id wins even though it
-    # started earlier, because latest_by_name orders by id.
+def _record(plan_run="111", **extra):
+    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run, **extra})
+
+
+def test_plan_records_newest_app_run_supplies_the_record():
+    """id order and started_at order deliberately disagree, and the higher id is listed first:
+    the higher id wins although it started earlier. Mutation: iterate
+    `{r["name"]: r for r in app_runs(...)}` (last seen per name) instead of latest_by_name."""
     older = _ext(
         "apply / stacks/app / dev-eu",
         1,
-        json.dumps({"fingerprint": "a" * 64, "plan_run": "111"}),
+        _record(plan_run="111", plan_sha256="a" * 64),
         started_at="2026-07-18T12:00:00Z",
     )
     newer = _ext(
         "apply / stacks/app / dev-eu",
         2,
-        json.dumps({"fingerprint": "b" * 64, "plan_run": "222"}),
+        _record(plan_run="222", plan_sha256="b" * 64),
         started_at="2026-07-18T09:00:00Z",
     )
-    # newer listed FIRST: a substitute that keeps the last run seen per name, rather than the
-    # newest by id, must not be absorbed by input order.
-    assert ag.plan_runs_by_name([newer, older], "999") == {"apply / stacks/app / dev-eu": "222"}
+    assert ag.plan_records([newer, older], "999") == {
+        "apply / stacks/app / dev-eu": ("222", "b" * 64)
+    }
 
 
-def test_plan_runs_ignores_foreign_app_even_when_newest():
-    ours = _ext(
-        "apply / stacks/app / dev-eu", 1, json.dumps({"fingerprint": "a" * 64, "plan_run": "111"})
-    )
+def test_plan_records_ignores_foreign_app_even_when_newest():
+    """Mutation: iterate `parse_jsonl(check_run_lines)` instead of `app_runs(...)`."""
+    ours = _ext("apply / stacks/app / dev-eu", 1, _record(plan_run="111", plan_sha256="a" * 64))
     foreign = _ext(
         "apply / stacks/app / dev-eu",
         2,
-        json.dumps({"fingerprint": "b" * 64, "plan_run": "222"}),
+        _record(plan_run="222", plan_sha256="b" * 64),
         app_id=15368,
     )
-    assert ag.plan_runs_by_name([ours, foreign], "999") == {"apply / stacks/app / dev-eu": "111"}
-
-
-def test_plan_runs_legacy_bare_hex_external_id_is_absent():
-    # A bare 64-hex external_id is not JSON: it reads as absent, never as a JSONDecodeError
-    # traceback.
-    line = _ext("apply / stacks/app / dev-eu", 1, LEGACY_HEX)
-    assert ag.plan_runs_by_name([line], "999") == {}
+    assert ag.plan_records([ours, foreign], "999") == {
+        "apply / stacks/app / dev-eu": ("111", "a" * 64)
+    }
 
 
 # "1" * 64 is the only case that reaches the isinstance(record, dict) guard, because it parses
-# as a JSON int rather than a dict. Keep it.
-@pytest.mark.parametrize("external_id", [None, "", "not json at all", "1" * 64])
-def test_plan_runs_unusable_external_id_is_absent(external_id):
+# as a JSON int rather than a dict. A bare 64-hex LEGACY_HEX is not JSON: it reads as absent,
+# never as a JSONDecodeError traceback.
+@pytest.mark.parametrize("external_id", [None, "", "not json at all", "1" * 64, LEGACY_HEX])
+def test_plan_records_unusable_external_id_is_absent(external_id):
+    """Mutations: drop the `except json.JSONDecodeError` arm (the non-JSON cases raise); drop
+    the `isinstance(record, dict)` guard (`"1" * 64` raises on `.get`)."""
     line = _ext("apply / stacks/app / dev-eu", 1, external_id)
-    assert ag.plan_runs_by_name([line], "999") == {}
+    assert ag.plan_records([line], "999") == {}
 
 
 @pytest.mark.parametrize(
@@ -385,38 +387,93 @@ def test_plan_runs_unusable_external_id_is_absent(external_id):
         {"fingerprint": "a" * 64, "plan_run": 1234},
     ],
 )
-def test_plan_runs_bad_plan_run_value_is_absent(record):
+def test_plan_records_bad_plan_run_value_reads_as_none(record):
+    """Mutation: keep any truthy `plan_run` (`plan_run if plan_run else None`); `"12x4"` and
+    `1234` turn red."""
     line = _ext("apply / stacks/app / dev-eu", 1, json.dumps(record))
-    assert ag.plan_runs_by_name([line], "999") == {}
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": (None, None)}
 
 
-def test_plan_runs_only_apply_prefixed_names():
-    # latest_by_name's default prefix must not be overridden: a plan check with a well-formed
-    # record contributes nothing.
-    record = json.dumps({"fingerprint": "a" * 64, "plan_run": "111"})
-    apply_line = _ext("apply / stacks/app / dev-eu", 1, record)
-    plan_line = _ext("stacks/app / dev-eu", 2, record)
-    assert ag.plan_runs_by_name([apply_line, plan_line], "999") == {
-        "apply / stacks/app / dev-eu": "111"
+def test_plan_records_only_apply_prefixed_names():
+    """latest_by_name's default prefix must not be overridden: a plan check with a well-formed
+    record contributes nothing. Mutation: `latest_by_name(..., prefix="")`."""
+    apply_line = _ext("apply / stacks/app / dev-eu", 1, _record())
+    plan_line = _ext("stacks/app / dev-eu", 2, _record())
+    assert ag.plan_records([apply_line, plan_line], "999") == {
+        "apply / stacks/app / dev-eu": ("111", None)
     }
 
 
-def test_plan_runs_mode_prints_the_mapping_and_writes_no_verdict(monkeypatch, capsys):
-    # comment-ops' reviewed-plan lookup is this mode. GITHUB_OUTPUT is deliberately unset: a
-    # gate verdict written here would be a decision the caller never asked for, and would abort
-    # on the missing variable instead.
-    record = json.dumps({"fingerprint": "a" * 64, "plan_run": "777"})
-    stdin = io.StringIO(
-        _ext("apply / stacks/app / dev-eu", 1, record)
-        + "\n"
-        + _ext("apply / stacks/api / dev-eu", 2, LEGACY_HEX)
-    )
+def test_plan_records_reads_the_recorded_digest():
+    """Mutation: read the digest from `record.get("fingerprint")`, also 64 lowercase hex."""
+    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", "c" * 64)}
+
+
+# 64 chars where the value is merely not lowercase hex, so a length-only substitute for the
+# fullmatch cannot absorb the case. The int exercises the isinstance guard: without it,
+# re.fullmatch would raise TypeError rather than read as None.
+@pytest.mark.parametrize(
+    "digest",
+    [None, "", "z" * 64, "c" * 63, "c" * 65, "C" * 64, 1234],
+)
+def test_plan_records_unusable_digest_reads_as_none(digest):
+    """Mutation: the digest pattern `.{64}`; `"z" * 64` and `"C" * 64` turn red."""
+    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256=digest))
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None)}
+
+
+def test_plan_records_uppercase_digest_reads_as_none():
+    """Explicit literal beside the parametrization: sha256sum on the runner prints lowercase,
+    and the comparison at apply is a string equality, so an uppercase record would never match
+    anyway. Mutation: the digest pattern `.{64}`."""
+    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="ABCDEF" + "a" * 58))
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None)}
+
+
+def test_plan_records_missing_digest_reads_as_none():
+    """A record that carries no digest; with_plan_runs refuses on a falsy digest, so the slot
+    is None, not a placeholder. Mutation: `else ""` for the digest slot."""
+    line = _ext("apply / stacks/app / dev-eu", 1, _record())
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None)}
+
+
+def _plan_runs_stdout(monkeypatch, capsys, *lines):
+    # GITHUB_OUTPUT is deliberately unset: a gate verdict written in this mode would be a
+    # decision the caller never asked for, and would abort on the missing variable instead.
     monkeypatch.setattr(ag.sys, "argv", ["apply-gate", "--plan-runs"])
-    monkeypatch.setattr(ag.sys, "stdin", stdin)
+    monkeypatch.setattr(ag.sys, "stdin", io.StringIO("\n".join(lines)))
     monkeypatch.setenv("SHIPMATE_APP_ID", "999")
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     ag.main()
-    assert json.loads(capsys.readouterr().out) == {"apply / stacks/app / dev-eu": "777"}
+    return capsys.readouterr().out
+
+
+def test_plan_runs_mode_prints_the_run_projection_and_writes_no_verdict(monkeypatch, capsys):
+    """comment-ops' reviewed-plan lookup is this mode, read by authorize as PLAN_RUN_JSON; its
+    bytes are compared whole. Mutation: project every record, `None` runs included -- the
+    record without a plan run prints as `null`, red."""
+    out = _plan_runs_stdout(
+        monkeypatch,
+        capsys,
+        _ext("apply / stacks/app / dev-eu", 1, _record(plan_run="777")),
+        _ext("apply / stacks/api / dev-eu", 2, LEGACY_HEX),
+        _ext("apply / stacks/dns / dev-eu", 3, json.dumps({"plan_sha256": "c" * 64})),
+        _ext("apply / stacks/web / dev-eu", 4, _record(plan_run="778", plan_sha256="c" * 64)),
+    )
+    assert out == '{"apply / stacks/app / dev-eu": "777", "apply / stacks/web / dev-eu": "778"}\n'
+
+
+def test_plan_runs_mode_is_identical_with_and_without_a_digest(monkeypatch, capsys):
+    """authorize reads the `--plan-runs` membership; a name must not drop out of it because
+    its record carries no digest, or an operator is told their plan does not exist. Both
+    outputs are compared whole against the same hand-written literal. Mutation: project only
+    records carrying both a run and a digest -- the digest-less one prints `{}`, red."""
+    expected = '{"apply / stacks/app / dev-eu": "111"}\n'
+    with_hash = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
+    without_hash = _ext("apply / stacks/app / dev-eu", 1, _record())
+    assert _plan_runs_stdout(monkeypatch, capsys, with_hash) == expected
+    assert _plan_runs_stdout(monkeypatch, capsys, without_hash) == expected
 
 
 def test_an_unrecognized_argument_fails_loud(monkeypatch):
@@ -426,75 +483,3 @@ def test_an_unrecognized_argument_fails_loud(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         ag.main()
     assert "--plan-run" in str(exc.value)
-
-
-def _record(plan_run="111", **extra):
-    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run, **extra})
-
-
-def test_plan_hashes_reads_the_recorded_digest():
-    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
-    assert ag.plan_hashes_by_name([line], "999") == {"apply / stacks/app / dev-eu": "c" * 64}
-
-
-# 64 chars where the value is merely not lowercase hex, so a length-only substitute for the
-# fullmatch cannot absorb the case. The int exercises the isinstance guard: without it,
-# re.fullmatch would raise TypeError rather than read as absence.
-@pytest.mark.parametrize(
-    "digest",
-    [None, "", "z" * 64, "c" * 63, "c" * 65, "C" * 64, 1234],
-)
-def test_plan_hashes_unusable_digest_is_absent(digest):
-    record = json.dumps({"fingerprint": "a" * 64, "plan_run": "111", "plan_sha256": digest})
-    line = _ext("apply / stacks/app / dev-eu", 1, record)
-    assert ag.plan_hashes_by_name([line], "999") == {}
-
-
-def test_plan_hashes_uppercase_digest_is_absent():
-    # Explicit literal beside the parametrization: sha256sum on the runner prints lowercase,
-    # and the comparison at apply is a string equality, so an uppercase record would never
-    # match anyway.
-    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="ABCDEF" + "a" * 58))
-    assert ag.plan_hashes_by_name([line], "999") == {}
-
-
-def test_plan_hashes_missing_key_is_absent():
-    # A record that carries no digest.
-    line = _ext("apply / stacks/app / dev-eu", 1, _record())
-    assert ag.plan_hashes_by_name([line], "999") == {}
-
-
-def test_plan_runs_is_identical_with_and_without_a_digest():
-    """authorize reads plan_runs_by_name's membership; a name must not drop
-    out of it because its record carries no digest, or an operator is told their plan does not
-    exist. Both mappings are compared whole against the same hand-written literal."""
-    expected = {"apply / stacks/app / dev-eu": "111"}
-    with_hash = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
-    without_hash = _ext("apply / stacks/app / dev-eu", 1, _record())
-    assert ag.plan_runs_by_name([with_hash], "999") == expected
-    assert ag.plan_runs_by_name([without_hash], "999") == expected
-
-
-@pytest.mark.parametrize("external_id", [None, "", "not json at all", "1" * 64, LEGACY_HEX])
-def test_plan_hashes_unusable_external_id_is_absent(external_id):
-    line = _ext("apply / stacks/app / dev-eu", 1, external_id)
-    assert ag.plan_hashes_by_name([line], "999") == {}
-    assert ag.plan_runs_by_name([line], "999") == {}
-
-
-def test_plan_hashes_newest_app_run_supplies_the_digest():
-    # Higher id listed FIRST: a substitute that keeps the last run seen per name, instead of
-    # the newest by id, must not be absorbed by input order.
-    newer = _ext("apply / stacks/app / dev-eu", 2, _record(plan_run="222", plan_sha256="b" * 64))
-    older = _ext("apply / stacks/app / dev-eu", 1, _record(plan_run="111", plan_sha256="a" * 64))
-    assert ag.plan_hashes_by_name([newer, older], "999") == {
-        "apply / stacks/app / dev-eu": "b" * 64
-    }
-
-
-def test_plan_hashes_ignores_foreign_app_even_when_newest():
-    ours = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="a" * 64))
-    foreign = _ext("apply / stacks/app / dev-eu", 2, _record(plan_sha256="b" * 64), app_id=15368)
-    assert ag.plan_hashes_by_name([ours, foreign], "999") == {
-        "apply / stacks/app / dev-eu": "a" * 64
-    }

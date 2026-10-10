@@ -270,7 +270,7 @@ def test_the_check_runs_projection_carries_every_field_this_step_answers_from_it
 
 def test_a_check_run_in_that_shape_yields_its_plan_run():
     """Why `_CHECK_RUNS_PROJECTION` carries `app: {id: .app.id}` and not only the flattened pair
-    doctor's reducer reads: `plan_runs_by_name` filters on the NESTED id, so a projection carrying
+    doctor's reducer reads: `plan_records` filters on the NESTED id, so a projection carrying
     only `external_id` maps every name to nothing. This test cannot see the projection -- it is a
     hand-written line, reddening on the reader rather than on projection drift, and
     test_the_check_runs_projection_carries_every_field_this_step_answers_from_it is what pins the
@@ -287,8 +287,8 @@ def test_a_check_run_in_that_shape_yields_its_plan_run():
             "app_id": 4326562,
         }
     )
-    mapping = load_script("apply-gate").plan_runs_by_name([line], "4326562")
-    assert mapping == {"apply / stacks/app / dev-eu": "1281"}
+    mapping = load_script("apply-gate").plan_records([line], "4326562")
+    assert mapping == {"apply / stacks/app / dev-eu": ("1281", None)}
 
 
 def test_the_plan_records_are_read_from_the_listing_before_any_cell_download():
@@ -300,7 +300,7 @@ def test_the_plan_records_are_read_from_the_listing_before_any_cell_download():
 
 
 def test_the_doctor_lookup_reads_the_record_through_the_one_reader():
-    """`plan_runs_by_name`, behind apply-gate's `--plan-runs` mode, is the only reader of the
+    """`plan_records`, behind apply-gate's `--plan-runs` mode, is the only reader of the
     `external_id` record; a second reader here would be a second definition of what a usable record
     is."""
     body = _code(_gatherdoc_step()["run"])

@@ -79,8 +79,8 @@ def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
     # The recovery shape: one cell re-planned by a later run while its sibling is still named
     # by the first. Each must apply from the run that planned it, and each must be bound to
     # the plan text reviewed for IT -- one shared digest would let a sibling's text vouch for
-    # this cell's plan. Mutation: read `plan_hashes` from `plan_runs_by_name` inside
-    # `with_plan_runs` -- the digests become run ids, red.
+    # this cell's plan. Mutation: write `"plan_sha256": run` in `with_plan_runs` -- the
+    # digests become run ids, red.
     lines = _lines(_APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256="b" * 64))
     out = ad.with_plan_runs(_TWO_CELLS, lines, APP_ID)
     assert out == [
@@ -100,7 +100,7 @@ def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
 
 
 def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
-    """The cell IS in `plan_runs`, so the missing-plan-run arm cannot absorb this: the two
+    """The cell's record carries a run, so the missing-plan-run arm cannot absorb this: the two
     refusals name different causes and different remedies, and a reader told "no plan run"
     would go looking for a check that exists."""
     with pytest.raises(SystemExit) as exc_info:
@@ -123,6 +123,7 @@ def test_a_cell_whose_check_names_no_plan_run_refuses():
     # head_sha is the platform dependency this path exists to drop, and a silent default
     # applies a cell from nowhere. `stacks/dns` carries no check, and the message is the
     # missing-run one: a cell with no check at all is not a cell whose digest went missing.
+    # Mutation: raise the missing-digest refusal before the missing-run one -- red.
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, _lines(_APP_CHECK), APP_ID)
     assert str(exc_info.value) == (
