@@ -120,12 +120,20 @@ _MALFORMED = "malformed: expected `shipmate <verb> [env]` (try `shipmate help`)"
 
 
 @pytest.mark.parametrize(
-    "body", ["shipmate apply dev-eu foo", "shipmate apply DEV-EU", "shipmate unlock DEV-EU"]
+    "body",
+    [
+        "shipmate apply dev-eu foo",
+        "shipmate apply DEV-EU",
+        "shipmate unlock DEV-EU",
+        "shipmate apply dev_eu",
+        "shipmate plan Foo",
+    ],
 )
-def test_env_uppercase_rejected(body):
-    """Uppercase is outside the lowercase-only env charset, and nothing may follow the env, so
+def test_a_token_outside_the_grammar_is_malformed(body):
+    """The env charset is lowercase letters, digits and `-`, and nothing may follow the env, so
     these fail the grammar outright. Pinned as a deliberate choice: the user sees the malformed
-    error with its help hint, not a missing or invalid env one.
+    error with its help hint, not a missing or invalid env one. `dev_eu` is a valid environment
+    name that a comment cannot target.
 
     Mutation: restore the `(?: (?P<tag>[A-Za-z0-9][A-Za-z0-9/_:.-]*))?` group in `_CMD`, and
     every case parses and gets a verb-specific error instead.
@@ -203,8 +211,6 @@ def test_unknown_verb_points_at_help():
         "shipmate  apply",  # A double space.
         "shipmate apply dev-eu --auto",  # A token after the env.
         "shipmate apply dev-eu; rm -rf /",
-        "shipmate apply dev_eu",  # '_' is outside the env charset.
-        "shipmate plan Foo",
     ],
 )
 def test_malformed_command_points_at_help(body):

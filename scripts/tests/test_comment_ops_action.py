@@ -1239,20 +1239,30 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
 _VERB_TABLE = ("| verb | args | authorization |", "\n\n")
 
 
-def test_the_contract_verb_table_carries_every_verb():
+def test_the_contract_verb_table_carries_exactly_the_verbs():
     """CONTRACT.md calls `VERBS` "the single source of truth this table is derived from", but the
-    table is hand-maintained -- so it drifted. Derived from the registry here, never a hand-written
-    verb list, so the next verb added cannot repeat it."""
+    table is hand-maintained -- so it drifted. The rows' first cells must equal the set derived
+    from the registry, and the literal beside it catches a mistake in the registry itself.
+
+    Mutations: add a `shipmate destroy` row to the table; drop the `shipmate plan` row.
+    """
     start, end = _VERB_TABLE
     text = (ENGINE / "CONTRACT.md").read_text(encoding="utf-8")
     assert start in text, f"the verb table's header row, {start!r}, is gone"
     table = text.split(start, 1)[1].split(end, 1)[0]
-    assert cp.VERBS, "expected at least one verb in the registry"
-    for verb, spec in cp.VERBS.items():
-        invocation = " ".join(filter(None, ("shipmate", verb, spec["args"])))
-        assert f"| `{invocation}` |" in table, (
-            f"CONTRACT.md's verb table has no row for `{invocation}`"
-        )
+    rows = {line.split("|")[1].strip() for line in table.splitlines() if line.startswith("| `")}
+    derived = {
+        "`" + " ".join(filter(None, ("shipmate", verb, spec["args"]))) + "`"
+        for verb, spec in cp.VERBS.items()
+    }
+    expected = {
+        "`shipmate apply [env]`",
+        "`shipmate doctor`",
+        "`shipmate help`",
+        "`shipmate plan`",
+        "`shipmate unlock <env>`",
+    }
+    assert rows == derived == expected
 
 
 #: Every step of the action, in order, hand-written. One constant for the whole shape: it

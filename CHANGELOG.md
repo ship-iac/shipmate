@@ -14,7 +14,7 @@ section below names the SHA the release tags.
 
 - **The engine config is `.github/shipmate-config.yml`, written as YAML. Every value is read as written, and a duplicate key, an anchor, an alias or a tag refuses (`CONTRACT.md` §Keys). An empty `region`, and a variable reference on `shared`, `explicit` or `gated`, refuse too.**
 - **Runners need Python 3.12 or later and PyYAML ≥ 6. The engine installs `python3-yaml` where it is missing and `sudo` needs no password (`CONTRACT.md` §Runner prerequisites).**
-- **The comment grammar is `shipmate <verb> [env]`. A token after the env, or an env outside the lowercase charset, gets the malformed error, and `shipmate destroy` gets the unknown-verb error.**
+- **The comment grammar is `shipmate <verb> [env]`. A token after the env, or an env holding anything but lowercase letters, digits and `-`, gets the malformed error, and `shipmate destroy` gets the unknown-verb error.**
 - **Runners need curl 7.71 or later (`CONTRACT.md` §Runner prerequisites). Setup always passes `--retry-all-errors`, and an older curl fails the Terramate install with a message naming the floor.**
 
 ### Added
