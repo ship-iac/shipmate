@@ -6,6 +6,7 @@ of the table free to be rewritten. Each docstring names the mutation its test re
 
 import base64
 import json
+import sys
 
 import pytest
 from _loader import load_script
@@ -245,7 +246,7 @@ def test_read_table_resolves_references(monkeypatch):
     monkeypatch.setenv("GITHUB_REPOSITORY", "an-org/a-repo")
     monkeypatch.setenv("SHIPMATE_GITHUB_VARS", _ENUMERATION)
     blob = {"encoding": "base64", "content": base64.b64encode(_ROLE_REF.encode()).decode()}
-    monkeypatch.setattr(ec, "_run", lambda args: json.dumps(blob))
+    monkeypatch.setattr(sys.modules["_shipmate"], "_run", lambda args: json.dumps(blob))
     assert ec.read_table() == _ROLE_RESOLVED
 
 

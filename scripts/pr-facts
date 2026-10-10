@@ -23,12 +23,8 @@ state it.
 import json
 import os
 
-from _shipmate import _load, is_pr_number
-
-bm = _load("build-matrix")
-
-# The one `gh api` definition, aliased rather than copied.
-_gh_json = bm.gh_json
+from _shipmate import gh_json as _gh_json
+from _shipmate import is_pr_number
 
 #: The output keys, in the order they are written. Named once so the action's
 #: outputs and this list cannot drift apart silently.

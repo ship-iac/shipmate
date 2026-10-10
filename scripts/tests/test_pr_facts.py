@@ -57,7 +57,7 @@ def _main(monkeypatch, tmp_path, payload, gh=_no_api, repo="own/repo", module=pf
         calls.append(path)
         return gh(path)
 
-    # The alias binds at import, so patching `pf.bm.gh_json` would never be seen.
+    # The alias binds at import, so patching `_shipmate.gh_json` would never be seen.
     monkeypatch.setattr(module, "_gh_json", fake)
     try:
         module.main()

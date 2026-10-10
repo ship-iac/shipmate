@@ -13,13 +13,9 @@ import json
 import os
 import re
 
-from _shipmate import _load
+from _shipmate import _load, _run
 
 ec = _load("env-config")
-# One subprocess wrapper and one `gh api` reader for both modules, homed in the one
-# that `_load`s nothing; `_run`'s docstring says why that direction is the terminating one.
-_run = ec._run
-gh_json = ec.gh_json
 
 #: The two pull-request events `plan_workflow_error` requires a consumer workflow file on.
 _PR_EVENTS = ("pull_request", "pull_request_target")

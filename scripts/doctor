@@ -67,9 +67,9 @@ from _shipmate import (
     utf8_output,
     yaml_error_text,
 )
+from _shipmate import gh_json as _gh_json
 
 ec = _load("env-config")
-_gh_json = ec.gh_json
 sc = _load("summary-comment")
 ag = _load("apply-gate")
 _md_escape = sc._md_escape

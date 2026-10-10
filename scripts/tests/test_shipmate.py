@@ -2,10 +2,11 @@ import io
 import os
 import subprocess
 import sys
+import types
 
 import pytest
 from _loader import ENGINE
-from _shipmate import approval_rules, gate_check, is_pr_number, review_count, utf8_output
+from _shipmate import _run, approval_rules, gate_check, is_pr_number, review_count, utf8_output
 
 
 def test_utf8_output_switches_both_streams_from_cp1252_to_utf8(monkeypatch):
@@ -121,3 +122,18 @@ def test_is_pr_number_accepts_github_numbers_only():
         "7\n": False,
         "١": False,
     }
+
+
+def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
+    """`_run` re-raises `run`'s failure with `::error::` prepended and prints
+    nothing itself: the stderr rides in the message. Reddens on returning `run(args)` with no
+    `except` (the prefix is gone), and on writing stderr before raising."""
+
+    def fake_subprocess_run(args, capture_output=False, input=None):
+        return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"gh: boom\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+    with pytest.raises(SystemExit) as exc:
+        _run(["gh", "api", "repos/an-org/a-repo"])
+    assert str(exc.value) == "::error::command failed (1): gh api repos/an-org/a-repo\ngh: boom"
+    assert capsys.readouterr().err == ""

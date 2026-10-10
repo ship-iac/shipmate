@@ -5,13 +5,13 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``sys.modules``: every call returns a fresh module, so a test that monkeypatches one sibling's
 ``bm._run`` cannot leak the patch into every other holder of ``build_matrix``.
 
-Also holds the subprocess runner, which ``env-config`` wraps for the CI scripts, the secret
-scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
-switch for their console output. It also holds the pull-request number check that ``pr-facts``,
-``reply-comment`` and ``upsert-comment`` share, the ruleset and environment readers and the
-names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json`` summaries and builds
-this run's page link. It parses YAML: the strings-only config loader and the YAML 1.2
-workflow loader, both importing PyYAML only when first called.
+Also holds the subprocess runner, its ``::error::`` wrapper and ``gh api`` reader for the CI
+scripts, the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
+share, and the UTF-8 switch for their console output. It also holds the pull-request number
+check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the ruleset and
+environment readers and the names ``doctor`` and ``onboard`` share, reads the per-cell
+``cell.json`` summaries and builds this run's page link. It parses YAML: the strings-only
+config loader and the YAML 1.2 workflow loader, both importing PyYAML only when first called.
 """
 
 import functools
@@ -111,6 +111,29 @@ def run(args, secrets=(), stdin=None):
             + (f"\n{scrub(stderr, secrets)}" if stderr else "")
         )
     return p.stdout.decode("utf-8", "replace")
+
+
+def _run(args):
+    """stdout of `args` through `run`, its failure re-raised as an ::error:: annotation.
+    `run` stays unprefixed for the hand-run scripts that share it.
+
+    Homed here because every CI script already imports this module, so reaching it takes no
+    `_load` chain.
+    """
+    try:
+        return run(args)
+    except SystemExit as e:
+        raise SystemExit(f"::error::{e}") from None
+
+
+def gh_json(path, run=None):
+    """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit raises ::error::
+    with the tool's stderr in the message, from a single definition. Callers alias it as
+    `_gh_json` rather than repeating the `json.loads(_run(...))` pair.
+
+    Homed beside `_run` for the same reason.
+    """
+    return json.loads((run or _run)(["gh", "api", path]))
 
 
 def utf8_output():
