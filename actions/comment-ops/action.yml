@@ -307,7 +307,7 @@ runs:
           exit 0
         fi
         echo "head_sha=$head" >> "$GITHUB_OUTPUT"
-        # Harvest: latest shipmate-authored check run per name (check-ids filters on app slug/id), then
+        # Harvest: latest shipmate-authored check run per name (check-ids filters on app_slug and app.id), then
         # its annotations; never fails. harvest_failed is written once, after every step that could flip
         # it: an empty ann/<id>.json reads as "no annotations", so a failed fetch must not look complete.
         mkdir -p ann
@@ -315,7 +315,7 @@ runs:
         harvest_failed=false
         if GH_TOKEN="$APP_TOKEN" gh api --paginate \
              "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100" \
-             --jq '.check_runs[] | {id, name, status, started_at, external_id, app: {id: .app.id}, app_slug: .app.slug, app_id: .app.id}' > check-runs.jsonl; then
+             --jq '.check_runs[] | {id, name, status, started_at, external_id, app: {id: .app.id}, app_slug: .app.slug}' > check-runs.jsonl; then
           # check-ids mode also writes `harvest_pending`, true while any shipmate check run on
           # this commit is incomplete, so a report requested mid-run says so instead of printing
           # an all-clear nothing refreshes.

@@ -262,17 +262,17 @@ def test_the_check_runs_projection_carries_every_field_this_step_answers_from_it
     """One listing answers every question doctor asks about this head, so its projection carries all
     of them: `status` for the harvest-pending flag (without it every run reads as unfinished and the
     report tells every commenter to come back later, forever), `started_at` for check-ids' ranking,
-    `external_id` for the plan record each apply check carries, and the nested `app` object
-    apply-gate's fail-closed App filter reads -- the flattened `app_slug`/`app_id` pair beside it is
-    what doctor's own reducer reads."""
+    `external_id` for the plan record each apply check carries, the nested `app` object
+    apply-gate's fail-closed App filter and doctor's reducer both match the App id on, and
+    `app_slug`, which doctor's reducer reads to keep `github-actions` runs."""
     assert _projection(_gatherdoc_step()["run"]) == _CHECK_RUNS_PROJECTION
 
 
 def test_a_check_run_in_that_shape_yields_its_plan_run():
-    """Why `_CHECK_RUNS_PROJECTION` carries `app: {id: .app.id}` and not only the flattened pair
-    doctor's reducer reads: `plan_records` filters on the NESTED id, so a projection carrying
-    only `external_id` maps every name to nothing. This test cannot see the projection -- it is a
-    hand-written line, reddening on the reader rather than on projection drift, and
+    """Why `_CHECK_RUNS_PROJECTION` carries `app: {id: .app.id}`: `plan_records` filters on the
+    NESTED id, so a projection carrying only `external_id` maps every name to nothing. This test
+    cannot see the projection -- it is a hand-written line, reddening on the reader rather than on
+    projection drift, and
     test_the_check_runs_projection_carries_every_field_this_step_answers_from_it is what pins the
     file."""
     line = json.dumps(
@@ -538,7 +538,7 @@ def _code(block):
 #: The gatherdoc listing's whole jq projection, hand-written.
 _CHECK_RUNS_PROJECTION = (
     ".check_runs[] | {id, name, status, started_at, external_id, "
-    "app: {id: .app.id}, app_slug: .app.slug, app_id: .app.id}"
+    "app: {id: .app.id}, app_slug: .app.slug}"
 )
 
 

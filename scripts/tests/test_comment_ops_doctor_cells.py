@@ -79,7 +79,6 @@ def _run_block(tmp_path, undownloadable=()):
                     "external_id": record,
                     "app": {"id": int(_APP_ID)},
                     "app_slug": "shipmate",
-                    "app_id": int(_APP_ID),
                 }
             )
             + "\n"

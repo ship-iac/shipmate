@@ -1700,17 +1700,17 @@ def _ann(level="warning", title="t", message="m", check="shipmate · plan / ship
 
 
 def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
-    ga = ', "app_slug": "github-actions", "app_id": 15368}'
+    ga = ', "app_slug": "github-actions", "app": {"id": 15368}}'
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "2026-07-26T10:00:00Z"' + ga,
         '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z"' + ga,
         '{"id": 3, "name": "dns / dev-eu", "started_at": "2026-07-26T10:30:00Z"' + ga,
-        # The shipmate App's own check runs (the apply checks) are kept via `app_id`.
+        # The shipmate App's own check runs (the apply checks) are kept via `app.id`.
         '{"id": 4, "name": "apply / app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
-        + '"app_slug": "shipmate", "app_id": 999}',
+        + '"app_slug": "shipmate", "app": {"id": 999}}',
         # Third-party apps are dropped: they are outside the harvest's scope.
         '{"id": 5, "name": "codecov/project", "started_at": "2026-07-26T10:00:00Z", '
-        + '"app_slug": "codecov", "app_id": 254}',
+        + '"app_slug": "codecov", "app": {"id": 254}}',
     ]
     assert doctor.latest_check_ids(lines, app_id="999") == [
         (2, "app / dev-eu"),
@@ -1726,22 +1726,43 @@ def test_mirrored_app_check_does_not_displace_the_annotation_bearing_one():
     stay harvested."""
     autoplan = (
         '{"id": 1, "name": "app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
-        '"app_slug": "github-actions", "app_id": 15368}'
+        '"app_slug": "github-actions", "app": {"id": 15368}}'
     )
     # Later than the autoplan's: the mirror is created after it, and this keeps
     # the guard independent of whether GitHub populates started_at on a create.
     mirror = (
         '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z", '
-        '"app_slug": "shipmate", "app_id": 999}'
+        '"app_slug": "shipmate", "app": {"id": 999}}'
     )
     apply_check = (
         '{"id": 3, "name": "apply / app / dev-eu", "started_at": "2026-07-26T11:30:00Z", '
-        '"app_slug": "shipmate", "app_id": 999}'
+        '"app_slug": "shipmate", "app": {"id": 999}}'
     )
     assert doctor.latest_check_ids([autoplan, mirror, apply_check], app_id="999") == [
         (1, "app / dev-eu"),
         (3, "apply / app / dev-eu"),
     ]
+
+
+def test_the_app_is_matched_on_its_nested_app_id_alone():
+    """An App row carries no `app_slug` here, so only `app.id` can keep the `apply / ` run.
+
+    Mutation: match `run.get("app_id")` in `_parse_check_run` -- the apply row is lost."""
+    lines = [
+        '{"id": 2, "name": "app / dev-eu", "started_at": "t", "app": {"id": 999}}',
+        '{"id": 3, "name": "apply / app / dev-eu", "started_at": "t", "app": {"id": 999}}',
+    ]
+    assert doctor.latest_check_ids(lines, app_id="999") == [(3, "apply / app / dev-eu")]
+
+
+def test_a_check_run_whose_app_is_not_an_object_is_skipped_without_raising():
+    """Mutation: read `run["app"]["id"]` unguarded in `_parse_check_run` -- TypeError."""
+    lines = [
+        '{"id": 3, "name": "apply / app / dev-eu", "started_at": "t", "app": "shipmate"}',
+        '{"id": 4, "name": "apply / db / dev-eu", "started_at": "t"}',
+    ]
+    assert doctor.latest_check_ids(lines, app_id="999") == []
+    assert doctor.harvest_pending(lines, app_id="999") is False
 
 
 def test_harvest_drops_notices_and_doctors_own_annotations():
@@ -2067,14 +2088,14 @@ def test_harvest_pending_ignores_third_party_check_runs():
     # every report claim the commit's runs had not finished.
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
-        '{"id": 5, "name": "codecov/project", "app_slug": "codecov", "app_id": 254, '
+        '{"id": 5, "name": "codecov/project", "app_slug": "codecov", "app": {"id": 254}, '
         + '"status": "in_progress"}',
     ]
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is False
 
 
 _QUEUED_APP_APPLY = (
-    '{"id": 3, "name": "apply / app / dev-eu", "app_slug": "shipmate", "app_id": 999, '
+    '{"id": 3, "name": "apply / app / dev-eu", "app_slug": "shipmate", "app": {"id": 999}, '
     '"status": "queued"}'
 )
 
@@ -2106,7 +2127,7 @@ def test_harvest_pending_counts_a_queued_app_run_outside_the_apply_checks():
     """Mutation: skip every App-authored run -- False."""
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
-        '{"id": 6, "name": "db / dev-eu", "app_slug": "shipmate", "app_id": 999, '
+        '{"id": 6, "name": "db / dev-eu", "app_slug": "shipmate", "app": {"id": 999}, '
         '"status": "queued"}',
     ]
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is True

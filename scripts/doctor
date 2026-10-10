@@ -2045,8 +2045,9 @@ def _parse_check_run(line, app_id):
     # github-actions authors the check-runs carrying shipmate's ::warning:: emissions; the App
     # is matched by id, its slug being org-dependent. A consumer's own workflows pass too,
     # hence the generic "workflow runs".
+    app = run.get("app")
     if run.get("app_slug") != "github-actions" and not (
-        app_id and str(run.get("app_id")) == str(app_id)
+        app_id and isinstance(app, dict) and str(app.get("id")) == str(app_id)
     ):
         return None
     return run
