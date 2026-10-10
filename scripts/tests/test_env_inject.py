@@ -14,17 +14,14 @@ from _loader import load_script
 
 env_inject = load_script("env-inject")
 
-#: Hand-written message templates; the script builds the same text from `_TABLE` and the value.
-NOT_JSON = (
-    "::error::SHIPMATE_TF_VARS must be the JSON object the cell step passes as "
-    "toJSON(matrix.tf_vars), and {} is not JSON. An empty value means the step omitted "
-    "the input."
+#: Hand-written message template; the script builds the same text from `_TABLE`, the value
+#: and the rule it broke.
+REFUSAL = (
+    "::error::SHIPMATE_TF_VARS must be the JSON object of strings the cell step passes as "
+    "toJSON(matrix.tf_vars), and {raw} {rule}. An empty value means the step omitted the "
+    "input; null is what toJSON renders for a matrix field nothing stamped."
 )
-NOT_AN_OBJECT_OF_STRINGS = (
-    "::error::SHIPMATE_TF_VARS must be a JSON object of strings, got {}. "
-    "The empty table is {{}}; null is what toJSON renders for a matrix field nothing "
-    "stamped, and is not the same thing."
-)
+NOT_AN_OBJECT = "is not a JSON object of strings"
 
 
 def _read_github_env(text):
@@ -100,12 +97,12 @@ def test_the_table_round_trips_values_only_json_carries():
 @pytest.mark.parametrize(
     ("raw", "message"),
     [
-        ("", NOT_JSON.format("''")),
-        ("{oops}", NOT_JSON.format("'{oops}'")),
-        ("null", NOT_AN_OBJECT_OF_STRINGS.format("'null'")),
-        ("[]", NOT_AN_OBJECT_OF_STRINGS.format("'[]'")),
-        ("3", NOT_AN_OBJECT_OF_STRINGS.format("'3'")),
-        ('{"TF_VAR_env": 3}', NOT_AN_OBJECT_OF_STRINGS.format("'{\"TF_VAR_env\": 3}'")),
+        ("", REFUSAL.format(raw="''", rule="is empty")),
+        ("not json", REFUSAL.format(raw="'not json'", rule="is not JSON")),
+        ("null", REFUSAL.format(raw="'null'", rule=NOT_AN_OBJECT)),
+        ("[]", REFUSAL.format(raw="'[]'", rule=NOT_AN_OBJECT)),
+        ("3", REFUSAL.format(raw="'3'", rule=NOT_AN_OBJECT)),
+        ('{"a": 1}', REFUSAL.format(raw="'{\"a\": 1}'", rule=NOT_AN_OBJECT)),
     ],
     ids=["absent", "malformed", "null", "list", "number", "non-string value"],
 )
@@ -115,8 +112,8 @@ def test_a_table_that_is_not_an_object_of_strings_refuses(raw, message):
     them authenticates the cell and then runs it against another environment's workspace, which
     no later step can tell from a folder layout.
 
-    Mutation: drop the shape check and return whatever parsed, which turns the last four cases
-    into an empty injection.
+    Mutations: pass `null_is_empty=True` to `_parse_object`, which turns the `null` case into an
+    empty injection; drop the empty-value refusal, which turns the absent case into one.
     """
     with pytest.raises(SystemExit) as excinfo:
         env_inject.resolve({"SHIPMATE_TF_VARS": raw})

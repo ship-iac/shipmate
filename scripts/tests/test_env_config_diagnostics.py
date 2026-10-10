@@ -26,13 +26,13 @@ UNUSED_DEV_US = (
     "::warning::the environment table declares dev-us, which no stack tags. Remove the "
     "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
     "because the table is read from the default branch and the tags from this branch, so "
-    "an environment arrives and leaves over two pull requests."
+    "an environment or a workload arrives and leaves over two pull requests."
 )
 UNUSED_TWO = (
     "::warning::the environment table declares dev-us, prod-eu, which no stack tags. "
     "Remove the entry, or tag the stacks that belong to it. This is a warning rather than "
     "a refusal because the table is read from the default branch and the tags from this "
-    "branch, so an environment arrives and leaves over two pull requests."
+    "branch, so an environment or a workload arrives and leaves over two pull requests."
 )
 
 TABLE: dict[str, Any] = {
@@ -101,7 +101,7 @@ def test_a_misspelled_flagged_entry_warns_as_unused(capsys):
         "::warning::the environment table declares prd, which no stack tags. Remove the "
         "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
         "because the table is read from the default branch and the tags from this branch, so "
-        "an environment arrives and leaves over two pull requests."
+        "an environment or a workload arrives and leaves over two pull requests."
     ]
 
 
@@ -154,7 +154,7 @@ UNUSED_NEEDS = (
     "::warning::needs names ghost, which no stack tags, so it orders nothing. Remove "
     "the entry, or tag the stacks that belong to it. This is a warning rather than a "
     "refusal because the table is read from the default branch and the tags from this "
-    "branch, so an environment arrives and leaves over two pull requests."
+    "branch, so an environment or a workload arrives and leaves over two pull requests."
 )
 
 
@@ -209,20 +209,21 @@ UNTAGGED_NET = (
     "::warning::environments.dev-eu.workloads lists net, which no stack in dev-eu tags. "
     "Tag a stack with each, or remove it from the list once the pull request that drops its "
     "last tag has merged. This is a warning rather than a refusal because the table is read "
-    "from the default branch and the tags from this branch, so a workload arrives and leaves "
-    "over two pull requests."
+    "from the default branch and the tags from this branch, so an environment or a workload "
+    "arrives and leaves over two pull requests."
 )
 UNUSED_DEV_EU = (
     "::warning::the environment table declares dev-eu, which no stack tags. Remove the "
     "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
     "because the table is read from the default branch and the tags from this branch, so "
-    "an environment arrives and leaves over two pull requests."
+    "an environment or a workload arrives and leaves over two pull requests."
 )
 
 
 def test_a_listed_workload_no_stack_tags_warns(capsys):
-    """Mutation: hand `_report_unused` the matrix environments, each tagged by nothing,
-    instead of `tagged` -- the warning names `core, net`."""
+    """Mutations: hand `_report_unused` the matrix environments, each tagged by nothing,
+    instead of `tagged` -- the warning names `core, net`; drop the workload loop from
+    `_report_unused` -- nothing prints."""
     table = _validate(_LISTING, matrix_envs=("dev-eu",), tagged=_scan(**{"dev-eu": {"core"}}))
     assert table == _LISTING
     assert capsys.readouterr().out.splitlines() == [UNTAGGED_NET]

@@ -997,7 +997,7 @@ _UNUSED_DEV_US = (
     "::warning::the environment table declares dev-us, which no stack tags. Remove the "
     "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
     "because the table is read from the default branch and the tags from this branch, so "
-    "an environment arrives and leaves over two pull requests."
+    "an environment or a workload arrives and leaves over two pull requests."
 )
 
 
