@@ -163,23 +163,21 @@ def test_every_job_binds_the_environment_it_should_and_no_other():
     assert parsed == {"detect": None, "drift": _CELL_ENV, "issues": "shipmate-engine"}
 
 
-def test_every_checkout_takes_the_full_history_and_no_ref():
+def test_every_checkout_takes_no_with_block():
     """Whole `with:`, both jobs that check out. A sweep plans the default branch's own tip, so
     naming a `ref:` here would let a dispatch aim the sweep elsewhere; the two `if:` gates would
-    then be the only thing left refusing it. `fetch-depth: 0` is load-bearing: without the full
-    history `terramate list` sees no stacks.
+    then be the only thing left refusing it. Nothing in a sweep diffs, so the default depth of
+    one commit is enough.
 
-    Mutations: add `ref: ${{ github.sha }}` to either consumer checkout, and delete
-    `fetch-depth` from either.
+    Mutations: add `ref: ${{ github.sha }}` to each checkout, and add `fetch-depth: 0` to each.
     """
-    # PyYAML gives the int 0, not "0".
     for job_id in ("detect", "drift"):
         checkouts = [
             s.get("with")
             for s in workflow_yaml(WF)["jobs"][job_id]["steps"]
             if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
-        assert checkouts == [{"fetch-depth": 0}], job_id
+        assert checkouts == [None], job_id
 
 
 def test_the_cell_passes_this_whole_with_block():

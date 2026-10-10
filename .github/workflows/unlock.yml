@@ -35,7 +35,7 @@ jobs:
       cells: ${{ steps.d.outputs.cells }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
+        with: { ref: "${{ inputs.ref }}" }
       - uses: $/actions/setup
       - id: d
         uses: $/actions/unlock-detect
@@ -86,7 +86,7 @@ jobs:
     name: unlock / ${{ matrix.stack }} / ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0, ref: "${{ inputs.ref }}" }
+        with: { ref: "${{ inputs.ref }}" }
       - uses: $/actions/setup
       # The table chooses role and region; detect resolves a reference in it from a repository or
       # organization variable. A vars.* fallback would pick a role the table did not and stay green.

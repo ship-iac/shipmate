@@ -2546,7 +2546,7 @@ _FORK_WARNED = [
         id="unsafe_pr_checkout_as_an_expression_is_warned",
     ),
     # Flow style is not exotic authoring: the engine's own `.github/workflows/apply.yml`
-    # writes `with: { fetch-depth: 0, ref: ... }`. Missing it is fail-open on the outermost
+    # writes `with: { ref: ... }`. Missing it is fail-open on the outermost
     # guard of the plan path.
     pytest.param(
         {
