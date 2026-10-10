@@ -58,6 +58,7 @@ jobs:
           ref: ${{ needs.facts.outputs.head-sha }}
           fetch-depth: 0
       - uses: $/actions/setup
+        with: { tofu: "false" }
       # Before the two terramate steps, not after: this step is where a fork's pull request is
       # refused, and `terramate fmt`/`generate` evaluate the checked-out HCL.
       - id: matrix
@@ -90,7 +91,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.facts.outputs.head-sha }}
-          fetch-depth: 0
       - uses: $/actions/setup
       - name: Configure cloud credentials (AWS OIDC)
         if: ${{ matrix.role_arn != '' }}

@@ -100,23 +100,25 @@ def test_every_checkout_takes_the_head_the_facts_job_named():
     checkout that is not `expected-head`, so its cell and its checkout must agree; `detect` has
     no such refusal, and a `github.sha` there builds the matrix from base-branch content while
     build-matrix's own refusals still pass, because they read the facts job. `fetch-depth: 0` is
-    load-bearing in both: without the full history `terramate list --changed` finds nothing and
-    reports it as no change.
+    load-bearing in `detect` only: without the full history `terramate list --changed` and
+    `lost_env_tags`' `git diff` find nothing and report it as no change. `plan` diffs nothing.
 
     Mutations: `ref: ${{ github.sha }}` on `detect`, the same on `plan`, `fetch-depth` deleted
-    from each, and `expected-head: ${{ github.sha }}` on the cell.
+    from `detect`, `fetch-depth: 0` added to `plan`, and `expected-head: ${{ github.sha }}` on
+    the cell.
     """
+    head = "${{ needs.facts.outputs.head-sha }}"
     # PyYAML gives the int 0, not "0".
-    expected = {"ref": "${{ needs.facts.outputs.head-sha }}", "fetch-depth": 0}
-    for job_id in ("detect", "plan"):
+    expected = {"detect": {"ref": head, "fetch-depth": 0}, "plan": {"ref": head}}
+    for job_id, with_block in expected.items():
         checkouts = [
             s.get("with")
             for s in _job(job_id)["steps"]
             if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
-        assert checkouts == [expected], job_id
+        assert checkouts == [with_block], job_id
     cell = _step("plan", "actions/plan-cell")
-    assert cell["with"]["expected-head"] == "${{ needs.facts.outputs.head-sha }}"
+    assert cell["with"]["expected-head"] == head
 
 
 def test_the_cell_binds_the_environment_detect_resolved():

@@ -1,10 +1,12 @@
 """actions/setup resolves its tool versions from the release's own VERSIONS file.
 
-The action takes no input: it reads `$GITHUB_ACTION_PATH/../../VERSIONS` at the SHA the consumer
-pinned. The structural guards pin the shape that makes that file the source -- the resolve step
-runs before both installers, and both installers read its outputs -- and the behavioural ones
-execute the shipped `run:` body against a hand-written VERSIONS fixture. One case runs the
-repository's own file, because that is the file every consumer of this release reads.
+No input selects a version: the action reads `$GITHUB_ACTION_PATH/../../VERSIONS` at the SHA the
+consumer pinned. Its one input, `tofu`, only decides whether OpenTofu is installed at all.
+
+The structural guards pin the shape that makes that file the source -- the resolve step runs
+before both installers, and both installers read its outputs -- and the behavioural ones execute
+the shipped `run:` body against a hand-written VERSIONS fixture. One case runs the repository's
+own file, because that is the file every consumer of this release reads.
 
 The fail-closed property is what the behavioural cases exist for: `opentofu/setup-opentofu`
 resolves an empty `tofu_version` as "latest", so a missing file or a missing key must fail the
@@ -100,9 +102,36 @@ def test_both_installers_read_the_resolve_steps_outputs():
     assert step_by(_ACTION, name="Resolve versions").get("id") == "versions"
 
 
-def test_the_action_takes_no_input():
-    """Reds when a version override input comes back: the VERSIONS file is the only source."""
-    assert "inputs" not in action_yaml(_ACTION)
+#: The action's whole `inputs:` mapping. A version override input would read as a second source
+#: beside VERSIONS, so any input beyond `tofu` reds this.
+_EXPECTED_INPUTS = {
+    "tofu": {
+        "description": 'Whether to install OpenTofu. "false" for jobs that never run it.',
+        "required": False,
+        "default": "true",
+    },
+}
+
+
+def test_the_only_input_is_the_tofu_switch():
+    """Mutations: `default: "true"` -> `"false"`; add a `tofu-version` input."""
+    assert action_yaml(_ACTION).get("inputs") == _EXPECTED_INPUTS
+
+
+def test_only_the_opentofu_install_is_gated_on_the_tofu_input():
+    """Composite inputs are strings, and expression string comparison ignores case, so
+    anything but "false" in any case installs OpenTofu.
+
+    Mutations: `!=` -> `==` in the `Install OpenTofu` step's `if:`; add
+    `if: ${{ inputs.tofu != 'false' }}` to `Install Terramate`.
+    """
+    got = {s.get("name"): s.get("if") for s in action_steps(_ACTION)}
+    assert got == {
+        "Resolve versions": None,
+        "Install OpenTofu": "${{ inputs.tofu != 'false' }}",
+        "Install Terramate": None,
+        "Provider plugin cache": None,
+    }
 
 
 def _resolve(tmp_path, versions=_FIXTURE_VERSIONS):
