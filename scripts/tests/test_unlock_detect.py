@@ -38,9 +38,9 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
     """Stub the tag walk and the check-run listing; returns the kwargs `env_membership` was
     called with.
 
-    Only the walk is stubbed. The real `build_matrix` turns its output into cells, so the
-    matrix-limit and slug-collision guards it carries stay on the unlock path instead of being
-    stubbed out of it.
+    Only the walk is stubbed. The real `full_tree` and `cap_cells` turn its output into cells, so
+    the matrix-limit and slug-collision guards they carry stay on the unlock path instead of
+    being stubbed out of it.
 
     `checks` are stubbed as the raw JSONL `gh` emits, not as a set of names, so the queue's
     membership rule itself is under test rather than assumed: a construction that asks the
@@ -146,7 +146,7 @@ def test_unlock_non_empty_queue_does_not_warn(monkeypatch, tmp_path, capsys):
 
 
 def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_path):
-    """build_matrix refuses a cell set above the GHA matrix limit, and over a whole-tree walk
+    """`cap_cells` refuses a cell set above the GHA matrix limit, and over a whole-tree walk
     that ceiling counts every stack x every environment. Built for all envs and filtered
     afterwards, a repository past the limit could never unlock any environment however short
     its queue, and the refusal would tell the operator to split a pull request that does not

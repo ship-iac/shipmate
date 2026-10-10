@@ -7,7 +7,7 @@ read by nothing (`CONTRACT.md` §Resolution).
 `scripts/env-inject` refuses anything but a JSON object of strings and there is no default
 anywhere on the route, so a row that reaches a cell without `tf_vars` fails that cell -- and one
 call site left unstamped fails one workflow while the other five stay green. The stamp is applied
-at each call site rather than inside `build_matrix`, which stays pure, so the sites are an
+at each call site rather than inside `full_tree`, which stays pure, so the sites are an
 enumeration and each one needs its own assertion.
 
 Each assertion runs the detect's own `main()` through the stub scaffolding its module already
@@ -124,7 +124,7 @@ def test_the_drift_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
 
 def test_the_deploy_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
     """Call site 3: `deploy-detect` main(), which reaches the builder through `compute_cells`
-    and so is invisible to a search for `build_matrix`.
+    and so is invisible to a search for `full_tree`.
 
     Mutations: pass `"plan"` at that call site, and every post-merge apply runs with the
     read-only role; drop the `stamp_rows` wrapper from it.

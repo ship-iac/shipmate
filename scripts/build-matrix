@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compute the plan matrix: changed stacks x their env tags -> cells.
 
-Pure core (build_matrix) is unit-tested; main() gathers inputs from terramate
+Pure core (full_tree, cap_cells) is unit-tested; main() gathers inputs from terramate
 (the changed stack set + each stack's tags) and writes GitHub Actions job
 outputs. Environment membership comes purely from stack tags (CONTRACT tag
 grammar: env/<name>). The environment table is a separate read and does need
@@ -204,11 +204,6 @@ def cap_cells(cells, all_stacks):
     return cells
 
 
-def build_matrix(envs, stacks_by_env, tags_by_stack, all_stacks=False):
-    """`full_tree` of `envs`, capped at the matrix limit."""
-    return cap_cells(full_tree(envs, stacks_by_env, tags_by_stack), all_stacks)
-
-
 _ZERO_SHA = "0" * 40
 _ENV_TAG_LITERAL = re.compile(f'"env/{ec._ENV_ENTRY.pattern}"')
 
@@ -380,7 +375,7 @@ def stamp_rows(cells, table, tier):
 
     `tier` is the calling detect's path (`plan` or `apply`) and is always passed
     explicitly: one call site serves both tiers, so nothing may infer it. Applied at each
-    site that emits rows rather than inside `build_matrix`, which stays pure and
+    site that emits rows rather than inside `full_tree`, which stays pure and
     unit-testable. `test_row_stamp_guard.py` pins each site.
 
     A row whose `env_binding` is not a non-empty string refuses before any caller writes a

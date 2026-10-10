@@ -132,11 +132,13 @@ def test_a_run_with_neither_source_is_refused(monkeypatch, tmp_path):
     )
 
 
-def test_on_demand_marks_the_dispatch_leg_only(monkeypatch):
+def test_on_demand_marks_the_dispatch_leg_only(monkeypatch, tmp_path):
     """`on_demand` says which leg produced the facts, which is what lets an explicitly requested
-    plan override the draft skip, so the two legs must not answer it the same way."""
+    plan override the draft skip, so the two legs must not answer it the same way. Mutation:
+    pass `"true"` to `_facts` on `main`'s payload leg."""
+    text, _ = _main(monkeypatch, tmp_path, {"pull_request": _PAYLOAD_PR})
+    assert text.splitlines()[-1] == "on_demand=false"
     monkeypatch.setattr(pf, "_gh_json", _api(_API_PR))
-    assert pf.from_payload(_PAYLOAD_PR)["on_demand"] == "false"
     assert pf.from_api("42", "own/repo")["on_demand"] == "true"
 
 
@@ -177,7 +179,7 @@ def test_a_deleted_fork_head_is_refused_as_such():
     empty head repository for the fork refusal to read."""
     pr = dict(_PAYLOAD_PR, head={"sha": "a" * 40, "repo": None})
     with pytest.raises(SystemExit) as exc:
-        pf.from_payload(pr)
+        pf._facts(pr, "false")
     assert "deleted fork" in str(exc.value)
 
 
@@ -193,7 +195,7 @@ def test_a_missing_fact_is_refused_and_named(patch, named, unnamed):
     """Each absent fact is refused by name: an empty head SHA would leave the checkout on the
     base and green a gate over a pull request nobody planned."""
     with pytest.raises(SystemExit) as exc:
-        pf.from_payload(dict(_PAYLOAD_PR, **patch))
+        pf._facts(dict(_PAYLOAD_PR, **patch), "false")
     message = str(exc.value)
     assert [key for key in named if key in message] == named
     assert [key for key in unnamed if key in message] == []
@@ -206,7 +208,7 @@ def test_a_missing_fact_is_refused_and_named(patch, named, unnamed):
 def test_is_draft_is_the_string_the_guards_compare_against(draft, expected):
     """The summary job's guard compares against 'false'; a Python bool renders as
     'True' and matches neither."""
-    value = pf.from_payload(dict(_PAYLOAD_PR, draft=draft))["is_draft"]
+    value = pf._facts(dict(_PAYLOAD_PR, draft=draft), "false")["is_draft"]
     assert value == expected
     assert isinstance(value, str)
 
