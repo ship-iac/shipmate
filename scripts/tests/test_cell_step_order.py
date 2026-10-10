@@ -5,7 +5,10 @@ Restored workspace state with no `.terraform` record makes `init` ask about stat
 also precede the plan or apply: state restored after them is state they never read, a silent
 wrong plan rather than an error. `Locate state` sits between the two because it reads the record
 init writes. `actions/cell-init` holds the init, behind the provider cache restore that must
-precede it, and the state restore after it; each cell calls it as one step.
+precede it, and the state restore after it; each cell calls it as one step. In drift-cell the
+provider cache check and save follow the `cell-init` call, so a failed state locate or restore
+skips that save; accepted, because the cell has already failed and the cost is one re-download
+on the next sweep.
 
 The whole ordered list of step names per cell, hand-written, so a moved, dropped or added step
 reds here.

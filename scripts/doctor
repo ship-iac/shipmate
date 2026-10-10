@@ -2267,8 +2267,8 @@ def load_annotations(ctx):
         cid, name = line.split("\t", 1)
         payload = pathlib.Path(ctx["annotations_dir"]) / f"{cid.strip()}.json"
         try:
-            # A `[]` payload is indistinguishable from the gather step's `echo '[]'` fallback for
-            # a failed fetch, so the incomplete harvest has to be signalled out of band, via
+            # A `[]` payload is indistinguishable from the `[]` check-ids mode writes for a failed
+            # annotations fetch, so the incomplete harvest has to be signalled out of band, via
             # ctx["harvest_failed"], and cannot be inferred from the payloads.
             rows = json.loads(payload.read_text(encoding="utf-8"))
         except (OSError, ValueError):

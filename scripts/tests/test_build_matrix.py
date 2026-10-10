@@ -846,11 +846,11 @@ def test_main_refuses_a_missing_plan_workflow(monkeypatch, tmp_path):
 
 
 def test_build_matrix_action_declares_its_inputs():
-    """No input here can turn a refusal off: `head-repo` and `head-sha` are what the two
-    refusals key on and an empty value refuses either, while `sweep` only states that the
-    run is a drift sweep with no pull request at all, and `tags` is refused outside one. All
-    are settable only by this repository's own default-branch workflow, which a pull-request
-    author cannot edit, and the direction is chosen so a forgotten input refuses (plan
+    """`sweep: "true"` is the one input that skips a refusal: it skips the head-repository and
+    head-commit refusals, and only engine `drift.yml` sets it, in engine-owned YAML a
+    pull-request author cannot edit. No other input turns a refusal off: `head-repo` and
+    `head-sha` are what those two refusals key on and an empty value refuses either, and `tags`
+    is refused outside a sweep. The direction is chosen so a forgotten input refuses (plan
     wrapper) or reddens the sweep (drift), never plans a fork.
 
     Hand-written, name -> default; descriptions are prose and not pinned. Mutation: restore

@@ -21,7 +21,7 @@ outputs:
     description: The outcome of `tofu init` itself, not of this action. A cache step failing first skips init, and the caller then reports "an earlier step failed" rather than a failed init.
     value: ${{ steps.init.outcome }}
   state-path:
-    description: The local state path read from the stack's `tofu init` record. Empty for a backend other than `local`, which skips the restore.
+    description: The local state path read from the stack's `tofu init` record. Empty for a backend other than `local`, which skips the restore, and also when `Locate state` failed or was skipped (init failed) or `cell-init` was not reached. Only `restore-outcome == 'success'` means state was restored.
     value: ${{ steps.locate-state.outputs.path }}
   locate-outcome:
     description: The outcome of locating the state path. `success` is the only value meaning the step ran and succeeded; `skipped` (an earlier step here failed) and empty (the step was not reached) both mean no path was read.

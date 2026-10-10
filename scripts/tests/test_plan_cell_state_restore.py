@@ -1,4 +1,4 @@
-"""plan-cell restores flavor state itself, on the same terms as drift-cell.
+"""plan-cell restores flavor state through its `cell-init` call, on the same terms as drift-cell.
 
 The engine's reusable plan workflow carries no slug step and no `actions/state` call: the cell
 computes the slug and its `cell-init` call restores state at the path it located after init. The
