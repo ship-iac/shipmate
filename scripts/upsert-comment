@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Create or update the sticky comment a body file names on a pull request.
+
+Usage: `upsert-comment PR BODYFILE [--update-only]`, with `gh` (`GH_TOKEN`) against
+`GITHUB_REPOSITORY`. A PR that is not a pull-request number exits 1 with `::error::` before the
+body file is read or any `gh` call, because it is bound into the API path.
+
+The marker is BODYFILE's first line, which must be a whole `<!-- shipmate:<name> -->` with a
+1-40 letter lowercase name; anything else exits 1 with `::error::` before any `gh` call. The
+renderers (`summary-comment`, `doctor`) emit it first, so the body names its own comment.
+
+The listing keeps only Bot-authored comments, because the App's bot login derives from the App
+name, which an org may slug differently. A comment matches when its body starts with the marker,
+and the first match in listing order wins. `startswith`, not `contains`: the plan comment embeds
+`tofu plan` output and doctor's report interpolates repository data, so either can quote the
+other's marker, and a `contains` match would PATCH one body over the other comment. Only the
+first 64 characters of each body reach this script, which the marker's length bound keeps inside.
+
+Prints exactly one word and exits 0:
+
+- `updated`: the first match was PATCHed.
+- `created`: no match, so the body was POSTed.
+- `skipped`: no match under `--update-only`; nothing written.
+- `list-failed`: the listing failed on any page, or printed a line that is not an `{id, head}`
+  object, so nothing was written; the error goes to stderr without `::error::`, because the
+  caller degrades on it. A POST here would create a second sticky that later runs could PATCH
+  instead of this one.
+
+A failed PATCH or POST exits 1 with `::error::`. gh's response to a write never reaches stdout.
+"""
+
+import json
+import os
+import re
+import sys
+
+from _shipmate import is_pr_number, run, utf8_output
+
+MARKER = re.compile(r"<!-- shipmate:[a-z]{1,40} -->")
+JQ = '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}'
+
+
+def find_existing(repo, pr, marker):
+    """The id of the first Bot comment whose body starts with `marker`, or None.
+
+    Raises SystemExit when the listing fails: `run` returns stdout only on exit 0, so a failure
+    on a later page yields no ids at all rather than the earlier pages' ones. A line that does
+    not parse raises SystemExit too, so it degrades like a failed listing instead of a traceback.
+    """
+    out = run(
+        ["gh", "api", "--paginate", "--jq", JQ, f"repos/{repo}/issues/{pr}/comments?per_page=100"]
+    )
+    for line in out.splitlines():
+        if line.strip():
+            try:
+                comment = json.loads(line)
+                cid, matched = comment["id"], comment["head"].startswith(marker)
+            except (ValueError, LookupError, TypeError, AttributeError) as exc:
+                raise SystemExit(f"unparseable comment listing line: {line!r}") from exc
+            if matched:
+                return cid
+    return None
+
+
+def main():
+    utf8_output()
+    args = sys.argv[1:]
+    if len(args) not in (2, 3) or args[2:] not in ([], ["--update-only"]):
+        sys.exit("::error::usage: upsert-comment PR BODYFILE [--update-only]")
+    pr, path = args[0], args[1]
+    # Bound into the API path.
+    if not is_pr_number(pr):
+        sys.exit(f"::error::PR must be a pull request number (got: {pr})")
+    with open(path, encoding="utf-8") as f:
+        marker = f.readline().rstrip("\r\n")
+    if not MARKER.fullmatch(marker):
+        sys.exit(f"::error::{path}: the first line must be a shipmate marker (got: {marker})")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    try:
+        cid = find_existing(repo, pr, marker)
+    except SystemExit as exc:
+        print(exc.code, file=sys.stderr)
+        print("list-failed")
+        return
+    if cid is None and args[2:]:
+        print("skipped")
+        return
+    if cid is None:
+        argv, word = ["gh", "api", f"repos/{repo}/issues/{pr}/comments"], "created"
+    else:
+        argv, word = ["gh", "api", "-X", "PATCH", f"repos/{repo}/issues/comments/{cid}"], "updated"
+    try:
+        run([*argv, "-F", f"body=@{path}"])
+    except SystemExit as exc:
+        sys.exit(f"::error::could not write the sticky comment: {exc.code}")
+    print(word)
+
+
+if __name__ == "__main__":
+    main()

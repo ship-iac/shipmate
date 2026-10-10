@@ -88,8 +88,7 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.parse.outputs.error }}
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
 
     - name: Post help
       if: ${{ steps.parse.outputs.route == 'help' }}
@@ -164,8 +163,7 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.access.outputs.reason }}
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
 
     - name: Permission check failed
       # A failed step skips every later `success()`-gated step, so without `failure()` here
@@ -181,8 +179,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "could not decide the commenter's permission on this repository, so this command was not run. This run's log has the error; comment again."
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
         exit 1
 
     - name: Authorize plan
@@ -224,8 +221,7 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.planauthz.outputs.reason }}
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
 
     - uses: $/actions/python-yaml
       # Doctor and gate-config parse YAML; a refused commenter costs no install.
@@ -265,8 +261,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository, with every permission it requests accepted? Ask an org admin to install it, or to add any permission the App's settings lack and accept the request (docs/github-app.md, Re-approve after permission changes), then re-run `shipmate doctor`."
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
 
     - name: "Doctor: probe the manifest's full permission set"
       id: fullmint
@@ -399,38 +394,21 @@ runs:
         fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md
         # `retry_hint` is resolved by the job-summary write, the one place that knows whether
-        # the summary actually carries the report, so the listing-failure branch stays a single
-        # `echo`: a nested `if` inside that asserted degrade block would hide the warning.
+        # the summary actually carries the report, so the listing-failure branch stays one `echo`.
         retry_hint="comment shipmate doctor again to retry"
         # The job summary is written first so the run page keeps the report when the comment
-        # listing (exit 0 by design) or the PATCH/POST fails. Reviewer-facing only, never fatal,
-        # and not `|| true` (a guard forbids it here); `:-` keeps `set -u` alive when unset.
+        # listing (degraded by design) or the PATCH/POST fails. Reviewer-facing only, so it warns
+        # rather than fails; `:-` keeps `set -u` alive when unset.
         if [ -z "${GITHUB_STEP_SUMMARY:-}" ] || ! cat doctor.md >> "$GITHUB_STEP_SUMMARY"; then
           echo "::warning::could not publish the doctor report to this job's summary; it survives only as the pull request comment"
         else
           retry_hint="read it in this job's summary, or $retry_hint"
         fi
-        marker='<!-- shipmate:doctor -->'
-        # Marker plus Bot author, since the App's bot login is org-dependent. `startswith`, not
-        # `contains`: the sticky plan comment can quote the marker in `tofu plan` output, and a
-        # `contains` match would PATCH the doctor report over the plan comment.
-        if ! gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --paginate \
-               --jq "map(select(((.body // \"\") | startswith(\"$marker\")) and .user.type == \"Bot\")) | .[0].id // empty" \
-               > doctor-comment-ids.txt; then
+        result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR_NUMBER" doctor.md)
+        if [ "$result" = "list-failed" ]; then
           # `retry_hint` names the surface that survived, so the commenter need not re-run 30-60s
-          # of probes for a report this run already rendered. A failed listing skips the post so
-          # the next run can recover.
+          # of probes for a report this run already rendered. The next run can recover.
           echo "::warning::could not list this pull request's comments; the doctor report was not posted to the pull request this run: $retry_hint"
-          exit 0
-        fi
-        # --paginate runs --jq per page, so take the first id. Via a file, not a pipe into `head`:
-        # EPIPE under `pipefail` would need a `|| true` that masks a listing failure, and the empty
-        # id would then create a second marker-bearing Bot comment.
-        id=$(head -n1 doctor-comment-ids.txt)
-        if [ -n "$id" ]; then
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@doctor.md >/dev/null
-        else
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -F body=@doctor.md >/dev/null
         fi
 
     - name: Mint App token (checks:read)
@@ -463,8 +441,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "could not mint a GitHub App token. Is the shipmate App installed on this repository (with checks:read)? Ask an org admin to install it, then retry."
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
 
     - name: Resolve gate configuration
       id: gate
@@ -495,8 +472,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "could not resolve the gate settings from `.github/shipmate-config.yml` on the default branch, so this command was not run. The file is not merged there, it does not validate, a variable it references is unset or empty, or the runner lacks PyYAML or runs Python older than 3.12; the job log names which. Fix that and comment again."
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
         # The resolve's own failure, re-raised: `continue-on-error` above kept the job alive
         # long enough to post this, and a green run over an unauthorized command is not a
         # verdict this action may render.
@@ -593,8 +569,7 @@ runs:
         SHIPMATE_REPLY_TEXT: "${{ steps.authz.outputs.environment }}: ungated, permitted to apply without an approving review (`gated: false` in `.github/shipmate-config.yml`). The apply result comment shows what applied."
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post
 
     - name: Reject with reason
       if: ${{ (steps.parse.outputs.route == 'apply' || steps.parse.outputs.route == 'unlock') && steps.apptoken.outcome == 'success' && steps.authz.outputs.authorized != 'true' }}
@@ -608,5 +583,4 @@ runs:
         SHIPMATE_REPLY_TEXT: ${{ steps.authz.outputs.reason }}
       run: |
         set -euo pipefail
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")
-        gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null
+        python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post

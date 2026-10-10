@@ -4,7 +4,7 @@ import os
 import sys
 
 import pytest
-from _loader import ACTIONS, ENGINE, SCRIPTS, load_script
+from _loader import ENGINE, SCRIPTS, load_script
 from _shipmate import load_workflow_text
 from test_env_config_yaml_fixtures import CANONICAL
 
@@ -2434,15 +2434,6 @@ def test_harvest_never_emits_a_dangling_section_header():
     assert lines == [header_fits, row_fits]
     assert dropped == 1
     assert not any("zzz-toolong" in line for line in lines)
-
-
-def test_doctor_marker_matches_action_upsert():
-    # Coupling: the marker doctor embeds must equal the marker the comment-ops action's
-    # doctor upsert step greps for. Drift means a new comment every run instead of an
-    # edit in place, so the action site must carry the marker and invoke the script.
-    src = (ACTIONS / "comment-ops" / "action.yml").read_text(encoding="utf-8")
-    assert src.count(doctor.DOCTOR_MARKER) >= 1, "upsert step no longer greps the script's marker"
-    assert "scripts/doctor" in src, "comment-ops action no longer calls scripts/doctor"
 
 
 def _fork_responses(files):

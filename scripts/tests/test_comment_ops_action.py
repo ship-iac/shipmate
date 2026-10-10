@@ -20,8 +20,10 @@ from _loader import (
     action_yaml,
     bash_only,
     load_script,
+    run_lines,
     run_step,
     step_by,
+    write_python3_shim,
 )
 
 _ACTION_FILE = ACTIONS / "comment-ops" / "action.yml"
@@ -114,13 +116,9 @@ def test_doctor_runs_in_report_mode_with_the_app_token():
     assert "steps.doctortoken.outputs.token" in _ACTION
 
 
-def test_doctor_sticky_marker_matches_the_script():
-    assert doctor.DOCTOR_MARKER in _ACTION
-
-
 def test_the_rendered_report_reaches_the_job_summary_before_the_comment_post():
     """The report costs 30-60s of probes, and both post paths can lose it: a failed comment listing
-    `exit 0`s by design, so the run stays green with no report anywhere, and a failed PATCH/POST
+    degrades by design, so the run stays green with no report anywhere, and a failed PATCH/POST
     reds the step after the render. Writing `doctor.md` to the job summary first means the run page
     always carries the report even when the comment does not.
 
@@ -129,7 +127,8 @@ def test_the_rendered_report_reaches_the_job_summary_before_the_comment_post():
     write would leave the comment as the sole match.
 
     Kills dropping the write, writing something other than the report, truncating instead of
-    appending, and moving the write below the listing, where the early `exit 0` skips it."""
+    appending, and moving the write below the `upsert-comment` call, whose failed write ends the
+    step before it."""
     code = _code(_step("SHIPMATE_DOCTOR_MODE: report"))
     writes = [ln for ln in code.splitlines() if "$GITHUB_STEP_SUMMARY" in ln]
     assert len(writes) == 1, f"expected exactly one job-summary write, got {writes}"
@@ -138,17 +137,15 @@ def test_the_rendered_report_reaches_the_job_summary_before_the_comment_post():
     # so this is not about other steps -- it is about not clobbering anything
     # written earlier in this same step, and never truncating a runner-owned file.
     assert ">>" in writes[0], writes[0]
-    assert code.index(writes[0]) < code.index("issues/$PR_NUMBER/comments")
-    assert code.index(writes[0]) < code.index("exit 0")
+    assert code.index(writes[0]) < code.index("scripts/upsert-comment")
 
 
 def test_a_lost_job_summary_write_does_not_cost_the_comment():
     """The summary write must degrade rather than abort: a bare `cat` under the step's `set -euo
     pipefail` turns an unwritable summary into a red step with no comment either, strictly worse
-    than writing none. `|| true` is not available here (see
-    test_the_doctor_upsert_does_not_swallow_a_comment_listing_failure), so the degrade is an
-    `if`-guard that warns, and the variable is read with `:-` so `set -u` cannot kill the step on a
-    runner that never exports it."""
+    than writing none. `|| true` would degrade silently, so the degrade is an `if`-guard that
+    warns, and the variable is read with `:-` so `set -u` cannot kill the step on a runner that
+    never exports it."""
     code = _code(_step("SHIPMATE_DOCTOR_MODE: report"))
     write = next(ln for ln in code.splitlines() if "$GITHUB_STEP_SUMMARY" in ln)
     assert write.lstrip().startswith("if "), write
@@ -570,38 +567,16 @@ def _report_ctx():
     }
 
 
-def test_the_doctor_upsert_anchors_the_marker_at_the_body_start(monkeypatch):
-    """`render_report` emits `DOCTOR_MARKER` as the body's first line, so the sticky lookup must
-    anchor there. A `contains` match also hits any comment that merely quotes the marker: the sticky
-    plan comment embeds `tofu plan` output verbatim, so a plan containing `<!-- shipmate:doctor -->`
-    would be selected and PATCHed with the doctor report, the plan comment destroyed and the summary
-    marker orphaned onto a comment without it."""
-    code = _code(_step("body=@doctor.md"))
-    assert "startswith" in code
-    assert "contains" not in code
+def test_the_doctor_report_starts_with_its_marker(monkeypatch):
+    """`upsert-comment` reads the marker from the body's first line.
+
+    Mutation: render a blank line above `DOCTOR_MARKER`.
+    """
     monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
     monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
     monkeypatch.setenv("GITHUB_RUN_ID", "1")
     monkeypatch.setenv("GITHUB_RUN_NUMBER", "1")
     assert doctor.render_report([], [], _report_ctx()).splitlines()[0] == doctor.DOCTOR_MARKER
-
-
-def test_the_doctor_upsert_does_not_swallow_a_comment_listing_failure():
-    """`|| true` on the id lookup turns a failed listing into an empty id, which falls through to
-    the create branch: a second marker-bearing Bot comment, and every later run PATCHing whichever
-    one the listing returns first. The `|| true` only dodged EPIPE from `head` under `pipefail`, so
-    the pipe goes rather than the error check -- and a listing failure skips the post entirely, so
-    the next run recovers."""
-    code = _code(_step("body=@doctor.md"))
-    assert "|| true" not in code
-    assert "| head -n1" not in code  # No pipe, so no EPIPE to swallow.
-    assert "if ! gh api" in code
-    degrade = code.split("if ! gh api", 1)[1].split("fi", 1)[0]
-    assert "::warning::" in degrade
-    assert "exit 0" in degrade
-    # The skip must precede both writes, or it is not a skip.
-    assert code.index("exit 0") < code.index("-X PATCH")
-    assert code.index("exit 0") < code.index('issues/$PR_NUMBER/comments" -F body=@doctor.md')
 
 
 def _mint_with(action, step_id):
@@ -930,14 +905,9 @@ _FOOTER = f"[run]({_RUN_URL}). Comment `shipmate help` for the available command
 _PARSED_VERB = "${{ steps.parse.outputs.verb }}"
 _PARSED_ENV = "${{ steps.parse.outputs.env }}"
 
-#: Every reply step's shell body, hand-written: the comment comes from reply-comment alone, so
+#: Every reply step's shell body, hand-written: reply-comment renders and posts the comment, so
 #: no step formats a header, verdict or footer of its own.
-_REPLY_RUN = (
-    "set -euo pipefail\n"
-    'body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment")\n'
-    'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" '
-    ">/dev/null\n"
-)
+_REPLY_RUN = 'set -euo pipefail\npython3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post\n'
 
 #: Each reply step's header words, outcome and text, hand-written. `refused` where the engine
 #: decided not to run the command, `failed` where it could not.
@@ -1039,8 +1009,9 @@ def test_every_reply_step_names_its_header_outcome_and_text():
     assert got == {name: {**_REPLY_POST_ENV, **reply} for name, reply in _REPLIES.items()}
 
 
-#: An issue-comment endpoint at the end of a path; `/comments/<id>/reactions` is not one.
-_COMMENT_ENDPOINT = re.compile(r"/comments\b(?!/)")
+#: A run line that posts a comment: an issue-comment endpoint at the end of a path
+#: (`/comments/<id>/reactions` is not one), a `reply-comment --post`, or an `upsert-comment`.
+_POSTS = re.compile(r'/comments\b(?!/)|reply-comment" --post\b|scripts/upsert-comment\b')
 
 #: The steps that post a comment reply-comment does not render: help prints its own frame, and
 #: the doctor report is a sticky upsert of doctor's own body.
@@ -1049,15 +1020,15 @@ _NON_REPLY_POSTERS = {"Post help", "Doctor: render and upsert the sticky comment
 
 def test_every_step_posting_a_comment_is_a_reply_step_or_a_named_poster():
     """The reply guards above select by `SHIPMATE_REPLY_OUTCOME`, so a new step posting a
-    hand-formatted comment without it escapes them; this selects by the endpoint instead.
+    hand-formatted comment without it escapes them; this selects by what a run line posts with.
 
-    Mutation: add a step whose `run` is `gh api -X POST
-    "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=":x: shipmate: x"` with no
-    reply env -- red."""
+    Mutations: add a step running `gh api -X POST
+    "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body=x` with no reply env; add one
+    running `reply-comment" --post` with no reply env -- each red."""
     posters = {
         s["name"]
         for s in action_steps("comment-ops")
-        if _COMMENT_ENDPOINT.search(s.get("run") or "")
+        if any(_POSTS.search(line) for line in run_lines(s))
     }
     assert posters == set(_REPLIES) | _NON_REPLY_POSTERS
 
@@ -1125,12 +1096,8 @@ def _run_as_wired(tmp_path, step, context):
     """Run `step`'s shipped body under its own `env:`, each `${{ X }}` in it replaced by
     `context[X]`, against a `gh` that saves the comment body, with `GITHUB_OUTPUT` at
     `github_output`; return the process result."""
-    for tool, text in (
-        ("gh", _BODY_GH),
-        ("python3", f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'),
-    ):
-        (tmp_path / tool).write_text(text, encoding="utf-8", newline="\n")
-        (tmp_path / tool).chmod(0o755)
+    (tmp_path / "gh").write_text(_BODY_GH, encoding="utf-8", newline="\n")
+    write_python3_shim(tmp_path)
     context = {"github.token": "test_token", "inputs.pr-number": "42", **context}
     env = {
         **os.environ,

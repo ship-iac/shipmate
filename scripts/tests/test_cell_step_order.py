@@ -4,7 +4,8 @@ Restored workspace state with no `.terraform` record makes `init` ask about stat
 `-input=false` turns the question into a hard error, so the restore must follow init. It must
 also precede the plan or apply: state restored after them is state they never read, a silent
 wrong plan rather than an error. `Locate state` sits between the two because it reads the record
-init writes.
+init writes. `actions/cell-init` holds the init, behind the provider cache restore that must
+precede it, and each cell calls it as one step.
 
 The whole ordered list of step names per cell, hand-written, so a moved, dropped or added step
 reds here.
@@ -14,14 +15,17 @@ import pytest
 from _loader import action_steps
 
 _EXPECTED = {
-    "plan-cell": [
-        "Record the planned commit",
-        "Inject identity variables",
-        "Stack slug",
+    "cell-init": [
         "Provider cache key",
         "Restore provider cache",
         "Initialize the stack",
         "Name the restored provider cache entry",
+    ],
+    "plan-cell": [
+        "Record the planned commit",
+        "Inject identity variables",
+        "Stack slug",
+        "Initialize the stack",
         "Locate state",
         "Restore state",
         "Plan",
@@ -36,10 +40,7 @@ _EXPECTED = {
     "drift-cell": [
         "Inject identity variables",
         "Stack slug",
-        "Provider cache key",
-        "Restore provider cache",
         "Initialize the stack",
-        "Name the restored provider cache entry",
         "Check the provider cache",
         "Save provider cache",
         "Locate state",
@@ -56,10 +57,7 @@ _EXPECTED = {
         "Decrypt reviewed plan artifact (fail-safe on config/plaintext mismatch)",
         "Verify fingerprint matches the reviewed plan",
         "Check the reviewed plan text's digest reached this action",
-        "Provider cache key",
-        "Restore provider cache",
         "Initialize the stack",
-        "Name the restored provider cache entry",
         "Locate state",
         "Restore state",
         "Verify the stored plan renders as the reviewed plan text",
@@ -75,4 +73,5 @@ _EXPECTED = {
 
 @pytest.mark.parametrize("cell", sorted(_EXPECTED))
 def test_each_cell_runs_its_steps_in_the_expected_order(cell):
+    """Mutation: swap `Initialize the stack` and `Restore provider cache` in `cell-init`."""
     assert [s.get("name") for s in action_steps(cell)] == _EXPECTED[cell]

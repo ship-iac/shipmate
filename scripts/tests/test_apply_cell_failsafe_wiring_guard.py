@@ -20,12 +20,7 @@ from _loader import SCRIPTS, action_steps, step_by
 #: can proceed. Adding an id here must be a conscious, reviewed choice, spelled out with a reason,
 #: because an unlisted id'd step in range fails the guard instead of being silently skipped, and
 #: silent skipping is how a real fail-safe could ship unwired.
-NOT_A_FAILSAFE: set[str] = {
-    # The provider cache key and restore cannot halt the apply: `scripts/provider-cache-key`
-    # never exits non-zero, and a restore miss or cache service error is a warning.
-    "provider-cache-key",
-    "provider-cache",
-}
+NOT_A_FAILSAFE: set[str] = set()
 
 
 def _steps():
@@ -45,10 +40,11 @@ def _ids_between_slug_and_apply():
 
 
 def _compose_env_id_mapping():
-    """Map each `steps.<id>.outcome` referenced in the Compose step's `env:` block back to its
-    env var name, both directions."""
+    """Map each `steps.<id>.outcome`, or `steps.<id>.outputs.init-outcome` for the `cell-init`
+    call, referenced in the Compose step's `env:` block back to its env var name, both
+    directions."""
     env_block = step_by("apply-cell", name="Compose cell summary").get("env") or {}
-    pattern = re.compile(r"steps\.([A-Za-z0-9_-]+)\.outcome")
+    pattern = re.compile(r"steps\.([A-Za-z0-9_-]+)\.(?:outcome|outputs\.init-outcome)")
     envvar_to_id = {}
     for var_name, expr in env_block.items():
         m = pattern.search(str(expr))
@@ -144,3 +140,12 @@ def test_current_failsafe_set_is_exactly_the_nine_known_ids():
         "restore-state",
         "plan-digest",
     }
+
+
+def test_init_outcome_is_inits_own_and_not_the_cell_init_composites():
+    """The composite's outcome is not init's: a failed cache key or restore step skips init, and
+    the cell must report that as an earlier failure, not as a failed init. The widened mapping
+    above also accepts the old form, so the expression is pinned whole here. Mutation: point
+    `INIT_OUTCOME` at `steps.init.outcome`."""
+    env_block = step_by("apply-cell", name="Compose cell summary")["env"]
+    assert env_block["INIT_OUTCOME"] == "${{ steps.init.outputs.init-outcome }}"

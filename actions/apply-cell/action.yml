@@ -145,37 +145,11 @@ runs:
           exit 1
         }
 
-    - name: Provider cache key
-      id: provider-cache-key
-      shell: bash
-      env:
-        STACK: ${{ inputs.stack }}
-      run: python3 "$GITHUB_ACTION_PATH/../../scripts/provider-cache-key"
-
-    - name: Restore provider cache
-      id: provider-cache
-      if: ${{ steps.provider-cache-key.outputs.digest != '' }}
-      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-        key: tofu-providers-${{ runner.os }}-${{ runner.arch }}-${{ steps.provider-cache-key.outputs.digest }}
-
     - name: Initialize the stack
       id: init
-      shell: bash
-      env:
-        STACK: ${{ inputs.stack }}
-      # Its own step: init output is setup noise and stays out of the apply step's teed pipeline,
-      # apply.txt being reviewer-facing comment data.
-      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
-
-    - name: Name the restored provider cache entry
-      if: ${{ failure() && steps.init.outcome == 'failure' && steps.provider-cache.outputs.cache-hit == 'true' }}
-      shell: bash
-      env:
-        KEY: ${{ steps.provider-cache.outputs.cache-primary-key }}
-      run: |
-        echo "::error::OpenTofu's init failed after restoring provider cache entry $KEY. If the log above says a cached package does not match the content of the downloaded package, delete the entry with gh cache delete $KEY --repo $GITHUB_REPOSITORY and re-run."
+      uses: $/actions/cell-init
+      with:
+        stack: ${{ inputs.stack }}
 
     - name: Locate state
       id: locate-state
@@ -260,7 +234,7 @@ runs:
       # No status function in this `if:` or the save's: the implied success() skips both after a
       # failed apply. continue-on-error, as on `Compose cell summary`, keeps a cache failure from
       # stranding an applied cell's check pending.
-      if: ${{ steps.provider-cache.outcome == 'success' && steps.provider-cache.outputs.cache-hit != 'true' }}
+      if: ${{ steps.init.outputs.cache-primary-key != '' && steps.init.outputs.cache-hit != 'true' }}
       continue-on-error: true
       shell: bash
       run: |
@@ -274,7 +248,7 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ env.TF_PLUGIN_CACHE_DIR }}
-        key: ${{ steps.provider-cache.outputs.cache-primary-key }}
+        key: ${{ steps.init.outputs.cache-primary-key }}
 
     - name: Compose cell summary
       # always(): the aggregator needs a result for every attempted or blocked cell. Env vars only:
@@ -291,7 +265,7 @@ runs:
         DECRYPT_OUTCOME: ${{ steps.decrypt.outcome }}
         FINGERPRINT_OUTCOME: ${{ steps.fingerprint.outcome }}
         DIGEST_INPUT_OUTCOME: ${{ steps.digest-input.outcome }}
-        INIT_OUTCOME: ${{ steps.init.outcome }}
+        INIT_OUTCOME: ${{ steps.init.outputs.init-outcome }}
         LOCATE_OUTCOME: ${{ steps.locate-state.outcome }}
         RESTORE_OUTCOME: ${{ steps.restore-state.outcome }}
         PLAN_DIGEST_OUTCOME: ${{ steps.plan-digest.outcome }}

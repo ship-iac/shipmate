@@ -1,18 +1,19 @@
 """The provider plugin cache is restored per stack from a committed lock file and saved by drift
 and apply cells.
 
-Every cell that runs `tofu init` on a plan or apply path restores the entry keyed on the provider
-addresses and versions in its own stack's `.terraform.lock.hcl` (`scripts/provider-cache-key`),
+`actions/cell-init` holds the restore and the `tofu init` every plan, drift and apply cell runs,
+and each cell calls it as one step with `id: init`. It restores the entry keyed on the provider
+addresses and versions in the stack's own `.terraform.lock.hcl` (`scripts/provider-cache-key`),
 exact match: a `restore-keys` prefix would hand one stack another stack's partial provider set.
 `drift-cell` and `apply-cell` save; plan cells never do. An apply cell already holds the
 environment's apply role, so its save reaches nothing that cell's applied HCL could not. The save
 runs only after a restore that missed and an `init` that left at least one file in the cache, and
 it reuses the restore step's key, computed before `init -reconfigure` can rewrite the committed
-lock: a key computed after it could name a lock no restore reads. In `apply-cell` both steps follow
-`Save state` with no status function in their `if:`, so a failed apply saves nothing, and carry
-`continue-on-error: true`, so a failed save cannot fail an applied cell. When `init` fails after a
-restore that hit, each cell names the restored entry in one `::error::`, so a corrupt entry can be
-deleted by key.
+lock: a key computed after it could name a lock no restore reads. The cells read both through
+`cell-init`'s outputs. In `apply-cell` both steps follow `Save state` with no status function in
+their `if:`, so a failed apply saves nothing, and carry `continue-on-error: true`, so a failed save
+cannot fail an applied cell. When `init` fails after a restore that hit, `cell-init` names the
+restored entry in one `::error::`, so a corrupt entry can be deleted by key.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
 save added to another cell, a dropped guard or a widened key. Each value is compared whole
@@ -20,18 +21,32 @@ against a hand-written constant.
 
 Mutations that red this module: `!= 'true'` to `== 'true'` in the check step's `if:`; the
 `cache-hit` clause dropped from `apply-cell`'s check; `always() &&` prefixed to `apply-cell`'s
-check `if:`; the save's key rebuilt from the key step's digest; `continue-on-error` dropped from
-`apply-cell`'s save; `-type f` dropped from the check's `find`; `restore-keys` added to one
-cell's restore; `STACK` dropped from one cell's key step `env:`; `actions/cache/save` of the
-cache directory added to another action; the combined `actions/cache` action used anywhere;
-`steps.init.outcome == 'failure'` or the `cache-hit` clause dropped from one cell's annotation
-`if:`.
+check `if:`; drift's check `if:` reverted to `steps.provider-cache.outcome == 'success'`; the
+save's key rebuilt from the key step's digest; `continue-on-error` dropped from `apply-cell`'s
+save; `-type f` dropped from the check's `find`; `restore-keys` added to the restore; `STACK`
+dropped from the key step's `env:`; `actions/cache/save` of the cache directory added to another
+action; the combined `actions/cache` action used anywhere; `failure() &&`,
+`steps.init.outcome == 'failure'` or the `cache-hit` clause dropped from the annotation's `if:`;
+the `cache-primary-key` output deleted, `cache-hit` mapped to `steps.provider-cache-key`, or
+`init-outcome` mapped to `steps.provider-cache.outcome`; one cell's call step `id` changed to
+`cell-init`.
 """
 
 import os
 
 import pytest
-from _loader import ACTIONS, WORKFLOWS, action_yaml, bash_only, run_step, step_by, workflow_yaml
+from _loader import (
+    ACTIONS,
+    WORKFLOWS,
+    action_yaml,
+    bash_only,
+    local_action,
+    run_step,
+    step_by,
+    workflow_yaml,
+)
+
+_INIT_ACTION = "cell-init"
 
 _KEY_STEP = {
     "name": "Provider cache key",
@@ -53,13 +68,39 @@ _RESTORE = {
     },
 }
 
+_INIT_STEP = {
+    "name": "Initialize the stack",
+    "id": "init",
+    "shell": "bash",
+    "env": {"STACK": "${{ inputs.stack }}"},
+    "run": "terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "
+    '"$STACK" -- tofu init -input=false -reconfigure',
+}
+
+#: What each cell reads back. `init-outcome` is init's own outcome, not the composite's: a failed
+#: key or restore step skips init, and apply-cell-summary must not call that a failed init.
+_OUTPUTS = {
+    "cache-hit": "${{ steps.provider-cache.outputs.cache-hit }}",
+    "cache-primary-key": "${{ steps.provider-cache.outputs.cache-primary-key }}",
+    "init-outcome": "${{ steps.init.outcome }}",
+}
+
+#: The one step each cell runs in place of the four `cell-init` holds. Every
+#: `steps.init.outputs.*` read in the cell resolves through its `id`.
+_CALL = {
+    "name": "Initialize the stack",
+    "id": "init",
+    "uses": local_action(_INIT_ACTION),
+    "with": {"stack": "${{ inputs.stack }}"},
+}
+
 _CELLS = ["apply-cell", "drift-cell", "plan-cell"]
 
 _CHECK = {
     "name": "Check the provider cache",
     "id": "provider-cache-files",
-    "if": "${{ steps.provider-cache.outcome == 'success' && "
-    "steps.provider-cache.outputs.cache-hit != 'true' }}",
+    "if": "${{ steps.init.outputs.cache-primary-key != '' && "
+    "steps.init.outputs.cache-hit != 'true' }}",
     "shell": "bash",
 }
 
@@ -69,7 +110,7 @@ _SAVE = {
     "uses": "actions/cache/save",
     "with": {
         "path": "${{ env.TF_PLUGIN_CACHE_DIR }}",
-        "key": "${{ steps.provider-cache.outputs.cache-primary-key }}",
+        "key": "${{ steps.init.outputs.cache-primary-key }}",
     },
 }
 
@@ -80,15 +121,32 @@ def _without_ref(step):
     return {**step, "uses": step["uses"].split("@")[0]}
 
 
-@pytest.mark.parametrize("cell", _CELLS)
-def test_each_cell_computes_the_key_from_its_own_lock_file(cell):
-    assert step_by(cell, name="Provider cache key") == _KEY_STEP
+def test_the_key_is_computed_from_the_stacks_own_lock_file():
+    """Mutation: drop `STACK` from the key step's `env:`."""
+    assert step_by(_INIT_ACTION, name="Provider cache key") == _KEY_STEP
+
+
+def test_the_restore_is_keyed_on_the_stacks_own_lock_file():
+    """Mutation: add `restore-keys: tofu-providers-` to the restore."""
+    assert _without_ref(step_by(_INIT_ACTION, name="Restore provider cache")) == _RESTORE
+
+
+def test_init_runs_unconditionally_under_the_id_the_outputs_read():
+    """Mutation: drop `-reconfigure` from the init."""
+    assert step_by(_INIT_ACTION, name="Initialize the stack") == _INIT_STEP
+
+
+def test_cell_init_exposes_the_restore_key_and_inits_own_outcome():
+    """Mutations: delete the `cache-primary-key` output; map `cache-hit` to
+    `steps.provider-cache-key`; map `init-outcome` to `steps.provider-cache.outcome`."""
+    outputs = action_yaml(_INIT_ACTION)["outputs"]
+    assert {name: spec["value"] for name, spec in outputs.items()} == _OUTPUTS
 
 
 @pytest.mark.parametrize("cell", _CELLS)
-def test_each_cell_restores_the_cache_keyed_on_its_own_lock_file(cell):
-    step = step_by(cell, name="Restore provider cache")
-    assert _without_ref(step) == _RESTORE
+def test_each_cell_initializes_through_cell_init_under_id_init(cell):
+    """Mutation: change one cell's call `id` to `cell-init`."""
+    assert step_by(cell, name="Initialize the stack") == _CALL
 
 
 _SAVERS = ["apply-cell", "drift-cell"]
@@ -201,9 +259,9 @@ _ANNOTATE_IF = (
 )
 
 
-@pytest.mark.parametrize("cell", _CELLS)
-def test_each_cell_names_the_entry_only_when_init_fails_after_a_hit(cell):
-    step = step_by(cell, name="Name the restored provider cache entry")
+def test_the_entry_is_named_only_when_init_fails_after_a_hit():
+    """Mutation: drop `failure() &&` from the annotation's `if:`."""
+    step = step_by(_INIT_ACTION, name="Name the restored provider cache entry")
     assert {k: v for k, v in step.items() if k != "run"} == {
         "name": "Name the restored provider cache entry",
         "if": _ANNOTATE_IF,
@@ -212,16 +270,10 @@ def test_each_cell_names_the_entry_only_when_init_fails_after_a_hit(cell):
     }
 
 
-@pytest.mark.parametrize("cell", _CELLS)
-def test_each_cells_init_step_carries_the_id_the_annotation_reads(cell):
-    assert step_by(cell, name="Initialize the stack")["id"] == "init"
-
-
 @bash_only
-@pytest.mark.parametrize("cell", _CELLS)
-def test_the_annotation_names_the_key_and_the_delete_command(tmp_path, cell):
-    body = step_by(cell, name="Name the restored provider cache entry")["run"]
+def test_the_annotation_names_the_key_and_the_delete_command(tmp_path):
     """Mutation: drop `--repo $GITHUB_REPOSITORY` from the delete command."""
+    body = step_by(_INIT_ACTION, name="Name the restored provider cache entry")["run"]
     key = "tofu-providers-Linux-X64-abc123"
     r = run_step(tmp_path, body, {**os.environ, "KEY": key, "GITHUB_REPOSITORY": "o/r"})
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"

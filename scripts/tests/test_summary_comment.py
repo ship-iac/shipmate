@@ -760,111 +760,20 @@ def test_cell_summary_artifact_uploads_plan_text():
     assert "plan.txt" in upload
 
 
-def _upsert_step():
-    """The summary action's `Upsert sticky comment` step, shell comment lines dropped: these
-    assertions are about what the step runs, and the prose explaining why an operator was
-    removed would otherwise keep tripping a substring check for that operator."""
-    src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
-    steps = src.split("\n    - name:")
-    matches = [s for s in steps if "body=@comment.md" in s]
-    assert len(matches) == 1, f"expected one upsert step, found {len(matches)}"
-    return "\n".join(ln for ln in matches[0].splitlines() if not ln.strip().startswith("#"))
+def test_the_comment_body_starts_with_its_marker():
+    """`upsert-comment` reads the marker from the body's first line.
 
-
-def test_the_sticky_upsert_anchors_the_marker_at_the_body_start():
-    """`build_comment` emits MARKER as the body's first line, so the lookup must anchor there.
-    A `contains` match also selects a comment that merely quotes the marker -- doctor's report
-    renders findings that interpolate repository data such as workflow file names -- and this
-    step would then PATCH that comment with the plan body."""
-    block = _upsert_step()
-    assert "startswith" in block
-    assert "contains" not in block
+    Mutation: render a blank line above `MARKER`.
+    """
     assert sc.build_comment([], {}, "u", SHA)[0].splitlines()[0] == sc.MARKER
 
 
-def test_the_sticky_upsert_does_not_swallow_a_comment_listing_failure():
-    """`|| true` on the id lookup turns a failed listing into an empty id, falls through to the
-    create branch and leaves the pull request with two marker-bearing Bot comments, every later
-    run PATCHing the older one -- a permanently stale plan comment below the live one. That
-    `|| true` only existed to dodge EPIPE from `head` under `pipefail`, so the pipe goes rather
-    than the error check, and a listing failure skips the post for the next run to recover. The
-    gate status is written by a separate later step, so skipping here must not fail this one.
+def test_the_upsert_quiet_inputs_read_doctor_and_build():
+    """The quiet condition is exercised in `test_upsert_comment.py`; these are its inputs.
 
-    The positions are those of the listing-failure `exit 0`, not of the step's first one, which
-    is the draft exit above the listing. Mutation: move the listing-failure `exit 0` below the
-    PATCH."""
-    block = _upsert_step()
-    assert "|| true" not in block
-    assert "| head -n1" not in block  # No pipe, so no EPIPE to swallow.
-    assert "if ! gh api" in block
-    listing = block.index("if ! gh api") + len("if ! gh api")
-    degrade = block[listing:].split("fi", 1)[0]
-    assert "::warning::" in degrade
-    assert "exit 0" in degrade
-    listing_exit = listing + degrade.index("exit 0")
-    assert listing_exit < block.index("-X PATCH")
-    assert listing_exit < block.index('issues/$PR/comments" -F body=@comment.md')
-
-
-def _guard_bodies():
-    """The `if ... ; then` bodies of the upsert step's zero-count guards, keyed by their
-    condition line. Assertions bind `exit 0` to a body, never to the step as a whole: an
-    unconditional `exit 0` anywhere below the id lookup satisfies every positional check while
-    silently stopping the sticky comment from ever being written."""
-    guard = _upsert_step().split("id=$(head -n1 summary-comment-ids.txt)", 1)[1]
-    bodies, cond = {}, None
-    for line in guard.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("if ") and stripped.endswith("then"):
-            cond = stripped[len("if ") : -len("; then")]
-            bodies[cond] = []
-        elif stripped == "fi":
-            cond = None
-        elif cond is not None:
-            bodies[cond].append(stripped)
-    return bodies
-
-
-def test_a_hold_mode_never_overwrites_the_sticky_comment():
-    """`gate-state` collapses every "the plan can't be trusted" case -- a non-success plan run,
-    or a cell/artifact-count shortfall -- into `comment_mode=hold`, one signal the upsert step
-    reacts to before it inspects anything else. Those runs must write nothing at all, so an
-    existing comment, the reviewed plan for the previous push, survives instead of being
-    PATCHed down to an empty table."""
-    bodies = _guard_bodies()
-    hold = next(c for c in bodies if '"$MODE" = "hold"' in c)
-    assert "exit 0" in bodies[hold]
-    # No write of any kind on that path: not the PATCH, not the create.
-    assert not any("gh api" in line for line in bodies[hold])
-
-    nothing_changed = next(c for c in bodies if '"$MODE" = "nothing-changed"' in c)
-    assert bodies[nothing_changed] == ["nothing_changed=true"]
-
-
-def test_the_sticky_upsert_skips_creation_when_nothing_was_planned():
-    """A docs-only or pin-bump pull request carries no shipmate comment at all. The guard is
-    create-only, conditioned on an empty id as well as `comment_mode=nothing-changed` --
-    gate-state's `nothing_changed` derivation, not a raw cell count -- because an existing
-    comment must still be updated to the no-planned-cells body, or a pull request that planned
-    changes and then pushed them away keeps displaying the stale plan table. It also yields to
-    doctor's `warned` output: findings render only as run-page annotations, so a run with a
-    warning still posts. Behaviour lives in the action's shell, so this is source-derived.
-
-    It yields to the unmanaged stacks line the same way: a pull request changing only stacks
-    with no env/* tag gets a comment naming them.
-
-    Mutation: test `"$DOCTOR_WARNED" = "true"` in the skip condition -- red.
-    Mutation: bind `DOCTOR_WARNED` to another step's output -- red.
-    Mutation: drop the `"$UNMANAGED" != "true"` clause from the skip condition -- red.
-    Mutation: bind `UNMANAGED` to another output of step `build` -- red."""
-    bodies = _guard_bodies()
-    quiet = (
-        '[ "$nothing_changed" = "true" ] && [ -z "$id" ] && [ "$DOCTOR_WARNED" != "true" ] '
-        '&& [ "$UNMANAGED" != "true" ]'
-    )
-    assert quiet in bodies
-    assert "exit 0" in bodies[quiet]
-    assert not any("gh api" in line for line in bodies[quiet])
+    Mutations: bind `DOCTOR_WARNED` to another step's output; bind `UNMANAGED` to another output
+    of step `build`.
+    """
     env = step_by("summary", name="Upsert sticky comment")["env"]
     assert env["DOCTOR_WARNED"] == "${{ steps.doctor.outputs.warned }}"
     assert env["UNMANAGED"] == "${{ steps.build.outputs.unmanaged }}"
@@ -1031,24 +940,13 @@ def test_main_reports_zero_count_when_no_cell_summaries_arrived(tmp_path, monkey
 
 
 def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():
-    """The upsert's listing-failure path `exit 0`s the step, so `Create/refresh gate` must be a
-    later step rather than code below that exit, or a comment listing failure would silently
-    stop writing the gate status."""
+    """A comment listing failure degrades the upsert step green without writing, so the gate must
+    be written by a later step, `Create/refresh gate`, rather than by code in the upsert step."""
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("- name:")]
     upsert = next(i for i, n in enumerate(names) if "Upsert sticky comment" in n)
     gate = next(i for i, n in enumerate(names) if "Create/refresh gate" in n)
     assert gate > upsert
-
-
-def test_marker_round_trip_guard_summary_action_matches_script():
-    """Coupling: the marker summary-comment embeds <-> the marker the summary action's upsert
-    step greps for. Drift means a new comment every run instead of an edit-in-place, so both
-    action sites must carry the script's marker and the build step must invoke the script."""
-    src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
-    assert src.count(sc.MARKER) >= 1, "upsert step no longer greps the script's marker"
-    assert "scripts/summary-comment" in src, "summary action no longer calls summary-comment"
-    assert sc.build_comment([], {}, "u", SHA)[0].startswith(sc.MARKER)
 
 
 @pytest.mark.parametrize("warned", ["true", "false", ""])

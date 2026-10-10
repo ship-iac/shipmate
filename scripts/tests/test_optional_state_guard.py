@@ -16,11 +16,6 @@ _CELLS = ["apply-cell", "drift-cell", "plan-cell"]
 
 _STACK_ENV = {"STACK": "${{ inputs.stack }}"}
 
-_INIT_RUN = (
-    "terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "
-    '"$STACK" -- tofu init -input=false -reconfigure'
-)
-
 #: Inside `terramate run`, as init is, so the record is read with the TF_DATA_DIR and
 #: TF_WORKSPACE OpenTofu saw. A bare `python3` would read `.terraform` from the repository root.
 _LOCATE = {
@@ -80,10 +75,9 @@ def test_apply_cell_saves_state_to_the_located_path():
 def test_a_failed_init_skips_locate_and_restore(cell):
     """A one-line `run:` fails the step on a non-zero init, so the default `success()` condition
     skips what follows. An `always()` or `failure()` on either would locate or restore state for
-    a stack init could not set up. Mutation: `if: always()` on `Locate state`."""
-    init = step_by(cell, name="Initialize the stack")
-    assert init["run"] == _INIT_RUN
-    assert "if" not in init
+    a stack init could not set up. The init runs inside `actions/cell-init`; it and the cell's
+    call step are pinned whole, with no `if:`, in test_provider_cache.py. Mutation: `if: always()`
+    on `Locate state`."""
     assert {
         name: step_by(cell, name=name).get("if") for name in ("Locate state", "Restore state")
     } == {

@@ -10,7 +10,7 @@ entry in that module's `_SHARED_ROUTE_IFS` and by the comparison below.
 """
 
 import pytest
-from _loader import load_script, step_by
+from _loader import load_script, run_lines, step_by
 
 #: The whole `env:` of the resolve step, hand-written. `GH_TOKEN` is the workflow token: the
 #: contents read needs no App token. The file on the default branch is the only source;
@@ -36,7 +36,8 @@ def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
     green run over a command this action never authorized is not a verdict it may render.
 
     Mutations: delete `continue-on-error` from the resolve step, so the report never runs;
-    delete the `exit 1`, so the job ends green with nothing applied and nothing refused.
+    delete the `exit 1`, so the job ends green with nothing applied and nothing refused; drop
+    `--post`, so the reply is printed to the log and never posted.
     """
     assert step_by("comment-ops", name="Resolve gate configuration")["continue-on-error"] is True
     report = step_by("comment-ops", name="Gate configuration unreadable")
@@ -45,9 +46,9 @@ def test_a_failed_resolve_reports_to_the_commenter_and_still_fails_the_job():
         "GH_TOKEN": "${{ github.token }}",
         "PR_NUMBER": "${{ inputs.pr-number }}",
     }
-    run = report["run"]
-    assert 'gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments"' in run
-    assert run.strip().endswith("exit 1")
+    lines = run_lines(report)
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" --post' in lines
+    assert lines[-1] == "exit 1"
 
 
 def test_the_resolve_step_carries_the_id_authorize_reads():

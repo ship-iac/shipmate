@@ -10,14 +10,14 @@ read succeeds and finds none. Every other mode writes as before, without the rea
 The upsert step leaves the sticky comment as it is on a draft run and makes no comment API call.
 
 Both steps run for real: `Create/refresh gate` with `gh` replaced by a bash function, as in
-`test_gate_refresh_hold.py`; the upsert step with a stub `gh` on PATH.
+`test_gate_refresh_hold.py`; the upsert step through `run_with_gh_recorder`.
 """
 
 import os
 import re
 
 import pytest
-from _loader import bash_only, run_step, step_by
+from _loader import ACTIONS, bash_only, run_step, run_with_gh_recorder, step_by
 
 HEAD_SHA = "a" * 40
 READ_ARGV = [
@@ -134,27 +134,22 @@ def test_the_draft_read_is_gate_refreshs_own():
 
 
 def _run_upsert(tmp_path, mode):
-    stubs = tmp_path / "bin"
-    stubs.mkdir()
-    calls = tmp_path / "gh-calls"
-    stub = stubs / "gh"
-    stub.write_text(f'#!/bin/sh\necho "$*" >> "{calls.as_posix()}"\nexit 0\n', encoding="utf-8")
-    stub.chmod(0o755)
-    proc = run_step(
+    (tmp_path / "comment.md").write_text("<!-- shipmate:summary -->\n", encoding="utf-8")
+    return run_with_gh_recorder(
         tmp_path,
         step_by("summary", name="Upsert sticky comment")["run"],
         {
             **os.environ,
-            "PATH": f"{stubs.as_posix()}:/usr/bin:/bin",
             "GH_TOKEN": "x",
             "PR": "7",
             "MODE": mode,
             "PLAN_RESULT": "skipped",
+            "DOCTOR_WARNED": "false",
+            "UNMANAGED": "false",
             "GITHUB_REPOSITORY": "acme/demo",
+            "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         },
     )
-    made = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
-    return proc, made
 
 
 @bash_only
@@ -172,6 +167,13 @@ def test_the_upsert_stub_records_a_post_run(tmp_path):
     an empty record means the step made no call rather than that the stub was never reached."""
     proc, made = _run_upsert(tmp_path, "post")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert len(made) == 2
-    assert made[0].startswith("api repos/acme/demo/issues/7/comments --paginate")
-    assert made[1] == "api repos/acme/demo/issues/7/comments -F body=@comment.md"
+    assert made == [
+        [
+            "api",
+            "--paginate",
+            "--jq",
+            '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}',
+            "repos/acme/demo/issues/7/comments?per_page=100",
+        ],
+        ["api", "repos/acme/demo/issues/7/comments", "-F", "body=@comment.md"],
+    ]

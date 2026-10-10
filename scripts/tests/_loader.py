@@ -4,9 +4,9 @@ fence, or run a shipped shell body.
 Four jobs: ``load_script`` for the extension-less helpers;
 ``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus ``action_yaml``, ``workflow_yaml``, ``action_steps`` and
 ``step_by`` for the YAML-shape guards; ``doc_fences`` and ``assert_every_fence_discovered`` for
-the docs fence guards; and ``bash_only`` plus ``run_step`` for the tests that execute a step's
-bash. The parser is load-bearing, because a guard that silently parses to ``[]``
-asserts nothing, so it has one definition.
+the docs fence guards; and ``bash_only``, ``run_step``, ``write_python3_shim`` and
+``run_with_gh_recorder`` for the tests that execute a step's bash. The parser is load-bearing,
+because a guard that silently parses to ``[]`` asserts nothing, so it has one definition.
 
 Loading a helper script
 -----------------------
@@ -24,9 +24,11 @@ mode.
 
 import copy
 import functools
+import os
 import pathlib
 import shutil
 import subprocess
+import sys
 import textwrap
 
 import pytest
@@ -226,6 +228,98 @@ def usable_bash():
 #: Marks a test that executes a shipped shell body. `conftest.py` skips it on a host with no
 #: working bash, probing only when a marked test runs rather than at every import.
 bash_only = pytest.mark.bash_only
+
+
+#: The Python half of `write_python3_shim`'s `python3`; `{bash}` and `{gh}` are path literals.
+_PYTHON3_SHIM = """\
+import os, runpy, subprocess, sys
+
+_run = subprocess.run
+
+
+def _gh_through_bash(args, *rest, **kwargs):
+    if isinstance(args, (list, tuple)) and args and args[0] == "gh":
+        args = [{bash}, {gh}, *args[1:]]
+    return _run(args, *rest, **kwargs)
+
+
+subprocess.run = _gh_through_bash
+script = sys.argv[1]
+sys.argv = [script, *sys.argv[2:]]
+sys.path[0] = os.path.dirname(os.path.abspath(script))
+runpy.run_path(script, run_name="__main__")
+"""
+
+
+def write_python3_shim(bin_dir):
+    """Write a ``python3`` into ``bin_dir`` that runs a script with every ``subprocess.run``
+    argv starting ``"gh"`` sent to ``bash bin_dir/gh`` instead.
+
+    The caller puts ``bin_dir`` first on PATH and writes its own bash ``gh`` stub there. A PATH
+    stub alone cannot reach a ``gh`` that Python spawns on Windows: the spawn resolves the real
+    ``gh.EXE`` past it, and an extensionless stub run by full path raises FileNotFoundError.
+    ``sys.argv`` and ``sys.path[0]`` are set as ``python3 script`` sets them, so the script reads
+    only its own arguments and imports its siblings with no PYTHONPATH. Only that
+    ``python3 <script> args...`` form runs; ``python3 -c`` and ``python3 -`` do not.
+    """
+    bash = usable_bash()
+    assert bash is not None, "callers are bash_only-gated"
+    shim = bin_dir / "python3_shim.py"
+    shim.write_text(
+        _PYTHON3_SHIM.format(bash=repr(bash), gh=repr(str(bin_dir / "gh"))), encoding="utf-8"
+    )
+    python3 = bin_dir / "python3"
+    python3.write_text(
+        f'#!/bin/bash\nexec "{sys.executable}" "{shim}" "$@"\n', encoding="utf-8", newline="\n"
+    )
+    python3.chmod(0o755)
+
+
+#: A bash ``gh`` for ``run_with_gh_recorder``: it appends each call's argv to ``$CALLS``, one line
+#: per argument and ``--`` after each call, answers a ``--paginate`` listing with
+#: ``$FAKE_LISTING`` and exit ``$FAKE_LIST_RC``, and any other call with JSON and
+#: ``$FAKE_WRITE_RC``.
+_GH_RECORDER = """\
+#!/bin/bash
+printf '%s\\n' "$@" -- >> "$CALLS"
+if [ "$2" = "--paginate" ]; then
+  printf '%s' "${FAKE_LISTING:-}"
+  exit "${FAKE_LIST_RC:-0}"
+fi
+echo '{"id": 99}'
+exit "${FAKE_WRITE_RC:-0}"
+"""
+
+
+def run_with_gh_recorder(tmp_path, body, env, *, listing="", list_rc=0, write_rc=0):
+    """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and a recording ``gh`` first
+    on PATH; return (process, the argv after ``gh`` of each call, in order).
+
+    ``listing`` is what a ``--paginate`` call prints before exiting ``list_rc``; every other call
+    exits ``write_rc``. ``env`` is extended, not replaced, with PATH and the stub's variables.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    write_python3_shim(bin_dir)
+    (bin_dir / "gh").write_text(_GH_RECORDER, encoding="utf-8", newline="\n")
+    calls = tmp_path / "gh-calls"
+    env = {
+        **env,
+        "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        "CALLS": str(calls),
+        "FAKE_LISTING": listing,
+        "FAKE_LIST_RC": str(list_rc),
+        "FAKE_WRITE_RC": str(write_rc),
+    }
+    proc = run_step(tmp_path, body, env)
+    recorded, current = [], []
+    for line in calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []:
+        if line == "--":
+            recorded.append(current)
+            current = []
+        else:
+            current.append(line)
+    return proc, recorded
 
 
 def run_step(tmp_path, body, env, *, cwd=None, timeout=30):

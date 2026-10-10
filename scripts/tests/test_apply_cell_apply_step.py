@@ -33,10 +33,16 @@ import pytest
 from _loader import action_steps, action_yaml, bash_only, run_step, step_by
 
 #: The four steps the apply half of the cell is split across, in the order the runner executes
-#: them. The three ahead of the apply each carry a blocked reason of their own -- a wiring slip, a
-#: failed init and a tampered plan need different remedies -- and together the four are the one
-#: script this file exercises.
-_STEP_IDS = ("digest-input", "init", "plan-digest", "apply")
+#: them, each as (action, step id). The three ahead of the apply each carry a blocked reason of
+#: their own -- a wiring slip, a failed init and a tampered plan need different remedies -- and
+#: together the four are the one script this file exercises. The init body is `cell-init`'s,
+#: which apply-cell runs as its `init` step.
+_STEP_IDS = (
+    ("apply-cell", "digest-input"),
+    ("cell-init", "init"),
+    ("apply-cell", "plan-digest"),
+    ("apply-cell", "apply"),
+)
 
 
 def _apply_step():
@@ -54,11 +60,9 @@ def test_the_apply_half_is_split_across_its_four_attributable_steps():
     # bodies in that constant's order, so a swap made in both places would leave every runtime
     # assertion in this file green and this the only test able to catch it. Locating and
     # restoring state sit between init and the render, and the harness leaves them out: neither
-    # touches the stored plan; nor do the provider cache key and restore before init.
-    assert tuple(ids[start : start + 8]) == (
+    # touches the stored plan.
+    assert tuple(ids[start : start + 6]) == (
         "digest-input",
-        "provider-cache-key",
-        "provider-cache",
         "init",
         "locate-state",
         "restore-state",
@@ -111,7 +115,7 @@ def _run_step(
     # The four step bodies concatenated in runner order. They are separate steps so that each
     # refusal carries its own blocked reason, but composite-action steps share one workspace and
     # run in sequence, so one script under one set of stubs is what they amount to at runtime.
-    run = "\n".join(step_by("apply-cell", id=step_id)["run"] for step_id in _STEP_IDS)
+    run = "\n".join(step_by(action, id=step_id)["run"] for action, step_id in _STEP_IDS)
     # The step calls terramate twice: a plain `init` line, then the teed apply. `terramate_body`
     # ends in `exit`, which dies in a subshell inside the pipeline but would kill this whole
     # script on the init line, so the stub dispatches on the tofu subcommand.
@@ -178,7 +182,7 @@ def test_failed_init_fails_the_step_before_the_apply(tmp_path):
     """init runs outside the pipeline, and errexit must stop the step there rather than fall
     through to an apply of a plan against an uninitialized directory. On the runner errexit comes
     from `shell: bash` (`bash -e`); in this harness, from digest-input's `set -euo pipefail`.
-    Mutation: append `|| true` to init's one-line `run:`.
+    Mutation: append `|| true` to `cell-init`'s one-line init `run:`.
 
     The stub uses `return 5`, not `exit 5`: the init line is a plain function call in the current
     shell, so an `exit` body terminates the script whatever the init line says, and this test
@@ -243,6 +247,8 @@ def test_a_malformed_plan_sha256_refuses_before_init(tmp_path, digest):
 
 @bash_only
 def test_a_matching_render_reaches_the_apply(tmp_path):
+    """The harness runs `cell-init`'s real init body. Mutation: prefix that `run:` with
+    `exit 1;`."""
     r = _run_step(tmp_path, terramate_body="echo applied ; exit 0", tee_body='cat > "$1"')
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert _ran(tmp_path, "apply-ran"), "the apply was skipped for a plan that renders as reviewed"
