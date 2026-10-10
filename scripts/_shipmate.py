@@ -10,8 +10,9 @@ scripts, the secret scrubber and repository-slug check that ``onboard`` and ``re
 share, and the UTF-8 switch for their console output. It also holds the pull-request number
 check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the ruleset and
 environment readers and the names ``doctor`` and ``onboard`` share, reads the per-cell
-``cell.json`` summaries and builds this run's page link. It parses YAML: the strings-only
-config loader and the YAML 1.2 workflow loader, both importing PyYAML only when first called.
+``cell.json`` summaries, builds this run's page link and joins a capped list of names. It
+parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both importing
+PyYAML only when first called.
 """
 
 import functools
@@ -168,6 +169,14 @@ def is_pr_number(value):
     Bounded and anchored, with no leading zero, because callers bind it into an API path.
     """
     return _PR_NUMBER.fullmatch(value) is not None
+
+
+def named(items, cap):
+    """`items` joined with `, `: the first `cap`, the rest as `, and N more`."""
+    listed = ", ".join(items[:cap])
+    if len(items) > cap:
+        listed += f", and {len(items) - cap} more"
+    return listed
 
 
 def current_run_url():

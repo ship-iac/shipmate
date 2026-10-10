@@ -452,7 +452,7 @@ def test_the_unrecorded_note_is_capped_and_summarizes_the_rest():
     push the render into the fail-loud SystemExit, on the run that needed it: the usual cause of
     `unrecorded` rows (an expired App key, a checks-API outage) strands a wide matrix.
 
-    Mutation: name every cell in `_named` -- red.
+    Mutation: name every cell in `named` -- red.
     Mutation: name a cell `**<stack> / <env>**` in `_unrecorded_note` -- red."""
     rows = [_row(status="unrecorded", stack=f"s{i}") for i in range(7)]
     assert ac._unrecorded_note(rows) == (

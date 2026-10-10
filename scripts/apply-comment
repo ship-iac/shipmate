@@ -26,7 +26,7 @@ import pathlib
 import re
 import sys
 
-from _shipmate import _load, cell_summaries, current_run_url
+from _shipmate import _load, cell_summaries, current_run_url, named
 
 sc = _load("summary-comment")
 # COUPLING: "what counts as a done apply check" is written once in apply-gate and shared with
@@ -78,14 +78,6 @@ def _not_attempted_note(rows, env_name):
     return f"not attempted: the apply checks stay pending; retry with `{cmd}`."
 
 
-def _named(cells, cap):
-    """`cells` joined with `, `: the first `cap` by name, the rest as `, and N more`."""
-    listed = ", ".join(cells[:cap])
-    if len(cells) > cap:
-        listed += f", and {len(cells) - cap} more"
-    return listed
-
-
 def _unrecorded_note(rows):
     """The 'not recorded' note, naming every affected cell.
 
@@ -106,7 +98,7 @@ def _unrecorded_note(rows):
     if not cells:
         return ""
     return (
-        f"not recorded: {_named(cells, _UNRECORDED_NAMED)}. The apply succeeded but its apply "
+        f"not recorded: {named(cells, _UNRECORDED_NAMED)}. The apply succeeded but its apply "
         "check is not recorded as complete (it failed, was cancelled, or a newer plan "
         "re-created it), so `shipmate / gate` stays pending. Re-plan and re-apply."
     )
@@ -157,7 +149,7 @@ def _lock_note(rows, env_name):
         return ""
     cmd = f"shipmate unlock {sc._md_escape(env_name)}" if env_name else "shipmate unlock <env>"
     return (
-        f"state lock held: {_named(hits, _LOCK_NAMED)}. An earlier apply was cancelled or "
+        f"state lock held: {named(hits, _LOCK_NAMED)}. An earlier apply was cancelled or "
         "killed before releasing the lock, so nothing in these cells was applied. Per-cell "
         "concurrency admits one apply at a time, so the holder was that cell's most recent "
         f"apply run. Release it with `{cmd}`, then re-apply. Unlocking is not recovery: if "

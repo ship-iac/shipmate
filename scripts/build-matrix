@@ -13,7 +13,7 @@ import json
 import os
 import re
 
-from _shipmate import _load, _run
+from _shipmate import _load, _run, named
 
 ec = _load("env-config")
 
@@ -283,12 +283,10 @@ def warn_lost_env_tags(all_stacks, base, unmanaged):
     lost = lost_env_tags(base, unmanaged)
     if not lost:
         return
-    more = len(lost) - UNMANAGED_NAMES
     print(
         f"::warning::{len(lost)} stack(s) lost their last env/* tag in this pull request, so "
-        f"shipmate no longer plans or deploys them: {', '.join(lost[:UNMANAGED_NAMES])}"
-        + (f", and {more} more" if more > 0 else "")
-        + ". If that is deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; "
+        f"shipmate no longer plans or deploys them: {named(lost, UNMANAGED_NAMES)}"
+        ". If that is deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; "
         "otherwise restore the tag."
     )
 
@@ -307,11 +305,9 @@ def env_membership(all_stacks=False, base="", check_names=True):
     unmanaged = unmanaged_stacks(tags_by_stack)
     if unmanaged:
         scope = "stack(s)" if all_stacks else "changed stack(s)"
-        more = len(unmanaged) - UNMANAGED_NAMES
         print(
             f"::notice::{len(unmanaged)} {scope} carry no env/* tag and are not managed by "
-            f"shipmate: {', '.join(unmanaged[:UNMANAGED_NAMES])}"
-            + (f", and {more} more" if more > 0 else "")
+            f"shipmate: {named(unmanaged, UNMANAGED_NAMES)}"
         )
     stacks_by_env = {}
     for s in stacks:
