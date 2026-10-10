@@ -5,7 +5,7 @@ Restored workspace state with no `.terraform` record makes `init` ask about stat
 also precede the plan or apply: state restored after them is state they never read, a silent
 wrong plan rather than an error. `Locate state` sits between the two because it reads the record
 init writes. `actions/cell-init` holds the init, behind the provider cache restore that must
-precede it, and each cell calls it as one step.
+precede it, and the state restore after it; each cell calls it as one step.
 
 The whole ordered list of step names per cell, hand-written, so a moved, dropped or added step
 reds here.
@@ -20,14 +20,14 @@ _EXPECTED = {
         "Restore provider cache",
         "Initialize the stack",
         "Name the restored provider cache entry",
+        "Locate state",
+        "Restore state",
     ],
     "plan-cell": [
         "Record the planned commit",
         "Inject identity variables",
         "Stack slug",
         "Initialize the stack",
-        "Locate state",
-        "Restore state",
         "Plan",
         "Render + classify plan",
         "Encrypt plan artifact at rest (no-op without a passphrase)",
@@ -43,8 +43,6 @@ _EXPECTED = {
         "Initialize the stack",
         "Check the provider cache",
         "Save provider cache",
-        "Locate state",
-        "Restore state",
         "Plan + classify drift",
         "Compose cell summary",
         "Upload drift summary",
@@ -58,8 +56,6 @@ _EXPECTED = {
         "Verify fingerprint matches the reviewed plan",
         "Check the reviewed plan text's digest reached this action",
         "Initialize the stack",
-        "Locate state",
-        "Restore state",
         "Verify the stored plan renders as the reviewed plan text",
         "Apply the stored plan (exact-plan; stale -> fail-safe)",
         "Save state",
@@ -73,5 +69,6 @@ _EXPECTED = {
 
 @pytest.mark.parametrize("cell", sorted(_EXPECTED))
 def test_each_cell_runs_its_steps_in_the_expected_order(cell):
-    """Mutation: swap `Initialize the stack` and `Restore provider cache` in `cell-init`."""
+    """Mutations: swap `Initialize the stack` and `Restore provider cache` in `cell-init`; swap
+    `Locate state` and `Restore state` in `cell-init`."""
     assert [s.get("name") for s in action_steps(cell)] == _EXPECTED[cell]

@@ -2600,7 +2600,7 @@ squash-merge drops the PR-head SHA from `main`):
 | `git-uncommitted` | **no** — skipped under `--no-recursive` | never disabled by the engine, but do not rely on it: a dirty tree does not block a cell. |
 
 **Mechanism (engine-controlled).** Every `terramate run` a cell makes — in
-`plan-cell`, `apply-cell`, `drift-cell` and `unlock-cell`, including
+`cell-init`, `plan-cell`, `apply-cell`, `drift-cell` and `unlock-cell`, including
 `scripts/env-inject`'s `run.env` check and the `scripts/state-path` call —
 passes `--disable-safeguards=git-out-of-sync`. The policy is versioned in the engine
 actions (pinned by SHA), so consumers get the correct policy for free by pinning.

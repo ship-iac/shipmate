@@ -82,10 +82,10 @@ _FORCE_UNLOCK = [*_WRAPPER, "tofu", "force-unlock", "-force", "$LOCK_ID"]
 
 #: Every `terramate run` each cell is expected to make, in order.
 _EXPECTED = {
-    "cell-init": [_INIT],
-    "plan-cell": [_LOCATE, _PLAN],
-    "drift-cell": [_LOCATE, _PLAN],
-    "apply-cell": [_LOCATE, _APPLY],
+    "cell-init": [_INIT, _LOCATE],
+    "plan-cell": [_PLAN],
+    "drift-cell": [_PLAN],
+    "apply-cell": [_APPLY],
     "unlock-cell": [_INIT, _PROBE, _FORCE_UNLOCK],
 }
 #: The plan-text render, one constant for the two sides of the plan-text binding: plan-cell writes

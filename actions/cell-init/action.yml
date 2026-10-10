@@ -1,8 +1,14 @@
 name: shipmate cell-init
-description: Restore the stack's provider cache and run `tofu init` for one cell. Its own step in each cell, so init output stays out of the caller's later steps.
+description: Restore the stack's provider cache, run `tofu init` and restore the stack's local state for one cell. Its own step in each cell, so init output stays out of the caller's later steps.
 inputs:
   stack:
     description: Stack path, e.g. stacks/app.
+    required: true
+  env:
+    description: Environment name, e.g. dev-eu.
+    required: true
+  slug:
+    description: The stack path with `/` replaced by `-`, the key the state artifact is stored under.
     required: true
 outputs:
   cache-hit:
@@ -14,6 +20,15 @@ outputs:
   init-outcome:
     description: The outcome of `tofu init` itself, not of this action. A cache step failing first skips init, and the caller then reports "an earlier step failed" rather than a failed init.
     value: ${{ steps.init.outcome }}
+  state-path:
+    description: The local state path read from the stack's `tofu init` record. Empty for a backend other than `local`, which skips the restore.
+    value: ${{ steps.locate-state.outputs.path }}
+  locate-outcome:
+    description: The outcome of locating the state path. `success` is the only value meaning the step ran and succeeded; `skipped` (an earlier step here failed) and empty (the step was not reached) both mean no path was read.
+    value: ${{ steps.locate-state.outcome }}
+  restore-outcome:
+    description: The outcome of the state restore. `success` is the only value meaning the step ran and succeeded; `skipped` (no located path, a remote backend, or an earlier step here failed) and empty (the step was not reached) both mean nothing was restored.
+    value: ${{ steps.restore-state.outcome }}
 runs:
   using: composite
   steps:
@@ -46,3 +61,22 @@ runs:
         KEY: ${{ steps.provider-cache.outputs.cache-primary-key }}
       run: |
         echo "::error::OpenTofu's init failed after restoring provider cache entry $KEY. If the log above says a cached package does not match the content of the downloaded package, delete the entry with gh cache delete $KEY --repo $GITHUB_REPOSITORY and re-run."
+
+    - name: Locate state
+      id: locate-state
+      shell: bash
+      env:
+        STACK: ${{ inputs.stack }}
+      # Inside `terramate run` so a consumer's run.env TF_DATA_DIR or TF_WORKSPACE applies, as it
+      # did for init.
+      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- python3 "$GITHUB_ACTION_PATH/../../scripts/state-path"
+
+    - name: Restore state
+      id: restore-state
+      if: ${{ steps.locate-state.outputs.path != '' }}
+      uses: $/actions/state
+      with:
+        stack-slug: ${{ inputs.slug }}
+        env: ${{ inputs.env }}
+        mode: restore
+        path: ${{ steps.locate-state.outputs.path }}
