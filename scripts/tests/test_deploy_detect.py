@@ -3,7 +3,7 @@ import json
 import pytest
 from _detect_fixtures import APP_ID, _apply_check, spy_env_config, stub_read_table
 from _detect_fixtures import check_run as _check
-from _loader import load_script
+from _loader import github_outputs, load_script
 
 dd = load_script("deploy-detect")
 
@@ -182,7 +182,7 @@ def _run_main(
     monkeypatch.setattr(dd.bm, "_run", _run)
     monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
     dd.main()
-    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    return github_outputs(out)
 
 
 def _wave_cells(parsed):

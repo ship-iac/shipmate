@@ -109,8 +109,3 @@ def spy_env_config(monkeypatch, build_matrix):
 
     monkeypatch.setattr(build_matrix, "env_config", spy)
     return seen
-
-
-def _parsed(out):
-    """The `key=value` lines a detect wrote to its `GITHUB_OUTPUT` file, as a dict."""
-    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())

@@ -11,7 +11,7 @@ from _detect_fixtures import (
     spy_env_config,
     stub_read_table,
 )
-from _loader import load_script
+from _loader import github_outputs, load_script
 
 aad = load_script("apply-all-detect")
 
@@ -279,7 +279,7 @@ def _run_main(
     )
     stub_read_table(monkeypatch, (aad.bm.ec,), table, order, explicit, reads)
     aad.main()
-    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    return github_outputs(out)
 
 
 def _wave_cells(parsed):

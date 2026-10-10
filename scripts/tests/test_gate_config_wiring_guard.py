@@ -10,7 +10,7 @@ entry in that module's `_SHARED_ROUTE_IFS` and by the comparison below.
 """
 
 import pytest
-from _loader import load_script, step_by
+from _loader import github_outputs, load_script, step_by
 
 #: The whole `env:` of the resolve step, hand-written. `GH_TOKEN` is the workflow token: the
 #: contents read needs no App token. The file on the default branch is the only source;
@@ -83,7 +83,7 @@ def _resolve(monkeypatch, tmp_path, table):
     out = tmp_path / "out.txt"
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     gc.main()
-    return dict(ln.split("=", 1) for ln in out.read_text(encoding="utf-8").splitlines())
+    return github_outputs(out)
 
 
 def test_the_file_is_the_only_source(monkeypatch, tmp_path):

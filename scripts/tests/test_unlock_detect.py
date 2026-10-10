@@ -1,9 +1,9 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, _parsed, spy_env_config, stub_read_table
+from _detect_fixtures import APP_ID, spy_env_config, stub_read_table
 from _detect_fixtures import check_run as _check
-from _loader import load_script
+from _loader import github_outputs, load_script
 
 ud = load_script("unlock-detect")
 
@@ -102,7 +102,7 @@ def test_unlock_queue_is_the_pending_cells_of_the_target_env(monkeypatch, tmp_pa
     # all_stacks=True is the point: a cell whose plan artifacts expired long ago is exactly the
     # cell that can hold a stranded lock.
     assert seen == {"all_stacks": True, "base": "", "check_names": False}
-    assert json.loads(_parsed(out)["cells"]) == [
+    assert json.loads(github_outputs(out)["cells"]) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -165,7 +165,7 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
         + [_DEV_EU_CELLS[0]],
     )
     ud.main()
-    assert json.loads(_parsed(out)["cells"]) == [
+    assert json.loads(github_outputs(out)["cells"]) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -187,7 +187,7 @@ def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
     out = _unlock_env(monkeypatch, tmp_path)
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
     ud.main()
-    parsed = _parsed(out)
+    parsed = github_outputs(out)
     assert len(json.loads(parsed["cells"])) == 3  # Not vacuous: there is a queue.
     wave_keys = [k for k in parsed if "waves" in k or "empty" in k]
     assert wave_keys == []
@@ -201,7 +201,7 @@ def test_unlock_does_not_refuse_an_unreviewed_pr(monkeypatch, tmp_path):
     out = _unlock_env(monkeypatch, tmp_path)
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
     ud.main()
-    assert len(json.loads(_parsed(out)["cells"])) == 3
+    assert len(json.loads(github_outputs(out)["cells"])) == 3
 
 
 def test_unlock_passes_the_whole_tree_workload_map(monkeypatch, tmp_path):
@@ -311,7 +311,7 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
         ud.bm, "_tags", lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else []
     )
     ud.main()
-    assert json.loads(_parsed(out)["cells"]) == [
+    assert json.loads(github_outputs(out)["cells"]) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -341,7 +341,7 @@ def test_unlock_tolerates_an_unusable_env_tag_elsewhere_in_the_tree(monkeypatch,
         lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else ["env/a.b"],
     )
     ud.main()
-    assert json.loads(_parsed(out)["cells"]) == [
+    assert json.loads(github_outputs(out)["cells"]) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",
@@ -375,7 +375,7 @@ def test_unlock_ignores_two_workload_tags_on_a_stack_outside_the_queue(monkeypat
         ),
     )
     ud.main()
-    assert json.loads(_parsed(out)["cells"]) == [
+    assert json.loads(github_outputs(out)["cells"]) == [
         {
             "stack": "stacks/app",
             "environment": "dev-eu",

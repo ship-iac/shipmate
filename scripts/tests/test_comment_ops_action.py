@@ -19,6 +19,7 @@ from _loader import (
     action_steps,
     action_yaml,
     bash_only,
+    github_outputs,
     load_script,
     run_lines,
     run_step,
@@ -844,7 +845,7 @@ def _run_gather(tmp_path):
     }
     result = run_step(tmp_path, _gather_step()["run"], env)
     assert result.returncode == 0, result.stderr
-    outputs = dict(line.split("=", 1) for line in out_file.read_text().splitlines())
+    outputs = github_outputs(out_file)
     return outputs, (tmp_path / "endpoints.txt").read_text().splitlines()
 
 
@@ -1420,11 +1421,7 @@ def _run_planauthz(tmp_path, *, head_repo="org/repo"):
     env["GITHUB_OUTPUT"] = str(out_file)
 
     result = run_step(tmp_path, _by_id("planauthz")["run"], env)
-    outputs = dict(
-        line.split("=", 1)
-        for line in out_file.read_text(encoding="utf-8").splitlines()
-        if "=" in line
-    )
+    outputs = github_outputs(out_file)
     argv_file = tmp_path / "argv.txt"
     return result, outputs, (argv_file.read_text() if argv_file.exists() else "")
 
