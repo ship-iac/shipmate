@@ -255,9 +255,11 @@ def test_main_checks_the_resolved_table_after_masking_and_writing(tmp_path, monk
             {"TF_VAR_env": "dev-eu", "TF_VAR_size": "small", "API_KEY": "s3cr3t"},
             True,
             "::add-mask::s3cr3t\n",
-            "API_KEY<<SHIPMATE_EOF\ns3cr3t\nSHIPMATE_EOF\n"
-            "TF_VAR_env<<SHIPMATE_EOF\ndev-eu\nSHIPMATE_EOF\n"
-            "TF_VAR_size<<SHIPMATE_EOF\nsmall\nSHIPMATE_EOF\n",
+            (
+                "API_KEY<<SHIPMATE_EOF\ns3cr3t\nSHIPMATE_EOF\n"
+                "TF_VAR_env<<SHIPMATE_EOF\ndev-eu\nSHIPMATE_EOF\n"
+                "TF_VAR_size<<SHIPMATE_EOF\nsmall\nSHIPMATE_EOF\n"
+            ),
         )
     ]
 

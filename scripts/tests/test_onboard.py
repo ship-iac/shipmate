@@ -794,8 +794,10 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
         (
             "differs",
             "shipmate-engine branch policy",
-            "also permits release/*: a workflow on those branches can still claim what "
-            "`shipmate-engine` scopes. Remove them by hand if that is not intended.",
+            (
+                "also permits release/*: a workflow on those branches can still claim what "
+                "`shipmate-engine` scopes. Remove them by hand if that is not intended."
+            ),
         ),
         ("ok", "shipmate-engine SHIPMATE_APP_PRIVATE_KEY", ""),
         ("ok", "no repository-level SHIPMATE_APP_PRIVATE_KEY", ""),
@@ -865,18 +867,22 @@ def test_plan_environment_carrying_a_policy_is_reported_not_stripped(monkeypatch
 SPLIT_CONFLICT = (
     "differs",
     "dev-eu",
-    "the engine binds `dev-eu-plan` / `dev-eu-apply` for `dev-eu`, and `dev-eu` is also "
-    "present. Nothing binds `dev-eu`, so nothing was created or changed for `dev-eu`. "
-    "Delete `dev-eu`, or set `shared: true` in `environments.dev-eu` so the engine "
-    "binds the bare `dev-eu` instead.",
+    (
+        "the engine binds `dev-eu-plan` / `dev-eu-apply` for `dev-eu`, and `dev-eu` is also "
+        "present. Nothing binds `dev-eu`, so nothing was created or changed for `dev-eu`. "
+        "Delete `dev-eu`, or set `shared: true` in `environments.dev-eu` so the engine "
+        "binds the bare `dev-eu` instead."
+    ),
 )
 SHARED_CONFLICT = (
     "differs",
     "dev-eu",
-    "the engine binds `dev-eu` for `dev-eu`, and `dev-eu-plan` and `dev-eu-apply` are "
-    "also present. Nothing binds `dev-eu-plan` and `dev-eu-apply`, so nothing was created "
-    "or changed for `dev-eu`. Delete `dev-eu-plan` and `dev-eu-apply`, or drop "
-    "`shared: true` from `environments.dev-eu`.",
+    (
+        "the engine binds `dev-eu` for `dev-eu`, and `dev-eu-plan` and `dev-eu-apply` are "
+        "also present. Nothing binds `dev-eu-plan` and `dev-eu-apply`, so nothing was created "
+        "or changed for `dev-eu`. Delete `dev-eu-plan` and `dev-eu-apply`, or drop "
+        "`shared: true` from `environments.dev-eu`."
+    ),
 )
 
 
@@ -1552,10 +1558,12 @@ def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monk
         (
             "deferred",
             "gate ruleset",
-            "`.github/workflows/shipmate.yml` is not on main yet, or this token cannot read "
-            "it and GitHub answered 404. No pull request can produce `shipmate / gate` "
-            "before the file is there. Merge the pull request that adds it, then run this "
-            "again to create the ruleset.",
+            (
+                "`.github/workflows/shipmate.yml` is not on main yet, or this token cannot read "
+                "it and GitHub answered 404. No pull request can produce `shipmate / gate` "
+                "before the file is there. Merge the pull request that adds it, then run this "
+                "again to create the ruleset."
+            ),
         )
     ]
 
@@ -1576,10 +1584,12 @@ def test_a_required_gate_without_the_workflow_file_is_reported(monkeypatch):
         (
             "differs",
             "gate ruleset",
-            "`shipmate / gate` is already required, but `.github/workflows/shipmate.yml` is "
-            "not on main yet, or this token cannot read it and GitHub answered 404. The pull "
-            "request adding the file cannot get the gate: disable the gate rule until it "
-            "merges, or merge it through a bypass actor.",
+            (
+                "`shipmate / gate` is already required, but `.github/workflows/shipmate.yml` is "
+                "not on main yet, or this token cannot read it and GitHub answered 404. The pull "
+                "request adding the file cannot get the gate: disable the gate rule until it "
+                "merges, or merge it through a bypass actor."
+            ),
         )
     ]
     assert onboard._exit_code() == 2
@@ -1658,8 +1668,10 @@ def test_gate_under_another_integration_id_is_reported_not_edited(monkeypatch):
         (
             "differs",
             "gate ruleset",
-            "`shipmate / gate` is required under integration_id 15368, not the shipmate "
-            "App (4326562), so a status from another identity satisfies it. Change it by hand.",
+            (
+                "`shipmate / gate` is required under integration_id 15368, not the shipmate "
+                "App (4326562), so a status from another identity satisfies it. Change it by hand."
+            ),
         )
     ]
     assert onboard._exit_code() == 2
@@ -1694,8 +1706,10 @@ def test_a_gate_without_strict_is_reported(monkeypatch):
         (
             "differs",
             "gate ruleset",
-            "it does not require branches to be up to date (strict), so plans can go "
-            "stale against the base before merge. Change it by hand.",
+            (
+                "it does not require branches to be up to date (strict), so plans can go "
+                "stale against the base before merge. Change it by hand."
+            ),
         )
     ]
 
@@ -1724,9 +1738,11 @@ def test_ruleset_post_forbidden_is_reported_with_the_plan_sentence(monkeypatch, 
         (
             "differs",
             "gate ruleset",
-            "rulesets need GitHub Pro, Team, Enterprise, or a public repository "
-            "(docs/branch-protection.md §Reproducible ruleset). Configure the gate by "
-            "hand there.",
+            (
+                "rulesets need GitHub Pro, Team, Enterprise, or a public repository "
+                "(docs/branch-protection.md §Reproducible ruleset). Configure the gate by "
+                "hand there."
+            ),
         )
     ]
     assert onboard._exit_code() == 2
@@ -1752,11 +1768,13 @@ def test_an_invisible_shipmate_gate_ruleset_is_reported_not_fatal(monkeypatch):
         (
             "differs",
             "gate ruleset",
-            "the rulesets POST was rejected (HTTP 422). Most likely a `shipmate-gate` "
-            "ruleset already exists but requires nothing on this branch, because its "
-            "enforcement is `evaluate` or `disabled` and the effective-rules read cannot "
-            "see it. A 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` "
-            "before acting. Set it to active, or delete it and run this again.",
+            (
+                "the rulesets POST was rejected (HTTP 422). Most likely a `shipmate-gate` "
+                "ruleset already exists but requires nothing on this branch, because its "
+                "enforcement is `evaluate` or `disabled` and the effective-rules read cannot "
+                "see it. A 422 has other causes, so read `gh api repos/OWNER/REPO/rulesets` "
+                "before acting. Set it to active, or delete it and run this again."
+            ),
         )
     ]
     assert onboard._exit_code() == 2
@@ -2206,8 +2224,10 @@ def test_a_table_failing_tf_vars_coverage_is_todo_naming_the_refusal():
         "todo",
         "`.github/shipmate-config.yml`",
         [
-            "layout: tf_vars derives TF_VAR_env and TF_VAR_region from the environment "
-            "table, and dev-eu has an entry with no region."
+            (
+                "layout: tf_vars derives TF_VAR_env and TF_VAR_region from the environment "
+                "table, and dev-eu has an entry with no region."
+            )
         ],
     )
 
@@ -2755,15 +2775,20 @@ def _table_only_detail(*names):
     [
         (
             ("production-eu-central",),
-            "Provisioned for production-eu-central, which no stack tags yet: the first pull "
-            "request tagging a stack into an environment deploys under its protection. Fix a "
-            "misspelled name in its entry.",
+            (
+                "Provisioned for production-eu-central, which no stack tags yet: the first pull "
+                "request tagging a stack into an environment deploys under its protection. Fix a "
+                "misspelled name in its entry."
+            ),
         ),
         (
             ("prdo", "production-eu-central", "qa"),
-            "Provisioned for prdo, production-eu-central, qa, which no stack tags yet: the first "
-            "pull request tagging a stack into an environment deploys under its protection. "
-            "Fix a misspelled name in its entry.",
+            (
+                "Provisioned for prdo, production-eu-central, qa, which no stack tags yet: the "
+                "first "
+                "pull request tagging a stack into an environment deploys under its protection. "
+                "Fix a misspelled name in its entry."
+            ),
         ),
     ],
     ids=["one", "several"],
@@ -2872,14 +2897,20 @@ def test_a_stack_with_two_workload_tags_is_a_stack_tags_line(monkeypatch, tmp_pa
     assert checklist_items(checklist_of(capsys.readouterr().out))[STACK_TAGS_ITEM] == (
         "todo",
         [
-            "stack 'a' carries 2 workload tags (workload/x, workload/y), and a stack carries at "
-            "most one `workload/<name>` tag. Keep one in the stack's `tags` and remove the rest.",
-            "1 cell(s) carry a workload tag their environment's workloads list does not name: "
-            "b in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
-            "the default branch grants a role to. Retag the stack, or add the workload to "
-            "environments.<env>.workloads in .github/shipmate-config.yml on the default "
-            "branch, which is where this table is read from: merge it there on its own pull "
-            "request first.",
+            (
+                "stack 'a' carries 2 workload tags (workload/x, workload/y), and a stack carries "
+                "at "
+                "most one `workload/<name>` tag. Keep one in the stack's `tags` and remove the "
+                "rest."
+            ),
+            (
+                "1 cell(s) carry a workload tag their environment's workloads list does not name: "
+                "b in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
+                "the default branch grants a role to. Retag the stack, or add the workload to "
+                "environments.<env>.workloads in .github/shipmate-config.yml on the default "
+                "branch, which is where this table is read from: merge it there on its own pull "
+                "request first."
+            ),
             "`environments.dev-eu.workloads` lists core, which no stack in dev-eu tags. Tag a",
             "stack with each, or remove it from the list.",
         ],
@@ -2899,9 +2930,11 @@ def test_a_slug_collision_is_a_stack_tags_line(monkeypatch, tmp_path, capsys):
     assert checklist_items(checklist_of(capsys.readouterr().out))[STACK_TAGS_ITEM] == (
         "todo",
         [
-            "a-b, a/b all map to the plan artifact 'plan.dev-eu.a-b': distinct stack paths "
-            "sharing one artifact name would make an apply download another stack's plan. "
-            "Rename one so the path->'-' slug is unique."
+            (
+                "a-b, a/b all map to the plan artifact 'plan.dev-eu.a-b': distinct stack paths "
+                "sharing one artifact name would make an apply download another stack's plan. "
+                "Rename one so the path->'-' slug is unique."
+            )
         ],
     )
 
@@ -2929,12 +2962,14 @@ def test_a_cell_whose_workload_its_list_does_not_name_is_listed():
         "todo",
         STACK_TAGS_ITEM,
         [
-            "1 cell(s) carry a workload tag their environment's workloads list does not name: "
-            "a in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
-            "the default branch grants a role to. Retag the stack, or add the workload to "
-            "environments.<env>.workloads in .github/shipmate-config.yml on the default "
-            "branch, which is where this table is read from: merge it there on its own pull "
-            "request first."
+            (
+                "1 cell(s) carry a workload tag their environment's workloads list does not name: "
+                "a in dev-eu (workload/net; dev-eu lists core). A listed workload is the only one "
+                "the default branch grants a role to. Retag the stack, or add the workload to "
+                "environments.<env>.workloads in .github/shipmate-config.yml on the default "
+                "branch, which is where this table is read from: merge it there on its own pull "
+                "request first."
+            )
         ],
     )
 
@@ -3343,8 +3378,11 @@ def test_an_absent_table_leaves_coverage_uncomputed(tmp_path):
         DRIFT_ITEM,
         [
             "Coverage was not computed:",
-            "  `.github/shipmate-config.yml` is absent, and a drift run refuses without it; see "
-            "its item.",
+            (
+                "  `.github/shipmate-config.yml` is absent, and a drift run refuses without it; "
+                "see "
+                "its item."
+            ),
             _read_line("drift.yml"),
         ],
     )
@@ -3422,9 +3460,12 @@ def test_the_drift_query_is_parsed_by_build_matrix(tmp_path, monkeypatch):
                 "todo",
                 DRIFT_ITEM,
                 [
-                    "drift.yml: 257 plan cells exceeds the GitHub Actions matrix limit of 256. "
-                    "A drift sweep is one matrix; split it across more drift files, each calling "
-                    "drift.yml with a narrower `tags` query (docs/drift.md).",
+                    (
+                        "drift.yml: 257 plan cells exceeds the GitHub Actions matrix limit of 256. "
+                        "A drift sweep is one matrix; split it across more drift files, each "
+                        "calling "
+                        "drift.yml with a narrower `tags` query (docs/drift.md)."
+                    ),
                     "257 cell(s) no drift file sweeps:",
                     *[f"  s{i:03} (dev-eu)" for i in range(10)],
                     "  and 247 more",
@@ -3466,12 +3507,16 @@ def test_a_dead_clause_and_an_empty_sweep_are_each_listed(tmp_path):
         "todo",
         DRIFT_ITEM,
         [
-            "dead.yaml: the drift tags query 'env/dev-eu,env/ghost' has clause(s) matching no "
-            "cell: env/ghost. No stack carries: env/ghost. Tags match in their on-disk form, "
-            "such as 'env/dev-eu'.",
-            "ghost.yml: the drift tags query 'env/ghost' matches no stack x environment cell, "
-            "so this sweep is empty. No stack carries: env/ghost. Tags match in their on-disk "
-            "form, such as 'env/dev-eu'.",
+            (
+                "dead.yaml: the drift tags query 'env/dev-eu,env/ghost' has clause(s) matching no "
+                "cell: env/ghost. No stack carries: env/ghost. Tags match in their on-disk form, "
+                "such as 'env/dev-eu'."
+            ),
+            (
+                "ghost.yml: the drift tags query 'env/ghost' matches no stack x environment cell, "
+                "so this sweep is empty. No stack carries: env/ghost. Tags match in their on-disk "
+                "form, such as 'env/dev-eu'."
+            ),
             _read_line("dead.yaml", "ghost.yml"),
         ],
     )
@@ -3644,9 +3689,11 @@ def test_a_drift_finding_is_listed_and_the_run_exits_0(monkeypatch, tmp_path, ca
     assert checklist_items(checklist_of(capsys.readouterr().out))[DRIFT_ITEM] == (
         "todo",
         [
-            "ghost.yml: the drift tags query 'env/ghost' matches no stack x environment cell, "
-            "so this sweep is empty. No stack carries: env/ghost. Tags match in their on-disk "
-            "form, such as 'env/dev-eu'.",
+            (
+                "ghost.yml: the drift tags query 'env/ghost' matches no stack x environment cell, "
+                "so this sweep is empty. No stack carries: env/ghost. Tags match in their on-disk "
+                "form, such as 'env/dev-eu'."
+            ),
             "1 cell(s) no drift file sweeps:",
             "  stacks/app (dev-eu)",
             "Widen a `tags` query, or add a drift file for them.",
@@ -3713,12 +3760,16 @@ def test_a_sweep_refusing_a_workload_gap_covers_no_cell(tmp_path):
         "todo",
         DRIFT_ITEM,
         [
-            "drift.yml: 1 cell(s) carry a workload tag their environment's workloads list does "
-            "not name: a in dev-eu (workload/net; dev-eu lists core). A listed workload is the "
-            "only one the default branch grants a role to. Retag the stack, or add the workload "
-            "to environments.<env>.workloads in .github/shipmate-config.yml on the default branch, "
-            "which is where this table is read from: merge it there on its own pull request "
-            "first.",
+            (
+                "drift.yml: 1 cell(s) carry a workload tag their environment's workloads list does "
+                "not name: a in dev-eu (workload/net; dev-eu lists core). A listed workload is the "
+                "only one the default branch grants a role to. Retag the stack, or add the "
+                "workload "
+                "to environments.<env>.workloads in .github/shipmate-config.yml on the default "
+                "branch, "
+                "which is where this table is read from: merge it there on its own pull request "
+                "first."
+            ),
             "1 cell(s) no drift file sweeps:",
             "  a (dev-eu)",
             "Widen a `tags` query, or add a drift file for them.",

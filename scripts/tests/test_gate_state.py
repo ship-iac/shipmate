@@ -170,8 +170,10 @@ def test_fewer_cells_than_planned_holds():
     """Mutations: restore the old "re-run this summary job" lead; drop either count."""
     assert d(planned_cells="3", cell_count=2) == (
         "failure",
-        "re-plan this pull request (comment shipmate plan or push): "
-        "3 cell(s) planned but 2 cell summary/summaries read",
+        (
+            "re-plan this pull request (comment shipmate plan or push): "
+            "3 cell(s) planned but 2 cell summary/summaries read"
+        ),
         "hold",
     )
 

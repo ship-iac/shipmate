@@ -79,14 +79,18 @@ _NEEDS_REF = "layout: folder\nenvironments:\n  prod:\n    needs: [{vars: FIRST_E
     [
         (
             "Dev",
-            "::error::environments.prod.needs entry 'Dev' is not an environment name: "
-            "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
+            (
+                "::error::environments.prod.needs entry 'Dev' is not an environment name: "
+                "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
+            ),
         ),
         (
             "dev-eu-plan",
-            "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment "
-            "suffix '-plan'; environments.prod.needs is matched against the bare logical env "
-            "name; write 'dev-eu' instead.",
+            (
+                "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment "
+                "suffix '-plan'; environments.prod.needs is matched against the bare logical env "
+                "name; write 'dev-eu' instead."
+            ),
         ),
     ],
     ids=["uppercase", "suffix"],

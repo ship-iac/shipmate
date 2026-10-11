@@ -174,8 +174,10 @@ def _gate_rule_warnings(ctx):
         return [
             (
                 WARNING,
-                f"no active ruleset requires `{GATE}` on `{default_branch}`, so "
-                "merges are not gated (see docs/branch-protection.md).",
+                (
+                    f"no active ruleset requires `{GATE}` on `{default_branch}`, so "
+                    "merges are not gated (see docs/branch-protection.md)."
+                ),
             )
         ]
     out = []
@@ -183,17 +185,21 @@ def _gate_rule_warnings(ctx):
         out.append(
             (
                 WARNING,
-                f"gate ruleset does not pin `integration_id` to the shipmate App "
-                f"(found {chk.get('integration_id')!r}), so a forged `{GATE}` status "
-                "from another identity would satisfy the required check.",
+                (
+                    f"gate ruleset does not pin `integration_id` to the shipmate App "
+                    f"(found {chk.get('integration_id')!r}), so a forged `{GATE}` status "
+                    "from another identity would satisfy the required check."
+                ),
             )
         )
     if not params.get("strict_required_status_checks_policy"):
         out.append(
             (
                 WARNING,
-                "gate ruleset does not require branches to be up to date "
-                "(strict), so plans can go stale against the base before merge.",
+                (
+                    "gate ruleset does not require branches to be up to date "
+                    "(strict), so plans can go stale against the base before merge."
+                ),
             )
         )
     return out
@@ -373,25 +379,31 @@ def _missing(name, env, role):
 
 DEFAULT_TABLE_UNREADABLE = (
     NOTICE,
-    "the environment probes were skipped: the default branch's `.github/shipmate-config.yml` "
-    "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
-    "and it alone selects which GitHub Environments a run binds. While that holds, every run "
-    "refuses at detect.",
+    (
+        "the environment probes were skipped: the default branch's `.github/shipmate-config.yml` "
+        "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
+        "and it alone selects which GitHub Environments a run binds. While that holds, every run "
+        "refuses at detect."
+    ),
 )
 
 # The runner, not the file: the config probe's WARNING names the floor, and every revision of the
 # table meets the same refusal.
 ENV_PROBES_INTERPRETER_REFUSED = (
     NOTICE,
-    "the environment probes were skipped: this runner's Python refuses the environment "
-    "table, so which GitHub Environments a run binds cannot be determined here.",
+    (
+        "the environment probes were skipped: this runner's Python refuses the environment "
+        "table, so which GitHub Environments a run binds cannot be determined here."
+    ),
 )
 
 
 NO_ENVS_SKIPPED = (
     NOTICE,
-    "no plan run with cell summaries for this commit: the declared "
-    "environment set is unknown, so the environment probes were skipped.",
+    (
+        "no plan run with cell summaries for this commit: the declared "
+        "environment set is unknown, so the environment probes were skipped."
+    ),
 )
 
 
@@ -440,20 +452,24 @@ def _env_shape_findings(name, env, data, role):
         out.append(
             (
                 WARNING,
-                f"GitHub Environment `{name}` is a plan environment but has "
-                f"protection rules ({', '.join(approval)}), so plan jobs will not "
-                f"start immediately; put reviewers on `{env}-apply` instead.",
+                (
+                    f"GitHub Environment `{name}` is a plan environment but has "
+                    f"protection rules ({', '.join(approval)}), so plan jobs will not "
+                    f"start immediately; put reviewers on `{env}-apply` instead."
+                ),
             )
         )
     if role == "plan" and policy:
         out.append(
             (
                 WARNING,
-                f"GitHub Environment `{name}` is a plan environment but has a "
-                "deployment branch policy. Plan jobs run at the pull request's "
-                "base ref, so a policy that does not name every branch pull "
-                "requests target refuses those plan cells; plan environments "
-                "must allow all branches.",
+                (
+                    f"GitHub Environment `{name}` is a plan environment but has a "
+                    "deployment branch policy. Plan jobs run at the pull request's "
+                    "base ref, so a policy that does not name every branch pull "
+                    "requests target refuses those plan cells; plan environments "
+                    "must allow all branches."
+                ),
             )
         )
     if role == "apply" and not set(approval) - {"?"}:
@@ -463,20 +479,24 @@ def _env_shape_findings(name, env, data, role):
         out.append(
             (
                 NOTICE,
-                f"GitHub Environment `{name}` has no approval rules (required reviewers "
-                "or a wait timer), so pre-merge applies to it are unreviewed.",
+                (
+                    f"GitHub Environment `{name}` has no approval rules (required reviewers "
+                    "or a wait timer), so pre-merge applies to it are unreviewed."
+                ),
             )
         )
     if role == "shared" and approval:
         out.append(
             (
                 WARNING,
-                f"{_shared_intro(env)} has "
-                f"protection rules ({', '.join(approval)}). A protection rule gates every "
-                "job that binds the environment and GitHub offers no per-job filter, so "
-                "the plan cells and every drift sweep covering it will not start immediately "
-                f"either. To gate applies only, split it into `{env}-plan` and "
-                f"`{env}-apply` and remove `shared: true` from its `environments.{env}` entry.",
+                (
+                    f"{_shared_intro(env)} has "
+                    f"protection rules ({', '.join(approval)}). A protection rule gates every "
+                    "job that binds the environment and GitHub offers no per-job filter, so "
+                    "the plan cells and every drift sweep covering it will not start immediately "
+                    f"either. To gate applies only, split it into `{env}-plan` and "
+                    f"`{env}-apply` and remove `shared: true` from its `environments.{env}` entry."
+                ),
             )
         )
     if role == "shared" and policy:
@@ -486,23 +506,28 @@ def _env_shape_findings(name, env, data, role):
         out.append(
             (
                 NOTICE,
-                f"{_shared_intro(env)} has a "
-                "deployment branch policy. On a shared environment that policy is what "
-                "scopes which branches may claim its secrets, and it is also what refuses "
-                "plan cells whose base ref it does not name. Correct while every pull "
-                "request targets a branch it names; open it up, or split into "
-                f"`{env}-plan` and `{env}-apply`, if they do not.",
+                (
+                    f"{_shared_intro(env)} has a "
+                    "deployment branch policy. On a shared environment that policy is what "
+                    "scopes which branches may claim its secrets, and it is also what refuses "
+                    "plan cells whose base ref it does not name. Correct while every pull "
+                    "request targets a branch it names; open it up, or split into "
+                    f"`{env}-plan` and `{env}-apply`, if they do not."
+                ),
             )
         )
     if role == "shared" and not approval:
         out.append(
             (
                 NOTICE,
-                f"{_shared_intro(env)} has no "
-                "approval rules (required reviewers or a wait timer), so pre-merge applies "
-                "to it are unreviewed, and no reviewer gate is available while it is "
-                "shared: a reviewer here would stall the plan cells and every drift "
-                f"sweep covering it. Split it into `{env}-plan` and `{env}-apply` if you need one.",
+                (
+                    f"{_shared_intro(env)} has no "
+                    "approval rules (required reviewers or a wait timer), so pre-merge applies "
+                    "to it are unreviewed, and no reviewer gate is available while it is "
+                    "shared: a reviewer here would stall the plan cells and every drift "
+                    f"sweep covering it. Split it into `{env}-plan` and `{env}-apply` if you need "
+                    "one."
+                ),
             )
         )
     return out
@@ -525,9 +550,11 @@ def _env_protection_warnings(ctx):
             out.append(
                 (
                     NOTICE,
-                    f"GitHub Environment `{name}` exists but its settings could not be "
-                    f"read ({_degrade_reason(e)}), so its plan/apply protection shape was "
-                    "not checked.",
+                    (
+                        f"GitHub Environment `{name}` exists but its settings could not be "
+                        f"read ({_degrade_reason(e)}), so its plan/apply protection shape was "
+                        "not checked."
+                    ),
                 )
             )
             continue
@@ -557,10 +584,12 @@ def _engine_environment_warnings(ctx):
         return [
             (
                 WARNING,
-                f"GitHub Environment `{_ENGINE_ENV}` does not exist, so nothing scopes "
-                "which branches may claim the shipmate App private key. If the key is "
-                "still a repository secret, every branch's workflow can read it (see "
-                "docs/github-app.md).",
+                (
+                    f"GitHub Environment `{_ENGINE_ENV}` does not exist, so nothing scopes "
+                    "which branches may claim the shipmate App private key. If the key is "
+                    "still a repository secret, every branch's workflow can read it (see "
+                    "docs/github-app.md)."
+                ),
             )
         ]
     try:
@@ -570,8 +599,10 @@ def _engine_environment_warnings(ctx):
         return [
             (
                 NOTICE,
-                f"GitHub Environment `{_ENGINE_ENV}` exists but its settings could not be "
-                f"read ({_degrade_reason(e)}), so its branch-policy scoping was not checked.",
+                (
+                    f"GitHub Environment `{_ENGINE_ENV}` exists but its settings could not be "
+                    f"read ({_degrade_reason(e)}), so its branch-policy scoping was not checked."
+                ),
             )
         ]
     policy = env.get("deployment_branch_policy")
@@ -579,9 +610,11 @@ def _engine_environment_warnings(ctx):
         return [
             (
                 WARNING,
-                f"GitHub Environment `{_ENGINE_ENV}` has no deployment branch policy, so "
-                "a workflow on any branch can still claim the App private key it "
-                f"holds. Restrict it to `{default_branch}`.",
+                (
+                    f"GitHub Environment `{_ENGINE_ENV}` has no deployment branch policy, so "
+                    "a workflow on any branch can still claim the App private key it "
+                    f"holds. Restrict it to `{default_branch}`."
+                ),
             )
         ]
     if not policy.get("custom_branch_policies"):
@@ -591,9 +624,11 @@ def _engine_environment_warnings(ctx):
         return [
             (
                 WARNING,
-                f"GitHub Environment `{_ENGINE_ENV}`'s deployment branch policy does not "
-                f"use a custom policy naming `{default_branch}`, so its actual scope could "
-                "not be confirmed as default-branch-only.",
+                (
+                    f"GitHub Environment `{_ENGINE_ENV}`'s deployment branch policy does not "
+                    f"use a custom policy naming `{default_branch}`, so its actual scope could "
+                    "not be confirmed as default-branch-only."
+                ),
             )
         ]
     try:
@@ -603,8 +638,10 @@ def _engine_environment_warnings(ctx):
         return [
             (
                 NOTICE,
-                f"could not read `{_ENGINE_ENV}`'s deployment branch policies "
-                f"({_degrade_reason(e)}), so its scope was not checked.",
+                (
+                    f"could not read `{_ENGINE_ENV}`'s deployment branch policies "
+                    f"({_degrade_reason(e)}), so its scope was not checked."
+                ),
             )
         ]
     names = {p.get("name") for p in (policies or {}).get("branch_policies", [])}
@@ -683,23 +720,27 @@ def _app_key_findings(env, names, total, noun):
         return [
             (
                 WARNING,
-                f"{noun} `{env}` holds `{_APP_KEY_NAME}`, so plan-time "
-                "code execution can mint an App token with it, forge the "
-                f"`{GATE}` status and approve its own pull request. The key belongs "
-                f"only in `{_ENGINE_ENV}` (docs/github-app.md §Key-exposure "
-                "boundary).",
+                (
+                    f"{noun} `{env}` holds `{_APP_KEY_NAME}`, so plan-time "
+                    "code execution can mint an App token with it, forge the "
+                    f"`{GATE}` status and approve its own pull request. The key belongs "
+                    f"only in `{_ENGINE_ENV}` (docs/github-app.md §Key-exposure "
+                    "boundary)."
+                ),
             )
         ]
     if total > len(names):
         return [
             (
                 WARNING,
-                f"{noun} `{env}` holds {total} secret(s) but only "
-                f"{len(names)} name(s) could be read, so whether `{_APP_KEY_NAME}` "
-                "is one of them was not determined, and no document blesses that "
-                "configuration. List the environment's secrets in its settings and "
-                "remove the key if it is there (docs/github-app.md §Key-exposure "
-                "boundary).",
+                (
+                    f"{noun} `{env}` holds {total} secret(s) but only "
+                    f"{len(names)} name(s) could be read, so whether `{_APP_KEY_NAME}` "
+                    "is one of them was not determined, and no document blesses that "
+                    "configuration. List the environment's secrets in its settings and "
+                    "remove the key if it is there (docs/github-app.md §Key-exposure "
+                    "boundary)."
+                ),
             )
         ]
     return []
@@ -771,9 +812,11 @@ def _plan_env_secret_warnings(ctx):
             out.append(
                 (
                     WARNING,
-                    f"GitHub Environment `{name}`'s secrets could not be listed "
-                    f"({_degrade_reason(e)}), so whether this {_env_noun(role)} holds "
-                    "credentials reachable by plan-time code was not checked.",
+                    (
+                        f"GitHub Environment `{name}`'s secrets could not be listed "
+                        f"({_degrade_reason(e)}), so whether this {_env_noun(role)} holds "
+                        "credentials reachable by plan-time code was not checked."
+                    ),
                 )
             )
             continue
@@ -1032,9 +1075,11 @@ def _pin_findings(doc, fname, ctx, seen):
             out.append(
                 (
                     WARNING,
-                    f"`{fname}` pins `{slug}@{ref}` by tag or branch. Pin a "
-                    "commit SHA (a moving ref lets the engine change under your "
-                    "deploy credentials).",
+                    (
+                        f"`{fname}` pins `{slug}@{ref}` by tag or branch. Pin a "
+                        "commit SHA (a moving ref lets the engine change under your "
+                        "deploy credentials)."
+                    ),
                 )
             )
             continue
@@ -1102,8 +1147,10 @@ def _pin_warnings(ctx):
         out.append(
             (
                 WARNING,
-                f"`{fname}` pins `{slug}@{ref[:7]}`, which differs from the latest "
-                f"release {tag} (`{sha[:7]}`). Re-pin to pick up fixes.",
+                (
+                    f"`{fname}` pins `{slug}@{ref[:7]}`, which differs from the latest "
+                    f"release {tag} (`{sha[:7]}`). Re-pin to pick up fixes."
+                ),
             )
         )
     return out
@@ -1150,15 +1197,17 @@ def _unsafe_checkout_warnings(doc, name):
     return [
         (
             WARNING,
-            f"`{name}` sets `allow-unsafe-pr-checkout` to something other than `false`: "
-            "that input turns off `actions/checkout`'s own refusal to check out a fork's "
-            "head, which is the outermost guard on shipmate's plan path. Under "
-            "`pull_request_target` the job runs at the base ref and may hold this "
-            "repository's secrets, so the checked-out code runs alongside them. Under "
-            "`pull_request` a fork's run is handed no secrets, and the input is still "
-            "reported: it holds nothing back the day this workflow gains a "
-            "`pull_request_target` trigger. Remove the input or set it to `false` "
-            "(see docs/hardening.md).",
+            (
+                f"`{name}` sets `allow-unsafe-pr-checkout` to something other than `false`: "
+                "that input turns off `actions/checkout`'s own refusal to check out a fork's "
+                "head, which is the outermost guard on shipmate's plan path. Under "
+                "`pull_request_target` the job runs at the base ref and may hold this "
+                "repository's secrets, so the checked-out code runs alongside them. Under "
+                "`pull_request` a fork's run is handed no secrets, and the input is still "
+                "reported: it holds nothing back the day this workflow gains a "
+                "`pull_request_target` trigger. Remove the input or set it to `false` "
+                "(see docs/hardening.md)."
+            ),
         )
     ]
 
@@ -1199,17 +1248,19 @@ def _fork_trigger_warnings(ctx):
         return out + [
             (
                 WARNING,
-                f"`{name}` triggers on `pull_request_target`. That trigger runs at "
-                "the base ref with this repository's secrets, and on a pull request "
-                "into the default branch that is the ref `shipmate-engine`'s branch "
-                "policy trusts, so a fork can reach them. shipmate's own `shipmate.yml` "
-                "uses this trigger safely because the job holding the App key (the "
-                "`summary` job inside the engine's reusable plan workflow) runs "
-                "no *consumer* repository content. If this workflow checks out or acts "
-                "on the pull request's own code in a job binding a CREDENTIALED "
-                "environment (one holding the App key or cloud credentials), it "
-                "does not have that property. Remove the trigger or split those "
-                "two things apart (see docs/hardening.md).",
+                (
+                    f"`{name}` triggers on `pull_request_target`. That trigger runs at "
+                    "the base ref with this repository's secrets, and on a pull request "
+                    "into the default branch that is the ref `shipmate-engine`'s branch "
+                    "policy trusts, so a fork can reach them. shipmate's own `shipmate.yml` "
+                    "uses this trigger safely because the job holding the App key (the "
+                    "`summary` job inside the engine's reusable plan workflow) runs "
+                    "no *consumer* repository content. If this workflow checks out or acts "
+                    "on the pull request's own code in a job binding a CREDENTIALED "
+                    "environment (one holding the App key or cloud credentials), it "
+                    "does not have that property. Remove the trigger or split those "
+                    "two things apart (see docs/hardening.md)."
+                ),
             )
         ]
 
@@ -1290,25 +1341,29 @@ def _dispatch_input_findings(inputs, name):
         out.append(
             (
                 WARNING,
-                f"`{name}`'s `workflow_dispatch` trigger declares no "
-                f"{_and_list(missing)} input. `actions/dispatch` sends one body per verb, and "
-                "GitHub refuses a body naming an input the workflow does not declare: "
-                "`Unexpected inputs provided`, no run created, and the pull request pointed at "
-                "the comment-handling run by a comment saying the dispatch failed. Declare "
-                f"{_and_list(_DISPATCH_INPUTS)} under the trigger's `inputs:` "
-                "(docs/getting-started.md).",
+                (
+                    f"`{name}`'s `workflow_dispatch` trigger declares no "
+                    f"{_and_list(missing)} input. `actions/dispatch` sends one body per verb, and "
+                    "GitHub refuses a body naming an input the workflow does not declare: "
+                    "`Unexpected inputs provided`, no run created, and the pull request pointed at "
+                    "the comment-handling run by a comment saying the dispatch failed. Declare "
+                    f"{_and_list(_DISPATCH_INPUTS)} under the trigger's `inputs:` "
+                    "(docs/getting-started.md)."
+                ),
             )
         )
     if _mapping(inputs.get("verb")).get("options") != _VERB_OPTION_LIST:
         out.append(
             (
                 WARNING,
-                f"`{name}`'s `verb` input does not offer `{_VERB_OPTIONS}`, which is the whole "
-                "set of verbs this file routes. A missing option is refused at the dispatch "
-                "form and at the API, so that verb reaches nothing; an extra one offers a verb "
-                "no job's `if:` selects, and its run completes with every job skipped, which "
-                f"reads as success everywhere. Write `options: {_VERB_OPTIONS}` "
-                "(docs/getting-started.md).",
+                (
+                    f"`{name}`'s `verb` input does not offer `{_VERB_OPTIONS}`, which is the whole "
+                    "set of verbs this file routes. A missing option is refused at the dispatch "
+                    "form and at the API, so that verb reaches nothing; an extra one offers a verb "
+                    "no job's `if:` selects, and its run completes with every job skipped, which "
+                    f"reads as success everywhere. Write `options: {_VERB_OPTIONS}` "
+                    "(docs/getting-started.md)."
+                ),
             )
         )
     required = [
@@ -1320,12 +1375,15 @@ def _dispatch_input_findings(inputs, name):
         out.append(
             (
                 WARNING,
-                f"`{name}` declares the {_and_list(required)} input `required: true`, but at "
-                "least one dispatch body leaves it empty, and GitHub reads an omitted or empty "
-                "value for a required input as not provided: `Required input not provided`, "
-                "HTTP 422 and no run, so one required input refuses a whole verb. `verb` is the "
-                "only required one; give the rest `required: false` and `default: ''` "
-                "(docs/getting-started.md).",
+                (
+                    f"`{name}` declares the {_and_list(required)} input `required: true`, but at "
+                    "least one dispatch body leaves it empty, and GitHub reads an omitted or empty "
+                    "value for a required input as not provided: `Required input not provided`, "
+                    "HTTP 422 and no run, so one required input refuses a whole verb. `verb` is "
+                    "the "
+                    "only required one; give the rest `required: false` and `default: ''` "
+                    "(docs/getting-started.md)."
+                ),
             )
         )
     return out
@@ -1360,13 +1418,16 @@ def _dispatch_wiring_finding(doc, name):
         return [
             (
                 WARNING,
-                f"`{name}` declares no `workflow_dispatch` trigger, so every commented verb is "
-                "authorized, reacted to with a rocket, and then dispatches nothing: "
-                "GitHub answers the dispatch with `Workflow does not have 'workflow_dispatch' "
-                "trigger`, no run is created, and the pull request gets a comment saying the "
-                "dispatch failed and linking the comment-handling run that holds the error. Add "
-                "the trigger, with its `verb`, `environment`, `ref` and `pr_number` inputs "
-                "(docs/getting-started.md).",
+                (
+                    f"`{name}` declares no `workflow_dispatch` trigger, so every commented verb is "
+                    "authorized, reacted to with a rocket, and then dispatches nothing: "
+                    "GitHub answers the dispatch with `Workflow does not have 'workflow_dispatch' "
+                    "trigger`, no run is created, and the pull request gets a comment saying the "
+                    "dispatch failed and linking the comment-handling run that holds the error. "
+                    "Add "
+                    "the trigger, with its `verb`, `environment`, `ref` and `pr_number` inputs "
+                    "(docs/getting-started.md)."
+                ),
             )
         ]
     trigger = _mapping(_mapping(doc.get("on")).get("workflow_dispatch"))
@@ -1427,12 +1488,15 @@ def _routing_finding(doc, name, engine):
             out.append(
                 (
                     WARNING,
-                    f"`{name}` has {count} jobs calling the engine's `{callee}`: it needs exactly "
-                    "one, selected by the `if:` that routes its event. With none, the verb or "
-                    "event it serves reaches nothing and its run completes with every job "
-                    "skipped, which reads as success everywhere; with more than one, either "
-                    "the work runs twice or one of them is unreachable "
-                    "(docs/getting-started.md).",
+                    (
+                        f"`{name}` has {count} jobs calling the engine's `{callee}`: it needs "
+                        "exactly "
+                        "one, selected by the `if:` that routes its event. With none, the verb or "
+                        "event it serves reaches nothing and its run completes with every job "
+                        "skipped, which reads as success everywhere; with more than one, either "
+                        "the work runs twice or one of them is unreachable "
+                        "(docs/getting-started.md)."
+                    ),
                 )
             )
             continue
@@ -1441,31 +1505,38 @@ def _routing_finding(doc, name, engine):
             out.append(
                 (
                     WARNING,
-                    f"`{name}`'s job calling the engine's `{callee}` declares no `if:`, so it "
-                    "then runs on every one of this file's triggers, so a `push` starts a plan "
-                    f"and an `issue_comment` starts an apply. Add `if: {expected}` "
-                    "(docs/getting-started.md).",
+                    (
+                        f"`{name}`'s job calling the engine's `{callee}` declares no `if:`, so it "
+                        "then runs on every one of this file's triggers, so a `push` starts a plan "
+                        f"and an `issue_comment` starts an apply. Add `if: {expected}` "
+                        "(docs/getting-started.md)."
+                    ),
                 )
             )
         elif _scalar(found) is None:
             out.append(
                 (
                     WARNING,
-                    f"`{name}`'s job calling the engine's `{callee}` has an `if:` that is not a "
-                    f"single expression. Write `if: {expected}` "
-                    "(docs/getting-started.md).",
+                    (
+                        f"`{name}`'s job calling the engine's `{callee}` has an `if:` that is not "
+                        "a "
+                        f"single expression. Write `if: {expected}` "
+                        "(docs/getting-started.md)."
+                    ),
                 )
             )
         elif _normalize_if(str(_scalar(found))) != _normalize_if(expected):
             out.append(
                 (
                     WARNING,
-                    f"`{name}`'s job calling the engine's `{callee}` is selected by "
-                    f"`{_normalize_if(str(_scalar(found)))}`, "
-                    f"not `{_normalize_if(expected)}`. A wrong "
-                    "expression routes a verb nowhere and its dispatched run completes with "
-                    "every job skipped, which reads as success everywhere "
-                    "(docs/getting-started.md).",
+                    (
+                        f"`{name}`'s job calling the engine's `{callee}` is selected by "
+                        f"`{_normalize_if(str(_scalar(found)))}`, "
+                        f"not `{_normalize_if(expected)}`. A wrong "
+                        "expression routes a verb nowhere and its dispatched run completes with "
+                        "every job skipped, which reads as success everywhere "
+                        "(docs/getting-started.md)."
+                    ),
                 )
             )
     return out
@@ -1482,10 +1553,12 @@ SHIPMATE_YML_NO_ENGINE = _no_engine("the workflow file's job name, event routing
 
 SHIPMATE_YML_CALLS_DRIFT = (
     WARNING,
-    "`shipmate.yml` calls the engine's `drift.yml`. A drift job there runs on that file's "
-    "triggers: with no `if:`, on every pull request, comment, push and dispatched verb. Move "
-    "the drift job to a workflow file of its own, and drop the `schedule` trigger and the "
-    "`drift` verb option from `shipmate.yml` (docs/drift.md).",
+    (
+        "`shipmate.yml` calls the engine's `drift.yml`. A drift job there runs on that file's "
+        "triggers: with no `if:`, on every pull request, comment, push and dispatched verb. Move "
+        "the drift job to a workflow file of its own, and drop the `schedule` trigger and the "
+        "`drift` verb option from `shipmate.yml` (docs/drift.md)."
+    ),
 )
 
 
@@ -1564,8 +1637,10 @@ ACCOUNT_LINES_BUDGET = 4000
 # misconfiguration. Never an all-clear, and never a read of another revision in its place.
 CONFIG_UNREADABLE = (
     NOTICE,
-    f"could not read `{CONFIG_PATH}` at the commit under examination, so its settings were "
-    "not validated here. The default branch's copy was not read in its place.",
+    (
+        f"could not read `{CONFIG_PATH}` at the commit under examination, so its settings were "
+        "not validated here. The default branch's copy was not read in its place."
+    ),
 )
 CONFIG_NO_COMMIT = (
     NOTICE,
@@ -1718,11 +1793,13 @@ def _config_table(ctx):
         # runner, so no revision of the file can be at fault and none is worth reading.
         floor = (
             WARNING,
-            "this runner's Python refuses the environment table before any revision "
-            f"of it is read: {_one_line(refusal.removeprefix('::error::'), 400)} "
-            "Nothing is wrong with the file: merging it changes nothing, and every "
-            "operation that reads the table meets the same refusal on the default "
-            "branch too.",
+            (
+                "this runner's Python refuses the environment table before any revision "
+                f"of it is read: {_one_line(refusal.removeprefix('::error::'), 400)} "
+                "Nothing is wrong with the file: merging it changes nothing, and every "
+                "operation that reads the table meets the same refusal on the default "
+                "branch too."
+            ),
         )
         return None, [floor], []
     ref = _contents_ref(ctx)
@@ -1742,10 +1819,12 @@ def _config_table(ctx):
             errors += f" … and {len(lines) - CONFIG_ERROR_LINES} more."
         invalid = (
             WARNING,
-            f"`{CONFIG_PATH}` at the commit under examination is not valid: "
-            f"{errors} Merging it refuses "
-            "every operation that reads the table. Execution still reads the default "
-            "branch's copy, which this says nothing about.",
+            (
+                f"`{CONFIG_PATH}` at the commit under examination is not valid: "
+                f"{errors} Merging it refuses "
+                "every operation that reads the table. Execution still reads the default "
+                "branch's copy, which this says nothing about."
+            ),
         )
         return None, [invalid], []
     refs = ec.references(ec.load_config(text))
@@ -1835,11 +1914,13 @@ def _app_permission_warnings(ctx):
     return [
         (
             WARNING,
-            f"{_one_line(ctx['app_permission_error'])}, which usually means the shipmate App "
-            "installation is missing a permission the manifest declares. Add it in the App's "
-            "settings if they lack it, then accept the request in the installation settings "
-            "(docs/github-app.md, Re-approve after permission changes), or retry if the API "
-            "was transiently failing.",
+            (
+                f"{_one_line(ctx['app_permission_error'])}, which usually means the shipmate App "
+                "installation is missing a permission the manifest declares. Add it in the App's "
+                "settings if they lack it, then accept the request in the installation settings "
+                "(docs/github-app.md, Re-approve after permission changes), or retry if the API "
+                "was transiently failing."
+            ),
         )
     ]
 
@@ -1849,8 +1930,10 @@ DRIFT_FILE_UNREADABLE, DRIFT_FILE_NO_COMMIT = _unverified(_DRIFT_FILE_SUBJECT)
 DRIFT_FILE_NO_ENGINE = _no_engine(_DRIFT_FILE_SUBJECT)
 DRIFT_FILE_MISSING = (
     NOTICE,
-    "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
-    "Add a drift workflow file to check for drift (docs/drift.md).",
+    (
+        "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
+        "Add a drift workflow file to check for drift (docs/drift.md)."
+    ),
 )
 
 
@@ -1973,8 +2056,10 @@ def warnings(ctx):
             out.append(
                 (
                     getattr(probe, "degrade_level", WARNING),
-                    f"doctor could not verify the {_probe_label(probe)} settings "
-                    f"({_degrade_reason(e)}): probe skipped.",
+                    (
+                        f"doctor could not verify the {_probe_label(probe)} settings "
+                        f"({_degrade_reason(e)}): probe skipped."
+                    ),
                 )
             )
     return out

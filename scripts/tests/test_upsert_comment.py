@@ -338,13 +338,18 @@ def _run_summary(tmp_path, mode, *, warned="false", unmanaged="false", **gh):
     [
         (
             "draft",
-            "the pull request was a draft when this run started and was not planned; the sticky "
-            "plan comment was left as it is\n",
+            (
+                "the pull request was a draft when this run started and was not planned; the "
+                "sticky "
+                "plan comment was left as it is\n"
+            ),
         ),
         (
             "hold",
-            "::warning::the plan job (failure) did not produce a trustworthy set of cell "
-            "summaries; the sticky plan comment was left as it is\n",
+            (
+                "::warning::the plan job (failure) did not produce a trustworthy set of cell "
+                "summaries; the sticky plan comment was left as it is\n"
+            ),
         ),
     ],
 )
@@ -441,9 +446,11 @@ def test_doctor_list_failure_warns_with_the_retry_hint_and_writes_nothing(tmp_pa
     proc, calls = _run_doctor(tmp_path, list_rc=1)
     assert (proc.returncode, proc.stdout, calls) == (
         0,
-        "::warning::could not list this pull request's comments; the doctor report was not "
-        "posted to the pull request this run: read it in this job's summary, or comment "
-        "shipmate doctor again to retry\n",
+        (
+            "::warning::could not list this pull request's comments; the doctor report was not "
+            "posted to the pull request this run: read it in this job's summary, or comment "
+            "shipmate doctor again to retry\n"
+        ),
         [_LIST],
     )
 

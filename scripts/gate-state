@@ -140,8 +140,10 @@ def decide(
     if planned is None:
         return (
             "failure",
-            "the planned cell count was not reported, so this run's evidence is "
-            "unknown; re-plan before merging",
+            (
+                "the planned cell count was not reported, so this run's evidence is "
+                "unknown; re-plan before merging"
+            ),
             _HOLD,
         )
     # `or`, so the plan-job checks still run before the evidence check: a plan

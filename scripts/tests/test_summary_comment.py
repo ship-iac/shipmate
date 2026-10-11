@@ -590,18 +590,22 @@ _HEREDOC = (
 _COUNTS_FIXTURES = {
     "mixed": (_MIXED, (1, 2, 2, 0, 0)),
     "no-changes": (
-        "No changes. Your infrastructure matches the configuration.\n"
-        "\n"
-        "OpenTofu has compared your real infrastructure against your configuration\n"
-        "and found no differences, so no changes are needed.\n",
+        (
+            "No changes. Your infrastructure matches the configuration.\n"
+            "\n"
+            "OpenTofu has compared your real infrastructure against your configuration\n"
+            "and found no differences, so no changes are needed.\n"
+        ),
         (0, 0, 0, 0, 0),
     ),
     "outputs-only": (
-        "Changes to Outputs:\n"
-        '  + o = "x"\n'
-        "\n"
-        "You can apply this plan to save these new output values to the OpenTofu\n"
-        "state, without changing any real infrastructure.\n",
+        (
+            "Changes to Outputs:\n"
+            '  + o = "x"\n'
+            "\n"
+            "You can apply this plan to save these new output values to the OpenTofu\n"
+            "state, without changing any real infrastructure.\n"
+        ),
         (0, 0, 0, 0, 0),
     ),
     "import-only": ("Plan: 1 to import, 0 to add, 0 to change, 0 to destroy.\n", (0, 0, 0, 1, 0)),

@@ -98,10 +98,12 @@ def test_a_misspelled_flagged_entry_warns_as_unused(capsys):
     table = {"layout": "folder", "environments": {"prd": {"explicit": True, "gated": False}}}
     _validate(table, tagged=_scan("prod"))
     assert capsys.readouterr().out.splitlines() == [
-        "::warning::the environment table declares prd, which no stack tags. Remove the "
-        "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
-        "because the table is read from the default branch and the tags from this branch, so "
-        "an environment or a workload arrives and leaves over two pull requests."
+        (
+            "::warning::the environment table declares prd, which no stack tags. Remove the "
+            "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
+            "because the table is read from the default branch and the tags from this branch, so "
+            "an environment or a workload arrives and leaves over two pull requests."
+        )
     ]
 
 

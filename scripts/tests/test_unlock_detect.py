@@ -293,8 +293,10 @@ def test_unlock_notice_names_the_env_and_counts(monkeypatch, tmp_path, capsys):
         (
             "SHIPMATE_ENV",
             "dev.eu",
-            "::error::SHIPMATE_ENV 'dev.eu' is not an environment name: lowercase letters, "
-            "digits, '-' and '_', with no quotes, spaces or path separators.",
+            (
+                "::error::SHIPMATE_ENV 'dev.eu' is not an environment name: lowercase letters, "
+                "digits, '-' and '_', with no quotes, spaces or path separators."
+            ),
         ),
     ],
     ids=["head-sha", "empty-env", "dotted-env"],

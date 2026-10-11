@@ -842,8 +842,11 @@ def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
         line for line in capsys.readouterr().out.splitlines() if line.startswith("::notice title=")
     ]
     assert notices == [
-        f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, 0] "
-        "excluded_explicit=[] skipped_after_explicit=[] review_held=[] applied_ungated=[] "
-        "review_decision='APPROVED'"
+        (
+            f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, "
+            "0] "
+            "excluded_explicit=[] skipped_after_explicit=[] review_held=[] applied_ungated=[] "
+            "review_decision='APPROVED'"
+        )
     ]
     assert "apply-all-detect notice" in load_script("apply-comment")._HELD_REMEDY

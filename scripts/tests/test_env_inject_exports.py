@@ -307,24 +307,31 @@ def test_shipmate_vars_is_lifted_out_of_the_enumeration():
     [
         (
             "SHIPMATE_SECRETS",
-            "::error::SHIPMATE_SECRETS is set as a GitHub variable, and it must be a secret. "
-            "Nothing in it reaches the cell, and its value is readable by anyone who can "
-            "see the repository. Delete the variable, rotate every credential it held, "
-            "and set a secret of that name instead.",
+            (
+                "::error::SHIPMATE_SECRETS is set as a GitHub variable, and it must be a secret. "
+                "Nothing in it reaches the cell, and its value is readable by anyone who can "
+                "see the repository. Delete the variable, rotate every credential it held, "
+                "and set a secret of that name instead."
+            ),
         ),
         (
             "SHIPMATE_APP_PRIVATE_KEY",
-            "::error::SHIPMATE_APP_PRIVATE_KEY is set as a GitHub variable, and it must be a "
-            "secret on the shipmate-engine environment. Its value is readable by anyone who "
-            "can see the repository. Delete the variable, rotate the key, and run gh "
-            "secret set SHIPMATE_APP_PRIVATE_KEY --env shipmate-engine.",
+            (
+                "::error::SHIPMATE_APP_PRIVATE_KEY is set as a GitHub variable, and it must be a "
+                "secret on the shipmate-engine environment. Its value is readable by anyone who "
+                "can see the repository. Delete the variable, rotate the key, and run gh "
+                "secret set SHIPMATE_APP_PRIVATE_KEY --env shipmate-engine."
+            ),
         ),
         (
             "SHIPMATE_PLAN_PASSPHRASE",
-            "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable, and it must be a "
-            "secret, not a variable. Its value is readable by anyone who can see the repository. "
-            "Delete the variable, choose a new passphrase, and set it as a secret, for example "
-            "with gh secret set SHIPMATE_PLAN_PASSPHRASE.",
+            (
+                "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable, and it must be a "
+                "secret, not a variable. Its value is readable by anyone who can see the "
+                "repository. "
+                "Delete the variable, choose a new passphrase, and set it as a secret, for example "
+                "with gh secret set SHIPMATE_PLAN_PASSPHRASE."
+            ),
         ),
     ],
     ids=["secrets", "app-key", "plan-passphrase"],

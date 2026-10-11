@@ -225,14 +225,19 @@ _CHARSET = (
         ("env/../admin", "::error::stack 'stacks/c' tag 'env/../admin'" + _CHARSET),
         (
             "env/prod-apply",
-            "::error::stack 'stacks/c' tag 'env/prod-apply' carries the environment suffix "
-            "'-apply'; a tag is matched against the bare logical env name; write 'prod' instead.",
+            (
+                "::error::stack 'stacks/c' tag 'env/prod-apply' carries the environment suffix "
+                "'-apply'; a tag is matched against the bare logical env name; write 'prod' "
+                "instead."
+            ),
         ),
         (
             "env/shipmate-engine",
-            "::error::stack 'stacks/c' tag 'env/shipmate-engine' names 'shipmate-engine', the "
-            "engine's own environment, which holds the shipmate App's private key; use another "
-            "name.",
+            (
+                "::error::stack 'stacks/c' tag 'env/shipmate-engine' names 'shipmate-engine', the "
+                "engine's own environment, which holds the shipmate App's private key; use another "
+                "name."
+            ),
         ),
     ],
     ids=["dot", "path", "suffix", "engine"],
@@ -1326,12 +1331,17 @@ def test_plan_detect_names_every_two_tag_stack_and_every_gap_in_one_refusal(monk
         [
             _TWO_TAG_A,
             _TWO_TAG_B,
-            "::error::1 cell(s) carry a workload tag their environment's workloads list does "
-            "not name: stacks/c in dev (workload/app; dev lists core). A listed workload is the "
-            "only one the default branch grants a role to. Retag the stack, or add the workload "
-            "to environments.<env>.workloads in .github/shipmate-config.yml on the default branch, "
-            "which is where this table is read from: merge it there on its own pull request "
-            "first.",
+            (
+                "::error::1 cell(s) carry a workload tag their environment's workloads list does "
+                "not name: stacks/c in dev (workload/app; dev lists core). A listed workload is "
+                "the "
+                "only one the default branch grants a role to. Retag the stack, or add the "
+                "workload "
+                "to environments.<env>.workloads in .github/shipmate-config.yml on the default "
+                "branch, "
+                "which is where this table is read from: merge it there on its own pull request "
+                "first."
+            ),
         ]
     )
 
@@ -1597,8 +1607,10 @@ def test_a_clause_of_known_terms_matching_no_cell_is_named_beside_a_live_one(cap
         ("dev-eu", "stacks/db"),
     ]
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::the drift tags query 'env/prod-eu:workload/app,env/dev-eu' has clause(s) "
-        "matching no cell: env/prod-eu:workload/app."
+        (
+            "::notice::the drift tags query 'env/prod-eu:workload/app,env/dev-eu' has clause(s) "
+            "matching no cell: env/prod-eu:workload/app."
+        )
     ]
 
 
@@ -2080,9 +2092,12 @@ def test_detect_warns_about_each_env_a_tagged_stack_lost(monkeypatch, tmp_path, 
         diffs={"stacks/app": _REMOVED_PROD_LINE},
     )
     assert _warnings(capsys) == [
-        "::warning::1 stack / environment pair(s) lost their env/* tag in this pull request, so "
-        "shipmate no longer plans or deploys them: stacks/app / prod. If that is deliberate "
-        "(CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise restore the tag."
+        (
+            "::warning::1 stack / environment pair(s) lost their env/* tag in this pull request, "
+            "so "
+            "shipmate no longer plans or deploys them: stacks/app / prod. If that is deliberate "
+            "(CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise restore the tag."
+        )
     ]
 
 
@@ -2155,10 +2170,12 @@ def test_detect_names_the_first_ten_lost_stacks(monkeypatch, tmp_path, capsys):
         diffs=dict.fromkeys(lost, _REMOVED_ENV_LINE),
     )
     assert _warnings(capsys) == [
-        "::warning::11 stack(s) lost their last env/* tag in this pull request, so shipmate no "
-        f"longer plans or deploys them: {', '.join(lost[:10])}, and 1 more. If that is "
-        "deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise "
-        "restore the tag."
+        (
+            "::warning::11 stack(s) lost their last env/* tag in this pull request, so shipmate no "
+            f"longer plans or deploys them: {', '.join(lost[:10])}, and 1 more. If that is "
+            "deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise "
+            "restore the tag."
+        )
     ]
 
 
@@ -2175,8 +2192,10 @@ def test_detect_names_the_first_ten_lost_pairs(monkeypatch, tmp_path, capsys):
         diffs=dict.fromkeys(stacks, _REMOVED_PROD_LINE),
     )
     assert _warnings(capsys) == [
-        "::warning::11 stack / environment pair(s) lost their env/* tag in this pull request, "
-        "so shipmate no longer plans or deploys them: "
-        f"{', '.join(f'{s} / prod' for s in stacks[:10])}, and 1 more. If that is deliberate "
-        "(CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise restore the tag."
+        (
+            "::warning::11 stack / environment pair(s) lost their env/* tag in this pull request, "
+            "so shipmate no longer plans or deploys them: "
+            f"{', '.join(f'{s} / prod' for s in stacks[:10])}, and 1 more. If that is deliberate "
+            "(CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise restore the tag."
+        )
     ]
