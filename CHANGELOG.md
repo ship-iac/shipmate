@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **A plan summary that fails after publishing some apply checks leaves the gate held instead of greenable by an apply of the published cells.**
+- **The hold for a cell-summary shortfall says to re-plan (comment `shipmate plan` or push) instead of re-running the summary job, which republished pending checks over cells applied since.**
 
 ## [0.44.0] — 2026-10-11
 

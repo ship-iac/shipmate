@@ -167,14 +167,13 @@ def test_a_non_integer_planned_count_holds(planned):
 
 
 def test_fewer_cells_than_planned_holds():
-    state, desc, mode = d(planned_cells="3", cell_count=2)
-    assert state == "failure"
-    assert mode == "hold"
-    # The recovery has to survive the 140-char truncation, and it must not be "re-plan":
-    # plan-cell's uploads are not `overwrite:`, so re-running a plan job that already published
-    # its artifacts 409s.
-    assert "re-run this summary job" in desc[:140]
-    assert "re-plan" not in desc
+    """Mutations: restore the old "re-run this summary job" lead; drop either count."""
+    assert d(planned_cells="3", cell_count=2) == (
+        "failure",
+        "re-plan this pull request (comment shipmate plan or push): "
+        "3 cell(s) planned but 2 cell summary/summaries read",
+        "hold",
+    )
 
 
 def test_more_cells_than_planned_holds():
@@ -192,12 +191,15 @@ def test_more_cells_than_planned_holds():
         {"planned_cells": "unknown"},
         {"plan_result": "skipped", "planned_cells": "3"},
         {"planned_cells": "3", "cell_count": 0},
+        {"planned_cells": "256", "cell_count": 0},
+        {"planned_cells": "256", "cell_count": 255},
         {"detect_result": "skipped", "is_draft": True},
         {"detect_result": "failure", "refusal": _LONG_REFUSAL},
     ],
 )
 def test_every_description_fits_the_statuses_api(kw):
-    """Mutation: drop the `[:140]` in `_detect_gap` -- the long-refusal case."""
+    """Mutations: drop the `[:140]` in `_detect_gap` -- the long-refusal case; lengthen the
+    evidence-gap remedy -- the 256-cell cases."""
     assert len(d(**kw)[1]) <= 140
 
 
