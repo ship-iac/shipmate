@@ -47,10 +47,9 @@ def test_every_job_declares_its_own_permissions():
 def test_facts_is_the_single_producer_of_every_pull_request_fact():
     """One producer, or two producers of one fact disagree eventually. Mutation: add a second
     `actions/pr-facts` step to `detect`."""
-    doc = workflow_yaml(WF)
     producers = [
         job_id
-        for job_id, job in doc["jobs"].items()
+        for job_id, job in workflow_jobs(WF).items()
         for s in (job.get("steps") or [])
         if "actions/pr-facts" in str(s.get("uses", ""))
     ]
@@ -79,7 +78,7 @@ def test_build_matrix_reads_the_facts_job_and_states_no_constant():
 def test_the_plan_workflow_never_sets_sweep():
     """`sweep: "true"` skips build-matrix's head-repository and head-commit refusals.
     drift.yml is required to carry it; a plan workflow must never. Mutation: add the key."""
-    for job in workflow_yaml(WF)["jobs"].values():
+    for job in workflow_jobs(WF).values():
         for step in job.get("steps") or []:
             assert "sweep" not in (step.get("with") or {})
 

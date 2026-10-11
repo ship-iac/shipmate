@@ -1,4 +1,4 @@
-"""Check-run fixtures for the three detect scripts."""
+"""Check-run fixtures shared by the detect-script tests."""
 
 import json
 from typing import Any

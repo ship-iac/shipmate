@@ -63,7 +63,7 @@ def test_every_job_declares_its_own_permissions():
     Mutations: drop `issues: write`, and the reaction and refusal comment fail; delete the whole
     block, and the job silently gets the empty floor.
     """
-    assert {j: v.get("permissions") for j, v in workflow_yaml(WF)["jobs"].items()} == {
+    assert {j: v.get("permissions") for j, v in workflow_jobs(WF).items()} == {
         "ops": {
             "contents": "read",
             "issues": "write",
@@ -79,7 +79,7 @@ def test_every_job_binds_the_engine_environment():
 
     Mutation: delete the `environment:`.
     """
-    bound = {j: v.get("environment") for j, v in workflow_yaml(WF)["jobs"].items()}
+    bound = {j: v.get("environment") for j, v in workflow_jobs(WF).items()}
     assert bound == {"ops": "shipmate-engine"}
 
 

@@ -76,7 +76,7 @@ def test_the_detect_job_outputs_exactly_these_expressions():
 
 def test_the_jobs_are_exactly_these():
     """Each job id is also a check-run name segment."""
-    assert list(workflow_yaml(WF)["jobs"]) == ["detect", "drift", "issues"]
+    assert list(workflow_jobs(WF)) == ["detect", "drift", "issues"]
 
 
 def test_the_cell_and_issue_jobs_gate_on_the_api_resolved_default_branch():
@@ -93,7 +93,7 @@ def test_the_cell_and_issue_jobs_gate_on_the_api_resolved_default_branch():
 def test_the_detect_job_is_deliberately_ungated():
     """It runs no consumer code and holds no secret. A gate here would make a feature-branch
     dispatch silently do nothing instead of failing visibly at the two jobs below."""
-    assert "if" not in workflow_yaml(WF)["jobs"]["detect"]
+    assert "if" not in workflow_jobs(WF)["detect"]
 
 
 def test_the_sweep_call_states_sweep_and_its_query():
@@ -102,7 +102,7 @@ def test_the_sweep_call_states_sweep_and_its_query():
     `tags: ${{ inputs.tags }}`, and every drift file sweeps every cell."""
     step = next(
         s
-        for s in workflow_yaml(WF)["jobs"]["detect"]["steps"]
+        for s in workflow_jobs(WF)["detect"]["steps"]
         if "actions/build-matrix" in str(s.get("uses", ""))
     )
     assert step["with"] == {
@@ -128,7 +128,7 @@ def test_every_job_declares_its_own_permissions():
     """Whole map. Mutations: delete the `drift` job's block, and it silently gets the floor
     instead of the `id-token: write` its OIDC step needs; drop `contents: read` from `issues`,
     and its read of the default branch head fails on a private repository."""
-    assert {j: v.get("permissions") for j, v in workflow_yaml(WF)["jobs"].items()} == {
+    assert {j: v.get("permissions") for j, v in workflow_jobs(WF).items()} == {
         "detect": {"contents": "read"},
         "drift": {"contents": "read", "id-token": "write"},
         "issues": {"actions": "read", "contents": "read"},
@@ -146,7 +146,7 @@ def test_every_job_binds_the_environment_it_should_and_no_other():
     """
     parsed = {
         j: (" ".join(v["environment"].split()) if "environment" in v else None)
-        for j, v in workflow_yaml(WF)["jobs"].items()
+        for j, v in workflow_jobs(WF).items()
     }
     assert parsed == {"detect": None, "drift": _CELL_ENV, "issues": "shipmate-engine"}
 
@@ -162,7 +162,7 @@ def test_every_checkout_takes_no_with_block():
     for job_id in ("detect", "drift"):
         checkouts = [
             s.get("with")
-            for s in workflow_yaml(WF)["jobs"][job_id]["steps"]
+            for s in workflow_jobs(WF)[job_id]["steps"]
             if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
         assert checkouts == [None], job_id

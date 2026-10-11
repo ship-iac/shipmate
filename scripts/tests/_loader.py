@@ -1,9 +1,9 @@
 """Shared test-side helpers: load a ``scripts/`` helper, read an engine YAML file or a docs code
 fence, or run a shipped shell body.
 
-Five jobs: ``load_script`` for the extension-less helpers;
-``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus ``action_yaml``, ``workflow_yaml``, ``action_steps`` and
-``step_by`` for the YAML-shape guards; ``doc_fences`` and ``assert_every_fence_discovered`` for
+Five jobs: ``load_script`` for the extension-less helpers; ``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus
+``action_yaml``, ``workflow_yaml``, ``action_steps``, ``step_by``, ``workflow_jobs``, ``step_using``
+and ``strings`` for the YAML-shape guards; ``doc_fences`` and ``assert_every_fence_discovered`` for
 the docs fence guards; ``bash_only``, ``run_step``, ``write_python3_shim`` and
 ``run_with_gh_recorder`` for the tests that execute a step's bash; and ``github_outputs`` for
 reading back what a helper or step wrote to ``GITHUB_OUTPUT``. The YAML parser behind
@@ -153,7 +153,7 @@ def step_using(workflow, job_id, needle):
     Exactly one, asserted, for the reason ``step_by`` gives.
     """
     hits = [s for s in workflow_jobs(workflow)[job_id]["steps"] if needle in str(s.get("uses", ""))]
-    assert len(hits) == 1, f"{workflow} {job_id}: {len(hits)} steps use {needle}"
+    assert len(hits) == 1, f"{pathlib.Path(workflow).name} {job_id}: {len(hits)} steps use {needle}"
     return hits[0]
 
 

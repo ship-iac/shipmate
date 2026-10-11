@@ -15,7 +15,7 @@ satisfies it, and the way a cell would actually regain the key -- a direct
 
 import pytest
 import yaml
-from _loader import WORKFLOWS, action_steps, action_yaml, strings, workflow_yaml
+from _loader import WORKFLOWS, action_steps, action_yaml, strings, workflow_jobs
 
 CELLS = ("apply-cell", "drift-cell", "plan-cell")
 
@@ -65,8 +65,7 @@ def test_only_the_completer_job_reads_the_app_key():
     # Parse, do not string-split: the secret stays declared at the top of the file, because the
     # complete job consumes it and test_gate_name_consistency requires reusable targets called
     # with `secrets: inherit` to declare it. A textual "not in" assertion checks the wrong thing.
-    doc = workflow_yaml(LEVEL)
-    for name, job in doc["jobs"].items():
+    for name, job in workflow_jobs(LEVEL).items():
         body = yaml.safe_dump(job)
         if name == "complete":
             assert APP_KEY_ENV in body
@@ -83,7 +82,7 @@ def test_plan_workflow_untrusted_jobs_never_reach_the_app_key(job_id):
 
     Mutation: add `env: { K: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }} }` to the `plan` job.
     """
-    job = workflow_yaml(PLAN_WF)["jobs"][job_id]
+    job = workflow_jobs(PLAN_WF)[job_id]
     hits = [s for s in strings(job) if APP_KEY_ENV in s]
     assert not hits, f"plan.yml job `{job_id}` references the App key: {hits}"
 
@@ -98,7 +97,7 @@ def test_plan_workflow_untrusted_jobs_bind_no_engine_environment(job_id):
 
     Mutation: set `environment: shipmate-engine` on the `detect` job.
     """
-    job = workflow_yaml(PLAN_WF)["jobs"][job_id]
+    job = workflow_jobs(PLAN_WF)[job_id]
     assert "shipmate-engine" not in str(job.get("environment", ""))
 
 
@@ -107,6 +106,7 @@ def test_the_completer_is_the_only_job_naming_the_engine_environment():
     # job naming the environment, so moving it onto wave0, which runs tofu over branch content,
     # would keep the count at 1 and the test green while releasing the key to consumer code.
     # Assert the specific job, not the count.
-    doc = workflow_yaml(LEVEL)
-    named = {n for n, j in doc["jobs"].items() if j.get("environment") == "shipmate-engine"}
+    named = {
+        n for n, j in workflow_jobs(LEVEL).items() if j.get("environment") == "shipmate-engine"
+    }
     assert named == {"complete"}
