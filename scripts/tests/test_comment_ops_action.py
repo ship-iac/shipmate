@@ -56,10 +56,9 @@ cp = load_script("comment-parse")
 doctor = load_script("doctor")
 
 
-def test_every_active_route_has_a_branch():
+def test_every_route_has_a_branch():
     routed = set(re.findall(r"outputs\.route == '([a-z]+)'", _ACTION))
-    expected = {verb for verb, spec in cp.VERBS.items() if spec["status"] == cp.ACTIVE}
-    assert expected <= routed, expected - routed
+    assert set(cp.VERBS) <= routed, set(cp.VERBS) - routed
 
 
 def test_bot_authored_comments_are_ignored():
@@ -823,7 +822,7 @@ _REPLY_RUN = 'set -euo pipefail\npython3 "$GITHUB_ACTION_PATH/../../scripts/repl
 #: Each reply step's header words, outcome and text, hand-written. `refused` where the engine
 #: decided not to run the command, `failed` where it could not.
 _REPLIES = {
-    "Reject malformed / reserved command": {
+    "Reject malformed command": {
         "SHIPMATE_REPLY_VERB": _PARSED_VERB,
         "SHIPMATE_REPLY_ENV": _PARSED_ENV,
         "SHIPMATE_REPLY_OUTCOME": "refused",
@@ -1075,7 +1074,7 @@ def test_a_command_naming_no_known_verb_is_refused_under_the_bare_header(tmp_pat
     """
     body = _posted_body(
         tmp_path,
-        "Reject malformed / reserved command",
+        "Reject malformed command",
         {
             "steps.parse.outputs.verb": "",
             "steps.parse.outputs.env": "dev-eu",
@@ -1237,24 +1236,33 @@ def test_exactly_the_table_readers_receive_the_callers_variables():
 #: The comment-ops verb table in CONTRACT.md: the header row that opens it and
 #: the blank line that ends it. Bounded rather than whole-file, so a `shipmate
 #: <verb>` mention in the surrounding prose cannot satisfy the guard.
-_VERB_TABLE = ("| verb | status | args | authorization |", "\n\n")
+_VERB_TABLE = ("| verb | args | authorization |", "\n\n")
 
 
-def test_the_contract_verb_table_carries_every_active_verb():
+def test_the_contract_verb_table_carries_exactly_the_verbs():
     """CONTRACT.md calls `VERBS` "the single source of truth this table is derived from", but the
-    table is hand-maintained -- so it drifted. Derived from the registry here, never a hand-written
-    verb list, so the next verb added cannot repeat it."""
+    table is hand-maintained -- so it drifted. The rows' first cells must equal the set derived
+    from the registry, and the literal beside it catches a mistake in the registry itself.
+
+    Mutations: add a `shipmate destroy` row to the table; drop the `shipmate plan` row.
+    """
     start, end = _VERB_TABLE
     text = (ENGINE / "CONTRACT.md").read_text(encoding="utf-8")
     assert start in text, f"the verb table's header row, {start!r}, is gone"
     table = text.split(start, 1)[1].split(end, 1)[0]
-    active = {v: s for v, s in cp.VERBS.items() if s["status"] == cp.ACTIVE}
-    assert active, "expected at least one active verb in the registry"
-    for verb, spec in active.items():
-        invocation = " ".join(filter(None, ("shipmate", verb, spec["args"])))
-        assert f"| `{invocation}` | active |" in table, (
-            f"CONTRACT.md's verb table has no active row for `{invocation}`"
-        )
+    rows = {line.split("|")[1].strip() for line in table.splitlines() if line.startswith("| `")}
+    derived = {
+        "`" + " ".join(filter(None, ("shipmate", verb, spec["args"]))) + "`"
+        for verb, spec in cp.VERBS.items()
+    }
+    expected = {
+        "`shipmate apply [env]`",
+        "`shipmate doctor`",
+        "`shipmate help`",
+        "`shipmate plan`",
+        "`shipmate unlock <env>`",
+    }
+    assert rows == derived == expected
 
 
 #: Every step of the action, in order, hand-written. One constant for the whole shape: it
@@ -1263,7 +1271,7 @@ def test_the_contract_verb_table_carries_every_active_verb():
 _STEP_NAMES = [
     "Ignore bot-authored comments",
     "Parse command",
-    "Reject malformed / reserved command",
+    "Reject malformed command",
     "Post help",
     "Acknowledge a command that changes no infrastructure",
     "Read the commenter's repository permission",

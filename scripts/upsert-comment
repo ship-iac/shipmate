@@ -34,7 +34,7 @@ import os
 import re
 import sys
 
-from _shipmate import is_pr_number, run, utf8_output
+from _shipmate import is_pr_number, run
 
 MARKER = re.compile(r"<!-- shipmate:[a-z]{1,40} -->")
 JQ = '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}'
@@ -63,7 +63,6 @@ def find_existing(repo, pr, marker):
 
 
 def main():
-    utf8_output()
     args = sys.argv[1:]
     if len(args) not in (2, 3) or args[2:] not in ([], ["--update-only"]):
         sys.exit("::error::usage: upsert-comment PR BODYFILE [--update-only]")

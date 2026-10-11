@@ -27,10 +27,9 @@ import os
 import re
 import sys
 
-from _shipmate import _load
+from _shipmate import _load, gh_json
 
 ag = _load("apply-gate")
-bm = _load("build-matrix")
 
 #: Conclusions `POST /check-runs` accepts. The listing can also answer `stale`,
 #: which it does not accept on create, so anything outside this set is mirrored
@@ -91,7 +90,7 @@ def main():
     run_id = os.environ["GITHUB_RUN_ID"]
     # The engine plan workflow's `summary` job shares the caller's run id (measured), so
     # this reads the plan run's own suite without an input.
-    suite_id = bm.gh_json(f"repos/{repo}/actions/runs/{run_id}").get("check_suite_id")
+    suite_id = gh_json(f"repos/{repo}/actions/runs/{run_id}").get("check_suite_id")
     out = bodies(sys.stdin, suite_id, os.environ["SHIPMATE_HEAD_SHA"])
     for body in out:
         print(json.dumps(body))

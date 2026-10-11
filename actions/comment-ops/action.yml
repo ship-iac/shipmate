@@ -74,7 +74,7 @@ runs:
         [[ "$COMMENT_ID" =~ ^[0-9]+$ ]] || { echo "::error::comment-id must be numeric (got: $COMMENT_ID)"; exit 1; }
         python3 "$GITHUB_ACTION_PATH/../../scripts/comment-parse"
 
-    - name: Reject malformed / reserved command
+    - name: Reject malformed command
       # Runs only when the comment IS a shipmate command but not a valid one. A non-command
       # is silently ignored, with no output. GITHUB_TOKEN posts the comment.
       if: ${{ steps.parse.outputs.is_command == 'true' && steps.parse.outputs.valid != 'true' }}

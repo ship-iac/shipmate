@@ -165,7 +165,7 @@ def _run_main(monkeypatch, capsys, stdin):
     monkeypatch.setenv("GITHUB_REPOSITORY", "acme/consumer")
     monkeypatch.setenv("GITHUB_RUN_ID", "77")
     monkeypatch.setenv("SHIPMATE_HEAD_SHA", HEAD)
-    monkeypatch.setattr(mc.bm, "gh_json", lambda path: {"check_suite_id": SUITE})
+    monkeypatch.setattr(mc, "gh_json", lambda path: {"check_suite_id": SUITE})
     monkeypatch.setattr("sys.stdin", io.StringIO(stdin))
     mc.main()
     return capsys.readouterr()

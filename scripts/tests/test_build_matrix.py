@@ -20,7 +20,7 @@ def _no_read():
 
 
 def test_multi_env_stack_yields_one_cell_per_env():
-    cells = bm.build_matrix(
+    cells = bm.full_tree(
         envs=["dev-eu", "dev-us"],
         stacks_by_env={"dev-eu": ["stacks/app"], "dev-us": ["stacks/app", "stacks/dns"]},
         tags_by_stack={
@@ -40,7 +40,7 @@ def test_multi_env_stack_yields_one_cell_per_env():
 
 
 def test_empty_when_no_changed_stacks():
-    assert bm.build_matrix(["dev-eu"], {"dev-eu": []}, {}) == []
+    assert bm.full_tree(["dev-eu"], {"dev-eu": []}, {}) == []
 
 
 def test_raises_above_256_cells():
@@ -49,7 +49,10 @@ def test_raises_above_256_cells():
     # ceiling trips in plan detect, so no reviewed plan exists to apply.
     stacks = [f"stacks/s{i}" for i in range(257)]
     with pytest.raises(SystemExit) as exc_info:
-        bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
+        bm.cap_cells(
+            bm.full_tree(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks}),
+            False,
+        )
     assert str(exc_info.value) == (
         "::error::257 plan cells exceeds the GitHub Actions matrix limit of 256. "
         "Split the change across several pull requests -- the matrix is built over "
@@ -99,7 +102,7 @@ def test_stack_at_engine_reserved_word_paths_plans():
 
     Reddens on re-adding a refusal of either path (SystemExit).
     """
-    cells = bm.build_matrix(
+    cells = bm.full_tree(
         ["dev"],
         {"dev": ["apply", "shipmate"]},
         {"apply": ["env/dev"], "shipmate": ["env/dev"]},
@@ -131,11 +134,11 @@ def test_one_or_zero_workload_tags_keep_their_values():
     assert bm.workload_of(["env/dev-eu"], "stacks/dns") == ""
 
 
-def test_build_matrix_refuses_a_stack_with_two_workload_tags():
-    """Reddens on replacing the `workload_of` call in `build_matrix` with an inline first-match
+def test_full_tree_refuses_a_stack_with_two_workload_tags():
+    """Reddens on replacing the `workload_of` call in `full_tree` with an inline first-match
     over the tags, and on dropping the sort of the named tags (they arrive unsorted here)."""
     with pytest.raises(SystemExit) as exc_info:
-        bm.build_matrix(
+        bm.full_tree(
             ["dev-eu"],
             {"dev-eu": ["stacks/dns"]},
             {"stacks/dns": ["workload/network", "env/dev-eu", "workload/net"]},
@@ -464,7 +467,7 @@ def _run_main(
 
     def fake_compute(all_stacks=False, base="", tags="", errors=None):
         called.append((all_stacks, base, tags))
-        # The whole row `build_matrix` emits, `workload` included: a double that omits a
+        # The whole row `full_tree` emits, `workload` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.
         rows = [{"stack": s, "environment": e, "workload": ""} for s, e in cells]
         names = [{"environment": e, "stack": s} for s, e in cells] if tree is None else tree
@@ -932,7 +935,7 @@ def test_rejects_stacks_that_slug_to_one_artifact_name():
     # `plan.dev-eu.a-b` and an apply downloads whichever landed last.
     stacks = ["a/b", "a-b"]
     with pytest.raises(SystemExit) as exc_info:
-        bm.build_matrix(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
+        bm.full_tree(["dev-eu"], {"dev-eu": stacks}, {s: ["env/dev-eu"] for s in stacks})
     assert str(exc_info.value) == (
         "::error::a-b, a/b all map to the plan artifact 'plan.dev-eu.a-b': distinct "
         "stack paths sharing one artifact name would make an apply download another "
@@ -943,7 +946,7 @@ def test_rejects_stacks_that_slug_to_one_artifact_name():
 def test_same_slug_in_different_envs_is_allowed():
     # The env is part of the artifact name: `plan.dev-eu.a-b` and
     # `plan.prod-eu.a-b` are distinct, so there is nothing to collide.
-    cells = bm.build_matrix(
+    cells = bm.full_tree(
         ["dev-eu", "prod-eu"],
         {"dev-eu": ["a/b"], "prod-eu": ["a-b"]},
         {"a/b": ["env/dev-eu"], "a-b": ["env/prod-eu"]},
@@ -997,7 +1000,7 @@ _UNUSED_DEV_US = (
     "::warning::the environment table declares dev-us, which no stack tags. Remove the "
     "entry, or tag the stacks that belong to it. This is a warning rather than a refusal "
     "because the table is read from the default branch and the tags from this branch, so "
-    "an environment arrives and leaves over two pull requests."
+    "an environment or a workload arrives and leaves over two pull requests."
 )
 
 

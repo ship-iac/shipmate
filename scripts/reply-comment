@@ -23,7 +23,7 @@ a notice asks nothing of the reader, so it carries no hint.
 import os
 import sys
 
-from _shipmate import _load, current_run_url, is_pr_number, run, utf8_output
+from _shipmate import _load, current_run_url, is_pr_number, run
 
 sc = _load("summary-comment")
 
@@ -37,7 +37,6 @@ def body(verb, env, outcome, text, run_url):
 
 
 def main():
-    utf8_output()
     if sys.argv[1:]:
         sys.exit("::error::usage: reply-comment")
     outcome = os.environ.get("SHIPMATE_REPLY_OUTCOME", "")

@@ -105,7 +105,7 @@ def test_merged_head_gives_up_after_attempts_exhausted_all_empty(monkeypatch):
 
 
 def _cell(stack, env="dev-eu"):
-    # The whole row `build_matrix` emits, `workload` included: a double that omits a key the
+    # The whole row `full_tree` emits, `workload` included: a double that omits a key the
     # real builder always adds cannot fail on a guard that pins the row shape, and the table
     # path keys its workload tier on that key.
     return {"stack": stack, "environment": env, "workload": ""}
@@ -175,10 +175,10 @@ def _run_main(
     else:
         monkeypatch.setattr(dd.bm, "_list_stacks", lambda all_stacks, base: list(stacks))
         monkeypatch.setattr(dd.bm, "_tags", lambda s: stacks[s])
-    # deploy-detect and the apply-detect it loads hold separate build-matrix instances, and
-    # the check-run listing is fetched through apply-detect's. Both are stubbed so a `gh api`
-    # call from either module lands in `urls`.
-    monkeypatch.setattr(dd.ad.bm, "_run", _run)
+    # The check-run listing is fetched through apply-detect's own `_run`, and the tree walk
+    # through deploy-detect's build-matrix. Both are stubbed so a `gh api` call from either
+    # module lands in `urls`.
+    monkeypatch.setattr(dd.ad, "_run", _run)
     monkeypatch.setattr(dd.bm, "_run", _run)
     monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
     dd.main()

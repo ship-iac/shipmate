@@ -22,14 +22,14 @@ cell and cannot make unlock unavailable. For the same reason the walk passes
 `check_names=False`: another stack's unusable `env/*` tag refuses every other
 run, and must not strand this env's lock; `validate_env` checked `env` itself.
 
-`env_membership` + `build_matrix([env], {env: queued}, ...)` rather than
+`env_membership` + `cap_cells(full_tree([env], {env: queued}, ...))` rather than
 `compute_cells`, which is what the bare-apply detect does with the same whole-tree walk
-and for the same reason: `build_matrix` refuses a set above the GHA matrix limit, and
+and for the same reason: `cap_cells` refuses a set above the GHA matrix limit, and
 over `all_stacks=True` that ceiling counts every stack × every environment in the tree
 — so a repository large enough to exceed it could never unlock ANY environment,
 however short the queue, and the refusal would tell the operator to split a pull
 request that does not exist. The queue is narrowed before any cell is built, so every
-refusal `build_matrix`, `stamp_rows` and `refuse_workload_gaps` carry sees only the
+refusal `full_tree`, `cap_cells`, `stamp_rows` and `refuse_workload_gaps` carry sees only the
 queued stacks: the matrix limit, the slug-collision guard, two
 `workload/*` tags, and a workload tag outside its environment's `workloads` list.
 None of them can affect a lock release, and a stack outside the queue is not
@@ -48,7 +48,7 @@ import os
 from _shipmate import _load
 
 ad = _load("apply-detect")
-# Aliases, not loads: one build-matrix instance serves the tree walk and the check-run read.
+# Aliases, not loads: unlock-detect and apply-detect share one build-matrix instance.
 bm = ad.bm
 ag = ad.ag
 
@@ -68,7 +68,7 @@ def main():
     names = {n for n, r in ag.latest_by_name(runs).items() if r["status"] != "completed"}
     in_env = stacks_by_env.get(env, [])
     queued = [s for s in in_env if ag.check_name(s, env) in names]
-    pending = bm.build_matrix([env], {env: queued}, tags_by_stack)
+    pending = bm.cap_cells(bm.full_tree([env], {env: queued}, tags_by_stack), False)
     table = bm.env_config(pending, bm.tagged_workloads(stacks_by_env, tags_by_stack))
     pending = bm.stamp_rows(pending, table, "apply")
     bm.refuse_workload_gaps(pending, table)

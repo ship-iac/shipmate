@@ -1045,7 +1045,7 @@ own ([`docs/aws.md`](docs/aws.md) §The environment table).
 
 ## Comment-ops
 
-`shipmate <verb> [env] [tag-filter]` in a PR comment drives shipmate's
+`shipmate <verb> [env]` in a PR comment drives shipmate's
 comment-based commands. The grammar is strict and anchored — the whole
 comment line must match one regex, and the parsed values are never
 interpolated into a shell. A comment authored by a bot account (any login
@@ -1055,14 +1055,13 @@ themselves contain text that matches the command grammar. The engine's `ops`
 job starts only for a pull-request comment whose author is not a bot and whose
 body contains `shipmate` in any case; every other comment starts no runner.
 
-| verb | status | args | authorization |
-|---|---|---|---|
-| `shipmate apply [env]` | active | optional env | apply requirements, below |
-| `shipmate doctor` | active | none | write access (below); read-only |
-| `shipmate help` | active | none | none — read-only, open to any commenter |
-| `shipmate plan` | active | none | write access (below); changes no infrastructure |
-| `shipmate unlock <env>` | active | required env | write access plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
-| `shipmate destroy` | reserved | — | — |
+| verb | args | authorization |
+|---|---|---|
+| `shipmate apply [env]` | optional env | apply requirements, below |
+| `shipmate doctor` | none | write access (below); read-only |
+| `shipmate help` | none | none — read-only, open to any commenter |
+| `shipmate plan` | none | write access (below); changes no infrastructure |
+| `shipmate unlock <env>` | required env | write access plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
 
 `plan`, `doctor`, `apply` and `unlock` require the commenter's write access
 (the "write access" apply requirement below defines it), read and decided once
@@ -1111,8 +1110,8 @@ comment, the per-cell plan checks, the plan artifacts an apply consumes, and
 request head as App-authored mirrors, described with the App identities below).
 It takes no arguments — there is one plan of record per head commit, and a
 run holding a single environment's artifacts would leave every other
-environment's workset empty at the next apply, so an env or tag-filter
-alongside it is rejected. Unlike autoplan it plans a draft pull request —
+environment's workset empty at the next apply, so an env alongside it is
+rejected. Unlike autoplan it plans a draft pull request —
 a plan a draft can hold but not apply, since the apply requirements below
 refuse a draft.
 Re-issuing it re-plans rather than reporting the existing plan current: the new
@@ -1127,15 +1126,13 @@ is a message, not a layer — it reads the same head repository that guard reads
 and a head it cannot read is dispatched, leaving the refusal where it is
 enforced.
 
-`destroy` is recognized and rejected with a "reserved" message, so the grammar
-does not need to change shape when that verb is implemented. A
-verb documented as taking no arguments (`doctor`, `help`, `plan`) rejects an env or
-tag-filter given alongside it with an explicit "takes no arguments" error
-rather than silently ignoring the extra token; a tag-filter given to any verb
-is likewise rejected as not yet supported rather than silently applied to the
-whole environment. An unknown verb's error points the commenter at
+A verb documented as taking no arguments (`doctor`, `help`, `plan`) rejects an
+env given alongside it with an explicit "takes no arguments" error rather than
+silently ignoring the extra token. An unknown verb's error points the commenter at
 `shipmate help`, and so does the "malformed" error for a line that does not
-match the grammar at all (a capitalized verb, a stray token, a double space). `scripts/comment-parse`'s `VERBS` registry is the single
+match the grammar at all (a capitalized verb, an env holding anything but
+lowercase letters, digits, `-` and `_`, a token after the env, a double space).
+`scripts/comment-parse`'s `VERBS` registry is the single
 source of truth this table is derived from: it drives the parser, the
 `--help-markdown` rendering that `shipmate help` posts verbatim (marked with
 the HTML comment `<!-- shipmate:help -->`), and the reject-hint text, so the

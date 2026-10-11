@@ -11,13 +11,12 @@ import base64
 import contextlib
 import graphlib
 import importlib.util
-import json
 import os
 import re
 import sys
 import types
 
-from _shipmate import load_config_text, run, yaml_error_text
+from _shipmate import gh_json, load_config_text, yaml_error_text
 
 #: The file the engine reads its settings from, and the interpreter floor that reading it
 #: needs. The floor is CONTRACT.md section Runner prerequisites, which every runner already
@@ -25,20 +24,6 @@ from _shipmate import load_config_text, run, yaml_error_text
 #: is checked.
 CONFIG_PATH = ".github/shipmate-config.yml"
 _MIN_PYTHON = (3, 12)
-
-
-def _run(args):
-    """stdout of `args` through `_shipmate.run`, its failure re-raised as an ::error::
-    annotation. `_shipmate.run` stays unprefixed for the hand-run scripts that share it.
-
-    `build-matrix` aliases this rather than keeping its own copy: this module `_load`s
-    nothing at import, so reaching it from there terminates. The reverse would not --
-    `_shipmate.py` caches nothing and re-executes a module on every `_load`.
-    """
-    try:
-        return run(args)
-    except SystemExit as e:
-        raise SystemExit(f"::error::{e}") from None
 
 
 def runner_refusal():
@@ -279,17 +264,6 @@ def read_table():
     if text is None:
         raise SystemExit(_UNREADABLE)
     return parse_table(text)
-
-
-def gh_json(path, run=None):
-    """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit raises ::error::
-    with the tool's stderr in the message, from a single definition. Callers alias it as
-    `_gh_json` rather than repeating the `json.loads(_run(...))` pair.
-
-    Homed beside `_run` for the same reason: `build-matrix` aliases it, and this module
-    cannot alias upward.
-    """
-    return json.loads((run or _run)(["gh", "api", path]))
 
 
 def contents_text(path, fetch=None):
@@ -772,8 +746,8 @@ def _check_dry_coverage(environments, matrix_envs):
 #: reasoning is one reasoning.
 _TWO_PULL_REQUESTS = (
     "This is a warning rather than a refusal because the table is read from the default "
-    "branch and the tags from this branch, so an environment arrives and leaves over two "
-    "pull requests."
+    "branch and the tags from this branch, so an environment or a workload arrives and leaves "
+    "over two pull requests."
 )
 
 
@@ -793,6 +767,9 @@ def _report_unused(table, tagged):
     checked: the env holding `needs` is an entry, like one holding `explicit` or `gated`, and
     the unused-entry warning covers it.
 
+    A listed workload no stack in its environment tags warns per environment; an environment
+    no stack tags is skipped, since the unused-entry warning already names it.
+
     `tagged` maps each environment the whole-tree scan found to the workload names its
     stacks tag.
     """
@@ -809,21 +786,11 @@ def _report_unused(table, tagged):
             f"::warning::needs names {', '.join(stale)}, which no stack tags, so it orders "
             "nothing. Remove the entry, or tag the stacks that belong to it. " + _TWO_PULL_REQUESTS
         )
-    _report_untagged_workloads(table, tagged)
-
-
-def _report_untagged_workloads(table, tagged):
-    """Name each entry's listed workloads no stack in that environment tags. A workload is
-    listed before the branch tagging it merges and dropped after the branch untagging it. An
-    environment no stack tags is skipped: the unused-entry warning already names it."""
     for env, untagged in untagged_workloads(table, tagged):
         print(
             f"::warning::environments.{env}.workloads lists {', '.join(untagged)}, which "
             f"no stack in {env} tags. Tag a stack with each, or remove it from the list "
-            "once the pull request that drops its last tag has merged. This is a warning "
-            "rather than a refusal because the table is read from the default branch and "
-            "the tags from this branch, so a workload arrives and leaves over two pull "
-            "requests."
+            "once the pull request that drops its last tag has merged. " + _TWO_PULL_REQUESTS
         )
 
 

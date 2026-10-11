@@ -17,14 +17,13 @@ import os
 import time
 
 from _shipmate import _load
+from _shipmate import gh_json as _gh_json
 
 bm = _load("build-matrix")
 wv = _load("waves")
 # No apply-gate load of its own: the App-scoped "already applied" query is
 # ad.ag.app_done_names, and test_detect_app_scoping pins this script to it.
 ad = _load("apply-detect")
-
-_gh_json = bm.gh_json
 
 
 def _merged_head(repo, merge_sha, _attempts=3, _sleep=2):

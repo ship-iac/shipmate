@@ -58,7 +58,7 @@ def completed_names(apply_detect, monkeypatch, checks, app_id=APP_ID):
     case.
     """
     jsonl = "\n".join(json.dumps(c) if isinstance(c, dict) else c for c in checks)
-    monkeypatch.setattr(apply_detect.bm, "_run", lambda args: jsonl)
+    monkeypatch.setattr(apply_detect, "_run", lambda args: jsonl)
     return apply_detect.ag.app_done_names(apply_detect._check_run_lines("acme/repo", HEAD), app_id)
 
 

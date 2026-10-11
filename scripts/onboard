@@ -56,6 +56,7 @@ from _shipmate import (
     REPO_RE,
     _load,
     gate_check,
+    gh_json,
     load_workflow_text,
     review_count,
     utf8_output,
@@ -82,7 +83,7 @@ _BRANCH_RE = re.compile(r"[A-Za-z][A-Za-z0-9._/-]*")
 
 
 def _gh_json(path):
-    return ec.gh_json(path, _run)
+    return gh_json(path, _run)
 
 
 def _gh_json_or_none(path):

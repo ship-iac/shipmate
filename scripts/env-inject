@@ -84,21 +84,17 @@ def resolve(environ):
     run it against another environment's workspace.
     """
     raw = environ.get(_TABLE, "")
-    try:
-        parsed = json.loads(raw)
-    except ValueError as exc:
-        raise SystemExit(
-            f"::error::{_TABLE} must be the JSON object the cell step passes as "
-            f"toJSON(matrix.tf_vars), and {raw!r} is not JSON. An empty value means the "
-            "step omitted the input."
-        ) from exc
-    if not isinstance(parsed, dict) or not all(isinstance(v, str) for v in parsed.values()):
-        raise SystemExit(
-            f"::error::{_TABLE} must be a JSON object of strings, got {raw!r}. "
-            "The empty table is {}; null is what toJSON renders for a matrix field "
-            "nothing stamped, and is not the same thing."
+
+    def message(rule):
+        return (
+            f"::error::{_TABLE} must be the JSON object of strings the cell step passes as "
+            f"toJSON(matrix.tf_vars), and {raw!r} {rule}. An empty value means the step omitted "
+            "the input; null is what toJSON renders for a matrix field nothing stamped."
         )
-    return parsed
+
+    if not raw:
+        raise SystemExit(message("is empty"))
+    return _parse_object(raw, message)
 
 
 def _parse_object(raw, message, null_is_empty=False):

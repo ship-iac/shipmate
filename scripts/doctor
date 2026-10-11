@@ -67,9 +67,9 @@ from _shipmate import (
     utf8_output,
     yaml_error_text,
 )
+from _shipmate import gh_json as _gh_json
 
 ec = _load("env-config")
-_gh_json = ec.gh_json
 sc = _load("summary-comment")
 ag = _load("apply-gate")
 _md_escape = sc._md_escape
@@ -294,7 +294,7 @@ def _code_spans(names):
 def _existing_env_names(ctx):
     """The repository's GitHub Environment names.
 
-    THE LISTING IS THE ONLY EXISTENCE ORACLE. `ec.gh_json`'s exception carries
+    THE LISTING IS THE ONLY EXISTENCE ORACLE. `_gh_json`'s exception carries
     `gh`'s stderr as free text, which doctor never parses, so a per-environment
     read cannot tell a 404 (absence, which is `_environment_warnings`' finding)
     from a 403 or a 5xx. Every probe below that needs existence decides it from
@@ -304,7 +304,7 @@ def _existing_env_names(ctx):
     on a present one passes as healthy. A failure of this listing is the
     caller's precondition and propagates to `warnings()`' degrade note.
 
-    per_page=100 covers >=50 logical env pairs, and `ec.gh_json` does not
+    per_page=100 covers >=50 logical env pairs, and `_gh_json` does not
     multi-page merge, so a repository past that raises rather than reports on half
     the names: each environment past the page would read as absent. `total_count` is
     read strictly -- a listing missing the key is a listing whose completeness is
@@ -652,7 +652,7 @@ def _env_secret_names(ctx, name):
     Published anyway because "holds 3 secret(s)" tells an operator nothing about
     which credential to move.
 
-    `total` comes from the payload, not the list length, because `ec.gh_json` does
+    `total` comes from the payload, not the list length, because `_gh_json` does
     not multi-page.
     """
     data = _gh_json(f"repos/{ctx['repo']}/environments/{name}/secrets?per_page=100")
@@ -668,7 +668,7 @@ def _env_secret_names(ctx, name):
 def _app_key_findings(env, names, total, noun):
     """The App-key half of the plan-env secret finding, for one environment.
 
-    `ec.gh_json` does not multi-page, so on a truncated listing the key can sit
+    `_gh_json` does not multi-page, so on a truncated listing the key can sit
     outside the page: absence is reportable as absence ONLY when the read was
     complete. A partial listing says the check could not be completed rather
     than passing the most dangerous configuration off as a routine note. Both
@@ -1941,7 +1941,7 @@ def _probe_label(probe):
 
 def _degrade_reason(e):
     """The failure reason, safe in a comment body or an annotation. Strips
-    `ec.gh_json`'s `::error::...: gh api <path>` wrapper -- the workflow-command
+    `_gh_json`'s `::error::...: gh api <path>` wrapper -- the workflow-command
     prefix would nest inside `::warning ...::` in annotate mode, and the
     endpoint is an internal detail no reader can act on. Every caller also passes `e`
     to `ec.log_failure`, because the cut drops the HTTP status that says why."""
@@ -1965,7 +1965,7 @@ def warnings(ctx):
             continue
         try:
             out.extend(probe(ctx))
-        # noqa: BLE001 - doctor must never fail the run. `ec.gh_json` raises
+        # noqa: BLE001 - doctor must never fail the run. `_gh_json` raises
         # SystemExit, not a plain Exception, so both are caught -- but never
         # bare BaseException, so KeyboardInterrupt still propagates.
         except (Exception, SystemExit) as e:  # noqa: BLE001

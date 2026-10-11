@@ -23,12 +23,8 @@ state it.
 import json
 import os
 
-from _shipmate import _load, is_pr_number
-
-bm = _load("build-matrix")
-
-# The one `gh api` definition, aliased rather than copied.
-_gh_json = bm.gh_json
+from _shipmate import gh_json as _gh_json
+from _shipmate import is_pr_number
 
 #: The output keys, in the order they are written. Named once so the action's
 #: outputs and this list cannot drift apart silently.
@@ -86,11 +82,6 @@ def _facts(pr, on_demand):
     return facts
 
 
-def from_payload(pr):
-    """The facts for a pull-request event, from its own payload."""
-    return _facts(pr, "false")
-
-
 def from_api(number, repository):
     """The facts for a dispatched plan, read from the API by number."""
     if not is_pr_number(number):
@@ -127,7 +118,7 @@ def main():
     payload = _event_payload(os.environ.get("GITHUB_EVENT_PATH", ""))
     pr = payload.get("pull_request")
     if isinstance(pr, dict) and pr:
-        facts = from_payload(pr)
+        facts = _facts(pr, "false")
     else:
         number = str((payload.get("inputs") or {}).get("pr_number") or "").strip()
         if not number:

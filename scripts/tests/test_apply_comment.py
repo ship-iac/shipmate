@@ -452,7 +452,7 @@ def test_the_unrecorded_note_is_capped_and_summarizes_the_rest():
     push the render into the fail-loud SystemExit, on the run that needed it: the usual cause of
     `unrecorded` rows (an expired App key, a checks-API outage) strands a wide matrix.
 
-    Mutation: name every cell in `_named` -- red.
+    Mutation: name every cell in `named` -- red.
     Mutation: name a cell `**<stack> / <env>**` in `_unrecorded_note` -- red."""
     rows = [_row(status="unrecorded", stack=f"s{i}") for i in range(7)]
     assert ac._unrecorded_note(rows) == (
@@ -1136,15 +1136,17 @@ def test_load_check_maps_judges_the_newest_run_per_name(tmp_path):
 
 def test_load_check_maps_empty_app_id_warns_and_returns_no_data(tmp_path, capsys):
     """Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is only allowed to cost
-    this one display axis, never the whole comment, and the warning names the variable rather
-    than blaming the file. Mutation: delete load_check_maps' `if not app_id` early return (the
-    catch-all then warns about checks.jsonl instead)."""
+    this one display axis, never the whole comment, and the warning carries from_app's error
+    naming the variable without its own `::error::` prefix. Mutations: remove `SystemExit` from
+    load_check_maps' except tuple (the SystemExit propagates); drop the `::error::` strip (the
+    warning embeds it)."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     assert ac.load_check_maps(str(p), "") == (set(), set())
     assert capsys.readouterr().out == (
-        "::warning::SHIPMATE_APP_ID is empty, so the apply result comment falls back "
-        "to artifact-only status (see docs/github-app.md).\n"
+        f"::warning::{p} could not be read as apply checks (SHIPMATE_APP_ID is empty; "
+        "set the SHIPMATE_APP_ID repo/org variable to the shipmate App id (see "
+        "docs/github-app.md).) -- the apply result comment falls back to artifact-only status\n"
     )
 
 
@@ -1232,13 +1234,22 @@ def test_load_check_maps_malformed_line_degrades_with_a_warning(tmp_path, capsys
 
 
 def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, capsys):
-    # A non-numeric SHIPMATE_APP_ID (the App's client id pasted in place of its numeric
-    # app id) makes ag.from_app's int(app_id) raise ValueError. That must cost only the
-    # check-state display axis, the same degradation as a malformed checks.jsonl.
+    """A non-numeric SHIPMATE_APP_ID (the App's client id pasted in place of its numeric app id)
+    makes ag.from_app's int(app_id) raise ValueError. That must cost only the check-state display
+    axis, the same degradation as a malformed checks.jsonl. Mutation: remove `ValueError` from
+    load_check_maps' except tuple (the ValueError propagates).
+
+    The text between the parentheses is Python's own `int()` message, so it is read from
+    `int()` here rather than pinned as a literal."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set())
-    assert "::warning::" in capsys.readouterr().out
+    with pytest.raises(ValueError) as exc:
+        int("Iv1.notanumericid")
+    assert capsys.readouterr().out == (
+        f"::warning::{p} could not be read as apply checks ({exc.value}) -- the apply result "
+        "comment falls back to artifact-only status\n"
+    )
 
 
 def test_cell_json_result_enum_is_unchanged():
@@ -1343,19 +1354,15 @@ def test_check_name_grammar_matches_apply_cells_construction():
     name.
 
     Mutation: make apply-gate's `check_name` return `f"{APPLY_PREFIX}{env} / {stack}"`, or
-    apply-snapshot or apply-comment build the name by hand in that order -- red."""
+    swap stack and environment in apply_check_state's `ag.check_name` call (the row stays
+    `applied`) -- red."""
     snap = load_script("apply-snapshot")
     waves = {"wave0": [{"stack": "stacks/app", "environment": "dev-eu"}]}
     run = {"id": 7, "name": "apply / stacks/app / dev-eu", "app": {"id": int(APP_ID)}}
     assert snap.snapshot(waves, [run], APP_ID) == {"apply / stacks/app / dev-eu": [7]}
-    row = _row(environment="dev-eu", stack="stacks/app")
-    assert ac._check_name(row) == "apply / stacks/app / dev-eu"
-
-
-def test_env_level_count_matches_waves():
-    # apply-comment keeps its own copy of the constant, so the equality is pinned here
-    # rather than by construction.
-    assert ac.MAX_ENV_LEVELS == wv.MAX_ENV_LEVELS
+    rows = [_row(environment="dev-eu", stack="stacks/app")]
+    ac.apply_check_state(rows, {"apply / stacks/app / dev-eu"}, set())
+    assert rows == [_row(environment="dev-eu", stack="stacks/app", status="unrecorded")]
 
 
 def test_wave_job_name_matches_the_apply_check_grammar():
@@ -1393,7 +1400,7 @@ def test_wave_job_name_matches_the_apply_check_grammar():
         f"source for either silently breaks the name/job-name equality (got: {sorted(set(wired))})"
     )
     # The reader's half, exercised: a nested-display job name built from that grammar
-    # must resolve, for the same row `_check_name` builds.
+    # must resolve, for the row's own stack and environment.
     row = _row(environment="dev-eu", stack="stacks/app")
     jobs = [_job("post-merge / L0 / apply / stacks/app / dev-eu", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
@@ -1405,7 +1412,7 @@ def _main_env(monkeypatch, tmp_path, cells_dir, waves_json, checks_path):
     monkeypatch.setenv("CELLS", str(cells_dir))
     monkeypatch.setenv("SHIPMATE_ENVIRONMENT", "dev-eu")
     monkeypatch.setenv("SHIPMATE_ENVLEVEL0_WAVES", waves_json)
-    for i in range(1, ac.MAX_ENV_LEVELS):
+    for i in range(1, wv.MAX_ENV_LEVELS):
         monkeypatch.setenv(f"SHIPMATE_ENVLEVEL{i}_WAVES", "")
     for kind in ("EXCLUDED", "SKIPPED", "REVIEW_HELD", "APPLIED_UNGATED", "REVIEW_NOT_REQUIRED"):
         monkeypatch.setenv(f"SHIPMATE_{kind}_ENVS", "")

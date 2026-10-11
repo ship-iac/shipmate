@@ -34,15 +34,16 @@ def _blob(text, encoding="base64"):
 
 
 def _fake_run(monkeypatch, text="layout: tf_vars\n", recorder=None, encoding="base64"):
-    """Replace `ec._run` with a double answering the contents API with `text` as a blob.
-    `gh api` output is text, so the blob is handed back as JSON."""
+    """Replace `_shipmate._run`, `gh_json`'s default runner, with a double answering the
+    contents API with `text` as a blob. `gh api` output is text, so the blob is handed back as
+    JSON."""
 
     def run(args):
         if recorder is not None:
             recorder.append(list(args))
         return json.dumps(_blob(text, encoding))
 
-    monkeypatch.setattr(ec, "_run", run)
+    monkeypatch.setattr(sys.modules["_shipmate"], "_run", run)
 
 
 def _env(monkeypatch):
@@ -85,7 +86,7 @@ def test_an_absent_file_refuses(monkeypatch, capsys):
             "shipmate-config.yml\ngh: Not Found (HTTP 404)"
         )
 
-    monkeypatch.setattr(ec, "_run", run)
+    monkeypatch.setattr(sys.modules["_shipmate"], "_run", run)
     with pytest.raises(SystemExit) as exc:
         ec.read_table()
     assert str(exc.value) == _UNREADABLE
@@ -104,7 +105,7 @@ def test_a_missing_gh_refuses_with_its_reason_on_stderr(monkeypatch, capsys):
     def run(args):
         raise FileNotFoundError(2, "No such file or directory", "gh")
 
-    monkeypatch.setattr(ec, "_run", run)
+    monkeypatch.setattr(sys.modules["_shipmate"], "_run", run)
     with pytest.raises(SystemExit) as exc:
         ec.read_table()
     assert str(exc.value) == _UNREADABLE
@@ -221,21 +222,6 @@ def test_a_failing_gh_refuses(monkeypatch):
     assert str(exc.value) == _UNREADABLE
 
 
-def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
-    """`_run` re-raises `_shipmate.run`'s failure with `::error::` prepended and prints
-    nothing itself: the stderr rides in the message. Reddens on returning `run(args)` with no
-    `except` (the prefix is gone), and on writing stderr before raising."""
-
-    def fake_subprocess_run(args, capture_output=False, input=None):
-        return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"gh: boom\n")
-
-    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
-    with pytest.raises(SystemExit) as exc:
-        ec._run(["gh", "api", "repos/an-org/a-repo"])
-    assert str(exc.value) == "::error::command failed (1): gh api repos/an-org/a-repo\ngh: boom"
-    assert capsys.readouterr().err == ""
-
-
 #: The block scalar's indentation is what a transformation of the decoded text shows up in.
 _SHARED_TEXT = (
     "layout: tf_vars\n"
@@ -272,17 +258,3 @@ def test_contents_text_leaves_a_leading_byte_order_mark_in_place():
     text = "\ufeff" + _SHARED_TEXT
     blob = _blob(text)
     assert ec.contents_text("p", fetch=lambda _path: blob) == text
-
-
-def test_loading_env_config_loads_no_other_helper(monkeypatch):
-    """`build-matrix` aliases `env-config._run`, which terminates only because this module
-    `_load`s nothing at import; its one `_load` stays inside `_check_depth`.
-
-    Mutation: move `_check_depth`'s `from _shipmate import _load` and `_load("waves")` to
-    module top -- the patched `_load` raises while `env-config` loads."""
-
-    def _refuse(fname):
-        raise AssertionError(f"env-config loaded {fname} at import")
-
-    monkeypatch.setattr("_shipmate._load", _refuse)
-    assert load_script("env-config").CONFIG_PATH == ".github/shipmate-config.yml"

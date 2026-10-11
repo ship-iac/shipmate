@@ -38,9 +38,9 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
     """Stub the tag walk and the check-run listing; returns the kwargs `env_membership` was
     called with.
 
-    Only the walk is stubbed. The real `build_matrix` turns its output into cells, so the
-    matrix-limit and slug-collision guards it carries stay on the unlock path instead of being
-    stubbed out of it.
+    Only the walk is stubbed. The real `full_tree` and `cap_cells` turn its output into cells, so
+    the matrix-limit and slug-collision guards they carry stay on the unlock path instead of
+    being stubbed out of it.
 
     `checks` are stubbed as the raw JSONL `gh` emits, not as a set of names, so the queue's
     membership rule itself is under test rather than assumed: a construction that asks the
@@ -60,7 +60,7 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
         return stacks_by_env, tags_by_stack
 
     runs = _DEV_EU_PENDING_CHECKS if checks is None else checks
-    monkeypatch.setattr(ud.bm, "_run", lambda args: "\n".join(json.dumps(r) for r in runs))
+    monkeypatch.setattr(ud.ad, "_run", lambda args: "\n".join(json.dumps(r) for r in runs))
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
     monkeypatch.setattr(ud.bm, "env_membership", _membership)
     return seen
@@ -146,7 +146,7 @@ def test_unlock_non_empty_queue_does_not_warn(monkeypatch, tmp_path, capsys):
 
 
 def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_path):
-    """build_matrix refuses a cell set above the GHA matrix limit, and over a whole-tree walk
+    """`cap_cells` refuses a cell set above the GHA matrix limit, and over a whole-tree walk
     that ceiling counts every stack x every environment. Built for all envs and filtered
     afterwards, a repository past the limit could never unlock any environment however short
     its queue, and the refusal would tell the operator to split a pull request that does not
@@ -177,6 +177,32 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
             "env_binding": "dev-eu-apply",
         }
     ]
+
+
+def test_unlock_refuses_a_queue_above_the_matrix_limit(monkeypatch, tmp_path):
+    """A queue of 257 pending cells in the target env cannot fit one matrix.
+
+    Mutation: drop `cap_cells` from the `full_tree` call in `main`, and 257 cells are written.
+    """
+    _unlock_env(monkeypatch, tmp_path)
+    stacks = [f"stacks/s{i}" for i in range(257)]
+    _stub_unlock_tree(
+        monkeypatch,
+        [{"stack": s, "environment": "dev-eu", "workload": "app"} for s in stacks],
+        [
+            _check(name=f"apply / {s} / dev-eu", status="in_progress", conclusion=None)
+            for s in stacks
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        ud.main()
+    assert str(exc.value) == (
+        "::error::257 plan cells exceeds the GitHub Actions matrix limit of 256. Split the "
+        "change across several pull requests -- the matrix is built over `terramate list "
+        "--changed`. A one-line edit to a shared local module correctly marks every dependent "
+        "stack changed and is one atomic change by nature; there the only lever is to reduce "
+        "the number of environments in play."
+    )
 
 
 def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
@@ -284,6 +310,7 @@ def test_main_validates_its_inputs_before_any_read(monkeypatch, tmp_path, name, 
     def _boom(*a, **kw):
         raise AssertionError("unlock-detect read the tree or the API before validating")
 
+    monkeypatch.setattr(ud.ad, "_run", _boom)
     monkeypatch.setattr(ud.bm, "_run", _boom)
     monkeypatch.setattr(ud.ad, "_check_run_lines", _boom)
     with pytest.raises(SystemExit) as exc_info:
@@ -294,7 +321,7 @@ def test_main_validates_its_inputs_before_any_read(monkeypatch, tmp_path, name, 
 def _stub_one_pending_check(monkeypatch):
     """One pending App-authored check, for `stacks/app / dev-eu`, as the raw JSONL `gh` emits."""
     line = json.dumps(_check(name="apply / stacks/app / dev-eu", status="queued", conclusion=None))
-    monkeypatch.setattr(ud.bm, "_run", lambda args: line)
+    monkeypatch.setattr(ud.ad, "_run", lambda args: line)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
 
 
