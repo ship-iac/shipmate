@@ -29,7 +29,7 @@ import json
 import os
 import re
 
-from _shipmate import _load
+from _shipmate import _load, _run
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -137,7 +137,7 @@ def filter_pending(cells, completed_names):
 
 def _check_run_lines(repo, head_sha):
     """The commit's check-runs as JSONL lines, for the apply and unlock name queries."""
-    return bm._run(
+    return _run(
         [
             "gh",
             "api",
@@ -166,7 +166,7 @@ def run_graph_deps():
     """The stack dependency graph, parsed. `--label stack.dir` is what makes
     waves.parse_dot's node normalization correct -- its docstring pins the argv
     as contract."""
-    return wv.parse_dot(bm._run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
+    return wv.parse_dot(_run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
 
 
 def dag_shape_notice(deps):

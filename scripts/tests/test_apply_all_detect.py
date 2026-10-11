@@ -271,6 +271,7 @@ def _run_main(
     tree = tree or {e: ["stacks/app"] for e in envs}
     deps = deps or {p: set() for ps in tree.values() for p in ps}
     monkeypatch.setattr(aad, "run_graph_deps", lambda: deps)
+    monkeypatch.setattr(aad, "_run", _run)
     monkeypatch.setattr(aad.bm, "_run", _run)
     monkeypatch.setattr(
         aad.bm, "env_membership", _membership_double(tree, tags or {"stacks/app": []}, membership)

@@ -60,7 +60,7 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
         return stacks_by_env, tags_by_stack
 
     runs = _DEV_EU_PENDING_CHECKS if checks is None else checks
-    monkeypatch.setattr(ud.bm, "_run", lambda args: "\n".join(json.dumps(r) for r in runs))
+    monkeypatch.setattr(ud.ad, "_run", lambda args: "\n".join(json.dumps(r) for r in runs))
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
     monkeypatch.setattr(ud.bm, "env_membership", _membership)
     return seen
@@ -310,6 +310,7 @@ def test_main_validates_its_inputs_before_any_read(monkeypatch, tmp_path, name, 
     def _boom(*a, **kw):
         raise AssertionError("unlock-detect read the tree or the API before validating")
 
+    monkeypatch.setattr(ud.ad, "_run", _boom)
     monkeypatch.setattr(ud.bm, "_run", _boom)
     monkeypatch.setattr(ud.ad, "_check_run_lines", _boom)
     with pytest.raises(SystemExit) as exc_info:
@@ -320,7 +321,7 @@ def test_main_validates_its_inputs_before_any_read(monkeypatch, tmp_path, name, 
 def _stub_one_pending_check(monkeypatch):
     """One pending App-authored check, for `stacks/app / dev-eu`, as the raw JSONL `gh` emits."""
     line = json.dumps(_check(name="apply / stacks/app / dev-eu", status="queued", conclusion=None))
-    monkeypatch.setattr(ud.bm, "_run", lambda args: line)
+    monkeypatch.setattr(ud.ad, "_run", lambda args: line)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
 
 

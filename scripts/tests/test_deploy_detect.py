@@ -175,10 +175,10 @@ def _run_main(
     else:
         monkeypatch.setattr(dd.bm, "_list_stacks", lambda all_stacks, base: list(stacks))
         monkeypatch.setattr(dd.bm, "_tags", lambda s: stacks[s])
-    # deploy-detect and the apply-detect it loads hold separate build-matrix instances, and
-    # the check-run listing is fetched through apply-detect's. Both are stubbed so a `gh api`
-    # call from either module lands in `urls`.
-    monkeypatch.setattr(dd.ad.bm, "_run", _run)
+    # The check-run listing is fetched through apply-detect's own `_run`, and the tree walk
+    # through deploy-detect's build-matrix. Both are stubbed so a `gh api` call from either
+    # module lands in `urls`.
+    monkeypatch.setattr(dd.ad, "_run", _run)
     monkeypatch.setattr(dd.bm, "_run", _run)
     monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
     dd.main()

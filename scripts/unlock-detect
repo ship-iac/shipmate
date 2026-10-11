@@ -48,7 +48,7 @@ import os
 from _shipmate import _load
 
 ad = _load("apply-detect")
-# Aliases, not loads: one build-matrix instance serves the tree walk and the check-run read.
+# Aliases, not loads: unlock-detect and apply-detect share one build-matrix instance.
 bm = ad.bm
 ag = ad.ag
 

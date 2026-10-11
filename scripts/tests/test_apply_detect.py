@@ -247,6 +247,7 @@ def _stub_apply(monkeypatch, deps, checks):
         return "\n".join(json.dumps(c) for c in checks)
 
     monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
+    monkeypatch.setattr(ad, "_run", _run)
     monkeypatch.setattr(ad.bm, "_run", _run)
     monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu", "workload/app"])
     return urls
