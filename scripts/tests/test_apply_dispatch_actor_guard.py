@@ -25,7 +25,7 @@ reopened, `||` instead of `&&` -- and against a guard step moved to the end of `
 the dispatcher-controlled ref had already been checked out.
 """
 
-from _loader import workflow_yaml
+from _loader import workflow_jobs
 
 GUARD_JOB = "guard"
 GUARD_IF = "${{ !endsWith(github.actor, '[bot]') }}"
@@ -82,11 +82,6 @@ SUMMARY_IF = "${{ always() && needs.guard.result == 'success' }}"
 DISPATCH_PATHS = ("apply.yml", "unlock.yml")
 
 
-def _jobs(name):
-    spec = workflow_yaml(name)
-    return spec["jobs"]
-
-
 def _needs(job):
     needs = job.get("needs") or []
     return [needs] if isinstance(needs, str) else list(needs)
@@ -97,7 +92,7 @@ def test_dispatched_workflows_reject_dispatches_missing_a_bot_actor():
     # before it. That is why it is not a step of `detect`, where `actions/checkout` of the
     # dispatcher-supplied ref sits.
     for name in DISPATCH_PATHS:
-        job = _jobs(name)[GUARD_JOB]
+        job = workflow_jobs(name)[GUARD_JOB]
         steps = job["steps"]
         assert len(steps) == 1, f"{name}: {GUARD_JOB} must carry exactly one step, got {len(steps)}"
         step = steps[0]
@@ -117,7 +112,7 @@ def test_guard_job_holds_no_credentials_and_runs_no_repository_code():
     # It gates the App key, so it must not be able to reach one, name the environment that holds
     # one, or execute the dispatcher's ref.
     for name in DISPATCH_PATHS:
-        job = _jobs(name)[GUARD_JOB]
+        job = workflow_jobs(name)[GUARD_JOB]
         assert job.get("permissions") == {}, (
             f"{name}: {GUARD_JOB} must grant no token permissions, got {job.get('permissions')!r}"
         )
@@ -133,7 +128,7 @@ def test_every_fan_out_job_carries_the_guard_in_its_needs():
     # strings, which `needs.detect.outputs.*_empty != 'true'` reads as "not empty". `guard` in
     # `needs` is what makes the rejection visible to each job's `!failure()` clause.
     for name in DISPATCH_PATHS:
-        jobs = _jobs(name)
+        jobs = workflow_jobs(name)
         assert _needs(jobs["detect"]) == DETECT_NEEDS[name], (
             f"{name}: detect must need exactly {DETECT_NEEDS[name]!r}, "
             f"got {_needs(jobs['detect'])!r}"
@@ -152,7 +147,7 @@ def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
 
     Mutation: drop `envlevel1` from `apply.yml`'s `envlevel2` `needs:` -- red."""
     for name, expected_by_job in DOWNSTREAM_NEEDS.items():
-        jobs = _jobs(name)
+        jobs = workflow_jobs(name)
         # Discovery decides the scope: a job added downstream of `detect` and left out of the map
         # is the omission this pins.
         downstream = {j for j in jobs if j not in (GUARD_JOB, "detect", "review")}
@@ -170,7 +165,7 @@ def test_every_fan_out_job_needs_every_job_that_runs_before_detect():
 
 
 def test_deploy_detect_carries_no_bot_actor_guard():
-    jobs = _jobs("deploy.yml")
+    jobs = workflow_jobs("deploy.yml")
     assert GUARD_JOB not in jobs, (
         "deploy.yml must not carry the dispatch guard -- it runs on `push`, "
         "where github.actor is the human who merged"
@@ -190,7 +185,7 @@ def test_apply_summary_is_gated_on_the_guard_and_not_on_detect():
     request comment. Gating on `needs.detect.result` instead is the opposite regression: it also
     silences every genuine detect failure, so the developer gets no failure comment and no gate
     refresh. The whole expression is pinned so either escape fails."""
-    job = _jobs("apply.yml")["summary"]
+    job = workflow_jobs("apply.yml")["summary"]
     summary_if = job.get("if")
     assert summary_if == SUMMARY_IF, (
         f"summary's if: must be exactly {SUMMARY_IF!r}, got {summary_if!r}"

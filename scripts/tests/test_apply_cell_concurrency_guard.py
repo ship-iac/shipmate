@@ -26,7 +26,7 @@ The realistic failure is accidental regression -- a dropped expression, one wave
 edit, an inverted boolean -- not a hostile edit to a SHA-pinned file every consumer reviews.
 """
 
-from _loader import workflow_yaml
+from _loader import workflow_jobs
 
 CONCURRENCY = {
     "group": "apply-${{ matrix.environment }}-${{ matrix.stack }}",
@@ -45,13 +45,9 @@ SERIALIZED = {
 }
 
 
-def _jobs(workflow):
-    return workflow_yaml(workflow)["jobs"]
-
-
 def test_every_cell_job_serializes_on_environment_and_stack():
     for workflow, job_ids in SERIALIZED.items():
-        jobs = _jobs(workflow)
+        jobs = workflow_jobs(workflow)
         missing = [j for j in job_ids if j not in jobs]
         assert not missing, (
             f"{workflow} no longer declares {missing} -- either they were renamed "

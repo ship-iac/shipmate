@@ -8,18 +8,14 @@ run, rather than asserted about as text, so the guard tracks behaviour and not p
 """
 
 import pytest
-from _loader import bash_only, run_step, workflow_yaml
+from _loader import bash_only, run_step, workflow_jobs
 
 _STEP = "Complete gate on the merged PR head SHA"
 _WRITE_MARKER = 'gh api "repos/$GITHUB_REPOSITORY/statuses/'
 
 
-def _jobs():
-    return workflow_yaml("deploy.yml")["jobs"]
-
-
 def _summary_step(name):
-    found = [s for s in _jobs()["summary"]["steps"] if s.get("name") == name]
+    found = [s for s in workflow_jobs("deploy.yml")["summary"]["steps"] if s.get("name") == name]
     assert len(found) == 1, f"deploy.yml summary job has {len(found)} steps named {name!r}"
     return found[0]
 

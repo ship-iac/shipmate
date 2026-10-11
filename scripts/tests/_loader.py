@@ -142,6 +142,21 @@ def step_by(action, *, name=None, id=None):
     return matches[0]
 
 
+def workflow_jobs(workflow):
+    """The ``jobs`` mapping of engine workflow ``workflow``, as ``workflow_yaml`` accepts it."""
+    return workflow_yaml(workflow)["jobs"]
+
+
+def step_using(workflow, job_id, needle):
+    """The one step of job ``job_id`` in ``workflow`` whose ``uses`` contains ``needle``.
+
+    Exactly one, asserted, for the reason ``step_by`` gives.
+    """
+    hits = [s for s in workflow_jobs(workflow)[job_id]["steps"] if needle in str(s.get("uses", ""))]
+    assert len(hits) == 1, f"{workflow} {job_id}: {len(hits)} steps use {needle}"
+    return hits[0]
+
+
 def run_lines(step):
     """Stripped, non-empty, non-comment lines of ``step``'s ``run:``.
 

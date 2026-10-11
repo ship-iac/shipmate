@@ -11,20 +11,9 @@ passes an entry whose expression was mistyped; a substring test is satisfied by 
 
 import re
 
-from _loader import WORKFLOWS, workflow_yaml
+from _loader import WORKFLOWS, step_using, workflow_jobs, workflow_yaml
 
 WF = WORKFLOWS / "plan.yml"
-
-
-def _job(job_id):
-    return workflow_yaml(WF)["jobs"][job_id]
-
-
-def _step(job_id, needle):
-    steps = _job(job_id)["steps"]
-    hits = [s for s in steps if needle in str(s.get("uses", ""))]
-    assert len(hits) == 1, f"{job_id} has {len(hits)} steps using {needle}"
-    return hits[0]
 
 
 def test_the_workflow_call_inputs_are_exactly_these():
@@ -46,7 +35,7 @@ def test_the_workflow_call_secrets_are_exactly_these():
 
 
 def test_every_job_declares_its_own_permissions():
-    jobs = workflow_yaml(WF)["jobs"]
+    jobs = workflow_jobs(WF)
     assert {j: v.get("permissions") for j, v in jobs.items()} == {
         "facts": {"pull-requests": "read"},
         "detect": {"contents": "read"},
@@ -66,7 +55,7 @@ def test_facts_is_the_single_producer_of_every_pull_request_fact():
         if "actions/pr-facts" in str(s.get("uses", ""))
     ]
     assert producers == ["facts"]
-    assert _job("facts")["outputs"] == {
+    assert workflow_jobs(WF)["facts"]["outputs"] == {
         "head-sha": "${{ steps.facts.outputs.head-sha }}",
         "head-repo": "${{ steps.facts.outputs.head-repo }}",
         "base-sha": "${{ steps.facts.outputs.base-sha }}",
@@ -79,7 +68,7 @@ def test_facts_is_the_single_producer_of_every_pull_request_fact():
 def test_build_matrix_reads_the_facts_job_and_states_no_constant():
     """The half that matters more than the summary call's: a wrong value here passes the fork
     refusal itself. Mutation: `head-repo: ${{ github.repository }}`."""
-    assert _step("detect", "actions/build-matrix")["with"] == {
+    assert step_using(WF, "detect", "actions/build-matrix")["with"] == {
         "base-sha": "${{ needs.facts.outputs.base-sha }}",
         "head-repo": "${{ needs.facts.outputs.head-repo }}",
         "head-sha": "${{ needs.facts.outputs.head-sha }}",
@@ -113,11 +102,11 @@ def test_every_checkout_takes_the_head_the_facts_job_named():
     for job_id, with_block in expected.items():
         checkouts = [
             s.get("with")
-            for s in _job(job_id)["steps"]
+            for s in workflow_jobs(WF)[job_id]["steps"]
             if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
         assert checkouts == [with_block], job_id
-    cell = _step("plan", "actions/plan-cell")
+    cell = step_using(WF, "plan", "actions/plan-cell")
     assert cell["with"]["expected-head"] == head
 
 
@@ -125,7 +114,7 @@ def test_the_cell_binds_the_environment_detect_resolved():
     """Hand-written whole value. A literal env name here is the thing CLAUDE.md forbids
     outright. Mutation: replace it with a literal `dev-eu`.
     """
-    assert _job("plan")["environment"] == "${{ matrix.env_binding }}"
+    assert workflow_jobs(WF)["plan"]["environment"] == "${{ matrix.env_binding }}"
 
 
 def test_the_cell_passes_this_whole_with_block():
@@ -137,7 +126,7 @@ def test_the_cell_passes_this_whole_with_block():
 
     Mutations: `plan-passphrase` deleted, and `expected-head: ${{ github.sha }}`.
     """
-    assert _step("plan", "actions/plan-cell")["with"] == {
+    assert step_using(WF, "plan", "actions/plan-cell")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
         "github-vars": "${{ toJSON(vars) }}",
         "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",
@@ -205,5 +194,5 @@ def test_the_detect_and_plan_jobs_carry_exactly_these_gates():
     `test_summary_workflow_guards.py` owns `summary`'s. The job-id list there is what fails when
     a fourth gated job appears.
     """
-    jobs = workflow_yaml(WF)["jobs"]
+    jobs = workflow_jobs(WF)
     assert {j: " ".join(jobs[j]["if"].split()) for j in _GATED_IF} == _GATED_IF

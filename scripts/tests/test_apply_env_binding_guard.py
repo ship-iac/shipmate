@@ -28,7 +28,7 @@ whole-value comparison per job, plus a derived job set compared to the hand-writ
 it.
 """
 
-from _loader import WORKFLOWS, local_action, workflow_yaml
+from _loader import WORKFLOWS, local_action, workflow_jobs
 
 CELL_ENV = "${{ matrix.env_binding }}"
 WAVES = [f"wave{i}" for i in range(8)]
@@ -54,12 +54,8 @@ SNAPSHOT_STEPS = [
 ]
 
 
-def _jobs(workflow="apply-env-level.yml"):
-    return workflow_yaml(workflow)["jobs"]
-
-
 def _wave_jobs():
-    jobs = _jobs()
+    jobs = workflow_jobs("apply-env-level.yml")
     missing = [w for w in WAVES if w not in jobs]
     assert not missing, f"apply-env-level.yml lost wave jobs: {missing}"
     return {w: jobs[w] for w in WAVES}
@@ -68,7 +64,7 @@ def _wave_jobs():
 def test_every_cell_job_binds_the_resolved_environment():
     """Mutations: restore the ternary in one wave; bind `${{ matrix.environment }}` in `wave7`."""
     for workflow, job_id in sorted(CELL_BOUND):
-        jobs = _jobs(workflow)
+        jobs = workflow_jobs(workflow)
         assert job_id in jobs, f"{workflow} no longer declares {job_id!r} (update CELL_BOUND)"
         assert jobs[job_id].get("environment") == CELL_ENV, (
             f"{workflow} job {job_id!r} must bind the environment detect resolved -- the "
@@ -85,14 +81,14 @@ def test_the_cell_jobs_are_exactly_the_hand_written_set():
     found = {
         (path.name, job_id)
         for path in sorted(WORKFLOWS.glob("*.yml"))
-        for job_id, job in _jobs(path.name).items()
+        for job_id, job in workflow_jobs(path.name).items()
         if (job.get("strategy") or {}).get("matrix") is not None
     }
     assert found == CELL_BOUND
 
 
 def test_snapshot_binds_no_environment_and_complete_binds_the_engine_environment():
-    jobs = _jobs()
+    jobs = workflow_jobs("apply-env-level.yml")
     # Absence asserted as absence: an explicit `environment:` with a null value is a binding the
     # caller can be made to resolve, and `.get()` would read it as no key at all.
     assert "environment" not in jobs["snapshot"], (
@@ -103,7 +99,7 @@ def test_snapshot_binds_no_environment_and_complete_binds_the_engine_environment
 
 
 def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
-    steps = _jobs()["snapshot"]["steps"]
+    steps = workflow_jobs("apply-env-level.yml")["snapshot"]["steps"]
     assert [s["uses"].split("@")[0] for s in steps] == SNAPSHOT_STEPS, (
         "snapshot's steps changed: the environment pre-flight must run first and "
         "the whole job before wave0, or the applies it exists to refuse have "
@@ -113,7 +109,7 @@ def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():
         "the pre-flight step is continue-on-error: it would name the missing "
         "environments and let the waves apply into them anyway"
     )
-    assert _jobs()["wave0"]["needs"] == ["snapshot"], (
+    assert workflow_jobs("apply-env-level.yml")["wave0"]["needs"] == ["snapshot"], (
         "wave0 must gate on snapshot, or the pre-flight refuses a run whose first "
         "wave is already applying"
     )
@@ -125,7 +121,7 @@ def test_every_apply_cell_invocation_passes_the_reviewed_plan_digest():
     ninth wave that never got one."""
     steps = [
         step
-        for job in _jobs().values()
+        for job in workflow_jobs("apply-env-level.yml").values()
         for step in (job.get("steps") or [])
         if (step.get("uses") or "").split("@")[0] == APPLY_CELL
     ]

@@ -8,19 +8,9 @@ the dispatch step is lost, any commenter's apply reaches the apply path with an 
 authorization decision is made exactly once, in the first step, and read exactly once, here.
 """
 
-from _loader import WORKFLOWS, local_action, workflow_yaml
+from _loader import WORKFLOWS, local_action, step_using, workflow_jobs, workflow_yaml
 
 WF = WORKFLOWS / "comment-ops.yml"
-
-
-def _job():
-    return workflow_yaml(WF)["jobs"]["ops"]
-
-
-def _step(needle):
-    hits = [s for s in _job()["steps"] if needle in str(s.get("uses", ""))]
-    assert len(hits) == 1, f"{len(hits)} steps use {needle}"
-    return hits[0]
 
 
 def test_the_workflow_declares_no_inputs_and_one_secret():
@@ -39,7 +29,7 @@ def test_only_human_pull_request_comments_naming_shipmate_are_handled():
     runner for comments the step guard and the parser would ignore anyway. Mutations: drop the
     bot clause; drop the `contains` clause; `contains` -> `startsWith`, which misses a command
     that follows other lines."""
-    assert _job()["if"] == (
+    assert workflow_jobs(WF)["ops"]["if"] == (
         "${{ github.event.issue.pull_request"
         " && !endsWith(github.event.comment.user.login, '[bot]')"
         " && contains(github.event.comment.body, 'shipmate') }}"
@@ -48,14 +38,17 @@ def test_only_human_pull_request_comments_naming_shipmate_are_handled():
 
 def test_the_dispatch_step_runs_only_when_the_guard_authorized():
     """Mutation: delete the dispatch step's `if:`, or change `'true'` to `'false'`."""
-    assert _step("actions/dispatch")["if"] == "${{ steps.authz.outputs.authorized == 'true' }}"
+    assert (
+        step_using(WF, "ops", "actions/dispatch")["if"]
+        == "${{ steps.authz.outputs.authorized == 'true' }}"
+    )
 
 
 def test_the_guard_step_runs_before_the_dispatch_step():
     """Mutation: swap the two steps. A dispatch reading a not-yet-produced output gets the empty
     string, which the `== 'true'` comparison rejects -- but only by accident; the order is the
     property."""
-    uses = [str(s.get("uses", "")).split("@")[0] for s in _job()["steps"]]
+    uses = [str(s.get("uses", "")).split("@")[0] for s in workflow_jobs(WF)["ops"]["steps"]]
     assert uses == [
         local_action("comment-ops"),
         local_action("dispatch"),
@@ -103,7 +96,7 @@ def test_the_authz_step_passes_this_whole_with_block():
     only the `{vars: NAME}` references the file itself names, so the file still chooses;
     delete it, and a file holding a reference refuses every apply and unlock.
     """
-    assert _step("actions/comment-ops")["with"] == {
+    assert step_using(WF, "ops", "actions/comment-ops")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
         "comment-body": "${{ github.event.comment.body }}",
@@ -119,7 +112,7 @@ def test_the_dispatch_step_passes_this_whole_with_block():
 
     Mutation: `ref: ${{ github.event.pull_request.head.sha }}`.
     """
-    assert _step("actions/dispatch")["with"] == {
+    assert step_using(WF, "ops", "actions/dispatch")["with"] == {
         "app-id": "${{ vars.SHIPMATE_APP_ID }}",
         "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
         "verb": "${{ steps.authz.outputs.verb }}",
