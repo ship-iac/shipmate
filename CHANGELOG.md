@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **`docs/branch-protection.md`'s sole-maintainer posture is `required_approving_review_count: 0` and `require_last_push_approval` off, with code-owner review kept on: GitHub requires no code-owner review from a pull request author who owns the changed files. Own `/.github/shipmate-config.yml` and `/.github/CODEOWNERS`.**
+- **The sole-maintainer posture is two values, `required_approving_review_count: 0` and `require_last_push_approval` off; code-owner review stays on instead of off or narrowed. At count 0 GitHub required no code-owner review from a pull request author who individually owns the changed files and held a non-owner's, so a `CODEOWNERS` entry for `/.github/shipmate-config.yml` and `/.github/CODEOWNERS`, added on its own pull request, holds a pull request opened with a leaked App key. A pull request changing only unowned files, and a commit pushed onto the owner's pull request, stay unreviewed. `CONTRACT.md` now holds a gated environment only on a non-owner's pull request changing owned files (`docs/branch-protection.md` §Reproducible ruleset).**
 
 ## [0.44.0] — 2026-10-11
 
