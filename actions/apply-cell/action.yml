@@ -70,7 +70,7 @@ runs:
         echo "::group::download reviewed plan: $ART"
         if ! gh run download "$RUN_ID" -n "$ART" -D . ; then
           echo "::endgroup::"
-          echo "::error::reviewed plan artifact '$ART' missing/expired; cannot apply $ENV/$STACK without re-planning (fail-safe). Re-plan: comment shipmate plan or push, or after the merge open a new pull request touching the stack."
+          echo "::error::reviewed plan artifact '$ART' missing/expired; cannot apply $ENV/$STACK without re-planning (fail-safe). Re-plan: comment shipmate plan or push, or after the merge open a new pull request that edits a file of the stack."
           exit 1
         fi
         echo "::endgroup::"

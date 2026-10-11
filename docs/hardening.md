@@ -334,12 +334,14 @@ That unforgeability holds only where the rule actually bites. GitHub requires a
 code-owner review for a changed file that has an owner; with no `CODEOWNERS`
 file, an entry that does not parse, or IaC paths left unowned, the setting
 is a no-op and the App's own approving review satisfies the count on its own.
-Write a `CODEOWNERS` entry covering the paths the stacks and the Terramate
-configuration live in, and `/.github/shipmate-config.yml` with them — that one file
-names every cloud role the repository can assume — and `/.github/CODEOWNERS` itself.
-Confirm that the reviewer requirement appears on a real pull request opened by
-someone who does not own the changed files: GitHub shows no code-owner requirement
-on a pull request whose author owns them. `shipmate doctor` warns when the rule
+Write `CODEOWNERS` entries covering the paths the stacks and the Terramate
+configuration live in, `/.github/shipmate-config.yml`, which names every cloud role
+the repository can assume, and `/.github/CODEOWNERS` itself. Add them on their own
+pull request: GitHub reads `CODEOWNERS` from the base branch. Confirm that the
+reviewer requirement appears on a real pull request opened by someone who does not
+own the changed files: at count 0 with one individual owner, GitHub showed no
+code-owner requirement on a pull request whose author owns them (measured
+2026-10-11; team ownership and higher counts were not). `shipmate doctor` warns when the rule
 requires approvals but not code-owner review — it does not check `CODEOWNERS`
 coverage, and it never fails a run, so that is a warning, not enforcement.
 
