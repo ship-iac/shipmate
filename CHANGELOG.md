@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.44.0] — 2026-10-11
 
+Tags `038dcf7`.
+
 ### Changed — BREAKING
 
 - **The engine config is `.github/shipmate-config.yml`, written as YAML. Every value is read as written, and a duplicate key, an anchor, an alias or a tag refuses (`CONTRACT.md` §Keys). An empty `region`, and a variable reference on `shared`, `explicit` or `gated`, refuse too.**
