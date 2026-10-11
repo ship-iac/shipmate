@@ -9,7 +9,7 @@ the App key is never minted for a run with no cell to report.
 """
 
 import yaml
-from _loader import WORKFLOWS, local_action, workflow_yaml
+from _loader import WORKFLOWS, local_action, step_using, workflow_jobs, workflow_yaml
 
 WF = WORKFLOWS / "drift.yml"
 
@@ -26,16 +26,6 @@ _GATED_IF = {
 #: The `drift` cell's whole `environment:` expression, whitespace-collapsed. Hand-written: a
 #: value read back from the file passes whatever the file says, literal env name included.
 _CELL_ENV = "${{ matrix.env_binding }}"
-
-
-def _job(job_id):
-    return workflow_yaml(WF)["jobs"][job_id]
-
-
-def _step(job_id, needle):
-    hits = [s for s in _job(job_id)["steps"] if needle in str(s.get("uses", ""))]
-    assert len(hits) == 1, f"{job_id} has {len(hits)} steps using {needle}"
-    return hits[0]
 
 
 def test_the_workflow_call_inputs_are_exactly_these():
@@ -60,7 +50,7 @@ def test_the_issues_job_is_one_drift_issues_step_with_the_app_id_and_key():
     `private-key` at `vars.`, which every plan cell exports and the run log prints; drop
     `cells`, which `actions/drift-issues` then refuses as unset; drop `default-branch`, and no
     Issue of a removed cell is ever closed."""
-    assert _job("issues")["steps"] == [
+    assert workflow_jobs(WF)["issues"]["steps"] == [
         {
             "uses": local_action("drift-issues"),
             "with": {
@@ -76,7 +66,7 @@ def test_the_issues_job_is_one_drift_issues_step_with_the_app_id_and_key():
 def test_the_detect_job_outputs_exactly_these_expressions():
     """Mutation: drop `cells` from detect's `outputs:`, and the issues job receives an empty
     string."""
-    assert _job("detect")["outputs"] == {
+    assert workflow_jobs(WF)["detect"]["outputs"] == {
         "matrix": "${{ steps.m.outputs.matrix }}",
         "cells": "${{ steps.m.outputs.cells }}",
         "empty": "${{ steps.m.outputs.empty }}",
@@ -86,7 +76,7 @@ def test_the_detect_job_outputs_exactly_these_expressions():
 
 def test_the_jobs_are_exactly_these():
     """Each job id is also a check-run name segment."""
-    assert list(workflow_yaml(WF)["jobs"]) == ["detect", "drift", "issues"]
+    assert list(workflow_jobs(WF)) == ["detect", "drift", "issues"]
 
 
 def test_the_cell_and_issue_jobs_gate_on_the_api_resolved_default_branch():
@@ -96,14 +86,14 @@ def test_the_cell_and_issue_jobs_gate_on_the_api_resolved_default_branch():
     `success()` and a failed cell skips the job -- exactly when an Issue is owed; dropping the
     emptiness clause runs the job on an empty sweep, minting the App token to download nothing.
     """
-    jobs = workflow_yaml(WF)["jobs"]
+    jobs = workflow_jobs(WF)
     assert {j: " ".join(jobs[j]["if"].split()) for j in _GATED_IF} == _GATED_IF
 
 
 def test_the_detect_job_is_deliberately_ungated():
     """It runs no consumer code and holds no secret. A gate here would make a feature-branch
     dispatch silently do nothing instead of failing visibly at the two jobs below."""
-    assert "if" not in workflow_yaml(WF)["jobs"]["detect"]
+    assert "if" not in workflow_jobs(WF)["detect"]
 
 
 def test_the_sweep_call_states_sweep_and_its_query():
@@ -112,7 +102,7 @@ def test_the_sweep_call_states_sweep_and_its_query():
     `tags: ${{ inputs.tags }}`, and every drift file sweeps every cell."""
     step = next(
         s
-        for s in workflow_yaml(WF)["jobs"]["detect"]["steps"]
+        for s in workflow_jobs(WF)["detect"]["steps"]
         if "actions/build-matrix" in str(s.get("uses", ""))
     )
     assert step["with"] == {
@@ -125,7 +115,7 @@ def test_the_sweep_call_states_sweep_and_its_query():
 def test_only_the_issues_job_holds_the_app_key():
     """Mutations: reference the key from the `drift` job, which runs repository content; move
     `issues` off `shipmate-engine`; give `detect` an `environment:` of its own."""
-    jobs = workflow_yaml(WF)["jobs"]
+    jobs = workflow_jobs(WF)
     holders = [
         job_id for job_id, job in jobs.items() if "SHIPMATE_APP_PRIVATE_KEY" in yaml.safe_dump(job)
     ]
@@ -138,7 +128,7 @@ def test_every_job_declares_its_own_permissions():
     """Whole map. Mutations: delete the `drift` job's block, and it silently gets the floor
     instead of the `id-token: write` its OIDC step needs; drop `contents: read` from `issues`,
     and its read of the default branch head fails on a private repository."""
-    assert {j: v.get("permissions") for j, v in workflow_yaml(WF)["jobs"].items()} == {
+    assert {j: v.get("permissions") for j, v in workflow_jobs(WF).items()} == {
         "detect": {"contents": "read"},
         "drift": {"contents": "read", "id-token": "write"},
         "issues": {"actions": "read", "contents": "read"},
@@ -156,7 +146,7 @@ def test_every_job_binds_the_environment_it_should_and_no_other():
     """
     parsed = {
         j: (" ".join(v["environment"].split()) if "environment" in v else None)
-        for j, v in workflow_yaml(WF)["jobs"].items()
+        for j, v in workflow_jobs(WF).items()
     }
     assert parsed == {"detect": None, "drift": _CELL_ENV, "issues": "shipmate-engine"}
 
@@ -172,7 +162,7 @@ def test_every_checkout_takes_no_with_block():
     for job_id in ("detect", "drift"):
         checkouts = [
             s.get("with")
-            for s in workflow_yaml(WF)["jobs"][job_id]["steps"]
+            for s in workflow_jobs(WF)[job_id]["steps"]
             if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
         ]
         assert checkouts == [None], job_id
@@ -186,7 +176,7 @@ def test_the_cell_passes_this_whole_with_block():
 
     Mutations: `env` deleted, and a `state-path:` key added back.
     """
-    assert _step("drift", "actions/drift-cell")["with"] == {
+    assert step_using(WF, "drift", "actions/drift-cell")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
         "github-vars": "${{ toJSON(vars) }}",
         "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",

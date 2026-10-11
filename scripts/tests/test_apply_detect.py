@@ -4,10 +4,10 @@ import json
 import pytest
 from _detect_fixtures import (
     APP_ID,
+    HEAD,
     PLAN_SHA,
     _apply_check,
     _record,
-    completed_names,
 )
 from _detect_fixtures import check_run as _check
 from _loader import github_outputs, load_script
@@ -146,9 +146,13 @@ def test_filter_pending_drops_completed():
     assert [c["stack"] for c in kept] == ["stacks/app"]
 
 
-def _completed(monkeypatch, checks, **kw):
-    """The "already applied" set every detect queries, with only `gh` stubbed."""
-    return completed_names(ad, monkeypatch, checks, **kw)
+def _completed(monkeypatch, checks):
+    """The "already applied" set apply-detect reports for `checks`, with only `gh` stubbed:
+    the listing is fetched and queried exactly as `main()` does. A raw string in `checks`
+    passes through unparsed, for the malformed-line case."""
+    jsonl = "\n".join(json.dumps(c) if isinstance(c, dict) else c for c in checks)
+    monkeypatch.setattr(ad, "_run", lambda args: jsonl)
+    return ad.ag.app_done_names(ad._check_run_lines("acme/repo", HEAD), APP_ID)
 
 
 def test_completed_failure_apply_stays_pending(monkeypatch):

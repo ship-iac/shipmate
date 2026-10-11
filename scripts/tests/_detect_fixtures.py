@@ -1,10 +1,4 @@
-"""Check-run fixtures for the three detect scripts.
-
-All three ask `apply-gate.app_done_names` the same question over the same `gh` output,
-so the stub contract -- which module attribute to patch, the check-run shape -- lives here rather
-than once per detect. Three copies drift one at a time, and the one left stubbing the old shape
-keeps passing against output `gh` no longer produces.
-"""
+"""Check-run fixtures shared by the detect-script tests."""
 
 import json
 from typing import Any
@@ -46,20 +40,6 @@ def _apply_check(stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, *
         external_id=_record(plan_run, plan_sha256),
         **kw,
     )
-
-
-def completed_names(apply_detect, monkeypatch, checks, app_id=APP_ID):
-    """The "already applied" set `apply_detect` reports for `checks`, with only the `gh` call
-    stubbed.
-
-    `apply_detect` is the caller's own loaded `apply-detect` module, each detect holding its own
-    instance, so the query runs exactly as that detect's `main()` runs it: fetch the listing,
-    then ask it. A raw string in `checks` is passed through unparsed, for the malformed-line
-    case.
-    """
-    jsonl = "\n".join(json.dumps(c) if isinstance(c, dict) else c for c in checks)
-    monkeypatch.setattr(apply_detect, "_run", lambda args: jsonl)
-    return apply_detect.ag.app_done_names(apply_detect._check_run_lines("acme/repo", HEAD), app_id)
 
 
 #: What a detect reads when a test names no table. `layout` is required, and `folder` derives

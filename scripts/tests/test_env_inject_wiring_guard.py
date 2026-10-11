@@ -12,7 +12,15 @@ passes an entry whose expression was mistyped; a substring check is satisfied by
 """
 
 import pytest
-from _loader import WORKFLOWS, action_steps, action_yaml, local_action, run_lines, workflow_yaml
+from _loader import (
+    WORKFLOWS,
+    action_steps,
+    action_yaml,
+    local_action,
+    run_lines,
+    workflow_jobs,
+    workflow_yaml,
+)
 
 #: The jobs that run a cell, hand-written. `test_the_registry_names_every_job_that_runs_a_cell`
 #: derives the same set from the files, so a twelfth cell job reds rather than going unguarded.
@@ -69,10 +77,6 @@ _CHANNEL_INPUT_SPEC = {"required": False, "default": ""}
 _ELEVEN = [(wf, job) for wf, jobs in _CELL_JOBS.items() for job in jobs]
 
 
-def _jobs(doc):
-    return doc.get("jobs") or {}
-
-
 def _runs_a_cell(step):
     """True for a step that actually runs a cell action.
 
@@ -90,7 +94,7 @@ def test_the_registry_names_every_job_that_runs_a_cell():
     """
     found = set()
     for path in sorted(WORKFLOWS.glob("*.yml")):
-        for job_id, job in _jobs(workflow_yaml(path.name)).items():
+        for job_id, job in workflow_jobs(path.name).items():
             if any(_runs_a_cell(s) for s in (job.get("steps") or [])):
                 found.add((path.name, job_id))
     assert found == set(_ELEVEN)
@@ -114,7 +118,7 @@ def test_no_workflow_binds_the_old_names():
     for path in files:
         doc = workflow_yaml(path.name)
         scan(path.name, doc.get("env"))
-        for job_id, job in _jobs(doc).items():
+        for job_id, job in doc["jobs"].items():
             visited.add((path.name, job_id))
             scan(f"{path.name}:{job_id}", job.get("env"))
             for i, step in enumerate(job.get("steps") or []):
@@ -135,9 +139,7 @@ def test_every_cell_step_passes_the_identity_input_from_its_matrix_row(workflow,
     Mutations: replace one wave job's `steps: *wave-steps` with a copy of wave0's steps minus
     the `tf-vars:` line; drop the `toJSON()` and pass `${{ matrix.tf_vars }}`.
     """
-    steps = [
-        s for s in (_jobs(workflow_yaml(workflow))[job_id].get("steps") or []) if _runs_a_cell(s)
-    ]
+    steps = [s for s in (workflow_jobs(workflow)[job_id].get("steps") or []) if _runs_a_cell(s)]
     assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"
     with_ = steps[0]["with"]
     assert {k: with_.get(k) for k in _IDENTITY_INPUTS} == _CELL_STEP_WITH
@@ -205,9 +207,7 @@ def test_every_cell_step_binds_both_consumer_channels(workflow, job_id):
     Mutation: replace ONE wave job's `steps: *wave-steps` with a copy of wave0's steps minus
     the `consumer-secrets:` line.
     """
-    steps = [
-        s for s in (_jobs(workflow_yaml(workflow))[job_id].get("steps") or []) if _runs_a_cell(s)
-    ]
+    steps = [s for s in (workflow_jobs(workflow)[job_id].get("steps") or []) if _runs_a_cell(s)]
     assert len(steps) == 1, f"{workflow}:{job_id}: {len(steps)} cell steps"
     with_ = steps[0]["with"]
     assert {k: with_.get(k) for k in _CHANNEL_STEP_WITH} == _CHANNEL_STEP_WITH

@@ -21,7 +21,7 @@ satisfied by a comment and by an inverted operator.
 
 import re
 
-from _loader import ENGINE, step_by, workflow_yaml
+from _loader import ENGINE, step_by, workflow_jobs
 
 _MINT = "actions/create-github-app-token"
 _CHECKOUT = "actions/checkout"
@@ -71,12 +71,8 @@ _RD_STEP = {
 _MINT_PERMISSIONS = {"permission-pull-requests": "read"}
 
 
-def _jobs(workflow):
-    return workflow_yaml(workflow)["jobs"]
-
-
 def _review():
-    return _jobs("apply.yml")["review"]
+    return workflow_jobs("apply.yml")["review"]
 
 
 def test_the_review_job_is_this_whole_mapping():
@@ -112,7 +108,7 @@ def test_detect_needs_review_and_refuses_to_run_after_it_failed():
     read as anything but a dead run.
 
     Mutation: set detect's `if:` to `${{ always() }}`."""
-    detect = _jobs("apply.yml")["detect"]
+    detect = workflow_jobs("apply.yml")["detect"]
     assert detect.get("needs") == _DETECT_NEEDS
     # `.get`, not `[...]`: a deleted `if:` is a fail-open mutation, and a KeyError would red
     # without naming the expression that went missing.

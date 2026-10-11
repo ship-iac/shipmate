@@ -45,7 +45,7 @@ wrong output, a step re-aimed at the apply family -- not a hostile edit to files
 reviews.
 """
 
-from _loader import local_action, workflow_yaml
+from _loader import local_action, workflow_jobs, workflow_yaml
 
 APPLY = "apply.yml"
 UNLOCK = "unlock.yml"
@@ -170,12 +170,8 @@ def _inputs(workflow):
     return (on["workflow_call"].get("inputs") or {}) if isinstance(on, dict) else {}
 
 
-def _jobs(workflow):
-    return workflow_yaml(workflow)["jobs"]
-
-
 def _job(workflow, job_id):
-    jobs = _jobs(workflow)
+    jobs = workflow_jobs(workflow)
     assert job_id in jobs, f"{workflow} declares no {job_id!r} job"
     return jobs[job_id]
 
@@ -198,7 +194,7 @@ def test_the_apply_workflow_declares_no_mode_rail():
 
 
 def test_the_apply_workflow_can_release_no_lock():
-    jobs = _jobs(APPLY)
+    jobs = workflow_jobs(APPLY)
     assert set(jobs) == APPLY_JOBS, (
         f"{APPLY}'s jobs are {sorted(jobs)}, not {sorted(APPLY_JOBS)} -- an unlock job "
         "back in this file force-unlocks state on the apply dispatch's authority"
@@ -248,7 +244,7 @@ def test_the_unlock_workflow_declares_exactly_the_dispatch_body():
 
 
 def test_the_unlock_workflow_applies_nothing():
-    jobs = _jobs(UNLOCK)
+    jobs = workflow_jobs(UNLOCK)
     assert set(jobs) == UNLOCK_JOBS, (
         f"{UNLOCK}'s jobs are {sorted(jobs)}, not {sorted(UNLOCK_JOBS)}"
     )
