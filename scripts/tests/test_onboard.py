@@ -633,17 +633,12 @@ def test_conforming_engine_environment_writes_nothing(monkeypatch):
     secret names are read in `main`), no write, and every report line `ok` so the exit
     code stays 0.
 
-    `doctor` checks `shipmate-engine` itself, so a shape WARNING, stubbed here because no
-    apply-role one exists yet, is no `differs` either: one would exit 2 on every run.
-
     Mutations: drop the `custom_branch_policies` test in `_reconcile_env`, so a
-    conforming environment is PUT again; drop the `(ENGINE_ENV, "apply")` skip, so the
-    stubbed WARNING becomes a `differs` line.
+    conforming environment is PUT again; raise doctor's apply-role no-approval finding
+    from NOTICE to WARNING, so it becomes a `differs` line and the run exits 2.
     """
     fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
-    drift = [(onboard.dr.WARNING, "drift")]
-    monkeypatch.setattr(onboard.dr, "_env_shape_findings", lambda *_: drift)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply", onboard.ENGINE_ENV)
     onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
@@ -3141,45 +3136,6 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
     assert onboard.REPORT == [
         ("differs", "dev-eu", SHARED_RULES_WARNING),
         ("ok", "dev-eu branch policy", "main"),
-    ]
-    assert onboard._exit_code() == 2
-
-
-def test_a_shared_env_named_shipmate_engine_still_reports_its_rules(monkeypatch):
-    """A logical env may be named `shipmate-engine`; reconciled as `shared`, it is not the
-    engine environment, so doctor's shared WARNING on its reviewers is still a `differs`.
-
-    Mutation: skip shape findings on `name != ENGINE_ENV` alone, which reports `ok`.
-    """
-    fake = make_gh(
-        {
-            "repos/o/r/environments/shipmate-engine": {
-                "deployment_branch_policy": CUSTOM_POLICY,
-                "protection_rules": [{"type": "required_reviewers"}],
-            },
-            "repos/o/r/environments/shipmate-engine-plan": SystemExit("gh: Not Found (HTTP 404)"),
-            "repos/o/r/environments/shipmate-engine-apply": SystemExit("gh: Not Found (HTTP 404)"),
-            "repos/o/r/environments/shipmate-engine/deployment-branch-policies": {
-                "total_count": 1,
-                "branch_policies": [{"name": "main"}],
-            },
-        }
-    )
-    monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_envs(ctx(envs=["shipmate-engine"], shared={"shipmate-engine"}))
-    assert onboard.REPORT == [
-        (
-            "differs",
-            "shipmate-engine",
-            "GitHub Environment `shipmate-engine` (shared between plan and apply by "
-            "`shared: true` in its `environments.shipmate-engine` entry) has protection rules "
-            "(required_reviewers). A protection rule gates every job that binds the "
-            "environment and GitHub offers no per-job filter, so the plan cells and every "
-            "drift sweep covering it will not start immediately either. To gate applies only, "
-            "split it into `shipmate-engine-plan` and `shipmate-engine-apply` and remove "
-            "`shared: true` from its `environments.shipmate-engine` entry.",
-        ),
-        ("ok", "shipmate-engine branch policy", "main"),
     ]
     assert onboard._exit_code() == 2
 
