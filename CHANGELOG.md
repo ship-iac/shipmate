@@ -28,6 +28,7 @@ section below names the SHA the release tags.
 - **An empty run-graph with pending applies refuses naming the first stack that is not a run-graph node, instead of saying the run-graph produced no levels.**
 - **build-matrix's `all-stacks` and `no-pull-request` inputs are one `sweep` input, read only when exactly `true`.**
 - **The apply review re-read displays as `review` instead of `review / decision`.**
+- **`scripts/onboard` reports a plan or shared environment's protection shape in `shipmate doctor`'s words, one `differs` line per finding, and its adoption checklist item ends with the re-run step in place of a separate gate ruleset item.**
 
 ### Fixed
 

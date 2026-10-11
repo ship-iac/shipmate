@@ -63,7 +63,6 @@ from _shipmate import (
     yaml_error_text,
 )
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
-from _shipmate import approval_rules as _approval_rules
 from _shipmate import run as _run
 
 ec = _load("env-config")
@@ -277,65 +276,33 @@ def _ensure_policy(ctx, name):
         )
 
 
-def _plan_drift(env):
-    """What disqualifies `env` as a plan environment, as one sentence, or ""."""
-    reasons = []
-    if env.get("deployment_branch_policy"):
-        reasons.append(
-            "it carries a deployment branch policy, which blocks every plan cell whose "
-            "pull request targets a branch the policy does not name"
-        )
-    rules = _approval_rules(env)
-    if rules:
-        reasons.append(f"it carries protection rules ({', '.join(rules)}), which stall plan cells")
-    if not reasons:
-        return ""
-    return (
-        f"{' and '.join(reasons)}. Removing a protection a consumer set is not this "
-        "script's call, so it is reported and left alone."
-    )
+def _reconcile_env(ctx, name, role, env):
+    """Create or repair environment `name`, the `role` binding of logical env `env`.
 
-
-def _report_shared_approval(ctx, name, env):
-    """Report approval rules on a shared bare environment.
-
-    `_env_names` collapses a shared env to one apply-role environment, but a protection
-    rule there is not the reviewer gate the split naming gives an apply environment: the
-    plan cells and every drift sweep covering it bind the same environment and GitHub offers no
-    per-job filter, so they stall too. `doctor` warns on it; reported here, never stripped.
+    A WARNING `doctor` raises on its shape is reported `differs` and left alone: removing a
+    protection a consumer set is not this script's call. `shipmate-engine` gets no shape
+    findings: doctor checks it separately, and an apply WARNING would exit 2 on every run.
     """
-    approval = _approval_rules(env) if env is not None and name in ctx["shared"] else []
-    if not approval:
-        return
-    report(
-        "differs",
-        name,
-        f"it carries protection rules ({', '.join(approval)}) and is shared, so the plan "
-        "cells and every drift sweep covering it do not start immediately either. To gate applies "
-        f"alone, split it into `{name}-plan` and `{name}-apply` and drop `shared: true` "
-        f"from `environments.{name}`.",
-    )
-
-
-def _reconcile_env(ctx, name, role):
-    """Create or repair one environment. `role` is "plan" or "apply"."""
     path = f"repos/{ctx['repo']}/environments/{name}"
-    env = _gh_json_or_none(path)
-    if role == "apply":
-        ctx["apply_envs"][name] = env
-    body = _APPLY_BODY if role == "apply" else _PLAN_BODY
+    data = _gh_json_or_none(path)
+    if role != "plan":
+        ctx["apply_envs"][name] = data
+    body = _PLAN_BODY if role == "plan" else _APPLY_BODY
     put = ["gh", "api", "-X", "PUT", path, "--input", "-"]
-    if env is None:
+    shaped = data is not None and name != ENGINE_ENV
+    findings = dr._env_shape_findings(name, env, data, role) if shaped else []
+    drift = [text for level, text in findings if level == dr.WARNING]
+    policy = (data or {}).get("deployment_branch_policy") or {}
+    if data is None:
         write("create", name, put, stdin=json.dumps(body))
-    elif role == "plan":
-        drift = _plan_drift(env)
-        report("differs" if drift else "ok", name, drift)
-    elif (env.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
-        report("ok", name)
+    elif role == "plan" or policy.get("custom_branch_policies"):
+        if not drift:
+            report("ok", name)
     else:
         write("update", name, put, stdin=json.dumps(body))
-    if role == "apply":
-        _report_shared_approval(ctx, name, env)
+    for text in drift:
+        report("differs", name, text)
+    if role != "plan":
         _ensure_policy(ctx, name)
 
 
@@ -390,15 +357,6 @@ def _reconcile_key(ctx):
     )
 
 
-def _env_names(env, shared):
-    """[(environment name, role)] for one derived environment; a shared one is reconciled
-    as an apply environment."""
-    return [
-        (name, "apply" if role == "shared" else role)
-        for role, name in ec.env_names(env, env in shared).items()
-    ]
-
-
 def _unused_naming(env, shared):
     """The environment names for the naming this repository does *not* bind: `env_names`
     under the opposite `shared` setting."""
@@ -419,6 +377,7 @@ def _naming_conflict(ctx, env):
     if not unused:
         return False
     names = " and ".join(f"`{n}`" for n in unused)
+    bound = " / ".join(f"`{n}`" for n in ec.env_names(env, env in ctx["shared"]).values())
     remedy = (
         f"drop `shared: true` from `environments.{env}`"
         if env in ctx["shared"]
@@ -428,10 +387,9 @@ def _naming_conflict(ctx, env):
     report(
         "differs",
         env,
-        f"the engine binds {' / '.join(f'`{n}`' for n, _role in _env_names(env, ctx['shared']))} "
-        f"for `{env}`, and {names} {'is' if len(unused) == 1 else 'are'} also present. Nothing "
-        f"binds {names}, so nothing was created or changed for `{env}`. Delete {names}, or "
-        f"{remedy}.",
+        f"the engine binds {bound} for `{env}`, and {names} "
+        f"{'is' if len(unused) == 1 else 'are'} also present. Nothing binds {names}, so "
+        f"nothing was created or changed for `{env}`. Delete {names}, or {remedy}.",
     )
     return True
 
@@ -441,8 +399,8 @@ def _reconcile_envs(ctx):
         if _naming_conflict(ctx, env):
             ctx["unresolved"].add(env)
             continue
-        for name, role in _env_names(env, ctx["shared"]):
-            _reconcile_env(ctx, name, role)
+        for role, name in ec.env_names(env, env in ctx["shared"]).items():
+            _reconcile_env(ctx, name, role, env)
 
 
 def _reaching_variables(repo, remedy):
@@ -591,7 +549,6 @@ def _reconcile_ruleset(ctx):
     app_id = int(ctx["app_id"])
     branch = ctx["default_branch"]
     if chk is None and not ctx["shim_on_default"]:
-        ctx["ruleset_deferred"] = True
         report(
             "deferred",
             subject,
@@ -759,18 +716,11 @@ def _table_item(ctx):
     # consumer to declare before tagging.
     lines = []
     untagged = [e for e in ctx["envs"] if e not in ctx["tagged"]]
-    if len(untagged) == 1:
-        lines = textwrap.wrap(
-            f"Provisioned for {untagged[0]}, which no stack tags yet: its first tagging pull "
-            "request deploys under that environment's protection. If the name is a typo, fix "
-            "the entry.",
-            width=80,
-        )
-    elif untagged:
+    if untagged:
         lines = textwrap.wrap(
             f"Provisioned for {', '.join(untagged)}, which no stack tags yet: the first pull "
-            "request tagging a stack into each deploys under that environment's protection. If "
-            "a name is a typo, fix the entry.",
+            "request tagging a stack into an environment deploys under its protection. Fix a "
+            "misspelled name in its entry.",
             width=80,
         )
     # A declared, untagged predecessor is the provisioned-ahead order named above; only a
@@ -972,6 +922,8 @@ def _adoption_item(ctx):
             f"{verb} the workflow file and the table together,",
             "in a pull request that changes no stack. The table is read from the default",
             "branch, so the first plan needs it merged.",
+            "Once it merges, run this script again: that run creates or checks the gate",
+            "ruleset.",
         ],
     )
 
@@ -1123,17 +1075,6 @@ def _drift_sweeps_item(ctx):
     return ("todo" if lines else "ok"), item, [*lines, read]
 
 
-_RULESET_ITEM = (
-    "todo",
-    "gate ruleset",
-    [
-        "Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because",
-        "the workflows that produce it are not on the default branch (CONTRACT.md",
-        "§Post-plan topology). Then run this script again to create the gate ruleset.",
-    ],
-)
-
-
 def _checklist(ctx):
     """Print each value and step this script cannot supply, marked `ok`, `todo` or
     `cannot check` from what this run read. Only a `todo` carries a command or template.
@@ -1146,13 +1087,7 @@ def _checklist(ctx):
     # of its own.
     ungated = ec.ungated_envs(ctx["table"] or {})
     gated = [env for env in ctx["envs"] if env not in ctx["unresolved"] and env not in ungated]
-    reviewed = [
-        name
-        for env in gated
-        if env not in ctx["shared"]
-        for name, role in _env_names(env, ctx["shared"])
-        if role == "apply"
-    ]
+    reviewed = [ec.env_names(env, False)["apply"] for env in gated if env not in ctx["shared"]]
     items = [_passphrase_item(ctx), _table_item(ctx)]
     items.append(_app_item(ctx))
     if gated:
@@ -1165,8 +1100,6 @@ def _checklist(ctx):
         _drift_sweeps_item(ctx),
         _adoption_item(ctx),
     ]
-    if ctx["ruleset_deferred"]:
-        items.append(_RULESET_ITEM)
     out = ["", "Still yours, each item marked from what this run read:", ""]
     for verdict, item, details in items:
         out.append(f"{verdict:<12}  {item}")
@@ -1265,7 +1198,6 @@ def main(argv=None):
         "is_private": is_private,
         # Read before the first write: a token without Contents read answers 403 here.
         "shim_on_default": _shim_on_default(repo, default_branch),
-        "ruleset_deferred": False,
         "apply_envs": {},
         "review_count": 0,
         "tags_by_stack": tags_by_stack,
@@ -1287,7 +1219,7 @@ def main(argv=None):
     print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
     print(f"engine pin: {ctx['sha']} ({ctx['version']})")
 
-    _reconcile_env(ctx, ENGINE_ENV, "apply")
+    _reconcile_env(ctx, ENGINE_ENV, "apply", ENGINE_ENV)
     _reconcile_key(ctx)
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)

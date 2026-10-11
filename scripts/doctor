@@ -388,22 +388,36 @@ ENV_PROBES_INTERPRETER_REFUSED = (
 )
 
 
-def _environment_warnings(ctx):
+NO_ENVS_SKIPPED = (
+    NOTICE,
+    "no plan run with cell summaries for this commit: the declared "
+    "environment set is unknown, so the environment probes were skipped.",
+)
+
+
+def _bindings(ctx):
+    """(skip finding or None, `(env, name, role, exists)` rows), shared by
+    `_environment_warnings` and `_probed_bindings`; a skip comes with no rows.
+
+    With no declared env nothing is read: listing the environments anyway would let a
+    repository whose token cannot list them collect a "could not verify" degrade for a probe
+    that had no work to do."""
     if not ctx["envs"]:
-        return [
-            (
-                NOTICE,
-                "no plan run with cell summaries for this commit: the declared "
-                "environment set is unknown, so the environment probes were skipped.",
-            )
-        ]
+        return NO_ENVS_SKIPPED, []
     if ec.runner_refusal():
-        return [ENV_PROBES_INTERPRETER_REFUSED]
-    names = _existing_env_names(ctx)
+        return ENV_PROBES_INTERPRETER_REFUSED, []
+    existing = _existing_env_names(ctx)
     bound = _bound_names(ctx)
     if bound is None:
-        return [DEFAULT_TABLE_UNREADABLE]
-    return [(WARNING, _missing(n, env, r)) for env, n, r in bound if n not in names]
+        return DEFAULT_TABLE_UNREADABLE, []
+    return None, [(env, name, role, name in existing) for env, name, role in bound]
+
+
+def _environment_warnings(ctx):
+    skip, rows = _bindings(ctx)
+    if skip:
+        return [skip]
+    return [(WARNING, _missing(n, env, r)) for env, n, r, exists in rows if not exists]
 
 
 _environment_warnings.parses_yaml = True
@@ -411,18 +425,9 @@ _environment_warnings.parses_yaml = True
 
 def _probed_bindings(ctx):
     """The `_bound_names` rows whose environment exists; `[]` when the probe is skipped.
-    Each skip and each absent environment is `_environment_warnings`' finding.
-
-    With no declared env nothing is read: listing the environments anyway would let a
-    repository whose token cannot list them collect a "could not verify" degrade for a probe
-    that had no work to do. Existence comes from `_existing_env_names`."""
-    if not ctx["envs"] or ec.runner_refusal():
-        return []
-    existing = _existing_env_names(ctx)
-    bound = _bound_names(ctx)
-    if bound is None:
-        return []
-    return [(env, name, role) for env, name, role in bound if name in existing]
+    Each skip and each absent environment is `_environment_warnings`' finding."""
+    _skip, rows = _bindings(ctx)
+    return [(env, name, role) for env, name, role, exists in rows if exists]
 
 
 def _env_shape_findings(name, env, data, role):
@@ -1113,16 +1118,11 @@ _UNSAFE_CHECKOUT = "allow-unsafe-pr-checkout"
 
 def _events(doc):
     """The event names the workflow `doc`'s `on:` declares, in each of its three forms: one
-    event, a list of them, or a mapping keyed by them."""
+    event, a list of them, or a mapping keyed by them. Only the events `on:` names count:
+    the same word in a comment, a `run:` body, an `if:` or an input's `options:` declares
+    nothing."""
     on = doc.get("on")
     return list(on) if isinstance(on, (dict, list)) else [on]
-
-
-def declares_pull_request_target(doc):
-    """Whether the workflow `doc` declares the `pull_request_target` trigger. Only the
-    events `on:` names count: the same word in a comment, a `run:` body, an `if:` or an
-    input's `options:` declares nothing."""
-    return "pull_request_target" in _events(doc)
 
 
 def _unsafe_checkout_warnings(doc, name):
@@ -1194,7 +1194,7 @@ def _fork_trigger_warnings(ctx):
         # consumer file and gets the warning.
         if name == "shipmate.yml":
             return out
-        if not declares_pull_request_target(doc):
+        if "pull_request_target" not in _events(doc):
             return out
         return out + [
             (
@@ -2109,11 +2109,8 @@ def harvest_pending(lines, app_id=""):
 
 def _write_step_output(name, value):
     """Append `name=<value>` to the calling action step's GITHUB_OUTPUT, a bool as
-    `true`/`false`. Silently skipped when GITHUB_OUTPUT is unset, so every mode stays
-    runnable outside a runner."""
-    path = os.environ.get("GITHUB_OUTPUT")
-    if not path:
-        return
+    `true`/`false`."""
+    path = os.environ["GITHUB_OUTPUT"]
     if isinstance(value, bool):
         value = "true" if value else "false"
     with open(path, "a", encoding="utf-8") as fh:
