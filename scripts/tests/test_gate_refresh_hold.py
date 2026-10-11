@@ -88,8 +88,10 @@ def test_the_gate_is_read_before_it_is_written():
 def test_refuses_to_green_a_held_gate(tmp_path):
     proc, posted = _run_step(tmp_path, "failure")
     assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert "::error::" in proc.stdout
-    assert "Re-plan" in proc.stdout
+    assert proc.stdout == (
+        "::error::shipmate / gate is held for " + "a" * 40 + ": its description names the cause"
+        " and the remedy. Applying the stacks that have apply checks cannot clear a hold.\n"
+    )
     assert posted is None, f"a held gate was overwritten with {posted!r}"
 
 

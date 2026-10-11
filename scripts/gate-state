@@ -74,10 +74,11 @@ def _evidence_gap(*, cell_count, planned):
     that produced more cells than were planned describes a run nobody can
     account for, which holds for the same reason.
 
-    The recovery is a fresh plan run. Re-running this run's plan jobs 409s, since
-    `plan-cell`'s artifact uploads are not `overwrite:`, and re-running this job
-    republishes pending checks over cells applied since. The description is
-    truncated to 140 characters by `main()`, so it leads with the recovery.
+    The recovery is a fresh plan run. Re-running this run's plan jobs that already
+    uploaded their artifacts 409s, since `plan-cell`'s uploads are not `overwrite:`,
+    and re-running this job republishes pending checks over cells applied since. The
+    description is truncated to 140 characters by `main()`, so it leads with the
+    recovery.
     """
     if cell_count != planned:
         return (
