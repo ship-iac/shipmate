@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## [Unreleased]
 
+### Added
+
+- **A plan run warns, naming each stack and environment, when a pull request removes one `env/*` tag from a stack that keeps another.**
+
 ### Fixed
 
 - **An environment named `shipmate-engine` is refused as a table entry, a `needs` element, a stack's `env/*` tag and a dispatched environment: a `shared: true` entry of that name bound the engine's own environment, which holds the App private key.**

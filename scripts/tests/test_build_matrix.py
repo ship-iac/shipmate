@@ -1933,24 +1933,24 @@ def _stack(tags, name="s"):
 
 
 def test_lost_env_tags_names_a_stack_whose_diff_removes_an_env_line(git_repo):
-    """`s` drops `env/dev`; `t` edits its name. Mutation: drop the tag-literal condition --
-    `t` appears."""
+    """`s` drops `env/dev`; `t` edits its name. Mutation: widen the capture to `"([^"]*)"` --
+    the name edit yields a name and `t` appears."""
     base = _commit(
         {"s/stack.tm.hcl": _stack('["env/dev"]'), "t/stack.tm.hcl": _stack("[]", "t")}, "base"
     )
     _git("checkout", "-q", "-b", "pr")
     _commit({"s/stack.tm.hcl": _stack("[]"), "t/stack.tm.hcl": _stack("[]", "t2")}, "untag")
-    assert bm.lost_env_tags(base, ["s", "t"]) == ["s"]
+    assert bm.lost_env_tags(base, {"s": set(), "t": set()}) == {"s": ["dev"]}
 
 
 def test_lost_env_tags_names_the_root_stack(git_repo):
     """Terramate lists the root stack as `.`, so its pathspec is `:(glob)./*.tm.hcl`.
     Mutation: `stack.removeprefix(".")` in both pathspecs -- `:(glob)/*.tm.hcl` lies outside
-    the repository and `git diff` exits 128."""
+    the repository, `git diff` exits 128 and `_run` raises `SystemExit`."""
     base = _commit({"stack.tm.hcl": _stack('["env/dev"]')}, "base")
     _git("checkout", "-q", "-b", "pr")
     _commit({"stack.tm.hcl": _stack("[]")}, "untag")
-    assert bm.lost_env_tags(base, ["."]) == ["."]
+    assert bm.lost_env_tags(base, {".": set()}) == {".": ["dev"]}
 
 
 def test_lost_env_tags_ignores_an_env_directory_in_the_file_header(git_repo):
@@ -1959,7 +1959,7 @@ def test_lost_env_tags_ignores_an_env_directory_in_the_file_header(git_repo):
     base = _commit({"stacks/env/app/stack.tm.hcl": _stack("[]")}, "base")
     _git("checkout", "-q", "-b", "pr")
     _commit({"stacks/env/app/stack.tm.hcl": _stack("[]", "renamed")}, "edit")
-    assert bm.lost_env_tags(base, ["stacks/env/app"]) == []
+    assert bm.lost_env_tags(base, {"stacks/env/app": set()}) == {}
 
 
 def test_lost_env_tags_diffs_from_the_merge_base(git_repo):
@@ -1971,7 +1971,7 @@ def test_lost_env_tags_diffs_from_the_merge_base(git_repo):
     _git("checkout", "-q", "main")
     base = _commit({"s/stack.tm.hcl": _stack('["env/dev"]')}, "tag on main")
     _git("checkout", "-q", "pr")
-    assert bm.lost_env_tags(base, ["s"]) == []
+    assert bm.lost_env_tags(base, {"s": set()}) == {}
 
 
 def test_lost_env_tags_reads_only_the_stacks_own_terramate_files(git_repo):
@@ -1993,17 +1993,36 @@ def test_lost_env_tags_reads_only_the_stacks_own_terramate_files(git_repo):
         },
         "retag child",
     )
-    assert bm.lost_env_tags(base, ["stacks/app"]) == []
+    assert bm.lost_env_tags(base, {"stacks/app": set()}) == {}
 
 
 def test_lost_env_tags_ignores_an_env_prefixed_backend_key(git_repo):
     """An untagged stack's `.tm.hcl` drops a backend key under `env/`, not a tag literal.
-    Mutation: test `"env/" in line` instead of the tag-literal pattern -- `s` appears."""
+    Mutation: widen the capture to `"env/([^"]*)"` -- `s` appears."""
     key = '  key = "env/${global.x}/state"\n'
     base = _commit({"s/stack.tm.hcl": _stack("[]"), "s/backend.tm.hcl": key}, "base")
     _git("checkout", "-q", "-b", "pr")
     _commit({"s/backend.tm.hcl": "\n"}, "drop key")
-    assert bm.lost_env_tags(base, ["s"]) == []
+    assert bm.lost_env_tags(base, {"s": set()}) == {}
+
+
+def test_lost_env_tags_names_each_env_removed_from_a_stack_that_keeps_another(git_repo):
+    """One line holds two literals; the head keeps `dev-eu`. Mutations: drop the head filter
+    -- `dev-eu` appears; `.search` instead of `.finditer` -- only the first literal is read,
+    the head carries it, and nothing is named."""
+    base = _commit({"s/stack.tm.hcl": _stack('["env/dev-eu", "env/prod"]')}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/stack.tm.hcl": _stack('["env/dev-eu"]')}, "untag prod")
+    assert bm.lost_env_tags(base, {"s": {"dev-eu"}}) == {"s": ["prod"]}
+
+
+def test_lost_env_tags_ignores_a_reformatted_tag_line(git_repo):
+    """The tag line is removed and re-added with other spacing. Mutation: drop the head filter
+    -- both names appear."""
+    base = _commit({"s/stack.tm.hcl": _stack('["env/dev-eu", "env/prod"]')}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/stack.tm.hcl": _stack('[ "env/dev-eu",  "env/prod" ]')}, "reformat")
+    assert bm.lost_env_tags(base, {"s": {"dev-eu", "prod"}}) == {}
 
 
 _LOST_ENV_WARNING = (
@@ -2012,6 +2031,7 @@ _LOST_ENV_WARNING = (
     "stack out of CI), nothing is wrong; otherwise restore the tag."
 )
 _REMOVED_ENV_LINE = '@@ -3 +3 @@\n-  tags = ["env/dev"]\n+  tags = []\n'
+_REMOVED_PROD_LINE = '@@ -3 +3 @@\n-  tags = ["env/dev-eu", "env/prod"]\n+  tags = ["env/dev-eu"]\n'
 _PR_ENV = {
     "GITHUB_EVENT_NAME": "pull_request",
     "GITHUB_REPOSITORY": "acme/iac",
@@ -2020,30 +2040,54 @@ _PR_ENV = {
 }
 
 
+def _warnings(capsys):
+    return [line for line in capsys.readouterr().out.splitlines() if line.startswith("::warning::")]
+
+
 def test_detect_warns_about_a_stack_that_lost_its_last_env_tag(monkeypatch, tmp_path, capsys):
-    """Mutation: drop the call in `_detect`."""
+    """`stacks/app`, in the tree, changed without touching a tag. Mutations: drop the call in
+    `_detect`; let the pair warning include unmanaged stacks -- `stacks/gone / dev` is named
+    too."""
     _run_main(
         monkeypatch,
         tmp_path,
         _PR_ENV,
         head_sha="cafe1234",
         unmanaged=["stacks/gone"],
-        diffs={"stacks/gone": _REMOVED_ENV_LINE},
+        diffs={"stacks/gone": _REMOVED_ENV_LINE, "stacks/app": ""},
     )
-    assert _LOST_ENV_WARNING in capsys.readouterr().out.splitlines()
+    assert _warnings(capsys) == [_LOST_ENV_WARNING]
 
 
-def test_detect_diffs_only_the_unmanaged_stacks(monkeypatch, tmp_path):
-    """`stacks/app` is a changed, tagged stack whose diff also removes an `env/` line (a
-    retag). Mutation: pass every changed stack instead of `unmanaged`."""
+def test_detect_warns_about_each_env_a_tagged_stack_lost(monkeypatch, tmp_path, capsys):
+    """`stacks/app` keeps `dev-eu` and loses `prod`. Mutation: delete the pair warning's
+    `print`."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        diffs={"stacks/app": _REMOVED_PROD_LINE},
+    )
+    assert _warnings(capsys) == [
+        "::warning::1 stack / environment pair(s) lost their env/* tag in this pull request, so "
+        "shipmate no longer plans or deploys them: stacks/app / prod. If that is deliberate "
+        "(CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise restore the tag."
+    ]
+
+
+def test_detect_diffs_every_scanned_stack_once(monkeypatch, tmp_path):
+    """`stacks/app` is in the tree in two environments. Mutations: diff only `unmanaged` --
+    the tree stacks go undiffed; diff once per tree row -- `stacks/app` is diffed twice."""
     diff_calls = []
     _run_main(
         monkeypatch,
         tmp_path,
         _PR_ENV,
+        cells=(("stacks/app", "dev-eu"), ("stacks/app", "prod"), ("stacks/db", "dev-eu")),
         head_sha="cafe1234",
         unmanaged=["stacks/gone"],
-        diffs={"stacks/gone": _REMOVED_ENV_LINE, "stacks/app": _REMOVED_ENV_LINE},
+        diffs={"stacks/gone": "", "stacks/app": "", "stacks/db": ""},
         diff_calls=diff_calls,
     )
     assert diff_calls == [
@@ -2053,9 +2097,10 @@ def test_detect_diffs_only_the_unmanaged_stacks(monkeypatch, tmp_path):
             "-U0",
             f"{'b' * 40}...HEAD",
             "--",
-            ":(glob)stacks/gone/*.tm.hcl",
-            ":(glob)stacks/gone/*.tm",
+            f":(glob){s}/*.tm.hcl",
+            f":(glob){s}/*.tm",
         ]
+        for s in ("stacks/app", "stacks/db", "stacks/gone")
     ]
 
 
@@ -2069,8 +2114,9 @@ def test_detect_diffs_only_the_unmanaged_stacks(monkeypatch, tmp_path):
     ids=["sweep", "zero-base", "no-base"],
 )
 def test_detect_runs_no_diff_without_a_pull_request_base(monkeypatch, tmp_path, capsys, env):
-    """A drift sweep, a force-push or first push, and a run with no base. Mutation: drop each
-    clause of the guard in turn -- its case diffs and warns."""
+    """A drift sweep, a force-push or first push, and a run with no base; `stacks/app` loses
+    `prod` too, so both warnings are reachable. Mutation: drop each clause of the guard in turn
+    -- its case diffs and warns."""
     diff_calls = []
     _run_main(
         monkeypatch,
@@ -2078,7 +2124,7 @@ def test_detect_runs_no_diff_without_a_pull_request_base(monkeypatch, tmp_path, 
         {**_PR_ENV, **env},
         head_sha="cafe1234",
         unmanaged=["stacks/gone"],
-        diffs={"stacks/gone": _REMOVED_ENV_LINE},
+        diffs={"stacks/gone": _REMOVED_ENV_LINE, "stacks/app": _REMOVED_PROD_LINE},
         diff_calls=diff_calls,
     )
     assert diff_calls == []
@@ -2092,6 +2138,7 @@ def test_detect_names_the_first_ten_lost_stacks(monkeypatch, tmp_path, capsys):
         monkeypatch,
         tmp_path,
         _PR_ENV,
+        cells=(),
         head_sha="cafe1234",
         unmanaged=lost,
         diffs=dict.fromkeys(lost, _REMOVED_ENV_LINE),
@@ -2102,3 +2149,23 @@ def test_detect_names_the_first_ten_lost_stacks(monkeypatch, tmp_path, capsys):
         "deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise "
         "restore the tag."
     ) in capsys.readouterr().out.splitlines()
+
+
+def test_detect_names_the_first_ten_lost_pairs(monkeypatch, tmp_path, capsys):
+    """Eleven tree stacks each lose `prod`. Mutation: `UNMANAGED_NAMES + 1` at the pair
+    warning's `named(...)` call -- `stacks/t10 / prod` is named."""
+    stacks = [f"stacks/t{i:02}" for i in range(11)]
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        cells=tuple((s, "dev-eu") for s in stacks),
+        head_sha="cafe1234",
+        diffs=dict.fromkeys(stacks, _REMOVED_PROD_LINE),
+    )
+    assert _warnings(capsys) == [
+        "::warning::11 stack / environment pair(s) lost their env/* tag in this pull request, "
+        "so shipmate no longer plans or deploys them: "
+        f"{', '.join(f'{s} / prod' for s in stacks[:10])}, and 1 more. If that is deliberate "
+        "(CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise restore the tag."
+    ]
