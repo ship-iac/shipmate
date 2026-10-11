@@ -445,7 +445,7 @@ enforcement.
 
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
-`shared`, `explicit` and `gated` are booleans and refuse a reference, so
+`shared`, `explicit` and `gated` hold `true` or `false` and refuse a reference, so
 which environments share one binding, which a bare apply skips and which apply
 unreviewed stay merged commits. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes
