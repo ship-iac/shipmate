@@ -16,8 +16,8 @@ import sys
 
 from _shipmate import _load, current_run_url
 
-# `shipmate` as a whole word, then verb, then an optional env in lower kebab (GitHub env naming).
-_CMD = re.compile(r"^shipmate (?P<verb>[a-z]+)(?: (?P<env>[a-z0-9][a-z0-9-]*))?$")
+# `shipmate` as a whole word, a verb, then an optional env in env-config's `_ENV_ENTRY` charset.
+_CMD = re.compile(r"^shipmate (?P<verb>[a-z]+)(?: (?P<env>[a-z0-9][a-z0-9_-]*))?$")
 _SHIPMATE_LINE = re.compile(r"^shipmate\b")
 
 HELP_MARKER = "<!-- shipmate:help -->"

@@ -1131,9 +1131,8 @@ env given alongside it with an explicit "takes no arguments" error rather than
 silently ignoring the extra token. An unknown verb's error points the commenter at
 `shipmate help`, and so does the "malformed" error for a line that does not
 match the grammar at all (a capitalized verb, an env holding anything but
-lowercase letters, digits and `-`, a token after the env, a double space). The
-grammar's env charset is narrower than an environment name's, so an environment
-whose name holds `_` cannot be targeted by a comment. `scripts/comment-parse`'s `VERBS` registry is the single
+lowercase letters, digits, `-` and `_`, a token after the env, a double space).
+`scripts/comment-parse`'s `VERBS` registry is the single
 source of truth this table is derived from: it drives the parser, the
 `--help-markdown` rendering that `shipmate help` posts verbatim (marked with
 the HTML comment `<!-- shipmate:help -->`), and the reject-hint text, so the

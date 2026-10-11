@@ -125,21 +125,34 @@ _MALFORMED = "malformed: expected `shipmate <verb> [env]` (try `shipmate help`)"
         "shipmate apply dev-eu foo",
         "shipmate apply DEV-EU",
         "shipmate unlock DEV-EU",
-        "shipmate apply dev_eu",
         "shipmate plan Foo",
     ],
 )
 def test_a_token_outside_the_grammar_is_malformed(body):
-    """The env charset is lowercase letters, digits and `-`, and nothing may follow the env, so
-    these fail the grammar outright. Pinned as a deliberate choice: the user sees the malformed
-    error with its help hint, not a missing or invalid env one. `dev_eu` is a valid environment
-    name that a comment cannot target.
+    """The env charset is lowercase letters, digits, `-` and `_`, and nothing may follow the env,
+    so these fail the grammar outright. Pinned as a deliberate choice: the user sees the malformed
+    error with its help hint, not a missing or invalid env one.
 
     Mutation: restore the `(?: (?P<tag>[A-Za-z0-9][A-Za-z0-9/_:.-]*))?` group in `_CMD`, and
     every case parses and gets a verb-specific error instead.
     """
     r = cp.parse(body)
     assert (r["is_command"], r["valid"], r["route"], r["error"]) == (True, False, None, _MALFORMED)
+
+
+def test_an_env_holding_an_underscore_is_targetable():
+    """env-config accepts `_` in an environment name, so a comment must reach that environment.
+
+    Mutation: narrow `_CMD`'s env group to `[a-z0-9][a-z0-9-]*`, and the line is malformed.
+    """
+    assert cp.parse("shipmate apply dev_eu") == {
+        "is_command": True,
+        "valid": True,
+        "verb": "apply",
+        "env": "dev_eu",
+        "route": "apply",
+        "error": None,
+    }
 
 
 def test_destroy_is_an_unknown_verb():
@@ -331,6 +344,21 @@ def test_main_writes_no_verb_for_an_unknown_one(tmp_path, monkeypatch):
         "env=dev-eu",
         "route=",
         "error=unknown verb `aply` (try `shipmate help`)",
+    ]
+
+
+def test_main_writes_the_verb_of_a_refused_known_verb(tmp_path, monkeypatch):
+    """A known verb refused for its argument still names itself, so the reply is headed with it.
+
+    Mutation: write `verb={r['route'] or ''}` in `main()`, and the refused verb is written empty.
+    """
+    assert _main_output(tmp_path, monkeypatch, "shipmate plan dev-eu") == [
+        "is_command=true",
+        "valid=false",
+        "verb=plan",
+        "env=dev-eu",
+        "route=",
+        "error=`plan` takes no arguments (use `shipmate plan`)",
     ]
 
 
