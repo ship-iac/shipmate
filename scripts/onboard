@@ -550,7 +550,6 @@ def _reconcile_ruleset(ctx):
     app_id = int(ctx["app_id"])
     branch = ctx["default_branch"]
     if chk is None and not ctx["shim_on_default"]:
-        ctx["ruleset_deferred"] = True
         report(
             "deferred",
             subject,
@@ -718,14 +717,7 @@ def _table_item(ctx):
     # consumer to declare before tagging.
     lines = []
     untagged = [e for e in ctx["envs"] if e not in ctx["tagged"]]
-    if len(untagged) == 1:
-        lines = textwrap.wrap(
-            f"Provisioned for {untagged[0]}, which no stack tags yet: its first tagging pull "
-            "request deploys under that environment's protection. If the name is a typo, fix "
-            "the entry.",
-            width=80,
-        )
-    elif untagged:
+    if untagged:
         lines = textwrap.wrap(
             f"Provisioned for {', '.join(untagged)}, which no stack tags yet: the first pull "
             "request tagging a stack into each deploys under that environment's protection. If "
@@ -931,6 +923,7 @@ def _adoption_item(ctx):
             f"{verb} the workflow file and the table together,",
             "in a pull request that changes no stack. The table is read from the default",
             "branch, so the first plan needs it merged.",
+            "Then run this script again.",
         ],
     )
 
@@ -1082,17 +1075,6 @@ def _drift_sweeps_item(ctx):
     return ("todo" if lines else "ok"), item, [*lines, read]
 
 
-_RULESET_ITEM = (
-    "todo",
-    "gate ruleset",
-    [
-        "Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because",
-        "the workflows that produce it are not on the default branch (CONTRACT.md",
-        "§Post-plan topology). Then run this script again to create the gate ruleset.",
-    ],
-)
-
-
 def _checklist(ctx):
     """Print each value and step this script cannot supply, marked `ok`, `todo` or
     `cannot check` from what this run read. Only a `todo` carries a command or template.
@@ -1118,8 +1100,6 @@ def _checklist(ctx):
         _drift_sweeps_item(ctx),
         _adoption_item(ctx),
     ]
-    if ctx["ruleset_deferred"]:
-        items.append(_RULESET_ITEM)
     out = ["", "Still yours, each item marked from what this run read:", ""]
     for verdict, item, details in items:
         out.append(f"{verdict:<12}  {item}")
@@ -1218,7 +1198,6 @@ def main(argv=None):
         "is_private": is_private,
         # Read before the first write: a token without Contents read answers 403 here.
         "shim_on_default": _shim_on_default(repo, default_branch),
-        "ruleset_deferred": False,
         "apply_envs": {},
         "review_count": 0,
         "tags_by_stack": tags_by_stack,

@@ -100,7 +100,6 @@ def ctx(**over):
         "engine_secrets": set(),
         "repo_secrets": set(),
         "table": None,
-        "ruleset_deferred": False,
         "apply_envs": {},
         "review_count": 0,
         "tags_by_stack": {},
@@ -2011,7 +2010,8 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
 #: Hand-written, not captured from the implementation: a constant pasted from the output
 #: passes whatever the output says. A fresh public repository under `--dry-run`: no table,
 #: no secret, every environment absent, no rule, no `CODEOWNERS`, no workflow file on the
-#: default branch, so the gate ruleset is deferred.
+#: default branch, so the adoption item ends by asking for the re-run that creates the gate
+#: ruleset.
 FRESH_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
@@ -2055,11 +2055,7 @@ todo          adoption pull request
     Re-run without --dry-run, then commit the workflow file and the table together,
     in a pull request that changes no stack. The table is read from the default
     branch, so the first plan needs it merged.
-
-todo          gate ruleset
-    Merge the adoption pull request: no ruleset requires `shipmate / gate` yet, because
-    the workflows that produce it are not on the default branch (CONTRACT.md
-    §Post-plan topology). Then run this script again to create the gate ruleset.
+    Then run this script again.
 """
 
 #: Hand-written: a configured public repository with the `repo-example-folders` drift file.
@@ -2127,7 +2123,8 @@ def test_the_checklist_of_a_fresh_repository_in_a_dry_run(monkeypatch, tmp_path,
     The checkout holds no `.github/workflows/`, so the drift sweeps item asks for a file.
 
     Mutations: delete the passphrase item from `_checklist`; delete `_drift_sweeps_item`
-    from it.
+    from it; append a `gate ruleset` todo item to it; drop `_adoption_item`'s
+    `Then run this script again.` line.
     """
     _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
     assert exit_.code == 0
@@ -2724,7 +2721,7 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
     declare before tagging.
 
     Mutation: drop the table-only detail line -- the item has no details.
-    Mutation: always render the several-name wording -- the one-name lines differ.
+    Mutation: restore a `len(untagged) == 1` branch with its own wording -- the lines differ.
     Mutation: pass `tagged` to `_table_item`'s `ec.validate` again -- the warning prints.
     """
     write_table(tmp_path, "  prdo:\n    region: eu-west-1\n")
@@ -2733,9 +2730,9 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
     assert checklist_items(checklist_of(out))["`.github/shipmate-config.yml`"] == (
         "ok",
         [
-            "Provisioned for prdo, which no stack tags yet: its first tagging pull request",
-            "deploys under that environment's protection. If the name is a typo, fix the",
-            "entry.",
+            "Provisioned for prdo, which no stack tags yet: the first pull request tagging a",
+            "stack into each deploys under that environment's protection. If a name is a",
+            "typo, fix the entry.",
         ],
     )
     assert not [ln for ln in out.splitlines() if ln.startswith("::warning::")]
@@ -2755,9 +2752,9 @@ def _table_only_detail(*names):
     [
         (
             ("production-eu-central",),
-            "Provisioned for production-eu-central, which no stack tags yet: its first tagging "
-            "pull request deploys under that environment's protection. If the name is a typo, "
-            "fix the entry.",
+            "Provisioned for production-eu-central, which no stack tags yet: the first pull "
+            "request tagging a stack into each deploys under that environment's protection. If "
+            "a name is a typo, fix the entry.",
         ),
         (
             ("prdo", "production-eu-central", "qa"),
@@ -2769,8 +2766,10 @@ def _table_only_detail(*names):
     ids=["one", "several"],
 )
 def test_the_table_only_detail_wraps_the_whole_sentence_at_80(names, sentence):
-    """Mutation: always render the one-name wording -- `several` reddens. Mutation: always the
-    several-name wording -- `one` reddens. Mutation: `width=100` -- both redden."""
+    """`one` and `several` count the table-only names; both render the one wording.
+
+    Mutation: restore a `len(untagged) == 1` branch with its own wording -- `one` reddens.
+    Mutation: `width=100` -- both redden."""
     details = _table_only_detail(*names)
     assert all(len(line) <= 80 for line in details)
     assert " ".join(details) == sentence
@@ -2974,9 +2973,9 @@ def test_a_needs_predecessor_no_entry_declares_and_no_stack_tags_is_todo():
         "todo",
         "`.github/shipmate-config.yml`",
         [
-            "Provisioned for staging, which no stack tags yet: its first tagging pull request",
-            "deploys under that environment's protection. If the name is a typo, fix the",
-            "entry.",
+            "Provisioned for staging, which no stack tags yet: the first pull request tagging",
+            "a stack into each deploys under that environment's protection. If a name is a",
+            "typo, fix the entry.",
             "`needs` names stagng, which no entry declares and no stack tags, so it orders",
             "nothing. If a name is a typo, fix it.",
         ],
