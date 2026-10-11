@@ -49,6 +49,7 @@ select = [
     "C90", # mccabe — cyclomatic complexity ceiling
     "SIM", # flake8-simplify — SIM115 is the one that matters: an unclosed open()
     "RET", # flake8-return — RET503 catches a fall-through beside an explicit return
+    "ISC", # implicit-str-concat — ISC004: a multi-line string in a collection is parenthesized
 ]
 
 [tool.ruff.lint.mccabe]

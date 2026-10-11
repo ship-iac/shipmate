@@ -434,46 +434,62 @@ def _needs(value):
 _ORDERING = [
     (
         _needs("dev-eu"),
-        "::error::environments.prod.needs must be a list of env-name strings, got str "
-        "('dev-eu'); did you mean ['dev-eu']?",
+        (
+            "::error::environments.prod.needs must be a list of env-name strings, got str "
+            "('dev-eu'); did you mean ['dev-eu']?"
+        ),
     ),
     (
         _needs([1]),
-        "::error::environments.prod.needs elements must all be env-name strings; "
-        "got non-string element(s) [1]",
+        (
+            "::error::environments.prod.needs elements must all be env-name strings; "
+            "got non-string element(s) [1]"
+        ),
     ),
     (
         _needs(["Dev"]),
-        "::error::environments.prod.needs entry 'Dev' is not an environment name: "
-        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
+        (
+            "::error::environments.prod.needs entry 'Dev' is not an environment name: "
+            "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
+        ),
     ),
     (
         _needs(["dev-eu-plan"]),
-        "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment suffix "
-        "'-plan'; environments.prod.needs is matched against the bare logical env name; "
-        "write 'dev-eu' instead.",
+        (
+            "::error::environments.prod.needs entry 'dev-eu-plan' carries the environment suffix "
+            "'-plan'; environments.prod.needs is matched against the bare logical env name; "
+            "write 'dev-eu' instead."
+        ),
     ),
     (
         _needs(["dev-eu-apply"]),
-        "::error::environments.prod.needs entry 'dev-eu-apply' carries the environment "
-        "suffix '-apply'; environments.prod.needs is matched against the bare logical env "
-        "name; write 'dev-eu' instead.",
+        (
+            "::error::environments.prod.needs entry 'dev-eu-apply' carries the environment "
+            "suffix '-apply'; environments.prod.needs is matched against the bare logical env "
+            "name; write 'dev-eu' instead."
+        ),
     ),
     (
         _needs(["shipmate-engine"]),
-        "::error::environments.prod.needs entry 'shipmate-engine' names 'shipmate-engine', "
-        "the engine's own environment, which holds the shipmate App's private key; use "
-        "another name.",
+        (
+            "::error::environments.prod.needs entry 'shipmate-engine' names 'shipmate-engine', "
+            "the engine's own environment, which holds the shipmate App's private key; use "
+            "another name."
+        ),
     ),
     (
         _needs(["dev eu"]),
-        "::error::environments.prod.needs entry 'dev eu' is not an environment name: "
-        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
+        (
+            "::error::environments.prod.needs entry 'dev eu' is not an environment name: "
+            "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
+        ),
     ),
     (
         _needs(['"dev-eu"']),
-        "::error::environments.prod.needs entry '\"dev-eu\"' is not an environment name: "
-        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
+        (
+            "::error::environments.prod.needs entry '\"dev-eu\"' is not an environment name: "
+            "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
+        ),
     ),
 ]
 
@@ -634,28 +650,38 @@ def test_env_order_reads_needs_off_every_entry_holding_it():
 _ENTRY_NAMES = [
     (
         "Prod",
-        "::error::environments.Prod is not an environment name: "
-        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
+        (
+            "::error::environments.Prod is not an environment name: "
+            "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
+        ),
     ),
     (
         "dev eu",
-        "::error::environments.dev eu is not an environment name: "
-        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
+        (
+            "::error::environments.dev eu is not an environment name: "
+            "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
+        ),
     ),
     (
         "dev-plan",
-        "::error::environments.dev-plan carries the environment suffix '-plan'; an entry "
-        "name is matched against the bare logical env name; write 'dev' instead.",
+        (
+            "::error::environments.dev-plan carries the environment suffix '-plan'; an entry "
+            "name is matched against the bare logical env name; write 'dev' instead."
+        ),
     ),
     (
         "shipmate-engine",
-        "::error::environments.shipmate-engine names 'shipmate-engine', the engine's own "
-        "environment, which holds the shipmate App's private key; use another name.",
+        (
+            "::error::environments.shipmate-engine names 'shipmate-engine', the engine's own "
+            "environment, which holds the shipmate App's private key; use another name."
+        ),
     ),
     (
         "shipmate-engine-apply",
-        "::error::environments.shipmate-engine-apply names 'shipmate-engine', the engine's "
-        "own environment, which holds the shipmate App's private key; use another name.",
+        (
+            "::error::environments.shipmate-engine-apply names 'shipmate-engine', the engine's "
+            "own environment, which holds the shipmate App's private key; use another name."
+        ),
     ),
 ]
 

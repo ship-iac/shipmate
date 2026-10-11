@@ -478,8 +478,10 @@ _ENV_CHARSET = (
         ("dev/eu", "::error::SHIPMATE_ENV 'dev/eu'" + _ENV_CHARSET),
         (
             "shipmate-engine",
-            "::error::SHIPMATE_ENV 'shipmate-engine' names 'shipmate-engine', the engine's own "
-            "environment, which holds the shipmate App's private key; use another name.",
+            (
+                "::error::SHIPMATE_ENV 'shipmate-engine' names 'shipmate-engine', the engine's own "
+                "environment, which holds the shipmate App's private key; use another name."
+            ),
         ),
     ],
     ids=["upper", "path", "engine"],

@@ -16,8 +16,10 @@ import os
 FAILSAFES = [
     (
         "DOWNLOAD_OUTCOME",
-        "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or push, "
-        "or after the merge open a new pull request touching the stack",
+        (
+            "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or push, "
+            "or after the merge open a new pull request touching the stack"
+        ),
     ),
     (
         "PLANNED_HEAD_OUTCOME",

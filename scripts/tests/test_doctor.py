@@ -89,8 +89,10 @@ def test_envs_unavailable_skips_the_probes_that_need_the_declared_set(monkeypatc
     assert doctor._environment_warnings(_ctx(envs=set())) == [
         (
             doctor.NOTICE,
-            "no plan run with cell summaries for this commit: the declared "
-            "environment set is unknown, so the environment probes were skipped.",
+            (
+                "no plan run with cell summaries for this commit: the declared "
+                "environment set is unknown, so the environment probes were skipped."
+            ),
         )
     ]
 
@@ -353,30 +355,38 @@ def _existence(*names, table=CANONICAL):
 #: Every finding the split and shared namings produce, hand-written.
 _MISSING_PLAN = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu-plan` does not exist: the plan jobs for stacks tagged "
-    "`env:dev-eu` run in an environment GitHub auto-creates empty, with no secrets and none "
-    "of its protection rules. Create it.",
+    (
+        "GitHub Environment `dev-eu-plan` does not exist: the plan jobs for stacks tagged "
+        "`env:dev-eu` run in an environment GitHub auto-creates empty, with no secrets and none "
+        "of its protection rules. Create it."
+    ),
 )
 _MISSING_APPLY = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu-apply` does not exist: an apply of stacks tagged "
-    "`env:dev-eu` is refused before any wave until it exists. Create it.",
+    (
+        "GitHub Environment `dev-eu-apply` does not exist: an apply of stacks tagged "
+        "`env:dev-eu` is refused before any wave until it exists. Create it."
+    ),
 )
 _MISSING_SHARED = (
     doctor.WARNING,
-    "GitHub Environment `dev-eu` does not exist: the plan jobs for stacks tagged "
-    "`env:dev-eu` run in an environment GitHub auto-creates empty, with no secrets and none "
-    "of its protection rules, and their apply then runs in it too. Create it.",
+    (
+        "GitHub Environment `dev-eu` does not exist: the plan jobs for stacks tagged "
+        "`env:dev-eu` run in an environment GitHub auto-creates empty, with no secrets and none "
+        "of its protection rules, and their apply then runs in it too. Create it."
+    ),
 )
 #: The shared-mode NOTICE for a bare `dev-eu` with no approval rules.
 _SHARED_UNREVIEWED = (
     doctor.NOTICE,
-    "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` in its "
-    "`environments.dev-eu` entry) has no approval rules (required reviewers or a wait "
-    "timer), so pre-merge applies to it are unreviewed, and no reviewer gate is available "
-    "while it is shared: a reviewer here would stall the plan cells and every drift sweep "
-    "covering it. "
-    "Split it into `dev-eu-plan` and `dev-eu-apply` if you need one.",
+    (
+        "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` in its "
+        "`environments.dev-eu` entry) has no approval rules (required reviewers or a wait "
+        "timer), so pre-merge applies to it are unreviewed, and no reviewer gate is available "
+        "while it is shared: a reviewer here would stall the plan cells and every drift sweep "
+        "covering it. "
+        "Split it into `dev-eu-plan` and `dev-eu-apply` if you need one."
+    ),
 )
 
 
@@ -404,10 +414,12 @@ def test_the_table_selects_the_mode(monkeypatch):
 #: Hand-written: the environment probes' one finding when the default branch's table is unusable.
 _DEFAULT_TABLE_SKIPPED = (
     doctor.NOTICE,
-    "the environment probes were skipped: the default branch's `.github/shipmate-config.yml` "
-    "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
-    "and it alone selects which GitHub Environments a run binds. While that holds, every run "
-    "refuses at detect.",
+    (
+        "the environment probes were skipped: the default branch's `.github/shipmate-config.yml` "
+        "could not be read, is invalid, or references a GitHub variable that is unset or empty, "
+        "and it alone selects which GitHub Environments a run binds. While that holds, every run "
+        "refuses at detect."
+    ),
 )
 
 
@@ -432,10 +444,12 @@ def test_an_invalid_default_table_skips_the_environment_probes(monkeypatch):
         _DEFAULT_TABLE_SKIPPED,
         (
             doctor.WARNING,
-            "`.github/shipmate-config.yml` at the commit under examination is not valid: "
-            "environment dev-eu must be a mapping, got list. Merging it refuses every "
-            "operation that reads the table. Execution still reads the default branch's "
-            "copy, which this says nothing about.",
+            (
+                "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+                "environment dev-eu must be a mapping, got list. Merging it refuses every "
+                "operation that reads the table. Execution still reads the default branch's "
+                "copy, which this says nothing about."
+            ),
         ),
     ]
 
@@ -495,9 +509,11 @@ def test_an_interpreter_below_the_floor_skips_the_environment_probes(monkeypatch
     assert found == [
         (
             doctor.NOTICE,
-            "the environment probes were skipped: this runner's Python refuses the "
-            "environment table, so which GitHub Environments a run binds cannot be "
-            "determined here.",
+            (
+                "the environment probes were skipped: this runner's Python refuses the "
+                "environment table, so which GitHub Environments a run binds cannot be "
+                "determined here."
+            ),
         )
     ]
     assert asked == []
@@ -514,8 +530,10 @@ def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
     assert found == [
         (
             doctor.NOTICE,
-            "no plan run with cell summaries for this commit: the declared "
-            "environment set is unknown, so the environment probes were skipped.",
+            (
+                "no plan run with cell summaries for this commit: the declared "
+                "environment set is unknown, so the environment probes were skipped."
+            ),
         )
     ]
     assert asked == []
@@ -815,8 +833,10 @@ def test_apply_env_with_only_a_typeless_rule_is_still_noted(monkeypatch):
     assert doctor._env_protection_warnings(_ctx()) == [
         (
             doctor.NOTICE,
-            "GitHub Environment `dev-eu-apply` has no approval rules (required reviewers "
-            "or a wait timer), so pre-merge applies to it are unreviewed.",
+            (
+                "GitHub Environment `dev-eu-apply` has no approval rules (required reviewers "
+                "or a wait timer), so pre-merge applies to it are unreviewed."
+            ),
         )
     ]
 
@@ -926,14 +946,16 @@ def test_a_shared_env_with_reviewers_names_the_key_that_shares_it(monkeypatch):
     assert doctor._env_protection_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` "
-            "in its `environments.dev-eu` entry) has protection rules "
-            "(required_reviewers). A protection rule gates every job that binds the "
-            "environment and GitHub offers no per-job filter, so the plan cells and "
-            "every drift sweep covering it will not start immediately either. To gate applies "
-            "only, split "
-            "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared: true` from its "
-            "`environments.dev-eu` entry.",
+            (
+                "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` "
+                "in its `environments.dev-eu` entry) has protection rules "
+                "(required_reviewers). A protection rule gates every job that binds the "
+                "environment and GitHub offers no per-job filter, so the plan cells and "
+                "every drift sweep covering it will not start immediately either. To gate applies "
+                "only, split "
+                "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared: true` from its "
+                "`environments.dev-eu` entry."
+            ),
         )
     ]
 
@@ -1705,11 +1727,15 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
         '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z"' + ga,
         '{"id": 3, "name": "dns / dev-eu", "started_at": "2026-07-26T10:30:00Z"' + ga,
         # The shipmate App's own check runs (the apply checks) are kept via `app.id`.
-        '{"id": 4, "name": "apply / app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
-        + '"app_slug": "shipmate", "app": {"id": 999}}',
+        (
+            '{"id": 4, "name": "apply / app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
+            '"app_slug": "shipmate", "app": {"id": 999}}'
+        ),
         # Third-party apps are dropped: they are outside the harvest's scope.
-        '{"id": 5, "name": "codecov/project", "started_at": "2026-07-26T10:00:00Z", '
-        + '"app_slug": "codecov", "app": {"id": 254}}',
+        (
+            '{"id": 5, "name": "codecov/project", "started_at": "2026-07-26T10:00:00Z", '
+            '"app_slug": "codecov", "app": {"id": 254}}'
+        ),
     ]
     assert doctor.latest_check_ids(lines, app_id="999") == [
         (2, "app / dev-eu"),
@@ -2087,8 +2113,10 @@ def test_harvest_pending_ignores_third_party_check_runs():
     # every report claim the commit's runs had not finished.
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
-        '{"id": 5, "name": "codecov/project", "app_slug": "codecov", "app": {"id": 254}, '
-        + '"status": "in_progress"}',
+        (
+            '{"id": 5, "name": "codecov/project", "app_slug": "codecov", "app": {"id": 254}, '
+            '"status": "in_progress"}'
+        ),
     ]
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is False
 
@@ -2116,8 +2144,10 @@ def test_harvest_pending_counts_a_queued_github_actions_apply_job():
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
         _QUEUED_APP_APPLY,
-        '{"id": 4, "name": "wave0 / apply / app / dev-eu", "app_slug": "github-actions", '
-        '"status": "queued"}',
+        (
+            '{"id": 4, "name": "wave0 / apply / app / dev-eu", "app_slug": "github-actions", '
+            '"status": "queued"}'
+        ),
     ]
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
 
@@ -2126,8 +2156,10 @@ def test_harvest_pending_counts_a_queued_app_run_outside_the_apply_checks():
     """Mutation: skip every App-authored run -- False."""
     lines = [
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
-        '{"id": 6, "name": "db / dev-eu", "app_slug": "shipmate", "app": {"id": 999}, '
-        '"status": "queued"}',
+        (
+            '{"id": 6, "name": "db / dev-eu", "app_slug": "shipmate", "app": {"id": 999}, '
+            '"status": "queued"}'
+        ),
     ]
     assert doctor.harvest_pending(lines, app_id=_APP_ID) is True
 
@@ -2488,8 +2520,10 @@ def test_unreadable_plan_records_skip_the_downloads(monkeypatch, tmp_path, capsy
     assert not [argv for argv, _ in calls if argv[:3] == ("gh", "run", "download")]
     assert _outputs(tmp_path).splitlines()[-1] == "plan_run_ids="
     assert _warnings(capsys) == [
-        "::warning::the plan records on this commit's apply checks could not be read; "
-        "doctor skips the environment probes"
+        (
+            "::warning::the plan records on this commit's apply checks could not be read; "
+            "doctor skips the environment probes"
+        )
     ]
 
 
@@ -2582,8 +2616,10 @@ def test_a_run_whose_summaries_cannot_be_downloaded_is_a_warning_not_a_failure(
     assert cells == [("cell-summary.dev-eu.stacks-app", "1290", 2)]
     assert run_ids == "plan_run_ids=1281 1290"
     assert _warnings(capsys) == [
-        "::warning::the cell summaries of plan run 1281 could not be downloaded; "
-        "doctor's environment probes may be incomplete"
+        (
+            "::warning::the cell summaries of plan run 1281 could not be downloaded; "
+            "doctor's environment probes may be incomplete"
+        )
     ]
 
 
@@ -2772,8 +2808,10 @@ def test_latest_check_ids_tolerates_malformed_and_non_object_lines():
         "not json at all",
         "null",
         "5",
-        '{"id": 9, "name": "ok / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
-        + '"app_slug": "github-actions"}',
+        (
+            '{"id": 9, "name": "ok / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
+            '"app_slug": "github-actions"}'
+        ),
     ]
     assert doctor.latest_check_ids(lines) == [(9, "ok / dev-eu")]
 
@@ -3508,9 +3546,11 @@ def test_a_runner_without_pyyaml_gets_one_notice_for_every_probe_that_parses(mon
     assert doctor.warnings(ctx) == [
         (
             doctor.NOTICE,
-            "the engine needs PyYAML for python3 and this runner has none. Install "
-            "python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; "
-            "CONTRACT.md section Runner prerequisites lists it.",
+            (
+                "the engine needs PyYAML for python3 and this runner has none. Install "
+                "python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; "
+                "CONTRACT.md section Runner prerequisites lists it."
+            ),
         )
     ]
     assert doctor.config_status(ctx) == []
@@ -3533,9 +3573,11 @@ def test_a_runner_without_pyyaml_skips_the_count_zero_review_finding(monkeypatch
     assert doctor.warnings(_ctx()) == [
         (
             doctor.NOTICE,
-            "the engine needs PyYAML for python3 and this runner has none. Install "
-            "python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; "
-            "CONTRACT.md section Runner prerequisites lists it.",
+            (
+                "the engine needs PyYAML for python3 and this runner has none. Install "
+                "python3-yaml (Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; "
+                "CONTRACT.md section Runner prerequisites lists it."
+            ),
         )
     ]
 
@@ -3943,9 +3985,11 @@ def test_the_routing_probe_reports_an_if_that_is_not_one_expression():
     assert doctor._routing_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (
             doctor.WARNING,
-            "`shipmate.yml`'s job calling the engine's `deploy.yml` has an `if:` that is not a "
-            "single expression. Write `if: github.event_name == 'push'` "
-            "(docs/getting-started.md).",
+            (
+                "`shipmate.yml`'s job calling the engine's `deploy.yml` has an `if:` that is not a "
+                "single expression. Write `if: github.event_name == 'push'` "
+                "(docs/getting-started.md)."
+            ),
         )
     ]
 
@@ -4034,8 +4078,10 @@ def test_the_shipmate_yml_probe_without_the_engine_repo_still_checks_dispatch_wi
         (doctor.WARNING, _NO_TRIGGER_TEXT),
         (
             "notice",
-            "the workflow file's job name, event routing and drift call not verified: "
-            "the engine repository could not be determined.",
+            (
+                "the workflow file's job name, event routing and drift call not verified: "
+                "the engine repository could not be determined."
+            ),
         ),
     ]
 
@@ -4071,8 +4117,10 @@ def test_a_mixed_case_engine_pin_is_judged(monkeypatch):
     assert doctor._pin_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "`plan.yml` pins `Acme/Engine@v2` by tag or branch. Pin a commit SHA (a moving ref "
-            "lets the engine change under your deploy credentials).",
+            (
+                "`plan.yml` pins `Acme/Engine@v2` by tag or branch. Pin a commit SHA (a moving ref "
+                "lets the engine change under your deploy credentials)."
+            ),
         )
     ]
 
@@ -4150,13 +4198,17 @@ def test_the_workflow_directory_degrades_read_as_written():
     assert (doctor.SHIPMATE_YML_UNREADABLE, doctor.SHIPMATE_YML_NO_COMMIT) == (
         (
             "notice",
-            "could not read `.github/workflows/shipmate.yml`: the workflow file's job name, "
-            "dispatch wiring, event routing and drift call not verified.",
+            (
+                "could not read `.github/workflows/shipmate.yml`: the workflow file's job name, "
+                "dispatch wiring, event routing and drift call not verified."
+            ),
         ),
         (
             "notice",
-            "the workflow file's job name, dispatch wiring, event routing and drift call "
-            "not verified: the commit under examination could not be determined.",
+            (
+                "the workflow file's job name, dispatch wiring, event routing and drift call "
+                "not verified: the commit under examination could not be determined."
+            ),
         ),
     )
 
@@ -4187,13 +4239,17 @@ def test_unreadable_directory_degrades_to_a_note(monkeypatch, probe, _no_commit,
 #: Hand-written, never derived from `scripts/doctor`.
 _NO_DRIFT_FILE = (
     "notice",
-    "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
-    "Add a drift workflow file to check for drift (docs/drift.md).",
+    (
+        "no workflow file calls the engine's `drift.yml`, so no stack is ever checked for drift. "
+        "Add a drift workflow file to check for drift (docs/drift.md)."
+    ),
 )
 _DRIFT_FILE_UNREADABLE = (
     "notice",
-    "could not read `.github/workflows`: whether a workflow file calls the engine's drift.yml "
-    "not verified.",
+    (
+        "could not read `.github/workflows`: whether a workflow file calls the engine's drift.yml "
+        "not verified."
+    ),
 )
 
 
@@ -4236,8 +4292,10 @@ def test_the_drift_probe_without_the_engine_repo_is_a_note(monkeypatch):
     assert doctor._drift_file_warnings(_ctx(engine_repo="")) == [
         (
             "notice",
-            "whether a workflow file calls the engine's drift.yml not verified: the engine "
-            "repository could not be determined.",
+            (
+                "whether a workflow file calls the engine's drift.yml not verified: the engine "
+                "repository could not be determined."
+            ),
         )
     ]
 
@@ -4488,12 +4546,14 @@ def _no_required_review(envs, level=doctor.NOTICE):
     """Hand-written: the count-0 finding naming `envs`, already rendered."""
     return (
         level,
-        f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews, so "
-        f"these gated environments can apply without an approving review: {envs}. One is held "
-        "only where a code-owner review is required for the changed files. `gated` can "
-        "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
-        "`required_approving_review_count` to 1 or more, or set `gated: false` on the "
-        "environments meant to apply unreviewed.",
+        (
+            f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews, so "
+            f"these gated environments can apply without an approving review: {envs}. One is held "
+            "only where a code-owner review is required for the changed files. `gated` can "
+            "only relax a review requirement the ruleset sets (docs/hardening.md #3 to #5); set "
+            "`required_approving_review_count` to 1 or more, or set `gated: false` on the "
+            "environments meant to apply unreviewed."
+        ),
     )
 
 
@@ -4616,10 +4676,12 @@ def test_review_rule_count_is_the_highest_across_layered_rulesets(monkeypatch):
 
 _LAST_PUSH_WARNING = (
     doctor.WARNING,
-    f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews but sets "
-    "`require_last_push_approval`, so a sole maintainer cannot merge: the last push needs "
-    "an approval from someone other than its pusher. Turn `require_last_push_approval` off "
-    "(docs/branch-protection.md §Reproducible ruleset).",
+    (
+        f"the `pull_request` rule on `{_BRANCH}` requires 0 approving reviews but sets "
+        "`require_last_push_approval`, so a sole maintainer cannot merge: the last push needs "
+        "an approval from someone other than its pusher. Turn `require_last_push_approval` off "
+        "(docs/branch-protection.md §Reproducible ruleset)."
+    ),
 )
 
 
@@ -4866,14 +4928,17 @@ def test_shared_mode_reads_the_bare_env_and_says_it_is_the_apply_env_too(monkeyp
     assert doctor._plan_env_secret_warnings(_ctx()) == [
         (
             doctor.NOTICE,
-            "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` "
-            "in its `environments.dev-eu` entry) holds 1 secret(s) (`AWS_ROLE_ARN`). "
-            "It is the apply environment too, so a plan cell runs the pull request "
-            "branch's own code with everything it releases: any credential held there for "
-            "applying is reachable by plan-time code. Protection rules on it would stall those "
-            "plan cells, so it cannot be gated either. Treat anything it holds as readable "
-            "by anyone who can push a branch, and keep them read-only and blast-radius-free, or "
-            "move to OIDC (docs/hardening.md control 8).",
+            (
+                "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` "
+                "in its `environments.dev-eu` entry) holds 1 secret(s) (`AWS_ROLE_ARN`). "
+                "It is the apply environment too, so a plan cell runs the pull request "
+                "branch's own code with everything it releases: any credential held there for "
+                "applying is reachable by plan-time code. Protection rules on it would stall those "
+                "plan cells, so it cannot be gated either. Treat anything it holds as readable "
+                "by anyone who can push a branch, and keep them read-only and blast-radius-free, "
+                "or "
+                "move to OIDC (docs/hardening.md control 8)."
+            ),
         )
     ]
     # `dev-eu-plan` exists and is not read: the table selects the bare name.
@@ -5213,15 +5278,17 @@ environments:
 #: refusal -- or reported this one as a skipped probe -- reddens here.
 _MISINDENTED_FINDING = (
     doctor.WARNING,
-    "`.github/shipmate-config.yml` at the commit under examination is not valid: "
-    ".github/shipmate-config.yml declares no layout, so no cell can resolve its environment "
-    "identity. Declare layout: tf_vars, layout: workspace or layout: folder on the default "
-    "branch, which is where this table is read from. "
-    "environment prod: layout is not a key this engine implements. An environment "
-    "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. Merging it "
-    "refuses every "
-    "operation that reads the table. Execution still reads the default branch's copy, which "
-    "this says nothing about.",
+    (
+        "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+        ".github/shipmate-config.yml declares no layout, so no cell can resolve its environment "
+        "identity. Declare layout: tf_vars, layout: workspace or layout: folder on the default "
+        "branch, which is where this table is read from. "
+        "environment prod: layout is not a key this engine implements. An environment "
+        "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. Merging it "
+        "refuses every "
+        "operation that reads the table. Execution still reads the default branch's copy, which "
+        "this says nothing about."
+    ),
 )
 
 
@@ -5289,15 +5356,17 @@ def test_a_refusal_naming_three_errors_is_one_finding_naming_all_three(monkeypat
     assert doctor._config_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "`.github/shipmate-config.yml` at the commit under examination is not valid: "
-            "environment dev-eu: regoin is not a key this engine implements. An environment "
-            "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. "
-            "environments.dev-eu.gated must be true or false, got 'False'. "
-            "needs is cyclic: dev-eu -> dev-eu: each of those must fully apply before the "
-            "next, so the ordering has no first environment and no apply path can sort it. "
-            "Break the chain in .github/shipmate-config.yml. Merging it refuses every "
-            "operation that reads the table. Execution still reads the default branch's copy, "
-            "which this says nothing about.",
+            (
+                "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+                "environment dev-eu: regoin is not a key this engine implements. An environment "
+                "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated. "
+                "environments.dev-eu.gated must be true or false, got 'False'. "
+                "needs is cyclic: dev-eu -> dev-eu: each of those must fully apply before the "
+                "next, so the ordering has no first environment and no apply path can sort it. "
+                "Break the chain in .github/shipmate-config.yml. Merging it refuses every "
+                "operation that reads the table. Execution still reads the default branch's copy, "
+                "which this says nothing about."
+            ),
         )
     ]
 
@@ -5319,10 +5388,12 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
     assert doctor._config_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "`.github/shipmate-config.yml` at the commit under examination is not valid: "
-            f"{shown} … and 2 more. Merging it refuses every operation that reads the "
-            "table. Execution still reads the default branch's copy, which this says nothing "
-            "about.",
+            (
+                "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+                f"{shown} … and 2 more. Merging it refuses every operation that reads the "
+                "table. Execution still reads the default branch's copy, which this says nothing "
+                "about."
+            ),
         )
     ]
 
@@ -5343,13 +5414,15 @@ def test_an_interpreter_below_the_floor_is_not_reported_as_an_invalid_file(monke
     assert doctor._config_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "this runner's Python refuses the environment table before any revision of it "
-            "is read: the engine needs Python 3.12 or later; this runner has 3.11.9. "
-            "CONTRACT.md section Runner prerequisites requires python3 >= 3.12 on every "
-            "runner. Choose a newer runs_on image. "
-            "Nothing is wrong with the file: merging it changes nothing, and every "
-            "operation that reads the table meets the same refusal on the default branch "
-            "too.",
+            (
+                "this runner's Python refuses the environment table before any revision of it "
+                "is read: the engine needs Python 3.12 or later; this runner has 3.11.9. "
+                "CONTRACT.md section Runner prerequisites requires python3 >= 3.12 on every "
+                "runner. Choose a newer runs_on image. "
+                "Nothing is wrong with the file: merging it changes nothing, and every "
+                "operation that reads the table meets the same refusal on the default branch "
+                "too."
+            ),
         )
     ]
 
@@ -5423,40 +5496,50 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
     assert doctor.config_status(_ctx()) == [
         (
             doctor.NOTICE,
-            "`.github/shipmate-config.yml` at the commit under examination parses, and passes "
-            "every check a file can be judged on by itself: its top-level keys, "
-            "`layout`, the identities and the environment entries. Not checked here, for want "
-            "of a plan matrix and a whole-tree environment scan: `tf_vars`-layout coverage of "
-            "the planned environments, entries "
-            "that no stack tags, workload tags outside an environment's `workloads` and listed "
-            "workloads no stack tags. `detect` checks each of those on the runs where it "
-            "applies, and `scripts/onboard --app-id <id> --dry-run` checks them over a "
-            "checkout. "
-            "Execution reads the default branch's copy of this file, never this branch's.",
+            (
+                "`.github/shipmate-config.yml` at the commit under examination parses, and passes "
+                "every check a file can be judged on by itself: its top-level keys, "
+                "`layout`, the identities and the environment entries. Not checked here, for want "
+                "of a plan matrix and a whole-tree environment scan: `tf_vars`-layout coverage of "
+                "the planned environments, entries "
+                "that no stack tags, workload tags outside an environment's `workloads` and listed "
+                "workloads no stack tags. `detect` checks each of those on the runs where it "
+                "applies, and `scripts/onboard --app-id <id> --dry-run` checks them over a "
+                "checkout. "
+                "Execution reads the default branch's copy of this file, never this branch's."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`dev-eu` resolves these roles at the commit under examination: plan every cell: "
-            "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
-            "`arn:aws:iam::981781037707:role/shipmate-apply`.",
+            (
+                "`dev-eu` resolves these roles at the commit under examination: plan every cell: "
+                "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
+                "`arn:aws:iam::981781037707:role/shipmate-apply`."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`prod` resolves these roles at the commit under examination: plan app: "
-            "`arn:aws:iam::981781037707:role/prod-plan`; plan net-edge: "
-            "`arn:aws:iam::981781037707:role/prod-plan`; apply app: "
-            "`arn:aws:iam::981781037707:role/prod-apply`; apply net-edge: "
-            "`arn:aws:iam::981781037707:role/net-edge`.",
+            (
+                "`prod` resolves these roles at the commit under examination: plan app: "
+                "`arn:aws:iam::981781037707:role/prod-plan`; plan net-edge: "
+                "`arn:aws:iam::981781037707:role/prod-plan`; apply app: "
+                "`arn:aws:iam::981781037707:role/prod-apply`; apply net-edge: "
+                "`arn:aws:iam::981781037707:role/net-edge`."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`dev-eu-plan` reaches these AWS accounts at the commit under examination: "
-            "981781037707.",
+            (
+                "`dev-eu-plan` reaches these AWS accounts at the commit under examination: "
+                "981781037707."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`dev-eu-apply` reaches these AWS accounts at the commit under examination: "
-            "981781037707.",
+            (
+                "`dev-eu-apply` reaches these AWS accounts at the commit under examination: "
+                "981781037707."
+            ),
         ),
         (
             doctor.NOTICE,
@@ -5464,18 +5547,24 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`prod-apply` reaches these AWS accounts at the commit under examination: "
-            "981781037707.",
+            (
+                "`prod-apply` reaches these AWS accounts at the commit under examination: "
+                "981781037707."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`needs` orders dev-us after dev-eu: a bare `shipmate apply` applies "
-            "one env-level fully before it starts the next.",
+            (
+                "`needs` orders dev-us after dev-eu: a bare `shipmate apply` applies "
+                "one env-level fully before it starts the next."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`explicit: true` on prod: a bare `shipmate apply` skips those, and each "
-            "needs its own `shipmate apply <env>`.",
+            (
+                "`explicit: true` on prod: a bare `shipmate apply` skips those, and each "
+                "needs its own `shipmate apply <env>`."
+            ),
         ),
     ]
 
@@ -5523,19 +5612,24 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         (doctor.NOTICE, doctor.CONFIG_VALID),
         (
             doctor.NOTICE,
-            "`.github/shipmate-config.yml` at the commit under examination takes these values from "
-            "GitHub variables instead of holding them: `environments.prod.needs[0]` from "
-            "variable `FIRST_ENV`; `identities.dev.aws.plan` from variable `DEV_PLAN_ROLE`. "
-            "Every run "
-            "resolves them again from repository and organization variables, never from a "
-            "cell's Environment; in comment-ops and the plan summary a `shipmate-engine` "
-            "Environment variable of the same name wins.",
+            (
+                "`.github/shipmate-config.yml` at the commit under examination takes these values "
+                "from "
+                "GitHub variables instead of holding them: `environments.prod.needs[0]` from "
+                "variable `FIRST_ENV`; `identities.dev.aws.plan` from variable `DEV_PLAN_ROLE`. "
+                "Every run "
+                "resolves them again from repository and organization variables, never from a "
+                "cell's Environment; in comment-ops and the plan summary a `shipmate-engine` "
+                "Environment variable of the same name wins."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`dev` resolves these roles at the commit under examination: plan every cell: "
-            "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
-            "`arn:aws:iam::981781037707:role/shipmate-apply`.",
+            (
+                "`dev` resolves these roles at the commit under examination: plan every cell: "
+                "`arn:aws:iam::981781037707:role/shipmate-plan`; apply every cell: "
+                "`arn:aws:iam::981781037707:role/shipmate-apply`."
+            ),
         ),
         (
             doctor.NOTICE,
@@ -5547,13 +5641,17 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
         ),
         (
             doctor.NOTICE,
-            "`needs` orders prod after dev: a bare `shipmate apply` applies "
-            "one env-level fully before it starts the next.",
+            (
+                "`needs` orders prod after dev: a bare `shipmate apply` applies "
+                "one env-level fully before it starts the next."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`explicit: true` on prod: a bare `shipmate apply` skips those, and each "
-            "needs its own `shipmate apply <env>`.",
+            (
+                "`explicit: true` on prod: a bare `shipmate apply` skips those, and each "
+                "needs its own `shipmate apply <env>`."
+            ),
         ),
     ]
 
@@ -5575,26 +5673,30 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
     assert doctor._config_defaults(table) == [
         (
             doctor.NOTICE,
-            "`needs` orders "
-            "environment-with-a-long-name-01 after environment-with-a-long-name-00; "
-            "environment-with-a-long-name-02 after environment-with-a-long-name-01; "
-            "environment-with-a-long-name-03 after environment-with-a-long-name-02; "
-            "environment-with-a-long-name-04 after environment-with-a-long-name-03; "
-            "environment-with-a-long-name-05 after environment-with-a-long-name-04"
-            " … and 14 more: a bare `shipmate apply` applies one env-level fully before it "
-            "starts the next.",
+            (
+                "`needs` orders "
+                "environment-with-a-long-name-01 after environment-with-a-long-name-00; "
+                "environment-with-a-long-name-02 after environment-with-a-long-name-01; "
+                "environment-with-a-long-name-03 after environment-with-a-long-name-02; "
+                "environment-with-a-long-name-04 after environment-with-a-long-name-03; "
+                "environment-with-a-long-name-05 after environment-with-a-long-name-04"
+                " … and 14 more: a bare `shipmate apply` applies one env-level fully before it "
+                "starts the next."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`explicit: true` on "
-            "environment-with-a-long-name-00, environment-with-a-long-name-01, "
-            "environment-with-a-long-name-02, environment-with-a-long-name-03, "
-            "environment-with-a-long-name-04, environment-with-a-long-name-05, "
-            "environment-with-a-long-name-06, environment-with-a-long-name-07, "
-            "environment-with-a-long-name-08, environment-with-a-long-name-09, "
-            "environment-with-a-long-name-10"
-            " … and 9 more: a bare `shipmate apply` skips those, and each needs its own "
-            "`shipmate apply <env>`.",
+            (
+                "`explicit: true` on "
+                "environment-with-a-long-name-00, environment-with-a-long-name-01, "
+                "environment-with-a-long-name-02, environment-with-a-long-name-03, "
+                "environment-with-a-long-name-04, environment-with-a-long-name-05, "
+                "environment-with-a-long-name-06, environment-with-a-long-name-07, "
+                "environment-with-a-long-name-08, environment-with-a-long-name-09, "
+                "environment-with-a-long-name-10"
+                " … and 9 more: a bare `shipmate apply` skips those, and each needs its own "
+                "`shipmate apply <env>`."
+            ),
         ),
     ]
 
@@ -5625,8 +5727,10 @@ def test_a_defaults_notice_showing_only_the_count_has_one_space_before_it():
     table = {"environments": {"a": {"needs": preds}, **{p: {} for p in preds}}}
     assert doctor._config_defaults(table)[0] == (
         doctor.NOTICE,
-        "`needs` orders … and 1 more: a bare `shipmate apply` applies one env-level fully "
-        "before it starts the next.",
+        (
+            "`needs` orders … and 1 more: a bare `shipmate apply` applies one env-level fully "
+            "before it starts the next."
+        ),
     )
 
 
@@ -5710,28 +5814,36 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
         (doctor.NOTICE, doctor.CONFIG_VALID),
         (
             doctor.NOTICE,
-            "`dev` resolves these roles at the commit under examination: plan network: "
-            "`arn:aws:iam::111111111111:role/network-plan`; plan core: "
-            "`arn:aws:iam::111111111111:role/core-plan`; apply network: "
-            "`arn:aws:iam::111111111111:role/net-apply`; apply core: "
-            "`arn:aws:iam::111111111111:role/core-apply`.",
+            (
+                "`dev` resolves these roles at the commit under examination: plan network: "
+                "`arn:aws:iam::111111111111:role/network-plan`; plan core: "
+                "`arn:aws:iam::111111111111:role/core-plan`; apply network: "
+                "`arn:aws:iam::111111111111:role/net-apply`; apply core: "
+                "`arn:aws:iam::111111111111:role/core-apply`."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`ops` resolves these roles at the commit under examination: plan every cell: "
-            "`arn:aws:iam::333333333333:role/ops-apply`; apply every cell: "
-            "`arn:aws:iam::333333333333:role/ops-apply`.",
+            (
+                "`ops` resolves these roles at the commit under examination: plan every cell: "
+                "`arn:aws:iam::333333333333:role/ops-apply`; apply every cell: "
+                "`arn:aws:iam::333333333333:role/ops-apply`."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`stage` resolves these roles at the commit under examination: plan every cell: no "
-            "role; apply every cell: `arn:aws:iam::333333333333:role/ops-apply`.",
+            (
+                "`stage` resolves these roles at the commit under examination: plan every cell: no "
+                "role; apply every cell: `arn:aws:iam::333333333333:role/ops-apply`."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`tools` resolves these roles at the commit under examination: plan untagged and "
-            "listed cells: no role; apply untagged and listed cells: "
-            "`arn:aws:iam::333333333333:role/ops-apply`.",
+            (
+                "`tools` resolves these roles at the commit under examination: plan untagged and "
+                "listed cells: no role; apply untagged and listed cells: "
+                "`arn:aws:iam::333333333333:role/ops-apply`."
+            ),
         ),
         (
             doctor.NOTICE,
@@ -5747,23 +5859,31 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
         ),
         (
             doctor.NOTICE,
-            "`stage-apply` reaches these AWS accounts at the commit under examination: "
-            "333333333333.",
+            (
+                "`stage-apply` reaches these AWS accounts at the commit under examination: "
+                "333333333333."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`tools-apply` reaches these AWS accounts at the commit under examination: "
-            "333333333333.",
+            (
+                "`tools-apply` reaches these AWS accounts at the commit under examination: "
+                "333333333333."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`needs`: declared by no environment, so every environment sits at one level, "
-            "and a bare `shipmate apply` applies them all together.",
+            (
+                "`needs`: declared by no environment, so every environment sits at one level, "
+                "and a bare `shipmate apply` applies them all together."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`explicit`: set on no environment, so every environment applies on a bare "
-            "`shipmate apply`, production included.",
+            (
+                "`explicit`: set on no environment, so every environment applies on a bare "
+                "`shipmate apply`, production included."
+            ),
         ),
     ]
 
@@ -5820,8 +5940,10 @@ def test_the_roles_section_stays_within_its_budget_and_keeps_the_harvest():
         ),
         (
             doctor.NOTICE,
-            "roles for 1 more environment(s) not shown, to keep this report under GitHub's "
-            "comment limit; `CONTRACT.md` §Resolution lists how each cell resolves.",
+            (
+                "roles for 1 more environment(s) not shown, to keep this report under GitHub's "
+                "comment limit; `CONTRACT.md` §Resolution lists how each cell resolves."
+            ),
         ),
     ]
 
@@ -5843,8 +5965,10 @@ def test_a_heading_over_the_budget_shows_no_items_and_stops():
     assert doctor._config_roles(doctor.ec.validate_structure(table)) == [
         (
             doctor.NOTICE,
-            "roles for 2 more environment(s) not shown, to keep this report under GitHub's "
-            "comment limit; `CONTRACT.md` §Resolution lists how each cell resolves.",
+            (
+                "roles for 2 more environment(s) not shown, to keep this report under GitHub's "
+                "comment limit; `CONTRACT.md` §Resolution lists how each cell resolves."
+            ),
         )
     ]
 
@@ -5873,8 +5997,10 @@ def test_a_later_environment_over_the_budget_is_cut_against_what_is_left():
     assert roles == [
         (
             doctor.NOTICE,
-            "`aa` resolves these roles at the commit under examination: plan every cell: "
-            "`arn:aws:iam::222222222222:role/aa-plan`; apply every cell: no role.",
+            (
+                "`aa` resolves these roles at the commit under examination: plan every cell: "
+                "`arn:aws:iam::222222222222:role/aa-plan`; apply every cell: no role."
+            ),
         ),
         (
             doctor.NOTICE,
@@ -6021,8 +6147,10 @@ def test_the_account_lines_keep_their_own_budget():
         _accounts_line("prod-apply", ", ".join(accounts[:18]) + " … and 238 more"),
         (
             doctor.NOTICE,
-            "accounts for 1 more subject(s) not shown, to keep this report under GitHub's "
-            "comment limit; the roles notices above list each environment's roles.",
+            (
+                "accounts for 1 more subject(s) not shown, to keep this report under GitHub's "
+                "comment limit; the roles notices above list each environment's roles."
+            ),
         ),
     ]
 
@@ -6063,13 +6191,15 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
     assert doctor._config_warnings(_ctx()) == [
         (
             doctor.WARNING,
-            "`.github/shipmate-config.yml` at the commit under examination is not valid: "
-            ".github/shipmate-config.yml identities.dev.aws.plan references GitHub variable "
-            "DEV_PLAN_ROLE, which is not set. A reference reads repository and organization "
-            "variables; the variables of a cell's <env>-plan, <env>-apply or shared <env> "
-            "Environment are never read. "
-            "Merging it refuses every operation that reads the table. Execution still reads "
-            "the default branch's copy, which this says nothing about.",
+            (
+                "`.github/shipmate-config.yml` at the commit under examination is not valid: "
+                ".github/shipmate-config.yml identities.dev.aws.plan references GitHub variable "
+                "DEV_PLAN_ROLE, which is not set. A reference reads repository and organization "
+                "variables; the variables of a cell's <env>-plan, <env>-apply or shared <env> "
+                "Environment are never read. "
+                "Merging it refuses every operation that reads the table. Execution still reads "
+                "the default branch's copy, which this says nothing about."
+            ),
         )
     ]
     assert doctor.config_status(_ctx()) == []
@@ -6087,13 +6217,17 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
     assert doctor.config_status(_ctx())[1:] == [
         (
             doctor.NOTICE,
-            "`needs`: declared by no environment, so every environment sits at one level, "
-            "and a bare `shipmate apply` applies them all together.",
+            (
+                "`needs`: declared by no environment, so every environment sits at one level, "
+                "and a bare `shipmate apply` applies them all together."
+            ),
         ),
         (
             doctor.NOTICE,
-            "`explicit`: set on no environment, so every environment applies on a bare "
-            "`shipmate apply`, production included.",
+            (
+                "`explicit`: set on no environment, so every environment applies on a bare "
+                "`shipmate apply`, production included."
+            ),
         ),
     ]
 
@@ -6194,11 +6328,13 @@ environments:
 #: `_check_cycle`'s message, via `validate_structure`, with the `::error::` prefix stripped.
 _CYCLIC_FINDING = (
     doctor.WARNING,
-    "`.github/shipmate-config.yml` at the commit under examination is not valid: needs is "
-    "cyclic: dev -> prod -> dev: each of those must fully apply before the next, so the "
-    "ordering has no first environment and no apply path can sort it. Break the chain in "
-    ".github/shipmate-config.yml. Merging it refuses every operation that reads the table. "
-    "Execution still reads the default branch's copy, which this says nothing about.",
+    (
+        "`.github/shipmate-config.yml` at the commit under examination is not valid: needs is "
+        "cyclic: dev -> prod -> dev: each of those must fully apply before the next, so the "
+        "ordering has no first environment and no apply path can sort it. Break the chain in "
+        ".github/shipmate-config.yml. Merging it refuses every operation that reads the table. "
+        "Execution still reads the default branch's copy, which this says nothing about."
+    ),
 )
 
 

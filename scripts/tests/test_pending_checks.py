@@ -59,7 +59,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
         "output": {
             "title": "apply pending",
             "summary": "Waiting to be applied. Merge after apply completes "
-            + "for this stack x environment.",
+            "for this stack x environment.",
         },
     }
 
