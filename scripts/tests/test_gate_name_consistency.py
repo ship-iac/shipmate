@@ -9,19 +9,16 @@ invariant the same way test_check_runs_filter_aligned guards the check-runs read
 from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, workflow_yaml
 
 GATE = "shipmate / gate"
-# `scripts/gate-state` builds the plan run's body, which `actions/summary` POSTs. The two
-# completion writers post their fields with `gh api -f`, and `actions/gate-refresh/action.yml`
-# also names the gate in its hold refusal, which must move with the context if it is renamed.
+# `scripts/gate-state` builds the plan run's body, which `actions/summary` POSTs after its own
+# publish hold. The hold and the two completion writers post their fields with `gh api -f`, and
+# `actions/gate-refresh/action.yml` also names the gate in its hold refusal, which must move with
+# the context if it is renamed.
 WRITERS = [
     "scripts/gate-state",
+    "actions/summary/action.yml",
     "actions/gate-refresh/action.yml",
     ".github/workflows/deploy.yml",
 ]
-
-# The files whose gate-writing step must target the commit-statuses API, never check-runs.
-# Same idea as WRITERS over a different set: `actions/summary` carries no `shipmate / gate`
-# literal, only a POST of a body `scripts/gate-state` built, yet still performs the write.
-STATUS_WRITERS = [*WRITERS, "actions/summary/action.yml"]
 
 
 def test_gate_literal_present_in_every_writer():
@@ -32,11 +29,11 @@ def test_gate_literal_present_in_every_writer():
 
 def _gate_writing_run_blocks(text):
     """Yield each `run:` block, as a single string, that writes the gate: it either posts the
-    gate context as a field (`-f context="shipmate / gate"`), or -- `actions/summary`'s shape,
-    which carries no context literal of its own -- POSTs the specific body `scripts/gate-state`
-    produced (`--input gate.json`). A step that merely names the gate in a comment or echo does
-    not count. The writer files each have exactly one such block, but this scans generically
-    rather than assume a fixed line layout."""
+    gate context as a field (`-f context="shipmate / gate"`), or -- `actions/summary`'s final
+    write -- POSTs the specific body `scripts/gate-state` produced (`--input gate.json`). A step
+    that merely names the gate in a comment or echo does not count. `actions/summary` has two
+    such blocks, its publish hold and that final write; this scans generically rather than
+    assume a fixed line layout."""
     blocks = []
     current = []
     in_run = False
@@ -64,7 +61,7 @@ def _gate_writing_run_blocks(text):
 
 
 def _writer_gate_segments(rel, text):
-    """The text segments of one STATUS_WRITERS entry to check for the commit-status invariant.
+    """The text segments of one WRITERS entry to check for the commit-status invariant.
 
     A `.yml` writer, a composite action or a workflow, gets the `run:`-block extraction,
     because a step may hold other unrelated `run:` blocks that must not be conflated with the
@@ -90,17 +87,13 @@ def test_gate_written_as_commit_status_not_check_run():
     Scoped to the gate-writing steps only -- the block referencing the `shipmate / gate` context
     and POSTing it, or, for `actions/summary`, POSTing the specific body `scripts/gate-state`
     produced -- not every line in the writer file. `actions/summary` also legitimately creates
-    apply check-runs in a separate step, and that step must not be flagged here.
-
-    STATUS_WRITERS, not WRITERS: `actions/summary` carries no `shipmate / gate` literal of its
-    own, only the call to `scripts/gate-state`, but it still performs the POST, so it needs this
-    guard even though test_gate_literal_present_in_every_writer above exempts it.
+    apply check-runs, in a step of their own: in its publish-hold step they would be flagged here.
 
     `scripts/gate-state` never calls `gh api` at all and only builds the body JSON that
     `actions/summary` later POSTs, so it cannot itself target the wrong endpoint. The guard
     narrows there to the weaker claim that it never names the check-runs endpoint.
     """
-    for rel in STATUS_WRITERS:
+    for rel in WRITERS:
         text = (ENGINE / rel).read_text(encoding="utf-8")
         gate_segments = _writer_gate_segments(rel, text)
         assert gate_segments, f"{rel}: no gate-writing segment found (context+POST)"

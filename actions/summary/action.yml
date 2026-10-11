@@ -96,7 +96,7 @@ runs:
         # doctor's plan-environment secret probe lists `/environments/{name}/secrets`.
         permission-environments: read
 
-    - name: Create apply checks (pending / no-changes)
+    - name: Hold the gate while apply checks publish
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -105,6 +105,21 @@ runs:
         set -euo pipefail
         [[ "$SHIPMATE_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $SHIPMATE_HEAD_SHA)"; exit 1; }
         python3 "$GITHUB_ACTION_PATH/../../scripts/pending-checks" > bodies.jsonl
+        # gate-refresh greens an absent or pending gate, so a job dying mid-publish would let an
+        # apply of the published cells merge the unpublished ones. `Create/refresh gate` replaces it.
+        if [ -s bodies.jsonl ]; then
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHIPMATE_HEAD_SHA" -f state=failure \
+            -f context="shipmate / gate" \
+            -f description="re-run this summary job: apply checks were not all published; do not re-run the plan jobs (their uploads 409)" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+        fi
+
+    - name: Create apply checks (pending / no-changes)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+      run: |
+        set -euo pipefail
         while IFS= read -r body; do
           [ -z "$body" ] && continue
           printf '%s' "$body" | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null

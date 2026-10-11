@@ -839,7 +839,11 @@ nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
 never apply. Follow the description — for an evidence shortfall it says to
 re-run *this summary job* and not the plan jobs, whose artifact uploads are not
-`overwrite:` and 409 on a re-run. A hold clears only from a fresh plan run;
+`overwrite:` and 409 on a re-run. The summary job also holds the gate while it
+publishes the apply checks, and a job that failed before its final gate write
+leaves that hold, reading "apply checks were not all published": re-run the
+failed summary job, comment `shipmate plan`, or push. A hold clears only from a
+fresh plan run;
 `gate-refresh` refuses to green a held gate from apply checks alone.
 
 **The required check does not match the status.** The ruleset pins
