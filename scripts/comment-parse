@@ -64,11 +64,11 @@ VERBS = {
 
 
 def _is_recognized_command(line):
-    """True if `line` fully matches the command grammar AND its verb is one
-    shipmate knows about -- as opposed to merely fitting
-    the generic `shipmate <word> <word>` shape (e.g. `shipmate is great`)."""
-    m = _CMD.match(line)
-    return m is not None and m.group("verb") in VERBS
+    """True if `line` starts `shipmate <verb>` with a verb shipmate knows, whether or not the
+    rest fits the grammar, so a known verb with a stray token is chosen and refused as malformed
+    instead of yielding to a later line. Chatter such as `shipmate is great` is not recognized."""
+    words = line.split(" ")
+    return words[0] == "shipmate" and len(words) > 1 and words[1] in VERBS
 
 
 def _verb_error(verb, env):
@@ -97,9 +97,9 @@ def parse(body):
         "error": None,
     }
     lines = [ln.strip() for ln in body.splitlines()]
-    # Prefer the first line that is a fully recognized command over the first merely
-    # shipmate-prefixed line: incidental chatter like "shipmate is great" ahead of a real
-    # "shipmate apply dev-eu" would otherwise win and bury it behind an "unknown verb" error.
+    # Prefer the first line naming a known verb over the first merely shipmate-prefixed line:
+    # incidental chatter like "shipmate is great" ahead of a real "shipmate apply dev-eu" would
+    # otherwise win and bury it behind an "unknown verb" error.
     line = next((ln for ln in lines if _is_recognized_command(ln)), None)
     if line is None:
         line = next((ln for ln in lines if _SHIPMATE_LINE.match(ln)), None)

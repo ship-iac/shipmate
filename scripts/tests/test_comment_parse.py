@@ -180,6 +180,24 @@ def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
     }
 
 
+def test_a_known_verb_with_a_stray_token_is_refused_not_skipped():
+    """A known verb followed by a token outside the grammar is the command the commenter meant,
+    so it is refused as malformed rather than skipped for a later bare apply.
+
+    Mutation: revert `_is_recognized_command` to `_CMD.match(line)` plus the `VERBS` check, and
+    the later `shipmate apply` routes.
+    """
+    r = cp.parse("shipmate apply dev-eu stacks/app\nshipmate apply")
+    assert r == {
+        "is_command": True,
+        "valid": False,
+        "verb": None,
+        "env": None,
+        "route": None,
+        "error": _MALFORMED,
+    }
+
+
 def test_pure_garbage_shipmate_line_still_errors():
     r = cp.parse("shipmate is great")
     assert r["is_command"] and not r["valid"] and r["error"]
