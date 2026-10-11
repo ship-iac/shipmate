@@ -91,7 +91,7 @@ _ALL_SUCCESS = {
         pytest.param(
             "download",
             "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or "
-            "push, or after the merge open a new pull request that edits a file of the stack",
+            "push, or after the merge open a new pull request touching the stack",
             id="download",
         ),
         pytest.param(
