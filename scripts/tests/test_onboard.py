@@ -633,17 +633,12 @@ def test_conforming_engine_environment_writes_nothing(monkeypatch):
     secret names are read in `main`), no write, and every report line `ok` so the exit
     code stays 0.
 
-    `doctor` checks `shipmate-engine` itself, so a shape WARNING, stubbed here because no
-    apply-role one exists yet, is no `differs` either: one would exit 2 on every run.
-
     Mutations: drop the `custom_branch_policies` test in `_reconcile_env`, so a
-    conforming environment is PUT again; drop the `name != ENGINE_ENV` skip, so the stubbed
-    WARNING becomes a `differs` line.
+    conforming environment is PUT again; raise doctor's apply-role no-approval finding
+    from NOTICE to WARNING, so it becomes a `differs` line and the run exits 2.
     """
     fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
-    drift = [(onboard.dr.WARNING, "drift")]
-    monkeypatch.setattr(onboard.dr, "_env_shape_findings", lambda *_: drift)
     onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply", onboard.ENGINE_ENV)
     onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
