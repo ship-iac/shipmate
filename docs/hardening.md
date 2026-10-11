@@ -285,7 +285,8 @@ whenever code-owner review is off, whatever the count is. Count `0` with
 note rather than a warning, naming any gated environments in it. Under it, a pull
 request whose author owns the changed files needs no review, and one someone else
 opens changing owned files waits for an owner's approval (measured 2026-10-11 with
-one individual owner). Count `0` with `require_last_push_approval` on warns
+one individual owner). A commit someone else pushes onto the owner's own pull
+request is not held (inferred: the exemption follows the pull request's author). Count `0` with `require_last_push_approval` on warns
 whatever else is set, and omits the sole-maintainer note; the gated-environments
 note still appears.
 Either way, a `CHANGES_REQUESTED` review still blocks an apply until it is

@@ -136,19 +136,21 @@ doctor` warns. The sole-maintainer posture is two values:
 count keep `require_code_owner_review` on. Measured 2026-10-11 at count 0 with one
 individual code owner: GitHub required no code-owner review on a pull request that
 owner authored, so it merged, and held one someone else opened changing an owned
-file until the owner approved. That is what stops a pull request opened with a
-leaked App key. Two gaps stay open at count 0: a pull request changing only files
-no `CODEOWNERS` entry covers needs no review from anyone, and a commit someone else
-pushes onto the maintainer's own pull request is not held either, since its author
-still owns the files and last-push approval is off. Team-owned paths and the
-exemption at count 1 or more were not measured.
+file until the owner approved. The same rule holds a pull request opened with a
+leaked App key, when it changes an owned file. Two gaps stay open at count 0: a pull
+request changing only files no `CODEOWNERS` entry covers needs no review from
+anyone, and, inferred rather than measured, a commit someone else pushes onto the
+maintainer's own pull request is not held, since the pull request's author still
+owns the files and last-push approval is off. Team-owned paths and the exemption at
+count 1 or more were not measured.
 
-**Own the environment table in `CODEOWNERS`.** The role a cell assumes is a line
+**Own the environment table and `CODEOWNERS` itself.** The role a cell assumes is a line
 in `.github/shipmate-config.yml` on the default branch, not a GitHub Environment
 variable, so changing it is a pull request rather than a repository-settings
 change. At count 0, a pull request changing that file with no `CODEOWNERS` entry
-covering it needs no review at all, a leaked App key's included. Add
-`/.github/shipmate-config.yml` to `CODEOWNERS` on its own pull request: GitHub
+covering it needs no review at all, a leaked App key's included, and so does one
+removing that entry from an unowned `CODEOWNERS`. Add `/.github/shipmate-config.yml`
+and `/.github/CODEOWNERS` to `CODEOWNERS` on their own pull request: GitHub
 reads `CODEOWNERS` from the base branch, so an entry added beside a role change
 does not apply to that change.
 
