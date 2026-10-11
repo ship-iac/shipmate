@@ -1393,7 +1393,7 @@ each gated environment that applied that way (§Apply result comment), and
 `shipmate doctor` names the gated environments when it can read the default
 branch's table: in a note while code-owner review is on, since they are still
 held wherever a code-owner review is required (a pull request changing owned files
-that none of their owners authored), and in a warning beside the code-owner
+whose author does not own them), and in a warning beside the code-owner
 warning while that review is off. With the table unreadable, doctor reports only
 the sole-maintainer note, or only the code-owner warning when that review is off.
 

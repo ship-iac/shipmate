@@ -218,7 +218,7 @@ def _review_rule_warnings(ctx):
     only relaxes a review the ruleset requires, so with no count required a gated
     environment is held only where a code-owner review is required for the changed
     files. With code-owner review on it is a notice naming the gated environments,
-    since they are still held wherever owned files change; with it off it is a
+    since they are still held wherever a code-owner review is required; with it off it is a
     warning beside the code-owner warning. It is the sole-maintainer note only when
     no environment is gated or the default branch's table cannot be read
     (`_no_review_findings`). Count 0 with `require_last_push_approval` on is a warning

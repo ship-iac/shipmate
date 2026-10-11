@@ -4507,7 +4507,7 @@ def _review_probe(monkeypatch, rules, table, envs=_ENVS):
 
 def test_review_rule_count_zero_names_only_the_gated_environments(monkeypatch):
     """Count 0 with code-owner review on is a notice naming the gated environments only: they
-    are still held wherever owned files change.
+    are still held wherever a code-owner review is required.
 
     Mutation: drop the `ungated_envs` subtraction -- `sandbox` is named too.
     Mutation: emit the gated finding as WARNING unconditionally -- the level differs."""

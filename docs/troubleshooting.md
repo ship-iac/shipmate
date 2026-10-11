@@ -26,8 +26,8 @@ live probes.
   reads ruleset booleans only, so it cannot see that.
   `required_approving_review_count: 0` *with* code-owner review on is
   reported as a note: the supported sole-maintainer mode while
-  `require_last_push_approval` is off, since GitHub requires no code-owner review
-  from an author who owns the changed files. While the default
+  `require_last_push_approval` is off, since at count 0 GitHub requires no
+  code-owner review from an author who owns the changed files. While the default
   branch's table is readable and an environment is gated, the note names the
   gated environments, which can apply without an approving review and are held
   only where a code-owner review is required for the changed files. Count 0
