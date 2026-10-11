@@ -11,7 +11,7 @@ passes an entry whose expression was mistyped; a substring test is satisfied by 
 
 import re
 
-from _loader import WORKFLOWS, step_using, workflow_jobs, workflow_yaml
+from _loader import WORKFLOWS, step_using, strings, workflow_jobs, workflow_yaml
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -137,23 +137,6 @@ def test_the_cell_passes_this_whole_with_block():
     }
 
 
-def _strings(node):
-    """Every scalar string reachable in the parsed workflow, mapping keys included.
-
-    Parsed, not file text: a payload expression inside a comment teaches the next reader to write
-    it back, but the parser discards comments, so this cannot be satisfied by one.
-    """
-    if isinstance(node, dict):
-        for key, value in node.items():
-            yield from _strings(key)
-            yield from _strings(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _strings(item)
-    elif isinstance(node, str):
-        yield node
-
-
 def test_the_workflow_reads_the_event_payload_nowhere():
     """`facts` is the single producer of every pull-request fact, and a fact read from the
     payload beside it is a second producer of the same fact. This file answers to whatever
@@ -168,7 +151,7 @@ def test_the_workflow_reads_the_event_payload_nowhere():
     Mutation: `env: { PR: ${{ github.event.pull_request.number }} }` on the `detect` job.
     """
     found = sorted(
-        {m for s in _strings(workflow_yaml(WF)) for m in re.findall(r"github\.event\.[\w.]*", s)}
+        {m for s in strings(workflow_yaml(WF)) for m in re.findall(r"github\.event\.[\w.]*", s)}
     )
     assert found == [], f"plan.yml reads the event payload: {found}"
 

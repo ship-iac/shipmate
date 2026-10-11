@@ -157,6 +157,23 @@ def step_using(workflow, job_id, needle):
     return hits[0]
 
 
+def strings(node):
+    """Every scalar string reachable in a parsed subtree, mapping keys included.
+
+    Walk the parsed tree, not the file text: the parser discards comments, so a comment naming
+    the value a guard looks for cannot satisfy it.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from strings(key)
+            yield from strings(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from strings(item)
+    elif isinstance(node, str):
+        yield node
+
+
 def run_lines(step):
     """Stripped, non-empty, non-comment lines of ``step``'s ``run:``.
 

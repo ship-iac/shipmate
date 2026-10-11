@@ -15,7 +15,7 @@ satisfies it, and the way a cell would actually regain the key -- a direct
 
 import pytest
 import yaml
-from _loader import WORKFLOWS, action_steps, action_yaml, workflow_yaml
+from _loader import WORKFLOWS, action_steps, action_yaml, strings, workflow_yaml
 
 CELLS = ("apply-cell", "drift-cell", "plan-cell")
 
@@ -38,24 +38,6 @@ PLAN_WF = WORKFLOWS / "plan.yml"
 UNTRUSTED_PLAN_JOBS = ("facts", "detect", "plan")
 
 
-def _strings(node):
-    """Every scalar string reachable in a parsed subtree, mapping keys included.
-
-    Walking the parsed tree rather than the file text is the point: an `env:` value, a `with:`
-    value and a `run:` body are all reached, while a YAML comment, which the parser discards,
-    can no longer satisfy the guard.
-    """
-    if isinstance(node, dict):
-        for key, value in node.items():
-            yield from _strings(key)
-            yield from _strings(value)
-    elif isinstance(node, list):
-        for item in node:
-            yield from _strings(item)
-    elif isinstance(node, str):
-        yield node
-
-
 @pytest.mark.parametrize("action", CELLS)
 def test_cell_declares_no_private_key_input(action):
     inputs = action_yaml(action).get("inputs") or {}
@@ -75,7 +57,7 @@ def test_cell_uses_no_token_minting_action(action):
 def test_cell_never_references_the_app_private_key(action):
     steps = action_steps(action)
     assert steps, f"{action} parsed to zero steps -- this guard would assert nothing"
-    for text in _strings(steps):
+    for text in strings(steps):
         assert APP_KEY_ENV not in text, f"{action} references {APP_KEY_ENV}: {text!r}"
 
 
@@ -102,7 +84,7 @@ def test_plan_workflow_untrusted_jobs_never_reach_the_app_key(job_id):
     Mutation: add `env: { K: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }} }` to the `plan` job.
     """
     job = workflow_yaml(PLAN_WF)["jobs"][job_id]
-    hits = [s for s in _strings(job) if APP_KEY_ENV in s]
+    hits = [s for s in strings(job) if APP_KEY_ENV in s]
     assert not hits, f"plan.yml job `{job_id}` references the App key: {hits}"
 
 

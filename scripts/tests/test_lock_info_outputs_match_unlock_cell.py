@@ -24,29 +24,16 @@ today fails loud anyway, because `probe_status` then survives into the equality.
 
 import re
 
-from _loader import SCRIPTS, action_yaml, step_by
+from _loader import SCRIPTS, action_yaml, step_by, strings
 
 _MAIN = (SCRIPTS / "lock-info").read_text(encoding="utf-8").split("\ndef main():", 1)[1]
 _ACTION = "unlock-cell"
 
 
-def _strings(node):
-    """Every string anywhere in the parsed action, `if:` expressions included and not only the
-    `env:` blocks. Parsed, so a comment naming an output name -- this action has several --
-    cannot stand in for a real use of it."""
-    if isinstance(node, dict):
-        node = list(node.values())
-    if isinstance(node, list):
-        for item in node:
-            yield from _strings(item)
-    elif isinstance(node, str):
-        yield node
-
-
 def test_lock_info_writes_exactly_the_probe_outputs_unlock_cell_consumes():
     written = set(re.findall(r'\.write\(f?"([a-z_]+)=', _MAIN))
     consumed = set(
-        re.findall(r"steps\.probe\.outputs\.([a-z_]+)", "\n".join(_strings(action_yaml(_ACTION))))
+        re.findall(r"steps\.probe\.outputs\.([a-z_]+)", "\n".join(strings(action_yaml(_ACTION))))
     )
     probe = step_by(_ACTION, id="probe")
     step_written = set(
