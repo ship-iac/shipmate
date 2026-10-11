@@ -197,6 +197,7 @@ EXPECTED_STEP_NAMES = [
     "Verify the App key arrived",
     "Download plan cell summaries",
     "Mint App installation token",
+    "Hold the gate while apply checks publish",
     "Create apply checks (pending / no-changes)",
     "Mirror this run's per-cell plan checks onto the head",
     "$/actions/python-yaml",
