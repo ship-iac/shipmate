@@ -465,15 +465,31 @@ def test_validate_head_sha_accepts_valid():
     ad.validate_head_sha("0123456789abcdef0123456789abcdef01234567")  # This must not raise.
 
 
-@pytest.mark.parametrize("value", ["Dev-EU", "dev/eu"])
-def test_validate_env_refuses_a_name_no_environment_can_take(value):
-    """Mutation: refuse only a `.` in `value` -- `Dev-EU` passes."""
+_ENV_CHARSET = (
+    " is not an environment name: "
+    "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
+)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ("Dev-EU", "::error::SHIPMATE_ENV 'Dev-EU'" + _ENV_CHARSET),
+        ("dev/eu", "::error::SHIPMATE_ENV 'dev/eu'" + _ENV_CHARSET),
+        (
+            "shipmate-engine",
+            "::error::SHIPMATE_ENV 'shipmate-engine' names 'shipmate-engine', the engine's own "
+            "environment, which holds the shipmate App's private key; use another name.",
+        ),
+    ],
+    ids=["upper", "path", "engine"],
+)
+def test_validate_env_refuses_a_name_no_environment_can_take(value, message):
+    """Mutations: refuse only a `.` in `value` -- `Dev-EU` passes; delete the `ENGINE_ENV`
+    check from `check_env_name`, or change `ENGINE_ENV`'s value -- `shipmate-engine` passes."""
     with pytest.raises(SystemExit) as e:
         ad.validate_env(value)
-    assert str(e.value) == (
-        f"::error::SHIPMATE_ENV {value!r} is not an environment name: "
-        "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators."
-    )
+    assert str(e.value) == message
 
 
 def test_validate_env_rejects_empty():

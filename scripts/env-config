@@ -16,7 +16,7 @@ import re
 import sys
 import types
 
-from _shipmate import gh_json, load_config_text, yaml_error_text
+from _shipmate import ENGINE_ENV, gh_json, load_config_text, yaml_error_text
 
 #: The file the engine reads its settings from, and the interpreter floor that reading it
 #: needs. The floor is CONTRACT.md section Runner prerequisites, which every runner already
@@ -889,8 +889,12 @@ def check_env_name(e, label, matched):
 
     Guards a name outside the charset, and one carrying a `-plan`/`-apply` environment
     suffix -- each is matched against the bare logical env name, matches nothing, and so
-    orders, holds back or exempts nothing while reading as if it did. `label` opens each
-    message and `matched` names what the suffix message says is matched.
+    orders, holds back or exempts nothing while reading as if it did. It also refuses
+    `ENGINE_ENV`, with or without one suffix, because that environment holds the App's
+    private key and a cell binding it would run the pull request's code beside that key;
+    the suffixed form gets this message, not the suffix one whose remedy is the reserved
+    name. `label` opens each message and `matched` names what the suffix message says is
+    matched.
 
     Charset before suffix: a suffixed name passes the charset, so the two are separate
     checks, and this order gives `"dev eu-plan"` the message about its space.
@@ -900,13 +904,18 @@ def check_env_name(e, label, matched):
             f"::error::{label} is not an environment name: lowercase letters, digits, '-' "
             "and '_', with no quotes, spaces or path separators."
         )
-    for suffix in ("-plan", "-apply"):
-        if e.endswith(suffix):
-            raise SystemExit(
-                f"::error::{label} carries the environment suffix "
-                f"{suffix!r}; {matched} is matched against the bare logical env name; "
-                f"write {e[: -len(suffix)]!r} instead."
-            )
+    suffix = next((s for s in ("-plan", "-apply") if e.endswith(s)), "")
+    if e[: len(e) - len(suffix)] == ENGINE_ENV:
+        raise SystemExit(
+            f"::error::{label} names {ENGINE_ENV!r}, the engine's own environment, which holds "
+            "the shipmate App's private key; use another name."
+        )
+    if suffix:
+        raise SystemExit(
+            f"::error::{label} carries the environment suffix "
+            f"{suffix!r}; {matched} is matched against the bare logical env name; "
+            f"write {e[: -len(suffix)]!r} instead."
+        )
 
 
 def _check_entries(environments, errors, identities):

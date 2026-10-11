@@ -460,6 +460,12 @@ _ORDERING = [
         "name; write 'dev-eu' instead.",
     ),
     (
+        _needs(["shipmate-engine"]),
+        "::error::environments.prod.needs entry 'shipmate-engine' names 'shipmate-engine', "
+        "the engine's own environment, which holds the shipmate App's private key; use "
+        "another name.",
+    ),
+    (
         _needs(["dev eu"]),
         "::error::environments.prod.needs entry 'dev eu' is not an environment name: "
         "lowercase letters, digits, '-' and '_', with no quotes, spaces or path separators.",
@@ -485,8 +491,9 @@ def test_the_single_entry_point_validates_ordering(table, message):
 
     Mutations: delete the `validate_env_name_list` call from `_check_entries` -- every
     case validates; drop either entry from the suffix tuple in `check_env_name` -- that
-    suffix's case validates; or widen `_ENV_ENTRY` to `.+` -- the space, quote and
-    uppercase cases validate.
+    suffix's case validates; widen `_ENV_ENTRY` to `.+` -- the space, quote and
+    uppercase cases validate; delete the `ENGINE_ENV` check from `check_env_name`, or change
+    `ENGINE_ENV`'s value -- the `shipmate-engine` case validates.
     """
     assert _refusal(table) == message
 
@@ -640,6 +647,16 @@ _ENTRY_NAMES = [
         "::error::environments.dev-plan carries the environment suffix '-plan'; an entry "
         "name is matched against the bare logical env name; write 'dev' instead.",
     ),
+    (
+        "shipmate-engine",
+        "::error::environments.shipmate-engine names 'shipmate-engine', the engine's own "
+        "environment, which holds the shipmate App's private key; use another name.",
+    ),
+    (
+        "shipmate-engine-apply",
+        "::error::environments.shipmate-engine-apply names 'shipmate-engine', the engine's "
+        "own environment, which holds the shipmate App's private key; use another name.",
+    ),
 ]
 
 
@@ -649,12 +666,29 @@ def test_an_entry_name_no_environment_can_take_refuses(name, message):
     orders nothing and is never resolved. The name is checked before the entry is read: each
     entry here is otherwise valid.
 
-    Mutation: check the charset on list items only -- drop the entry-name loop from
-    `_check_entries`; every case validates.
+    `shipmate-engine-apply` gets the engine message, not the suffix one, whose remedy would
+    be the reserved name.
+
+    Mutations: check the charset on list items only -- drop the entry-name loop from
+    `_check_entries`; every case validates. Delete the `ENGINE_ENV` check from
+    `check_env_name` -- `shipmate-engine` validates and `shipmate-engine-apply` gets the
+    suffix message; change `ENGINE_ENV`'s value -- both validate; compare `e` alone, without
+    removing the suffix -- `shipmate-engine-apply` gets the suffix message.
     """
     assert _refusal({"layout": "folder", "environments": {name: {"region": "eu-west-1"}}}) == (
         message
     )
+
+
+@pytest.mark.parametrize("name", ["shipmate-engineer", "shipmate-engine2"])
+def test_a_name_extending_the_engine_environment_is_accepted(name):
+    """Only the engine's own name is reserved; a longer name holding it binds another
+    environment.
+
+    Mutation: refuse `e.startswith(ENGINE_ENV)` in `check_env_name` -- both refuse.
+    """
+    table = {"layout": "folder", "environments": {name: {"region": "eu-west-1"}}}
+    assert env_config.validate(table, ()) == table
 
 
 # --- 12: the tf_vars layout, the entry's tf_vars table, the vars reference -------------
