@@ -111,7 +111,7 @@ runs:
         if [ -s bodies.jsonl ]; then
           gh api "repos/$GITHUB_REPOSITORY/statuses/$SHIPMATE_HEAD_SHA" -f state=failure \
             -f context="shipmate / gate" \
-            -f description="re-plan this pull request (comment shipmate plan or push): its apply checks were not all published" \
+            -f description="re-plan this pull request (comment shipmate plan or push): its plan summary did not finish" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
         fi
 

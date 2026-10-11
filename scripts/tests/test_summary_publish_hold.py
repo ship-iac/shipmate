@@ -28,7 +28,7 @@ HOLD_ARGV = [
     "context=shipmate / gate",
     "-f",
     "description=re-plan this pull request (comment shipmate plan or push): "
-    "its apply checks were not all published",
+    "its plan summary did not finish",
     "-f",
     "target_url=https://github.com/acme/demo/actions/runs/42",
 ]

@@ -841,10 +841,9 @@ never apply. Follow the description — for an evidence shortfall it says to
 re-run *this summary job* and not the plan jobs, whose artifact uploads are not
 `overwrite:` and 409 on a re-run. The summary job also holds the gate while it
 publishes the apply checks, and a job that failed before its final gate write
-leaves that hold, reading "its apply checks were not all published": comment
+leaves that hold, reading "its plan summary did not finish": comment
 `shipmate plan` or push, and do not re-run the summary job, which would
-republish pending checks over cells applied since. A hold clears only from a
-fresh plan run;
+republish pending checks over cells applied since.
 `gate-refresh` refuses to green a held gate from apply checks alone.
 
 **The required check does not match the status.** The ruleset pins

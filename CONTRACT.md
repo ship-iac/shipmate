@@ -2071,10 +2071,10 @@ it holds the gate in either direction.
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
 only some checks published leaves a hold that `gate-refresh` will not green.
-The job's final gate write replaces the hold. Otherwise only a fresh plan run
-clears it: a re-run of the summary job republishes pending checks over cells
-applied since, and a run whose plan job was cancelled writes no final gate and
-keeps the hold.
+The job's final gate write replaces the hold, so a re-run of the summary job
+clears it too, but re-plan instead: that re-run republishes pending checks over
+cells applied since, and a run whose plan job was cancelled writes no final gate
+and keeps the hold.
 
 ## Apply result comment
 
