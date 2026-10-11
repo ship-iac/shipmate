@@ -308,7 +308,7 @@ its `todo` items.
 | --- | --- |
 | `ok` | what the run read already satisfies the item. |
 | `todo` | the item is not done; what to do follows. |
-| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether a `CODEOWNERS` entry covers `/.github/workflows/` is GitHub's matching, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
+| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
 
 Three items check the working tree's stacks and drift files the way a run
 would, so a run that would refuse or skip shows up before the pull request

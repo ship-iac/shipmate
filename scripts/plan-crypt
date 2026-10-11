@@ -72,7 +72,9 @@ def decrypt(path):
     elif has_pass and not salted:
         raise SystemExit(
             "::error::plan artifact is plaintext but a plan-passphrase is configured; "
-            "refusing to apply an unencrypted plan. Re-run plan to produce an encrypted plan."
+            "refusing to apply an unencrypted plan. Re-plan to produce an encrypted plan: comment "
+            "shipmate plan or push, or after the merge open a new pull request touching the "
+            "stack."
         )
     elif not has_pass and salted:
         raise SystemExit(

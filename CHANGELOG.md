@@ -19,6 +19,7 @@ section below names the SHA the release tags.
 - **A plan summary that fails after publishing some apply checks leaves the gate held instead of greenable by an apply of the published cells.**
 - **The hold for a cell-summary shortfall says to re-plan (comment `shipmate plan` or push) instead of re-running the summary job, which republished pending checks over cells applied since.**
 - **An apply refused over a held gate names where the cause is, the gate's status description, and that only a new plan run clears the hold.**
+- **`scripts/onboard`'s CODEOWNERS item asks for an entry covering the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS`, the plan-summary engine-mismatch refusals say to re-pin every engine reference to one commit and re-plan, and the missing-artifact and plaintext-plan apply refusals say to comment `shipmate plan` or push, or after the merge open a new pull request touching the stack, instead of re-running the plan jobs.**
 
 ## [0.44.0] — 2026-10-11
 

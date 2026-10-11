@@ -102,7 +102,31 @@ def test_missing_fingerprint_fails_loud(tmp_path):
     cell_json = os.path.join(str(tmp_path), "cell-summary.dev-eu.stacks-app", "cell.json")
     assert str(exc_info.value) == (
         f"::error::cell summary {cell_json} missing keys ['fingerprint'] -- plan-cell and the "
-        "summary job must run the same engine revision; re-run the plan"
+        "summary job must run the same engine revision; re-pin every engine reference to one "
+        "commit, then re-plan (comment shipmate plan or push)"
+    )
+
+
+def test_missing_plan_text_refuses_with_the_re_plan_remedy(tmp_path):
+    """Mutation: revert the refusal's remedy to "re-run the plan"."""
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-app",
+        plan_text=None,
+        stack="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="f" * 64,
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        pc.bodies(str(tmp_path), HEAD)
+    cell_json = os.path.join(str(tmp_path), "cell-summary.dev-eu.stacks-app", "cell.json")
+    assert str(exc_info.value) == (
+        f"::error::{cell_json} has no plan.txt beside it: the plan text a reviewer reads cannot "
+        "be bound to the plan that will be applied. plan-cell and summary are from mismatched "
+        "engine revisions; re-pin every engine reference to one commit, then re-plan (comment "
+        "shipmate plan or push)."
     )
 
 

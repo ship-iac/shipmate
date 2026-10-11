@@ -796,7 +796,7 @@ def _review_item(ctx, names, shared=()):
 
 
 def _codeowners_item(ctx):
-    item = "CODEOWNERS entry covering /.github/workflows/"
+    item = "CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS"
     found = [p for p in _CODEOWNERS_PATHS if (pathlib.Path(ctx["root"]) / p).is_file()]
     if not found:
         return "todo", item, [f"Add one in `{_CODEOWNERS_PATHS[0]}`."]
