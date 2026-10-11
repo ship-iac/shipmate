@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.44.2] — 2026-10-11
 
+Tags `230b988`.
+
 ### Added
 
 - **A plan run warns, naming each stack and environment, when a pull request removes one `env/*` tag from a stack that keeps another.**
