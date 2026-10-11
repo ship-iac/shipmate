@@ -133,13 +133,13 @@ any approval count.** The pusher cannot approve their own last push, so even at
 `required_approving_review_count: 0` nobody is left to approve, and `shipmate
 doctor` warns. The sole-maintainer posture is two values:
 `required_approving_review_count: 0` and `require_last_push_approval` off. At that
-count `require_code_owner_review` can stay on: a pull request its sole code owner
-authored, changing a file `CODEOWNERS` gives that owner, was mergeable with no
-review and no bypass actor (measured 2026-10-11). Whether code-owner review at
-count `0` still holds a pull request someone else authored, such as one opened with
-a leaked App key, was not measured.
+count keep `require_code_owner_review` on: GitHub does not require a code-owner
+review from the author of a pull request who owns the changed files, so the
+maintainer's own pull requests merge, while one anyone else authors, a leaked App
+key's included, waits for an owner's approval (measured 2026-10-11).
 
-**A `CODEOWNERS` that does not cover the environment table leaves it under ordinary review.**
+**A `CODEOWNERS` covering `/.github/workflows/` alone leaves the environment table
+under ordinary review.**
 The role a cell assumes is a line in `.github/shipmate-config.yml` on the default
 branch, not a GitHub Environment variable, so changing it is a pull request
 rather than a repository-settings change. Under a `CODEOWNERS` covering
@@ -150,10 +150,7 @@ once merged to the default branch, and every other control still applies. What
 moved is the bar for naming a role, from settings access to ordinary review. Add
 `/.github/shipmate-config.yml` to `CODEOWNERS` if you want the code-owner half on it.
 
-**Change `CODEOWNERS` on its own pull request.** GitHub evaluates `CODEOWNERS`
-from the pull request's base branch, so an ownership change committed alongside
-another change does not apply to that pull request: the old ownership still
-decides. Before changing `required_approving_review_count` to `0`, read
+Before changing `required_approving_review_count` to `0`, read
 `docs/hardening.md` §3–5. That page has the reasoning for each of these rules;
 this block is its recommendation made pasteable.
 
@@ -183,7 +180,7 @@ cannot be determined at all — a wiring failure, never a policy state — apply
 fails closed rather than proceeding unreviewed.)
 
 - **Sole-maintainer mode** (`required_approving_review_count: 0`, with
-  `require_last_push_approval` off; §Reproducible ruleset has the three values
+  `require_last_push_approval` off; §Reproducible ruleset has the two values
   and why): `shipmate apply` needs no approving review (a one-person repo can never self-approve
   on GitHub) — but a `CHANGES_REQUESTED` review still blocks apply until
   resolved. `shipmate doctor` names each gated environment when it can read

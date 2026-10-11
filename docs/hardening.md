@@ -283,9 +283,8 @@ of the App private key cannot satisfy is left either. `shipmate doctor` warns
 whenever code-owner review is off, whatever the count is. Count `0` with
 `require_code_owner_review` on is a different setting, which doctor reports as a
 note rather than a warning, naming any gated environments in it. Under it, a pull
-request its sole code owner authored was mergeable with no review (measured
-2026-10-11); whether it holds a pull request someone else authored was not
-measured. Count `0` with `require_last_push_approval`
+request whose author owns the changed files needs no review, and one anyone else
+authors waits for an owner's approval (measured 2026-10-11). Count `0` with `require_last_push_approval`
 on warns whatever else is set, and omits the sole-maintainer note; the
 gated-environments note still appears.
 Either way, a `CHANGES_REQUESTED` review still blocks an apply until it is
@@ -340,10 +339,9 @@ that the reviewer requirement appears. `shipmate doctor` warns when the rule
 requires approvals but not code-owner review — it does not check `CODEOWNERS`
 coverage, and it never fails a run, so that is a warning, not enforcement.
 
-**Know which copy of `CODEOWNERS` decides, before you need to change it.** GitHub
-evaluates it from the pull request's base branch, so narrowing or widening
-ownership never applies to the pull request carrying the edit — it has to merge
-first, on its own. `docs/branch-protection.md` has the sole-maintainer shape.
+**GitHub reads `CODEOWNERS` from the pull request's base branch,** so narrowing or
+widening ownership never applies to the pull request carrying the edit — it has to
+merge first, on its own.
 
 ## 6. Environment reviewers — the gate that holds after a merge
 
