@@ -14,7 +14,11 @@ import os
 # that never ran reads 'skipped', not 'failure'. Matching 'failure' exactly means only
 # the fail-safe that actually tripped can claim the blocked reason.
 FAILSAFES = [
-    ("DOWNLOAD_OUTCOME", "reviewed plan artifact missing or expired; re-run plan"),
+    (
+        "DOWNLOAD_OUTCOME",
+        "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or push, "
+        "or after the merge open a new pull request touching the stack",
+    ),
     (
         "PLANNED_HEAD_OUTCOME",
         "reviewed plan records no commit or was produced from a different one; re-plan",

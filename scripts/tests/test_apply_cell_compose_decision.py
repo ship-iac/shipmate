@@ -89,7 +89,10 @@ _ALL_SUCCESS = {
     ("failed", "reason"),
     [
         pytest.param(
-            "download", "reviewed plan artifact missing or expired; re-run plan", id="download"
+            "download",
+            "reviewed plan artifact missing or expired; re-plan: comment shipmate plan or "
+            "push, or after the merge open a new pull request touching the stack",
+            id="download",
         ),
         pytest.param(
             "planned_head",

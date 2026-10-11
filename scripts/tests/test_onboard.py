@@ -2035,7 +2035,7 @@ todo          approving review before apply
     Required reviewers and `Prevent self-review` on dev-eu-apply
     (docs/getting-started.md §Environment setup).
 
-todo          CODEOWNERS entry covering /.github/workflows/
+todo          CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS
     Add one in `.github/CODEOWNERS`.
 
 todo          Provider lock files
@@ -2077,7 +2077,7 @@ cannot check  o/r in the App installation's repository selection
     The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
 ok            approving review before apply
-cannot check  CODEOWNERS entry covering /.github/workflows/
+cannot check  CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS
     `.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's.
 
 ok            Provider lock files
@@ -2399,7 +2399,7 @@ def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
 
     Mutation: drop `docs/CODEOWNERS` from `_CODEOWNERS_PATHS`.
     """
-    item = "CODEOWNERS entry covering /.github/workflows/"
+    item = "CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS"
     assert onboard._codeowners_item(ctx(root=tmp_path)) == (
         "todo",
         item,

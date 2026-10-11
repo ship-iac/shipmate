@@ -336,8 +336,10 @@ file, an entry that does not parse, or IaC paths left unowned, the setting
 is a no-op and the App's own approving review satisfies the count on its own.
 Write a `CODEOWNERS` entry covering the paths the stacks and the Terramate
 configuration live in, and `/.github/shipmate-config.yml` with them — that one file
-names every cloud role the repository can assume. Confirm on a real pull request
-that the reviewer requirement appears. `shipmate doctor` warns when the rule
+names every cloud role the repository can assume — and `/.github/CODEOWNERS` itself.
+Confirm that the reviewer requirement appears on a real pull request opened by
+someone who does not own the changed files: GitHub shows no code-owner requirement
+on a pull request whose author owns them. `shipmate doctor` warns when the rule
 requires approvals but not code-owner review — it does not check `CODEOWNERS`
 coverage, and it never fails a run, so that is a warning, not enforcement.
 
