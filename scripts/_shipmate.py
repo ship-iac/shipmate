@@ -129,8 +129,8 @@ def _run(args):
 
 def gh_json(path, run=None):
     """`gh api <path>` -> parsed JSON, through `run` so a nonzero exit raises ::error::
-    with the tool's stderr in the message, from a single definition. Callers alias it as
-    `_gh_json` rather than repeating the `json.loads(_run(...))` pair.
+    with the tool's stderr in the message, from a single definition, so no caller repeats the
+    `json.loads(_run(...))` pair.
 
     Homed beside `_run` for the same reason.
     """
