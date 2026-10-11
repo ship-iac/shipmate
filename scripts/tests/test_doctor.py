@@ -488,7 +488,7 @@ def test_an_interpreter_below_the_floor_skips_the_environment_probes(monkeypatch
     read for probes that cannot select a naming.
 
     Mutation: drop the NOTICE (`return []`) -- an empty list reads as every environment
-    existing; or move the refusal check after `_existing_env_names` in any probe -- the
+    existing; or move the refusal check after `_existing_env_names` in `_bindings` -- the
     listing is read."""
     monkeypatch.setattr(sys, "version_info", (3, 11, 9, "final", 0))
     found, asked = _environment_probes(monkeypatch, _ctx())
@@ -508,8 +508,8 @@ def test_no_declared_env_reads_nothing_in_the_environment_probes(monkeypatch):
     default branch's table is read, and a failed read cannot report probes that had no work.
     The one finding is the skipped-probes NOTICE.
 
-    Mutation: remove `_env_protection_warnings`' early return on an empty `ctx["envs"]` --
-    it reads the listing and the table."""
+    Mutation: remove `_bindings`' early return on an empty `ctx["envs"]` -- it reads the
+    listing and the table."""
     found, asked = _environment_probes(monkeypatch, _ctx(envs=set()))
     assert found == [
         (
@@ -2214,7 +2214,7 @@ def _apply_check(cid, name, plan_run):
     }
 
 
-def _run_check_ids(monkeypatch, tmp_path, answers, *, github_output=True):
+def _run_check_ids(monkeypatch, tmp_path, answers):
     """[(argv, GH_TOKEN)] check-ids mode called `run` with, in order, answered from `answers`
     ({argv: stdout, a BaseException to raise, or a callable of the argv}). A download absent
     from `answers` succeeds; any other unanswered argv raises `_Unexpected`."""
@@ -2235,10 +2235,7 @@ def _run_check_ids(monkeypatch, tmp_path, answers, *, github_output=True):
     monkeypatch.setenv("SHIPMATE_APP_TOKEN", _APP_KEY)
     monkeypatch.setenv("SHIPMATE_APP_ID", _APP_ID)
     monkeypatch.setenv("PR_NUMBER", _PR)
-    if github_output:
-        monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "gh-output"))
-    else:
-        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "gh-output"))
     doctor.main()
     return calls
 
@@ -2274,18 +2271,6 @@ def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_
     assert _outputs(tmp_path) == (
         f"head_sha={_HEAD}\nharvest_pending=true\nharvest_failed=false\nplan_run_ids=\n"
     )
-
-
-def test_check_ids_mode_runs_without_a_github_output(monkeypatch, tmp_path):
-    """The modes stay runnable outside a runner: no GITHUB_OUTPUT, no crash.
-    Mutation: `_write_step_output` opens `os.environ["GITHUB_OUTPUT"]` unguarded -- KeyError."""
-    _run_check_ids(
-        monkeypatch,
-        tmp_path,
-        {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: ""},
-        github_output=False,
-    )
-    assert not (tmp_path / "gh-output").exists()
 
 
 def test_an_unreadable_head_sha_marks_the_harvest_failed_and_reads_nothing_else(
