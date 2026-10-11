@@ -8,7 +8,7 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## [Unreleased]
+## [0.44.0] — 2026-10-11
 
 ### Changed — BREAKING
 
@@ -35,7 +35,7 @@ section below names the SHA the release tags.
 - **A deploy or bare `shipmate apply` prints the DAG-shape notice before a refusal for too many dependency levels; the bare apply printed none.**
 - **An `env/<name>` tag whose name the environment table could not hold (a `.`, a `/`, a `-plan`/`-apply` suffix) refuses the run; before, under `layout: folder` or `workspace`, a dotted name could make two cells share one plan artifact.**
 - **`shipmate doctor` parses workflow files as YAML: an `if: >-` block scalar, a block-style `options:` list and a wholly inline `on:` mapping are read as GitHub reads them, and a file that does not parse gets one `workflow parse` notice.**
-- **A deploy refuses a head SHA that is not 40 lowercase hex characters, whether it came from the merged pull request or from the pushed commit, before any API read uses it.**
+- **A deploy refuses a head SHA that is not 40 lowercase hex characters, whether it came from the merged pull request or from the pushed commit, before the deploy reads that commit's checks or artifacts.**
 - **A deploy refused for an apply check on a stack that lost its `env/*` tag names every unapplied cell of the merge, and offers a remedy for a deliberate untag (`docs/troubleshooting.md` §A deploy refused an apply check on a stack that lost its env tag).**
 - **`shipmate doctor`'s missing-environment finding says that a missing apply environment refuses the apply before any wave.**
 
@@ -59,7 +59,7 @@ Tags `ce6faac`.
 - **A stack with no `env/*` tag is unmanaged: it is skipped with a notice that counts the unmanaged stacks and names up to ten, instead of failing the run (`CONTRACT.md` §Tag grammar).**
 - **A deploy refuses when its merged pull request holds an open apply check on a stack that lost its `env/*` tag after it was planned, and names every other open check of that merge, which it does not apply either: open a new pull request that retags each stranded stack and changes every other named stack; its deploy applies all of them. Re-running the refused deploy refuses again (`docs/troubleshooting.md`).**
 - **`scripts/onboard` no longer refuses a stack with no `env/*` tag, and provisions every environment the checkout's `.github/shipmate-config.yml` declares as well as every one a stack tags, and names a declared entry no stack tags on its `.github/shipmate-config.yml` checklist item.**
-- **`scripts/onboard` no longer refuses a `shared = true` entry that no stack tags; it provisions the bare `<env>` like any other entry.**
+- **`scripts/onboard` no longer refuses a `shared: true` entry that no stack tags; it provisions the bare `<env>` like any other entry.**
 - **`shipmate doctor`'s and `scripts/onboard`'s shared-environment protection messages say those rules stall every drift sweep covering the environment, and `build-matrix`'s head-repository, head-commit and `tags` refusals name a drift sweep as the workflow with no pull request.**
 
 ### Fixed
@@ -253,7 +253,7 @@ Tags `6c6aed1`.
 
 - **A `run.env` override is refused in the cell, not at detect.** `scripts/env-inject`
   refuses before `tofu init` when a row's `tf_vars` come back changed or unset through
-  `terramate run`. `run.env` may now set `TF_VAR_env` under `layout = "folder"` and
+  `terramate run`. `run.env` may now set `TF_VAR_env` under `layout: folder` and
   `TF_WORKSPACE` under `dry` and `folder`.
 
 ### Fixed
@@ -279,7 +279,7 @@ Tags `c22c2c3`.
 
 ### Changed — BREAKING
 
-- **A shared environment is declared in the table** with `shared = true` in an
+- **A shared environment is declared in the table** with `shared: true` in an
   `environments.<env>` entry. The `SHIPMATE_SHARED_ENVS` variable is no longer read, the
   `shared-envs` action inputs are gone, and `scripts/onboard` drops `--shared`. Every cell
   job binds `${{ matrix.env_binding }}`. `shipmate doctor` reads the mode from the default
