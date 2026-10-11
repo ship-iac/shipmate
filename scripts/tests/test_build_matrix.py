@@ -2025,6 +2025,15 @@ def test_lost_env_tags_ignores_a_reformatted_tag_line(git_repo):
     assert bm.lost_env_tags(base, {"s": {"dev-eu", "prod"}}) == {}
 
 
+def test_lost_env_tags_ignores_an_added_env_literal(git_repo):
+    """A tagged stack adds a comment holding `"env/legacy"`, an environment it does not carry.
+    Mutation: drop the `line.startswith("-")` filter -- `legacy` appears."""
+    base = _commit({"s/stack.tm.hcl": _stack('["env/dev-eu"]')}, "base")
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/stack.tm.hcl": _stack('["env/dev-eu"]') + '# was "env/legacy"\n'}, "comment")
+    assert bm.lost_env_tags(base, {"s": {"dev-eu"}}) == {}
+
+
 _LOST_ENV_WARNING = (
     "::warning::1 stack(s) lost their last env/* tag in this pull request, so shipmate no "
     "longer plans or deploys them: stacks/gone. If that is deliberate (CONTRACT.md §Taking a "
@@ -2132,7 +2141,8 @@ def test_detect_runs_no_diff_without_a_pull_request_base(monkeypatch, tmp_path, 
 
 
 def test_detect_names_the_first_ten_lost_stacks(monkeypatch, tmp_path, capsys):
-    """Mutation: slice with `UNMANAGED_NAMES + 1` -- `stacks/u10` is named."""
+    """Mutation: `UNMANAGED_NAMES + 1` at the last-tag warning's `named(...)` call --
+    `stacks/u10` is named."""
     lost = [f"stacks/u{i:02}" for i in range(11)]
     _run_main(
         monkeypatch,
@@ -2143,12 +2153,12 @@ def test_detect_names_the_first_ten_lost_stacks(monkeypatch, tmp_path, capsys):
         unmanaged=lost,
         diffs=dict.fromkeys(lost, _REMOVED_ENV_LINE),
     )
-    assert (
+    assert _warnings(capsys) == [
         "::warning::11 stack(s) lost their last env/* tag in this pull request, so shipmate no "
         f"longer plans or deploys them: {', '.join(lost[:10])}, and 1 more. If that is "
         "deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise "
         "restore the tag."
-    ) in capsys.readouterr().out.splitlines()
+    ]
 
 
 def test_detect_names_the_first_ten_lost_pairs(monkeypatch, tmp_path, capsys):

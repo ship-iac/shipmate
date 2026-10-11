@@ -28,9 +28,9 @@ MATRIX_LIMIT = 256
 #: under this name. No plan-run lookup does — each reads a cell's own apply check.
 PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
-#: How many unmanaged stack paths the notice and the `unmanaged` output name, and how many
-#: `<stack> / <env>` pairs the partial-untag warning names; the rest are counted. The output
-#: crosses a job boundary in one environment variable, so it stays small.
+#: How many unmanaged stack paths the notice and the `unmanaged` output name; the rest are
+#: counted. The output crosses a job boundary in one environment variable, so it stays small.
+#: The partial-untag warning reuses the cap for its `<stack> / <env>` pairs.
 UNMANAGED_NAMES = 10
 
 
@@ -292,6 +292,7 @@ def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
         head_envs.setdefault(c["stack"], set()).add(c["environment"])
     lost = lost_env_tags(base, head_envs)
     gone = [s for s in unmanaged if s in lost]
+    untagged = set(unmanaged)
     if gone:
         print(
             f"::warning::{len(gone)} stack(s) lost their last env/* tag in this pull request, "
@@ -299,7 +300,7 @@ def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
             ". If that is deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; "
             "otherwise restore the tag."
         )
-    pairs = [f"{s} / {e}" for s, envs in sorted(lost.items()) if s not in unmanaged for e in envs]
+    pairs = [f"{s} / {e}" for s, envs in lost.items() if s not in untagged for e in envs]
     if pairs:
         print(
             f"::warning::{len(pairs)} stack / environment pair(s) lost their env/* tag in this "
