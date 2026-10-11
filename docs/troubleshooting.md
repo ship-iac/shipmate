@@ -594,7 +594,7 @@ branch's** copy of the file — that is the only copy execution reads.
 | `<n> cell(s) carry a workload tag their environment's workloads list does not name` | each named stack's `workload/<name>` tag is outside its environment's `workloads`. Retag the stack, or add the workload to the list on the default branch in a pull request of its own first; the plan reads the default branch's table, so the same pull request cannot fix it |
 | `environments.<env>.workloads lists <w>, which no stack in <env> tags` | a warning, on the paths that scan the whole tree. The workload was listed ahead of the branch that tags it, or its last tag was dropped: tag a stack with it, or remove it from the list once the branch dropping its last tag has merged. An environment no stack tags at all gets the unused-entry warning instead |
 | `environments.<name> is not an environment name` or `environments.<name> carries the environment suffix` | an `environments.<name>` entry whose name no stack tag can carry: Terramate refuses an uppercase letter in a tag, and the name is the bare logical env name, never `<env>-plan` or `<env>-apply`. Rename the entry to the name in the stacks' `env/<name>` tags |
-| `... names 'shipmate-engine', the engine's own environment` | an entry, a `needs` item, a stack's `env/*` tag or a dispatched environment names `shipmate-engine`, with or without a `-plan`/`-apply` suffix. That environment holds the App private key, so no cell may bind it. Rename the entry, retag the stack, or dispatch another environment |
+| `... names 'shipmate-engine', the engine's own environment` | an entry, a `needs` item, a stack's `env/*` tag or a dispatched environment names `shipmate-engine`, with or without a `-plan`/`-apply` suffix. A `shared: true` entry of that name would bind the engine's own environment, which holds the App private key, so the name is refused wherever it is read. Rename the entry, retag the stack, or comment another environment |
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
 | `<key> references GitHub variable <NAME>, which is set to an empty value` | a reference never means an empty string; give the variable a value or write the value into the file |
 | `<key> references GitHub variable "<name>"; GitHub variable names are uppercase` | GitHub stores every variable name uppercase. Write the reference with the spelling the message gives |
@@ -871,8 +871,8 @@ apply holds for each decision, is in [`../CONTRACT.md`](../CONTRACT.md)
 of the file you edited: all three readers resolve `gated` from the
 **default branch**, so a flag added on the pull request asking for the apply
 does nothing until it merges. Then check the entry against the rules below. The
-refusal is by *shape*: a non-boolean `gated`, or an entry name with a suffix, a
-character outside the env charset or the reserved `shipmate-engine`, is rejected loudly, naming the key. Spelling
+refusal is by *shape*: a non-boolean `gated`, or an entry name with a suffix or a
+character outside the env charset, is rejected loudly, naming the key. Spelling
 is never refused, and it warns only where a run has already scanned the whole
 tree: `gated: false` on `environments.dev-eu2` for `dev-eu` is accepted and
 `dev-eu` simply keeps its review requirement, but a run that scanned the tree
@@ -888,8 +888,8 @@ silently inert:
 
 - anything but `true` or `false` — `gated: no`, `gated: 0` or a
   variable reference would otherwise resolve as gated while reading as ungated;
-- an entry name with a `-plan` / `-apply` suffix, outside the env charset
-  (lowercase letters, digits, `-`, `_`), or `shipmate-engine` — the name is matched against the bare
+- an entry name with a `-plan` / `-apply` suffix, or outside the env charset
+  (lowercase letters, digits, `-`, `_`) — the name is matched against the bare
   logical env name carried by the apply checks, so write `environments.dev-eu`,
   not `environments.dev-eu-apply`.
 

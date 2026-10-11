@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
-- **An environment named `shipmate-engine`, the engine's own environment holding the App key, is refused as a table entry, a `needs` element, a stack's `env/*` tag and a dispatched environment, suffixed or not.**
+- **An environment named `shipmate-engine` is refused as a table entry, a `needs` element, a stack's `env/*` tag and a dispatched environment: a `shared: true` entry of that name bound the engine's own environment, which holds the App private key.**
 
 ## [0.44.1] — 2026-10-11
 

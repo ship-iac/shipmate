@@ -890,11 +890,11 @@ def check_env_name(e, label, matched):
     Guards a name outside the charset, and one carrying a `-plan`/`-apply` environment
     suffix -- each is matched against the bare logical env name, matches nothing, and so
     orders, holds back or exempts nothing while reading as if it did. It also refuses
-    `ENGINE_ENV`, with or without one suffix, because that environment holds the App's
-    private key and a cell binding it would run the pull request's code beside that key;
-    the suffixed form gets this message, not the suffix one whose remedy is the reserved
-    name. `label` opens each message and `matched` names what the suffix message says is
-    matched.
+    `ENGINE_ENV`, with or without one suffix: a `shared: true` entry of that name would
+    bind the engine's own environment, which holds the App's private key, and one rule for
+    every name is simpler than a shared-only rule. The suffixed form gets this message, not
+    the suffix one whose remedy is the reserved name. `label` opens each message and
+    `matched` names what the suffix message says is matched.
 
     Charset before suffix: a suffixed name passes the charset, so the two are separate
     checks, and this order gives `"dev eu-plan"` the message about its space.

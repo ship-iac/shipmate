@@ -263,8 +263,9 @@ never used.
     environment?) and binds `foo-apply-apply` on the apply path. An
     `environments.<name>` entry, a `needs` item, an `env/<name>` stack tag or a
     dispatched environment carrying the suffix refuses. `shipmate-engine` is
-    reserved too, suffixed or not: it is the engine's own environment, holding
-    the App private key, and the same four refuse it.
+    reserved too, and the same four refuse it: a `shared: true` entry of that
+    name would bind the engine's own environment, which holds the App private
+    key, and one rule for every name is simpler than a shared-only rule.
 - **A binding that disagrees with the environment names is invisible to the
   fingerprint, on every layout.** Both sides derive a cell's variables from
   `matrix.environment` and the same default-branch table, so they hash
@@ -657,7 +658,7 @@ variable rows depend on the run as well as the file, so they are not structural.
 | `layout: tf_vars` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables |
 | An empty `region` (`region:`, or `region: #eu-west-1`, which YAML reads as empty) | an empty region derives no `TF_VAR_region` the fingerprint can tell apart, and the credentials step needs one |
 | A cell's `workload/<name>` tag its environment's `workloads` does not list | a listed workload is the only one the default branch grants a role to. One refusal names every such cell. Checked only for the cells the run plans, applies or unlocks: a completed, excluded or held cell is not refused, and neither is an untagged cell, a tag in an environment naming no identity, or one in an environment writing no list |
-| An environment name outside the env-name charset, carrying a `-plan`/`-apply` suffix, or `shipmate-engine` | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing; `shipmate-engine`, suffixed or not, is the engine's own environment, and a cell binding it would run beside the App private key |
+| An environment name outside the env-name charset, carrying a `-plan`/`-apply` suffix, or `shipmate-engine` | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing. A `shared: true` entry named `shipmate-engine` would bind the engine's own environment, which holds the App private key, so that name is refused wherever an environment name is read |
 | An environment key other than `region`, `tf_vars`, `identity`, `workloads`, `shared`, `needs`, `explicit`, `gated` | catches a misspelled key and a top-level setting indented under an entry; credentials live in `identities.<name>`, never in an entry |
 | `identity` that is not a string, or names no `identities.<name>` entry | the refusal lists the identities the file declares |
 | An environment naming an identity with no non-empty string `region` | the credentials step authenticates against the environment's region and requires one |
@@ -1323,9 +1324,10 @@ deployment rather than the code review (see `docs/hardening.md`).
 `gated` holds `true` or `false`. Any other value — `no`, `False`, `0`, a variable
 reference — is a loud configuration error naming `environments.<env>.gated`: a
 silently inert value would leave an operator believing an environment is ungated
-when it is not. The entry's own name is held to the env-name charset, the
-`-plan` / `-apply` suffix rule and the reserved `shipmate-engine`, so an entry no
-stack's tag can name is refused rather than left to exempt nothing.
+when it is not. The entry's own name is held to the env-name charset and the
+`-plan` / `-apply` suffix rule, so an entry no stack's tag can name is refused
+rather than left to exempt nothing, and it may not be the reserved
+`shipmate-engine` (§Tag grammar).
 
 **Absent means gated**: an entry without `gated`, or with `gated: true`, keeps
 the ruleset's review requirement. There is no second source for an absent key
