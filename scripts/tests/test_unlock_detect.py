@@ -179,6 +179,32 @@ def test_unlock_is_not_capped_by_the_whole_tree_matrix_limit(monkeypatch, tmp_pa
     ]
 
 
+def test_unlock_refuses_a_queue_above_the_matrix_limit(monkeypatch, tmp_path):
+    """A queue of 257 pending cells in the target env cannot fit one matrix.
+
+    Mutation: drop `cap_cells` from the `full_tree` call in `main`, and 257 cells are written.
+    """
+    _unlock_env(monkeypatch, tmp_path)
+    stacks = [f"stacks/s{i}" for i in range(257)]
+    _stub_unlock_tree(
+        monkeypatch,
+        [{"stack": s, "environment": "dev-eu", "workload": "app"} for s in stacks],
+        [
+            _check(name=f"apply / {s} / dev-eu", status="in_progress", conclusion=None)
+            for s in stacks
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        ud.main()
+    assert str(exc.value) == (
+        "::error::257 plan cells exceeds the GitHub Actions matrix limit of 256. Split the "
+        "change across several pull requests -- the matrix is built over `terramate list "
+        "--changed`. A one-line edit to a shared local module correctly marks every dependent "
+        "stack changed and is one atomic change by nature; there the only lever is to reduce "
+        "the number of environments in play."
+    )
+
+
 def test_unlock_emits_no_wave_array_with_any_member(monkeypatch, tmp_path):
     """unlock.yml's matrix reads `cells` alone; a wave output here would be an apply matrix
     with nothing reading it.
