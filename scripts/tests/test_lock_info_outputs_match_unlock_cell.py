@@ -21,10 +21,10 @@ and a dropped write shrinks one side.
 step ever legitimately stops echoing an output of its own, and an exclusion regex that breaks
 today fails loud anyway, because `probe_status` then survives into the equality.
 
-A probe output counts as consumed only where a step's `env:` values or its `if:` name it. A
-mapping key, a step name or `run:` text does not: GitHub never evaluates them into the step, so
-counting them would let `LOCK_ID: ""` pass beside a stray mention. A direct `${{ }}` read inside
-`run:` is out of scope and must be written as an `env:` entry instead.
+A probe output counts as consumed only where it reaches a step through an `env:` value or `if:`.
+A mention elsewhere (a mapping key, a step name, `run:` text) does not count, so it cannot keep
+`LOCK_ID: ""` green. A direct `${{ }}` read inside `run:` is out of scope and must be written as
+an `env:` entry instead.
 """
 
 import re
@@ -37,7 +37,7 @@ _ACTION = "unlock-cell"
 
 def _consumed(steps):
     wired = [v for s in steps for v in [*(s.get("env") or {}).values(), s.get("if", "")]]
-    return set(re.findall(r"steps\.probe\.outputs\.([a-z_]+)", "\n".join(map(str, wired))))
+    return set(re.findall(r"steps\.probe\.outputs\.([A-Za-z0-9_-]+)", "\n".join(map(str, wired))))
 
 
 def test_lock_info_writes_exactly_the_probe_outputs_unlock_cell_consumes():
@@ -66,7 +66,7 @@ def test_lock_info_writes_exactly_the_probe_outputs_unlock_cell_consumes():
 
 
 def test_consumed_counts_only_env_values_and_if():
-    """Making `_consumed` scan the whole step reddens this."""
+    """Making `_consumed` scan the whole step, or read only one step, reddens this."""
     step = {
         "name": "${{ steps.probe.outputs.name_ref }}",
         "if": "${{ steps.probe.outputs.in_if == 'true' }}",
@@ -76,4 +76,5 @@ def test_consumed_counts_only_env_values_and_if():
         },
         "run": "# was ${{ steps.probe.outputs.run_ref }}\ntrue\n",
     }
-    assert _consumed([step]) == {"in_env", "in_if"}
+    other = {"env": {"IN_ENV2": "${{ steps.probe.outputs.in_env2 }}"}}
+    assert _consumed([step, other]) == {"in_env", "in_if", "in_env2"}
