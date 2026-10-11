@@ -214,16 +214,16 @@ def _review_rule_warnings(ctx):
     configuration with no unforgeable merge-time control at all, so it must not
     read as the sole-maintainer note.
 
-    Count 0 is a finding in its own right while any environment is gated: `gated`
-    only relaxes a review the ruleset requires, so with no count required a gated
-    environment is held only where a code-owner review is required for the changed
-    files. With code-owner review on it is a notice naming the gated environments,
-    since they are still held wherever owned files change; with it off it is a
-    warning beside the code-owner warning. It is the sole-maintainer note only when
-    no environment is gated or the default branch's table cannot be read
+    Count 0 is a finding in its own right while any environment is gated: `gated` only
+    relaxes a review the ruleset requires, so with no count required a gated environment
+    is held only where a code-owner review is required for the changed files. With
+    code-owner review on it is a notice naming the gated environments, since a
+    non-owner's pull request changing owned files still needs an owner's review; with it
+    off it is a warning beside the code-owner warning. It is the sole-maintainer note
+    only when no environment is gated or the default branch's table cannot be read
     (`_no_review_findings`). Count 0 with `require_last_push_approval` on is a warning
-    whatever else is set: a sole maintainer cannot approve their own last push, so cannot
-    merge, and the sole-maintainer note is then omitted.
+    whatever else is set: a sole maintainer cannot approve their own last push, so
+    cannot merge, and the sole-maintainer note is then omitted.
 
     Two limits, both stated in the finding text or the docs rather than probed:
     the endpoint returns rulesets only (classic branch protection reads as no

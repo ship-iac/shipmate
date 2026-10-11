@@ -90,10 +90,10 @@ JSON
 ```
 
 This body is the team posture. For a single maintainer, set
-`required_approving_review_count` to `0`, turn `require_last_push_approval` off,
-and narrow `CODEOWNERS`, which keeps code-owner review on (the single-maintainer
-paragraph below has why). Turning `require_code_owner_review` off instead makes
-`shipmate doctor` warn on every run; `docs/hardening.md` §3–5 names the cost.
+`required_approving_review_count` to `0` and turn `require_last_push_approval` off
+(the single-maintainer paragraph below has why). Turning `require_code_owner_review`
+off as well makes `shipmate doctor` warn on every run; `docs/hardening.md` §3–5 names
+the cost.
 
 When `$id` is non-empty, replace that ruleset by its id. The `PUT` replaces the
 ruleset with the body, so carry any bypass actors it already holds into the
@@ -131,37 +131,30 @@ and the workflows live in.
 **A single maintainer cannot merge with `require_last_push_approval` on, at
 any approval count.** The pusher cannot approve their own last push, so even at
 `required_approving_review_count: 0` nobody is left to approve, and `shipmate
-doctor` warns. `require_code_owner_review` blocks the same way where
-`CODEOWNERS` covers the changed files: the author cannot approve their own pull
-request, and an App cannot be a code owner. The sole-maintainer posture is
-three values: `required_approving_review_count: 0`, `require_last_push_approval`
-off, and `require_code_owner_review` off or a narrow `CODEOWNERS` — covering
-`/.github/workflows/` alone, say, so ordinary IaC pull requests need no
-code-owner approval. The alternative is a bypass actor on the ruleset, which
-spends exactly the control a leaked App key cannot get past.
+doctor` warns. The sole-maintainer posture is two values:
+`required_approving_review_count: 0` and `require_last_push_approval` off. At that
+count keep `require_code_owner_review` on. Measured 2026-10-11 at count 0 with one
+individual code owner: GitHub required no code-owner review on a pull request that
+owner authored, so it merged, and held one someone else opened changing an owned
+file until the owner approved. The same rule holds a pull request opened with a
+leaked App key, when it changes an owned file. Two gaps stay open at count 0: a pull
+request changing only files no `CODEOWNERS` entry covers needs no review from
+anyone, and, inferred rather than measured, a commit someone else pushes onto the
+maintainer's own pull request is not held, since the pull request's author still
+owns the files and last-push approval is off. Team-owned paths and the exemption at
+count 1 or more were not measured.
 
-**A narrow `CODEOWNERS` leaves the environment table under ordinary review.**
-The role a cell assumes is a line in `.github/shipmate-config.yml` on the default
-branch, not a GitHub Environment variable, so changing it is a pull request
-rather than a repository-settings change. Under a `CODEOWNERS` covering
-`/.github/workflows/` alone that pull request needs no code-owner approval — the
-rule is a no-op for changed files with no owner, and `/.github/shipmate-config.yml` is
-not under `/.github/workflows/`. Nothing is bypassed: the table takes effect only
-once merged to the default branch, and every other control still applies. What
-moved is the bar for naming a role, from settings access to ordinary review. Add
-`/.github/shipmate-config.yml` to `CODEOWNERS` if you want the code-owner half on it.
+**Own the environment table and `CODEOWNERS` itself.** The role a cell assumes is a line
+in `.github/shipmate-config.yml` on the default branch, not a GitHub Environment
+variable, so changing it is a pull request rather than a repository-settings
+change. At count 0, a pull request changing that file with no `CODEOWNERS` entry
+covering it needs no review at all, a leaked App key's included, and so does one
+removing that entry from an unowned `CODEOWNERS`. Add `/.github/shipmate-config.yml`
+and `/.github/CODEOWNERS` to `CODEOWNERS` on their own pull request: GitHub
+reads `CODEOWNERS` from the base branch, so an entry added beside a role change
+does not apply to that change.
 
-**If you narrow `CODEOWNERS`, land that on its own pull request first.** GitHub
-evaluates `CODEOWNERS` from the pull request's base branch, so a narrowing
-committed alongside the change it is meant to unblock does not apply to that
-pull request — the old ownership still decides, and the pull request stays
-unmergeable. This bites precisely on a `CODEOWNERS` covering
-`/.github/workflows/`, because the pull requests it blocks are the ones that
-edit a workflow — an engine re-pin, say. It
-also has a floor: the narrowing is itself mergeable only because
-`.github/CODEOWNERS` is not under a path it owns. A `CODEOWNERS` entry covering
-`/.github/` — or the file's own path — owns the fix, and then a bypass actor is
-the only way out. Before changing `required_approving_review_count` to `0`, read
+Before changing `required_approving_review_count` to `0`, read
 `docs/hardening.md` §3–5. That page has the reasoning for each of these rules;
 this block is its recommendation made pasteable.
 
@@ -191,7 +184,7 @@ cannot be determined at all — a wiring failure, never a policy state — apply
 fails closed rather than proceeding unreviewed.)
 
 - **Sole-maintainer mode** (`required_approving_review_count: 0`, with
-  `require_last_push_approval` off; §Reproducible ruleset has the three values
+  `require_last_push_approval` off; §Reproducible ruleset has the two values
   and why): `shipmate apply` needs no approving review (a one-person repo can never self-approve
   on GitHub) — but a `CHANGES_REQUESTED` review still blocks apply until
   resolved. `shipmate doctor` names each gated environment when it can read
