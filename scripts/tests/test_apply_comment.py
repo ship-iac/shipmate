@@ -1137,13 +1137,14 @@ def test_load_check_maps_judges_the_newest_run_per_name(tmp_path):
 def test_load_check_maps_empty_app_id_warns_and_returns_no_data(tmp_path, capsys):
     """Must NOT fail loud the way from_app does: a missing SHIPMATE_APP_ID is only allowed to cost
     this one display axis, never the whole comment, and the warning carries from_app's error
-    naming the variable. Mutation: remove `SystemExit` from load_check_maps' except tuple (the
-    SystemExit propagates)."""
+    naming the variable without its own `::error::` prefix. Mutations: remove `SystemExit` from
+    load_check_maps' except tuple (the SystemExit propagates); drop the `::error::` strip (the
+    warning embeds it)."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     assert ac.load_check_maps(str(p), "") == (set(), set())
     assert capsys.readouterr().out == (
-        f"::warning::{p} could not be read as apply checks (::error::SHIPMATE_APP_ID is empty; "
+        f"::warning::{p} could not be read as apply checks (SHIPMATE_APP_ID is empty; "
         "set the SHIPMATE_APP_ID repo/org variable to the shipmate App id (see "
         "docs/github-app.md).) -- the apply result comment falls back to artifact-only status\n"
     )
@@ -1236,14 +1237,18 @@ def test_load_check_maps_non_numeric_app_id_degrades_with_a_warning(tmp_path, ca
     """A non-numeric SHIPMATE_APP_ID (the App's client id pasted in place of its numeric app id)
     makes ag.from_app's int(app_id) raise ValueError. That must cost only the check-state display
     axis, the same degradation as a malformed checks.jsonl. Mutation: remove `ValueError` from
-    load_check_maps' except tuple (the ValueError propagates)."""
+    load_check_maps' except tuple (the ValueError propagates).
+
+    The text between the parentheses is Python's own `int()` message, so it is read from
+    `int()` here rather than pinned as a literal."""
     p = tmp_path / "checks.jsonl"
     p.write_text("\n".join(_jsonl(_check("apply / stacks/app / dev-eu"))), encoding="utf-8")
     assert ac.load_check_maps(str(p), "Iv1.notanumericid") == (set(), set())
+    with pytest.raises(ValueError) as exc:
+        int("Iv1.notanumericid")
     assert capsys.readouterr().out == (
-        f"::warning::{p} could not be read as apply checks (invalid literal for int() with "
-        "base 10: 'Iv1.notanumericid') -- the apply result comment falls back to "
-        "artifact-only status\n"
+        f"::warning::{p} could not be read as apply checks ({exc.value}) -- the apply result "
+        "comment falls back to artifact-only status\n"
     )
 
 
