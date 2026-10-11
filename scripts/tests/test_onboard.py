@@ -634,8 +634,12 @@ def test_conforming_engine_environment_writes_nothing(monkeypatch):
     secret names are read in `main`), no write, and every report line `ok` so the exit
     code stays 0.
 
-    Mutation: drop the `custom_branch_policies` test in `_reconcile_env`, so a
-    conforming environment is PUT again.
+    `shipmate-engine` has no approval rules, which `doctor` notes but does not warn on, so
+    that is no `differs` either.
+
+    Mutations: drop the `custom_branch_policies` test in `_reconcile_env`, so a
+    conforming environment is PUT again; drop the `level == dr.WARNING` filter, so the
+    NOTICE becomes a `differs` line.
     """
     fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
@@ -680,9 +684,9 @@ def test_shared_mode_binds_one_bare_environment(monkeypatch):
     The two suffixed reads are the naming-conflict probe, which in shared mode looks for
     the split pair: they 404 here, so the bare environment is reconciled.
 
-    Mutation: make `_env_names` ignore `shared` and always return the split pair.
+    Mutation: pass `False` for `shared` to `ec.env_names` in `_reconcile_envs`, which
+    reconciles the split pair instead.
     """
-    assert onboard._env_names("dev-eu", {"dev-eu"}) == [("dev-eu", "apply")]
     fake = make_gh(
         {
             "repos/o/r/environments/dev-eu": {"deployment_branch_policy": CUSTOM_POLICY},
@@ -798,11 +802,35 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
     assert onboard._exit_code() == 2
 
 
+#: doctor's WARNING sentences `_reconcile_env` reports as `differs` details. Hand-written:
+#: a detail derived from the code it checks says whatever the code says.
+PLAN_POLICY_WARNING = (
+    "GitHub Environment `dev-eu-plan` is a plan environment but has a deployment branch "
+    "policy. Plan jobs run at the pull request's base ref, so a policy that does not name "
+    "every branch pull requests target refuses those plan cells; plan environments must "
+    "allow all branches."
+)
+PLAN_RULES_WARNING = (
+    "GitHub Environment `dev-eu-plan` is a plan environment but has protection rules "
+    "(required_reviewers, wait_timer), so plan jobs will not start immediately; put "
+    "reviewers on `dev-eu-apply` instead."
+)
+SHARED_RULES_WARNING = (
+    "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` in its "
+    "`environments.dev-eu` entry) has protection rules (required_reviewers, wait_timer). A "
+    "protection rule gates every job that binds the environment and GitHub offers no per-job "
+    "filter, so the plan cells and every drift sweep covering it will not start immediately "
+    "either. To gate applies only, split it into `dev-eu-plan` and `dev-eu-apply` and remove "
+    "`shared: true` from its `environments.dev-eu` entry."
+)
+
+
 def test_plan_environment_carrying_a_policy_is_reported_not_stripped(monkeypatch):
     """Removing a consumer's protection is not this script's call, and doctor already
     warns on it: the plan half is reported as differing and left untouched.
 
-    Mutation: PUT `_PLAN_BODY` over it instead of reporting.
+    Mutation: PUT `_PLAN_BODY` over a drifting plan environment in place of the `ok` report
+    branch.
     """
     fake = make_gh(
         {
@@ -824,14 +852,7 @@ def test_plan_environment_carrying_a_policy_is_reported_not_stripped(monkeypatch
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
     ]
     assert onboard.REPORT == [
-        (
-            "differs",
-            "dev-eu-plan",
-            "it carries a deployment branch policy, which blocks every plan cell whose "
-            "pull request targets a branch the policy does not name. Removing a "
-            "protection a consumer set is not this script's call, so it is reported "
-            "and left alone.",
-        ),
+        ("differs", "dev-eu-plan", PLAN_POLICY_WARNING),
         ("ok", "dev-eu-apply", ""),
         ("ok", "dev-eu-apply branch policy", "main"),
     ]
@@ -947,8 +968,8 @@ def test_plan_environment_with_a_protection_rule_is_reported(monkeypatch):
     environment's plan cells and every drift sweep covering it. It is drift, not something
     to strip: removing a protection a consumer set is not this script's call.
 
-    Mutation: drop the `protection_rules` arm of `_plan_drift`, so the environment
-    reports `ok` and the run exits 0.
+    Mutation: pass `"apply"` instead of `role` to `_env_shape_findings` for a plan
+    environment, so the environment reports `ok` and the run exits 0.
     """
     fake = make_gh(
         {
@@ -973,13 +994,7 @@ def test_plan_environment_with_a_protection_rule_is_reported(monkeypatch):
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
     ]
     assert onboard.REPORT == [
-        (
-            "differs",
-            "dev-eu-plan",
-            "it carries protection rules (required_reviewers, wait_timer), which stall "
-            "plan cells. Removing a protection a consumer set is not this script's "
-            "call, so it is reported and left alone.",
-        ),
+        ("differs", "dev-eu-plan", PLAN_RULES_WARNING),
         ("ok", "dev-eu-apply", ""),
         ("ok", "dev-eu-apply branch policy", "main"),
     ]
@@ -2988,13 +3003,13 @@ def test_onboard_and_env_config_share_one_table_rule(monkeypatch):
 
 def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkeypatch):
     """GitHub synthesizes a `branch_policy` protection rule for any environment that has
-    a deployment branch policy (`scripts/doctor` filters the same entry). Counted, it
-    makes every policy-carrying plan environment also report "it carries protection
-    rules (branch_policy), which stall plan cells" -- false, because a branch policy
+    a deployment branch policy. Counted, it makes every policy-carrying plan environment
+    also report protection rules (branch_policy) -- false, because a branch policy
     refuses the cell rather than delaying it, and it names a rule the consumer cannot
     find in the UI.
 
-    Mutation: drop the `!= "branch_policy"` filter from `_plan_drift`.
+    Mutation: remove `- {"branch_policy"}` from `_shipmate.approval_rules`, which adds a
+    second `differs` line.
     """
     fake = make_gh(
         {
@@ -3013,14 +3028,7 @@ def test_a_plan_environment_with_a_branch_policy_reports_the_policy_alone(monkey
     monkeypatch.setattr(onboard, "_run", fake)
     onboard._reconcile_envs(ctx())
     assert onboard.REPORT == [
-        (
-            "differs",
-            "dev-eu-plan",
-            "it carries a deployment branch policy, which blocks every plan cell whose "
-            "pull request targets a branch the policy does not name. Removing a "
-            "protection a consumer set is not this script's call, so it is reported and "
-            "left alone.",
-        ),
+        ("differs", "dev-eu-plan", PLAN_POLICY_WARNING),
         ("ok", "dev-eu-apply", ""),
         ("ok", "dev-eu-apply branch policy", "main"),
     ]
@@ -3033,7 +3041,8 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch)
     `dev-eu-plan` the engine binds.
 
     Mutation: probe the bound naming instead of the unused one
-    (`[n for n, _r in _env_names(env, ctx["shared"])]` in the comprehension). It still
+    (`ec.env_names(env, env in ctx["shared"]).values()` in place of `_unused_naming(...)`
+    in the comprehension). It still
     refuses, on `dev-eu-plan`, and tells the operator to delete an environment the
     engine binds -- which the recorded reads and the message below both catch.
     """
@@ -3088,13 +3097,11 @@ def test_shared_mode_reports_the_unused_naming_too(monkeypatch):
 def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch):
     """A shared env is one bare environment on both paths, so a required reviewer there
     gates the plan cells and every drift sweep covering it too -- GitHub has no per-job filter.
-    `doctor` warns on it; `_env_names` collapses the env to `role == "apply"`, which
-    would otherwise report a conforming branch policy as plain `ok`.
+    `doctor` warns on it under the `shared` role; under the `apply` role the same rules are
+    the reviewer gate, and the conforming branch policy would report plain `ok`.
 
-    Mutation: drop the `_report_shared_approval` call from `_reconcile_env`, which loses
-    the `differs` line. Dropping its `name in ctx["shared"]` test does nothing here --
-    both suffixed names are absent in this fixture -- and reddens
-    `test_a_split_apply_environments_reviewers_are_not_reported` instead.
+    Mutation: pass `"apply"` instead of `role` to `_env_shape_findings` for a shared
+    environment, which loses the `differs` line.
     """
     fake = make_gh(
         {
@@ -3124,14 +3131,7 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
     ]
     assert onboard.REPORT == [
         ("ok", "dev-eu", ""),
-        (
-            "differs",
-            "dev-eu",
-            "it carries protection rules (required_reviewers, wait_timer) and is shared, "
-            "so the plan cells and every drift sweep covering it do not start immediately either. "
-            "To gate applies alone, split it into `dev-eu-plan` and `dev-eu-apply` and "
-            "drop `shared: true` from `environments.dev-eu`.",
-        ),
+        ("differs", "dev-eu", SHARED_RULES_WARNING),
         ("ok", "dev-eu branch policy", "main"),
     ]
     assert onboard._exit_code() == 2
@@ -3141,7 +3141,8 @@ def test_a_split_apply_environments_reviewers_are_not_reported(monkeypatch):
     """Required reviewers on `<env>-apply` are the reviewer gate docs/hardening.md row 6
     asks for, not drift: only a *shared* bare environment's rules stall the plan path.
 
-    Mutation: drop the `name in ctx["shared"]` test in `_report_shared_approval`.
+    Mutation: pass `"plan"` instead of `role` to `_env_shape_findings` for an apply
+    environment; the reviewers then raise the plan WARNING as a `differs` line.
     """
     fake = make_gh(
         {
@@ -3165,6 +3166,96 @@ def test_a_split_apply_environments_reviewers_are_not_reported(monkeypatch):
         ("ok", "dev-eu-apply branch policy", "main"),
     ]
     assert onboard._exit_code() == 0
+
+
+def test_a_shared_environment_with_only_a_branch_policy_is_ok(monkeypatch):
+    """On a shared environment a deployment branch policy is a real control and having no
+    approval rules is the only shape available; `doctor` notes both and warns on neither,
+    so the run stays `ok` and exits 0.
+
+    Mutation: drop the `level == dr.WARNING` filter in `_reconcile_env`, which turns both
+    NOTICEs into `differs` lines.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": {
+                "deployment_branch_policy": CUSTOM_POLICY,
+                "protection_rules": [{"type": "branch_policy"}],
+            },
+            "repos/o/r/environments/dev-eu-plan": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-apply": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx(shared={"dev-eu"}))
+    assert onboard.REPORT == [("ok", "dev-eu", ""), ("ok", "dev-eu branch policy", "main")]
+    assert onboard._exit_code() == 0
+
+
+def test_a_plan_environment_with_a_policy_and_protection_rules_reports_both(monkeypatch):
+    """Each `doctor` WARNING is its own `differs` line under the one subject, so neither
+    remedy hides behind the other.
+
+    Mutation: report `drift[:1]` instead of `drift` in `_reconcile_env`.
+    """
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": SystemExit("gh: Not Found (HTTP 404)"),
+            "repos/o/r/environments/dev-eu-plan": {
+                "deployment_branch_policy": CUSTOM_POLICY,
+                "protection_rules": [
+                    {"type": "branch_policy"},
+                    {"type": "required_reviewers"},
+                    {"type": "wait_timer"},
+                ],
+            },
+            "repos/o/r/environments/dev-eu-apply": {"deployment_branch_policy": CUSTOM_POLICY},
+            "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": {
+                "total_count": 1,
+                "branch_policies": [{"name": "main"}],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx())
+    assert onboard.REPORT == [
+        ("differs", "dev-eu-plan", PLAN_RULES_WARNING),
+        ("differs", "dev-eu-plan", PLAN_POLICY_WARNING),
+        ("ok", "dev-eu-apply", ""),
+        ("ok", "dev-eu-apply branch policy", "main"),
+    ]
+    assert onboard._exit_code() == 2
+
+
+def test_a_shared_environment_absent_on_read_is_created(monkeypatch):
+    """A fresh shared environment has no payload to judge: it is created with its branch
+    policy and no shape finding is computed for it.
+
+    Mutation: drop the `data is not None` guard on the `_env_shape_findings` call, which
+    hands it `None` and raises.
+    """
+    absent = SystemExit("gh: Not Found (HTTP 404)")
+    fake = make_gh(
+        {
+            "repos/o/r/environments/dev-eu": absent,
+            "repos/o/r/environments/dev-eu-plan": absent,
+            "repos/o/r/environments/dev-eu-apply": absent,
+            "repos/o/r/environments/dev-eu/deployment-branch-policies": {
+                "total_count": 0,
+                "branch_policies": [],
+            },
+        }
+    )
+    monkeypatch.setattr(onboard, "_run", fake)
+    onboard._reconcile_envs(ctx(shared={"dev-eu"}))
+    assert [(verb, subject) for verb, subject, _detail in onboard.REPORT] == [
+        ("create", "dev-eu"),
+        ("create", "dev-eu branch policy"),
+    ]
 
 
 def test_a_diverging_repository_app_id_is_refused(monkeypatch):
