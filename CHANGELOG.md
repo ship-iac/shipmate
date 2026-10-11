@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Changed
+
+- **`docs/branch-protection.md`'s sole-maintainer posture is `required_approving_review_count: 0` and `require_last_push_approval` off, with code-owner review kept on: GitHub requires no code-owner review from a pull request author who owns the changed files. Own `/.github/shipmate-config.yml` and `/.github/CODEOWNERS`.**
+
 ## [0.44.0] — 2026-10-11
 
 Tags `038dcf7`.
