@@ -252,10 +252,10 @@ Control 3 is the ruleset in `docs/branch-protection.md` — required
 { "type": "deletion" }
 ```
 
-This is the team posture. A single maintainer sets the count to `0`, turns
-`require_last_push_approval` off, and either narrows `CODEOWNERS` or turns
-`require_code_owner_review` off (the costliest version, below);
-`docs/branch-protection.md` §Reproducible ruleset has why.
+This is the team posture. A single maintainer sets the count to `0` and turns
+`require_last_push_approval` off; `docs/branch-protection.md` §Reproducible ruleset
+has why. Turning `require_code_owner_review` off as well is the costliest version,
+below.
 
 The two review-freshness settings do different jobs, and the apply path only
 ever sees their combined result via `reviewDecision`:
@@ -281,10 +281,11 @@ the most. GitHub then reports no review decision at all, and
 anywhere requires a reviewed pull request — and no merge-time control a holder
 of the App private key cannot satisfy is left either. `shipmate doctor` warns
 whenever code-owner review is off, whatever the count is. Count `0` with
-`require_code_owner_review` on is a different setting: the code-owner review
-still gates the merge wherever a `CODEOWNERS` entry covers the changed files,
-which is why doctor reports that combination as a note rather than a warning,
-naming any gated environments in it. Count `0` with `require_last_push_approval`
+`require_code_owner_review` on is a different setting, which doctor reports as a
+note rather than a warning, naming any gated environments in it. Under it, a pull
+request its sole code owner authored was mergeable with no review (measured
+2026-10-11); whether it holds a pull request someone else authored was not
+measured. Count `0` with `require_last_push_approval`
 on warns whatever else is set, and omits the sole-maintainer note; the
 gated-environments note still appears.
 Either way, a `CHANGES_REQUESTED` review still blocks an apply until it is
@@ -342,12 +343,7 @@ coverage, and it never fails a run, so that is a warning, not enforcement.
 **Know which copy of `CODEOWNERS` decides, before you need to change it.** GitHub
 evaluates it from the pull request's base branch, so narrowing or widening
 ownership never applies to the pull request carrying the edit — it has to merge
-first, on its own. That timing is the difference between a sole maintainer being
-able to merge an engine re-pin that touches a workflow file and not being
-able to. The rule also has a floor to check now: an entry that owns `/.github/`
-(or `CODEOWNERS`' own path) owns the fix too, leaving a ruleset bypass actor as
-the only way out — and that spends the one merge-time control a leaked App key
-cannot satisfy. `docs/branch-protection.md` has the sole-maintainer shape.
+first, on its own. `docs/branch-protection.md` has the sole-maintainer shape.
 
 ## 6. Environment reviewers — the gate that holds after a merge
 

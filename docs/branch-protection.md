@@ -90,10 +90,10 @@ JSON
 ```
 
 This body is the team posture. For a single maintainer, set
-`required_approving_review_count` to `0`, turn `require_last_push_approval` off,
-and narrow `CODEOWNERS`, which keeps code-owner review on (the single-maintainer
-paragraph below has why). Turning `require_code_owner_review` off instead makes
-`shipmate doctor` warn on every run; `docs/hardening.md` §3–5 names the cost.
+`required_approving_review_count` to `0` and turn `require_last_push_approval` off
+(the single-maintainer paragraph below has why). Turning `require_code_owner_review`
+off as well makes `shipmate doctor` warn on every run; `docs/hardening.md` §3–5 names
+the cost.
 
 When `$id` is non-empty, replace that ruleset by its id. The `PUT` replaces the
 ruleset with the body, so carry any bypass actors it already holds into the
@@ -131,16 +131,15 @@ and the workflows live in.
 **A single maintainer cannot merge with `require_last_push_approval` on, at
 any approval count.** The pusher cannot approve their own last push, so even at
 `required_approving_review_count: 0` nobody is left to approve, and `shipmate
-doctor` warns. `require_code_owner_review` blocks the same way where
-`CODEOWNERS` covers the changed files: the author cannot approve their own pull
-request, and an App cannot be a code owner. The sole-maintainer posture is
-three values: `required_approving_review_count: 0`, `require_last_push_approval`
-off, and `require_code_owner_review` off or a narrow `CODEOWNERS` — covering
-`/.github/workflows/` alone, say, so ordinary IaC pull requests need no
-code-owner approval. The alternative is a bypass actor on the ruleset, which
-spends exactly the control a leaked App key cannot get past.
+doctor` warns. The sole-maintainer posture is two values:
+`required_approving_review_count: 0` and `require_last_push_approval` off. At that
+count `require_code_owner_review` can stay on: a pull request its sole code owner
+authored, changing a file `CODEOWNERS` gives that owner, was mergeable with no
+review and no bypass actor (measured 2026-10-11). Whether code-owner review at
+count `0` still holds a pull request someone else authored, such as one opened with
+a leaked App key, was not measured.
 
-**A narrow `CODEOWNERS` leaves the environment table under ordinary review.**
+**A `CODEOWNERS` that does not cover the environment table leaves it under ordinary review.**
 The role a cell assumes is a line in `.github/shipmate-config.yml` on the default
 branch, not a GitHub Environment variable, so changing it is a pull request
 rather than a repository-settings change. Under a `CODEOWNERS` covering
@@ -151,17 +150,10 @@ once merged to the default branch, and every other control still applies. What
 moved is the bar for naming a role, from settings access to ordinary review. Add
 `/.github/shipmate-config.yml` to `CODEOWNERS` if you want the code-owner half on it.
 
-**If you narrow `CODEOWNERS`, land that on its own pull request first.** GitHub
-evaluates `CODEOWNERS` from the pull request's base branch, so a narrowing
-committed alongside the change it is meant to unblock does not apply to that
-pull request — the old ownership still decides, and the pull request stays
-unmergeable. This bites precisely on a `CODEOWNERS` covering
-`/.github/workflows/`, because the pull requests it blocks are the ones that
-edit a workflow — an engine re-pin, say. It
-also has a floor: the narrowing is itself mergeable only because
-`.github/CODEOWNERS` is not under a path it owns. A `CODEOWNERS` entry covering
-`/.github/` — or the file's own path — owns the fix, and then a bypass actor is
-the only way out. Before changing `required_approving_review_count` to `0`, read
+**Change `CODEOWNERS` on its own pull request.** GitHub evaluates `CODEOWNERS`
+from the pull request's base branch, so an ownership change committed alongside
+another change does not apply to that pull request: the old ownership still
+decides. Before changing `required_approving_review_count` to `0`, read
 `docs/hardening.md` §3–5. That page has the reasoning for each of these rules;
 this block is its recommendation made pasteable.
 
