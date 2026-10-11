@@ -280,7 +280,7 @@ def _reconcile_env(ctx, name, role, env):
     """Create or repair environment `name`, the `role` binding of logical env `env`.
 
     A WARNING `doctor` raises on its shape is reported `differs` and left alone: removing a
-    protection a consumer set is not this script's call. `shipmate-engine` gets no shape
+    protection a consumer set is not this script's call. The engine reconcile gets no shape
     findings: doctor checks it separately, and an apply WARNING would exit 2 on every run.
     """
     path = f"repos/{ctx['repo']}/environments/{name}"
@@ -289,7 +289,7 @@ def _reconcile_env(ctx, name, role, env):
         ctx["apply_envs"][name] = data
     body = _PLAN_BODY if role == "plan" else _APPLY_BODY
     put = ["gh", "api", "-X", "PUT", path, "--input", "-"]
-    shaped = data is not None and name != ENGINE_ENV
+    shaped = data is not None and (name, role) != (ENGINE_ENV, "apply")
     findings = dr._env_shape_findings(name, env, data, role) if shaped else []
     drift = [text for level, text in findings if level == dr.WARNING]
     policy = (data or {}).get("deployment_branch_policy") or {}
