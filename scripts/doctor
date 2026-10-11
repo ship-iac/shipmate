@@ -396,28 +396,28 @@ NO_ENVS_SKIPPED = (
 
 
 def _bindings(ctx):
-    """(skip finding or None, `_bound_names` rows, existing environment names), shared by
-    `_environment_warnings` and `_probed_bindings`.
+    """(skip finding or None, `(env, name, role, exists)` rows), shared by
+    `_environment_warnings` and `_probed_bindings`; a skip comes with no rows.
 
     With no declared env nothing is read: listing the environments anyway would let a
     repository whose token cannot list them collect a "could not verify" degrade for a probe
     that had no work to do."""
     if not ctx["envs"]:
-        return NO_ENVS_SKIPPED, [], set()
+        return NO_ENVS_SKIPPED, []
     if ec.runner_refusal():
-        return ENV_PROBES_INTERPRETER_REFUSED, [], set()
+        return ENV_PROBES_INTERPRETER_REFUSED, []
     existing = _existing_env_names(ctx)
     bound = _bound_names(ctx)
     if bound is None:
-        return DEFAULT_TABLE_UNREADABLE, [], existing
-    return None, bound, existing
+        return DEFAULT_TABLE_UNREADABLE, []
+    return None, [(env, name, role, name in existing) for env, name, role in bound]
 
 
 def _environment_warnings(ctx):
-    skip, bound, existing = _bindings(ctx)
+    skip, rows = _bindings(ctx)
     if skip:
         return [skip]
-    return [(WARNING, _missing(n, env, r)) for env, n, r in bound if n not in existing]
+    return [(WARNING, _missing(n, env, r)) for env, n, r, exists in rows if not exists]
 
 
 _environment_warnings.parses_yaml = True
@@ -426,10 +426,8 @@ _environment_warnings.parses_yaml = True
 def _probed_bindings(ctx):
     """The `_bound_names` rows whose environment exists; `[]` when the probe is skipped.
     Each skip and each absent environment is `_environment_warnings`' finding."""
-    skip, bound, existing = _bindings(ctx)
-    if skip:
-        return []
-    return [(env, name, role) for env, name, role in bound if name in existing]
+    _skip, rows = _bindings(ctx)
+    return [(env, name, role) for env, name, role, exists in rows if exists]
 
 
 def _env_shape_findings(name, env, data, role):
