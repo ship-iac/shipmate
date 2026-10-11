@@ -66,7 +66,9 @@ def test_lock_info_writes_exactly_the_probe_outputs_unlock_cell_consumes():
 
 
 def test_consumed_counts_only_env_values_and_if():
-    """Making `_consumed` scan the whole step, or read only one step, reddens this."""
+    """Making `_consumed` scan the whole step, or read only one step, reddens this. So does
+    reverting `_consumed`'s capture to `[a-z_]+`: `in_env2` reads as `in_env`. The digit in
+    `in_env2` is load-bearing."""
     step = {
         "name": "${{ steps.probe.outputs.name_ref }}",
         "if": "${{ steps.probe.outputs.in_if == 'true' }}",
