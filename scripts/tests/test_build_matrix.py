@@ -228,12 +228,19 @@ _CHARSET = (
             "::error::stack 'stacks/c' tag 'env/prod-apply' carries the environment suffix "
             "'-apply'; a tag is matched against the bare logical env name; write 'prod' instead.",
         ),
+        (
+            "env/shipmate-engine",
+            "::error::stack 'stacks/c' tag 'env/shipmate-engine' names 'shipmate-engine', the "
+            "engine's own environment, which holds the shipmate App's private key; use another "
+            "name.",
+        ),
     ],
-    ids=["dot", "path", "suffix"],
+    ids=["dot", "path", "suffix", "engine"],
 )
 def test_env_membership_refuses_a_tag_no_environment_can_take(monkeypatch, tag, message):
     """Mutations: drop the `check_env_name` call -- `env/a.b` passes; refuse only on
-    `is_env_name` -- `env/prod-apply` passes."""
+    `is_env_name` -- `env/prod-apply` passes; delete the `ENGINE_ENV` check from
+    `check_env_name`, or change `ENGINE_ENV`'s value -- `env/shipmate-engine` passes."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/c"])
     monkeypatch.setattr(bm, "_tags", lambda s: [tag] if s == "stacks/c" else ["env/dev-eu"])
     with pytest.raises(SystemExit) as e:

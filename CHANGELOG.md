@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## [Unreleased]
+
+### Fixed
+
+- **An environment named `shipmate-engine` is refused as a table entry, a `needs` element, a stack's `env/*` tag and a dispatched environment: a `shared: true` entry of that name bound the engine's own environment, which holds the App private key.**
+
 ## [0.44.1] — 2026-10-11
 
 Tags `39e5d0e`.

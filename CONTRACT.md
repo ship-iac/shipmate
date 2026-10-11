@@ -261,8 +261,11 @@ never used.
     logical env literally named `foo-apply` makes the naming undecidable (is an
     existing `foo-apply` that env's shared environment, or `foo`'s apply
     environment?) and binds `foo-apply-apply` on the apply path. An
-    `environments.<name>` entry or a `needs` item carrying the suffix refuses;
-    an `env/<name>` stack tag is not checked.
+    `environments.<name>` entry, a `needs` item, an `env/<name>` stack tag or a
+    dispatched environment carrying the suffix refuses. `shipmate-engine` is
+    reserved too, and the same four refuse it: a `shared: true` entry of that
+    name would bind the engine's own environment, which holds the App private
+    key, and one rule for every name is simpler than a shared-only rule.
 - **A binding that disagrees with the environment names is invisible to the
   fingerprint, on every layout.** Both sides derive a cell's variables from
   `matrix.environment` and the same default-branch table, so they hash
@@ -655,7 +658,7 @@ variable rows depend on the run as well as the file, so they are not structural.
 | `layout: tf_vars` and a matrix environment has no entry, or an entry with no region | the layout cannot derive its variables |
 | An empty `region` (`region:`, or `region: #eu-west-1`, which YAML reads as empty) | an empty region derives no `TF_VAR_region` the fingerprint can tell apart, and the credentials step needs one |
 | A cell's `workload/<name>` tag its environment's `workloads` does not list | a listed workload is the only one the default branch grants a role to. One refusal names every such cell. Checked only for the cells the run plans, applies or unlocks: a completed, excluded or held cell is not refused, and neither is an untagged cell, a tag in an environment naming no identity, or one in an environment writing no list |
-| An environment name outside the env-name charset, or carrying a `-plan`/`-apply` suffix | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing |
+| An environment name outside the env-name charset, carrying a `-plan`/`-apply` suffix, or `shipmate-engine` | the name is matched against the bare logical env name from a stack's tag, so such an entry resolves for nothing, and anything it declares orders nothing. A `shared: true` entry named `shipmate-engine` would bind the engine's own environment, which holds the App private key, so that name is refused wherever an environment name is read |
 | An environment key other than `region`, `tf_vars`, `identity`, `workloads`, `shared`, `needs`, `explicit`, `gated` | catches a misspelled key and a top-level setting indented under an entry; credentials live in `identities.<name>`, never in an entry |
 | `identity` that is not a string, or names no `identities.<name>` entry | the refusal lists the identities the file declares |
 | An environment naming an identity with no non-empty string `region` | the credentials step authenticates against the environment's region and requires one |
@@ -952,10 +955,11 @@ leaves out does not refuse the run, and targeted and bare
 
 Terramate refuses an uppercase letter in a tag, so an environment name is
 lowercase letters, digits, `-` and `_` — never uppercase. The `environments`
-table's own keys and each `needs` item are held to that charset and to the
-`-plan`/`-apply` suffix rule, and an uppercase name is refused rather than left to
-match nothing. An `env/<name>` tag takes an environment-table name (lowercase
-letters, digits, `-`, `_`, no `-plan`/`-apply` suffix). A run whose scan includes
+table's own keys and each `needs` item are held to that charset, to the
+`-plan`/`-apply` suffix rule and to the reserved `shipmate-engine`, and an
+uppercase name is refused rather than left to match nothing. An `env/<name>` tag
+takes an environment-table name (lowercase letters, digits, `-`, `_`, no
+`-plan`/`-apply` suffix, not `shipmate-engine`). A run whose scan includes
 a stack carrying any other `env/*` tag refuses: plan and deploy scan the changed
 stacks, drift and a bare `shipmate apply` the whole tree. A targeted
 `shipmate apply` and `shipmate unlock` check only the environment they act on.
@@ -1322,7 +1326,8 @@ reference — is a loud configuration error naming `environments.<env>.gated`: a
 silently inert value would leave an operator believing an environment is ungated
 when it is not. The entry's own name is held to the env-name charset and the
 `-plan` / `-apply` suffix rule, so an entry no stack's tag can name is refused
-rather than left to exempt nothing.
+rather than left to exempt nothing, and it may not be the reserved
+`shipmate-engine` (§Tag grammar).
 
 **Absent means gated**: an entry without `gated`, or with `gated: true`, keeps
 the ruleset's review requirement. There is no second source for an absent key

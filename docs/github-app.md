@@ -323,11 +323,10 @@ actual work here:
   `refs/heads/<base>` and therefore satisfies the policy. And the `plan` job's
   `environment:` is branch-authored data: it is `matrix.environment`, which
   `build-matrix` derives from `env/*` Terramate tags in the head checkout, so a
-  pull request that tags a stack `env/shipmate-engine` produces a plan cell
-  naming an environment of its choosing (`shipmate-engine-plan` with the
-  `-plan` suffix that binding adds, the bare `shipmate-engine` in a repository
-  that shares one environment between plan and apply). What makes that inert is
-  that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
+  pull request picks the environment its plan cells bind (`<env>-plan`, or the
+  bare `<env>` for a `shared: true` entry). Detect refuses the name
+  `shipmate-engine`, so no cell binds the engine's own environment. What makes
+  the rest inert is that the whole job graph is engine-owned: `secrets.SHIPMATE_APP_PRIVATE_KEY`
   is named in exactly one job of engine `plan.yml`, the one that checks nothing
   out, and a branch author cannot edit that file. The consumer's `shipmate.yml`
   names the secret in the `secrets:` block of each job that passes it, and
