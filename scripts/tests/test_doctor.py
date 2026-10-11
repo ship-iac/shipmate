@@ -662,7 +662,7 @@ def test_strict_policy_off_warned(monkeypatch):
 
 
 def test_probe_403_degrades_to_note_not_failure(monkeypatch):
-    """`ec.gh_json` hard-fails a nonzero `gh api` exit with `raise SystemExit`, which derives
+    """`_gh_json` hard-fails a nonzero `gh api` exit with `raise SystemExit`, which derives
     from BaseException, so a catch of only `except Exception` lets a 403 on `rules/branches`
     propagate past `warnings()`. The environments probe still succeeds and its own finding
     must surface beside the degrade note: one probe failing may not swallow the other."""
@@ -712,7 +712,7 @@ def test_probe_generic_exception_degrades_to_note(monkeypatch):
 
 def test_degrade_note_names_the_probe_and_drops_the_workflow_command_prefix(monkeypatch):
     """The degrade text renders verbatim into the sticky comment and into `::warning ...::`
-    annotation data, so echoing `ec.gh_json`'s `::error::command failed (N): gh api <path>`
+    annotation data, so echoing `_gh_json`'s `::error::command failed (N): gh api <path>`
     would put a literal workflow command in the comment body, nest one inside another in
     annotate mode, and leak the internal endpoint. Name the probe skipped; keep the reason."""
     quiet = _quiet_new_probes()
@@ -969,7 +969,7 @@ def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypat
 
 
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
-    """`ec.gh_json`'s exception carries `gh`'s stderr as free text doctor never parses, so a
+    """`_gh_json`'s exception carries `gh`'s stderr as free text doctor never parses, so a
     403 or 5xx on an environment that IS in the listing is indistinguishable from a 404;
     swallowing it lets the report say the settings probes found no problems. Listing first
     separates the two: present-but-unreadable is a note that names the environment."""
@@ -1026,7 +1026,7 @@ def _engine_env_responses(env=None, policies=None, listed=True):
 
 def test_missing_engine_environment_warns(monkeypatch):
     """The headline case: `shipmate-engine` absent from the environments listing itself,
-    never a per-environment-read failure standing in for absence -- `ec.gh_json`'s
+    never a per-environment-read failure standing in for absence -- `_gh_json`'s
     exception carries `gh`'s stderr as free text doctor never parses, so doctor cannot tell
     that apart from a 403 or a 5xx on an environment that does exist."""
     monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(listed=False))
@@ -4925,7 +4925,7 @@ def test_no_probe_reads_a_repository_variable(monkeypatch):
 
 def test_a_truncated_listing_cannot_clear_the_app_key(monkeypatch):
     """`_APP_KEY_NAME in names` is a membership test over the names actually read, and
-    `ec.gh_json` does not multi-page, so on a truncated listing the key can sit outside
+    `_gh_json` does not multi-page, so on a truncated listing the key can sit outside
     the page and produce silence -- the one configuration no document blesses reading as a
     routine note. Absence is reportable only when the read was complete."""
     responses = {
@@ -5157,7 +5157,7 @@ def test_plan_env_secret_listing_failure_propagates_to_the_degrade_note(monkeypa
 
 
 def test_truncated_secret_listing_reads_as_at_least(monkeypatch):
-    """`ec.gh_json` does not multi-page, so an environment with more than 100 secrets
+    """`_gh_json` does not multi-page, so an environment with more than 100 secrets
     returns a partial list, and reporting `len(names)` understates it as the whole set.
     The same partial read also warns that the App-key check could not be completed."""
     responses = {
