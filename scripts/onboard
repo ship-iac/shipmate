@@ -276,29 +276,28 @@ def _ensure_policy(ctx, name):
         )
 
 
-def _reconcile_env(ctx, name, role, env=None):
-    """Create or repair one environment; `role` is an `ec.env_names` key, `env` the
-    logical env name (defaults to `name`).
+def _reconcile_env(ctx, name, role, env):
+    """Create or repair environment `name`, the `role` binding of logical env `env`.
 
     A WARNING `doctor` raises on its shape is reported `differs` and left alone: removing a
-    protection a consumer set is not this script's call.
+    protection a consumer set is not this script's call. `shipmate-engine` gets no shape
+    findings: doctor checks it separately, and an apply WARNING would exit 2 on every run.
     """
-    env = env or name
     path = f"repos/{ctx['repo']}/environments/{name}"
     data = _gh_json_or_none(path)
     if role != "plan":
         ctx["apply_envs"][name] = data
     body = _PLAN_BODY if role == "plan" else _APPLY_BODY
     put = ["gh", "api", "-X", "PUT", path, "--input", "-"]
-    findings = dr._env_shape_findings(name, env, data, role) if data is not None else []
+    shaped = data is not None and name != ENGINE_ENV
+    findings = dr._env_shape_findings(name, env, data, role) if shaped else []
     drift = [text for level, text in findings if level == dr.WARNING]
+    policy = (data or {}).get("deployment_branch_policy") or {}
     if data is None:
         write("create", name, put, stdin=json.dumps(body))
-    elif role == "plan":
+    elif role == "plan" or policy.get("custom_branch_policies"):
         if not drift:
             report("ok", name)
-    elif (data.get("deployment_branch_policy") or {}).get("custom_branch_policies"):
-        report("ok", name)
     else:
         write("update", name, put, stdin=json.dumps(body))
     for text in drift:
@@ -720,8 +719,8 @@ def _table_item(ctx):
     if untagged:
         lines = textwrap.wrap(
             f"Provisioned for {', '.join(untagged)}, which no stack tags yet: the first pull "
-            "request tagging a stack into each deploys under that environment's protection. If "
-            "a name is a typo, fix the entry.",
+            "request tagging a stack into an environment deploys under its protection. Fix a "
+            "misspelled name in its entry.",
             width=80,
         )
     # A declared, untagged predecessor is the provisioned-ahead order named above; only a
@@ -923,7 +922,8 @@ def _adoption_item(ctx):
             f"{verb} the workflow file and the table together,",
             "in a pull request that changes no stack. The table is read from the default",
             "branch, so the first plan needs it merged.",
-            "Then run this script again.",
+            "Once it merges, run this script again: that run creates or checks the gate",
+            "ruleset.",
         ],
     )
 
@@ -1219,7 +1219,7 @@ def main(argv=None):
     print(f"shared: {', '.join(sorted(ctx['shared'])) or '(none)'}")
     print(f"engine pin: {ctx['sha']} ({ctx['version']})")
 
-    _reconcile_env(ctx, ENGINE_ENV, "apply")
+    _reconcile_env(ctx, ENGINE_ENV, "apply", ENGINE_ENV)
     _reconcile_key(ctx)
     _reconcile_envs(ctx)
     _reconcile_variables(ctx)

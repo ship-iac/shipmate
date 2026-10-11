@@ -476,8 +476,8 @@ def test_main_calls_every_stage_in_order():
     deliberately. Ceiling: the filter is exactly that -- a stage added as `report(...)`
     or `write(...)` directly in `main` is not seen.
 
-    Mutations, each proven: delete `_reconcile_env(ctx, ENGINE_ENV, "apply")`; delete
-    `_reconcile_key(ctx)`; swap those two, which writes the key to an environment that
+    Mutations, each proven: delete `_reconcile_env(ctx, ENGINE_ENV, "apply", ENGINE_ENV)`;
+    delete `_reconcile_key(ctx)`; swap those two, which writes the key to an environment that
     does not exist yet; delete `_reconcile_envs(ctx)`; delete `_reconcile_variables(ctx)`;
     delete `_reconcile_ruleset(ctx)`; delete `_reconcile_shim(ctx)`; delete `_checklist(ctx)`;
     `_repo_root()` back to `pathlib.Path.cwd()`; delete
@@ -486,7 +486,7 @@ def test_main_calls_every_stage_in_order():
     swap two reconcilers; move the `"shim_on_default"` read into
     `_reconcile_ruleset`, after the first write, where a 403 aborts a half-written run; move
     the `_engine_secrets` and `_repo_secrets` reads below `_reconcile_env(ctx, ENGINE_ENV,
-    "apply")`, after the first write; delete
+    "apply", ENGINE_ENV)`, after the first write; delete
     `_refuse_missing_key(ctx)`, which lets a run with no key create environments before
     `_reconcile_key` finds nothing to set. `_read_key` sits in a conditional expression,
     whose call `_calls_in_order` still lists.
@@ -508,7 +508,7 @@ def test_main_calls_every_stage_in_order():
         "_engine_secrets(repo)",
         "_repo_secrets()",
         "_refuse_missing_key(ctx)",
-        "_reconcile_env(ctx, ENGINE_ENV, 'apply')",
+        "_reconcile_env(ctx, ENGINE_ENV, 'apply', ENGINE_ENV)",
         "_reconcile_key(ctx)",
         "_reconcile_envs(ctx)",
         "_reconcile_variables(ctx)",
@@ -545,7 +545,7 @@ def test_fresh_engine_environment_is_created_with_the_policy_and_the_key(monkeyp
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply", onboard.ENGINE_ENV)
     onboard._reconcile_key(ctx())
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
@@ -607,7 +607,7 @@ def test_null_policy_on_an_existing_engine_environment_is_repaired(monkeypatch):
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply", onboard.ENGINE_ENV)
     onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
@@ -633,22 +633,29 @@ def test_conforming_engine_environment_writes_nothing(monkeypatch):
     secret names are read in `main`), no write, and every report line `ok` so the exit
     code stays 0.
 
-    `shipmate-engine` has no approval rules, which `doctor` notes but does not warn on, so
-    that is no `differs` either.
+    `doctor` checks `shipmate-engine` itself, so a shape WARNING, stubbed here because no
+    apply-role one exists yet, is no `differs` either: one would exit 2 on every run.
 
     Mutations: drop the `custom_branch_policies` test in `_reconcile_env`, so a
-    conforming environment is PUT again; drop the `level == dr.WARNING` filter, so the
-    NOTICE becomes a `differs` line.
+    conforming environment is PUT again; drop the `name != ENGINE_ENV` skip, so the stubbed
+    WARNING becomes a `differs` line.
     """
     fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    drift = [(onboard.dr.WARNING, "drift")]
+    monkeypatch.setattr(onboard.dr, "_env_shape_findings", lambda *_: drift)
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply", onboard.ENGINE_ENV)
     onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
         ["gh", "api", "repos/o/r/environments/shipmate-engine/deployment-branch-policies"],
     ]
-    assert [verb for verb, _subject, _detail in onboard.REPORT] == ["ok", "ok", "ok", "ok"]
+    assert onboard.REPORT == [
+        ("ok", "shipmate-engine", ""),
+        ("ok", "shipmate-engine branch policy", "main"),
+        ("ok", "shipmate-engine SHIPMATE_APP_PRIVATE_KEY", ""),
+        ("ok", "no repository-level SHIPMATE_APP_PRIVATE_KEY", ""),
+    ]
     assert onboard._exit_code() == 0
 
 
@@ -661,7 +668,7 @@ def test_repository_level_key_is_deleted(monkeypatch):
     """
     fake = make_gh(dict(_CONFORMING_ENGINE))
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply", onboard.ENGINE_ENV)
     onboard._reconcile_key(ctx(engine_secrets=PLACED, repo_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
@@ -771,7 +778,7 @@ def test_existing_policy_naming_another_branch_is_reported_not_edited(monkeypatc
         )
     )
     monkeypatch.setattr(onboard, "_run", fake)
-    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply", onboard.ENGINE_ENV)
     onboard._reconcile_key(ctx(engine_secrets=PLACED))
     assert fake.calls == [
         ["gh", "api", "repos/o/r/environments/shipmate-engine"],
@@ -1015,7 +1022,7 @@ def test_a_read_failure_that_is_not_a_404_refuses(monkeypatch):
     )
     monkeypatch.setattr(onboard, "_run", fake)
     with pytest.raises(SystemExit) as e:
-        onboard._reconcile_env(ctx(), "dev-eu-plan", "plan")
+        onboard._reconcile_env(ctx(), "dev-eu-plan", "plan", "dev-eu")
     assert "HTTP 403" in str(e.value)
     assert fake.calls == [["gh", "api", "repos/o/r/environments/dev-eu-plan"]]
 
@@ -1055,7 +1062,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     )
     monkeypatch.setattr(onboard, "_run", fake)
     monkeypatch.setattr(onboard, "_DRY", True)
-    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply")
+    onboard._reconcile_env(ctx(), onboard.ENGINE_ENV, "apply", onboard.ENGINE_ENV)
     onboard._reconcile_key(ctx(repo_secrets=PLACED))
     onboard._reconcile_envs(ctx())
     onboard._reconcile_variables(ctx())
@@ -1268,7 +1275,7 @@ def test_a_run_without_key_refuses_before_its_first_write(monkeypatch, tmp_path)
     whole call list is compared, so any write ahead of the refusal reddens it.
 
     Mutation: move `_refuse_missing_key(ctx)` below `_reconcile_env(ctx, ENGINE_ENV,
-    "apply")`, which creates `shipmate-engine` first.
+    "apply", ENGINE_ENV)`, which creates `shipmate-engine` first.
     """
     fake, exc = run_main(monkeypatch, tmp_path, {}, [], key=False)
     assert str(exc) == MISSING_KEY
@@ -2055,7 +2062,8 @@ todo          adoption pull request
     Re-run without --dry-run, then commit the workflow file and the table together,
     in a pull request that changes no stack. The table is read from the default
     branch, so the first plan needs it merged.
-    Then run this script again.
+    Once it merges, run this script again: that run creates or checks the gate
+    ruleset.
 """
 
 #: Hand-written: a configured public repository with the `repo-example-folders` drift file.
@@ -2123,8 +2131,8 @@ def test_the_checklist_of_a_fresh_repository_in_a_dry_run(monkeypatch, tmp_path,
     The checkout holds no `.github/workflows/`, so the drift sweeps item asks for a file.
 
     Mutations: delete the passphrase item from `_checklist`; delete `_drift_sweeps_item`
-    from it; append a `gate ruleset` todo item to it; drop `_adoption_item`'s
-    `Then run this script again.` line.
+    from it; append a `gate ruleset` todo item to it; revert `_adoption_item`'s closing
+    two lines to the bare `Then run this script again.`
     """
     _fake, exit_ = run_main(monkeypatch, tmp_path, {}, ["--dry-run"])
     assert exit_.code == 0
@@ -2135,7 +2143,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
     """Driven through `main`, so the reviewer verdict rests on the `dev-eu-apply` read that
     `_reconcile_env` recorded, not on a hand-filled `apply_envs`.
 
-    Mutations: drop the `ctx["apply_envs"][name] = env` record from `_reconcile_env`, so the
+    Mutations: drop the `ctx["apply_envs"][name] = data` record from `_reconcile_env`, so the
     reviewer item turns `todo`; delete `_drift_sweeps_item` from `_checklist`.
     """
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
@@ -2731,8 +2739,8 @@ def test_a_table_entry_no_stack_tags_is_named_on_the_table_item(monkeypatch, tmp
         "ok",
         [
             "Provisioned for prdo, which no stack tags yet: the first pull request tagging a",
-            "stack into each deploys under that environment's protection. If a name is a",
-            "typo, fix the entry.",
+            "stack into an environment deploys under its protection. Fix a misspelled name in",
+            "its entry.",
         ],
     )
     assert not [ln for ln in out.splitlines() if ln.startswith("::warning::")]
@@ -2753,14 +2761,14 @@ def _table_only_detail(*names):
         (
             ("production-eu-central",),
             "Provisioned for production-eu-central, which no stack tags yet: the first pull "
-            "request tagging a stack into each deploys under that environment's protection. If "
-            "a name is a typo, fix the entry.",
+            "request tagging a stack into an environment deploys under its protection. Fix a "
+            "misspelled name in its entry.",
         ),
         (
             ("prdo", "production-eu-central", "qa"),
             "Provisioned for prdo, production-eu-central, qa, which no stack tags yet: the first "
-            "pull request tagging a stack into each deploys under that environment's "
-            "protection. If a name is a typo, fix the entry.",
+            "pull request tagging a stack into an environment deploys under its protection. "
+            "Fix a misspelled name in its entry.",
         ),
     ],
     ids=["one", "several"],
@@ -2974,8 +2982,8 @@ def test_a_needs_predecessor_no_entry_declares_and_no_stack_tags_is_todo():
         "`.github/shipmate-config.yml`",
         [
             "Provisioned for staging, which no stack tags yet: the first pull request tagging",
-            "a stack into each deploys under that environment's protection. If a name is a",
-            "typo, fix the entry.",
+            "a stack into an environment deploys under its protection. Fix a misspelled name",
+            "in its entry.",
             "`needs` names stagng, which no entry declares and no stack tags, so it orders",
             "nothing. If a name is a typo, fix it.",
         ],
@@ -3041,9 +3049,9 @@ def test_a_bare_env_alongside_only_a_plan_env_is_reported_as_unused(monkeypatch)
 
     Mutation: probe the bound naming instead of the unused one
     (`ec.env_names(env, env in ctx["shared"]).values()` in place of `_unused_naming(...)`
-    in the comprehension). It still
-    refuses, on `dev-eu-plan`, and tells the operator to delete an environment the
-    engine binds -- which the recorded reads and the message below both catch.
+    in the comprehension). It still refuses, on `dev-eu-plan`, and tells the operator to
+    delete an environment the engine binds -- which the recorded reads and the message
+    below both catch.
     """
     fake = make_gh(
         {
@@ -3097,10 +3105,12 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
     """A shared env is one bare environment on both paths, so a required reviewer there
     gates the plan cells and every drift sweep covering it too -- GitHub has no per-job filter.
     `doctor` warns on it under the `shared` role; under the `apply` role the same rules are
-    the reviewer gate, and the conforming branch policy would report plain `ok`.
+    the reviewer gate. The `differs` line replaces the `ok` the conforming branch policy
+    would otherwise print, so the environment is not reported both ways.
 
-    Mutation: pass `"apply"` instead of `role` to `_env_shape_findings` for a shared
-    environment, which loses the `differs` line.
+    Mutations: pass `"apply"` instead of `role` to `_env_shape_findings` for a shared
+    environment, which loses the `differs` line; drop the `not drift` gate on the
+    `ok`, which prints `ok dev-eu` ahead of the `differs` line.
     """
     fake = make_gh(
         {
@@ -3129,7 +3139,6 @@ def test_a_shared_environment_carrying_protection_rules_is_reported(monkeypatch)
         ["gh", "api", "repos/o/r/environments/dev-eu/deployment-branch-policies"],
     ]
     assert onboard.REPORT == [
-        ("ok", "dev-eu", ""),
         ("differs", "dev-eu", SHARED_RULES_WARNING),
         ("ok", "dev-eu branch policy", "main"),
     ]
@@ -3141,7 +3150,8 @@ def test_a_split_apply_environments_reviewers_are_not_reported(monkeypatch):
     asks for, not drift: only a *shared* bare environment's rules stall the plan path.
 
     Mutation: pass `"plan"` instead of `role` to `_env_shape_findings` for an apply
-    environment; the reviewers then raise the plan WARNING as a `differs` line.
+    environment; the reviewers and the branch policy then raise both plan WARNINGs as two
+    `differs` lines.
     """
     fake = make_gh(
         {
