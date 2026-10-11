@@ -63,7 +63,7 @@ runs:
         # pending -> success refresh is untouched and no wording has to stay in sync. Only a fresh
         # plan run, which rewrites the gate, exits a hold.
         if [ "$held" = "failure" ]; then
-          echo "::error::shipmate / gate is held for $HEAD_SHA because the plan run's evidence was incomplete: some planned stacks may carry no apply check. Re-plan this pull request; the gate cannot be greened from apply checks alone."
+          echo "::error::shipmate / gate is held for $HEAD_SHA because the plan run's evidence was incomplete: some planned stacks may carry no apply check. Re-plan this pull request (comment shipmate plan or push); the gate cannot be greened from apply checks alone."
           exit 1
         fi
         # Commit status, not a check-run (see actions/summary for why).

@@ -367,9 +367,10 @@ reference names included ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match
 fingerprint). That error names the current variable names only; it never
 prints a value.
 
-The fix is a re-plan — comment `shipmate plan` or push — and an apply of the
-fresh plan. Re-running the same run's plan jobs does not re-plan: their artifact
-uploads 409. There is no force: an apply that silently re-planned would apply
+The fix is a re-plan and an apply of the fresh plan: on an open pull request,
+comment `shipmate plan` or push; after the merge, open a new pull request that
+changes the stack. Re-running plan jobs that already uploaded their artifacts
+does not re-plan: the uploads 409. There is no force: an apply that silently re-planned would apply
 something nobody reviewed, and the check left pending is exactly what stops the
 gate greening over an unapplied stack.
 
