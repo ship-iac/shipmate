@@ -59,11 +59,11 @@ runs:
         # summaries were never read still have no apply check at all.
         held=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status?per_page=100" \
           --jq '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty')
-        # Matched on the STATE alone: gate-state writes `failure` only for its hold cases, so a
-        # pending -> success refresh is untouched and no wording has to stay in sync. Only a fresh
-        # plan run, which rewrites the gate, exits a hold.
+        # Matched on the STATE alone: only gate-state's holds and the summary's publish hold write
+        # `failure`, so a pending -> success refresh is untouched and no wording has to stay in
+        # sync. Only a fresh plan run, which rewrites the gate, exits a hold.
         if [ "$held" = "failure" ]; then
-          echo "::error::shipmate / gate is held for $HEAD_SHA because the plan run's evidence was incomplete: some planned stacks may carry no apply check. Re-plan this pull request; the gate cannot be greened from apply checks alone."
+          echo "::error::shipmate / gate is held for $HEAD_SHA; its status description on the pull request names the cause. A hold clears only when a new plan run rewrites the gate: comment shipmate plan, or push."
           exit 1
         fi
         # Commit status, not a check-run (see actions/summary for why).

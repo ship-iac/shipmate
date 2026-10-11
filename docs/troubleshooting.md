@@ -367,8 +367,11 @@ reference names included ([`../CONTRACT.md`](../CONTRACT.md) §Apply-match
 fingerprint). That error names the current variable names only; it never
 prints a value.
 
-The fix is a re-plan — push, or re-run the plan workflow — and an apply of the
-fresh plan. There is no force: an apply that silently re-planned would apply
+The fix is a re-plan and an apply of the fresh plan. On an open pull request,
+comment `shipmate plan` or push; re-running the old run's plan jobs does not
+re-plan, because their artifact uploads 409. After the merge, open a new pull
+request touching the stack. There is no force: an apply that silently
+re-planned would apply
 something nobody reviewed, and the check left pending is exactly what stops the
 gate greening over an unapplied stack.
 
@@ -829,7 +832,7 @@ new head SHA: push a commit, and the plan run re-creates only the checks that
 exist now.
 
 **The gate is deliberately held.** A gate whose state is `failure` with a
-description telling you what to re-run is not "no changes"; it is a hold.
+description telling you what to do is not "no changes"; it is a hold.
 `gate-state` compares the cells `detect` planned against the cell summaries the
 trusted summary job actually read, and writes a hold when they disagree in
 either direction, when the plan job failed or was skipped with cells planned,
@@ -837,14 +840,15 @@ when `detect` did not succeed, or when the planned count was not reported at
 all. A run whose cell count is zero for any of those reasons must not claim
 nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
-never apply. Follow the description — for an evidence shortfall it says to
-re-run *this summary job* and not the plan jobs, whose artifact uploads are not
-`overwrite:` and 409 on a re-run. The summary job also holds the gate while it
-publishes the apply checks, and a job that failed before its final gate write
-leaves that hold, reading "its plan summary did not finish": comment
-`shipmate plan` or push, and do not re-run the summary job, which would
-republish pending checks over cells applied since.
-`gate-refresh` refuses to green a held gate from apply checks alone.
+never apply. The summary job also holds the gate while it publishes the apply
+checks, and a job that failed before its final gate write leaves that hold,
+reading "its plan summary did not finish". Both an evidence shortfall and that
+hold clear the same way: comment `shipmate plan` or push. Do not re-run the plan
+jobs, whose artifact uploads are not `overwrite:` and 409 on a re-run, and do
+not re-run the summary job, which would republish pending checks over cells
+applied since; a re-run of a plan job re-runs the summary too. `gate-refresh`
+refuses to green a held gate from apply checks alone: the apply run fails with
+"shipmate / gate is held", pointing at this status description.
 
 **The required check does not match the status.** The ruleset pins
 `integration_id` to the shipmate App id, so a `shipmate / gate` status of the
