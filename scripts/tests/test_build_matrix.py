@@ -1883,7 +1883,8 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         head_sha="cafe1234",
         stacks={"stacks/app": ["env/dev-eu"], "stacks/new": []},
     )
-    assert [c["stack"] for c in json.loads(outputs.pop("matrix"))["include"]] == ["stacks/app"]
+    matrix = json.loads(outputs.pop("matrix"))
+    assert [c["stack"] for c in matrix["include"]] == ["stacks/app"]
     assert outputs == {
         "empty": "false",
         "count": "1",

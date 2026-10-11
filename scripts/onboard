@@ -982,7 +982,8 @@ def _drift_file(path):
     if len(calls) > 1:
         return path.name, None, "it calls `drift.yml` more than once"
     if calls:
-        return path.name, *_drift_query(calls[0][1])
+        query, why = _drift_query(calls[0][1])
+        return path.name, query, why
     return None
 
 
