@@ -105,12 +105,13 @@ runs:
         set -euo pipefail
         [[ "$SHIPMATE_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $SHIPMATE_HEAD_SHA)"; exit 1; }
         python3 "$GITHUB_ACTION_PATH/../../scripts/pending-checks" > bodies.jsonl
-        # gate-refresh greens an absent or pending gate, so a job dying mid-publish would let an
-        # apply of the published cells merge the unpublished ones. `Create/refresh gate` replaces it.
+        # Fail-closed, never `|| true`: gate-refresh greens an absent or pending gate, so a job dying
+        # mid-publish would let an apply of the published cells merge the unpublished ones.
+        # `Create/refresh gate` replaces this hold.
         if [ -s bodies.jsonl ]; then
           gh api "repos/$GITHUB_REPOSITORY/statuses/$SHIPMATE_HEAD_SHA" -f state=failure \
             -f context="shipmate / gate" \
-            -f description="re-run this summary job: apply checks were not all published; do not re-run the plan jobs (their uploads 409)" \
+            -f description="re-plan this pull request (comment shipmate plan or push): its apply checks were not all published" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
         fi
 

@@ -2069,11 +2069,12 @@ job receives it as the `planned-cells` input. A cell count that disagrees with
 it holds the gate in either direction.
 
 Before it publishes the first apply check, the `summary` job writes the gate
-`failure` with a description telling you to re-run that job, so a job that dies
-with only some checks published leaves a hold that `gate-refresh` will not
-green. The job's final gate write replaces the hold; a re-run of the summary
-job or a fresh plan run clears it. A run whose plan job was cancelled writes no
-final gate and keeps the hold.
+`failure` with a description telling you to re-plan, so a job that dies with
+only some checks published leaves a hold that `gate-refresh` will not green.
+The job's final gate write replaces the hold. Otherwise only a fresh plan run
+clears it: a re-run of the summary job republishes pending checks over cells
+applied since, and a run whose plan job was cancelled writes no final gate and
+keeps the hold.
 
 ## Apply result comment
 

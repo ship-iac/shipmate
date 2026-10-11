@@ -18,6 +18,7 @@ from _loader import bash_only, run_step, step_by
 HEAD_SHA = "a" * 40
 HOLD = "Hold the gate while apply checks publish"
 CREATE = "Create apply checks (pending / no-changes)"
+GATE = "Create/refresh gate"
 HOLD_ARGV = [
     "api",
     f"repos/acme/demo/statuses/{HEAD_SHA}",
@@ -26,8 +27,8 @@ HOLD_ARGV = [
     "-f",
     "context=shipmate / gate",
     "-f",
-    "description=re-run this summary job: apply checks were not all published; "
-    "do not re-run the plan jobs (their uploads 409)",
+    "description=re-plan this pull request (comment shipmate plan or push): "
+    "its apply checks were not all published",
     "-f",
     "target_url=https://github.com/acme/demo/actions/runs/42",
 ]
@@ -39,7 +40,8 @@ BODIES = [
 
 # Records every call's argv one line per argument, then the stdin of an `--input -` call, then a
 # `--` line. FAKE_FAIL_CHECK fails that check-runs call (1-based); FAKE_STATUS_RC is the status
-# write's exit code. Pipeline members run in subshells, so the check counter lives in a file.
+# write's exit code. A gate read answers `failure`, the hold. Pipeline members run in
+# subshells, so the check counter lives in a file.
 GH_STUB = r"""
 python3() { printf '%s' "$FAKE_BODIES"; }
 gh() {
@@ -48,6 +50,8 @@ gh() {
   printf -- '--\n' >> "$CALLS"
   case "$*" in
     "api repos/acme/demo/statuses/$SHIPMATE_HEAD_SHA "*) return "$FAKE_STATUS_RC" ;;
+    "api --paginate repos/acme/demo/commits/$SHIPMATE_HEAD_SHA/status?per_page=100 --jq "*)
+      printf 'failure' ;;
     "api repos/acme/demo/check-runs --input -")
       n=$(( $(cat "$COUNT" 2>/dev/null || echo 0) + 1 ))
       echo "$n" > "$COUNT"
@@ -75,12 +79,16 @@ def _calls(path):
     return calls
 
 
-def _run(tmp_path, bodies, *, fail_check=0, status_rc=0):
+def _run(tmp_path, bodies, *, fail_check=0, status_rc=0, steps=(HOLD, CREATE)):
     calls = tmp_path / "calls"
     env = {
         **os.environ,
         "GH_TOKEN": "x",
         "SHIPMATE_HEAD_SHA": HEAD_SHA,
+        "HEAD_SHA": HEAD_SHA,
+        "STATE": "pending",
+        "MODE": "post",
+        "PLAN_RESULT": "success",
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_RUN_ID": "42",
@@ -92,7 +100,7 @@ def _run(tmp_path, bodies, *, fail_check=0, status_rc=0):
         "COUNT": str(tmp_path / "count"),
     }
     codes = []
-    for name in (HOLD, CREATE):
+    for name in steps:
         proc = run_step(tmp_path, GH_STUB + step_by("summary", name=name)["run"], env)
         codes.append(proc.returncode)
         if proc.returncode != 0:
@@ -132,3 +140,17 @@ def test_a_failed_hold_write_publishes_no_check(tmp_path):
     codes, calls = _run(tmp_path, BODIES[:2], status_rc=1)
     assert codes == [1]
     assert calls == [HOLD_ARGV]
+
+
+@bash_only
+def test_the_final_gate_write_replaces_the_hold(tmp_path):
+    """Mutation: run `Create/refresh gate`'s held-read for every mode (`[ "$MODE" = "draft" ]` ->
+    `true`) -> it reads the hold, keeps it, and never writes the final gate."""
+    (tmp_path / "gate.json").write_text("{}", encoding="utf-8")
+    codes, calls = _run(tmp_path, BODIES[:1], steps=(HOLD, CREATE, GATE))
+    assert codes == [0, 0, 0]
+    assert calls == [
+        HOLD_ARGV,
+        _check(BODIES[0]),
+        ["api", f"repos/acme/demo/statuses/{HEAD_SHA}", "--input", "gate.json"],
+    ]
