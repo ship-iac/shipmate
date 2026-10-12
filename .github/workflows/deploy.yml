@@ -26,7 +26,9 @@ jobs:
       head_sha: ${{ steps.d.outputs.head_sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }
+        # Full history to diff against the previous default-branch tip; file contents are fetched
+        # only when a diff or read needs them, so the history costs commits and trees, not blobs.
+        with: { fetch-depth: 0, filter: "blob:none" }
       - uses: $/actions/setup
         with: { tofu: "false" }
       - id: d
