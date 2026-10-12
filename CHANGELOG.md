@@ -10,12 +10,20 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed
+
+- **Every engine job binds `shipmate-engine` with `deployment: false`, so plan, apply, deploy, drift and comment runs create no deployment on it. GitHub fails such a job while the environment has a custom deployment protection rule; `scripts/onboard` reports an enabled one with the command that removes it.**
+
 ### Fixed
 
 - **Gate writers on one head commit run one at a time: the plan, apply and deploy runs' `summary` jobs share a `shipmate-gate-<head sha>` concurrency group, so a refresh and a re-plan can no longer interleave a read and a write. A plan summary cancelled while pending holds the gate until a fresh plan.**
 - **A plan summary greens its own `pending` gate when it published no queued apply check and every apply check on the head is already done, so an apply that finished before the summary wrote no longer leaves the gate pending. A hold found by that refresh is a warning on the plan run, not an error.**
 - **A plan summary publishes no apply check its own run already published and refuses before writing anything when a newer plan run of the head holds the gate or published checks there, so a re-run never resets an applied cell to pending or overwrites a newer run's gate. It holds the gate when it cannot read the gate statuses, list the apply checks or build the ones to publish, even when no cell summary arrived, and its final write refuses over a newer run's hold.**
 - **An apply run refused at its review binding posts no apply comment and writes no gate.**
+- **`shipmate doctor`'s line for a valid `.github/shipmate-config.yml` shows `scripts/onboard --app-id <id> --dry-run` with its placeholder intact instead of `&lt;id&gt;`.**
+- **The reply to a malformed `shipmate` comment names the token it refused, in a code span, when the token is non-empty, at most 40 characters and holds no backtick, and describes it otherwise; an unknown verb is quoted under the same rule.**
+- **The plan comment names each stack / environment pair a pull request drops by removing one of a stack's two or more `env/*` tags; a stack that lost its last tag stays on the unmanaged line. An `@` in a name on either line is followed by an empty HTML comment, so a stack path cannot mention a user or team.**
+- **`shipmate doctor` warns when a `pull_request` rule requires code-owner review and the default branch's `CODEOWNERS` owns no path (no file, or only blank and `#` lines), since that review then holds no pull request; `scripts/onboard` reports it as a `todo`.**
 
 ## [0.44.3] — 2026-10-12
 
