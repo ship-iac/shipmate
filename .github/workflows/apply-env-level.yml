@@ -177,7 +177,7 @@ jobs:
     if: ${{ always() && needs.snapshot.result == 'success' }}
     runs-on: ubuntu-slim
     permissions: { actions: read }
-    environment: shipmate-engine
+    environment: { name: shipmate-engine, deployment: false }
     steps:
       - uses: $/actions/apply-complete
         with:

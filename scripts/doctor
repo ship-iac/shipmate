@@ -7,7 +7,7 @@ Three modes, selected via SHIPMATE_DOCTOR_MODE:
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
-- report: render the sticky PR comment on demand — the thirteen live probes'
+- report: render the sticky PR comment on demand — the fourteen live probes'
   findings plus a harvest of the warnings GitHub already recorded as
   annotations on this commit's workflow check runs.
 - check-ids: gather what `report` reads, one step ahead of it: the PR head SHA,
@@ -23,6 +23,7 @@ Probes:
 - gate ruleset: `shipmate / gate` required, pinned to the App, strict policy on.
 - `pull_request` rule: code-owner review required (an approval count is not a
   substitute — the App can submit an approving review).
+- `CODEOWNERS`: while code-owner review is required, the default branch's file owns a path.
 - GitHub Environments exist for every planned env: the <env>-plan/<env>-apply
   pair, or a single shared <env>.
 - protection shape of those: plan envs open, apply envs reviewed, a shared env
@@ -47,6 +48,7 @@ Probes:
 - a workflow file at the commit under examination that calls the engine's `drift.yml`.
 """
 
+import base64
 import collections
 import contextlib
 import importlib.util
@@ -61,7 +63,9 @@ from _shipmate import (
     GATE_CONTEXT,
     _load,
     approval_rules,
+    code_owner_review,
     current_run_url,
+    first_codeowners,
     gate_check,
     load_workflow_text,
     review_count,
@@ -79,7 +83,9 @@ _md_escape = sc._md_escape
 
 class _Rendered(str):
     """Finding text whose repository parts are already escaped: `_finding_row` prints it as
-    is, so an engine literal such as `<env>` keeps its angle brackets in a code span."""
+    is, so an engine literal such as `<env>` keeps its angle brackets in a code span.
+    `test_every_engine_span_doctor_escapes_would_change_is_rendered` lists a literal that
+    needs it and lacks it."""
 
 
 GATE = GATE_CONTEXT
@@ -128,6 +134,12 @@ _LAST_PUSH_AT_ZERO = (
     "(docs/branch-protection.md §Reproducible ruleset)."
 )
 _ENV_NAME_CAP = 10
+_NO_CODE_OWNERS = (
+    "{where}, so no path has a code owner and the code-owner review the `pull_request` rule "
+    "on `{branch}` requires holds no pull request: GitHub asks an owner only for changed files "
+    "an entry owns. Add an entry covering the paths the IaC lives in (docs/hardening.md #3 to "
+    "#5)."
+)
 # Same degrade posture as `_unverified`: unread is not misconfigured.
 _REVIEW_RULE_UNREADABLE = (
     "the `pull_request` rule on `{branch}` carried no parameters: review requirements not verified."
@@ -233,13 +245,14 @@ def _review_rule_warnings(ctx):
     whatever else is set: a sole maintainer cannot approve their own last push, so
     cannot merge, and the sole-maintainer note is then omitted.
 
-    Two limits, both stated in the finding text or the docs rather than probed:
-    the endpoint returns rulesets only (classic branch protection reads as no
-    rule), and `require_code_owner_review` is a no-op for changed files no
-    `CODEOWNERS` entry owns."""
+    Two limits. The endpoint returns rulesets only (classic branch protection
+    reads as no rule), stated in the finding text rather than probed. And
+    `require_code_owner_review` is a no-op for changed files no `CODEOWNERS`
+    entry owns: `_codeowners_warnings` reports a file that owns nothing, and
+    which paths an entry owns is not checked."""
     branch = ctx["default_branch"]
     rules = _read_once(ctx, f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
-    found = readable = code_owner = last_push = False
+    found = readable = last_push = False
     for rule in rules:
         if rule.get("type") != "pull_request":
             continue
@@ -248,8 +261,8 @@ def _review_rule_warnings(ctx):
         if not params:
             continue
         readable = True
-        code_owner = code_owner or bool(params.get("require_code_owner_review"))
         last_push = last_push or bool(params.get("require_last_push_approval"))
+    code_owner = code_owner_review(rules)
     if not found:
         return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
     if not readable:
@@ -263,6 +276,55 @@ def _review_rule_warnings(ctx):
 
 
 _review_rule_warnings.parses_yaml = True
+
+
+def no_code_owners(path, place, branch):
+    """The finding for a `CODEOWNERS` that owns nothing: `path` is the file GitHub reads,
+    None when there is none, and `place` where it was read (``on `<branch>` ``, or
+    `onboard`'s working tree)."""
+    where = (
+        f"`{path}` {place} holds no rule line"
+        if path
+        else f"no `CODEOWNERS` file is {place} (`.github/`, the root or `docs/`)"
+    )
+    return _NO_CODE_OWNERS.format(where=where, branch=branch)
+
+
+def _codeowners_warnings(ctx):
+    """A WARNING when a `pull_request` rule requires code-owner review and the default
+    branch's `CODEOWNERS` owns nothing: no file, or no rule line in the first of
+    `CODEOWNERS_PATHS` present (`first_codeowners`). GitHub then requires no owner's review
+    on any pull request.
+
+    A sibling of `_review_rule_warnings`, not part of it: a failed `CODEOWNERS` read
+    degrades this probe alone instead of replacing every review-rule finding. Only a 404
+    moves on to the next path; any other failure is this probe's degrade. An unreadable
+    ruleset is silent here: the review-rule probe already degrades on that read."""
+    branch = ctx["default_branch"]
+    try:
+        rules = _read_once(ctx, f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
+    except (Exception, SystemExit):  # noqa: BLE001 - reported by `_review_rule_warnings`
+        return []
+    if not code_owner_review(rules):
+        return []
+
+    def read(path):
+        try:
+            blob = _gh_json(f"repos/{ctx['repo']}/contents/{path}")
+        except SystemExit as e:
+            if "HTTP 404" in str(e):
+                return None
+            raise
+        # A file over 1 MB answers `encoding: "none"` with empty content, not an empty file.
+        if blob.get("encoding") != "base64":
+            raise ValueError(f"{path} is not readable through the contents API")
+        return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+
+    path, owns = first_codeowners(read)
+    return [] if owns else [(WARNING, no_code_owners(path, f"on `{branch}`", branch))]
+
+
+_codeowners_warnings.label = "CODEOWNERS"
 
 
 def _no_review_findings(ctx, branch, code_owner, last_push):
@@ -303,8 +365,8 @@ def _existing_env_names(ctx):
     """The repository's GitHub Environment names.
 
     THE LISTING IS THE ONLY EXISTENCE ORACLE. `_gh_json`'s exception carries
-    `gh`'s stderr as free text, which doctor never parses, so a per-environment
-    read cannot tell a 404 (absence, which is `_environment_warnings`' finding)
+    `gh`'s stderr as free text, which the environment probes never parse, so a
+    per-environment read cannot tell a 404 (absence, which is `_environment_warnings`' finding)
     from a 403 or a 5xx. Every probe below that needs existence decides it from
     here, then treats a failed per-environment read as "not checked" — inferring
     absence from that read would let a token lacking `environments` access
@@ -1667,7 +1729,7 @@ CONFIG_NO_COMMIT = (
 # The verdict names the checks it did NOT run: each needs the plan matrix or the whole-tree
 # environment scan, neither of which doctor has, so a bare "valid" here would claim a clean
 # bill over the rest of the rules.
-CONFIG_VALID = (
+CONFIG_VALID = _Rendered(
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
     "file can be judged on by itself: its top-level keys, `layout`, the "
     "identities and the environment entries. Not checked here, for want of a plan matrix "
@@ -2017,6 +2079,7 @@ _workflow_parse_warnings.degrade_level = NOTICE
 PROBES = (
     _gate_rule_warnings,
     _review_rule_warnings,
+    _codeowners_warnings,
     _environment_warnings,
     _env_protection_warnings,
     _engine_environment_warnings,
@@ -2487,7 +2550,7 @@ def _emit_section(lines, name, rows, used, budget):
     also fits -- otherwise it would dangle with no children. `rows` is never
     empty: `harvest_sections` creates a group only by appending to it.
     Returns (new_used, rows_added, rows_dropped)."""
-    header = f"- **{_md_escape(_one_line(name, 120))}**"
+    header = f"- **{sc._md_name(_one_line(name, 120))}**"
     rendered = [_render_annotation_row(a) for a in rows]
     if used + len(header) + 1 + len(rendered[0]) + 1 > budget:
         return used, 0, len(rows)

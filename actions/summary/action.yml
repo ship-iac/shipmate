@@ -59,6 +59,15 @@ inputs:
       or one naming other than min(N, 10) paths, renders none and warns.
     required: false
     default: ""
+  lost-env-tags:
+    description: >-
+      build-matrix's `lost` output: JSON {"count": N, "pairs": [...]} for the `<stack> / <env>`
+      pairs this pull request untagged on stacks that keep another env/* tag, at most ten
+      pairs named. The plan comment counts and names them under the unmanaged stacks line.
+      Empty (detect skipped, a sweep, no base) renders no line; a value not of that shape, or
+      one naming other than min(N, 10) pairs, renders none and warns.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -231,9 +240,10 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
-        # Reviewer-facing only, so it degrades: empty (draft autoplan, detect skipped) renders no
-        # line, invalid renders none and warns. Neither touches `count`, `pending` or the gate.
+        # Reviewer-facing only, so each degrades: empty (draft autoplan, detect skipped) renders no
+        # line, invalid renders none and warns. None touches `count`, `pending` or the gate.
         SHIPMATE_UNMANAGED: ${{ inputs.unmanaged-stacks }}
+        SHIPMATE_LOST_ENV_TAGS: ${{ inputs.lost-env-tags }}
       run: |
         set -euo pipefail
         [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
@@ -273,6 +283,7 @@ runs:
         PLAN_RESULT: ${{ inputs.plan-result }}
         DOCTOR_WARNED: ${{ steps.doctor.outputs.warned }}
         UNMANAGED: ${{ steps.build.outputs.unmanaged }}
+        LOST: ${{ steps.build.outputs.lost }}
       run: |
         set -euo pipefail
         # A draft autoplan planned nothing, so an existing comment still describes a head
@@ -290,9 +301,9 @@ runs:
         fi
         # Nothing changed: only an existing comment is kept current, or it would keep showing
         # applies that no longer exist. A doctor warning (the comment links the run page its
-        # annotations live on) or an unmanaged stacks line still posts.
+        # annotations live on), an unmanaged stacks line or a lost pairs line still posts.
         args=("$PR" comment.md)
-        if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ]; then
+        if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ]; then
           args+=(--update-only)
         fi
         result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "${args[@]}")

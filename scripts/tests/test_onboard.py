@@ -72,6 +72,8 @@ def make_gh(routes):
 ENGINE_PATH = "repos/o/r/environments/shipmate-engine"
 ENGINE_POLICIES = f"{ENGINE_PATH}/deployment-branch-policies"
 ENGINE_SECRETS = f"{ENGINE_PATH}/secrets?per_page=100"
+ENGINE_RULES = f"{ENGINE_PATH}/deployment_protection_rules"
+NO_CUSTOM_RULES = {"total_count": 0, "custom_deployment_protection_rules": []}
 # Named without the word ruff S105 flags: this is a command line, not a credential.
 REPO_KEY_LIST = "gh secret list --json name"
 VARIABLE_LIST = "gh variable list --json name,value"
@@ -102,6 +104,7 @@ def ctx(**over):
         "table": None,
         "apply_envs": {},
         "review_count": 0,
+        "code_owner_review": False,
         "tags_by_stack": {},
         "tagged": {"dev-eu": frozenset()},
         "tree_errors": [],
@@ -364,7 +367,7 @@ def test_a_branch_with_a_slash_is_accepted_and_quoted_in_every_api_path(monkeypa
     shim = "repos/o/r/contents/.github/workflows/shipmate.yml?ref=release%2F1.x"
     fake = make_gh({rules: [], shim: {"type": "file"}})
     monkeypatch.setattr(onboard, "_run", fake)
-    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None, 0)
+    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None, 0, False)
     assert onboard._shim_on_default("o/r", "release/1.x") is True
     assert fake.calls == [["gh", "api", rules], ["gh", "api", shim]]
 
@@ -523,6 +526,7 @@ def test_main_calls_every_stage_in_order():
 _CONFORMING_ENGINE = {
     ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
     ENGINE_POLICIES: {"total_count": 1, "branch_policies": [{"name": "main"}]},
+    ENGINE_RULES: NO_CUSTOM_RULES,
 }
 #: The secret-name set `main` reads when the App key is already on `shipmate-engine`.
 PLACED = {"SHIPMATE_APP_PRIVATE_KEY"}
@@ -2171,6 +2175,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
         ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
         ENGINE_POLICIES: MAIN_POLICY,
         ENGINE_SECRETS: {"secrets": [{"name": KEY}]},
+        ENGINE_RULES: NO_CUSTOM_RULES,
         REPO_KEY_LIST: [{"name": "SHIPMATE_PLAN_PASSPHRASE"}],
         "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
         "repos/o/r/environments/dev-eu-apply": REVIEWED_APPLY,
@@ -2196,6 +2201,81 @@ def test_todo_items_leave_the_exit_code_at_0(monkeypatch, tmp_path, capsys):
     assert "\ntodo  " in capsys.readouterr().out
     assert [v for v, _s, _d in onboard.REPORT if v == "differs"] == []
     assert exit_.code == 0
+
+
+def _custom_rule(rule_id, slug, enabled):
+    return {"id": rule_id, "enabled": enabled, "app": {"id": 7, "slug": slug}}
+
+
+def _custom_rule_items(monkeypatch, answer):
+    monkeypatch.setattr(onboard, "_run", make_gh({ENGINE_RULES: answer}))
+    return onboard._custom_rule_items(ctx(apply_envs={"shipmate-engine": {}}))
+
+
+def test_an_enabled_custom_rule_on_the_engine_environment_is_todo(monkeypatch):
+    """Mutations: ignore `enabled`, so the disabled rule is listed too; read the
+    environment's `protection_rules` instead of the dedicated endpoint."""
+    answer = {
+        "total_count": 2,
+        "custom_deployment_protection_rules": [
+            _custom_rule(3, "gatekeeper", True),
+            _custom_rule(4, "dormant", False),
+        ],
+    }
+    assert _custom_rule_items(monkeypatch, answer) == [
+        (
+            "todo",
+            "custom deployment protection rules on shipmate-engine",
+            [
+                "The engine's jobs bind `shipmate-engine` with `deployment: false`, which GitHub",
+                "refuses while the environment has a custom deployment protection rule, so every",
+                "engine job fails. Enabled: gatekeeper. Remove each:",
+                (
+                    "gh api -X DELETE "
+                    "repos/o/r/environments/shipmate-engine/deployment_protection_rules/3"
+                ),
+            ],
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"total_count": 1, "custom_deployment_protection_rules": [_custom_rule(4, "d", False)]},
+        NO_CUSTOM_RULES,
+        SystemExit("gh: Not Found (HTTP 404)"),
+    ],
+    ids=["disabled", "none", "absent"],
+)
+def test_no_enabled_custom_rule_on_the_engine_environment_is_no_item(monkeypatch, answer):
+    """Mutation: ignore `enabled`, so the disabled case lists its rule."""
+    assert _custom_rule_items(monkeypatch, answer) == []
+
+
+def test_an_unreadable_custom_rule_list_cannot_be_checked(monkeypatch):
+    """Mutation: catch nothing around the read, so the failure ends the run."""
+    assert _custom_rule_items(monkeypatch, SystemExit("gh: Server Error (HTTP 500)")) == [
+        (
+            "cannot check",
+            "custom deployment protection rules on shipmate-engine",
+            [
+                (
+                    "`repos/o/r/environments/shipmate-engine/deployment_protection_rules` could "
+                    "not be read."
+                )
+            ],
+        )
+    ]
+
+
+def test_the_checklist_reports_an_enabled_custom_rule(monkeypatch, tmp_path, capsys):
+    """Mutation: drop `_custom_rule_items` from `_checklist`."""
+    rules = {"total_count": 1, "custom_deployment_protection_rules": [_custom_rule(3, "g", True)]}
+    routes = {**_CONFORMING_ENGINE, ENGINE_SECRETS: {"secrets": [{"name": KEY}]}}
+    run_main(monkeypatch, tmp_path, {**routes, ENGINE_RULES: rules}, ["--dry-run"])
+    items = checklist_items(checklist_of(capsys.readouterr().out))
+    assert items["custom deployment protection rules on shipmate-engine"][0] == "todo"
 
 
 def test_the_passphrase_is_read_from_the_repository_secrets():
@@ -2288,22 +2368,28 @@ def test_the_reviewer_verdict_ignores_the_engine_environment():
 
 def test_the_review_count_reads_past_the_gate_rule(monkeypatch):
     """`_gate_entry` returns at the gate's own `required_status_checks` rule, so a count
-    taken in that loop never sees a `pull_request` rule listed after it.
+    taken in that loop never sees a `pull_request` rule listed after it. The code-owner flag
+    is read from the same rule.
 
-    Mutation: take the count inside the loop, before its `return`.
+    Mutations: take the count inside the loop, before its `return`; return `False` for the
+    code-owner flag.
     """
     rules = [
         {
             "type": "required_status_checks",
             "parameters": {"required_status_checks": [{"context": onboard.GATE}]},
         },
-        {"type": "pull_request", "parameters": {"required_approving_review_count": 1}},
+        {
+            "type": "pull_request",
+            "parameters": {"required_approving_review_count": 1, "require_code_owner_review": True},
+        },
     ]
     monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
     assert onboard._gate_entry(ctx()) == (
         {"context": onboard.GATE},
         {"required_status_checks": [{"context": onboard.GATE}]},
         1,
+        True,
     )
 
 
@@ -2417,7 +2503,7 @@ def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
     """GitHub reads `CODEOWNERS` from `.github/`, the root or `docs/`; which paths an entry
     covers is not reimplemented here.
 
-    Mutation: drop `docs/CODEOWNERS` from `_CODEOWNERS_PATHS`.
+    Mutation: drop `docs/CODEOWNERS` from `CODEOWNERS_PATHS`.
     """
     item = "CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS"
     assert onboard._codeowners_item(ctx(root=tmp_path)) == (
@@ -2432,6 +2518,83 @@ def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
         item,
         ["`docs/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's."],
     )
+
+
+CODEOWNERS_ITEM = "CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS"
+COMMENTS_ONLY = "# owners\n\n   # none yet\n"
+#: The whole item for a comment-only `.github/CODEOWNERS` under code-owner review, hand-written.
+NO_OWNERS_ITEM = (
+    "todo",
+    CODEOWNERS_ITEM,
+    [
+        "`.github/CODEOWNERS` in this working tree holds no rule line, so no path has a",
+        "code owner and the code-owner review the `pull_request` rule on `main` requires",
+        "holds no pull request: GitHub asks an owner only for changed files an entry",
+        "owns. Add an entry covering the paths the IaC lives in (docs/hardening.md #3 to",
+        "#5).",
+    ],
+)
+GITHUB_DIR_EXISTS = (
+    "cannot check",
+    CODEOWNERS_ITEM,
+    ["`.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's."],
+)
+
+
+def write_codeowners(root, files):
+    for path, text in files.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text, encoding="utf-8")
+
+
+def test_code_owner_review_over_a_codeowners_with_no_rule_line_is_todo(tmp_path):
+    """Mutation: count a `#` line as a rule in `codeowners_rules`."""
+    write_codeowners(tmp_path, {".github/CODEOWNERS": COMMENTS_ONLY})
+    assert onboard._codeowners_item(ctx(root=tmp_path, code_owner_review=True)) == NO_OWNERS_ITEM
+
+
+def test_code_owner_review_over_a_codeowners_with_a_rule_line_cannot_be_checked(tmp_path):
+    """Mutation: return the `todo` whatever the file holds."""
+    write_codeowners(tmp_path, {".github/CODEOWNERS": COMMENTS_ONLY + "* @o/ops\n"})
+    assert onboard._codeowners_item(ctx(root=tmp_path, code_owner_review=True)) == (
+        GITHUB_DIR_EXISTS
+    )
+
+
+def test_code_owner_review_with_no_codeowners_is_todo_naming_the_absence(tmp_path):
+    """Mutation: keep today's bare `Add one in` line ahead of the code-owner check."""
+    assert onboard._codeowners_item(ctx(root=tmp_path, code_owner_review=True)) == (
+        "todo",
+        CODEOWNERS_ITEM,
+        [
+            "no `CODEOWNERS` file is in this working tree (`.github/`, the root or `docs/`),",
+            "so no path has a code owner and the code-owner review the `pull_request` rule on",
+            "`main` requires holds no pull request: GitHub asks an owner only for changed",
+            "files an entry owns. Add an entry covering the paths the IaC lives in",
+            "(docs/hardening.md #3 to #5).",
+        ],
+    )
+
+
+def test_without_code_owner_review_a_comment_only_codeowners_is_as_before(tmp_path):
+    """Mutation: drop the `code_owner_review` check, so the file is judged and reported."""
+    write_codeowners(tmp_path, {".github/CODEOWNERS": COMMENTS_ONLY})
+    assert onboard._codeowners_item(ctx(root=tmp_path)) == GITHUB_DIR_EXISTS
+
+
+def test_the_first_codeowners_in_github_order_is_the_one_judged(tmp_path):
+    """Mutation: read `CODEOWNERS` first in `CODEOWNERS_PATHS`."""
+    write_codeowners(tmp_path, {".github/CODEOWNERS": COMMENTS_ONLY, "CODEOWNERS": "* @o/ops\n"})
+    assert onboard._codeowners_item(ctx(root=tmp_path, code_owner_review=True)) == NO_OWNERS_ITEM
+
+
+def test_the_ruleset_reconciler_stores_the_code_owner_flag(monkeypatch):
+    """Mutation: unpack the flag into `_` in `_reconcile_ruleset`."""
+    rules = [{"type": "pull_request", "parameters": {"require_code_owner_review": True}}]
+    monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
+    c = ctx()
+    onboard._reconcile_ruleset(c)
+    assert c["code_owner_review"] is True
 
 
 LOCK_ITEM = "Provider lock files"

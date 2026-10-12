@@ -28,7 +28,7 @@ import re
 import shutil
 
 import pytest
-from _loader import ENGINE, bash_only, run_step, step_by, workflow_jobs
+from _loader import ENGINE, ENGINE_ENVIRONMENT, bash_only, run_step, step_by, workflow_jobs
 
 _MINT = "actions/create-github-app-token"
 _CHECKOUT = "actions/checkout"
@@ -44,7 +44,7 @@ _DETECT_NEEDS = ["guard", "review"]
 _REVIEW_JOB = {
     "needs": ["guard"],
     "runs-on": "ubuntu-slim",
-    "environment": "shipmate-engine",
+    "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
     "outputs": {"decision": "${{ steps.rd.outputs.decision }}"},
 }

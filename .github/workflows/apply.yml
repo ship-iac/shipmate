@@ -40,7 +40,7 @@ jobs:
     # dispatch never reaches decide(), so this job also binds `ref` to the open PR's own head.
     runs-on: ubuntu-slim
     # Reaches the App key the same way `summary` does.
-    environment: shipmate-engine
+    environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     outputs:
       decision: ${{ steps.rd.outputs.decision }}
@@ -212,7 +212,7 @@ jobs:
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as
     # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
     # the default branch, so a branch-authored workflow naming it is denied and never sees the key.
-    environment: shipmate-engine
+    environment: { name: shipmate-engine, deployment: false }
     # gate-refresh and apply-summary mint their own App tokens for their scans and writes; the
     # one GITHUB_TOKEN scope needed is actions:read, for apply-summary's artifact download and
     # run-jobs listing.

@@ -49,6 +49,7 @@ jobs:
       empty: ${{ steps.matrix.outputs.empty }}
       count: ${{ steps.matrix.outputs.count }}
       unmanaged: ${{ steps.matrix.outputs.unmanaged }}
+      lost: ${{ steps.matrix.outputs.lost }}
       refusal: ${{ steps.matrix.outputs.refusal }}
     steps:
       # Both triggers check out something else by default -- the base branch under
@@ -127,9 +128,9 @@ jobs:
     concurrency:
       group: shipmate-gate-${{ needs.facts.outputs.head-sha || github.run_id }}
       cancel-in-progress: false
-    # The guard is on the job, not on a step: a skipped job creates no deployment and never enters
-    # the environment, whereas a first-step check would already hold the App key in scope.
-    environment: shipmate-engine
+    # The guard is on the job, not on a step: a skipped job never enters the environment,
+    # whereas a first-step check would already hold the App key in scope.
+    environment: { name: shipmate-engine, deployment: false }
     permissions:
       contents: read
     steps:
@@ -153,6 +154,7 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           github-vars: ${{ toJSON(vars) }}
           unmanaged-stacks: ${{ needs.detect.outputs.unmanaged }}
+          lost-env-tags: ${{ needs.detect.outputs.lost }}
 
   # The group above cancels a pending `summary` when a later gate writer queues behind it, so this
   # run's cells would never publish. A hold only closes the gate, so this job writes outside the
@@ -162,7 +164,7 @@ jobs:
     needs: [facts, summary]
     if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}
     runs-on: ubuntu-slim
-    environment: shipmate-engine
+    environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
       - uses: $/actions/gate-refresh

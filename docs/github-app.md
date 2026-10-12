@@ -166,6 +166,11 @@ to gate a human decision (`docs/hardening.md` #16). `shipmate doctor` checks
 both that this environment exists and that its policy actually names the
 default branch.
 
+No custom deployment protection rule either. Every engine job binds this
+environment with `deployment: false`, so it creates no deployment, and GitHub
+fails such a job when the environment has a custom deployment protection rule.
+`scripts/onboard` reports an enabled one.
+
 **What this costs across N repositories.** Key *creation* is per App, not per
 repository: `docs/hardening.md` #13 asks for one App per trust domain, and one
 key serves every repository in it. Placement is per repository either way. The
@@ -398,14 +403,14 @@ actual work here:
   job earlier in the same engine-owned file, so nothing a consumer writes can
   weaken it. Under `pull_request_target` a fork's pull request *does* reach the
   base ref, so nothing else would stop that job. Being on the job, a refusal
-  creates no deployment at all.
+  never enters the environment.
 - A draft is not refused there. A draft's autoplan skips its plan jobs, enters
-  `shipmate-engine` and creates a deployment like any other plan run, and
-  the `summary` job writes `shipmate / gate` pending with the draft reason. The run
-  creates no apply check, so `gate-refresh` has nothing to green that status
-  over, and the draft status is written only on a head that carries no gate
-  status yet, so a draft run never replaces an earlier gate. A *requested*
-  plan of a draft does run, and `on-demand` is how the caller says so.
+  `shipmate-engine` like any other plan run, and the `summary` job writes
+  `shipmate / gate` pending with the draft reason. The run creates no apply
+  check, so `gate-refresh` has nothing to green that status over, and the draft
+  status is written only on a head that carries no gate status yet, so a draft
+  run never replaces an earlier gate. A *requested* plan of a draft does run,
+  and `on-demand` is how the caller says so.
 
 What none of this defends against is a change to the trusted workflow files
 themselves — the consumer's `shipmate.yml` and drift workflow files, and the engine's `plan.yml`,

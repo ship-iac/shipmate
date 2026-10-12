@@ -12,7 +12,7 @@ findings as workflow annotations titled `shipmate doctor`
 (`::warning title=shipmate doctor::<text>` / `::notice title=shipmate
 doctor::<text>`) — read-only, never blocking. Comment `shipmate doctor` on a
 pull request for a consolidated report: a sticky comment (marker `<!--
-shipmate:doctor -->`, upserted in place like the plan comment) combining thirteen
+shipmate:doctor -->`, upserted in place like the plan comment) combining fourteen
 live probes.
 
 - **The `shipmate / gate` rule on the default branch is missing or mis-pinned.**
@@ -22,8 +22,9 @@ live probes.
   (`hardening.md` #3–5).** An approval count alone is not reported as sufficient,
   because the shipmate App can submit an approving review. Only a CODEOWNERS
   review is out of reach of a leaked App private key, and only for changed files
-  an entry actually owns — the rule is a no-op for unowned paths, and the probe
-  reads ruleset booleans only, so it cannot see that.
+  an entry actually owns — the rule is a no-op for unowned paths. This probe
+  reads ruleset booleans only; the `CODEOWNERS` probe below reports a file that
+  owns nothing, and no probe checks which paths an entry covers.
   `required_approving_review_count: 0` *with* code-owner review on is
   reported as a note: the supported sole-maintainer mode while
   `require_last_push_approval` is off, since at count 0 GitHub required no
@@ -40,6 +41,14 @@ live probes.
   booleans are unioned across every
   `pull_request` rule on the branch, since GitHub enforces the union across
   layered rulesets.
+- **A `CODEOWNERS` that owns nothing while code-owner review is required.** The
+  default branch's `.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS`, the
+  first one present as GitHub reads them, holds no line naming a pattern and at
+  least one owner once a `#` comment is cut off, or none of the three exists. A
+  pattern with no owner un-owns its paths. No path then has a code owner, so the
+  code-owner review holds no pull request. Which paths a rule line matches is not
+  checked. A failed file read degrades this probe alone; an unreadable ruleset
+  leaves it silent, since the review-rule probe already reports that read.
 - **A GitHub Environment (`<env>-plan` / `<env>-apply`, or a single shared
   `<env>`) is missing for a tagged-in environment.**
 - **The plan/apply environment protection shape.** A plan environment must have
@@ -167,7 +176,7 @@ annotations GitHub already recorded on this commit's workflow runs — shipmate'
 own and any other Actions workflow run on that commit; third-party-app-authored
 check runs are excluded.
 
-Only twelve of the thirteen probes can produce a finding from the plan path's
+Only thirteen of the fourteen probes can produce a finding from the plan path's
 own `annotate`-mode run (`actions/summary`). The App-permission-drift probe
 only has something to report when a full-manifest permission-set mint was
 actually attempted, which only `shipmate doctor` does. It is effectively
@@ -309,7 +318,18 @@ its `todo` items.
 | --- | --- |
 | `ok` | what the run read already satisfies the item. |
 | `todo` | the item is not done; what to do follows. |
-| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
+| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, `shipmate-engine`'s custom deployment protection rules could not be listed, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
+
+`custom deployment protection rules on shipmate-engine` appears only when the
+environment exists and has an enabled custom deployment protection rule, or its
+rule list cannot be read. The `todo` names each enabled rule's App and the
+command that removes it: every engine job fails under one (§Every engine job
+fails before its first step).
+
+While a `pull_request` rule on the default branch requires code-owner review,
+the `CODEOWNERS` item is `todo` when the checkout has no `CODEOWNERS` file or the
+first one GitHub reads holds no line that is not blank or a `#` comment: no path
+then has a code owner, so that review holds no pull request.
 
 Three items check the working tree's stacks and drift files the way a run
 would, so a run that would refuse or skip shows up before the pull request
@@ -1053,7 +1073,9 @@ edit — plans nothing. This is expected, not a fault.
 
 A changed stack with no `env/*` tag is unmanaged and plans nothing either. The
 plan comment names it under the verdict, and the `detect` log carries a notice
-naming it. Tag it `env/<name>` to bring it under shipmate ([`../CONTRACT.md`](../CONTRACT.md) §Tag
+naming it. A pull request that removes one `env/*` tag from a stack that keeps
+another drops that stack / environment pair the same way; the plan comment names
+the pair on its own line. Tag the stack `env/<name>` to bring it under shipmate ([`../CONTRACT.md`](../CONTRACT.md) §Tag
 grammar).
 
 The same rule drops a stack whose change was applied before merge and then
@@ -1099,6 +1121,22 @@ pull request there.
 pull request's head branch is in a fork, or in a repository that was deleted.
 Nothing was dispatched. As for a plan, push the branch to this repository
 (`gh pr checkout`, then push) and open the pull request there.
+
+### Every engine job fails before its first step
+
+All eight jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`summary` and `gate-hold`, `comment-ops.yml` `ops`, `apply.yml` `review` and
+`summary`, `apply-env-level.yml` `complete`, `deploy.yml` `summary` and
+`drift.yml` `issues`. No `shipmate / gate` status, sticky comment or comment
+reply is written.
+
+`shipmate-engine` has an enabled custom deployment protection rule. Every engine
+job binds that environment with `deployment: false`, which creates no deployment,
+and GitHub fails such a job when the environment has a custom deployment
+protection rule. `shipmate doctor` runs inside those jobs, so it cannot report
+this; `scripts/onboard --app-id <id> --dry-run` does, with the command that
+removes the rule. List the rules with
+`gh api repos/<owner>/<repo>/environments/shipmate-engine/deployment_protection_rules`.
 
 ### An apply check never completes after a successful apply
 

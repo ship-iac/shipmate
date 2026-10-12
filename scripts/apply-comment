@@ -77,7 +77,7 @@ def _not_attempted_note(rows, env_name):
 def _unrecorded_note(rows):
     """The 'not recorded' note, naming every affected cell.
 
-    Cell names are author-controlled, so **bold** + `_md_escape` — never a
+    Cell names are author-controlled, so **bold** + `_md_name` — never a
     backtick code span, which `_md_escape` does not escape.
 
     The _UNRECORDED_NAMED cap is not cosmetic. Notes belong to the part of the
@@ -87,7 +87,7 @@ def _unrecorded_note(rows):
     is precisely the run that needs the comment most. The cell lines still name
     every affected cell."""
     cells = [
-        f"**{sc._md_escape(r['stack'])} ({sc._md_escape(r['environment'])})**"
+        f"**{sc._md_name(r['stack'])} ({sc._md_name(r['environment'])})**"
         for r in rows
         if r["status"] == "unrecorded"
     ]
@@ -106,7 +106,7 @@ def _lock_cell(row, lock):
     value (unbounded runtime output), so the sentence stays grammatical."""
     held = f", held since **{sc._md_escape(lock['created'])}**" if lock["created"] else ""
     return (
-        f"**{sc._md_escape(row['stack'])} ({sc._md_escape(row['environment'])})** "
+        f"**{sc._md_name(row['stack'])} ({sc._md_name(row['environment'])})** "
         f"(lock **{sc._md_escape(lock['id'])}**{held})"
     )
 
@@ -117,8 +117,9 @@ def _lock_note(rows, env_name):
 
     Cell names are author-controlled, and the lock id and creation time come
     from apply.txt -- provider and `local-exec` output a stack under review can
-    influence -- so all four are **bold** + `_md_escape`, never a backtick code
-    span, which `_md_escape` does not escape. `_md_escape` alone is not enough
+    influence -- so all four are **bold** + `_md_escape` (`_md_name` for the cell
+    names), never a backtick code span, which `_md_escape` does not escape.
+    `_md_escape` alone is not enough
     for the lock values, which is why lock-info bounds their length and charset
     at the source: it escapes neither `*` nor a backtick, and `apply_text` is
     capped only in total, so one crafted `Created:` line could both break out of

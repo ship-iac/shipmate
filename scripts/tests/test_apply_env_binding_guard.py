@@ -28,7 +28,7 @@ whole-value comparison per job, plus a derived job set compared to the hand-writ
 it.
 """
 
-from _loader import WORKFLOWS, local_action, workflow_jobs
+from _loader import ENGINE_ENVIRONMENT, WORKFLOWS, local_action, workflow_jobs
 
 CELL_ENV = "${{ matrix.env_binding }}"
 WAVES = [f"wave{i}" for i in range(8)]
@@ -95,7 +95,7 @@ def test_snapshot_binds_no_environment_and_complete_binds_the_engine_environment
         "snapshot must bind no environment -- it needs no secret, and an "
         "env-derived binding would subject the check snapshot to protection rules"
     )
-    assert jobs["complete"].get("environment") == "shipmate-engine"
+    assert jobs["complete"].get("environment") == ENGINE_ENVIRONMENT
 
 
 def test_snapshot_verifies_the_environments_before_snapshotting_the_checks():

@@ -313,17 +313,18 @@ _RESERVED_WORKLOADS = ("vars", "role", "region")
 #: Everything the file may declare at its top level.
 _TOP_KEYS = ("layout", "identities", "environments")
 
-#: Env names come from Terramate `env/<name>` tags, so the charset is comment-parse's env
-#: grammar plus `_`, a legal tag character no `shipmate apply <env>` can name. Lowercase
-#: because Terramate refuses an uppercase letter in a tag: an entry carrying an uppercase
-#: letter can never name an environment, so its flags and its `needs` would apply to
-#: nothing while reading as though they held.
+#: Env names come from Terramate `env/<name>` tags; comment-parse builds its env grammar
+#: from this pattern. Lowercase because Terramate refuses an uppercase letter in a tag: an
+#: entry carrying an uppercase letter can never name an environment, so its flags and its
+#: `needs` would apply to nothing while reading as though they held.
 _ENV_ENTRY = re.compile(r"[a-z0-9][a-z0-9_-]*")
+#: `_ENV_ENTRY` in words, for a message that names the rule.
+ENV_NAME_RULE = "lowercase letters, digits, `-` and `_`, starting with a letter or digit"
 
 
 def is_env_name(name):
-    """Whether `name` is in the environment-name charset: lowercase letters, digits, `-` and
-    `_`, starting with a letter or digit. It holds no space, so no ` / `."""
+    """Whether `name` is in the environment-name charset, `ENV_NAME_RULE`. It holds no space,
+    so no ` / `."""
     return bool(_ENV_ENTRY.fullmatch(name))
 
 

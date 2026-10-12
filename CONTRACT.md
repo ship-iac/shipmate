@@ -1000,7 +1000,8 @@ goes green over a stack that plans nothing. When a pull request removes a
 stack's last `env/*` tag, plan detect also writes a `::warning::` naming it,
 because the same green gate then hides a live stack's unapplied change. A pull
 request removing one `env/*` tag from a stack that keeps another gets a
-`::warning::` naming each `<stack> / <env>` pair, for the same reason. A
+`::warning::` and a plan comment line naming each `<stack> / <env>` pair, for the
+same reason. A
 deploy refuses when its merged pull request holds an open apply check for a
 stack and environment the merge no longer pairs: the stack, changed by that
 pull request, lost that `env/*` tag (or every one) after the pull request was
@@ -1056,7 +1057,8 @@ whose `env_binding` names no GitHub Environment, and the refusal of a
 3. Retag the stack in a later pull request to bring it back, or delete it.
 
 Removing one environment's tag from a stack that keeps others takes only that
-pair out; its plan run warns naming the `<stack> / <env>` pair.
+pair out; its plan comment and its plan run's warning name the `<stack> / <env>`
+pair.
 
 Every plan's `detect` still runs `terramate fmt --check` and
 `terramate generate --detailed-exit-code` over the whole repository, unmanaged
@@ -1158,9 +1160,17 @@ enforced.
 A verb documented as taking no arguments (`doctor`, `help`, `plan`) rejects an
 env given alongside it with an explicit "takes no arguments" error rather than
 silently ignoring the extra token. An unknown verb's error points the commenter at
-`shipmate help`, and so does the "malformed" error for a line that does not
-match the grammar at all (a capitalized verb, an env holding anything but
-lowercase letters, digits, `-` and `_`, a token after the env, a double space).
+`shipmate help`, and so does every other refusal of a line that does not match
+the grammar: for `apply` or `unlock`, the reply names a token after the env
+("unexpected `<token>` after the environment") or an env outside lowercase
+letters, digits, `-` and `_`, starting with a letter or digit ("environment
+`<token>` is not ..."); any other shape (a capitalized verb, a double space)
+gets "malformed: expected `shipmate <verb> [env]`". The reply quotes the
+commenter's token, an unknown verb included, only inside a code span, and only
+when it is non-empty, at most 40 characters and free of backticks; otherwise it
+says "an unexpected token", "the environment name" or "an unknown verb". The reply to a refused line names no environment in its
+header, and names its verb only when the verb is known and the line fits the
+grammar (`### shipmate help` for `shipmate help foo`).
 `scripts/comment-parse`'s `VERBS` registry is the single
 source of truth this table is derived from: it drives the parser, the
 `--help-markdown` rendering that `shipmate help` posts verbatim (marked with
@@ -1185,12 +1195,12 @@ and this run (`at an unknown commit in [run #<n>](<run url>)` when the commit
 is not a 40-character lowercase hex SHA). Each finding and harvested annotation
 carries the same circles. Under any verdict but 🟢 the report ends with the help
 hint ``Comment `shipmate help` for the available commands.``; a 🟢 report has
-no footer. It combines thirteen live settings probes, listed in
+no footer. It combines fourteen live settings probes, listed in
 `docs/troubleshooting.md` §shipmate doctor with their scopes and degrade paths,
 and a harvest of the warning and failure annotations GitHub already recorded on
 this commit's workflow runs (shipmate's own and any other Actions workflow run
 on that commit; third-party-app-authored check runs are excluded).
-Only twelve of the thirteen probes can produce a finding from the plan path's own
+Only thirteen of the fourteen probes can produce a finding from the plan path's own
 `annotate`-mode invocation: the App-permission-drift probe reports only on a
 full-manifest permission-set mint, which only `shipmate doctor` attempts. An
 empty harvest is
@@ -1312,7 +1322,7 @@ Together they are strictly stronger than a base-divergence check: a plan
 the base branch never moved under, but that state moved under, is refused too.
 
 Review policy is read from GitHub's own `reviewDecision` — the verdict the
-branch ruleset computes. shipmate never parses `CODEOWNERS` and keeps no
+branch ruleset computes. The apply path never parses `CODEOWNERS` and keeps no
 second copy of the rule: whatever the ruleset requires (approval counts,
 code-owner review, last-push approval) is what the apply path waits for, and
 there is no owners parser here to disagree with it.
@@ -1634,7 +1644,8 @@ Engine `plan.yml` is five jobs: `facts`, `detect`, `plan`, `summary`,
 `gate-hold`. `facts` is `actions/pr-facts`, the single producer of every
 pull-request fact the others decide on. `detect` and `plan` are untrusted: they
 check out the pull request's own head and hold no App credential. `summary` and
-`gate-hold` are the trusted jobs — `environment: shipmate-engine`, and neither
+`gate-hold` are the trusted jobs — bound to `shipmate-engine` with
+`deployment: false`, like every engine job binding it, and neither
 checks anything out. Every App-authored
 surface listed above (apply checks, the gate, the sticky comments, drift
 issues) is created by a job bound to that fixed GitHub Environment
@@ -1746,7 +1757,7 @@ The five jobs:
   drift path is unaffected because engine `drift.yml` states that it is a sweep
   with no pull request (`sweep: "true"`), which is the only opt-out
   and appears in no other engine workflow.
-- **`summary`** (engine, `environment: shipmate-engine`) — it calls
+- **`summary`** (engine, bound to `shipmate-engine`) — it calls
   `actions/summary`, which downloads this same run's cell summaries and, under
   an App token minted inside that environment, publishes the results. This is
   what creates the pending `apply / <stack> / <env>` checks, the sticky plan
@@ -1758,7 +1769,7 @@ The five jobs:
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
-- **`gate-hold`** (engine, `environment: shipmate-engine`, `permissions: {}`) —
+- **`gate-hold`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
   runs only when `summary` was cancelled, which the gate-writer concurrency
   group does to a pending `summary` (§Comment-ops, "The aggregate gate"). It
   calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
@@ -2072,13 +2083,14 @@ trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the unmanaged line and a blank line when
-the pull request changes an unmanaged stack, one line or fold-out per planned
+the pull request changes an unmanaged stack, the lost pairs line and a blank
+line when it untags a stack / environment pair, one line or fold-out per planned
 stack × environment, sorted by environment then stack. There is no footer and no help
 hint, whether or not `doctor` warned: both verdicts are normal results and the
 verdict links the run. The doctor step records its decision once, as its
 `warned` output, which the post-or-skip rule reads; the build step records
-whether the unmanaged line rendered, as its `unmanaged` output, which the same
-rule reads.
+whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
+and `lost` outputs, which the same rule reads.
 
 - **Verdict line.** `🟢 no changes` when no cell changes (zero cells
   included), else `🟡 N of M cells change`, then
@@ -2094,6 +2106,14 @@ rule reads.
   characters, then `, and M more`. When not even the first path fits, it ends
   `; their paths are too long to list here.` When the cell lines leave it no
   room under the 65,536-character cap, it is left out with a warning.
+- **Lost pairs line.** `⚪ N stack / environment pair(s) lost their env/* tag
+  in this pull request and are no longer planned or deployed: <pairs>`, each
+  `<stack> / <env>`, for the stacks that keep another `env/*` tag; a stack that
+  lost its last tag is on the unmanaged line instead, so no stack is named on
+  both. Same caps and fallback as the unmanaged line, ending `; their pairs are
+  too long to list here.` A drift sweep and a run with no pull-request base
+  have no such line. On both lines each name is escaped like a cell line's
+  stack, `@` included.
 - **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the
@@ -2104,7 +2124,10 @@ rule reads.
   the cell's `(stack-path, environment)` pair using the check-name grammar
   above; when the check run cannot be resolved, it is the workflow-run URL. The
   link is raw HTML because a Markdown link renders literally inside
-  `<summary>`.
+  `<summary>`. `<stack>` and `<env>` are escaped, and each `@` in them is
+  followed by an empty HTML comment (`@<!-- -->`), so a stack path cannot
+  mention a user or team; the apply comment's cell lines and its notes'
+  bold cell names and the doctor report's check headers do the same.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped

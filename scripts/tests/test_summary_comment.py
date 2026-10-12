@@ -223,6 +223,14 @@ def test_cell_line_escapes_author_controlled_names():
     )
 
 
+def test_cell_line_names_mention_nobody():
+    """Mutation: `_md_escape` for `_md_name` on the stack in `cell_line` -- a live `@acme`.
+    Mutation: the same on the env -- a live `@v`."""
+    assert sc.cell_line("🟡", "@acme/ops/y", "e@v", "+1 ~0 -0") == (
+        "🟡 @<!-- -->acme/ops/y (e@<!-- -->v): +1 ~0 -0"
+    )
+
+
 def test_header_forms():
     """Mutations: dropping `_md_escape` reddens the escaped-environment case; keeping `env` when
     `verb` is empty reddens the empty-verb-with-env case."""
@@ -432,6 +440,41 @@ def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verd
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/[new]")) == (
         HEAD + f"🟢 no changes {AT}\n\n" + _LEAD.format(1) + ": stacks/&#91;new&#93;",
         True,
+        False,
+    )
+
+
+_LOST_LEAD = (
+    "⚪ {} stack / environment pair(s) lost their env/* tag in this pull request and are no "
+    "longer planned or deployed"
+)
+
+
+def test_the_lost_pairs_line_follows_the_unmanaged_line_and_mentions_nobody():
+    """Each name is escaped, and an empty HTML comment follows each `@` so a path cannot
+    mention a user or team.
+
+    Mutation: drop the lost line from `build_comment` -- it is missing.
+    Mutation: `_md_escape` for `_md_name` in `names_line` -- both lines carry a live `@acme`."""
+    lost = {"count": 12, "pairs": ["@acme/ops/y / prod", *(f"s{i:02} / dev" for i in range(9))]}
+    assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "@acme/admins/x"), lost) == (
+        HEAD
+        + f"🟢 no changes {AT}\n\n"
+        + _LEAD.format(1)
+        + ": @<!-- -->acme/admins/x\n\n"
+        + _LOST_LEAD.format(12)
+        + ": @<!-- -->acme/ops/y / prod, s00 / dev, s01 / dev, s02 / dev, s03 / dev, s04 / dev, "
+        "s05 / dev, s06 / dev, s07 / dev, s08 / dev, and 2 more",
+        True,
+        True,
+    )
+
+
+def test_the_lost_pairs_line_names_none_when_none_fits():
+    """Mutation: name `paths` in the fixed sentence whatever the key -- it says paths."""
+    lost = {"count": 1, "pairs": ["p" * 3000]}
+    assert sc.names_line(lost, "pairs", sc.LOST_LEAD) == (
+        _LOST_LEAD.format(1) + "; their pairs are too long to list here."
     )
 
 
@@ -502,6 +545,7 @@ def test_the_unmanaged_line_yields_to_cell_lines_near_the_hard_cap(capsys):
     capsys.readouterr()
     assert sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged")) == (
         without,
+        False,
         False,
     )
     assert capsys.readouterr().out == _NO_ROOM
@@ -775,12 +819,13 @@ def test_the_comment_body_starts_with_its_marker():
 def test_the_upsert_quiet_inputs_read_doctor_and_build():
     """The quiet condition is exercised in `test_upsert_comment.py`; these are its inputs.
 
-    Mutations: bind `DOCTOR_WARNED` to another step's output; bind `UNMANAGED` to another output
-    of step `build`.
+    Mutations: bind `DOCTOR_WARNED` to another step's output; bind `UNMANAGED` or `LOST` to
+    another output of step `build`.
     """
     env = step_by("summary", name="Upsert sticky comment")["env"]
     assert env["DOCTOR_WARNED"] == "${{ steps.doctor.outputs.warned }}"
     assert env["UNMANAGED"] == "${{ steps.build.outputs.unmanaged }}"
+    assert env["LOST"] == "${{ steps.build.outputs.lost }}"
 
 
 #: The doctor step's whole shell body, hand-written: doctor's result is read here once, as the
@@ -860,18 +905,20 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     )
     # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`. Mutation:
     # binding `SHIPMATE_DOCTOR_WARNED` again -- a plan comment reads nothing from doctor.
-    # Mutation: mapping `unmanaged-stacks` to another env name.
+    # Mutation: mapping `unmanaged-stacks` or `lost-env-tags` to another env name.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_UNMANAGED": "${{ inputs.unmanaged-stacks }}",
+        "SHIPMATE_LOST_ENV_TAGS": "${{ inputs.lost-env-tags }}",
     }
     # Mutation: `required: true` (GitHub does not enforce it, but it misdocuments a draft run).
-    decl = load_workflow_text(src)["inputs"]["unmanaged-stacks"]
-    assert {k: v for k, v in decl.items() if k != "description"} == {
-        "required": False,
-        "default": "",
-    }
+    for name in ("unmanaged-stacks", "lost-env-tags"):
+        decl = load_workflow_text(src)["inputs"][name]
+        assert {k: v for k, v in decl.items() if k != "description"} == {
+            "required": False,
+            "default": "",
+        }
 
 
 _BAD_UNMANAGED = (
@@ -909,9 +956,45 @@ def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
     Mutation: dropping the `len(paths) == min(count, ...)` check accepts the zero count over
     one path, the count of 3 over none and the count of -1."""
     monkeypatch.setenv("SHIPMATE_UNMANAGED", raw)
-    assert _run_main(tmp_path, monkeypatch, []) == f"pending=false\ncount=0\nunmanaged={flag}\n"
+    assert _run_main(tmp_path, monkeypatch, []) == (
+        f"pending=false\ncount=0\nunmanaged={flag}\nlost=false\n"
+    )
     assert capsys.readouterr().out == out
     line = "\n\n" + _LEAD.format(1) + ": stacks/x" if flag == "true" else ""
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + line
+
+
+_BAD_LOST = (
+    '::warning::lost-env-tags is not a JSON object {"count": N, "pairs": [strings]} '
+    "naming min(N, 10) pairs; the plan comment names no lost stack / environment pair\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "out", "flag"),
+    [
+        ("", "", "false"),
+        ('{"count": 1, "paths": ["stacks/x / dev"]}', _BAD_LOST, "false"),
+        ('{"count": 2, "pairs": ["stacks/x / dev"]}', _BAD_LOST, "false"),
+        ('{"count": 0, "pairs": []}', "", "false"),
+        ('{"count": 1, "pairs": ["stacks/x / dev"]}', "", "true"),
+    ],
+)
+def test_main_names_the_lost_pairs_without_touching_the_gate_outputs(
+    tmp_path, monkeypatch, capsys, raw, out, flag
+):
+    """A nothing-changed run with a lost pair writes `lost=true`, which the upsert's create-skip
+    reads; an invalid value renders no line and warns once.
+
+    Mutation: always writing `lost=false` reddens the last case.
+    Mutation: read the lost value under `paths` -- the first bad case renders a line."""
+    monkeypatch.setenv("SHIPMATE_LOST_ENV_TAGS", raw)
+    assert _run_main(tmp_path, monkeypatch, []) == (
+        f"pending=false\ncount=0\nunmanaged=false\nlost={flag}\n"
+    )
+    assert capsys.readouterr().out == out
+    line = "\n\n" + _LOST_LEAD.format(1) + ": stacks/x / dev" if flag == "true" else ""
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     assert body == HEAD + f"🟢 no changes {MAIN_AT}" + line
 
@@ -930,7 +1013,9 @@ def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monke
     monkeypatch.setenv("SHIPMATE_UNMANAGED", '{"count": 1, "paths": ["stacks/unmanaged"]}')
     (tmp_path / "out.txt").unlink()
     capsys.readouterr()
-    assert _run_main(tmp_path, monkeypatch, []) == "pending=true\ncount=130\nunmanaged=false\n"
+    assert _run_main(tmp_path, monkeypatch, []) == (
+        "pending=true\ncount=130\nunmanaged=false\nlost=false\n"
+    )
     assert capsys.readouterr().out == _NO_ROOM
     assert len((tmp_path / "comment.md").read_text(encoding="utf-8")) == sc.HARD_CAP - 10
 

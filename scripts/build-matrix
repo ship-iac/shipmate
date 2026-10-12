@@ -30,7 +30,8 @@ PLAN_WORKFLOW = ".github/workflows/shipmate.yml"
 
 #: How many unmanaged stack paths the notice and the `unmanaged` output name; the rest are
 #: counted. The output crosses a job boundary in one environment variable, so it stays small.
-#: The partial-untag warning reuses the cap for its `<stack> / <env>` pairs.
+#: The partial-untag warning and the `lost` output reuse the cap for their `<stack> / <env>`
+#: pairs.
 UNMANAGED_NAMES = 10
 
 
@@ -281,12 +282,14 @@ def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
     """One `::warning::` naming the `unmanaged` stacks a pull request untagged, then one naming
     each `<stack> / <env>` pair it untagged on a stack of `tree` that keeps another `env/*`
     tag. `tree` is the scan's `[{environment, stack}]` cells, which give each scanned stack's
-    environments at `HEAD`.
+    environments at `HEAD`. Returns the second warning's pairs, sorted by stack then
+    environment, or `None` when skipped: an untagged stack is never among them, so the plan
+    comment names no stack twice.
 
     Plan detect only: deploy-detect's base is the push's `before`, which would warn about the
     same removal again on the merge, and a drift sweep scans the whole tree with no base."""
     if all_stacks or not base or base == _ZERO_SHA:
-        return
+        return None
     head_envs = {s: set() for s in unmanaged}
     for c in tree:
         head_envs.setdefault(c["stack"], set()).add(c["environment"])
@@ -308,6 +311,7 @@ def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
             f"{named(pairs, UNMANAGED_NAMES)}. If that is deliberate (CONTRACT.md §Taking a "
             "stack out of CI), nothing is wrong; otherwise restore the tag."
         )
+    return pairs
 
 
 def env_membership(all_stacks=False, base="", check_names=True):
@@ -640,7 +644,7 @@ def _detect():
         refuse_workload_gaps(cells, table)
     if errors:
         raise SystemExit("\n".join(errors))
-    warn_lost_env_tags(sweep, base, unmanaged, tree)
+    pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
@@ -648,6 +652,10 @@ def _detect():
         fh.write(f"cells={json.dumps(tree)}\n")
         named = {"count": len(unmanaged), "paths": unmanaged[:UNMANAGED_NAMES]}
         fh.write(f"unmanaged={json.dumps(named)}\n")
+        lost = ""
+        if pairs is not None:
+            lost = json.dumps({"count": len(pairs), "pairs": pairs[:UNMANAGED_NAMES]})
+        fh.write(f"lost={lost}\n")
     listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
     print(f"{len(cells)} cell(s): {listing}")
 

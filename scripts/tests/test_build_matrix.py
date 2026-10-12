@@ -913,6 +913,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "count": "${{ steps.build.outputs.count }}",
         "cells": "${{ steps.build.outputs.cells }}",
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
+        "lost": "${{ steps.build.outputs.lost }}",
         "refusal": "${{ steps.build.outputs.refusal }}",
     }
 
@@ -1902,6 +1903,7 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         "count": "1",
         "cells": '[{"environment": "dev-eu", "stack": "stacks/app"}]',
         "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
+        "lost": "",
     }
 
 
@@ -2143,7 +2145,7 @@ def test_detect_runs_no_diff_without_a_pull_request_base(monkeypatch, tmp_path, 
     `prod` too, so both warnings are reachable. Mutation: drop each clause of the guard in turn
     -- its case diffs and warns."""
     diff_calls = []
-    _run_main(
+    outputs, _ = _run_main(
         monkeypatch,
         tmp_path,
         {**_PR_ENV, **env},
@@ -2154,6 +2156,49 @@ def test_detect_runs_no_diff_without_a_pull_request_base(monkeypatch, tmp_path, 
     )
     assert diff_calls == []
     assert "::warning::" not in capsys.readouterr().out
+    assert outputs["lost"] == ""
+
+
+def test_detect_writes_the_lost_pairs_and_leaves_out_an_untagged_stack(monkeypatch, tmp_path):
+    """`stacks/gone` lost its last tag, so it is the unmanaged line's; `stacks/app` keeps
+    `dev-eu` and loses `prod`. Mutation: drop `if s not in untagged` from the pairs --
+    `stacks/gone / dev` is written too. Mutation: write `lost=` empty -- red."""
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        unmanaged=["stacks/gone"],
+        diffs={"stacks/gone": _REMOVED_ENV_LINE, "stacks/app": _REMOVED_PROD_LINE},
+    )
+    assert outputs["lost"] == '{"count": 1, "pairs": ["stacks/app / prod"]}'
+
+
+def test_detect_writes_no_lost_pair_when_none_was_untagged(monkeypatch, tmp_path):
+    """Mutation: write `lost=` empty whenever `pairs` is falsy -- the zero count is lost."""
+    outputs, _ = _run_main(
+        monkeypatch, tmp_path, _PR_ENV, head_sha="cafe1234", diffs={"stacks/app": ""}
+    )
+    assert outputs["lost"] == '{"count": 0, "pairs": []}'
+
+
+def test_detect_writes_the_first_ten_lost_pairs_sorted(monkeypatch, tmp_path):
+    """Eleven tree stacks, listed in reverse, each lose `prod`. Mutation: `UNMANAGED_NAMES + 1`
+    at the `lost` output -- `stacks/t10 / prod` is written. Mutation: iterate `head_envs`
+    unsorted in `lost_env_tags` -- `stacks/t10 / prod` leads."""
+    stacks = [f"stacks/t{i:02}" for i in range(11)]
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        cells=tuple((s, "dev-eu") for s in reversed(stacks)),
+        head_sha="cafe1234",
+        diffs=dict.fromkeys(stacks, _REMOVED_PROD_LINE),
+    )
+    assert json.loads(outputs["lost"]) == {
+        "count": 11,
+        "pairs": [f"{s} / prod" for s in stacks[:10]],
+    }
 
 
 def test_detect_names_the_first_ten_lost_stacks(monkeypatch, tmp_path, capsys):

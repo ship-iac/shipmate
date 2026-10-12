@@ -354,8 +354,9 @@ reviewer requirement appears on a real pull request opened by someone who does n
 own the changed files: at count 0 with one individual owner, GitHub showed no
 code-owner requirement on a pull request whose author owns them (measured
 2026-10-11; team ownership and higher counts were not). `shipmate doctor` warns when the rule
-requires approvals but not code-owner review — it does not check `CODEOWNERS`
-coverage, and it never fails a run, so that is a warning, not enforcement.
+requires approvals but not code-owner review, and when code-owner review is required
+over a `CODEOWNERS` that owns no path at all. It does not check which paths the
+entries cover, and it never fails a run, so that is a warning, not enforcement.
 
 **GitHub reads `CODEOWNERS` from the pull request's base branch,** so narrowing or
 widening ownership never applies to the pull request carrying the edit — it has to
@@ -885,14 +886,26 @@ run itself is at, and a job that declares this environment from a non-default
 ref is refused *before its first step* — no runner, nothing handed over. The
 same job on `pull_request_target` is admitted, because that trigger evaluates at
 the base branch ref. Both halves were run against a live repository rather than
-read out of documentation; they are what the plan path's trusted `summary` job
-rests on.
+read out of documentation, with the plain `environment: shipmate-engine`
+binding that preceded `deployment: false`; they are what the plan path's trusted
+`summary` job rests on. With `deployment: false`, the non-default-branch refusal
+was re-probed on 2026-10-12; the admitted half was not.
+
+**No deployment, and no custom deployment protection rule.** Every engine job
+binds this environment as `{ name: shipmate-engine, deployment: false }`, so a
+run creates no deployment object. GitHub still releases the environment's secrets
+and variables to the job and still enforces the branch policy (measured: such a
+job from a non-default branch is refused), required reviewers and a wait timer.
+The cost: GitHub fails a `deployment: false` job when the environment has a
+custom deployment protection rule, so `shipmate-engine` takes none.
+`scripts/onboard` reports an enabled one.
 
 **Tag pushes are covered, and there is one way to uncover them.** A deployment
 branch policy is typed: the entry naming your default branch is a branch
 policy, and it matches no tag, so a workflow run at `refs/tags/…` that declares
 this environment is refused before a runner starts and is handed nothing —
-measured, not assumed. Someone who can push tags but not branches therefore
+measured with the plain `environment: shipmate-engine` binding, before
+`deployment: false`; a tag push was not re-probed with `deployment: false`. Someone who can push tags but not branches therefore
 cannot reach the key either. What breaks that is adding a tag policy to
 `shipmate-engine` — for release automation, say. Do not: a tag is a ref anyone
 with tag-push access can create at any commit, including one carrying a workflow

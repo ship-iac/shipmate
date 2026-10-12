@@ -100,7 +100,7 @@ jobs:
     # The gate write goes through a minted App token, not GITHUB_TOKEN. Same environment as
     # apply-env-level.yml's `complete` job: deployment branch policy restricts it to the default
     # branch, which is also this workflow's own trigger, so it never blocks the real run.
-    environment: shipmate-engine
+    environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
       - name: Complete gate on the merged PR head SHA

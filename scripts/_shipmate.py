@@ -8,11 +8,11 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 Also holds the subprocess runner, its ``::error::`` wrapper and ``gh api`` reader for the CI
 scripts, the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
 share, and the UTF-8 switch for their console output. It also holds the pull-request number
-check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the ruleset and
-environment readers and the names ``doctor`` and ``onboard`` share, reads the per-cell
-``cell.json`` summaries, builds this run's page link and joins a capped list of names. It
-parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both importing
-PyYAML only when first called.
+check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the ruleset,
+environment and ``CODEOWNERS`` readers and the names ``doctor`` and ``onboard`` share, reads
+the per-cell ``cell.json`` summaries, builds this run's page link and joins a capped list of
+names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both
+importing PyYAML only when first called.
 """
 
 import functools
@@ -64,6 +64,42 @@ def review_count(rules):
     """The highest `required_approving_review_count` over the `pull_request` rules, 0 if none."""
     pull = [r.get("parameters") or {} for r in rules if r.get("type") == "pull_request"]
     return max((p.get("required_approving_review_count") or 0 for p in pull), default=0)
+
+
+def code_owner_review(rules):
+    """True when any `pull_request` rule in a `rules/branches` response requires code-owner
+    review."""
+    return any(
+        (r.get("parameters") or {}).get("require_code_owner_review")
+        for r in rules
+        if r.get("type") == "pull_request"
+    )
+
+
+#: GitHub's own lookup order for the file: the first one present is the one it reads.
+CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+
+
+#: Where a `CODEOWNERS` comment starts: a `#` not escaped by `\`.
+_CODEOWNERS_COMMENT = re.compile(r"(?<!\\)#")
+
+
+def codeowners_rules(text):
+    """True when `CODEOWNERS` text holds a rule line: a pattern and at least one owner once
+    any `#` comment is cut off. A pattern with no owner un-owns its paths (GitHub), so it owns
+    nothing. Which paths a rule matches is GitHub's matching, not read here."""
+    return any(len(_CODEOWNERS_COMMENT.split(ln, 1)[0].split()) > 1 for ln in text.splitlines())
+
+
+def first_codeowners(read):
+    """`(path, owns)` for the first of `CODEOWNERS_PATHS` that `read(path)` returns text for,
+    `owns` being `codeowners_rules` of it; `(None, False)` when `read` returns None for all.
+    `read` raises for a failure that is not absence."""
+    for path in CODEOWNERS_PATHS:
+        text = read(path)
+        if text is not None:
+            return path, codeowners_rules(text)
+    return None, False
 
 
 def approval_rules(env):
