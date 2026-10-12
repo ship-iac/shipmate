@@ -330,6 +330,22 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
 
 
+def test_a_targeted_apply_reads_the_tag_metadata_once(monkeypatch, tmp_path):
+    """Mutation: call `bm.tags_of(paths)` without the map -- two reads."""
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
+    reads = []
+
+    def all_tags():
+        reads.append(1)
+        return {"stacks/app": ["env/dev-eu"]}
+
+    monkeypatch.setattr(ad.bm, "all_tags", all_tags)
+    ad.main()
+    assert len(json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]) == 1
+    assert reads == [1]
+
+
 def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_path):
     # A completed+success check of the same name from another identity (github-actions, app id
     # 15368) must not count the cell as applied. It is also the newer run of that name, so only
@@ -793,8 +809,9 @@ def test_main_names_a_gated_env_applied_with_no_review_required(
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
     key on the apply path is caught. apply.yml reads the four `envlevelN_waves`, the four
-    `envlevelN_empty`, `head_sha` and `review_not_required_envs`; a targeted apply is env-level
-    0 alone, so levels 1-3 must say `true` or apply.yml runs them into `fromJSON('')`.
+    `envlevelN_empty`, `head_sha`, `review_not_required_envs` and `waiting_cells`; a targeted
+    apply is env-level 0 alone, so levels 1-3 must say `true` or apply.yml runs them into
+    `fromJSON('')`.
 
     Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
     `envlevel1`."""
@@ -823,6 +840,7 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         "envlevel3_empty=true\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "review_not_required_envs=[]\n"
+        "waiting_cells=[]\n"
     )
 
 
@@ -838,7 +856,7 @@ def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
     ad.main()
     assert (
         f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
-        "cells=2 completed=0 pending=2 waves=[1, 1, 0, 0, 0, 0, 0, 0] empty=False"
+        "cells=2 completed=0 pending=2 waiting=0 waves=[1, 1, 0, 0, 0, 0, 0, 0] empty=False"
         in capsys.readouterr().out.splitlines()
     )
 
@@ -952,4 +970,74 @@ def test_main_refuses_an_unusable_pull_request_number(monkeypatch, tmp_path):
         ad.main()
     assert str(exc_info.value) == (
         "::error::SHIPMATE_PR_NUMBER must be a pull request number (got: '12a')"
+    )
+
+
+#: `platform` (dev-eu) runs after `dns`, tagged in dev-us only.
+_ZIGZAG_DEPS = {"stacks/dns": set(), "stacks/platform": {"stacks/dns"}}
+_ZIGZAG_TAGS = {"stacks/dns": ["env/dev-us"], "stacks/platform": ["env/dev-eu"]}
+_PLATFORM_WAITS = (
+    '[{"stack": "stacks/platform", "environment": "dev-eu", '
+    '"after_stack": "stacks/dns", "after_environment": "dev-us"}]'
+)
+
+
+def _zigzag(monkeypatch, tmp_path, checks, table=None):
+    """The targeted `dev-eu` apply over the zigzag: (stacks in its waves, `waiting_cells`)."""
+    out = _apply_env(monkeypatch, tmp_path, table=table)
+    _stub_apply(monkeypatch, _ZIGZAG_DEPS, checks)
+    monkeypatch.setattr(ad.bm, "all_tags", lambda: _ZIGZAG_TAGS)
+    ad.main()
+    parsed = github_outputs(out)
+    waves = json.loads(parsed["envlevel0_waves"])
+    return [c["stack"] for w in waves.values() for c in w], parsed["waiting_cells"]
+
+
+def test_a_cell_waits_on_a_pending_upstream_in_another_environment(monkeypatch, tmp_path):
+    """Mutation: build `all_pending` from `env`'s cells only -- `dns/dev-us` is no blocker and
+    `platform` applies."""
+    checks = [_apply_check("stacks/platform"), _apply_check("stacks/dns", "dev-us")]
+    assert _zigzag(monkeypatch, tmp_path, checks) == ([], _PLATFORM_WAITS)
+
+
+def test_a_completed_upstream_in_another_environment_does_not_hold_a_cell(monkeypatch, tmp_path):
+    """Mutation: drop the `not in completed_names` filter from `pending_tuples`, so every
+    check name counts -- the completed `dns/dev-us` holds `platform`."""
+    checks = [_apply_check("stacks/platform"), _check(name="apply / stacks/dns / dev-us")]
+    assert _zigzag(monkeypatch, tmp_path, checks) == (["stacks/platform"], "[]")
+
+
+def test_a_needs_order_added_after_the_plan_still_makes_the_cell_wait(monkeypatch, tmp_path):
+    """`dev-us` gained `needs: [dev-eu]` after the plan, so `dns/dev-us` sits on a later
+    env-level than `platform/dev-eu` and only the dead-end walk reaches it. No refusal on the
+    targeted form.
+
+    Mutation: return `below` alone from `waves._reach` (no instances at a dead end) --
+    `platform` applies."""
+    checks = [_apply_check("stacks/platform"), _apply_check("stacks/dns", "dev-us")]
+    table = {"layout": "folder", "environments": {"dev-us": {"needs": ["dev-eu"]}}}
+    assert _zigzag(monkeypatch, tmp_path, checks, table=table) == ([], _PLATFORM_WAITS)
+
+
+def test_a_waiting_cell_whose_check_records_no_plan_run_does_not_refuse(monkeypatch, tmp_path):
+    """The waiting cell stays pending for a later apply, which refuses on its own.
+
+    Mutation: call `with_plan_runs` before dropping the waiting cells -- the missing-plan-run
+    refusal fires."""
+    checks = [
+        _check(name="apply / stacks/platform / dev-eu", status="queued", conclusion=None),
+        _apply_check("stacks/dns", "dev-us"),
+    ]
+    assert _zigzag(monkeypatch, tmp_path, checks) == ([], _PLATFORM_WAITS)
+
+
+def test_main_notice_counts_a_waiting_cell_as_pending(monkeypatch, tmp_path, capsys):
+    """`pending=` counts before the waiting drop, as on the bare form; `waiting=` counts the
+    drop. Mutation: print `len(runnable)` for `pending=` -- `pending=0`."""
+    checks = [_apply_check("stacks/platform"), _apply_check("stacks/dns", "dev-us")]
+    _zigzag(monkeypatch, tmp_path, checks)
+    assert (
+        f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
+        "cells=1 completed=0 pending=1 waiting=1 waves=[0, 0, 0, 0, 0, 0, 0, 0] empty=True"
+        in capsys.readouterr().out.splitlines()
     )

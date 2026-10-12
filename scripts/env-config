@@ -851,11 +851,9 @@ def _check_depth(order, environments):
     depth = max(levels.values(), default=0)
     if depth < wv.MAX_ENV_LEVELS:
         return
-    chain = [min(e for e, lv in levels.items() if lv == depth)]
-    while levels[chain[-1]]:
-        chain.append(min(p for p in order[chain[-1]] if levels[p] == levels[chain[-1]] - 1))
+    chain = wv.needs_chain(order, levels, min(e for e, lv in levels.items() if lv == depth))
     raise SystemExit(
-        f"::error::needs spans {depth + 1} env levels: {' -> '.join(reversed(chain))}. "
+        f"::error::needs spans {depth + 1} env levels: {' -> '.join(chain)}. "
         f"A deploy applies at most {wv.MAX_ENV_LEVELS} env levels. Shorten the chain in "
         f"{CONFIG_PATH}."
     )

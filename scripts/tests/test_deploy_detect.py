@@ -124,13 +124,16 @@ def _run_main(
     reads=None,
     stacks=None,
     head=HEAD,
+    tag_reads=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
     into `urls` are the ones the work set itself asks for; `head` is what the stub returns.
 
     `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
-    the double, and leaves `cells` unused.
+    the double, and leaves `cells` unused. Without it, `all_tags` tags each stack of `cells`
+    with the env of each of its cells. Each `all_tags` call appends the map it answers to
+    `tag_reads` when one is given.
 
     `order` is folded into the stubbed table rather than stubbed on `wv`: the ordering map is
     a field of the mapping this path loads, so a double on the reader would mask a caller
@@ -165,16 +168,26 @@ def _run_main(
         monkeypatch.setattr(
             dd.bm,
             "compute_cells",
-            lambda all_stacks=False, base="", tags="": (
+            lambda all_stacks=False, base="", tags="", tag_map=None: (
                 {c["environment"]: frozenset({c["workload"]} - {""}) for c in cells},
                 cells,
                 [{"environment": c["environment"], "stack": c["stack"]} for c in cells],
                 [],
             ),
         )
+        tags = {}
+        for c in cells:
+            tags.setdefault(c["stack"], []).append(f"env/{c['environment']}")
     else:
         monkeypatch.setattr(dd.bm, "_list_stacks", lambda all_stacks, base: list(stacks))
-        monkeypatch.setattr(dd.bm, "all_tags", lambda: stacks)
+        tags = stacks
+    reads = [] if tag_reads is None else tag_reads
+
+    def all_tags():
+        reads.append(tags)
+        return tags
+
+    monkeypatch.setattr(dd.bm, "all_tags", all_tags)
     # The check-run listing is fetched through apply-detect's own `_run`, and the tree walk
     # through deploy-detect's build-matrix. Both are stubbed so a `gh api` call from either
     # module lands in `urls`.
@@ -456,6 +469,23 @@ def test_main_unpacks_the_real_compute_cells_return(tmp_path, monkeypatch):
     ]
 
 
+def test_a_deploy_reads_the_tag_metadata_once(tmp_path, monkeypatch):
+    """The real `compute_cells` scans the merge, and the inversion check reads the same map.
+
+    Mutation: call `compute_cells` in `main` without `tag_map` -- two reads."""
+    reads = []
+    _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[],
+        checks=[_apply_check("stacks/app")],
+        stacks={"stacks/app": ["env/dev-eu"]},
+        deps={"stacks/app": set()},
+        tag_reads=reads,
+    )
+    assert reads == [{"stacks/app": ["env/dev-eu"]}]
+
+
 def test_deploy_passes_no_workload_map(tmp_path, monkeypatch):
     """The merge's changed stacks are no whole-tree scan. Mutation: keep `compute_cells`'
     workload map and pass it to `env_config` -- the spy records `{"dev-eu": frozenset()}`."""
@@ -637,3 +667,73 @@ def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path,
         deps={"stacks/app": set(), "stacks/gone": set()},
     )
     assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+
+
+_PROBE_DEPS = {
+    "dns": set(),
+    "platform": {"dns"},
+    "edge": {"platform"},
+    "gr": {"edge", "dns"},
+    "workers": set(),
+}
+_PROBE_CELLS = [
+    _cell("dns", "dev-us"),
+    _cell("platform", "dev-eu"),
+    _cell("edge", "dev-us"),
+    _cell("gr", "dev-eu"),
+    _cell("workers", "dev-eu"),
+]
+
+
+def _run_probe(tmp_path, monkeypatch, order):
+    return _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=_PROBE_CELLS,
+        checks=[_apply_check(c["stack"], c["environment"]) for c in _PROBE_CELLS],
+        deps=_PROBE_DEPS,
+        order=order,
+    )
+
+
+def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch):
+    """`dev-us` needs `dev-eu`, yet `platform` and `gr` (dev-eu) run after dev-us stacks.
+    `workers / dev-eu` is in no pair and is named all the same: the deploy applies nothing.
+
+    Mutation: list only the pairs' cells in the remedy -- `workers / dev-eu` drops out.
+    Mutation: restore the remedy that sends a `needs` fix to a new pull request -- red.
+    Mutation: restore the remedy that names only a retag for the new pull request -- red.
+    Mutation: drop the `refuse_inversions` call from `main` -- the deploy writes waves."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
+    assert str(exc_info.value) == (
+        "::error::needs orders gr / dev-eu before dns / dev-us, which it runs after:\n"
+        "- gr / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes "
+        "from dev-eu -> dev-us\n"
+        "- gr / dev-eu (env-level 0) after edge / dev-us (env-level 1); dev-us's level comes "
+        "from dev-eu -> dev-us\n"
+        "- platform / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level "
+        "comes from dev-eu -> dev-us\n"
+        "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
+        "in that chain on the default branch, or retag the stacks so the edge stays inside "
+        "environments that order it. This deploy applies nothing, so none of these cells of "
+        "this merge is applied: dns / dev-us, edge / dev-us, gr / dev-eu, platform / dev-eu, "
+        "workers / dev-eu. A fix by `needs`: merge it, then re-run this deploy, which reads "
+        "`needs` from the default branch and applies these cells. A fix to tags or `after`: "
+        "both live in this merged commit, so a re-run refuses again; open a new pull request "
+        "that makes the fix and changes every listed stack (any edit `terramate list "
+        "--changed` marks); its plan and deploy apply them."
+    )
+
+
+def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
+    """With no `needs` every env is level 0, so no `after` edge contradicts one.
+
+    Mutation: `>=` for `>` in `inversions` -- level 0 = level 0 refuses."""
+    parsed = _run_probe(tmp_path, monkeypatch, {})
+    assert [
+        (c["stack"], c["environment"]) for c in json.loads(parsed["envlevel0_waves"])["wave0"]
+    ] == [
+        ("dns", "dev-us"),
+        ("workers", "dev-eu"),
+    ]

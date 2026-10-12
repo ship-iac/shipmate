@@ -1019,6 +1019,82 @@ ungated. `gated` and `explicit` are independent: the first decides whether a
 review is required, the second only decides that a bare apply will not reach it.
 An environment that must never apply unreviewed must not hold `gated: false`.
 
+### `needs orders <stack> / <env> before <stack> / <env>, which it runs after`
+
+```text
+::error::needs orders platform / dev-eu before dns / dev-us, which it runs after:
+- platform / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes from dev-eu -> dev-us
+Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry in that chain on the default branch, or retag the stacks so the edge stays inside environments that order it.
+```
+
+A stack is `after` a stack in another environment, and `needs` puts that other
+environment on a later env-level, so no order meets both. The plan, a bare
+`shipmate apply` or the merge deploy refused before anything applied; a plan
+refusal holds the gate. Each `- ` line names one inverted pair and the `needs`
+chain that sets the later level.
+
+1. Pick the order you want. Remove or reverse the `needs` entry in the named
+   chain in `.github/shipmate-config.yml`, or retag the stacks so the `after`
+   edge stays inside environments `needs` orders the same way.
+2. Merge that change on its own pull request: every reader takes the table
+   from the default branch. A pull request that only changes the table plans no
+   cell and is not refused.
+3. On a refused plan, re-plan the original pull request (push, or comment
+   `shipmate plan`). On a refused bare apply, comment `shipmate apply` again.
+
+A refused deploy appends the cells of the merge it left pending. After a
+`needs` fix merges, re-run the refused deploy: it reads `needs` from the
+default branch and applies them. For a fix to tags or `after`, open a new pull
+request that makes it and changes every listed stack; its plan and deploy
+apply them. A re-run reads tags and `after` from the merged commit and refuses
+again.
+
+A targeted `shipmate apply <env>` never refuses this: it does not order by
+`needs`, and a cell whose upstream is pending in another environment waits
+instead (next entry).
+
+### An apply comment line says a cell waits on another cell
+
+The apply comment carries a line
+`⚪ <stack> / <env>: waits on <stack> / <env>, not applied yet; <remedy>`, or,
+in its compact form, `⚪ waiting on <stack> / <env> (<remedy>): <cells>`.
+
+The first cell runs after the second through `after`
+([`../CONTRACT.md`](../CONTRACT.md) §Fan-out), and the second is pending and
+not applying in this run: another environment on a targeted apply, or a held,
+explicit or skipped environment on a bare one. The waiting cell's apply check
+stays pending and the rest of the run applied. Follow the remedy:
+
+- ``apply it first with `shipmate apply <env>` ``: apply the blocker's
+  environment, then apply the waiting cell's environment again.
+- ``it is held until the pull request is approved, then comment
+  `shipmate apply <env>` ``: the blocker's environment is held and explicit.
+  Get an approving review, then comment `shipmate apply <env>` for it.
+- `it is held until the pull request is approved`: get an approving review
+  (§An environment was held for review, or the apply was refused), then comment
+  `shipmate apply`.
+- ``its environment waits on its `needs` predecessors, which must apply first,
+  including any held for review``: get any review the predecessors are held
+  for, apply an explicit one with `shipmate apply <env>`, then comment
+  `shipmate apply`.
+
+A targeted apply always names `shipmate apply <env>`, even when the blocker's
+environment is held or ordered by `needs`, because the targeted form's comment
+receives no held or skipped environments. A run in which every cell waits applies nothing, succeeds, and its
+verdict reads `⚪ nothing applied, cells wait on pending cells they run after`.
+
+### A stack's plan does not show its upstream stack's change
+
+A pull request changes two stacks joined by `after`, and the dependent reads
+what its upstream changes (an output, a data source lookup). Its plan shows the
+upstream's current state, not the state after the upstream's change applies:
+applies follow `after`, plans do not ([`../CONTRACT.md`](../CONTRACT.md)
+§Fan-out). Nothing refuses the apply: a saved plan goes stale only when its own
+state changes.
+
+Split the change into two pull requests. Apply the upstream's first, then open
+the dependent's, whose plan reads the applied state.
+
 ### `Pull request #<n> head is <sha>, but this dispatch names <sha>`
 
 The apply run failed in its `review` job, before any wave, and nothing applied.

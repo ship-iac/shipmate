@@ -124,6 +124,7 @@ _RENDER_ENV = {
     "SHIPMATE_REVIEW_HELD_ENVS": "${{ inputs.review-held-envs }}",
     "SHIPMATE_APPLIED_UNGATED_ENVS": "${{ inputs.applied-ungated-envs }}",
     "SHIPMATE_REVIEW_NOT_REQUIRED_ENVS": "${{ inputs.review-not-required-envs }}",
+    "SHIPMATE_WAITING_CELLS": "${{ inputs.waiting-cells }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
     "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
@@ -140,7 +141,9 @@ def test_render_step_env_block_matches_the_expected_mapping():
     rather than close it.
 
     Mutation: drop `SHIPMATE_HEAD_SHA` from the render step, so every verdict reads `at an
-    unknown commit` -- red."""
+    unknown commit` -- red.
+    Mutation: drop `SHIPMATE_WAITING_CELLS` from the render step, so a fully waiting run
+    reads `🟢 no pending applies` -- red."""
     render_step = _find_step(
         action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
     )
@@ -318,6 +321,7 @@ _APPLY_SUMMARY_WITH = {
     "review-held-envs": "${{ needs.detect.outputs.review_held_envs }}",
     "applied-ungated-envs": "${{ needs.detect.outputs.applied_ungated_envs }}",
     "review-not-required-envs": "${{ needs.detect.outputs.review_not_required_envs }}",
+    "waiting-cells": "${{ needs.detect.outputs.waiting_cells }}",
     "results": "${{ join(needs.*.result, ',') }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
@@ -331,7 +335,9 @@ def test_apply_passes_apply_summary_exactly_this_with():
     read are pinned whole in `test_detect_wiring_guard.py`.
 
     Mutation: drop `environment:` from the step's `with:` -- red.
-    Mutation: wire `applied_ungated_envs` into `review-not-required-envs` -- red."""
+    Mutation: wire `applied_ungated_envs` into `review-not-required-envs` -- red.
+    Mutation: drop `waiting-cells:` from the step's `with:`, so the input defaults to `[]`
+    -- red."""
     steps = workflow_yaml("apply.yml")["jobs"]["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
     assert step["with"] == _APPLY_SUMMARY_WITH
