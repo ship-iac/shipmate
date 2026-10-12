@@ -361,8 +361,10 @@ actual work here:
   It reads the key from this environment, which resolves in the *calling*
   repository, so the caller passes the secret by name and holds nothing itself
   (that is also what makes a consumer in another organization work). The apply and
-  deploy paths reach the key the same way: `workflow_dispatch` from
-  comment-ops, or `push` to the default branch. Nothing that starts from
+  deploy paths reach the key the same way: a `workflow_dispatch` on the default
+  branch, which comment-ops sends and any workflow's own `GITHUB_TOKEN` can also
+  send (`apply.yml`'s `review` job binds it to its pull request, `CONTRACT.md`
+  §Comment-ops), or `push` to the default branch. Nothing that starts from
   arbitrary branch content ever does.
 - **The one job that holds the key runs no consumer repository content.** That
   `summary` job checks out nothing, and a consumer cannot add a checkout: they

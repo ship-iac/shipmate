@@ -7,7 +7,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Verify the apply-path environments exist
+    - name: Verify the apply-path environments exist and carry a branch policy
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}

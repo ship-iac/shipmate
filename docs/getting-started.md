@@ -145,8 +145,10 @@ It writes:
   repository-level copy of that key deleted. An environment whose entry in the
   checkout's `.github/shipmate-config.yml` holds `shared: true` gets one bare `<env>`
   instead, under the same default-branch policy, so set it only where every
-  pull request targets the default branch (plan cells for any other base are
-  refused; [`hardening.md`](hardening.md) rows 8 and 17, §7–9);
+  pull request targets the default branch, or add each other branch they target
+  to its policy (plan cells for a base it does not name are refused, and an
+  apply refuses the environment with no policy at all;
+  [`hardening.md`](hardening.md) rows 8 and 17, §7–9);
 - the `SHIPMATE_APP_ID` repository variable;
 - a `shipmate-gate` ruleset requiring `shipmate / gate` under the App, once
   `.github/workflows/shipmate.yml` is on the default branch. Until then it reports
@@ -613,10 +615,10 @@ also governs the idempotent post-merge apply the tier-1 `deploy` job runs on
 push to the default branch.
 
 `shipmate apply` runs only for a commenter with write or admin permission on the
-repository, on a pull request that is mergeable and satisfies the branch
-ruleset's review policy, and only against a plan for the pull request's current
-head, and only on a pull request that is not a draft — the five apply
-requirements in
+repository, on a pull request whose head branch is in this repository, that is
+mergeable and satisfies the branch ruleset's review policy, and only against a
+plan for the pull request's current head, and only on a pull request that is not
+a draft — the six apply requirements in
 [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops
 ([`concepts.md`](concepts.md) §Comment-ops for the shape). A refused comment
 names which requirement failed.
@@ -640,9 +642,10 @@ rules from Settings → Environments → `<name>` (or the API):
 
 - **Every `<env>-apply` — deployment branch policy restricted to the default
   branch.** Closes the direct-branch-secret path
-  ([`hardening.md`](hardening.md) #17). This is the baseline, and it is not a
-  reviewer gate: the secrets are released without a human seeing the
-  deployment. A shared env has no `<env>-apply`; the policy goes on its bare
+  ([`hardening.md`](hardening.md) #17). This is the baseline: an apply or
+  unlock that would bind an environment with no branch policy is refused before
+  it starts. It is not a reviewer gate: the secrets are released without a
+  human seeing the deployment. A shared env has no `<env>-apply`; the policy goes on its bare
   `<env>`, where it is the one control of this set that still applies — and,
   because plan cells run at the pull request's base ref, it also refuses any
   plan cell whose base ref it does not name ([`hardening.md`](hardening.md) #6).

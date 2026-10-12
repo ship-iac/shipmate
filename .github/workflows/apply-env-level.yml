@@ -15,8 +15,8 @@ on:
 # id-token: write.
 permissions: {}
 jobs:
-  # Pre-flight, before any wave runs: verify that the environments the waves will bind exist,
-  # then capture the apply-check ids. It needs no secret and no environment.
+  # Pre-flight, before any wave runs: verify that the environments the waves will bind exist and
+  # carry a branch policy, then capture the apply-check ids. It needs no secret and no environment.
   snapshot:
     runs-on: ubuntu-slim
     # Permissions cap at each `uses:` boundary, so every calling job must grant checks:read too,
@@ -28,7 +28,7 @@ jobs:
     steps:
       # First in this workflow: binding an environment nobody created auto-creates it with no
       # protection. Variables are keyed by matrix.environment, so the fingerprint pins nothing
-      # about the binding; existence is the only discriminator.
+      # about the binding; existence and a branch policy are the only discriminators.
       - uses: $/actions/verify-environments
         with:
           waves-json: ${{ inputs.waves_json }}

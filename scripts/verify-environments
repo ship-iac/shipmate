@@ -7,8 +7,8 @@ and no deployment branch policy, and the apply proceeds inside it. Nothing else
 in the engine sees that: a cell's `TF_VAR_*` and `TF_WORKSPACE` come from the
 environment table keyed by `matrix.environment`, never from the environment the
 job bound, so plan and apply hash identically whatever it bound and the
-apply-match fingerprint pins nothing about the binding. Existence, checked before
-any wave starts, is the only discriminator.
+apply-match fingerprint pins nothing about the binding. Existence and a branch policy,
+checked before any wave starts, are the only discriminators.
 
 An environment with no deployment branch policy can be bound by a workflow on any
 branch, which then reaches its secrets and OIDC role, so a required binding must

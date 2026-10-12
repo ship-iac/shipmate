@@ -10,14 +10,18 @@ A branch may carry its own workflow files. GitHub runs them, with whatever
 secrets that job's own environment bindings grant, on push — before a pull
 request exists, before review, and before `CODEOWNERS` applies.
 `SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way, so a branch-pushed
-workflow mints no App token, writes no gate status, submits no App review,
-completes no apply check and sends no apply dispatch (row 16;
-`docs/github-app.md` §Key-exposure boundary) — but the gate's verdict is still
-computed from artifacts the branch's own plan run produced (see "What none of
-this fixes").
+workflow mints no App token, writes no gate status, submits no App review and
+completes no apply check (row 16; `docs/github-app.md` §Key-exposure boundary)
+— but the gate's verdict is still computed from artifacts the branch's own plan
+run produced (see "What none of this fixes"). It can still dispatch the apply
+verb with its own `GITHUB_TOKEN`, which `apply.yml`'s `guard` job admits as a
+bot actor. That dispatch is bound to a pull request: the `review` job refuses it
+unless the pull request is open, not a draft, from this repository, and its head
+commit is the dispatched `ref`, and detect refuses a cell whose apply check
+records another pull request (`CONTRACT.md` §Comment-ops).
 
-Two things a branch-pushed workflow *can* still do, absent the rest of this
-checklist:
+Beyond that dispatch, two things a branch-pushed workflow *can* still do, absent
+the rest of this checklist:
 
 - declare `environment: <env>-apply` itself and claim that environment's cloud
   credentials directly, if that environment carries no deployment branch policy
@@ -460,12 +464,14 @@ approval is only as good as that habit.
 A deployment branch policy on `<env>-apply`, scoped to the default branch,
 does not change *which code the engine applies* — the pre-merge apply is
 always dispatched on the default branch and applies the pull request head
-passed as an input, policy or not. It is a control on secret release. Without
+passed as an input, which the `review` job requires to be the open pull
+request's current head, policy or not. It is a control on secret release. Without
 one, a branch-authored workflow that declares `environment: dev-eu-apply` in its
 own YAML is handed that environment's secrets directly on push, bypassing
 comment-ops, the gate, and everything else in this list — the same path row 16
 closes for the App key. Set it on every `<env>-apply`, restricted to the default
-branch, and do count it as a control.
+branch, and do count it as a control: the apply and unlock pre-flight refuses an
+environment with no policy.
 
 ## 7–9. Credentials
 
@@ -589,8 +595,9 @@ no split of its own.
   the pull request's *base* ref). Either leaves the gate red until it is removed
   (`shipmate doctor` warns; see `docs/troubleshooting.md`). One carve-out, and
   only for the branch policy: on a shared environment a default-branch policy is
-  row 17 doing real work, plan cells pass it at the base ref, and doctor notes it
-  rather than warning. The approval-rule half is absolute in both namings. That
+  row 17 doing real work, plan cells pass it at the base ref, the apply
+  pre-flight refuses the environment without one, and doctor notes it rather
+  than warning. The approval-rule half is absolute in both namings. That
   constraint is not negotiable, so treat a plan environment as readable by anyone
   with push access: a plan cell runs `terramate`/`tofu` over branch code, which
   is arbitrary code execution with whatever that environment holds. Read-only,

@@ -531,15 +531,14 @@ def test_unlock_on_a_draft_is_still_authorized():
     assert (ok, reason) == (True, "")
 
 
-def test_unlock_needs_only_write_access():
+def test_unlock_needs_only_write_access_and_a_same_repository_head():
+    """Mutation: delete the `verb == "unlock"` early return in `decide()` (the merged pull
+    request's null mergeability refuses the unlock)."""
     ok, reason = az.decide(
         permission="write",
         review_decision="",  # There is no decision at all.
-        pr={
-            **PR_OK,
-            "mergeable": None,
-            "mergeable_state": "unknown",
-        },  # The pull request is merged.
+        # The pull request is merged.
+        pr={**PR_OK, "mergeable": None, "mergeable_state": "unknown"},
         plan_runs={},  # There is no reviewed plan.
         environment="dev-eu",
         verb="unlock",
@@ -608,7 +607,13 @@ def test_a_head_in_a_deleted_repository_is_refused(verb, head):
 def test_a_pull_request_with_no_base_repository_is_refused():
     """Mutation: compare only when `base.repo` is present (this case authorizes)."""
     pr = {key: value for key, value in PR_OK.items() if key != "base"}
-    assert _decide(pr=pr) == (False, FORK_REASON.replace("someone", "ship-iac"))
+    assert _decide(pr=pr) == (
+        False,
+        (
+            "this pull request's head is in `ship-iac/repo-example-stacks`; shipmate applies "
+            "and unlocks only branches of this repository."
+        ),
+    )
 
 
 def test_a_same_repository_head_reaches_the_existing_checks():

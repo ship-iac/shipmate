@@ -271,24 +271,30 @@ never used.
   `matrix.environment` and the same default-branch table, so they hash
   identically whatever environment the job actually bound. The apply-match
   fingerprint pins plan and apply agreeing on values; it pins nothing about the
-  binding. What catches a mis-binding is the existence pre-flight in the next
+  binding. What catches a mis-binding is the environment pre-flight in the next
   bullet, which is unconditional on the apply-side binding, plus `shipmate
   doctor`, which reports a naming mismatch advisorily on a pull request.
 
   That is the reason for the symmetric `-plan` / `-apply` naming: the pre-flight
-  can only refuse a binding that names nothing, and under an asymmetric naming
-  the dangerous direction names something: an apply wave bound to the live plan
-  environment binds one that exists. A cell that applies
+  refuses only a binding that names nothing or names an environment with no
+  deployment branch policy, and under an asymmetric naming the dangerous
+  direction names something: an apply wave bound to the live plan environment
+  binds one that exists, and is refused only while that environment carries no
+  branch policy. A cell that applies
   inside an auto-created environment holds no reviewers, no wait timer and no
   deployment branch policy, against the right code and the right state.
-- **A binding that names no existing environment is refused before any wave
-  applies.** `apply-env-level.yml`'s `snapshot` job — which every apply route
+- **A binding that names no existing environment, or one with no deployment
+  branch policy, is refused before any wave applies.** `apply-env-level.yml`'s `snapshot` job — which every apply route
   fans through, and which runs before `wave0` — reads the `env_binding` of
   every cell in the incoming matrix, lists the repository's environments once,
   and fails the run naming every binding the repository does not have, plus
   both ways to fix it: create that environment, or correct the environment's
-  entry in `.github/shipmate-config.yml`. It is what refuses a binding naming no
-  environment: it compares existence, not table content, and a cell resolves its variables
+  entry in `.github/shipmate-config.yml`. It then fails the run naming every
+  binding whose `deployment_branch_policy` is null: a workflow on any branch can
+  bind such an environment and reach its secrets and OIDC role. Which kind of
+  policy (custom branches or protected branches) is the consumer's choice. It is
+  what refuses a binding naming no environment: it compares existence and the
+  presence of a branch policy, not table content, and a cell resolves its variables
   from the table whatever it bound. It runs once per `apply-env-level.yml` call,
   so an env-ordered deploy can have completed an earlier level's applies before a
   later level is refused — a partial deploy, not an unverified apply: every level
@@ -307,8 +313,9 @@ never used.
     involved.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
-    this pre-flight does not enumerate; an environment that exists but is
-    mis-scoped or unprotected, which is `shipmate doctor`'s subject; and an
+    this pre-flight does not enumerate; an environment whose branch policy names
+    the wrong branches, or that carries no protection rules, which is `shipmate
+    doctor`'s subject; and an
     environment created or deleted in the window between the pre-flight and the
     wave jobs.
 - **No env names in workflow YAML — ever.** Workflow files must not
@@ -1078,7 +1085,7 @@ body contains `shipmate` in any case; every other comment starts no runner.
 | `shipmate doctor` | none | write access (below); read-only |
 | `shipmate help` | none | none — read-only, open to any commenter |
 | `shipmate plan` | none | write access (below); changes no infrastructure |
-| `shipmate unlock <env>` | required env | write access plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
+| `shipmate unlock <env>` | required env | write access and same repository, plus the `<env>-apply` environment — no review policy, no mergeable check, no draft check, no reviewed plan (below) |
 
 `plan`, `doctor`, `apply` and `unlock` require the commenter's write access
 (the "write access" apply requirement below defines it), read and decided once
@@ -1261,6 +1268,9 @@ its own actionable rejection reason:
   and a permission that could not be read. Every account can read a public
   repository, so there a commenter who is not a collaborator has `read` and is
   refused;
+- **same repository**: the pull request's head branch is in this repository.
+  A fork's head, or one whose repository was deleted, is refused: shipmate
+  applies and unlocks only branches of this repository;
 - **not a draft**: the pull request is not a draft. `shipmate plan` plans a
   draft on request, so a draft head can carry apply checks with plan runs on
   them; a draft says the change is not ready for review, and applying it is
@@ -1302,7 +1312,7 @@ second copy of the rule: whatever the ruleset requires (approval counts,
 code-owner review, last-push approval) is what the apply path waits for, and
 there is no owners parser here to disagree with it.
 
-A bare `shipmate apply` is authorized once at comment time, by the same five
+A bare `shipmate apply` is authorized once at comment time, by the same six
 apply requirements. Comment time is never the whole review decision: both apply
 forms re-read `reviewDecision` server-side before anything applies (below), so
 an approval dismissed between the comment and the dispatch holds. Both forms
@@ -1310,6 +1320,17 @@ dispatch the consumer's `shipmate.yml` with `verb: apply`; the optional
 `environment` input selects the form `apply.yml` runs (set → targeted, empty → bare). Both
 share the same App-minted `workflow_dispatch` mechanism and the same per-env
 `apply-<env>-<stack>` concurrency groups.
+
+The dispatch is bound to its pull request after it arrives, because a dispatch
+can reach `apply.yml` without passing comment-ops: its `guard` job admits any
+`[bot]` actor, and a workflow's own `GITHUB_TOKEN` dispatches as one. The
+`review` job reads the pull request `pr_number` names and refuses the run, before
+any wave, unless it is open, not a draft, not from another repository, and its
+head commit equals the dispatched `ref`, compared whole. A merged pull request is
+refused too: its plans apply through the merge deploy. Then each apply form's
+detect refuses a cell it would apply whose apply check records another pull
+request, or none (§Apply-match fingerprint); the remedy is a re-plan on this pull
+request.
 
 `gated: false` on an entry in `.github/shipmate-config.yml` lets that environment be
 applied without an approving review. The entry's name is matched against the env
@@ -1327,7 +1348,7 @@ environments:
 
 It exempts one requirement, `reviewed`, and only its `REVIEW_REQUIRED`
 value. Everything else still decides, on an ungated environment exactly as on any
-other: `write access`, `not a draft`, `mergeable`,
+other: `write access`, `same repository`, `not a draft`, `mergeable`,
 `undiverged` and the exact-plan rule are unchanged; a `CHANGES_REQUESTED` review still refuses,
 because an explicit human "no" is not an absent review; and an unknown or
 absent decision still fails closed. Nor does it touch the `<env>-apply`
@@ -1430,8 +1451,9 @@ reference (§Variable references), so the decision stays a merged commit.
 or killed apply. The env is required: a destructive verb gets no wildcard,
 so there is no bare form.
 
-It is authorized by the commenter's write access at comment time plus the
-`<env>-apply` environment its job binds — the same required reviewers and the
+It is authorized at comment time by the commenter's write access and a head
+branch in this repository (the `write access` and `same repository` apply
+requirements), plus the `<env>-apply` environment its job binds — the same required reviewers and the
 same OIDC subject an apply of that environment binds. The other four apply
 requirements are deliberately absent: reviewed, because an approving review
 reviews a diff and an unlock applies none; not a draft, because a draft says
@@ -1442,12 +1464,12 @@ post-merge deploy, and a merged pull request reports `mergeable: null` — which
 the apply path reads as "still computing" — so keeping them would leave exactly
 that lock permanently unreleasable.
 
-Because that environment is half of the authorization, the run refuses when it
-does not exist — the same pre-flight the apply path runs before its first wave,
-on the unlock queue. GitHub would otherwise create the environment on demand
-with no reviewers, no wait timer and no branch policy, and keep it: an unlock
-into a missing environment would retire the reviewer gate for every later apply
-of that env.
+Because that environment is part of the authorization, the run refuses when it
+does not exist or has no deployment branch policy — the same pre-flight the
+apply path runs before its first wave, on the unlock queue. GitHub would
+otherwise create the environment on demand with no reviewers, no wait timer and
+no branch policy, and keep it: an unlock into a missing environment would retire
+the reviewer gate for every later apply of that env.
 
 Its queue is the cells in that environment whose `apply / <stack> / <env>` check
 is still pending, not the reviewed plan artifacts: a lock outlives the run
@@ -2298,7 +2320,8 @@ degrade to the workflow-run URL on no match.
 
 Each plan stores a fingerprint (`fingerprint.txt` in the artifact; on the apply
 check, the `external_id` JSON record holds it alongside the id of the plan run
-that produced the cell and the digest of that cell's plan text, below):
+that produced the cell, the number of the pull request that run planned, and
+the digest of that cell's plan text, below):
 `sha256` over the sorted JSON of every non-empty
 `TF_VAR_*` environment variable (name→value) plus `TF_WORKSPACE` when it is set.
 Ephemeral credential vars (`AWS_*`, etc.) are excluded. A set-but-empty
@@ -2331,6 +2354,11 @@ to the plan-run binding the apply path already carries: each cell's plan run
 is read from an App-authored apply check on that same head, so no plan run from
 another head can be named. That binding bounds which plan run may be
 applied; this one binds each individual plan to the tree it was produced from.
+Two open pull requests can share one head commit, so the record's `pr` field
+binds the plan to its pull request as well: the targeted and the bare apply
+refuse, at detect, a cell they would apply whose record names another pull
+request than the dispatch, or none, and the remedy is a re-plan on that pull
+request. The post-merge deploy does not compare it.
 
 A third record binds the plan *text* to the plan that executes. The trusted
 `summary` job takes `sha256` over the **whole** `plan.txt` it downloaded —

@@ -48,11 +48,11 @@ jobs:
       # The `unlock` job binds the same environment as the apply waves, so it needs the pre-flight
       # apply-env-level.yml's `snapshot` job runs. A failure fails `detect`, which `unlock`'s
       # `!failure()` reads as "do not run".
-      - name: Verify the unlock-path environment exists
+      - name: Verify the unlock-path environment exists and carries a branch policy
         if: ${{ steps.d.outputs.cells != '[]' }}
         # GitHub creates a missing environment on demand with no reviewers, no wait timer and no
-        # branch policy, and that created environment then satisfies the apply path's own
-        # pre-flight -- so an unlock into a missing one silently retires that env's reviewer gate.
+        # branch policy, and keeps it -- so an unlock into a missing one silently retires that
+        # env's reviewer gate.
         uses: $/actions/verify-environments
         with:
           # The flat queue is wrapped as one wave because the action's input shape is the waves
