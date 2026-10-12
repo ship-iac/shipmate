@@ -888,7 +888,10 @@ def test_shared_env_with_a_branch_policy_is_a_notice_naming_the_trade_both_ways(
     """NOTICE, not the WARNING a split plan environment gets: on a shared environment the
     policy is a real control over which branches may claim its secrets, and simultaneously
     what refuses plan cells whose base ref it does not name. A consumer whose pull requests
-    all target the default branch is correct to set it, so a WARNING would be unclearable."""
+    all target the default branch is correct to set it, so a WARNING would be unclearable.
+
+    Mutation: restore the remedy "open it up" (the apply pre-flight refuses a shared environment
+    with no policy, so removing it is no remedy)."""
     responses = _protection(
         _env("dev-eu", branch_policy={"protected_branches": True}), table=_SHARED_TABLE
     )
@@ -896,8 +899,14 @@ def test_shared_env_with_a_branch_policy_is_a_notice_naming_the_trade_both_ways(
     out = doctor._env_protection_warnings(_ctx())
     assert [lvl for lvl, _ in out] == [doctor.NOTICE, doctor.NOTICE]
     policy = next(t for _, t in out if "branch policy" in t)
-    assert "secrets" in policy
-    assert "base ref" in policy
+    assert policy == (
+        "GitHub Environment `dev-eu` (shared between plan and apply by `shared: true` in its "
+        "`environments.dev-eu` entry) has a deployment branch policy. On a shared environment "
+        "that policy is what scopes which branches may claim its secrets, and it is also what "
+        "refuses plan cells whose base ref it does not name. Correct while every pull request "
+        "targets a branch it names. If some do not, add the branches they target to its "
+        "policy, or split into `dev-eu-plan` and `dev-eu-apply`."
+    )
 
 
 def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch):

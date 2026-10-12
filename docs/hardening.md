@@ -82,7 +82,7 @@ compares all five of those expressions, whole, against the fence `getting-starte
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — on a private repository this rule needs Enterprise, see "Plan prerequisites" | Environment | Unforgeable at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
 | 7 | Cloud credentials scoped to the environment that needs them — the OIDC path's role named by the identity each environment's entry names in the environment table; any residual static key as an environment secret — never repo- or org-level | Environment table (role); Environment (secret) | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; for the role the table's resolution rule is the scoping — see §7–9) |
-| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
+| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, which must carry one: it is row 17 doing real work, plan cells pass a default-branch policy at their base ref, and pull requests targeting another branch need that branch added (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since every cell-running job (plan, drift, apply, unlock) mints OIDC tokens unconditionally, this claim condition is the only thing that decides which role any of them may assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
@@ -111,8 +111,10 @@ both paths instead (CONTRACT.md §Env model). On such an environment:
   *base* ref), a drift sweep covering it when scheduled or dispatched at the
   default branch, and the apply, while still refusing a
   branch-authored workflow that names the environment — the control row 17
-  exists for. A repository using release branches must open the policy up, and
-  then row 17 is forfeited too.
+  exists for. The apply pre-flight refuses a shared environment with no policy,
+  so a repository whose pull requests target release branches adds those
+  branches to the policy; each added branch can then claim the environment's
+  secrets too.
 
 ### Plan prerequisites
 

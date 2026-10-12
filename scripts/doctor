@@ -511,8 +511,8 @@ def _env_shape_findings(name, env, data, role):
                     "deployment branch policy. On a shared environment that policy is what "
                     "scopes which branches may claim its secrets, and it is also what refuses "
                     "plan cells whose base ref it does not name. Correct while every pull "
-                    "request targets a branch it names; open it up, or split into "
-                    f"`{env}-plan` and `{env}-apply`, if they do not."
+                    "request targets a branch it names. If some do not, add the branches they "
+                    f"target to its policy, or split into `{env}-plan` and `{env}-apply`."
                 ),
             )
         )
