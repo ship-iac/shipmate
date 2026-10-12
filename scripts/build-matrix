@@ -302,8 +302,8 @@ def unmanaged_stacks(tags_by_stack):
 def lost_env_tags(base, head_envs):
     """`{stack: sorted env names}` for each stack of `head_envs` whose diff from the merge base
     of `base` to `HEAD` removes a line holding a complete tag literal `"env/<name>"`, `<name>`
-    in the environment-name charset, from the stack's own Terramate files (`<stack>/*.tm.hcl`,
-    `<stack>/*.tm`; no `**`, so a child stack and a `.tf` are out), less the names in
+    in the environment-name charset, from the stack's own Terramate files (`*.tm.hcl` and
+    `*.tm` directly in its directory, so a child stack and a `.tf` are out), less the names in
     `head_envs[stack]`, the environments the stack carries at `HEAD`. Stacks with no such name
     are left out. A backend key such as `"env/${global.x}/state"` is not a tag literal.
 
@@ -316,26 +316,27 @@ def lost_env_tags(base, head_envs):
     A nonzero `git diff`, as when `base` and `HEAD` share no merge base, exits the run through
     `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs.
 
-    One `git diff` covers every stack, because a blobless checkout fetches each call's blobs
-    lazily. A file's stack is its directory, read from the `diff --git` header: no `**` in a
-    pathspec means no file under a child stack. `--no-renames` keeps a file moved between two
+    One tree-wide `git diff` covers every stack, because a blobless checkout fetches each
+    call's blobs lazily, and per-stack pathspecs would grow the command line with the tree. A
+    file belongs to the stack whose directory holds it, read from the `diff --git` header; a
+    file in no stack's directory is skipped. `--no-renames` keeps a file moved between two
     stacks a removal from the first, as a diff scoped to one stack would show it."""
     if not head_envs:
         return {}
-    pathspecs = [f":(glob){s}/*.{ext}" for s in sorted(head_envs) for ext in ("tm.hcl", "tm")]
+    pathspecs = [":(glob)**/*.tm.hcl", ":(glob)**/*.tm"]
     diff = _run(["git", "diff", "-U0", "--no-renames", f"{base}...HEAD", "--", *pathspecs])
     removed = {}
     stack = None
     for line in diff.splitlines():
         if line.startswith("diff --git "):
             stack = posixpath.dirname(_diff_path(line)) or "."
-        elif line.startswith("-"):
+        elif line.startswith("-") and stack in head_envs:
             removed.setdefault(stack, set()).update(
                 m.group(1) for m in _ENV_TAG_LITERAL.finditer(line)
             )
     lost = {}
-    for stack in sorted(head_envs):
-        names = sorted(removed.get(stack, set()) - head_envs[stack])
+    for stack, envs in sorted(removed.items()):
+        names = sorted(envs - head_envs[stack])
         if names:
             lost[stack] = names
     return lost

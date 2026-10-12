@@ -496,21 +496,15 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
 
 def _fake_run(head_sha, diffs, diff_calls):
     """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with, per
-    `.tm.hcl` pathspec it names, a `diff --git` header for that stack's `stack.tm.hcl` and the
-    stack's `diffs` text, recording the diff argv. A pathspec naming no `diffs` stack raises
-    `KeyError`."""
+    `diffs` stack, a `diff --git` header for its `stack.tm.hcl` and its `diffs` text, recording
+    the diff argv."""
 
     def fake_run(args):
         if args[:2] != ["git", "diff"]:
             return f"{head_sha}\n"
         diff_calls.append(args)
-        stacks = [
-            a.removeprefix(":(glob)").removesuffix("/*.tm.hcl")
-            for a in args
-            if a.endswith("/*.tm.hcl")
-        ]
         return "".join(
-            f"diff --git a/{s}/stack.tm.hcl b/{s}/stack.tm.hcl\n{diffs[s]}" for s in stacks
+            f"diff --git a/{s}/stack.tm.hcl b/{s}/stack.tm.hcl\n{text}" for s, text in diffs.items()
         )
 
     return fake_run
@@ -2116,17 +2110,29 @@ def test_lost_env_tags_reads_a_file_moved_between_stacks_as_a_removal(git_repo):
     assert bm.lost_env_tags(base, {"s": set(), "t": {"dev"}}) == {"s": ["dev"]}
 
 
+def test_lost_env_tags_ignores_a_file_in_no_stacks_directory(git_repo):
+    """`modules/shared.tm.hcl`, `s/sub/extra.tm.hcl` and the root's `root.tm.hcl` each drop
+    `"env/dev"`; none of their directories is a stack. Mutation: drop `and stack in head_envs`
+    -- `KeyError`."""
+    files = ["modules/shared.tm.hcl", "s/sub/extra.tm.hcl", "root.tm.hcl"]
+    base = _commit(
+        {"s/stack.tm.hcl": _stack("[]")} | dict.fromkeys(files, 'tags = ["env/dev"]\n'), "base"
+    )
+    _git("checkout", "-q", "-b", "pr")
+    _commit(dict.fromkeys(files, "tags = []\n"), "untag")
+    assert bm.lost_env_tags(base, {"s": set()}) == {}
+
+
 def test_lost_env_tags_of_no_stacks_runs_no_git(monkeypatch):
-    """With no pathspec, `git diff` would read the whole tree. Mutation: drop
-    `if not head_envs: return {}` -- `_run` is called."""
+    """No stack, no diff and no blob fetch. Mutation: drop `if not head_envs: return {}` --
+    `_run` is called."""
     monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
     assert bm.lost_env_tags("deadbeef", {}) == {}
 
 
 def test_lost_env_tags_names_the_root_stack(git_repo):
-    """Terramate lists the root stack as `.`, so its pathspec is `:(glob)./*.tm.hcl`.
-    Mutation: `stack.removeprefix(".")` in both pathspecs -- `:(glob)/*.tm.hcl` lies outside
-    the repository, `git diff` exits 128 and `_run` raises `SystemExit`."""
+    """Terramate lists the root stack as `.`, and a root file's directory is empty. Mutation:
+    drop `or "."` from the attribution -- the file reads as stack `""` and is skipped."""
     base = _commit({"stack.tm.hcl": _stack('["env/dev"]')}, "base")
     _git("checkout", "-q", "-b", "pr")
     _commit({"stack.tm.hcl": _stack("[]")}, "untag")
@@ -2156,7 +2162,8 @@ def test_lost_env_tags_diffs_from_the_merge_base(git_repo):
 
 def test_lost_env_tags_reads_only_the_stacks_own_terramate_files(git_repo):
     """A child stack's retag and the parent's `.tf` losing `"env/prod"` both remove an `env/`
-    tag literal under the parent's directory. Mutation: pathspec `f"{stack}/"`."""
+    tag literal under the parent's directory. Mutation: pathspec `":(glob)**"` -- the `.tf`
+    removal lands on `stacks/app`."""
     base = _commit(
         {
             "stacks/app/stack.tm.hcl": _stack("[]"),
@@ -2269,8 +2276,8 @@ def test_detect_warns_about_each_env_a_tagged_stack_lost(monkeypatch, tmp_path, 
 
 
 def test_detect_diffs_every_scanned_stack_once(monkeypatch, tmp_path):
-    """`stacks/app` is in the tree in two environments. Mutations: diff only `unmanaged` --
-    the tree stacks go undiffed; call `lost_env_tags` once per tree row -- three diffs."""
+    """`stacks/app` is in the tree in two environments. Mutation: call `lost_env_tags` once
+    per tree row -- three diffs."""
     diff_calls = []
     _run_main(
         monkeypatch,
@@ -2290,12 +2297,8 @@ def test_detect_diffs_every_scanned_stack_once(monkeypatch, tmp_path):
             "--no-renames",
             f"{'b' * 40}...HEAD",
             "--",
-            ":(glob)stacks/app/*.tm.hcl",
-            ":(glob)stacks/app/*.tm",
-            ":(glob)stacks/db/*.tm.hcl",
-            ":(glob)stacks/db/*.tm",
-            ":(glob)stacks/gone/*.tm.hcl",
-            ":(glob)stacks/gone/*.tm",
+            ":(glob)**/*.tm.hcl",
+            ":(glob)**/*.tm",
         ]
     ]
 
