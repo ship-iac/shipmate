@@ -128,6 +128,22 @@ def _permission_reason(permission, verb):
     )
 
 
+def _head_repo_reason(pr):
+    """Refusal text when the pull request head is not a branch of this repository, else ''.
+
+    A deleted fork's `head.repo` is null in the REST body, so it refuses rather than raises.
+    """
+    head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
+    base_repo = ((pr.get("base") or {}).get("repo") or {}).get("full_name")
+    if not head_repo or head_repo != base_repo:
+        where = f"`{head_repo}`" if head_repo else "a deleted repository"
+        return (
+            f"this pull request's head is in {where}; shipmate applies and unlocks only "
+            "branches of this repository."
+        )
+    return ""
+
+
 def decide(
     *,
     permission,
@@ -141,8 +157,10 @@ def decide(
     """Return (authorized, reason). reason is '' when authorized.
 
     Both verbs first require the commenter's repository permission to be `write`
-    or `admin`. For verb="unlock" that is the only requirement. The checks below
-    authorize applying a reviewed plan; unlock applies none:
+    or `admin`, then a pull request head in this repository: a fork head, or one
+    whose repository was deleted (`head.repo` null), refuses. For verb="unlock"
+    those are the only requirements. The checks below authorize applying a
+    reviewed plan; unlock applies none:
 
     - reviewDecision: an approval reviews a diff; unlock applies none. What
       bounds unlock is the commenter's write access plus the <env>-apply
@@ -158,9 +176,10 @@ def decide(
       review does not bound it. Not a reachability argument like mergeable's —
       a draft's lock is releasable, it is its apply that must wait.
     """
-    permission_reason = _permission_reason(permission, verb)
-    if permission_reason:
-        return False, permission_reason
+    # Permission first: a read-only commenter on a fork is told about the permission.
+    reason = _permission_reason(permission, verb) or _head_repo_reason(pr)
+    if reason:
+        return False, reason
     if verb == "unlock":
         # Everything below authorizes applying a reviewed plan; unlock applies
         # none. See the docstring for why each check is inapplicable rather
