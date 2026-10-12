@@ -549,11 +549,17 @@ def _dispositions(excluded, skipped, held, waiting=()):
     `excluded`, `skipped` and `held` are all-environments sets; the caller passes them empty in
     the targeted form, because apply.yml reads them from the bare-apply detector only.
     `waiting` comes from both forms: each cell becomes an escaped
-    `(stack, env, after_stack, after_env, remedy)`. A held env that is also explicit is
-    listed under `held` only, and under `held_explicit` for its command."""
+    `(stack, env, after_stack, after_env, remedy)`, its stacks through `_md_name`. A held env
+    that is also explicit is listed under `held` only, and under `held_explicit` for its
+    command."""
     excluded, skipped, held = _esc(excluded), _esc(skipped), _esc(held)
     cells = [
-        _esc((w["stack"], w["environment"], w["after_stack"], w["after_environment"]))
+        (
+            sc._md_name(w["stack"]),
+            sc._md_escape(w["environment"]),
+            sc._md_name(w["after_stack"]),
+            sc._md_escape(w["after_environment"]),
+        )
         for w in waiting
     ]
     return {
@@ -621,9 +627,10 @@ def _footer_parts(excluded, skipped, held=(), waiting=(), compact=False):
     produced (explicit left pending, skipped, held for review) and a `held:` remedy line when
     any is held, then one line per waiting cell naming its blocker and the blocker's remedy.
     Only `waiting` comes from both forms; apply.yml reads the other sets from the bare-apply
-    detector only. Stack and env names are author-controlled, so `_md_escape`d. `compact`
-    renders each disposition as one line naming its environments comma-separated, and the
-    waiting cells as one line per blocker, with the same meanings, for the hard-cap fallback.
+    detector only. Stack and env names are author-controlled, so `_md_escape`d, a stack
+    through `_md_name`. `compact` renders each disposition as one line naming its
+    environments comma-separated, and the waiting cells as one line per blocker, with the
+    same meanings, for the hard-cap fallback.
     Applied-ungated and no-review environments are not comment lines: `notices` reports them
     in the run log, and the `shipmate / gate` status shows the gate's state.
 

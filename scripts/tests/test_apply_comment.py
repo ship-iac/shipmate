@@ -1835,13 +1835,22 @@ def test_each_waiting_cell_names_the_remedy_its_blocker_needs():
 
 
 def test_the_waiting_lines_escape_every_name():
-    """Stack and env names are author-controlled, the blocker's included.
+    """Stack and env names are author-controlled, the blocker's included, and a stack's `@`
+    must not mention a team in either rendering.
 
-    Mutation: build the waiting tuples in `_dispositions` without `_esc` -- red."""
-    assert ac._footer_parts([], [], waiting=[_waits("s<1", "e<2", "a<3", "b<4")]) == [
+    Mutation: build the waiting tuples in `_dispositions` without escaping -- red.
+    Mutation: escape the two stacks with `_md_escape` instead of `_md_name` -- red."""
+    waiting = [_waits("s@org/team<1", "e<2", "a@org/ops<3", "b<4")]
+    assert ac._footer_parts([], [], waiting=waiting) == [
         (
-            "⚪ s&lt;1 / e&lt;2: waits on a&lt;3 / b&lt;4, not applied yet; apply it first with "
-            "`shipmate apply b&lt;4`"
+            "⚪ s@<!-- -->org/team&lt;1 / e&lt;2: waits on a@<!-- -->org/ops&lt;3 / b&lt;4, "
+            "not applied yet; apply it first with `shipmate apply b&lt;4`"
+        )
+    ]
+    assert ac._footer_parts([], [], waiting=waiting, compact=True) == [
+        (
+            "⚪ waiting on a@<!-- -->org/ops&lt;3 / b&lt;4 (apply it first with "
+            "`shipmate apply b&lt;4`): s@<!-- -->org/team&lt;1 / e&lt;2"
         )
     ]
 
