@@ -377,7 +377,7 @@ def test_help_carries_the_shared_header_and_a_footer_without_the_hint():
 
 def _main_output(tmp_path, monkeypatch, body):
     out = tmp_path / "out.txt"
-    out.touch()
+    out.write_text("")
     monkeypatch.setenv("COMMENT_BODY", body)
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     cp.main()
@@ -405,24 +405,34 @@ def test_main_writes_no_verb_for_an_unknown_one(tmp_path, monkeypatch):
         "is_command=true",
         "valid=false",
         "verb=",
-        "env=dev-eu",
+        "env=",
         "route=",
         "error=unknown verb `aply` (try `shipmate help`)",
     ]
 
 
 def test_main_writes_the_verb_of_a_refused_known_verb(tmp_path, monkeypatch):
-    """A known verb refused for its argument still names itself, so the reply is headed with it.
+    """A known verb refused for its argument still names itself, so the reply is headed with it,
+    and writes no env: the header would print the commenter's token outside a code span.
 
     Mutation: write `verb={r['route'] or ''}` in `main()`, and the refused verb is written empty.
+    Mutation: keep `env` in `result` on a `_verb_error` refusal -- `env=foo`.
     """
     assert _main_output(tmp_path, monkeypatch, "shipmate plan dev-eu") == [
         "is_command=true",
         "valid=false",
         "verb=plan",
-        "env=dev-eu",
+        "env=",
         "route=",
         "error=`plan` takes no arguments (use `shipmate plan`)",
+    ]
+    assert _main_output(tmp_path, monkeypatch, "shipmate help foo") == [
+        "is_command=true",
+        "valid=false",
+        "verb=help",
+        "env=",
+        "route=",
+        "error=`help` takes no arguments (use `shipmate help`)",
     ]
 
 

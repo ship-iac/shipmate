@@ -1168,8 +1168,9 @@ letters, digits, `-` and `_`, starting with a letter or digit ("environment
 gets "malformed: expected `shipmate <verb> [env]`". The reply quotes the
 commenter's token, an unknown verb included, only inside a code span, and only
 when it is non-empty, at most 40 characters and free of backticks; otherwise it
-says "an unexpected token", "the environment name" or "an unknown verb". The reply to a line outside the grammar names no verb
-and no environment in its header.
+says "an unexpected token", "the environment name" or "an unknown verb". The reply to a refused line names no environment in its
+header, and names its verb only when the verb is known and the line fits the
+grammar (`### shipmate help` for `shipmate help foo`).
 `scripts/comment-parse`'s `VERBS` registry is the single
 source of truth this table is derived from: it drives the parser, the
 `--help-markdown` rendering that `shipmate help` posts verbatim (marked with

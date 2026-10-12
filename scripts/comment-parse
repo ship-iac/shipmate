@@ -139,13 +139,12 @@ def parse(body):
         result["error"] = _malformed_error(line)
         return result
     verb, env = m.group("verb"), m.group("env")
-    result.update(verb=verb, env=env)
     error = _verb_error(verb, env)
     if error is not None:
-        result["error"] = error
+        # The env stays empty: the reply header prints it outside a code span, uncapped.
+        result.update(verb=verb, error=error)
         return result
-    result["route"] = verb
-    result["valid"] = True
+    result.update(verb=verb, env=env, route=verb, valid=True)
     return result
 
 
