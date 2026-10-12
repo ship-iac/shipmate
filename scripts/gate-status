@@ -13,6 +13,8 @@ a stale one when a commit carries two plan runs, which blocks the merge forever.
 `target_url` to this run. Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL`,
 `GITHUB_RUN_ID`, and `SHIPMATE_APP_ID` for `refresh`. A `<sha>` that is not 40 lowercase hex
 characters is refused before any API call. A failed API call exits 1 with an `::error::` line.
+`refresh` over a hold prints why, unannotated, and exits `HELD`: each caller decides whether a hold
+fails its step.
 """
 
 import os
@@ -29,6 +31,7 @@ _RUN_ID = re.compile(r"/actions/runs/([0-9]+)$")
 _CHECK_RUNS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
 _STATUSES_JQ = ".[] | {context, state, target_url}"
 _GOOD_RESULTS = {"success", "skipped"}
+HELD = 3
 
 
 def _repo():
@@ -140,11 +143,12 @@ def refresh(sha):
         return
     newest = newest_gate(sha)
     if newest and newest[0] == "failure":
-        raise SystemExit(
-            f"::error::{GATE_CONTEXT} is held for {sha}; its status description on the pull "
-            "request names the cause. A hold clears only when a new plan run rewrites the "
-            "gate: comment shipmate plan, or push."
+        print(
+            f"{GATE_CONTEXT} is held for {sha}; its status description on the pull request names "
+            "the cause. A hold clears only when a new plan run rewrites the gate: comment "
+            "shipmate plan, or push."
         )
+        raise SystemExit(HELD)
     post(sha, "success", "all applies complete, nothing left to apply")
 
 

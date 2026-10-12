@@ -23,9 +23,10 @@ GATE = "shipmate / gate"
 
 
 def _gate_literals():
-    """(file, line) of every string constant equal to the whole gate literal in the scripts
-    directly under `scripts/` that parse as Python, extensionless helpers included."""
-    found = set()
+    """The file name of every string constant equal to the whole gate literal, once per
+    occurrence, in the scripts directly under `scripts/` that parse as Python, extensionless
+    helpers included."""
+    found = []
     for path in sorted(SCRIPTS.glob("*")):
         if not path.is_file():
             continue
@@ -35,13 +36,14 @@ def _gate_literals():
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and node.value == GATE:
-                found.add((path.name, node.lineno))
-    return found
+                found.append(path.name)
+    return sorted(found)
 
 
 def test_the_gate_literal_is_defined_once():
-    """Mutation: restore `GATE = "shipmate / gate"` in `scripts/doctor` -> a second site."""
-    assert _gate_literals() == {("_shipmate.py", 40)}
+    """Mutations: restore `GATE = "shipmate / gate"` in `scripts/doctor` -> `doctor` is listed; a
+    second definition in `_shipmate.py` -> `_shipmate.py` is listed twice."""
+    assert _gate_literals() == ["_shipmate.py"]
 
 
 def _run_blocks():

@@ -79,13 +79,18 @@ def _run_step(tmp_path, *, gate="", deploy_results="", hold_description=""):
 
 @bash_only
 def test_refuses_to_green_a_held_gate(tmp_path):
-    """Mutation: delete the hold check in `gate-status refresh` -> the hold is greened."""
+    """The step turns `gate-status`'s hold exit into one `::error::` line and exit 1.
+    Mutations: delete the hold check in `gate-status refresh` -> the hold is greened; drop the
+    step's `rc = 3` branch -> exit 3 and no annotation."""
     proc, posted = _run_step(tmp_path, gate=_gate("failure"))
-    assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert proc.stderr.endswith(
-        f"::error::shipmate / gate is held for {HEAD_SHA}; its status description on the pull"
-        " request names the cause. A hold clears only when a new plan run rewrites the gate:"
-        " comment shipmate plan, or push.\n"
+    assert (proc.returncode, proc.stdout, proc.stderr) == (
+        1,
+        (
+            f"::error::shipmate / gate is held for {HEAD_SHA}; its status description on the pull"
+            " request names the cause. A hold clears only when a new plan run rewrites the gate:"
+            " comment shipmate plan, or push.\n"
+        ),
+        "",
     )
     assert posted == []
 

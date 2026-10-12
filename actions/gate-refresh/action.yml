@@ -63,5 +63,13 @@ runs:
         elif [ -n "$DEPLOY_RESULTS" ]; then
           python3 "$gate_status" deploy "$HEAD_SHA" "$DEPLOY_RESULTS"
         else
-          python3 "$gate_status" refresh "$HEAD_SHA"
+          rc=0
+          out=$(python3 "$gate_status" refresh "$HEAD_SHA") || rc=$?
+          # Exit 3 is gate-status' hold: this refresh was due and is refused, so the step fails.
+          if [ "$rc" = 3 ]; then
+            echo "::error::$out"
+            exit 1
+          fi
+          if [ -n "$out" ]; then echo "$out"; fi
+          exit "$rc"
         fi

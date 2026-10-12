@@ -32,7 +32,7 @@ ENV = {
     "SHIPMATE_APP_ID": APP_ID,
 }
 HELD = (
-    f"::error::shipmate / gate is held for {SHA}; its status description on the pull request "
+    f"shipmate / gate is held for {SHA}; its status description on the pull request "
     "names the cause. A hold clears only when a new plan run rewrites the gate: comment "
     "shipmate plan, or push.\n"
 )
@@ -137,12 +137,13 @@ def test_refresh_greens_a_pending_gate_once_every_check_is_done(tmp_path):
 
 @bash_only
 def test_refresh_refuses_to_green_a_held_gate(tmp_path):
-    """Mutation: test `pending` instead of `failure` in `refresh` -> the hold is greened."""
+    """The hold prints unannotated and exits `HELD`, so each caller decides whether it fails.
+    Mutations: test `pending` instead of `failure` in `refresh` -> the hold is greened; prefix the
+    text with `::error::` -> stdout differs; exit 1 -> the exit code differs."""
     proc, calls = _run(
         tmp_path, "refresh", SHA, checks=DONE, page1=_lines(_status("shipmate / gate", "failure"))
     )
-    assert proc.returncode == 1
-    assert proc.stderr.endswith(HELD), proc.stderr
+    assert (proc.returncode, proc.stdout, proc.stderr) == (3, HELD, "")
     assert calls == [CHECKS_ARGV, STATUSES_ARGV]
 
 
@@ -171,8 +172,7 @@ def test_refresh_finds_a_hold_past_the_first_statuses_page(tmp_path):
         page1=_lines(_status("ci / test", "success"), _status("ci / lint", "failure")),
         page2=_lines(_status("shipmate / gate", "failure")),
     )
-    assert proc.returncode == 1
-    assert proc.stderr.endswith(HELD), proc.stderr
+    assert (proc.returncode, proc.stdout, proc.stderr) == (3, HELD, "")
     assert calls == [CHECKS_ARGV, STATUSES_ARGV]
 
 
