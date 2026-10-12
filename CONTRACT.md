@@ -778,11 +778,10 @@ no stack tags is unused and warns.
 ### What the diagnostics can and cannot see
 
 The unused-entry warning, and its sibling naming a listed workload that no stack
-in its environment tags, need the whole-tree tag map, and they never trigger a
-scan of their own — evaluating the whole tree on a targeted apply would let one
-unrelated stack's unresolvable expression block an approved plan. So they fire
-only where a whole-tree scan already happened: every drift sweep, `unlock`,
-and a bare `shipmate apply`. The plan, deploy and targeted-apply paths see a
+in its environment tags, need every stack's environment membership, and they
+never trigger a whole-tree scan of their own. So they fire only where a
+whole-tree scan already happened: every drift sweep, `unlock`, and a bare
+`shipmate apply`. The plan, deploy and targeted-apply paths see a
 changed set or a workset and stay silent.
 
 **A `needs` predecessor is checked the same way.** It names an environment
