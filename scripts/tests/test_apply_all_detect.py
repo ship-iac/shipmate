@@ -1044,3 +1044,36 @@ def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
     )
     assert _applied(parsed) == [("stacks/workers", "dev-eu"), ("stacks/dns", "dev-us")]
     assert json.loads(parsed["waiting_cells"]) == []
+
+
+def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(tmp_path, monkeypatch):
+    """`r/e1` after `b/e0` after `a` (e1, e2) after `c` (ex, e1); ex is explicit, e1 needs ez
+    and e2 needs e1. Only `b`'s walk, through the dead end at `a`, reaches `c/ex`; `r` runs
+    after `b`, so it waits too, and nothing applies.
+
+    Mutation: `break` after the first pass of the loop in `waves.waiting_cells` -- `r/e1`
+    applies before `b/e0`."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=[],
+        tree={"e1": ["r"], "e0": ["b"], "ex": ["c"]},
+        tags={
+            "r": ["env/e1"],
+            "b": ["env/e0"],
+            "a": ["env/e1", "env/e2"],
+            "c": ["env/ex", "env/e1"],
+        },
+        deps={"r": {"b"}, "b": {"a"}, "a": {"c"}, "c": set()},
+        checks=[_apply_check("r", "e1"), _apply_check("b", "e0"), _apply_check("c", "ex")],
+        order={"e1": ["ez"], "e2": ["e1"]},
+        explicit=["ex"],
+        decision="APPROVED",
+    )
+    assert _applied(parsed) == []
+    assert json.loads(parsed["waiting_cells"]) == [
+        {"stack": "b", "environment": "e0", "after_stack": "c", "after_environment": "ex"},
+        {"stack": "r", "environment": "e1", "after_stack": "c", "after_environment": "ex"},
+    ]
+    assert json.loads(parsed["skipped_envs"]) == []
+    assert json.loads(parsed["excluded_envs"]) == ["ex"]

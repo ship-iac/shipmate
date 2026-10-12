@@ -198,7 +198,7 @@ def refuse_inversions(order, stopped, pending, deps, tags, level):
     after a pending cell `needs` puts on a later env-level.
 
     A held or explicit upstream counts: it is not in this run, so the dependent would
-    apply first. `settle`'s one-pass waiting walk relies on this refusal running first."""
+    apply first."""
     skipped = wv.blocked_envs(order, stopped, {c["environment"] for c in pending} - stopped)
     roots = [c for c in pending if c["environment"] not in stopped | skipped]
     present = {(c["stack"], c["environment"]) for c in pending}

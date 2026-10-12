@@ -276,29 +276,46 @@ def inversion_error(pairs, order, level, remedy=""):
     return "\n".join(lines)
 
 
+def _blocker(walk, out, blocker, deps, tags, level):
+    """The cell a run cell with walk `walk` waits on, or None.
+
+    A cell of `out` it reaches: the sorted-first that waits on nothing itself, so the user can
+    apply it now; else the sorted-first. Else the blocker of the sorted-first waiting run cell
+    in `blocker` it reaches."""
+    hit = sorted(walk & out)
+    if hit:
+        ready = [b for b in hit if not upstream(b, deps, tags, level) & out]
+        return (ready or hit)[0]
+    via = sorted(walk & blocker.keys())
+    return blocker[via[0]] if via else None
+
+
 def waiting_cells(run, pending, deps, tags, level):
     """[{stack, environment, after_stack, after_environment}] for each run cell that waits.
 
-    A run cell waits when its walk reaches a cell pending outside the run. One pass: the
-    walk is transitive. The blocker is the sorted-first such cell that waits on nothing
-    itself, so the user can apply it now; else the sorted-first. Sorted by (environment, stack)."""
+    A run cell waits when its walk reaches a cell pending outside the run, or a run cell that
+    waits. Repeated until no cell joins: a walk through a dead end reaches instances the
+    dependent's own walk does not. Each blocker is pending outside the run (`_blocker`).
+    Sorted by (environment, stack)."""
     out = pending - {(c["stack"], c["environment"]) for c in run}
-    waits = []
-    for c in run:
-        hit = sorted(upstream((c["stack"], c["environment"]), deps, tags, level) & out)
-        if not hit:
-            continue
-        ready = [b for b in hit if not upstream(b, deps, tags, level) & out]
-        after_stack, after_env = (ready or hit)[0]
-        waits.append(
-            {
-                "stack": c["stack"],
-                "environment": c["environment"],
-                "after_stack": after_stack,
-                "after_environment": after_env,
-            }
-        )
-    return sorted(waits, key=lambda d: (d["environment"], d["stack"]))
+    walks = {
+        (c["stack"], c["environment"]): upstream((c["stack"], c["environment"]), deps, tags, level)
+        for c in run
+    }
+    blocker = {}
+    while True:
+        found = {
+            k: b
+            for k in walks.keys() - blocker.keys()
+            if (b := _blocker(walks[k], out, blocker, deps, tags, level))
+        }
+        if not found:
+            break
+        blocker.update(found)
+    return [
+        {"stack": s, "environment": e, "after_stack": b[0], "after_environment": b[1]}
+        for (s, e), b in sorted(blocker.items(), key=lambda kv: (kv[0][1], kv[0][0]))
+    ]
 
 
 def write_env_level_waves(fh, per_level):

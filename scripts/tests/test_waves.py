@@ -500,3 +500,24 @@ def test_three_targeted_runs_apply_a_zigzag_without_deadlock():
     assert w.waiting_cells([_cell("platform", "eu")], pending, deps, tags, level) == []
     pending -= {("platform", "eu")}
     assert w.waiting_cells([_cell("edge", "us")], pending, deps, tags, level) == []
+
+
+#: `r` (e1) after `b` (e0) after `a` (e1 e2) after `c` (ex e1); e1 needs ez, e2 needs e1.
+_DEAD_END_TAGS = _tags(r="e1", b="e0", a="e1 e2", c="ex e1")
+_DEAD_END_DEPS = {"r": {"b"}, "b": {"a"}, "a": {"c"}}
+_DEAD_END_ORDER = {"e1": ["ez"], "e2": ["e1"]}
+
+
+def test_a_cell_after_a_waiting_cell_waits_on_its_blocker():
+    """`r`'s walk reaches `b` and never `c / ex`; `b`'s walk dead-ends at `a`, reaches `a / e2`
+    and through it `c / ex`. So `b` waits on `c / ex`, and `r`, which runs after `b`, waits on
+    that same blocker.
+
+    Mutation: `break` after the first pass of the loop in `waiting_cells` -- `r` is missing."""
+    level = w.cell_levels(_DEAD_END_ORDER, _DEAD_END_TAGS)
+    run = [_cell("r", "e1"), _cell("b", "e0")]
+    pending = {("r", "e1"), ("b", "e0"), ("c", "ex")}
+    assert w.waiting_cells(run, pending, _DEAD_END_DEPS, _DEAD_END_TAGS, level) == [
+        _wait("b", "e0", "c", "ex"),
+        _wait("r", "e1", "c", "ex"),
+    ]
