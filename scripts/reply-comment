@@ -9,7 +9,8 @@ script, so every one carries the shared header and footer from `summary-comment`
 - `SHIPMATE_REPLY_OUTCOME`: `refused` (the engine decided not to run the command), `failed` (it
   could not), or `notice`. Anything else prints `::error::` to stderr and exits 1, posting
   nothing.
-- `SHIPMATE_REPLY_TEXT`: the reason or notice, engine-authored and posted unescaped.
+- `SHIPMATE_REPLY_TEXT`: the reason or notice, posted unescaped. Engine text, holding a
+  commenter's text only inside a code span (`comment-parse`'s `_quotable`).
 
 The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBER` of
 `GITHUB_REPOSITORY`; gh's response is discarded and nothing is printed. Any argument exits 1 with

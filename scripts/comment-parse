@@ -81,7 +81,8 @@ def _verb_error(verb, env):
     """
     spec = VERBS.get(verb)
     if spec is None:
-        return f"unknown verb `{verb}`{_HELP_HINT}"
+        name = f"unknown verb `{verb}`" if _quotable(verb) else "an unknown verb"
+        return f"{name}{_HELP_HINT}"
     if spec["args"] == "" and env is not None:
         return f"`{verb}` takes no arguments (use `shipmate {verb}`)"
     if spec["args"].startswith("<") and env is None:
@@ -109,7 +110,7 @@ def _malformed_error(line):
         token = f"unexpected `{extra[0]}`" if _quotable(extra[0]) else "an unexpected token"
         return f"{token} after the environment{_HELP_HINT}"
     name = f"environment `{env}`" if _quotable(env) else "the environment name"
-    return f"{name} holds characters outside {ec.ENV_NAME_RULE}{_HELP_HINT}"
+    return f"{name} is not {ec.ENV_NAME_RULE}{_HELP_HINT}"
 
 
 def parse(body):

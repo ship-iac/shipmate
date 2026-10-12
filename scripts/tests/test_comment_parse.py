@@ -120,10 +120,7 @@ _MALFORMED = "malformed: expected `shipmate <verb> [env]` (try `shipmate help`)"
 
 
 _HINT = " (try `shipmate help`)"
-_OUTSIDE = (
-    "holds characters outside lowercase letters, digits, `-` and `_`, starting with a letter "
-    "or digit" + _HINT
-)
+_OUTSIDE = "is not lowercase letters, digits, `-` and `_`, starting with a letter or digit" + _HINT
 
 
 @pytest.mark.parametrize(
@@ -141,6 +138,7 @@ _OUTSIDE = (
         ("shipmate apply " + "A" * 40, f"environment `{'A' * 40}` " + _OUTSIDE),
         ("shipmate apply " + "A" * 41, "the environment name " + _OUTSIDE),
         ("shipmate apply a`b", "the environment name " + _OUTSIDE),
+        ("shipmate unlock -dev", "environment `-dev` " + _OUTSIDE),
         ("shipmate apply dev-eu a`b", "an unexpected token after the environment" + _HINT),
     ],
 )
@@ -185,6 +183,19 @@ def test_an_env_holding_an_underscore_is_targetable():
         "route": "apply",
         "error": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("verb", "error"),
+    [
+        ("a" * 40, f"unknown verb `{'a' * 40}`" + _HINT),
+        ("a" * 41, "an unknown verb" + _HINT),
+    ],
+)
+def test_an_unknown_verb_is_quoted_only_when_short(verb, error):
+    """Mutation: drop `_quotable` from `_verb_error`'s unknown-verb branch -- the 41-character
+    verb is quoted."""
+    assert cp.parse(f"shipmate {verb}")["error"] == error
 
 
 def test_destroy_is_an_unknown_verb():
@@ -444,9 +455,11 @@ def test_main_writes_no_verb_for_a_malformed_line(tmp_path, monkeypatch):
 
 def test_parse_does_not_import_summary_comment(tmp_path):
     """Every PR comment runs comment-parse, so a summary-comment that fails at import must not
-    stop a command from parsing. Runs a copy of the script beside a summary-comment that raises.
+    stop a command from parsing. Runs a copy of the script beside a summary-comment that raises,
+    under `python -S`, so no site-packages and no PyYAML: comment-parse loads env-config at import.
 
     Mutation: load summary-comment at module level, and the run exits non-zero with no output.
+    Mutation: move env-config's `import yaml` to module level -- the same.
     """
     scripts = pathlib.Path(cp.__file__).parent
     for name in ("comment-parse", "_shipmate.py", "env-config"):
@@ -455,7 +468,7 @@ def test_parse_does_not_import_summary_comment(tmp_path):
     out = tmp_path / "out.txt"
     out.touch()
     subprocess.run(
-        [sys.executable, str(tmp_path / "comment-parse")],
+        [sys.executable, "-S", str(tmp_path / "comment-parse")],
         env={"COMMENT_BODY": "shipmate apply dev-eu", "GITHUB_OUTPUT": str(out)},
         check=True,
         timeout=60,

@@ -1161,13 +1161,13 @@ env given alongside it with an explicit "takes no arguments" error rather than
 silently ignoring the extra token. An unknown verb's error points the commenter at
 `shipmate help`, and so does every other refusal of a line that does not match
 the grammar: for `apply` or `unlock`, the reply names a token after the env
-("unexpected `<token>` after the environment") or an env holding anything but
-lowercase letters, digits, `-` and `_` ("environment `<token>` holds characters
-outside ..."); any other shape (a capitalized verb, a double space) gets
-"malformed: expected `shipmate <verb> [env]`". The reply quotes the commenter's
-token only inside a code span, and only when it is non-empty, at most 40
-characters and free of backticks; otherwise it says "an unexpected token" or
-"the environment name". The reply to a line outside the grammar names no verb
+("unexpected `<token>` after the environment") or an env outside lowercase
+letters, digits, `-` and `_`, starting with a letter or digit ("environment
+`<token>` is not ..."); any other shape (a capitalized verb, a double space)
+gets "malformed: expected `shipmate <verb> [env]`". The reply quotes the
+commenter's token, an unknown verb included, only inside a code span, and only
+when it is non-empty, at most 40 characters and free of backticks; otherwise it
+says "an unexpected token", "the environment name" or "an unknown verb". The reply to a line outside the grammar names no verb
 and no environment in its header.
 `scripts/comment-parse`'s `VERBS` registry is the single
 source of truth this table is derived from: it drives the parser, the
