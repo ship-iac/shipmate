@@ -1056,7 +1056,8 @@ whose `env_binding` names no GitHub Environment, and the refusal of a
 3. Retag the stack in a later pull request to bring it back, or delete it.
 
 Removing one environment's tag from a stack that keeps others takes only that
-pair out; its plan run warns naming the `<stack> / <env>` pair.
+pair out; its plan comment and its plan run's warning name the `<stack> / <env>`
+pair.
 
 Every plan's `detect` still runs `terramate fmt --check` and
 `terramate generate --detailed-exit-code` over the whole repository, unmanaged
@@ -2079,13 +2080,14 @@ trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the unmanaged line and a blank line when
-the pull request changes an unmanaged stack, one line or fold-out per planned
+the pull request changes an unmanaged stack, the lost pairs line and a blank
+line when it untags a stack / environment pair, one line or fold-out per planned
 stack × environment, sorted by environment then stack. There is no footer and no help
 hint, whether or not `doctor` warned: both verdicts are normal results and the
 verdict links the run. The doctor step records its decision once, as its
 `warned` output, which the post-or-skip rule reads; the build step records
-whether the unmanaged line rendered, as its `unmanaged` output, which the same
-rule reads.
+whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
+and `lost` outputs, which the same rule reads.
 
 - **Verdict line.** `🟢 no changes` when no cell changes (zero cells
   included), else `🟡 N of M cells change`, then
@@ -2101,6 +2103,14 @@ rule reads.
   characters, then `, and M more`. When not even the first path fits, it ends
   `; their paths are too long to list here.` When the cell lines leave it no
   room under the 65,536-character cap, it is left out with a warning.
+- **Lost pairs line.** `⚪ N stack / environment pair(s) lost their env/* tag
+  in this pull request and are no longer planned or deployed: <pairs>`, each
+  `<stack> / <env>`, for the stacks that keep another `env/*` tag; a stack that
+  lost its last tag is on the unmanaged line instead, so no stack is named on
+  both. Same caps and fallback as the unmanaged line, ending `; their pairs are
+  too long to list here.` A drift sweep and a run with no pull-request base
+  have no such line. On both lines each name is escaped like a cell line's
+  stack, and `@` renders as `&#64;`, so a path cannot mention a user or team.
 - **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the

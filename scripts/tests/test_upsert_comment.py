@@ -314,7 +314,7 @@ _SUMMARY_SKIPPED = (
 )
 
 
-def _run_summary(tmp_path, mode, *, warned="false", unmanaged="false", **gh):
+def _run_summary(tmp_path, mode, *, warned="false", unmanaged="false", lost="false", **gh):
     """The summary action's upsert step under its own env names; return (process, gh calls)."""
     (tmp_path / "comment.md").write_text(SUMMARY + "\n### shipmate plan\n", encoding="utf-8")
     env = {
@@ -325,6 +325,7 @@ def _run_summary(tmp_path, mode, *, warned="false", unmanaged="false", **gh):
         "PLAN_RESULT": "failure",
         "DOCTOR_WARNED": warned,
         "UNMANAGED": unmanaged,
+        "LOST": lost,
         "GITHUB_REPOSITORY": "o/r",
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
     }
@@ -361,14 +362,16 @@ def test_summary_draft_and_hold_make_no_comment_call(tmp_path, mode, stdout):
 
 @bash_only
 @pytest.mark.parametrize(
-    ("mode", "warned", "unmanaged", "listing", "expected", "stdout"),
+    ("mode", "warned", "unmanaged", "lost", "listing", "expected", "stdout"),
     [
-        ("nothing-changed", "false", "false", "", [_LIST], _SUMMARY_SKIPPED),
-        ("post", "false", "false", "", [_LIST, _post_of("comment.md")], ""),
-        ("nothing-changed", "true", "false", "", [_LIST, _post_of("comment.md")], ""),
-        ("nothing-changed", "false", "true", "", [_LIST, _post_of("comment.md")], ""),
+        ("nothing-changed", "false", "false", "false", "", [_LIST], _SUMMARY_SKIPPED),
+        ("post", "false", "false", "false", "", [_LIST, _post_of("comment.md")], ""),
+        ("nothing-changed", "true", "false", "false", "", [_LIST, _post_of("comment.md")], ""),
+        ("nothing-changed", "false", "true", "false", "", [_LIST, _post_of("comment.md")], ""),
+        ("nothing-changed", "false", "false", "true", "", [_LIST, _post_of("comment.md")], ""),
         (
             "nothing-changed",
+            "false",
             "false",
             "false",
             _head(5, SUMMARY),
@@ -376,18 +379,19 @@ def test_summary_draft_and_hold_make_no_comment_call(tmp_path, mode, stdout):
             "",
         ),
     ],
-    ids=["quiet", "ordinary", "doctor-warned", "unmanaged", "quiet-existing"],
+    ids=["quiet", "ordinary", "doctor-warned", "unmanaged", "lost", "quiet-existing"],
 )
 def test_summary_posts_unless_quiet_and_keeps_an_existing_comment_current(
-    tmp_path, mode, warned, unmanaged, listing, expected, stdout
+    tmp_path, mode, warned, unmanaged, lost, listing, expected, stdout
 ):
-    """Nothing changed, no doctor warning and no unmanaged line: update only.
+    """Nothing changed, no doctor warning, no unmanaged line and no lost pairs line: update only.
 
     Mutations: delete the `DOCTOR_WARNED` clause (doctor-warned red); delete the `UNMANAGED`
-    clause (unmanaged red); delete the `nothing-changed` clause (ordinary red).
+    clause (unmanaged red); delete the `LOST` clause (lost red); delete the `nothing-changed`
+    clause (ordinary red).
     """
     proc, calls = _run_summary(
-        tmp_path, mode, warned=warned, unmanaged=unmanaged, listing=listing + "\n"
+        tmp_path, mode, warned=warned, unmanaged=unmanaged, lost=lost, listing=listing + "\n"
     )
     assert (proc.returncode, proc.stdout, calls) == (0, stdout, expected), proc.stderr
 

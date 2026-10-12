@@ -42,10 +42,11 @@ FOOTER_HINT = "Comment `shipmate help` for the available commands."
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
-#: Well below `HARD_CAP - SIZE_BUDGET`, so the unmanaged stacks line never eats the headroom.
+#: Twice this is well below `HARD_CAP - SIZE_BUDGET`, so the unmanaged stacks and lost pairs
+#: lines never eat the headroom.
 UNMANAGED_LINE_CAP = 1000
-#: build-matrix's own `UNMANAGED_NAMES`: the `unmanaged` output carries at most this many
-#: paths. Kept equal by `test_the_two_unmanaged_name_caps_are_equal`.
+#: build-matrix's own `UNMANAGED_NAMES`: the `unmanaged` and `lost` outputs carry at most this
+#: many names. Kept equal by `test_the_two_unmanaged_name_caps_are_equal`.
 UNMANAGED_NAMES = 10
 CELL_KEYS = ("stack", "environment", "changed")
 
@@ -280,25 +281,37 @@ def verdict(cells, head_sha, run_url):
     return f"{circle} {n} of {len(cells)} cells change {provenance(head_sha, run_url)}"
 
 
-def unmanaged_line(unmanaged):
-    """`⚪ N changed stack(s) carry no env/* tag ...` for build-matrix's `unmanaged` output
-    `{"count": N, "paths": [...]}`, naming the first of `paths` (each `_md_escape`d, at most
-    `UNMANAGED_NAMES` by `_unmanaged`'s shape check) that fit in
-    `UNMANAGED_LINE_CAP` characters, then `, and M more` for the other `count - named`. When
+UNMANAGED_LEAD = "⚪ {} changed stack(s) carry no env/* tag and are not managed by shipmate"
+LOST_LEAD = (
+    "⚪ {} stack / environment pair(s) lost their env/* tag in this pull request and are no "
+    "longer planned or deployed"
+)
+
+
+def names_line(value, key, lead):
+    """`lead` with its count, then the first names of build-matrix's `{"count": N, key: [...]}`
+    output (at most `UNMANAGED_NAMES` by `_named_output`'s shape check) that fit in
+    `UNMANAGED_LINE_CAP` characters, then `, and M more` for the other `count - named`. Each
+    name is `_md_escape`d with `@` as `&#64;`, so a path cannot mention a user or team. When
     not even the first fits, a fixed sentence names none. Empty for `None` or a zero count."""
-    if not unmanaged or not unmanaged["count"]:
+    if not value or not value["count"]:
         return ""
-    count, paths = unmanaged["count"], unmanaged["paths"]
-    lead = f"⚪ {count} changed stack(s) carry no env/* tag and are not managed by shipmate"
+    count = value["count"]
+    lead = lead.format(count)
     line, names = "", []
-    for path in paths:
-        names.append(_md_escape(path))
+    for name in value[key]:
+        names.append(_md_escape(name).replace("@", "&#64;"))
         more = count - len(names)
         candidate = f"{lead}: {', '.join(names)}" + (f", and {more} more" if more else "")
         if len(candidate) > UNMANAGED_LINE_CAP:
             break
         line = candidate
-    return line or f"{lead}; their paths are too long to list here."
+    return line or f"{lead}; their {key} are too long to list here."
+
+
+def unmanaged_line(unmanaged):
+    """`names_line` of build-matrix's `unmanaged` output."""
+    return names_line(unmanaged, "paths", UNMANAGED_LEAD)
 
 
 def _join(sections):
@@ -313,30 +326,35 @@ def _join(sections):
     return "".join(out)
 
 
-def build_comment(cells, checks, run_url, head_sha, unmanaged=None):
+def build_comment(cells, checks, run_url, head_sha, unmanaged=None, lost=None):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `unmanaged_line` of
-    `unmanaged` when its count is not zero, every cell in order (a fold-out for a changed cell
-    with plan text, else its bare line). No footer: the verdict links the run, and neither plan
-    verdict asks anything. Every cell is guaranteed its bare line: the space all remaining
-    cells' bare lines need is reserved up front, so an early giant plan cannot starve a later
-    cell. The unmanaged line yields, with a warning, when the bare lines leave it no room under
-    HARD_CAP. Returns `(body, named)`; `named` says whether the unmanaged line is in `body`."""
+    `unmanaged` and the lost pairs line of `lost` when each count is not zero, every cell in
+    order (a fold-out for a changed cell with plan text, else its bare line). No footer: the
+    verdict links the run, and neither plan verdict asks anything. Every cell is guaranteed its
+    bare line: the space all remaining cells' bare lines need is reserved up front, so an early
+    giant plan cannot starve a later cell. Each of the two lines yields, with a warning, when the
+    bare lines leave it no room under HARD_CAP. Returns `(body, unmanaged_named, lost_named)`,
+    each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     urls = [check_url(c, checks, run_url) for c in meta]
     bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
-    named = False
-    if line := unmanaged_line(unmanaged):
+    named = []
+    for line, what in (
+        (unmanaged_line(unmanaged), "unmanaged stacks"),
+        (names_line(lost, "pairs", LOST_LEAD), "lost stack / environment pairs"),
+    ):
         # The smallest body with the line; past HARD_CAP it goes, so the refusal below keeps
         # its one cause. In `head`, the line is counted in `used` before any fold-out is sized.
-        if len("\n\n".join(p for p in (head, line, "\n".join(bares)) if p)) > HARD_CAP:
+        if line and len("\n\n".join(p for p in (head, line, "\n".join(bares)) if p)) > HARD_CAP:
             print(
                 "::warning::the plan comment's cell lines leave no room under the 65,536-char "
-                "comment cap for the unmanaged stacks line; it was left out"
+                f"comment cap for the {what} line; it was left out"
             )
-        else:
+            line = ""
+        if line:
             head = f"{head}\n\n{line}"
-            named = True
+        named.append(bool(line))
     used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
@@ -356,7 +374,7 @@ def build_comment(cells, checks, run_url, head_sha, unmanaged=None):
             "::error::the plan comment's cell lines alone exceed the 65,536-char comment "
             "cap, shorten stack/env display names"
         )
-    return body, named
+    return body, *named
 
 
 _STR_KEYS = ("stack", "environment")
@@ -437,10 +455,11 @@ def load_cells(cells_dir):
     return out
 
 
-def _unmanaged(raw):
-    """build-matrix's `{"count": N, "paths": [...]}` from `SHIPMATE_UNMANAGED`: `None` when
-    empty, `None` with one warning when it is not that shape, with `N` a non-negative integer
-    and exactly `min(N, UNMANAGED_NAMES)` string paths (so a negative `N` fails too)."""
+def _named_output(raw, input_name, key, noun):
+    """build-matrix's `{"count": N, key: [...]}` from the `input_name` input's `raw` value:
+    `None` when empty, `None` with one warning when it is not that shape, with `N` a
+    non-negative integer and exactly `min(N, UNMANAGED_NAMES)` strings under `key` (so a
+    negative `N` fails too). `noun` names, in the warning, what the comment then omits."""
     if not raw:
         return None
     try:
@@ -448,17 +467,17 @@ def _unmanaged(raw):
     except json.JSONDecodeError:
         value = None
     if isinstance(value, dict):
-        count, paths = value.get("count"), value.get("paths")
+        count, names = value.get("count"), value.get(key)
         if (
             type(count) is int
-            and isinstance(paths, list)
-            and all(isinstance(p, str) for p in paths)
-            and len(paths) == min(count, UNMANAGED_NAMES)
+            and isinstance(names, list)
+            and all(isinstance(n, str) for n in names)
+            and len(names) == min(count, UNMANAGED_NAMES)
         ):
             return value
     print(
-        '::warning::unmanaged-stacks is not a JSON object {"count": N, "paths": [strings]} '
-        f"naming min(N, {UNMANAGED_NAMES}) paths; the plan comment names no unmanaged stack"
+        f'::warning::{input_name} is not a JSON object {{"count": N, "{key}": [strings]}} '
+        f"naming min(N, {UNMANAGED_NAMES}) {key}; the plan comment names no {noun}"
     )
     return None
 
@@ -472,8 +491,18 @@ def main():
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the verdict's run link and the per-cell fallback link promise.
     url = current_run_url()
-    unmanaged = _unmanaged(os.environ.get("SHIPMATE_UNMANAGED", ""))
-    body, named = build_comment(cells, checks, url, os.environ.get("HEAD_SHA", ""), unmanaged)
+    unmanaged = _named_output(
+        os.environ.get("SHIPMATE_UNMANAGED", ""), "unmanaged-stacks", "paths", "unmanaged stack"
+    )
+    lost = _named_output(
+        os.environ.get("SHIPMATE_LOST_ENV_TAGS", ""),
+        "lost-env-tags",
+        "pairs",
+        "lost stack / environment pair",
+    )
+    body, named, lost_named = build_comment(
+        cells, checks, url, os.environ.get("HEAD_SHA", ""), unmanaged, lost
+    )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
     pending = any(c["changed"] for c, _ in cells)
@@ -481,6 +510,7 @@ def main():
         fh.write(
             f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n"
             f"unmanaged={'true' if named else 'false'}\n"
+            f"lost={'true' if lost_named else 'false'}\n"
         )
 
 

@@ -49,6 +49,7 @@ jobs:
       empty: ${{ steps.matrix.outputs.empty }}
       count: ${{ steps.matrix.outputs.count }}
       unmanaged: ${{ steps.matrix.outputs.unmanaged }}
+      lost: ${{ steps.matrix.outputs.lost }}
       refusal: ${{ steps.matrix.outputs.refusal }}
     steps:
       # Both triggers check out something else by default -- the base branch under
@@ -153,6 +154,7 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           github-vars: ${{ toJSON(vars) }}
           unmanaged-stacks: ${{ needs.detect.outputs.unmanaged }}
+          lost-env-tags: ${{ needs.detect.outputs.lost }}
 
   # The group above cancels a pending `summary` when a later gate writer queues behind it, so this
   # run's cells would never publish. A hold only closes the gate, so this job writes outside the
