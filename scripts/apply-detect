@@ -180,11 +180,7 @@ def apply_check_names(check_run_lines, app_id):
     return set(ag.latest_by_name(ag.app_runs(check_run_lines, app_id)))
 
 
-def run_graph_deps():
-    """The stack dependency graph, parsed. `--label stack.dir` is what makes
-    waves.parse_dot's node normalization correct -- its docstring pins the argv
-    as contract."""
-    return wv.parse_dot(_run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
+run_graph_deps = bm.run_graph_deps
 
 
 def dag_shape_notice(deps):

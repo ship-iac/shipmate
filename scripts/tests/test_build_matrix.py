@@ -525,6 +525,8 @@ def _run_main(
     unmanaged=(),
     diffs=None,
     diff_calls=None,
+    tag_map=None,
+    graph=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -541,7 +543,10 @@ def _run_main(
 
     `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
     run past the head-checkout refusal looks like; without it the run states no head and is
-    refused, so every test that wants to reach the matrix passes one."""
+    refused, so every test that wants to reach the matrix passes one.
+
+    The inversion check's two reads are stubbed: `all_tags` answers `tag_map` (or `stacks`),
+    and `run_graph_deps` is `graph`, by default an empty run-graph."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -584,9 +589,11 @@ def _run_main(
 
     if stacks is None:
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
+        monkeypatch.setattr(bm, "all_tags", lambda: dict(tag_map or {}))
     else:
         monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
         monkeypatch.setattr(bm, "all_tags", lambda: stacks)
+    monkeypatch.setattr(bm, "run_graph_deps", graph or (lambda: {}))
     monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
     bm.main()
     parsed = github_outputs(out)
@@ -720,6 +727,107 @@ def test_main_drift_run_is_unaffected(monkeypatch, tmp_path):
     )
     assert outputs["empty"] == "false"
     assert called == [(True, "", "")]
+
+
+#: `dev-us` needs `dev-eu`, while `stacks/platform` (dev-eu only) runs after `stacks/dns`
+#: (dev-us only): no order applies both.
+_INVERTED_TABLE = {
+    "layout": "folder",
+    "environments": {"dev-eu": {}, "dev-us": {"needs": ["dev-eu"]}},
+}
+_INVERTED_TAGS = {"stacks/dns": ["env/dev-us"], "stacks/platform": ["env/dev-eu"]}
+_INVERTED_DEPS = {"stacks/dns": set(), "stacks/platform": {"stacks/dns"}}
+_PR_ENV = {
+    "GITHUB_EVENT_NAME": "pull_request_target",
+    "GITHUB_REPOSITORY": "acme/iac",
+    "SHIPMATE_HEAD_REPO": "acme/iac",
+}
+
+
+def _run_inverted(monkeypatch, tmp_path, env, cells, graph=None, head_sha="cafe1234"):
+    return _run_main(
+        monkeypatch,
+        tmp_path,
+        env,
+        cells=cells,
+        head_sha=head_sha,
+        table=_INVERTED_TABLE,
+        tag_map=_INVERTED_TAGS,
+        graph=graph or (lambda: _INVERTED_DEPS),
+    )
+
+
+def test_a_plan_refuses_changed_cells_whose_after_edge_needs_inverts(monkeypatch, tmp_path):
+    """Both ends of the inverted edge changed: the plan refuses, and the gate description's
+    `refusal` output names the pair. Mutation: drop the inversion check from `_detect`."""
+    with pytest.raises(SystemExit) as exc:
+        _run_inverted(
+            monkeypatch,
+            tmp_path,
+            _PR_ENV,
+            (("stacks/platform", "dev-eu"), ("stacks/dns", "dev-us")),
+        )
+    assert exc.value.code == (
+        "::error::needs orders stacks/platform / dev-eu before stacks/dns / dev-us, which it "
+        "runs after:\n"
+        "- stacks/platform / dev-eu (env-level 0) after stacks/dns / dev-us (env-level 1); "
+        "dev-us's level comes from dev-eu -> dev-us\n"
+        "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
+        "in that chain on the default branch, or retag the stacks so the edge stays inside "
+        "environments that order it."
+    )
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        "refusal=needs orders stacks/platform / dev-eu before stacks/dns / dev-us, which it "
+        "runs after:\n"
+    )
+
+
+def test_a_plan_passes_when_only_one_end_of_the_inverted_edge_changed(monkeypatch, tmp_path):
+    """The unchanged `stacks/dns / dev-us` is in no run, so nothing applies out of order.
+    Mutation: pass every `(stack, env)` of the tag map as `present`."""
+    outputs, _ = _run_inverted(monkeypatch, tmp_path, _PR_ENV, (("stacks/platform", "dev-eu"),))
+    assert outputs["matrix"] == json.dumps(
+        {
+            "include": [
+                {
+                    "stack": "stacks/platform",
+                    "environment": "dev-eu",
+                    "workload": "",
+                    "role_arn": "",
+                    "cred_region": "",
+                    "tf_vars": {},
+                    "config_path": "plan",
+                    "env_binding": "dev-eu-plan",
+                }
+            ]
+        }
+    )
+
+
+def test_a_drift_sweep_does_not_refuse_an_inverted_edge(monkeypatch, tmp_path):
+    """A sweep plans every cell and applies none. Mutation: drop `not sweep` from the check."""
+    outputs, _ = _run_inverted(
+        monkeypatch,
+        tmp_path,
+        {
+            "SHIPMATE_SWEEP": "true",
+            "GITHUB_EVENT_NAME": "schedule",
+            "GITHUB_REPOSITORY": "acme/iac",
+        },
+        (("stacks/platform", "dev-eu"), ("stacks/dns", "dev-us")),
+        head_sha=None,
+    )
+    assert outputs["count"] == "2"
+
+
+def test_an_empty_plan_reads_no_run_graph(monkeypatch, tmp_path):
+    """Mutation: drop the `cells` guard on the inversion check."""
+
+    def boom():
+        raise AssertionError("read the run-graph for an empty matrix")
+
+    outputs, _ = _run_inverted(monkeypatch, tmp_path, _PR_ENV, (), graph=boom)
+    assert outputs["empty"] == "true"
 
 
 def test_a_stated_head_equal_to_the_checkout_is_planned(monkeypatch):
