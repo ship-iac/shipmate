@@ -1776,7 +1776,8 @@ The five jobs:
   (comment shipmate plan or push): its plan summary was cancelled before it
   published". A `summary` refused by its fork `if:` is `skipped`, not
   `cancelled`, so `gate-hold` holds the App key only for a head `summary`
-  admitted. It runs on `ubuntu-slim` whatever `runs_on` the caller passes.
+  admitted. It runs on `ubuntu-slim` whatever `runs_on` the caller passes, as
+  `facts` does.
 - **`apply.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
@@ -1917,9 +1918,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and the control jobs below call `gh api` on the comment, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
-- The engine's nine control jobs, which run neither `tofu` nor `terramate`,
-  take no runner input and run on `ubuntu-slim`. `gate-hold` runs on
-  `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
+- The engine's ten control jobs, which run neither `tofu` nor `terramate`,
+  take no runner input and run on `ubuntu-slim`. `plan.yml`'s `facts` and
+  `gate-hold` run on `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
   `docs/aws.md` §Runner choice lists them. An account that cannot use that
   label leaves them waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config

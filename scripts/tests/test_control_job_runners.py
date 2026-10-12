@@ -2,9 +2,11 @@
 
 The control jobs run no `tofu` and no `terramate`, so they take the 1-CPU `ubuntu-slim` image.
 Detect jobs run `terramate` and cells run `tofu`: they stay on `ubuntu-latest`. `plan.yml` and
-`drift.yml` take the consumer's `runs_on:` input. A new job, a moved job or a flipped label
-fails here. Mutations: `apply-env-level.yml` `complete` to `ubuntu-latest`; a `plan.yml` job to
-`ubuntu-slim`; the `apply-env-level.yml` `wave0` cell to `ubuntu-slim`.
+`drift.yml` take the consumer's `runs_on:` input, except `plan.yml`'s `facts` and `gate-hold`.
+`summary` stays on the input: doctor installs and parses YAML there, an apt install on slim. A new
+job, a moved job or a flipped label fails here. Mutations: `apply-env-level.yml` `complete` to
+`ubuntu-latest`; `plan.yml` `summary` to `ubuntu-slim`; `plan.yml` `facts` to
+`${{ inputs.runs_on }}`; the `apply-env-level.yml` `wave0` cell to `ubuntu-slim`.
 """
 
 from _loader import WORKFLOWS, workflow_yaml
@@ -29,7 +31,7 @@ EXPECTED = {
     ("drift.yml", "drift"): INPUT,
     ("drift.yml", "issues"): INPUT,
     ("manifest-load.yml", "load"): LATEST,
-    ("plan.yml", "facts"): INPUT,
+    ("plan.yml", "facts"): SLIM,
     ("plan.yml", "detect"): INPUT,
     ("plan.yml", "plan"): INPUT,
     ("plan.yml", "summary"): INPUT,
