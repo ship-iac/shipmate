@@ -446,11 +446,11 @@ def main():
     completed = ag.app_done_names(lines, app_id)
 
     paths = paths_with_checks(env, list(deps.keys()), names)
-    cells = cells_for_env(env, paths, bm.tags_of(paths))
+    tag_map = bm.all_tags()
+    cells = cells_for_env(env, paths, bm.tags_of(paths, tag_map))
     table = bm.env_config(cells, table=table)
     cells = bm.stamp_rows(cells, table, "apply")
 
-    tag_map = bm.all_tags()
     all_pending = pending_tuples(names, completed, wv.env_stacks(tag_map))
     pending = filter_pending(cells, completed)
     levels = wv.cell_levels(bm.ec.env_order(table), tag_map)

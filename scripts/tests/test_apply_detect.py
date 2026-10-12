@@ -330,6 +330,22 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     assert urls == [f"repos/acme/iac/commits/{'a' * 40}/check-runs?filter=all&per_page=100"]
 
 
+def test_a_targeted_apply_reads_the_tag_metadata_once(monkeypatch, tmp_path):
+    """Mutation: call `bm.tags_of(paths)` without the map -- two reads."""
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
+    reads = []
+
+    def all_tags():
+        reads.append(1)
+        return {"stacks/app": ["env/dev-eu"]}
+
+    monkeypatch.setattr(ad.bm, "all_tags", all_tags)
+    ad.main()
+    assert len(json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]) == 1
+    assert reads == [1]
+
+
 def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_path):
     # A completed+success check of the same name from another identity (github-actions, app id
     # 15368) must not count the cell as applied. It is also the newer run of that name, so only

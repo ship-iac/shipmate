@@ -124,6 +124,7 @@ def _run_main(
     reads=None,
     stacks=None,
     head=HEAD,
+    tag_reads=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
@@ -131,7 +132,8 @@ def _run_main(
 
     `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
     the double, and leaves `cells` unused. Without it, `all_tags` tags each stack of `cells`
-    with the env of each of its cells.
+    with the env of each of its cells. Each `all_tags` call appends the map it answers to
+    `tag_reads` when one is given.
 
     `order` is folded into the stubbed table rather than stubbed on `wv`: the ordering map is
     a field of the mapping this path loads, so a double on the reader would mask a caller
@@ -166,7 +168,7 @@ def _run_main(
         monkeypatch.setattr(
             dd.bm,
             "compute_cells",
-            lambda all_stacks=False, base="", tags="": (
+            lambda all_stacks=False, base="", tags="", tag_map=None: (
                 {c["environment"]: frozenset({c["workload"]} - {""}) for c in cells},
                 cells,
                 [{"environment": c["environment"], "stack": c["stack"]} for c in cells],
@@ -176,10 +178,16 @@ def _run_main(
         tags = {}
         for c in cells:
             tags.setdefault(c["stack"], []).append(f"env/{c['environment']}")
-        monkeypatch.setattr(dd.bm, "all_tags", lambda: tags)
     else:
         monkeypatch.setattr(dd.bm, "_list_stacks", lambda all_stacks, base: list(stacks))
-        monkeypatch.setattr(dd.bm, "all_tags", lambda: stacks)
+        tags = stacks
+    reads = [] if tag_reads is None else tag_reads
+
+    def all_tags():
+        reads.append(tags)
+        return tags
+
+    monkeypatch.setattr(dd.bm, "all_tags", all_tags)
     # The check-run listing is fetched through apply-detect's own `_run`, and the tree walk
     # through deploy-detect's build-matrix. Both are stubbed so a `gh api` call from either
     # module lands in `urls`.
@@ -459,6 +467,23 @@ def test_main_unpacks_the_real_compute_cells_return(tmp_path, monkeypatch):
     assert [(c["environment"], c["stack"]) for c in _wave_cells(parsed)] == [
         ("dev-eu", "stacks/app")
     ]
+
+
+def test_a_deploy_reads_the_tag_metadata_once(tmp_path, monkeypatch):
+    """The real `compute_cells` scans the merge, and the inversion check reads the same map.
+
+    Mutation: call `compute_cells` in `main` without `tag_map` -- two reads."""
+    reads = []
+    _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[],
+        checks=[_apply_check("stacks/app")],
+        stacks={"stacks/app": ["env/dev-eu"]},
+        deps={"stacks/app": set()},
+        tag_reads=reads,
+    )
+    assert reads == [{"stacks/app": ["env/dev-eu"]}]
 
 
 def test_deploy_passes_no_workload_map(tmp_path, monkeypatch):

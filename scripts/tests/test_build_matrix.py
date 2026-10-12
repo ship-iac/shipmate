@@ -527,6 +527,7 @@ def _run_main(
     diff_calls=None,
     tag_map=None,
     graph=None,
+    tag_reads=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -546,7 +547,8 @@ def _run_main(
     refused, so every test that wants to reach the matrix passes one.
 
     The inversion check's two reads are stubbed: `all_tags` answers `tag_map` (or `stacks`),
-    and `run_graph_deps` is `graph`, by default an empty run-graph."""
+    and `run_graph_deps` is `graph`, by default an empty run-graph. Each `all_tags` call appends
+    the map it answers to `tag_reads` when one is given."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -577,7 +579,7 @@ def _run_main(
         monkeypatch.setenv(k, v)
     called = [] if called is None else called
 
-    def fake_compute(all_stacks=False, base="", tags="", errors=None):
+    def fake_compute(all_stacks=False, base="", tags="", errors=None, tag_map=None):
         called.append((all_stacks, base, tags))
         # The whole row `full_tree` emits, `workload` included: a double that omits a
         # key the real builder always adds cannot fail on a guard that pins the row shape.
@@ -587,12 +589,18 @@ def _run_main(
         # forwards it as `tagged` only under `all_stacks`. The rows tag no workload.
         return {e: frozenset() for _, e in cells}, rows, names, list(unmanaged)
 
+    answer = dict(tag_map or {}) if stacks is None else stacks
+    reads = [] if tag_reads is None else tag_reads
+
+    def all_tags():
+        reads.append(answer)
+        return answer
+
+    monkeypatch.setattr(bm, "all_tags", all_tags)
     if stacks is None:
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
-        monkeypatch.setattr(bm, "all_tags", lambda: dict(tag_map or {}))
     else:
         monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
-        monkeypatch.setattr(bm, "all_tags", lambda: stacks)
     monkeypatch.setattr(bm, "run_graph_deps", graph or (lambda: {}))
     monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
     bm.main()
@@ -818,6 +826,17 @@ def test_a_drift_sweep_does_not_refuse_an_inverted_edge(monkeypatch, tmp_path):
         head_sha=None,
     )
     assert outputs["count"] == "2"
+
+
+def test_a_plan_reads_the_tag_metadata_once(monkeypatch, tmp_path):
+    """The real `compute_cells` scans the tree and the inversion check runs over its cell.
+
+    Mutation: drop the `tag_map` pass-through from `compute_cells` to `env_membership` --
+    two reads."""
+    tags = {"stacks/app": ["env/dev-eu"]}
+    reads = []
+    _run_main(monkeypatch, tmp_path, _PR_ENV, head_sha="cafe1234", stacks=tags, tag_reads=reads)
+    assert reads == [{"stacks/app": ["env/dev-eu"]}]
 
 
 def test_an_empty_plan_reads_no_run_graph(monkeypatch, tmp_path):

@@ -280,13 +280,14 @@ def run_graph_deps():
     return wv.parse_dot(_run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
 
 
-def tags_of(stacks):
-    """`{stack: [tags...]}` for `stacks` from `all_tags`, or `SystemExit` naming each stack
-    the metadata has no tags for: a default of no tags would read as unmanaged and drop the
-    stack from CI. An empty `stacks` reads nothing."""
+def tags_of(stacks, tag_map=None):
+    """`{stack: [tags...]}` for `stacks` from `tag_map`, an `all_tags` map the caller read, or
+    from an `all_tags` read when it is None; `SystemExit` naming each stack the metadata has no
+    tags for: a default of no tags would read as unmanaged and drop the stack from CI. An empty
+    `stacks` reads nothing."""
     if not stacks:
         return {}
-    tags = all_tags()
+    tags = all_tags() if tag_map is None else tag_map
     missing = [s for s in stacks if s not in tags]
     if missing:
         raise SystemExit(
@@ -397,7 +398,7 @@ def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
     return pairs
 
 
-def env_membership(all_stacks=False, base="", check_names=True):
+def env_membership(all_stacks=False, base="", check_names=True, tag_map=None):
     """({env: [stacks...]}, {stack: [tags...]}) from Terramate tags (CONTRACT tag
     grammar: env/<name>). A stack with no `env/*` tag is unmanaged: it is in the tag map,
     in no environment, and named in one notice scoped to what this call scanned.
@@ -405,9 +406,9 @@ def env_membership(all_stacks=False, base="", check_names=True):
     `check_names` refuses an `env/<name>` tag whose name `ec.check_env_name` refuses.
     Terramate accepts `.` and `/` in a tag, and under `layout: folder` or `workspace` no
     table entry need check the name: a stack `c` tagged `env/a.b` and a stack `b.c` tagged
-    `env/a` would both render the artifact `plan.a.b.c`."""
+    `env/a` would both render the artifact `plan.a.b.c`. `tag_map` goes to `tags_of`."""
     stacks = _list_stacks(all_stacks, base)
-    tags_by_stack = tags_of(stacks)
+    tags_by_stack = tags_of(stacks, tag_map)
     unmanaged = unmanaged_stacks(tags_by_stack)
     if unmanaged:
         scope = "stack(s)" if all_stacks else "changed stack(s)"
@@ -444,7 +445,7 @@ def tagged_workloads(stacks_by_env, tags_by_stack):
     }
 
 
-def compute_cells(all_stacks=False, base="", tags="", errors=None):
+def compute_cells(all_stacks=False, base="", tags="", errors=None, tag_map=None):
     """(`tagged_workloads` of the scan, the cells to plan, the scanned tree's cell names, the
     scan's `unmanaged_stacks`).
 
@@ -454,8 +455,9 @@ def compute_cells(all_stacks=False, base="", tags="", errors=None):
     stack -- run over the whole tree's managed stacks; `tags` narrows only the cells to
     plan, and the matrix limit counts those. The caller's per-cell checks (`check_cells`) see
     only the returned cells.
-    The tree is `[{environment, stack}]` in matrix order, uncapped. `errors` is `full_tree`'s."""
-    stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
+    The tree is `[{environment, stack}]` in matrix order, uncapped. `errors` is `full_tree`'s.
+    `tag_map` goes to `tags_of`."""
+    stacks_by_env, tags_by_stack = env_membership(all_stacks, base, tag_map=tag_map)
     full = full_tree(sorted(stacks_by_env), stacks_by_env, tags_by_stack, errors)
     cells = select_cells(full, tags_by_stack, tags, all_stacks)
     tree = [{"environment": c["environment"], "stack": c["stack"]} for c in full]
@@ -728,7 +730,8 @@ def _detect():
     if rejection:
         raise SystemExit(rejection)
     errors = []
-    tagged, cells, tree, unmanaged = compute_cells(sweep, base, tags, errors)
+    tag_map = all_tags()
+    tagged, cells, tree, unmanaged = compute_cells(sweep, base, tags, errors, tag_map)
     with ec._gather(errors):
         # One call serves plan and drift, and only drift scans the whole tree. Outside a
         # sweep the map covers the CHANGED stacks alone, so passing it would
@@ -740,7 +743,7 @@ def _detect():
         raise SystemExit("\n".join(errors))
     if cells and not sweep:
         present = {(c["stack"], c["environment"]) for c in cells}
-        wv.refuse_inversions(cells, present, run_graph_deps(), all_tags(), ec.env_order(table))
+        wv.refuse_inversions(cells, present, run_graph_deps(), tag_map, ec.env_order(table))
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")

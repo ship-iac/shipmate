@@ -110,7 +110,7 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
     )
 
 
-def refuse_inversions(pending, order, deps):
+def refuse_inversions(pending, order, deps, tag_map):
     """Refuse when a pending cell runs after a pending cell `needs` puts on a later env-level.
 
     Every pending cell of the merge is in the run, so none waits; the refusal applies
@@ -122,7 +122,7 @@ def refuse_inversions(pending, order, deps):
         pending,
         present,
         deps,
-        bm.all_tags(),
+        tag_map,
         order,
         remedy=f"This deploy applies nothing, so none of these cells of this merge is "
         f"applied: {cells}. A fix by `needs`: merge it, then re-run this deploy, which reads "
@@ -144,8 +144,9 @@ def main():
     )
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
+    tag_map = bm.all_tags()
     _, cells, tree, unmanaged = bm.compute_cells(
-        all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", "")
+        all_stacks=False, base=os.environ.get("SHIPMATE_BASE_SHA", ""), tag_map=tag_map
     )
     table = bm.env_config(cells)
     cells = bm.stamp_rows(cells, table, "apply")
@@ -165,7 +166,7 @@ def main():
     bm.refuse_workload_gaps(pending, table)
     deps = ad.run_graph_deps()
     order = bm.ec.env_order(table)
-    refuse_inversions(pending, order, deps)
+    refuse_inversions(pending, order, deps, tag_map)
     # Before the padding, whose over-depth refusal is where this line helps most.
     print(ad.dag_shape_notice(deps))
     per_level = wv.env_level_waves(pending, order, deps)
