@@ -277,6 +277,15 @@ def inversion_error(pairs, order, level, remedy=""):
     return "\n".join(lines)
 
 
+def refuse_inversions(roots, present, deps, tags, order, remedy=""):
+    """`SystemExit` with `inversion_error` when a cell of `roots` runs after a cell of `present`
+    that `order` puts on a later env-level; `remedy` as `inversion_error` takes it."""
+    level = cell_levels(order, tags)
+    pairs = inversions(roots, present, deps, tags, level)
+    if pairs:
+        raise SystemExit(inversion_error(pairs, order, level, remedy))
+
+
 def _blocker(walk, out, blocker, deps, tags, level):
     """The cell a run cell with walk `walk` waits on, or None.
 

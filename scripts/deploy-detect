@@ -115,24 +115,19 @@ def refuse_inversions(pending, order, deps):
 
     Every pending cell of the merge is in the run, so none waits; the refusal applies
     nothing, and the message names every pending cell the remedy pull request must change."""
-    tag_map = bm.all_tags()
-    levels = wv.cell_levels(order, tag_map)
     present = {(c["stack"], c["environment"]) for c in pending}
-    pairs = wv.inversions(pending, present, deps, tag_map, levels)
-    if not pairs:
-        return
     cells = ", ".join(sorted(f"{s} / {e}" for s, e in present))
-    raise SystemExit(
-        wv.inversion_error(
-            pairs,
-            order,
-            levels,
-            remedy=f"This deploy applies nothing, so none of these cells of this merge is "
-            f"applied: {cells}. Fix the `needs` entry or the tags on the default branch, then "
-            "open a new pull request that changes every listed stack (any edit `terramate list "
-            "--changed` marks); its plan and deploy apply them. Re-running this deploy checks "
-            "out the same commit and refuses again.",
-        )
+    wv.refuse_inversions(
+        pending,
+        present,
+        deps,
+        bm.all_tags(),
+        order,
+        remedy=f"This deploy applies nothing, so none of these cells of this merge is "
+        f"applied: {cells}. Fix the `needs` entry or the tags on the default branch, then "
+        "open a new pull request that changes every listed stack (any edit `terramate list "
+        "--changed` marks); its plan and deploy apply them. Re-running this deploy checks "
+        "out the same commit and refuses again.",
     )
 
 

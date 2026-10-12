@@ -202,9 +202,7 @@ def refuse_inversions(order, stopped, pending, deps, tags, level):
     skipped = wv.blocked_envs(order, stopped, {c["environment"] for c in pending} - stopped)
     roots = [c for c in pending if c["environment"] not in stopped | skipped]
     present = {(c["stack"], c["environment"]) for c in pending}
-    pairs = wv.inversions(roots, present, deps, tags, level)
-    if pairs:
-        raise SystemExit(wv.inversion_error(pairs, order, level))
+    wv.refuse_inversions(roots, present, deps, tags, order)
 
 
 def _check_run_lines(repo, head_sha):
