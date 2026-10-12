@@ -193,6 +193,10 @@ def _secrets(*names, total=None):
     }
 
 
+#: The deployment branch policy `scripts/onboard` sets on every apply-path environment.
+_SCOPED = {"protected_branches": False, "custom_branch_policies": True}
+
+
 def _env(name, rules=(), branch_policy=None):
     # The real "Get an environment" response includes a {"type":
     # "branch_policy"} protection_rules entry whenever deployment_branch_policy
@@ -231,7 +235,7 @@ def _quiet_new_probes():
         f"repos/{_REPO}/environments/dev-eu-plan": _env("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
         f"repos/{_REPO}/environments/dev-eu-apply": _env(
-            "dev-eu-apply", rules=("required_reviewers",)
+            "dev-eu-apply", rules=("required_reviewers",), branch_policy=_SCOPED
         ),
         f"repos/{_REPO}/environments/shipmate-engine": {
             "name": "shipmate-engine",
@@ -388,6 +392,28 @@ _SHARED_UNREVIEWED = (
         "Split it into `dev-eu-plan` and `dev-eu-apply` if you need one."
     ),
 )
+#: The WARNING for an apply-path environment verify-environments refuses, here the bare
+#: shared `dev-eu` and the split `dev-eu-apply`.
+_UNSCOPED_SHARED = (
+    doctor.WARNING,
+    (
+        "GitHub Environment `dev-eu` has no deployment branch policy, so a workflow on any "
+        "branch can bind it and reach its secrets and OIDC role, and every apply to it is "
+        "refused before its first wave. Run `scripts/onboard` (docs/getting-started.md), which "
+        "scopes each apply environment to the default branch, or set the policy in the "
+        "environment's settings."
+    ),
+)
+_UNSCOPED_APPLY = (
+    doctor.WARNING,
+    (
+        "GitHub Environment `dev-eu-apply` has no deployment branch policy, so a workflow on any "
+        "branch can bind it and reach its secrets and OIDC role, and every apply to it is "
+        "refused before its first wave. Run `scripts/onboard` (docs/getting-started.md), which "
+        "scopes each apply environment to the default branch, or set the policy in the "
+        "environment's settings."
+    ),
+)
 
 
 def _env_findings(monkeypatch, table, *envs):
@@ -405,7 +431,10 @@ def test_the_table_selects_the_mode(monkeypatch):
     Mutation: make env-config's `env_names` ignore `shared` and always return the split
     pair -- the shared case reddens; always return the bare shared name -- the other two
     redden."""
-    assert _env_findings(monkeypatch, _SHARED_TABLE, _env("dev-eu")) == [_SHARED_UNREVIEWED]
+    assert _env_findings(monkeypatch, _SHARED_TABLE, _env("dev-eu")) == [
+        _SHARED_UNREVIEWED,
+        _UNSCOPED_SHARED,
+    ]
     split = [_MISSING_PLAN, _MISSING_APPLY]
     assert _env_findings(monkeypatch, CANONICAL, _env("dev-eu")) == split
     assert _env_findings(monkeypatch, _UNSHARED_TABLE, _env("dev-eu")) == split
@@ -582,7 +611,7 @@ def test_the_environment_probes_follow_the_default_branchs_table(monkeypatch, at
         + doctor._env_protection_warnings(ctx)
         + doctor._plan_env_secret_warnings(ctx)
     )
-    assert found == [_SHARED_UNREVIEWED]
+    assert found == [_SHARED_UNREVIEWED, _UNSCOPED_SHARED]
     listing = f"repos/{_REPO}/environments?per_page=100"
     assert asked == [
         listing,
@@ -767,7 +796,7 @@ def _protection(*envs, listed=None, table=CANONICAL):
 def test_plan_env_with_reviewers_warned(monkeypatch):
     responses = _protection(
         _env("dev-eu-plan", rules=("required_reviewers",)),
-        _env("dev-eu-apply", rules=("required_reviewers",)),
+        _env("dev-eu-apply", rules=("required_reviewers",), branch_policy=_SCOPED),
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
@@ -785,7 +814,7 @@ def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
     # finding must fire -- but its wording must fit the rule it names.
     responses = _protection(
         _env("dev-eu-plan", rules=("wait_timer",)),
-        _env("dev-eu-apply", rules=("required_reviewers",)),
+        _env("dev-eu-apply", rules=("required_reviewers",), branch_policy=_SCOPED),
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
@@ -796,7 +825,7 @@ def test_plan_env_wait_timer_is_not_diagnosed_as_an_approval_hang(monkeypatch):
 
 
 def test_apply_env_without_approval_rules_noted(monkeypatch):
-    responses = _protection(_env("dev-eu-plan"), _env("dev-eu-apply"))
+    responses = _protection(_env("dev-eu-plan"), _env("dev-eu-apply", branch_policy=_SCOPED))
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
     assert len(out) == 1
@@ -828,7 +857,9 @@ def test_apply_env_with_only_a_branch_policy_is_still_noted(monkeypatch):
 def test_apply_env_with_only_a_typeless_rule_is_still_noted(monkeypatch):
     """A typeless rule confirms no reviewer or wait timer, so the apply notice stands.
     Mutation: key the notice on `not approval` -- the `?` rule silences it."""
-    responses = _protection(_env("dev-eu-plan"), _env("dev-eu-apply", rules=("",)))
+    responses = _protection(
+        _env("dev-eu-plan"), _env("dev-eu-apply", rules=("",), branch_policy=_SCOPED)
+    )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._env_protection_warnings(_ctx()) == [
         (
@@ -859,7 +890,7 @@ def test_apply_env_with_an_approval_rule_and_a_branch_policy_is_silent(monkeypat
 def test_plan_env_branch_policy_warned(monkeypatch):
     responses = _protection(
         _env("dev-eu-plan", branch_policy={"protected_branches": True}),
-        _env("dev-eu-apply", rules=("required_reviewers",)),
+        _env("dev-eu-apply", rules=("required_reviewers",), branch_policy=_SCOPED),
     )
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
@@ -876,7 +907,7 @@ def test_shared_env_with_reviewers_warns_about_plan_cells_and_drift(monkeypatch)
     responses = _protection(_env("dev-eu", rules=("required_reviewers",)), table=_SHARED_TABLE)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     out = doctor._env_protection_warnings(_ctx())
-    assert len(out) == 1
+    assert len(out) == 2 and out[1] == _UNSCOPED_SHARED
     assert out[0][0] == doctor.WARNING
     assert "`dev-eu`" in out[0][1]
     assert "required_reviewers" in out[0][1]
@@ -916,7 +947,21 @@ def test_shared_env_without_approval_rules_says_no_gate_is_available(monkeypatch
     cell."""
     responses = _protection(_env("dev-eu"), table=_SHARED_TABLE)
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
-    assert doctor._env_protection_warnings(_ctx()) == [_SHARED_UNREVIEWED]
+    assert doctor._env_protection_warnings(_ctx()) == [_SHARED_UNREVIEWED, _UNSCOPED_SHARED]
+
+
+def test_an_apply_env_with_no_branch_policy_warns_naming_onboard(monkeypatch):
+    """The state verify-environments refuses before an apply's first wave, named before the
+    apply. A plan environment with no policy stays silent: `test_healthy_repo_emits_nothing`.
+
+    Mutations: delete the warning from `_env_protection_warnings` -- red; key it on `role ==
+    "shared"` -- red; drop `role in ("apply", "shared") and` -- the healthy test reddens on its
+    plan environment; move it into `_env_shape_findings` -- onboard's dry-run test reddens."""
+    responses = _protection(
+        _env("dev-eu-plan"), _env("dev-eu-apply", rules=("required_reviewers",))
+    )
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    assert doctor._env_protection_warnings(_ctx()) == [_UNSCOPED_APPLY]
 
 
 def test_the_protection_probe_reads_only_the_selected_naming(monkeypatch):
@@ -927,7 +972,7 @@ def test_the_protection_probe_reads_only_the_selected_naming(monkeypatch):
     responses = _protection(
         _env("dev-eu"),
         _env("dev-eu-plan"),
-        _env("dev-eu-apply", rules=("required_reviewers",)),
+        _env("dev-eu-apply", rules=("required_reviewers",), branch_policy=_SCOPED),
     )
     seen = []
 
@@ -965,7 +1010,8 @@ def test_a_shared_env_with_reviewers_names_the_key_that_shares_it(monkeypatch):
                 "it into `dev-eu-plan` and `dev-eu-apply` and remove `shared: true` from its "
                 "`environments.dev-eu` entry."
             ),
-        )
+        ),
+        _UNSCOPED_SHARED,
     ]
 
 
