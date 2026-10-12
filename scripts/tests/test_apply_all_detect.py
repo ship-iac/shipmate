@@ -1046,6 +1046,43 @@ def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
     assert json.loads(parsed["waiting_cells"]) == []
 
 
+def test_main_never_refuses_over_a_cell_of_an_env_settle_skips(tmp_path, monkeypatch):
+    """dev-us is explicit, so `platform/dev-eu` waits on `dns/dev-us`; settle then skips
+    stg-eu, which needs dev-eu, and prd-eu after it. `app/stg-eu` runs after `db/prd-eu`, a
+    later env-level, but applies nothing this run, so nothing refuses and `workers` applies.
+
+    Mutation: take `refuse_inversions`' roots from the pre-settle skip
+    (`blocked_envs(order, stopped, ...)` over `pending`) -- the run refuses."""
+    tree = {
+        "dev-eu": ["stacks/platform", "stacks/workers"],
+        "dev-us": ["stacks/dns"],
+        "stg-eu": ["stacks/app"],
+        "prd-eu": ["stacks/db"],
+    }
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=[],
+        tree=tree,
+        tags={s: [f"env/{e}"] for e, stacks in tree.items() for s in stacks},
+        deps={
+            "stacks/platform": {"stacks/dns"},
+            "stacks/workers": set(),
+            "stacks/dns": set(),
+            "stacks/app": {"stacks/db"},
+            "stacks/db": set(),
+        },
+        checks=[_apply_check(s, e) for e, stacks in tree.items() for s in stacks],
+        order={"stg-eu": ["dev-eu"], "prd-eu": ["stg-eu"]},
+        explicit=["dev-us"],
+        decision="APPROVED",
+    )
+    assert _applied(parsed) == [("stacks/workers", "dev-eu")]
+    assert json.loads(parsed["waiting_cells"]) == _PLATFORM_WAITS
+    assert json.loads(parsed["skipped_envs"]) == ["prd-eu", "stg-eu"]
+    assert json.loads(parsed["excluded_envs"]) == ["dev-us"]
+
+
 def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
     tmp_path, monkeypatch, capsys
 ):

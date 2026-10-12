@@ -2929,7 +2929,7 @@ One `- ` line per inverted pair. Three paths refuse, each over its own cells:
 | Path | Dependent cells | Upstream cells |
 | --- | --- | --- |
 | plan (not a drift sweep) | the plan matrix | the plan matrix |
-| bare `shipmate apply` | pending cells of every environment neither held, explicit nor skipped by `needs` | every pending cell, held and explicit ones included |
+| bare `shipmate apply` | pending cells of every environment neither held, explicit nor skipped by `needs`, the skips a waiting cell causes included; waiting cells count | every pending cell, held and explicit ones included |
 | merge deploy | every pending cell | every pending cell |
 
 A plan refusal holds the gate, and the gate description carries its first line.
