@@ -528,7 +528,9 @@ def notices(rows, applied_ungated, review_not_required):
 
 def _waiting_remedy(env, held, skipped):
     """What clears a waiting cell's blocker in `env`. A targeted apply ignores `needs`, so a
-    blocker in a `needs`-skipped environment never gets its `shipmate apply` command."""
+    blocker in a `needs`-skipped environment never gets its `shipmate apply` command. The
+    targeted form passes `held` and `skipped` empty, so its remedy is always
+    `shipmate apply <env>`."""
     if env in held:
         return "it is held until the pull request is approved"
     if env in skipped:
@@ -691,7 +693,8 @@ def build_comment(
     Every row is guaranteed its bare line: the space all remaining rows' bare lines need is
     reserved up front, together, so an early giant apply.txt cannot starve a later row. When
     even the bare lines overflow HARD_CAP, `_compact` renders them without the blocked reasons
-    and with one footer line per disposition; past that a SystemExit names the cause."""
+    and with one footer line per disposition and one per waiting blocker; past that a SystemExit
+    names the cause."""
     circle, verdict = _verdict(rows, _results_failed(results_csv), held, head_sha, run_url, waiting)
     head = f"{sc.header('apply', env_name)}\n\n{verdict}"
     hint = sc.footer_hint(circle)

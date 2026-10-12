@@ -67,7 +67,9 @@ with four things expressed somewhere shipmate does not read. None of them is a
 shipmate defect and none of them announces itself, so each is worth a deliberate
 pass before the first plan run.
 
-**Ordering.** Wave ordering comes only from the Terramate `after` DAG. If
+**Ordering.** Wave ordering comes only from the Terramate `after` DAG, and it
+orders a stack after its upstream stack in another environment too
+([`CONTRACT.md`](../CONTRACT.md) §Fan-out). If
 your ordering lives in the outgoing tool's configuration, it must be ported into
 `after`. Nothing will report the omission, because a missing edge is
 indistinguishable from a stack that is genuinely independent. Treat the outgoing

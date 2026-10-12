@@ -1251,7 +1251,9 @@ The env is optional for `apply`. A targeted `shipmate apply <env>` applies one
 environment; a bare `shipmate apply` applies every environment that has a
 reviewed plan for the current PR head, in `needs` env-levels (see Env
 apply order, below), except environments whose entry holds `explicit: true`
-in `.github/shipmate-config.yml` and environments held for review (below). Explicit
+in `.github/shipmate-config.yml` and environments held for review (below). In both
+forms a cell that runs after a pending cell not applying in that run waits and
+stays pending (see Env apply order). Explicit
 environments (typically production) must always be named: their
 `apply / <stack> / <env>` checks stay pending under a bare apply — so
 `shipmate / gate` keeps gating the merge — until someone runs
@@ -1972,10 +1974,28 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - Plans fan out flat: all applicable plan units for a pull request run
   concurrently, with no ordering dependency between them.
 - Applies run in waves: the `after` relationships between Terramate stacks
-  form a DAG, and applies execute in topological levels of that DAG — all
-  units at one level must complete before the next level's units start —
-  so that a stack's applies only wait on the specific stacks it actually
-  depends on, not on the entire fan-out.
+  form a DAG over the full run-graph, and applies execute in topological
+  levels of that DAG — all units at one level must complete before the next
+  level's units start. A wave spans every environment of its env-level (§Env
+  apply order), so `after` orders cells across environments: a cell waits on
+  every lower wave of its env-level, in any environment.
+- A cell `(stack, env)` runs after these cells of each stack its stack is
+  `after`, directly or transitively:
+  - the same environment, when the upstream stack is tagged into it;
+  - otherwise each of the upstream stack's environments whose env-level is at
+    or before the dependent cell's, the cell the walk started from: `needs`
+    orders a later instance after the dependent. When none is, every one of its
+    environments, which the inversion refusal reads (§Env apply order);
+  - none, when the upstream stack carries no `env/*` tag: the order passes
+    through it to its own upstream stacks, in the same environment.
+
+  The walk covers every stack and tag of the tree, so an unchanged stack in the
+  middle of a chain does not cut it.
+- Plans do not follow `after`: every plan reads its upstream's current state.
+  A change where the dependent reads what its upstream changes (an output, a
+  data source lookup) needs two pull requests: the upstream first, applied,
+  then the dependent. Nothing refuses the combined pull request: a saved plan
+  goes stale only when its own state changes, not its upstream's.
 
 ## Plan artifacts
 
@@ -2227,15 +2247,18 @@ footer lines and, under any verdict but 🟢, the hint.
   environments.
 - **Verdict line.** With rows: one count per display status, in the order
   `N failed`, `N not recorded`, `N not attempted`, `N blocked`, `N applied`,
-  zero counts omitted, joined by `, `. When the job-level `SHIPMATE_RESULTS`
+  zero counts omitted, joined by `, `, then `N waiting` when cells wait (see
+  the waiting line below). When the job-level `SHIPMATE_RESULTS`
   outcome signals a failure and no row is failed or blocked, a bare `failed`
   leads the counts, so an apply run that dies before any cell reports (a
   missing/denied apply environment, a job-level cancel) still surfaces a
   failure signal. A not-recorded row does not suppress it: it describes one
   cell in one environment and says nothing about a different environment whose
   job died before reporting. The circle is 🔴 for a failed run, else the worst
-  row's (🔴, 🟠, 🟡, ⚪, 🟢 in that order). With no rows: `🔴 failed`,
-  `⚪ nothing applied, environments are held for review`, or
+  of the rows' circles and, when cells wait, ⚪ (🔴, 🟠, 🟡, ⚪, 🟢 in that
+  order), so a run with waiting cells is never 🟢. With no rows, the first that
+  holds: `🔴 failed`, `⚪ nothing applied, environments are held for review`,
+  `⚪ nothing applied, cells wait on pending cells they run after`, or
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
@@ -2264,8 +2287,8 @@ footer lines and, under any verdict but 🟢, the hint.
   retry with `shipmate apply <env>`.`` (the bare `shipmate apply` when the run
   covered all environments).
 - **Footer lines**, one per line: the bare-apply form's environment
-  dispositions. The comment states no gate line: the `shipmate / gate` status
-  shows the gate's state.
+  dispositions, then, in both forms, one line per waiting cell. The comment
+  states no gate line: the `shipmate / gate` status shows the gate's state.
 
 There is no separate "nothing pending" input: the expected cell set is the
 same waves JSON both `apply-detect` forms already compute, and a
@@ -2273,8 +2296,8 @@ cell counts as attempted when its artifact actually downloaded or its apply
 check is already done — the render can never claim nothing is pending while
 holding evidence that an apply ran.
 
-The disposition lines are one per environment and cause, and both forms carry
-the same set: the rows form and the no-rows form are fed by one shared
+The disposition lines are one per environment and cause, or per waiting cell.
+The rows form and the no-rows form carry the same set, fed by one shared
 function, and the size budget never sheds a footer line — so the comment's most
 actionable warning cannot be lost on either path. In the order they render:
 
@@ -2296,6 +2319,18 @@ actionable warning cannot be lost on either path. In the order they render:
   `CHANGES_REQUESTED`, or an unknown or absent decision), and only the run's
   own apply-all-detect notice carries which one, since the decision never
   reaches this renderer.
+- **waiting** — `⚪ <stack> / <env>: waits on <stack> / <env>, not applied
+  yet; <remedy>`, one per cell left pending because a cell it runs after
+  (§Fan-out) is pending and not applying this run; the second pair is that
+  blocker. Both forms render these lines. The blocker is a cell that waits on
+  nothing itself when there is one, so it can apply now. `<remedy>` is
+  `it is held until the pull request is approved` when the blocker's
+  environment is held, `` its environment waits on `needs`; apply those
+  environments first `` when it is skipped, and otherwise
+  `` apply it first with `shipmate apply <env>` `` naming the blocker's
+  environment. The targeted form has no held or skipped environments to
+  consult, so its remedy always names `shipmate apply <env>`, even for a blocker
+  that waits on a review or on `needs`.
 
 Two audit facts are not comment lines. The render step prints each as one
 `::notice::` workflow annotation in its own log, environment names escaped as
@@ -2381,15 +2416,19 @@ when a row is blocked, one note follows the row lines:
 
 `blocked: each blocked cell's reason is in its logs.`
 
-In the compact form each footer disposition is one line naming its
-environments comma-separated (`<envs>`), in the per-environment order; the
-`held:` remedy line is unchanged:
+In the compact form each environment disposition is one line naming its
+environments comma-separated (`<envs>`), in the per-environment order, and the
+waiting cells are one line per blocker, keeping every blocker and its remedy;
+the `held:` remedy line is unchanged:
 
 - `` 🟡 left pending (explicit): <envs>; comment `shipmate apply <env>` for each ``
 - `⚪ skipped, ordered after an environment not fully applying this run: <envs>`
 - `⚪ held, the review state does not permit applying: <envs>`, followed by
   `` ; once the hold clears, comment `shipmate apply <env>` for <envs> `` naming
   the held environments that are also explicit, when there are any
+- `⚪ waiting on <stack> / <env> (<remedy>): <cells>`, one per blocker, naming
+  every cell waiting on it comma-separated as `<stack> / <env>`, in first-seen
+  order
 
 A 256-cell run needs this form when every cell is blocked, because a blocked
 reason is the one free text a bare line carries, and when it names hundreds of
@@ -2861,8 +2900,8 @@ in that file, so a feature branch cannot reorder its own applies.
 
 The merge-deploy path topologically sorts these lists into `env-levels`
 (level 0 = no predecessors): all pending applies whose
-environment falls in level 0 run to completion (respecting the existing
-stack-wave DAG within that level) before any env-level-1 apply starts, and so
+environment falls in level 0 run to completion, in stack waves that span every
+environment of that level (§Fan-out), before any env-level-1 apply starts, and so
 on. A failure anywhere in an env-level skips every successor level's applies
 for that deploy run — the failed environment's stacks stay pending, and
 downstream environments are not touched until it is fixed and re-run.
@@ -2870,8 +2909,44 @@ downstream environments are not touched until it is fixed and re-run.
 that fails validation of the table, naming one longest chain, rather than silently
 truncating.
 
-Targeted applies (`shipmate apply <env>`) act on a single environment and skip
-env-level ordering entirely — there is nothing to order across.
+`needs` is a coarser order on top of `after`: it adds order between
+environments and decides which instances of an upstream stack a cell runs after
+(§Fan-out). A pending cell that runs after a
+cell `needs` puts on a later env-level cannot be ordered, and the run refuses
+before anything applies:
+
+```text
+::error::needs orders <stack> / <env> before <stack> / <env>, which it runs after:
+- <stack> / <env> (env-level <n>) after <stack> / <env> (env-level <m>); <env>'s level comes from <env> -> ... -> <env>
+Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry in that chain on the default branch, or retag the stacks so the edge stays inside environments that order it.
+```
+
+One `- ` line per inverted pair. Three paths refuse, each over its own cells:
+
+| Path | Dependent cells | Upstream cells |
+| --- | --- | --- |
+| plan (not a drift sweep) | the plan matrix | the plan matrix |
+| bare `shipmate apply` | pending cells of every environment neither held, explicit nor skipped by `needs` | every pending cell, held and explicit ones included |
+| merge deploy | every pending cell | every pending cell |
+
+A plan refusal holds the gate, and the gate description carries its first line.
+The refusal reads only the run's cells, never the whole tree: a pull request
+that only changes `needs` plans no cell and passes, and the inversion surfaces
+on the first pull request that changes both ends. The deploy refusal applies
+nothing and appends the cells of the merge it leaves pending, with the
+remedy: fix the `needs` entry or the tags on the default branch, then open a
+new pull request that changes every listed stack. Re-running the deploy
+refuses again. A targeted apply and a drift sweep never refuse it.
+
+A targeted `shipmate apply <env>` applies one environment's pending cells and
+does not order by `needs`: it runs them as one env-level. A cell of it that
+runs after a cell pending in another environment waits: it stays pending, the
+apply comment names it and its blocker, and the rest apply. A run whose every
+cell waits applies nothing and succeeds. `needs` still decides which
+environments an upstream stack's cells are read from (§Fan-out), so a `needs`
+entry added after the plan makes the cell wait instead of applying out of
+order. Each run applies what is ready, so no order of targeted applies
+deadlocks.
 
 A bare `shipmate apply` is the pre-merge equivalent of the merge-deploy path: it
 buckets the pending applies of every non-explicit environment into the same
@@ -2883,6 +2958,11 @@ not fully applying this run — held for review, excluded as explicit, or holdin
 a waiting cell — are skipped with a notice — their ordering precondition cannot
 be met in that run, exactly like a failed predecessor level. The apply-all-detect
 notice names them `skipped_after_explicit`, for every one of those causes.
+A cell that runs after a pending cell of a held, explicit or skipped environment
+waits, as on the targeted form, and its environment's
+other cells still apply. An environment with a waiting cell is not fully
+applying, so its `needs` successors are skipped, and each new skip can make
+more cells wait; the bare form computes both to one fixpoint.
 Completed cells skip idempotently, so re-commenting `shipmate apply` resumes
 where the previous run stopped.
 

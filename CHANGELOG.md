@@ -10,8 +10,14 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Added
+
+- **Applies order cells across environments by `after`. A cell whose upstream cell in another environment is pending and not applying in the run waits: its apply check stays pending, the apply comment names it, its blocker and the blocker's remedy, and the rest of the run applies. A bare `shipmate apply` also skips the `needs` successors of an environment with a waiting cell.**
+- **The plan, a bare `shipmate apply` and the merge deploy refuse a `needs` order that puts a stack's upstream cell on a later env-level than the stack's own cell, naming each inverted pair and the `needs` chain.**
+
 ### Changed
 
+- **The apply comment's skipped line reads `ordered after an environment not fully applying this run`.**
 - **Every engine job binds `shipmate-engine` with `deployment: false`, so plan, apply, deploy, drift and comment runs create no deployment on it. GitHub fails such a job while the environment has a custom deployment protection rule; `scripts/onboard` reports an enabled one with the command that removes it.**
 - **Detect and `scripts/onboard` read every stack's tags with one `terramate debug show metadata` call instead of one call per stack. A stack `terramate list` names that the metadata prints no tags for refuses, naming it, and so does a metadata line that does not parse.**
 - **The plan and deploy detect jobs check out the full history without file contents (`filter: blob:none`); git fetches a file's contents when a diff or read needs them.**
