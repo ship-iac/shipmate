@@ -261,3 +261,73 @@ def test_a_bad_sha_is_refused_before_any_call(tmp_path, args, error):
     """Mutation: drop the `_SHA.fullmatch` check -> the stub records a call."""
     proc, calls = _run(tmp_path, *args)
     assert (proc.returncode, proc.stderr, calls) == (1, error, [])
+
+
+def _run_url(run):
+    return f"https://example.invalid/acme/demo/actions/runs/{run}"
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("page1", "page2", "printed"),
+    [
+        # This run's own hold (999, the retry after a failed read) on top of a newer run's earlier
+        # hold on page 2.
+        (
+            _lines(_status("shipmate / gate", "failure")),
+            _lines(_status("shipmate / gate", "failure", _run_url(1000))),
+            "1000\n",
+        ),
+        # The highest newer hold wins, wherever it sits; a newer `pending` or `success` is no hold.
+        (
+            _lines(
+                _status("shipmate / gate", "success", _run_url(5000)),
+                _status("shipmate / gate", "failure", _run_url(1001)),
+                _status("ci", "failure", _run_url(9000)),
+                _status("shipmate / gate", "failure", _run_url(1200)),
+            ),
+            "",
+            "1200\n",
+        ),
+        # Run ids of different lengths: 1000 is newer than 999 only as an integer.
+        (
+            _lines(
+                _status("shipmate / gate", "failure", _run_url(1000)),
+                _status("shipmate / gate", "failure", _run_url(99)),
+            ),
+            "",
+            "1000\n",
+        ),
+        (
+            _lines(
+                _status("shipmate / gate", "failure", _run_url(998)),
+                _status("shipmate / gate", "failure", "https://host1.invalid/a/b/pull/7000"),
+                _status("shipmate / gate", "pending", _run_url(1000)),
+            ),
+            "",
+            "",
+        ),
+        ("", "", ""),
+    ],
+    ids=["behind-own-hold", "highest-hold", "integer-compare", "none-newer", "no-statuses"],
+)
+def test_newer_hold_prints_the_newest_hold_written_after_this_run(tmp_path, page1, page2, printed):
+    """Mutations: read only the newest gate (`_gates(sha)[:1]`) -> the first case prints nothing;
+    compare run ids as strings -> the third case prints nothing (`"1000" > "999"` is false); drop
+    the `state == "failure"` filter -> the second case prints 5000; `max` -> `min` -> 1001."""
+    proc, calls = _run(tmp_path, "newer-hold", SHA, page1=page1, page2=page2)
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert (proc.stdout, calls) == (printed, [STATUSES_ARGV])
+
+
+@bash_only
+def test_newer_hold_fails_when_the_statuses_listing_fails(tmp_path):
+    """Mutation: answer an empty listing on a failed read -> exit 0 and the summary publishes."""
+    proc, calls = _run(
+        tmp_path,
+        "newer-hold",
+        SHA,
+        page1=_lines(_status("shipmate / gate", "failure", _run_url(1000))),
+        statuses_rc=1,
+    )
+    assert (proc.returncode, proc.stdout, calls) == (1, "", [STATUSES_ARGV])

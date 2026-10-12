@@ -2,6 +2,7 @@
 """Read and write the `shipmate / gate` commit status: the one script that does either.
 
     gate-status newest <sha>                     print `<state> <run id>` of the newest gate
+    gate-status newer-hold <sha>                 print the run id of a newer run's hold
     gate-status post <sha> <state> <description> write the gate
     gate-status hold <sha> <description>         write a `failure` gate
     gate-status refresh <sha>                    green the gate once every apply check is done
@@ -45,12 +46,12 @@ def deploy_verdict(results):
     return "failure", "deploy incomplete (deploy env-level applies completed)"
 
 
-def newest_gate(sha):
-    """(state, run id) of the newest gate status on `sha`, or None when it carries none.
+def _gates(sha):
+    """`(state, run id)` of every gate status on `sha`, newest first.
 
     The run id is the `/actions/runs/<id>` suffix of `target_url`, `-` when it has none. The
-    statuses listing is newest first and paginated: a head with many other contexts can push
-    its gate past the first page."""
+    statuses listing is paginated: a head with many other contexts can push its gate past the
+    first page."""
     out = _run(
         [
             "gh",
@@ -61,11 +62,36 @@ def newest_gate(sha):
             _STATUSES_JQ,
         ]
     )
+    gates = []
     for status in ag.parse_jsonl(out.splitlines()):
         if status.get("context") == GATE_CONTEXT:
             m = _RUN_ID.search(status.get("target_url") or "")
-            return status["state"], m.group(1) if m else "-"
-    return None
+            gates.append((status["state"], m.group(1) if m else "-"))
+    return gates
+
+
+def newest_gate(sha):
+    """(state, run id) of the newest gate status on `sha`, or None when it carries none."""
+    gates = _gates(sha)
+    return gates[0] if gates else None
+
+
+def newer_hold(sha):
+    """The highest run id among the `failure` gates on `sha` written by a run newer than this one,
+    or None.
+
+    Every status in the history counts, not only the newest: this run's own hold, written after a
+    failed read, must not hide a newer run's earlier one. Only plan runs write a `failure` gate
+    before a merge, so a newer one is a newer plan of the same head."""
+    this_run = os.environ.get("GITHUB_RUN_ID", "")
+    if not re.fullmatch(r"[0-9]+", this_run):
+        raise SystemExit(f"::error::GITHUB_RUN_ID must be a decimal run id (got: {this_run!r})")
+    runs = [
+        int(run)
+        for state, run in _gates(sha)
+        if state == "failure" and run != "-" and int(run) > int(this_run)
+    ]
+    return max(runs) if runs else None
 
 
 def post(sha, state, description):
@@ -128,9 +154,16 @@ def _newest(sha):
         print(*newest)
 
 
+def _newer_hold(sha):
+    run = newer_hold(sha)
+    if run is not None:
+        print(run)
+
+
 #: command -> (argument count after the sha, handler)
 _COMMANDS = {
     "newest": (0, _newest),
+    "newer-hold": (0, _newer_hold),
     "post": (2, post),
     "hold": (1, lambda sha, description: post(sha, "failure", description)),
     "refresh": (0, refresh),

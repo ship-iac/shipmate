@@ -15,6 +15,12 @@ digest covers at least what a reviewer saw and often more.
 The check name uses the stack PATH so deploy-detect (which only has the path)
 reconstructs it exactly. A missing pending check is not a quiet degradation: the pre-apply snapshot
 refuses over it, and deploy-detect's work queue comes up empty.
+
+Only cells this run has not published are emitted, judged against the head's check runs in the
+JSONL file `SHIPMATE_CHECK_RUNS` (the App `SHIPMATE_APP_ID`'s, newest per name): a re-run of the
+summary job leaves alone a check an apply has completed, or is completing, since. A record from a
+newer plan run refuses before anything is emitted, so an older run never replaces a newer run's
+checks.
 """
 
 import hashlib
@@ -82,10 +88,34 @@ def bodies(cells_dir, head_sha):
     return out
 
 
+def unpublished(bodies, check_run_lines, app_id):
+    """The `bodies` whose name's newest App-authored check carries no record from this run.
+
+    A check with no decodable record (an older engine's, a hand-made one) or an older run's is
+    published again. Any record from a run newer than this one refuses. Run ids compare as
+    integers; `bodies` validated `GITHUB_RUN_ID`."""
+    this_run = int(os.environ["GITHUB_RUN_ID"])
+    runs = {
+        name: int(run)
+        for name, (run, _, _) in ag.plan_records(check_run_lines, app_id).items()
+        if run is not None
+    }
+    newer = sorted(name for name, run in runs.items() if run > this_run)
+    if newer:
+        raise SystemExit(
+            f"::error::plan run {max(runs[n] for n in newer)}, newer than this run ({this_run}), "
+            f"published apply checks on this head ({', '.join(newer)}); this run publishes nothing "
+            "over them. That run's summary writes the gate; if it did not finish, re-plan this "
+            "pull request (comment shipmate plan or push)."
+        )
+    return [b for b in bodies if runs.get(b["name"]) != this_run]
+
+
 def main():
     head = os.environ["SHIPMATE_HEAD_SHA"]
     cells = os.environ.get("SHIPMATE_CELLS_DIR", "cells")
-    for body in bodies(cells, head):
+    lines = pathlib.Path(os.environ["SHIPMATE_CHECK_RUNS"]).read_text(encoding="utf-8").splitlines()
+    for body in unpublished(bodies(cells, head), lines, os.environ.get("SHIPMATE_APP_ID", "")):
         print(json.dumps(body))
 
 

@@ -219,8 +219,8 @@ def test_an_unset_pull_request_number_refuses(tmp_path, monkeypatch):
 
 
 def test_the_publishing_step_hands_the_script_exactly_these_names():
-    """The whole `env:` of the summary step running pending-checks. Mutation: drop
-    `SHIPMATE_PR_NUMBER` from it -- red."""
+    """The whole `env:` of the summary step running pending-checks. Mutations: drop
+    `SHIPMATE_PR_NUMBER` from it -- red; drop `SHIPMATE_APP_ID` -- red."""
     (step,) = [
         s
         for s in action_yaml("summary")["runs"]["steps"]
@@ -230,6 +230,7 @@ def test_the_publishing_step_hands_the_script_exactly_these_names():
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
+        "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
     }
 
 
@@ -360,3 +361,88 @@ def test_missing_plan_text_fails_loud_and_emits_nothing(tmp_path):
     (tmp_path / "cell-summary.dev-us.stacks-app" / "plan.txt").unlink()
     with pytest.raises(SystemExit, match=r"cell-summary\.dev-us\.stacks-app.*has no plan\.txt"):
         pc.bodies(str(tmp_path), HEAD)
+
+
+APP_ID = "4242"
+
+
+def _record_line(cid, name, external_id, *, status="completed", app=4242):
+    return json.dumps(
+        {"name": name, "id": cid, "status": status, "app": {"id": app}, "external_id": external_id}
+    )
+
+
+def _ext(plan_run):
+    return json.dumps({"fingerprint": "f" * 64, "plan_run": plan_run, "pr": PR})
+
+
+def _names(*names):
+    return [{"name": f"apply / {n} / dev"} for n in names]
+
+
+def test_a_cell_this_run_published_is_skipped_and_every_other_is_emitted(monkeypatch):
+    """Run 10 against records of runs 10 and 9: as strings `"9" > "10"`, so a string compare reads
+    run 9 as newer and refuses. Mutations: compare `plan_run` as a string -> red; drop the App
+    filter (`app_runs` returns `parse_jsonl` unfiltered) -> `other-app` is skipped; skip a cell
+    whatever its record (`return []`) -> red."""
+    monkeypatch.setenv("GITHUB_RUN_ID", "10")
+    lines = [
+        _record_line(1, "apply / done / dev", _ext("10")),
+        _record_line(2, "apply / queued / dev", _ext("10"), status="queued"),
+        _record_line(3, "apply / older / dev", _ext("9")),
+        _record_line(4, "apply / other-app / dev", _ext("10"), app=15368),
+        _record_line(5, "apply / no-id / dev", None),
+        _record_line(6, "apply / not-json / dev", "not json"),
+    ]
+    bodies = _names("done", "queued", "older", "other-app", "no-id", "not-json", "unlisted")
+    assert [b["name"] for b in pc.unpublished(bodies, lines, APP_ID)] == [
+        "apply / older / dev",
+        "apply / other-app / dev",
+        "apply / no-id / dev",
+        "apply / not-json / dev",
+        "apply / unlisted / dev",
+    ]
+
+
+def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monkeypatch):
+    """A newer run's record on a name this run did not plan still refuses. Mutation: drop the
+    newer-run refusal -> `unpublished` returns the cells."""
+    monkeypatch.setenv("GITHUB_RUN_ID", "10")
+    lines = [
+        _record_line(1, "apply / a / dev", _ext("10")),
+        _record_line(2, "apply / gone / dev", _ext("11"), status="queued"),
+        _record_line(3, "apply / b / dev", _ext("9")),
+    ]
+    with pytest.raises(SystemExit) as exc_info:
+        pc.unpublished(_names("a", "b"), lines, APP_ID)
+    assert str(exc_info.value) == (
+        "::error::plan run 11, newer than this run (10), published apply checks on this head "
+        "(apply / gone / dev); this run publishes nothing over them. That run's summary writes "
+        "the gate; if it did not finish, re-plan this pull request (comment shipmate plan or "
+        "push)."
+    )
+
+
+def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monkeypatch, capsys):
+    """Mutation: emit `bodies(...)` without `unpublished` -> the published cell is printed."""
+    for slug, fingerprint in (("stacks-app", "1"), ("stacks-dns", "2")):
+        _write_cell(
+            tmp_path,
+            "dev-eu",
+            slug,
+            stack=f"stacks/{slug[7:]}",
+            environment="dev-eu",
+            changed=True,
+            fingerprint=fingerprint * 64,
+        )
+    listing = tmp_path / "apply-check-runs.jsonl"
+    listing.write_text(
+        _record_line(1, "apply / stacks/app / dev-eu", _ext(RUN_ID)) + "\n", encoding="utf-8"
+    )
+    monkeypatch.setenv("SHIPMATE_HEAD_SHA", HEAD)
+    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
+    monkeypatch.setenv("SHIPMATE_CHECK_RUNS", str(listing))
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+    pc.main()
+    printed = [json.loads(line)["name"] for line in capsys.readouterr().out.splitlines()]
+    assert printed == ["apply / stacks/dns / dev-eu"]
