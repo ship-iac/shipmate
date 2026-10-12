@@ -46,9 +46,7 @@ def test_workset_forward_constructs_the_name_and_never_parses_it():
 
 def test_cells_take_the_workload_from_the_tags():
     """Never from the check name: the name carries no workload, and a cell that invented one
-    from its path would assume the wrong environment role. A stack missing from the map carries
-    "", because the map comes from a separate terramate query and a missing entry must never be
-    able to raise here."""
+    from its path would assume the wrong environment role."""
     cells = ad.cells_for_env(
         "dev-eu",
         ["stacks/app", "stacks/dns"],
@@ -62,6 +60,14 @@ def test_cells_take_the_workload_from_the_tags():
         },
         {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
     ]
+
+
+def test_cells_raise_on_a_stack_missing_from_the_map():
+    """`tags_of` refuses such a stack before this runs, so no default applies it with the
+    generic role. Mutation: `tags_by_stack.get(p, [])` in `cells_for_env` -- `stacks/dns`
+    becomes a cell with no workload."""
+    with pytest.raises(KeyError):
+        ad.cells_for_env("dev-eu", ["stacks/app", "stacks/dns"], {"stacks/app": ["env/dev-eu"]})
 
 
 _TWO_CELLS = [
@@ -582,8 +588,9 @@ def test_main_refuses_a_workset_stack_the_metadata_lacks(tmp_path, monkeypatch):
         ad.main()
     assert str(e.value) == (
         "::error::terramate debug show metadata printed no tags for 1 stack(s): stacks/app. "
-        "Run detect and onboard from the repository root: from a subdirectory, `terramate list` "
-        "prints stack paths relative to it, and the metadata does not."
+        "Two causes produce this: a working directory other than the repository root, where "
+        "`terramate list` prints stack paths relative to it and the metadata does not; or "
+        "metadata output this parser does not read, as after a Terramate version change."
     )
 
 

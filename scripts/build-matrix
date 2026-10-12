@@ -9,8 +9,10 @@ GH_TOKEN: it comes from the default branch through the contents API, not from th
 checked-out tree.
 """
 
+import codecs
 import json
 import os
+import posixpath
 import re
 
 from _shipmate import _load, _run, named
@@ -210,8 +212,9 @@ def select_cells(full, tags_by_stack, query, all_stacks):
     """The cells of `full` a run plans: narrowed by the `tags` query, then capped.
 
     The first half of the sweep chain, shared by `compute_cells` and onboard's drift-sweep
-    item; `check_cells` is the second. A sweep refusal that needs no table belongs in here,
-    so detect and onboard both apply it with no change to either caller."""
+    item; `check_cells` is the second. A refusal that needs no table belongs in here; it runs
+    on every plan, drift and deploy detect and on onboard's drift-sweep item, not only on
+    sweeps."""
     return cap_cells(filter_cells(full, tags_by_stack, query), all_stacks)
 
 
@@ -243,14 +246,20 @@ def parse_metadata(text):
     holds a JSON list. The header path is quoted with escapes and decodes as JSON (`\\uf022`
     in a header is the character `list` prints raw). A line is a tags line only from its start: a
     `description` holding the same text is a different attribute. A stack with no tags line
-    has no key."""
+    has no key. A header or tags line that does not decode raises `SystemExit` naming it."""
     tags = {}
     stack = None
     for line in text.splitlines():
-        if m := _METADATA_STACK.match(line):
-            stack = json.loads(m.group(1)).removeprefix("/") or "."
-        elif stack is not None and line.startswith(_METADATA_TAGS):
-            tags[stack] = json.loads(line[len(_METADATA_TAGS) :])
+        try:
+            if m := _METADATA_STACK.match(line):
+                stack = json.loads(m.group(1)).removeprefix("/") or "."
+            elif stack is not None and line.startswith(_METADATA_TAGS):
+                tags[stack] = json.loads(line[len(_METADATA_TAGS) :])
+        except json.JSONDecodeError:
+            raise SystemExit(
+                "::error::terramate debug show metadata printed a line that does not parse "
+                f"as JSON: {line[:200]!r}."
+            ) from None
     return tags
 
 
@@ -266,15 +275,18 @@ def all_tags():
 def tags_of(stacks):
     """`{stack: [tags...]}` for `stacks` from `all_tags`, or `SystemExit` naming each stack
     the metadata has no tags for: a default of no tags would read as unmanaged and drop the
-    stack from CI."""
+    stack from CI. An empty `stacks` reads nothing."""
+    if not stacks:
+        return {}
     tags = all_tags()
     missing = [s for s in stacks if s not in tags]
     if missing:
         raise SystemExit(
             f"::error::terramate debug show metadata printed no tags for {len(missing)} "
-            f"stack(s): {named(missing, UNMANAGED_NAMES)}. Run detect and onboard from the "
-            "repository root: from a subdirectory, `terramate list` prints stack paths relative "
-            "to it, and the metadata does not."
+            f"stack(s): {named(missing, UNMANAGED_NAMES)}. Two causes produce this: a working "
+            "directory other than the repository root, where `terramate list` prints stack "
+            "paths relative to it and the metadata does not; or metadata output this parser "
+            "does not read, as after a Terramate version change."
         )
     return {s: tags[s] for s in stacks}
 
@@ -302,30 +314,42 @@ def lost_env_tags(base, head_envs):
     refuses.
 
     A nonzero `git diff`, as when `base` and `HEAD` share no merge base, exits the run through
-    `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs."""
+    `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs.
+
+    One `git diff` covers every stack, because a blobless checkout fetches each call's blobs
+    lazily. A file's stack is its directory, read from the `diff --git` header: no `**` in a
+    pathspec means no file under a child stack. `--no-renames` keeps a file moved between two
+    stacks a removal from the first, as a diff scoped to one stack would show it."""
+    if not head_envs:
+        return {}
+    pathspecs = [f":(glob){s}/*.{ext}" for s in sorted(head_envs) for ext in ("tm.hcl", "tm")]
+    diff = _run(["git", "diff", "-U0", "--no-renames", f"{base}...HEAD", "--", *pathspecs])
+    removed = {}
+    stack = None
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            stack = posixpath.dirname(_diff_path(line)) or "."
+        elif line.startswith("-"):
+            removed.setdefault(stack, set()).update(
+                m.group(1) for m in _ENV_TAG_LITERAL.finditer(line)
+            )
     lost = {}
     for stack in sorted(head_envs):
-        diff = _run(
-            [
-                "git",
-                "diff",
-                "-U0",
-                f"{base}...HEAD",
-                "--",
-                f":(glob){stack}/*.tm.hcl",
-                f":(glob){stack}/*.tm",
-            ]
-        )
-        removed = {
-            m.group(1)
-            for line in diff.splitlines()
-            if line.startswith("-")
-            for m in _ENV_TAG_LITERAL.finditer(line)
-        }
-        names = sorted(removed - head_envs[stack])
+        names = sorted(removed.get(stack, set()) - head_envs[stack])
         if names:
             lost[stack] = names
     return lost
+
+
+def _diff_path(header):
+    """The path of a `diff --git a/<path> b/<path>` header from a diff with no renames, so both
+    halves are equal; git quotes both, C-style, when the path holds `"`, `\\` or a control
+    character."""
+    rest = header.removeprefix("diff --git ")
+    if rest.startswith('"'):
+        quoted = rest[3 : 3 + (len(rest) - 8) // 2]
+        return codecs.escape_decode(quoted.encode())[0].decode()
+    return rest[2 : 2 + (len(rest) - 5) // 2]
 
 
 def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
@@ -507,8 +531,8 @@ def check_cells(cells, table):
     refusals: `stamp_rows`, then `refuse_workload_gaps` over the stamped rows.
 
     The second half of the sweep chain, shared by `_detect` and onboard's drift-sweep item;
-    `select_cells` is the first. A sweep refusal that reads the table belongs in here, so
-    detect and onboard both apply it with no change to either caller."""
+    `select_cells` is the first. A refusal that reads the table belongs in here; it runs on
+    every plan and drift detect and on onboard's drift-sweep item, not only on sweeps."""
     rows = stamp_rows(cells, table, "plan")
     refuse_workload_gaps(rows, table)
     return rows

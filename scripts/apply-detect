@@ -57,12 +57,11 @@ def cells_for_env(env, paths, tags_by_stack):
     """Wave cells for `paths` in `env`.
 
     The workload comes from the tags, never from the check name — the name
-    carries no workload. A stack missing from the map carries "" and applies with
-    the environment's generic role; the map itself is REQUIRED, so a caller that
-    stops deriving it raises here instead of silently applying every cell with
-    the generic role. A stack carrying two `workload/*` tags refuses (`workload_of`)."""
+    carries no workload. A stack missing from the map raises `KeyError`: `tags_of`
+    refuses such a stack first. A stack carrying two `workload/*` tags refuses
+    (`workload_of`)."""
     return [
-        {"stack": p, "environment": env, "workload": bm.workload_of(tags_by_stack.get(p, []), p)}
+        {"stack": p, "environment": env, "workload": bm.workload_of(tags_by_stack[p], p)}
         for p in paths
     ]
 

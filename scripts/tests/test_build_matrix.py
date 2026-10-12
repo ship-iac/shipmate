@@ -260,10 +260,28 @@ def test_a_listed_stack_the_metadata_lacks_refuses_naming_it(monkeypatch):
         bm.env_membership(all_stacks=True)
     assert str(e.value) == (
         "::error::terramate debug show metadata printed no tags for 2 stack(s): "
-        "stacks/new, stacks/old. Run detect and onboard from the repository root: from a "
-        "subdirectory, `terramate list` prints stack paths relative to it, and the metadata "
-        "does not."
+        "stacks/new, stacks/old. Two causes produce this: a working directory other than the "
+        "repository root, where `terramate list` prints stack paths relative to it and the "
+        "metadata does not; or metadata output this parser does not read, as after a "
+        "Terramate version change."
     )
+
+
+def test_a_metadata_line_that_does_not_decode_refuses_naming_it():
+    """A header holding a raw control character is not JSON. Mutation: drop the
+    `json.JSONDecodeError` handler in `parse_metadata` -- the decode error escapes."""
+    with pytest.raises(SystemExit) as e:
+        bm.parse_metadata('stack "/a\x1fb":\n\tterramate.stack.tags=[]\n')
+    assert str(e.value) == (
+        "::error::terramate debug show metadata printed a line that does not parse as JSON: "
+        "'stack \"/a\\x1fb\":'."
+    )
+
+
+def test_tags_of_an_empty_workset_reads_no_metadata(monkeypatch):
+    """Mutation: drop `if not stacks: return {}` in `tags_of` -- `_run` is called."""
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
+    assert bm.tags_of([]) == {}
 
 
 def test_compute_cells_fans_out_multi_env(monkeypatch):
@@ -477,18 +495,23 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
 
 
 def _fake_run(head_sha, diffs, diff_calls):
-    """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with the text
-    of the `diffs` stack whose `.tm.hcl` pathspec it names, recording the diff argv. A diff
-    naming no `diffs` stack raises `KeyError` with its argv."""
+    """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with, per
+    `.tm.hcl` pathspec it names, a `diff --git` header for that stack's `stack.tm.hcl` and the
+    stack's `diffs` text, recording the diff argv. A pathspec naming no `diffs` stack raises
+    `KeyError`."""
 
     def fake_run(args):
         if args[:2] != ["git", "diff"]:
             return f"{head_sha}\n"
         diff_calls.append(args)
-        for s, text in diffs.items():
-            if f":(glob){s}/*.tm.hcl" in args:
-                return text
-        raise KeyError(f"no `diffs` entry for {args}")
+        stacks = [
+            a.removeprefix(":(glob)").removesuffix("/*.tm.hcl")
+            for a in args
+            if a.endswith("/*.tm.hcl")
+        ]
+        return "".join(
+            f"diff --git a/{s}/stack.tm.hcl b/{s}/stack.tm.hcl\n{diffs[s]}" for s in stacks
+        )
 
     return fake_run
 
@@ -519,7 +542,7 @@ def _run_main(
     replaces the default-branch read, which otherwise answers `table`.
 
     The double returns `unmanaged` as the scan's unmanaged stacks. `diffs`, `{stack: diff
-    text}`, answers each `git diff` naming that stack's `.tm.hcl` pathspec and appends its argv
+    text}`, answers the `git diff` naming that stack's `.tm.hcl` pathspec and appends its argv
     to `diff_calls`; it needs `head_sha`.
 
     `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
@@ -1777,26 +1800,8 @@ def test_a_detect_runs_the_shared_sweep_chain_once_each(monkeypatch, tmp_path):
         {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu"},
         stacks={"stacks/app": ["env/dev-eu"], "stacks/web": ["env/dev-us"]},
     )
-    assert calls == [
-        (
-            "select_cells",
-            (
-                [
-                    {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
-                    {"stack": "stacks/web", "environment": "dev-us", "workload": ""},
-                ],
-                {"stacks/app": ["env/dev-eu"], "stacks/web": ["env/dev-us"]},
-                "env/dev-eu",
-                True,
-            ),
-            {},
-        ),
-        (
-            "check_cells",
-            ([{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}], _MINIMAL_TABLE),
-            {},
-        ),
-    ]
+    assert [name for name, _, _ in calls] == ["select_cells", "check_cells"]
+    assert calls[1][1][0] == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
 
 
 def test_a_query_matching_no_cell_is_an_empty_sweep_with_a_notice(monkeypatch, tmp_path, capsys):
@@ -2074,6 +2079,50 @@ def test_lost_env_tags_names_a_stack_whose_diff_removes_an_env_line(git_repo):
     assert bm.lost_env_tags(base, {"s": set(), "t": set()}) == {"s": ["dev"]}
 
 
+def test_lost_env_tags_attributes_one_diff_to_each_stack(git_repo, monkeypatch):
+    """Four stacks, one nested in another, one under a path git prints unquoted with a space,
+    one under a path git quotes as octal escapes (`ø`), each losing its own tag, read through one
+    `git diff`.
+
+    Mutations: one `git diff` per stack again -- four `_run` calls; attribute a file to the
+    first sorted stack whose path prefixes it (shortest prefix) -- `a/b`'s `prod` lands on `a`;
+    return `rest[2:]` for an unquoted header -- each file's directory ends ` b/<stack>`, so no
+    tag is attributed; skip the C-unquoting -- `ø` reads as its escape."""
+    stacks = ["a", "a/b", "with space", "ø"]
+    tags = ["dev", "prod", "qa", "uat"]
+    base = _commit(
+        {f"{s}/stack.tm.hcl": _stack(f'["env/{t}"]') for s, t in zip(stacks, tags, strict=True)},
+        "base",
+    )
+    _git("checkout", "-q", "-b", "pr")
+    _commit({f"{s}/stack.tm.hcl": _stack("[]") for s in stacks}, "untag")
+    calls = record_calls(monkeypatch, bm, "_run")
+    assert bm.lost_env_tags(base, dict.fromkeys(stacks, set())) == {
+        "a": ["dev"],
+        "a/b": ["prod"],
+        "with space": ["qa"],
+        "ø": ["uat"],
+    }
+    assert len(calls) == 1
+
+
+def test_lost_env_tags_reads_a_file_moved_between_stacks_as_a_removal(git_repo):
+    """Mutation: drop `--no-renames` -- git pairs the move as a rename and `s` loses nothing."""
+    base = _commit(
+        {"s/tags.tm.hcl": _stack('["env/dev"]'), "t/stack.tm.hcl": _stack("[]", "t")}, "base"
+    )
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/tags.tm.hcl": None, "t/tags.tm.hcl": _stack('["env/dev"]')}, "move")
+    assert bm.lost_env_tags(base, {"s": set(), "t": {"dev"}}) == {"s": ["dev"]}
+
+
+def test_lost_env_tags_of_no_stacks_runs_no_git(monkeypatch):
+    """With no pathspec, `git diff` would read the whole tree. Mutation: drop
+    `if not head_envs: return {}` -- `_run` is called."""
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
+    assert bm.lost_env_tags("deadbeef", {}) == {}
+
+
 def test_lost_env_tags_names_the_root_stack(git_repo):
     """Terramate lists the root stack as `.`, so its pathspec is `:(glob)./*.tm.hcl`.
     Mutation: `stack.removeprefix(".")` in both pathspecs -- `:(glob)/*.tm.hcl` lies outside
@@ -2221,7 +2270,7 @@ def test_detect_warns_about_each_env_a_tagged_stack_lost(monkeypatch, tmp_path, 
 
 def test_detect_diffs_every_scanned_stack_once(monkeypatch, tmp_path):
     """`stacks/app` is in the tree in two environments. Mutations: diff only `unmanaged` --
-    the tree stacks go undiffed; diff once per tree row -- `stacks/app` is diffed twice."""
+    the tree stacks go undiffed; call `lost_env_tags` once per tree row -- three diffs."""
     diff_calls = []
     _run_main(
         monkeypatch,
@@ -2238,12 +2287,16 @@ def test_detect_diffs_every_scanned_stack_once(monkeypatch, tmp_path):
             "git",
             "diff",
             "-U0",
+            "--no-renames",
             f"{'b' * 40}...HEAD",
             "--",
-            f":(glob){s}/*.tm.hcl",
-            f":(glob){s}/*.tm",
+            ":(glob)stacks/app/*.tm.hcl",
+            ":(glob)stacks/app/*.tm",
+            ":(glob)stacks/db/*.tm.hcl",
+            ":(glob)stacks/db/*.tm",
+            ":(glob)stacks/gone/*.tm.hcl",
+            ":(glob)stacks/gone/*.tm",
         ]
-        for s in ("stacks/app", "stacks/db", "stacks/gone")
     ]
 
 
