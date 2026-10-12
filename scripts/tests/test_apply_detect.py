@@ -256,7 +256,9 @@ def _stub_apply(monkeypatch, deps, checks):
     monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
     monkeypatch.setattr(ad, "_run", _run)
     monkeypatch.setattr(ad.bm, "_run", _run)
-    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu", "workload/app"])
+    monkeypatch.setattr(
+        ad.bm, "all_tags", lambda: {s: ["env/dev-eu", "workload/app"] for s in deps}
+    )
     return urls
 
 
@@ -537,21 +539,20 @@ def test_duplicate_run_newer_queued_stays_pending():
 
 
 def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
-    """Two claims at once: the map reaches the cells, and it is derived for the workset alone.
-    Fails when the map never reaches the cells: every cell is then role-less and the suite stays
-    green. Evaluating `stacks/unrelated` would let a stack this apply never touches block an
-    approved plan."""
+    """The whole-tree tag map reaches the cells, and only the workset becomes cells.
+
+    Mutations: pass `{}` as the map to `cells_for_env` -- the cell loses its workload; pass
+    the map's keys as the paths -- `stacks/unrelated` becomes a cell."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
         {"stacks/app": set(), "stacks/unrelated": set()},
         [_apply_check("stacks/app", plan_run="42")],
     )
-    evaluated = []
     monkeypatch.setattr(
         ad.bm,
-        "_tags",
-        lambda stack: evaluated.append(stack) or ["env/dev-eu", "workload/net-edge"],
+        "all_tags",
+        lambda: {"stacks/app": ["env/dev-eu", "workload/net-edge"], "stacks/unrelated": []},
     )
     ad.main()
     parsed = github_outputs(out)
@@ -569,7 +570,18 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "plan_sha256": PLAN_SHA,
         }
     ]
-    assert evaluated == ["stacks/app"]
+
+
+def test_main_refuses_a_workset_stack_the_metadata_lacks(tmp_path, monkeypatch):
+    """Mutation: index `all_tags()` with `.get(p, [])` in `main` -- the cell plans untagged."""
+    _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    monkeypatch.setattr(ad.bm, "all_tags", lambda: {})
+    with pytest.raises(SystemExit) as e:
+        ad.main()
+    assert str(e.value) == (
+        "::error::terramate debug show metadata printed no tags for 1 stack(s): stacks/app"
+    )
 
 
 def _gate(ungated):

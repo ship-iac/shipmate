@@ -396,11 +396,8 @@ def main():
     names = apply_check_names(lines, app_id)
     completed = ag.app_done_names(lines, app_id)
 
-    # Tags only for the workset: this path reconstructs its cells from the head's
-    # apply checks plus the run-graph, and evaluating the whole tree would let one
-    # unrelated stack's unresolvable expression block an approved plan.
     paths = paths_with_checks(env, list(deps.keys()), names)
-    cells = cells_for_env(env, paths, {p: bm._tags(p) for p in paths})
+    cells = cells_for_env(env, paths, bm.tags_of(paths))
     table = bm.env_config(cells, table=table)
     cells = bm.stamp_rows(cells, table, "apply")
 

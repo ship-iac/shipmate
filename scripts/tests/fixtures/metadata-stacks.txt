@@ -1,0 +1,113 @@
+Available metadata:
+
+stack "/stacks/app":
+	terramate.stack.id="61279720-23b2-4691-a868-ebb24b0972a9"
+	terramate.stack.name="app"
+	terramate.stack.description="app"
+	terramate.stack.tags=["env/dev-eu","env/dev-us"]
+	terramate.stack.before=[]
+	terramate.stack.after=["/stacks/auth","/stacks/workers"]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/stacks/app"
+	terramate.stack.path.basename="app"
+	terramate.stack.path.relative="stacks/app"
+	terramate.stack.path.to_root="../.."
+
+stack "/stacks/auth":
+	terramate.stack.id="76082390-6320-4f48-9197-6452cd27eb3a"
+	terramate.stack.name="auth"
+	terramate.stack.description="auth"
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=["/stacks/platform"]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/stacks/auth"
+	terramate.stack.path.basename="auth"
+	terramate.stack.path.relative="stacks/auth"
+	terramate.stack.path.to_root="../.."
+
+stack "/stacks/dns":
+	terramate.stack.id="b1c3f7c2-8b31-4140-862d-1a77890630e5"
+	terramate.stack.name="dns"
+	terramate.stack.description="dns (prd2-5b, workload tag inert without an identity)"
+	terramate.stack.tags=["env/dev-us","workload/net"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/stacks/dns"
+	terramate.stack.path.basename="dns"
+	terramate.stack.path.relative="stacks/dns"
+	terramate.stack.path.to_root="../.."
+
+stack "/stacks/platform":
+	terramate.stack.id="814c3c27-5532-49cc-964a-b81411c44594"
+	terramate.stack.name="platform"
+	terramate.stack.description="platform (prd2-5)"
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=["/stacks/dns"]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/stacks/platform"
+	terramate.stack.path.basename="platform"
+	terramate.stack.path.relative="stacks/platform"
+	terramate.stack.path.to_root="../.."
+
+stack "/stacks/sandbox/box":
+	terramate.stack.id="f2763b41-eac2-420b-ae2f-eed458f74b06"
+	terramate.stack.name="box"
+	terramate.stack.description="box (prd2-6)"
+	terramate.stack.tags=["env/sbx"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/stacks/sandbox/box"
+	terramate.stack.path.basename="box"
+	terramate.stack.path.relative="stacks/sandbox/box"
+	terramate.stack.path.to_root="../../.."
+
+stack "/stacks/tenant-a":
+	terramate.stack.id="dbf84603-8f9d-4c8a-97da-33e32d4a4ecb"
+	terramate.stack.name="tenant-a"
+	terramate.stack.description="tenant-a (prd2-1e)"
+	terramate.stack.tags=["env/dev-eu","env/dev-us"]
+	terramate.stack.before=[]
+	terramate.stack.after=["/stacks/app"]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/stacks/tenant-a"
+	terramate.stack.path.basename="tenant-a"
+	terramate.stack.path.relative="stacks/tenant-a"
+	terramate.stack.path.to_root="../.."
+
+stack "/stacks/tenant-b":
+	terramate.stack.id="28ea9711-e125-4c92-b92c-79d1e0124272"
+	terramate.stack.name="tenant-b"
+	terramate.stack.description="tenant-b"
+	terramate.stack.tags=["env/dev-eu","env/dev-us"]
+	terramate.stack.before=[]
+	terramate.stack.after=["/stacks/app"]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/stacks/tenant-b"
+	terramate.stack.path.basename="tenant-b"
+	terramate.stack.path.relative="stacks/tenant-b"
+	terramate.stack.path.to_root="../.."
+
+stack "/stacks/workers":
+	terramate.stack.id="6b3ea960-b44c-486b-a6fc-33af70ced4eb"
+	terramate.stack.name="workers"
+	terramate.stack.description="workers"
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=["/stacks/platform"]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/stacks/workers"
+	terramate.stack.path.basename="workers"
+	terramate.stack.path.relative="stacks/workers"
+	terramate.stack.path.to_root="../.."

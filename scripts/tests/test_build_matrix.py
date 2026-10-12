@@ -70,7 +70,7 @@ def test_whole_tree_sweep_above_256_cells_names_drift_files(monkeypatch):
     """
     stacks = [f"stacks/s{i}" for i in range(257)]
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
-    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {s: ["env/dev-eu"] for s in stacks})
     with pytest.raises(SystemExit) as exc_info:
         bm.compute_cells(all_stacks=True)
     assert str(exc_info.value) == (
@@ -89,8 +89,11 @@ def test_the_matrix_limit_counts_the_cells_a_query_keeps(monkeypatch):
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
     monkeypatch.setattr(
         bm,
-        "_tags",
-        lambda s: ["env/dev-eu", "workload/keep" if s < "stacks/s010" else "workload/drop"],
+        "all_tags",
+        lambda: {
+            s: ["env/dev-eu", "workload/keep" if s < "stacks/s010" else "workload/drop"]
+            for s in stacks
+        },
     )
     _, cells, tree, _ = bm.compute_cells(all_stacks=True, tags="workload/keep")
     assert [c["stack"] for c in cells] == [f"stacks/s{i:03}" for i in range(10)]
@@ -175,24 +178,97 @@ def test_list_stacks_all_omits_changed_flag(monkeypatch):
     assert captured["args"] == ["terramate", "list"]
 
 
-def test_tags_evals_with_as_json(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or '["env/dev-eu"]')
-    assert bm._tags("stacks/app") == ["env/dev-eu"]
-    assert captured["args"] == [
-        "terramate",
-        "-C",
-        "stacks/app",
-        "experimental",
-        "eval",
-        "--as-json",
-        "terramate.stack.tags",
-    ]
+#: Raw `terramate debug show metadata > metadata-<name>.txt` captures (stdout to a file, not a
+#: TTY) from terramate 0.17.1 windows_x86_64, run at the root of: `repo-example-stacks`
+#: aabb04b, `repo-example-folders` bdea16c, `repo-example-workspaces` df8c25b (`stacks`,
+#: `folders`, `workspaces`); a scratch repository of stacks `outer`, `outer/inner`,
+#: `with space/app`, `quo"te` (Windows stores the `"` as U+F022, which the header escapes as
+#: `\uf022` and `terramate list` prints raw), `empty` (`tags = []`), `notags` (no `tags`),
+#: `desc` (`description = "terramate.stack.tags=[\"env/evil\"]"`) and `descnl` (the same
+#: description after `x\n\t`) (`edge`); a scratch repository with a stack at its root and one
+#: at `child` (`root`). A literal `"` cannot reach a Windows directory name, so the `\"`
+#: header escape is decoded by the same `json.loads` but was never captured.
+_METADATA = {
+    "stacks": {
+        "stacks/app": ["env/dev-eu", "env/dev-us"],
+        "stacks/auth": ["env/dev-eu"],
+        "stacks/dns": ["env/dev-us", "workload/net"],
+        "stacks/platform": ["env/dev-eu"],
+        "stacks/sandbox/box": ["env/sbx"],
+        "stacks/tenant-a": ["env/dev-eu", "env/dev-us"],
+        "stacks/tenant-b": ["env/dev-eu", "env/dev-us"],
+        "stacks/workers": ["env/dev-eu"],
+    },
+    "folders": {
+        "envs/dev-eu/eu-west-1/app": ["env/dev-eu"],
+        "envs/dev-eu/eu-west-1/platform": ["env/dev-eu"],
+        "envs/dev-us/us-east-1/dns": ["env/dev-us"],
+    },
+    "workspaces": {"components/app": ["env/dev-eu", "env/dev-us"]},
+    "edge": {
+        "desc": ["env/dev-eu"],
+        "descnl": [],
+        "empty": [],
+        "notags": [],
+        "outer": ["env/dev-eu"],
+        "outer/inner": ["env/dev-us", "workload/app"],
+        "quo\uf022te": ["env/dev-eu"],
+        "with space/app": ["env/dev-eu"],
+    },
+    "root": {".": ["env/dev-eu"], "child": ["env/dev-us"]},
+}
+
+
+def _metadata(name):
+    path = pathlib.Path(__file__).parent / "fixtures" / f"metadata-{name}.txt"
+    return path.read_bytes().decode("utf-8")
+
+
+@pytest.mark.parametrize("name", list(_METADATA))
+def test_parse_metadata_reads_every_stacks_tags_keyed_as_list_prints_it(name):
+    """Mutations: match `tags=` anywhere in a line -- `edge`'s `desc` description raises;
+    strip the header's quotes instead of decoding them -- `quo\\uf022te` keeps its escape;
+    drop `or "."` -- `root` keys its root stack `""`; keep the leading `/` -- every case."""
+    assert bm.parse_metadata(_metadata(name)) == _METADATA[name]
+
+
+def test_a_detect_reads_every_stacks_tags_with_one_terramate_call(monkeypatch):
+    """Mutation: read each stack's tags with its own `all_tags` call in `env_membership` --
+    eight metadata calls."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == ["terramate", "list"]:
+            return "".join(f"{s}\n" for s in _METADATA["stacks"])
+        return _metadata("stacks")
+
+    monkeypatch.setattr(bm, "_run", run)
+    _, tags_by_stack = bm.env_membership(all_stacks=True)
+    assert tags_by_stack == _METADATA["stacks"]
+    assert calls == [["terramate", "list"], ["terramate", "debug", "show", "metadata"]]
+
+
+def test_a_listed_stack_the_metadata_lacks_refuses_naming_it(monkeypatch):
+    """Mutation: default a missing stack to `[]` in `tags_of` -- `stacks/new` reads as
+    unmanaged and detect goes on."""
+    monkeypatch.setattr(
+        bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/new", "stacks/old"]
+    )
+    monkeypatch.setattr(bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu"]})
+    with pytest.raises(SystemExit) as e:
+        bm.env_membership(all_stacks=True)
+    assert str(e.value) == (
+        "::error::terramate debug show metadata printed no tags for 2 stack(s): "
+        "stacks/new, stacks/old"
+    )
 
 
 def test_compute_cells_fans_out_multi_env(monkeypatch):
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
-    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu", "env/dev-us", "workload/app"])
+    monkeypatch.setattr(
+        bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu", "env/dev-us", "workload/app"]}
+    )
     _, cells, _, _ = bm.compute_cells(all_stacks=True)
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
@@ -206,7 +282,7 @@ def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
         "stacks/app": ["env/dev-eu", "env/dev-us"],
         "stacks/dns": ["env/dev-eu", "workload/dns"],
     }
-    monkeypatch.setattr(bm, "_tags", lambda s: tags[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: tags)
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     assert stacks_by_env == {"dev-eu": ["stacks/app", "stacks/dns"], "dev-us": ["stacks/app"]}
     assert tags_by_stack == tags
@@ -247,7 +323,7 @@ def test_env_membership_refuses_a_tag_no_environment_can_take(monkeypatch, tag, 
     `is_env_name` -- `env/prod-apply` passes; delete the `ENGINE_ENV` check from
     `check_env_name`, or change `ENGINE_ENV`'s value -- `env/shipmate-engine` passes."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/c"])
-    monkeypatch.setattr(bm, "_tags", lambda s: [tag] if s == "stacks/c" else ["env/dev-eu"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu"], "stacks/c": [tag]})
     with pytest.raises(SystemExit) as e:
         bm.env_membership(all_stacks=True)
     assert str(e.value) == message
@@ -265,7 +341,7 @@ def test_env_membership_skips_untagged_stacks_with_a_whole_tree_notice(monkeypat
     """Two stacks with no `env/*` tag are in the tag map, in no environment, and named in one
     sorted notice. Mutation: restore the `SystemExit` refusal."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
-    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: _UNMANAGED_TREE)
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     assert stacks_by_env == {"dev-eu": ["stacks/app"]}
     assert tags_by_stack == _UNMANAGED_TREE
@@ -278,7 +354,7 @@ def test_env_membership_skips_untagged_stacks_with_a_whole_tree_notice(monkeypat
 def test_the_changed_set_scan_names_its_scope_in_the_notice(monkeypatch, capsys):
     """Mutation: print the whole-tree wording on both scans."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
-    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: _UNMANAGED_TREE)
     bm.env_membership(all_stacks=False, base="deadbeef")
     assert capsys.readouterr().out == (
         "::notice::2 changed stack(s) carry no env/* tag and are not managed by shipmate: "
@@ -289,7 +365,7 @@ def test_the_changed_set_scan_names_its_scope_in_the_notice(monkeypatch, capsys)
 def test_the_notice_names_ten_paths_and_counts_the_rest(monkeypatch, capsys):
     """Mutation: name every path -- the notice lists all twenty."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_TWENTY_UNMANAGED))
-    monkeypatch.setattr(bm, "_tags", lambda s: _TWENTY_UNMANAGED[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: _TWENTY_UNMANAGED)
     bm.env_membership(all_stacks=True)
     assert capsys.readouterr().out == (
         "::notice::20 stack(s) carry no env/* tag and are not managed by shipmate: "
@@ -301,7 +377,7 @@ def test_the_notice_names_ten_paths_and_counts_the_rest(monkeypatch, capsys):
 def test_no_unmanaged_stack_prints_nothing(monkeypatch, capsys):
     """Mutation: print the notice with N = 0."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
-    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu"]})
     bm.env_membership(all_stacks=True)
     assert capsys.readouterr().out == ""
 
@@ -309,7 +385,7 @@ def test_no_unmanaged_stack_prints_nothing(monkeypatch, capsys):
 def test_compute_cells_refuses_a_changed_stacks_env_tag_no_environment_can_take(monkeypatch):
     """Mutation: `compute_cells` passes `check_names=False` to `env_membership`."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/c"])
-    monkeypatch.setattr(bm, "_tags", lambda s: ["env/a.b"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {"stacks/c": ["env/a.b"]})
     with pytest.raises(SystemExit) as e:
         bm.compute_cells(all_stacks=False, base="deadbeef")
     assert str(e.value) == "::error::stack 'stacks/c' tag 'env/a.b'" + _CHARSET
@@ -319,7 +395,7 @@ def test_compute_cells_leaves_an_unmanaged_stack_out_of_cells_and_tree(monkeypat
     """The fourth element lists it, and no cell or tree entry names it, so drift closes its
     Issues. Mutation: add unmanaged stacks to `tree`."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
-    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: _UNMANAGED_TREE)
     _, cells, tree, unmanaged = bm.compute_cells(all_stacks=True)
     assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     assert tree == [{"environment": "dev-eu", "stack": "stacks/app"}]
@@ -330,7 +406,7 @@ def test_two_workload_tags_on_an_unmanaged_stack_draw_no_refusal(monkeypatch):
     """Mutation: call `workload_of` over every stack in `tags_by_stack` in `full_tree`."""
     tree = {"stacks/app": ["env/dev-eu"], "stacks/odd": ["workload/a", "workload/b"]}
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
-    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
     _, cells, _, unmanaged = bm.compute_cells(all_stacks=True)
     assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     assert unmanaged == ["stacks/odd"]
@@ -491,7 +567,7 @@ def _run_main(
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
     else:
         monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
-        monkeypatch.setattr(bm, "_tags", lambda s: stacks[s])
+        monkeypatch.setattr(bm, "all_tags", lambda: stacks)
     monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
     bm.main()
     parsed = github_outputs(out)
@@ -1736,7 +1812,7 @@ def test_a_filtered_sweep_still_refuses_a_slug_collision_outside_it(monkeypatch)
     """
     tree = {"stacks/app": ["env/dev-eu"], "a/b": ["env/dev-us"], "a-b": ["env/dev-us"]}
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
-    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
     with pytest.raises(SystemExit) as exc_info:
         bm.compute_cells(all_stacks=True, tags="env/dev-eu")
     assert str(exc_info.value) == (
@@ -1756,7 +1832,7 @@ def test_a_filtered_sweep_still_refuses_two_workload_tags_outside_it(monkeypatch
         "stacks/dns": ["env/prod-eu", "workload/network", "workload/net"],
     }
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
-    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
     with pytest.raises(SystemExit) as exc_info:
         bm.compute_cells(all_stacks=True, tags="env/dev-eu")
     assert exc_info.value.code == _TWO_WORKLOADS_ERROR

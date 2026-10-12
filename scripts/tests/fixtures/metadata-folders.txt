@@ -1,0 +1,43 @@
+Available metadata:
+
+stack "/envs/dev-eu/eu-west-1/app":
+	terramate.stack.id="7d3c1537-9a1e-4cb7-92f9-6b5a115ee81b"
+	terramate.stack.name="app"
+	terramate.stack.description="app"
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=["/envs/dev-eu/eu-west-1/platform"]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/envs/dev-eu/eu-west-1/app"
+	terramate.stack.path.basename="app"
+	terramate.stack.path.relative="envs/dev-eu/eu-west-1/app"
+	terramate.stack.path.to_root="../../../.."
+
+stack "/envs/dev-eu/eu-west-1/platform":
+	terramate.stack.id="f9291f6a-fff5-4db5-b888-2544e5ffc023"
+	terramate.stack.name="platform"
+	terramate.stack.description="platform"
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/envs/dev-eu/eu-west-1/platform"
+	terramate.stack.path.basename="platform"
+	terramate.stack.path.relative="envs/dev-eu/eu-west-1/platform"
+	terramate.stack.path.to_root="../../../.."
+
+stack "/envs/dev-us/us-east-1/dns":
+	terramate.stack.id="067c4260-bb0b-4198-8228-dfea6c3d5f69"
+	terramate.stack.name="dns"
+	terramate.stack.description="dns (prd2-gen2)"
+	terramate.stack.tags=["env/dev-us"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/envs/dev-us/us-east-1/dns"
+	terramate.stack.path.basename="dns"
+	terramate.stack.path.relative="envs/dev-us/us-east-1/dns"
+	terramate.stack.path.to_root="../../../.."

@@ -1,0 +1,15 @@
+Available metadata:
+
+stack "/components/app":
+	terramate.stack.id="ef7c9937-3676-43b2-88f1-b0ee6658e23f"
+	terramate.stack.name="app"
+	terramate.stack.description="app (prd2-gen)"
+	terramate.stack.tags=["env/dev-eu","env/dev-us"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/components/app"
+	terramate.stack.path.basename="app"
+	terramate.stack.path.relative="components/app"
+	terramate.stack.path.to_root="../.."

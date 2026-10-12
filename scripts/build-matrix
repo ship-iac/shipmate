@@ -222,11 +222,49 @@ def _list_stacks(all_stacks, base):
     return [s.strip() for s in _run(args).splitlines() if s.strip()]
 
 
-def _tags(stack):
-    out = _run(
-        ["terramate", "-C", stack, "experimental", "eval", "--as-json", "terramate.stack.tags"]
-    )
-    return json.loads(out)
+_METADATA_STACK = re.compile(r'^stack ("(?:[^"\\]|\\.)*"):$')
+_METADATA_TAGS = "\tterramate.stack.tags="
+
+
+def parse_metadata(text):
+    """`{stack: [tags...]}` from `terramate debug show metadata` output, keyed as `terramate
+    list` prints paths from the repository root (`stacks/app`; the root stack is `.`).
+
+    Each `stack "<path>":` header opens a stack; its tab-indented `terramate.stack.tags=` line
+    holds a JSON list. The header path is quoted with escapes and decodes as JSON (`\\uf022`
+    in a header is the character `list` prints raw). A line is a tags line only from its start: a
+    `description` holding the same text is a different attribute. A stack with no tags line
+    has no key."""
+    tags = {}
+    stack = None
+    for line in text.splitlines():
+        if m := _METADATA_STACK.match(line):
+            stack = json.loads(m.group(1)).removeprefix("/") or "."
+        elif stack is not None and line.startswith(_METADATA_TAGS):
+            tags[stack] = json.loads(line[len(_METADATA_TAGS) :])
+    return tags
+
+
+def all_tags():
+    """Every stack's tags in one Terramate call, as `parse_metadata` keys them.
+
+    Reading the whole tree costs no availability: a stack's `tags` cannot reference
+    `global.*`, and an expression that fails to evaluate there fails `terramate list` too."""
+    return parse_metadata(_run(["terramate", "debug", "show", "metadata"]))
+
+
+def tags_of(stacks):
+    """`{stack: [tags...]}` for `stacks` from `all_tags`, or `SystemExit` naming each stack
+    the metadata has no tags for: a default of no tags would read as unmanaged and drop the
+    stack from CI."""
+    tags = all_tags()
+    missing = [s for s in stacks if s not in tags]
+    if missing:
+        raise SystemExit(
+            f"::error::terramate debug show metadata printed no tags for {len(missing)} "
+            f"stack(s): {named(missing, UNMANAGED_NAMES)}"
+        )
+    return {s: tags[s] for s in stacks}
 
 
 def unmanaged_stacks(tags_by_stack):
@@ -324,7 +362,7 @@ def env_membership(all_stacks=False, base="", check_names=True):
     table entry need check the name: a stack `c` tagged `env/a.b` and a stack `b.c` tagged
     `env/a` would both render the artifact `plan.a.b.c`."""
     stacks = _list_stacks(all_stacks, base)
-    tags_by_stack = {s: _tags(s) for s in stacks}
+    tags_by_stack = tags_of(stacks)
     unmanaged = unmanaged_stacks(tags_by_stack)
     if unmanaged:
         scope = "stack(s)" if all_stacks else "changed stack(s)"

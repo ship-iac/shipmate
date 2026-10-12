@@ -337,7 +337,9 @@ def test_unlock_tolerates_an_untagged_stack_elsewhere_in_the_tree(monkeypatch, t
         ud.bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/orphan"]
     )
     monkeypatch.setattr(
-        ud.bm, "_tags", lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else []
+        ud.bm,
+        "all_tags",
+        lambda: {"stacks/app": ["env/dev-eu", "workload/app"], "stacks/orphan": []},
     )
     ud.main()
     assert json.loads(github_outputs(out)["cells"]) == [
@@ -366,8 +368,8 @@ def test_unlock_tolerates_an_unusable_env_tag_elsewhere_in_the_tree(monkeypatch,
     )
     monkeypatch.setattr(
         ud.bm,
-        "_tags",
-        lambda s: ["env/dev-eu", "workload/app"] if s == "stacks/app" else ["env/a.b"],
+        "all_tags",
+        lambda: {"stacks/app": ["env/dev-eu", "workload/app"], "stacks/other": ["env/a.b"]},
     )
     ud.main()
     assert json.loads(github_outputs(out)["cells"]) == [

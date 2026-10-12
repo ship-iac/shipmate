@@ -2884,7 +2884,7 @@ def test_an_untagged_stack_is_adopted_through_the_real_membership(monkeypatch, t
     Mutation: restore the refusal of an untagged stack in build-matrix's `env_membership`.
     """
     monkeypatch.setattr(onboard.bm, "_list_stacks", lambda all_stacks, base: ["a", "b"])
-    monkeypatch.setattr(onboard.bm, "_tags", lambda s: {"a": ["env/dev-eu"], "b": []}[s])
+    monkeypatch.setattr(onboard.bm, "all_tags", lambda: {"a": ["env/dev-eu"], "b": []})
     _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=None)
     assert exc.code == 0
     assert (

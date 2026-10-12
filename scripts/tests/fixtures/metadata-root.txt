@@ -1,0 +1,27 @@
+Available metadata:
+
+stack "/":
+	terramate.stack.name="rootstack"
+	terramate.stack.description=""
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/"
+	terramate.stack.path.basename="/"
+	terramate.stack.path.relative=""
+	terramate.stack.path.to_root="."
+
+stack "/child":
+	terramate.stack.name="child"
+	terramate.stack.description=""
+	terramate.stack.tags=["env/dev-us"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/child"
+	terramate.stack.path.basename="child"
+	terramate.stack.path.relative="child"
+	terramate.stack.path.to_root=".."

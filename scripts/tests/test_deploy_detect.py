@@ -174,7 +174,7 @@ def _run_main(
         )
     else:
         monkeypatch.setattr(dd.bm, "_list_stacks", lambda all_stacks, base: list(stacks))
-        monkeypatch.setattr(dd.bm, "_tags", lambda s: stacks[s])
+        monkeypatch.setattr(dd.bm, "all_tags", lambda: stacks)
     # The check-run listing is fetched through apply-detect's own `_run`, and the tree walk
     # through deploy-detect's build-matrix. Both are stubbed so a `gh api` call from either
     # module lands in `urls`.
