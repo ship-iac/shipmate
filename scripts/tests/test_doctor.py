@@ -215,9 +215,9 @@ def _env(name, rules=(), branch_policy=None):
 
 def _quiet_new_probes():
     """Healthy responses for the env-protection, engine-environment, plan-env-secret,
-    pin-freshness, fork-trigger, `shipmate.yml` and drift-file probes, so tests exercising the
-    older gate/environment probes through `warnings()` collect no incidental noise from these
-    seven.
+    pin-freshness, fork-trigger, `shipmate.yml`, drift-file and CODEOWNERS probes, so tests
+    exercising the older gate/environment probes through `warnings()` collect no incidental
+    noise from these eight.
     The config probe's read is here too, serving the design's canonical file: a sound table
     is silent in `warnings()`, and its status lines are rendered from `config_status` instead.
 

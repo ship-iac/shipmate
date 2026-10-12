@@ -1131,8 +1131,8 @@ no `shipmate / gate` status, sticky comment or comment reply is written.
 job binds that environment with `deployment: false`, which creates no deployment,
 and GitHub fails such a job when the environment has a custom deployment
 protection rule. `shipmate doctor` runs inside those jobs, so it cannot report
-this; `scripts/onboard --dry-run` does, with the command that removes the rule.
-List the rules with
+this; `scripts/onboard --app-id <id> --dry-run` does, with the command that
+removes the rule. List the rules with
 `gh api repos/<owner>/<repo>/environments/shipmate-engine/deployment_protection_rules`.
 
 ### An apply check never completes after a successful apply

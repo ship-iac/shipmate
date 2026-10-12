@@ -2527,10 +2527,11 @@ NO_OWNERS_ITEM = (
     "todo",
     CODEOWNERS_ITEM,
     [
-        "`.github/CODEOWNERS` on `main` holds no rule line, so no path has a code owner",
-        "and the code-owner review the `pull_request` rule on `main` requires holds no",
-        "pull request: GitHub asks an owner only for changed files an entry owns. Add an",
-        "entry covering the paths the IaC lives in (docs/hardening.md #3 to #5).",
+        "`.github/CODEOWNERS` in this working tree holds no rule line, so no path has a",
+        "code owner and the code-owner review the `pull_request` rule on `main` requires",
+        "holds no pull request: GitHub asks an owner only for changed files an entry",
+        "owns. Add an entry covering the paths the IaC lives in (docs/hardening.md #3 to",
+        "#5).",
     ],
 )
 GITHUB_DIR_EXISTS = (
@@ -2566,11 +2567,11 @@ def test_code_owner_review_with_no_codeowners_is_todo_naming_the_absence(tmp_pat
         "todo",
         CODEOWNERS_ITEM,
         [
-            "no `CODEOWNERS` file is on `main` (`.github/`, the root or `docs/`), so no path",
-            "has a code owner and the code-owner review the `pull_request` rule on `main`",
-            "requires holds no pull request: GitHub asks an owner only for changed files an",
-            "entry owns. Add an entry covering the paths the IaC lives in (docs/hardening.md",
-            "#3 to #5).",
+            "no `CODEOWNERS` file is in this working tree (`.github/`, the root or `docs/`),",
+            "so no path has a code owner and the code-owner review the `pull_request` rule on",
+            "`main` requires holds no pull request: GitHub asks an owner only for changed",
+            "files an entry owns. Add an entry covering the paths the IaC lives in",
+            "(docs/hardening.md #3 to #5).",
         ],
     )
 

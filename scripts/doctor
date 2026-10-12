@@ -278,13 +278,14 @@ def _review_rule_warnings(ctx):
 _review_rule_warnings.parses_yaml = True
 
 
-def no_code_owners(path, branch):
+def no_code_owners(path, place, branch):
     """The finding for a `CODEOWNERS` that owns nothing: `path` is the file GitHub reads,
-    None when there is none. `onboard` reports the same text."""
+    None when there is none, and `place` where it was read (`on `<branch>``, or `onboard`'s
+    working tree)."""
     where = (
-        f"`{path}` on `{branch}` holds no rule line"
+        f"`{path}` {place} holds no rule line"
         if path
-        else f"no `CODEOWNERS` file is on `{branch}` (`.github/`, the root or `docs/`)"
+        else f"no `CODEOWNERS` file is {place} (`.github/`, the root or `docs/`)"
     )
     return _NO_CODE_OWNERS.format(where=where, branch=branch)
 
@@ -316,8 +317,10 @@ def _codeowners_warnings(ctx):
         if blob.get("encoding") != "base64":
             raise ValueError(f"{path} is not readable through the contents API")
         text = base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
-        return [] if codeowners_rules(text) else [(WARNING, no_code_owners(path, branch))]
-    return [(WARNING, no_code_owners(None, branch))]
+        if codeowners_rules(text):
+            return []
+        return [(WARNING, no_code_owners(path, f"on `{branch}`", branch))]
+    return [(WARNING, no_code_owners(None, f"on `{branch}`", branch))]
 
 
 _codeowners_warnings.label = "CODEOWNERS"

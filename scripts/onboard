@@ -835,7 +835,8 @@ def _codeowners_item(ctx):
     found = [p for p in _CODEOWNERS_PATHS if (pathlib.Path(ctx["root"]) / p).is_file()]
     text = (pathlib.Path(ctx["root"]) / found[0]).read_text("utf-8", "replace") if found else ""
     if ctx["code_owner_review"] and not codeowners_rules(text):
-        finding = dr.no_code_owners(found[0] if found else None, ctx["default_branch"])
+        path = found[0] if found else None
+        finding = dr.no_code_owners(path, "in this working tree", ctx["default_branch"])
         return "todo", item, textwrap.wrap(finding, width=80)
     if not found:
         return "todo", item, [f"Add one in `{_CODEOWNERS_PATHS[0]}`."]
