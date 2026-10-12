@@ -528,11 +528,13 @@ every environment the applies would have bound that the repository does not have
 
 Why `snapshot` refuses instead of warning: GitHub creates a missing environment
 on demand, with no reviewers, no wait timer and no deployment branch policy, and
-the apply then runs inside it. Nothing else catches that: a cell's variables come
-from the environment table and `matrix.environment`, so plan and apply hash
-identically whatever environment the job actually bound, and the apply-match
-fingerprint pins nothing about the binding. Existence, checked before the waves,
-is the only control.
+the apply then runs inside it. An existing environment with no branch policy is
+open the same way: a workflow on any branch can bind it. Nothing else catches
+either: a cell's variables come from the environment table and
+`matrix.environment`, so plan and apply hash identically whatever environment the
+job actually bound, and the apply-match fingerprint pins nothing about the
+binding. Existence and a branch policy, both checked before the waves, are the
+only controls.
 
 Two fixes, and the error names both because either can be the right one:
 
@@ -566,18 +568,20 @@ Two neighbouring failures from the same step, both also fail-closed:
   ceiling around 100 environments, not a transient.
 - **`GitHub Environment(s) ... have no deployment branch policy`.** Each named
   environment exists, but a workflow on any branch can bind it and reach its
-  secrets and OIDC role. Run `scripts/onboard`, which scopes each apply
-  environment to the default branch, or set a policy in the environment's
-  settings; either kind (selected branches or protected branches) passes. A
-  shared bare `<env>` whose pull requests target branches besides the default
-  one needs those branches added to its policy, not the policy removed.
+  secrets and OIDC role; `shipmate doctor` warns on each one before an apply
+  reaches it. Run `scripts/onboard`, which scopes each apply environment to the
+  default branch, or set a policy in the environment's settings; either kind
+  (selected branches or protected branches) passes. A shared bare `<env>` whose
+  pull requests target branches besides the default one needs those branches
+  added to its policy, not the policy removed.
 
 What this does not cover, deliberately: the plan and drift bindings (those jobs
 bind the row's `env_binding`; detect refuses an unusable one, but nothing on those
 paths checks that the environment exists), an environment whose branch policy
-names the wrong branches or that carries no protection rules (`shipmate
-doctor`'s subject), and
-an environment deleted between the pre-flight and the wave that binds it.
+names the wrong branches (nothing checks it; `shipmate doctor` warns on a missing
+policy only), an environment with no approval rules (`shipmate doctor` notes
+it), and an environment deleted between the pre-flight and the wave that binds
+it.
 
 ### `.github/shipmate-config.yml` is rejected, or its settings do not take effect
 

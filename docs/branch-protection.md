@@ -89,6 +89,11 @@ cat > "$ruleset" <<'JSON'
 JSON
 ```
 
+The `pull_request` rule must cover every branch a pull request may use as a base,
+not only `~DEFAULT_BRANCH`: a pull request into an uncovered branch has no review
+decision, which the apply path reads as no review required. Put that rule in a
+second ruleset whose `include` is `["~ALL"]`, or list each base branch here.
+
 This body is the team posture. For a single maintainer, set
 `required_approving_review_count` to `0` and turn `require_last_push_approval` off
 (the single-maintainer paragraph below has why). Turning `require_code_owner_review`

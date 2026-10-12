@@ -363,9 +363,10 @@ actual work here:
   (that is also what makes a consumer in another organization work). The apply and
   deploy paths reach the key the same way: a `workflow_dispatch` on the default
   branch, which comment-ops sends and any workflow's own `GITHUB_TOKEN` can also
-  send (`apply.yml`'s `review` job binds it to its pull request, `CONTRACT.md`
-  §Comment-ops), or `push` to the default branch. Nothing that starts from
-  arbitrary branch content ever does.
+  send, or `push` to the default branch. Either way the run executes only the
+  default branch's workflow code, and `apply.yml`'s `review` job binds an apply
+  dispatch's inputs to its pull request (`CONTRACT.md` §Comment-ops). The unlock
+  dispatch reaches no key (`docs/hardening.md` names its residual).
 - **The one job that holds the key runs no consumer repository content.** That
   `summary` job checks out nothing, and a consumer cannot add a checkout: they
   call the workflow, they do not own its steps.

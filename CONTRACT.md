@@ -314,10 +314,10 @@ never used.
   - Deliberately out of scope, so what it promises stays readable: the
     plan-side environments, which engine `plan.yml` and `drift.yml` bind but
     this pre-flight does not enumerate; an environment whose branch policy names
-    the wrong branches, or that carries no protection rules, which is `shipmate
-    doctor`'s subject; and an
-    environment created or deleted in the window between the pre-flight and the
-    wave jobs.
+    the wrong branches, which nothing checks (`shipmate doctor` warns on a
+    missing policy only); an environment with no approval rules, which `shipmate
+    doctor` notes; and an environment created or deleted in the window between
+    the pre-flight and the wave jobs.
 - **No env names in workflow YAML — ever.** Workflow files must not
   hardcode `staging`, `production`, or any other environment name. Workflows
   discover environments dynamically from stack tags (see Tag grammar,
@@ -1327,7 +1327,10 @@ can reach `apply.yml` without passing comment-ops: its `guard` job admits any
 `review` job reads the pull request `pr_number` names and refuses the run, before
 any wave, unless it is open, not a draft, not from another repository, and its
 head commit equals the dispatched `ref`, compared whole. A merged pull request is
-refused too: its plans apply through the merge deploy. Then each apply form's
+refused too: its plans apply through the merge deploy. So at dispatch time the
+`review` job re-checks open, draft, same repository, head and review decision;
+mergeability is checked at comment time only, because GitHub computes it
+asynchronously and a conflict bypasses no review. Then each apply form's
 detect refuses a cell it would apply whose apply check records another pull
 request, or none (§Apply-match fingerprint); the remedy is a re-plan on this pull
 request.

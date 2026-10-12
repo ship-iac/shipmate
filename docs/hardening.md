@@ -14,14 +14,19 @@ workflow mints no App token, writes no gate status, submits no App review and
 completes no apply check (row 16; `docs/github-app.md` §Key-exposure boundary)
 — but the gate's verdict is still computed from artifacts the branch's own plan
 run produced (see "What none of this fixes"). It can still dispatch the apply
-verb with its own `GITHUB_TOKEN`, which `apply.yml`'s `guard` job admits as a
-bot actor. That dispatch is bound to a pull request: the `review` job refuses it
-unless the pull request is open, not a draft, from this repository, and its head
-commit is the dispatched `ref`, and detect refuses a cell whose apply check
-records another pull request (`CONTRACT.md` §Comment-ops).
+and unlock verbs with its own `GITHUB_TOKEN`, which the `guard` jobs of
+`apply.yml` and `unlock.yml` admit as a bot actor. The apply dispatch is bound
+to a pull request: the `review` job refuses it unless the pull request is open,
+not a draft, from this repository, and its head commit is the dispatched `ref`,
+and detect refuses a cell whose apply check records another pull request or
+none (`CONTRACT.md` §Comment-ops). The unlock dispatch is not bound: it takes
+`{environment, ref}` and runs `tofu init` over that ref inside `<env>-apply`
+with OIDC. It escalates nothing beyond a comment-time `shipmate unlock`, which
+needs only write access and runs the same init over a pull request head; write
+access and the `<env>-apply` environment's reviewers bound both.
 
-Beyond that dispatch, two things a branch-pushed workflow *can* still do, absent
-the rest of this checklist:
+Beyond those dispatches, two things a branch-pushed workflow *can* still do,
+absent the rest of this checklist:
 
 - declare `environment: <env>-apply` itself and claim that environment's cloud
   credentials directly, if that environment carries no deployment branch policy
@@ -99,6 +104,7 @@ compares all five of those expressions, whole, against the fence `getting-starte
 | 18 | An identity named by each environment you want cloud access from, with separate `aws.plan` and `aws.apply` roles in `.github/shipmate-config.yml` (§7–9) | Environment table | Opting in per environment. An identity is a role named once and picked up by every environment that names it, so one edit to `identities.<name>` retargets every environment carrying `identity: <name>`; `shipmate doctor`'s roles lines show what the branch's table resolves for each environment, and in them a referenced role shows the value comment-ops resolves, where a `shipmate-engine` Environment variable of the same name wins; a cell never reads that variable. What each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate-config.yml` (`branch-protection.md`) |
 | 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops`, and on each drift file's `drift` job | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
+| 21 | Row 4's `pull_request` rule targets every branch a pull request may use as a base (for example `~ALL`) | Branch ruleset | An unreviewed apply: a pull request into a branch no review rule covers has no review decision, which the apply path reads as no review required |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
 default split naming (`<env>-plan` + `<env>-apply`). A logical env whose
@@ -1083,9 +1089,12 @@ cannot lie about its own head repository, and a number naming a fork's pull
 request resolves to that fork, which the `build-matrix` step refuses in `detect`
 exactly as it refuses one on the autoplan leg. What the dispatch leg does add is
 `pull-requests: read` on the one job that looks the pull request up, and an
-authorization step ahead of it: only a comment from a commenter whose permission
-on the repository is `write` or `admin` is dispatched at all
-([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops).
+authorization step ahead of comment-ops' dispatch: it sends one only for a
+commenter whose permission on the repository is `write` or `admin`
+([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops). A branch-pushed workflow can
+send the same dispatch with its own `GITHUB_TOKEN`; the run still executes only
+the default branch's workflow code, and derives every fact from the number as
+above.
 
 **The outer of the two fork guards does not reach this leg, which is why step
 order matters here.** The `actions/checkout` refusal above was measured under
