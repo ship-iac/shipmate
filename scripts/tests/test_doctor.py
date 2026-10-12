@@ -6,7 +6,7 @@ import sys
 
 import pytest
 from _loader import ENGINE, SCRIPTS, load_script
-from _shipmate import load_workflow_text
+from _shipmate import codeowners_rules, load_workflow_text
 from test_env_config_yaml_fixtures import CANONICAL
 
 doctor = load_script("doctor")
@@ -253,6 +253,7 @@ def _quiet_new_probes():
         f"repos/{_ENGINE_REPO}/commits/v9.9.9": {"sha": _SHA},
         _CONFIG_READ: _wf_file(CANONICAL),
         _CONFIG_ON_DEFAULT: _wf_file(CANONICAL),
+        f"repos/{_REPO}/contents/.github/CODEOWNERS": _wf_file("* @o/ops\n"),
     }
 
 
@@ -1048,7 +1049,8 @@ def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypat
 
 
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
-    """`_gh_json`'s exception carries `gh`'s stderr as free text doctor never parses, so a
+    """`_gh_json`'s exception carries `gh`'s stderr as free text the environment probes never
+    parse, so a
     403 or 5xx on an environment that IS in the listing is indistinguishable from a 404;
     swallowing it lets the report say the settings probes found no problems. Listing first
     separates the two: present-but-unreadable is a note that names the environment."""
@@ -1106,7 +1108,8 @@ def _engine_env_responses(env=None, policies=None, listed=True):
 def test_missing_engine_environment_warns(monkeypatch):
     """The headline case: `shipmate-engine` absent from the environments listing itself,
     never a per-environment-read failure standing in for absence -- `_gh_json`'s
-    exception carries `gh`'s stderr as free text doctor never parses, so doctor cannot tell
+    exception carries `gh`'s stderr as free text the environment probes never parse, so they
+    cannot tell
     that apart from a 403 or a 5xx on an environment that does exist."""
     monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(listed=False))
     out = doctor._engine_environment_warnings(_ctx())
@@ -4563,6 +4566,7 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
     expected = (
         doctor._gate_rule_warnings,
         doctor._review_rule_warnings,
+        doctor._codeowners_warnings,
         doctor._environment_warnings,
         doctor._env_protection_warnings,
         doctor._engine_environment_warnings,
@@ -4580,6 +4584,130 @@ def test_the_probe_registry_is_exactly_this(monkeypatch):
 
 def _rules_only(*rules):
     return {f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": list(rules)}
+
+
+_CODEOWNERS_AT = {
+    path: f"repos/{_REPO}/contents/{path}"
+    for path in (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+}
+_NOT_FOUND = SystemExit("::error::command failed (1): gh api x\ngh: Not Found (HTTP 404)")
+_COMMENTS_ONLY = "# owners\n\n   # none yet\n"
+#: The whole finding for a `.github/CODEOWNERS` with no rule line, hand-written.
+_NO_OWNERS_IN_GITHUB_DIR = (
+    "`.github/CODEOWNERS` on `main` holds no rule line, so no path has a code owner and the "
+    "code-owner review the `pull_request` rule on `main` requires holds no pull request: "
+    "GitHub asks an owner only for changed files an entry owns. Add an entry covering the "
+    "paths the IaC lives in (docs/hardening.md #3 to #5)."
+)
+
+
+def _codeowners_gh(code_owner, files):
+    """A `_gh_json` serving the rules and `files` ({path: text or SystemExit}); any other
+    path, the absent ones included, answers 404."""
+    responses = _rules_only(_pull_request_rule(code_owner=code_owner))
+    asked = []
+
+    def gh(path):
+        asked.append(path)
+        if path in responses:
+            return responses[path]
+        answer = {_CODEOWNERS_AT[k]: v for k, v in files.items()}.get(path, _NOT_FOUND)
+        if isinstance(answer, SystemExit):
+            raise answer
+        return _wf_file(answer)
+
+    gh.asked = asked  # ty: ignore[unresolved-attribute]
+    return gh
+
+
+@pytest.mark.parametrize(
+    ("text", "owns"),
+    [(_COMMENTS_ONLY, False), (_COMMENTS_ONLY + "* @o/ops\n", True), ("", False)],
+    ids=["comments-only", "rule-after-comments", "empty"],
+)
+def test_codeowners_rules_is_any_line_neither_blank_nor_a_comment(text, owns):
+    """Mutation: count a `#` line as a rule."""
+    assert codeowners_rules(text) is owns
+
+
+def test_code_owner_review_over_a_codeowners_with_no_rule_line_warns(monkeypatch):
+    """Mutation: count a `#` line as a rule in `codeowners_rules`."""
+    monkeypatch.setattr(
+        doctor, "_gh_json", _codeowners_gh(True, {".github/CODEOWNERS": _COMMENTS_ONLY})
+    )
+    assert doctor._codeowners_warnings(_ctx()) == [(doctor.WARNING, _NO_OWNERS_IN_GITHUB_DIR)]
+
+
+def test_code_owner_review_over_a_codeowners_with_a_rule_line_is_silent(monkeypatch):
+    """Mutation: return the warning whatever the file holds."""
+    files = {".github/CODEOWNERS": _COMMENTS_ONLY + "* @o/ops\n"}
+    monkeypatch.setattr(doctor, "_gh_json", _codeowners_gh(True, files))
+    assert doctor._codeowners_warnings(_ctx()) == []
+
+
+def test_code_owner_review_with_no_codeowners_anywhere_warns_naming_the_absence(monkeypatch):
+    """Every path answers 404. Mutation: return `[]` after the loop."""
+    monkeypatch.setattr(doctor, "_gh_json", _codeowners_gh(True, {}))
+    assert doctor._codeowners_warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            (
+                "no `CODEOWNERS` file is on `main` (`.github/`, the root or `docs/`), so no "
+                "path has a code owner and the code-owner review the `pull_request` rule on "
+                "`main` requires holds no pull request: GitHub asks an owner only for changed "
+                "files an entry owns. Add an entry covering the paths the IaC lives in "
+                "(docs/hardening.md #3 to #5)."
+            ),
+        )
+    ]
+
+
+def test_the_first_codeowners_in_github_order_is_the_one_judged(monkeypatch):
+    """GitHub reads `.github/CODEOWNERS` before the root one, so a comment-only file there
+    hides a root file with rules, and a 404 there moves on to the root.
+
+    Mutation: read `CODEOWNERS` first in `CODEOWNERS_PATHS`.
+    """
+    files = {".github/CODEOWNERS": _COMMENTS_ONLY, "CODEOWNERS": "* @o/ops\n"}
+    monkeypatch.setattr(doctor, "_gh_json", _codeowners_gh(True, files))
+    assert doctor._codeowners_warnings(_ctx()) == [(doctor.WARNING, _NO_OWNERS_IN_GITHUB_DIR)]
+    monkeypatch.setattr(doctor, "_gh_json", _codeowners_gh(True, {"CODEOWNERS": "* @o/ops\n"}))
+    assert doctor._codeowners_warnings(_ctx()) == []
+
+
+def test_without_code_owner_review_no_codeowners_is_read(monkeypatch):
+    """Mutation: drop the `code_owner_review` check, so the file is read and warned on."""
+    gh = _codeowners_gh(False, {".github/CODEOWNERS": _COMMENTS_ONLY})
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor._codeowners_warnings(_ctx()) == []
+    assert gh.asked == [f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100"]
+
+
+def test_a_failed_codeowners_read_degrades_that_probe_alone(monkeypatch):
+    """A 500 is not absence: the probe degrades, and every other probe of a healthy
+    repository stays silent. Mutation: `continue` on every failure, so the 500 reads as no
+    file and warns."""
+    responses = {
+        f"repos/{_REPO}/rules/branches/{_BRANCH}?per_page=100": _gate_rule(),
+        f"repos/{_REPO}/environments?per_page=100": _environments(
+            "dev-eu-plan", "dev-eu-apply", "shipmate-engine"
+        ),
+        **_quiet_new_probes(),
+    }
+    failed = SystemExit("::error::command failed (1): gh api x\ngh: Server Error (HTTP 500)")
+
+    def gh(path):
+        if path == _CODEOWNERS_AT[".github/CODEOWNERS"]:
+            raise failed
+        return responses[path]
+
+    monkeypatch.setattr(doctor, "_gh_json", gh)
+    assert doctor.warnings(_ctx()) == [
+        (
+            doctor.WARNING,
+            "doctor could not verify the CODEOWNERS settings (command failed (1)): probe skipped.",
+        )
+    ]
 
 
 def test_review_rule_healthy_is_silent(monkeypatch):
@@ -5275,7 +5403,8 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
 
 def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
     """Existence comes from the environments *listing*, never from the per-environment
-    read's exception: it carries `gh`'s stderr as free text doctor never parses, so a 404
+    read's exception: it carries `gh`'s stderr as free text the environment probes never parse,
+    so a 404
     for a declared-but-absent environment is indistinguishable from a 403, and the degrade
     note would claim it exists. Asserted on the paths requested, since a probe that read the
     absent environment and swallowed the error also returns []."""

@@ -55,6 +55,8 @@ from _shipmate import (
     ENGINE_ENV,
     REPO_RE,
     _load,
+    code_owner_review,
+    codeowners_rules,
     gate_check,
     gh_json,
     load_workflow_text,
@@ -63,6 +65,7 @@ from _shipmate import (
     yaml_error_text,
 )
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
+from _shipmate import CODEOWNERS_PATHS as _CODEOWNERS_PATHS
 from _shipmate import run as _run
 
 ec = _load("env-config")
@@ -491,8 +494,8 @@ _PLAN_TIER = (
 
 
 def _gate_entry(ctx):
-    """(the `shipmate / gate` status-check entry, its rule parameters, the review count),
-    the first two None when no rule requires the gate.
+    """(the `shipmate / gate` status-check entry, its rule parameters, the review count,
+    whether code-owner review is required), the first two None when no rule requires the gate.
 
     The effective rules across every ruleset, read the way `doctor`'s gate probe reads
     them -- including the assumption, inherited from it and not verified here, that this
@@ -501,11 +504,12 @@ def _gate_entry(ctx):
     `_reconcile_ruleset` writes for one that cannot have rulesets at all.
 
     The review count is the highest `required_approving_review_count` over every
-    `pull_request` rule in the same response, 0 when none.
+    `pull_request` rule in the same response, 0 when none; code-owner review is on when any
+    of them sets `require_code_owner_review`.
     """
     branch = urllib.parse.quote(ctx["default_branch"], safe="")
     rules = _gh_json(f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
-    return (*gate_check(rules, GATE), review_count(rules))
+    return (*gate_check(rules, GATE), review_count(rules), code_owner_review(rules))
 
 
 def _post_failure(e):
@@ -543,7 +547,7 @@ def _reconcile_ruleset(ctx):
     deferred; one already required is reported.
     """
     subject = "gate ruleset"
-    chk, params, ctx["review_count"] = _gate_entry(ctx)
+    chk, params, ctx["review_count"], ctx["code_owner_review"] = _gate_entry(ctx)
     app_id = int(ctx["app_id"])
     branch = ctx["default_branch"]
     if chk is None and not ctx["shim_on_default"]:
@@ -678,10 +682,6 @@ def _reconcile_shim(ctx):
         report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:
         report("differs", filename, "differs beyond its pin, not overwritten")
-
-
-#: GitHub's own search order for the file.
-_CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 
 
 def _passphrase_item(ctx):
@@ -827,8 +827,16 @@ def _review_item(ctx, names, shared=()):
 
 
 def _codeowners_item(ctx):
+    """`cannot check` for a checkout `CODEOWNERS` with a rule line: which paths it owns is
+    GitHub's matching. `todo` when there is no file, and while code-owner review is required,
+    when the first file GitHub reads holds no rule line either: that review then holds no
+    pull request."""
     item = "CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS"
     found = [p for p in _CODEOWNERS_PATHS if (pathlib.Path(ctx["root"]) / p).is_file()]
+    text = (pathlib.Path(ctx["root"]) / found[0]).read_text("utf-8", "replace") if found else ""
+    if ctx["code_owner_review"] and not codeowners_rules(text):
+        finding = dr.no_code_owners(found[0] if found else None, ctx["default_branch"])
+        return "todo", item, textwrap.wrap(finding, width=80)
     if not found:
         return "todo", item, [f"Add one in `{_CODEOWNERS_PATHS[0]}`."]
     return (
@@ -1231,6 +1239,7 @@ def main(argv=None):
         "shim_on_default": _shim_on_default(repo, default_branch),
         "apply_envs": {},
         "review_count": 0,
+        "code_owner_review": False,
         "tags_by_stack": tags_by_stack,
         "tagged": bm.tagged_workloads(stacks_by_env, tags_by_stack),
         "tree_errors": [],

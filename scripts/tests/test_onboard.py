@@ -104,6 +104,7 @@ def ctx(**over):
         "table": None,
         "apply_envs": {},
         "review_count": 0,
+        "code_owner_review": False,
         "tags_by_stack": {},
         "tagged": {"dev-eu": frozenset()},
         "tree_errors": [],
@@ -366,7 +367,7 @@ def test_a_branch_with_a_slash_is_accepted_and_quoted_in_every_api_path(monkeypa
     shim = "repos/o/r/contents/.github/workflows/shipmate.yml?ref=release%2F1.x"
     fake = make_gh({rules: [], shim: {"type": "file"}})
     monkeypatch.setattr(onboard, "_run", fake)
-    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None, 0)
+    assert onboard._gate_entry(ctx(default_branch="release/1.x")) == (None, None, 0, False)
     assert onboard._shim_on_default("o/r", "release/1.x") is True
     assert fake.calls == [["gh", "api", rules], ["gh", "api", shim]]
 
@@ -2367,22 +2368,28 @@ def test_the_reviewer_verdict_ignores_the_engine_environment():
 
 def test_the_review_count_reads_past_the_gate_rule(monkeypatch):
     """`_gate_entry` returns at the gate's own `required_status_checks` rule, so a count
-    taken in that loop never sees a `pull_request` rule listed after it.
+    taken in that loop never sees a `pull_request` rule listed after it. The code-owner flag
+    is read from the same rule.
 
-    Mutation: take the count inside the loop, before its `return`.
+    Mutations: take the count inside the loop, before its `return`; return `False` for the
+    code-owner flag.
     """
     rules = [
         {
             "type": "required_status_checks",
             "parameters": {"required_status_checks": [{"context": onboard.GATE}]},
         },
-        {"type": "pull_request", "parameters": {"required_approving_review_count": 1}},
+        {
+            "type": "pull_request",
+            "parameters": {"required_approving_review_count": 1, "require_code_owner_review": True},
+        },
     ]
     monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
     assert onboard._gate_entry(ctx()) == (
         {"context": onboard.GATE},
         {"required_status_checks": [{"context": onboard.GATE}]},
         1,
+        True,
     )
 
 
@@ -2496,7 +2503,7 @@ def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
     """GitHub reads `CODEOWNERS` from `.github/`, the root or `docs/`; which paths an entry
     covers is not reimplemented here.
 
-    Mutation: drop `docs/CODEOWNERS` from `_CODEOWNERS_PATHS`.
+    Mutation: drop `docs/CODEOWNERS` from `CODEOWNERS_PATHS`.
     """
     item = "CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS"
     assert onboard._codeowners_item(ctx(root=tmp_path)) == (
@@ -2511,6 +2518,82 @@ def test_codeowners_outside_github_is_found_but_not_matched(tmp_path):
         item,
         ["`docs/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's."],
     )
+
+
+CODEOWNERS_ITEM = "CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS"
+COMMENTS_ONLY = "# owners\n\n   # none yet\n"
+#: The whole item for a comment-only `.github/CODEOWNERS` under code-owner review, hand-written.
+NO_OWNERS_ITEM = (
+    "todo",
+    CODEOWNERS_ITEM,
+    [
+        "`.github/CODEOWNERS` on `main` holds no rule line, so no path has a code owner",
+        "and the code-owner review the `pull_request` rule on `main` requires holds no",
+        "pull request: GitHub asks an owner only for changed files an entry owns. Add an",
+        "entry covering the paths the IaC lives in (docs/hardening.md #3 to #5).",
+    ],
+)
+GITHUB_DIR_EXISTS = (
+    "cannot check",
+    CODEOWNERS_ITEM,
+    ["`.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's."],
+)
+
+
+def write_codeowners(root, files):
+    for path, text in files.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text, encoding="utf-8")
+
+
+def test_code_owner_review_over_a_codeowners_with_no_rule_line_is_todo(tmp_path):
+    """Mutation: count a `#` line as a rule in `codeowners_rules`."""
+    write_codeowners(tmp_path, {".github/CODEOWNERS": COMMENTS_ONLY})
+    assert onboard._codeowners_item(ctx(root=tmp_path, code_owner_review=True)) == NO_OWNERS_ITEM
+
+
+def test_code_owner_review_over_a_codeowners_with_a_rule_line_cannot_be_checked(tmp_path):
+    """Mutation: return the `todo` whatever the file holds."""
+    write_codeowners(tmp_path, {".github/CODEOWNERS": COMMENTS_ONLY + "* @o/ops\n"})
+    assert onboard._codeowners_item(ctx(root=tmp_path, code_owner_review=True)) == (
+        GITHUB_DIR_EXISTS
+    )
+
+
+def test_code_owner_review_with_no_codeowners_is_todo_naming_the_absence(tmp_path):
+    """Mutation: keep today's bare `Add one in` line ahead of the code-owner check."""
+    assert onboard._codeowners_item(ctx(root=tmp_path, code_owner_review=True)) == (
+        "todo",
+        CODEOWNERS_ITEM,
+        [
+            "no `CODEOWNERS` file is on `main` (`.github/`, the root or `docs/`), so no path",
+            "has a code owner and the code-owner review the `pull_request` rule on `main`",
+            "requires holds no pull request: GitHub asks an owner only for changed files an",
+            "entry owns. Add an entry covering the paths the IaC lives in (docs/hardening.md",
+            "#3 to #5).",
+        ],
+    )
+
+
+def test_without_code_owner_review_a_comment_only_codeowners_is_as_before(tmp_path):
+    """Mutation: drop the `code_owner_review` check, so the file is judged and reported."""
+    write_codeowners(tmp_path, {".github/CODEOWNERS": COMMENTS_ONLY})
+    assert onboard._codeowners_item(ctx(root=tmp_path)) == GITHUB_DIR_EXISTS
+
+
+def test_the_first_codeowners_in_github_order_is_the_one_judged(tmp_path):
+    """Mutation: read `CODEOWNERS` first in `CODEOWNERS_PATHS`."""
+    write_codeowners(tmp_path, {".github/CODEOWNERS": COMMENTS_ONLY, "CODEOWNERS": "* @o/ops\n"})
+    assert onboard._codeowners_item(ctx(root=tmp_path, code_owner_review=True)) == NO_OWNERS_ITEM
+
+
+def test_the_ruleset_reconciler_stores_the_code_owner_flag(monkeypatch):
+    """Mutation: unpack the flag into `_` in `_reconcile_ruleset`."""
+    rules = [{"type": "pull_request", "parameters": {"require_code_owner_review": True}}]
+    monkeypatch.setattr(onboard, "_run", make_gh({RULES: rules}))
+    c = ctx()
+    onboard._reconcile_ruleset(c)
+    assert c["code_owner_review"] is True
 
 
 LOCK_ITEM = "Provider lock files"

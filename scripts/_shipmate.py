@@ -8,11 +8,11 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 Also holds the subprocess runner, its ``::error::`` wrapper and ``gh api`` reader for the CI
 scripts, the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
 share, and the UTF-8 switch for their console output. It also holds the pull-request number
-check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the ruleset and
-environment readers and the names ``doctor`` and ``onboard`` share, reads the per-cell
-``cell.json`` summaries, builds this run's page link and joins a capped list of names. It
-parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both importing
-PyYAML only when first called.
+check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the ruleset,
+environment and ``CODEOWNERS`` readers and the names ``doctor`` and ``onboard`` share, reads
+the per-cell ``cell.json`` summaries, builds this run's page link and joins a capped list of
+names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both
+importing PyYAML only when first called.
 """
 
 import functools
@@ -64,6 +64,26 @@ def review_count(rules):
     """The highest `required_approving_review_count` over the `pull_request` rules, 0 if none."""
     pull = [r.get("parameters") or {} for r in rules if r.get("type") == "pull_request"]
     return max((p.get("required_approving_review_count") or 0 for p in pull), default=0)
+
+
+def code_owner_review(rules):
+    """True when any `pull_request` rule in a `rules/branches` response requires code-owner
+    review."""
+    return any(
+        (r.get("parameters") or {}).get("require_code_owner_review")
+        for r in rules
+        if r.get("type") == "pull_request"
+    )
+
+
+#: GitHub's own lookup order for the file: the first one present is the one it reads.
+CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+
+
+def codeowners_rules(text):
+    """True when `CODEOWNERS` text holds a rule line: one neither blank nor a `#` comment.
+    Which paths a rule matches is GitHub's matching, not read here."""
+    return any(ln.strip() and not ln.strip().startswith("#") for ln in text.splitlines())
 
 
 def approval_rules(env):

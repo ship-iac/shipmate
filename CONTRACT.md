@@ -1194,12 +1194,12 @@ and this run (`at an unknown commit in [run #<n>](<run url>)` when the commit
 is not a 40-character lowercase hex SHA). Each finding and harvested annotation
 carries the same circles. Under any verdict but 🟢 the report ends with the help
 hint ``Comment `shipmate help` for the available commands.``; a 🟢 report has
-no footer. It combines thirteen live settings probes, listed in
+no footer. It combines fourteen live settings probes, listed in
 `docs/troubleshooting.md` §shipmate doctor with their scopes and degrade paths,
 and a harvest of the warning and failure annotations GitHub already recorded on
 this commit's workflow runs (shipmate's own and any other Actions workflow run
 on that commit; third-party-app-authored check runs are excluded).
-Only twelve of the thirteen probes can produce a finding from the plan path's own
+Only thirteen of the fourteen probes can produce a finding from the plan path's own
 `annotate`-mode invocation: the App-permission-drift probe reports only on a
 full-manifest permission-set mint, which only `shipmate doctor` attempts. An
 empty harvest is
@@ -1321,7 +1321,7 @@ Together they are strictly stronger than a base-divergence check: a plan
 the base branch never moved under, but that state moved under, is refused too.
 
 Review policy is read from GitHub's own `reviewDecision` — the verdict the
-branch ruleset computes. shipmate never parses `CODEOWNERS` and keeps no
+branch ruleset computes. The apply path never parses `CODEOWNERS` and keeps no
 second copy of the rule: whatever the ruleset requires (approval counts,
 code-owner review, last-push approval) is what the apply path waits for, and
 there is no owners parser here to disagree with it.

@@ -354,8 +354,9 @@ reviewer requirement appears on a real pull request opened by someone who does n
 own the changed files: at count 0 with one individual owner, GitHub showed no
 code-owner requirement on a pull request whose author owns them (measured
 2026-10-11; team ownership and higher counts were not). `shipmate doctor` warns when the rule
-requires approvals but not code-owner review — it does not check `CODEOWNERS`
-coverage, and it never fails a run, so that is a warning, not enforcement.
+requires approvals but not code-owner review, and when code-owner review is required
+over a `CODEOWNERS` that owns no path at all. It does not check which paths the
+entries cover, and it never fails a run, so that is a warning, not enforcement.
 
 **GitHub reads `CODEOWNERS` from the pull request's base branch,** so narrowing or
 widening ownership never applies to the pull request carrying the edit — it has to

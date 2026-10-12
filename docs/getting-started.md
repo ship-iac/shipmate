@@ -181,8 +181,9 @@ before a run does: `unmanaged stacks` names the stacks with no `env/*` tag,
 `stack tags` the tag refusals a plan would raise and the workload tags that
 disagree with the table, and `drift sweeps` the cells no drift file sweeps. It marks
 each item `ok`, `todo` or `cannot check` from what the run read, and only a
-`todo` prints what to do. Three items can be `cannot check`: the App
-installation, which only an App JWT can read; once a `CODEOWNERS` file
+`todo` prints what to do. Four items can be `cannot check`: the App
+installation, which only an App JWT can read; the custom deployment protection
+rules on `shipmate-engine`, when they cannot be listed; once a `CODEOWNERS` file
 exists, whether its entries cover the IaC, the workflows,
 `/.github/shipmate-config.yml` and `/.github/CODEOWNERS`, which is GitHub's
 matching; and `drift sweeps`, when a drift file's `tags` query cannot be read,
