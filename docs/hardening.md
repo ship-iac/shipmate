@@ -886,8 +886,10 @@ run itself is at, and a job that declares this environment from a non-default
 ref is refused *before its first step* — no runner, nothing handed over. The
 same job on `pull_request_target` is admitted, because that trigger evaluates at
 the base branch ref. Both halves were run against a live repository rather than
-read out of documentation; they are what the plan path's trusted `summary` job
-rests on.
+read out of documentation, with the plain `environment: shipmate-engine`
+binding that preceded `deployment: false`; they are what the plan path's trusted
+`summary` job rests on. With `deployment: false`, the non-default-branch refusal
+was re-probed on 2026-10-12; the admitted half was not.
 
 **No deployment, and no custom deployment protection rule.** Every engine job
 binds this environment as `{ name: shipmate-engine, deployment: false }`, so a
@@ -902,7 +904,8 @@ custom deployment protection rule, so `shipmate-engine` takes none.
 branch policy is typed: the entry naming your default branch is a branch
 policy, and it matches no tag, so a workflow run at `refs/tags/…` that declares
 this environment is refused before a runner starts and is handed nothing —
-measured, not assumed. Someone who can push tags but not branches therefore
+measured with the plain `environment: shipmate-engine` binding, before
+`deployment: false`; a tag push was not re-probed with `deployment: false`. Someone who can push tags but not branches therefore
 cannot reach the key either. What breaks that is adding a tag policy to
 `shipmate-engine` — for release automation, say. Do not: a tag is a ref anyone
 with tag-push access can create at any commit, including one carrying a workflow

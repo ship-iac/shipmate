@@ -1123,9 +1123,11 @@ Nothing was dispatched. As for a plan, push the branch to this repository
 
 ### Every engine job fails before its first step
 
-The plan run's `summary`, the comment-ops `ops` job, apply's `review`, the
-trailing completion jobs and drift's `issues` job fail before any step runs, so
-no `shipmate / gate` status, sticky comment or comment reply is written.
+All eight jobs that bind `shipmate-engine` fail before any step runs: `plan.yml`
+`summary` and `gate-hold`, `comment-ops.yml` `ops`, `apply.yml` `review` and
+`summary`, `apply-env-level.yml` `complete`, `deploy.yml` `summary` and
+`drift.yml` `issues`. No `shipmate / gate` status, sticky comment or comment
+reply is written.
 
 `shipmate-engine` has an enabled custom deployment protection rule. Every engine
 job binds that environment with `deployment: false`, which creates no deployment,
