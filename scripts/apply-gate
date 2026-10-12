@@ -36,6 +36,20 @@ APPLY_PREFIX = "apply / "
 #: name, and `CONTRACT.md` §Check names states it.
 CALLER_PREFIX = "shipmate / "
 DONE_CONCLUSIONS = {"success", "neutral"}
+#: A pull request number as the apply record carries it and the apply dispatch sends it.
+PR_NUMBER_RE = re.compile(r"[1-9][0-9]*")
+
+
+def env_pr_number():
+    """`SHIPMATE_PR_NUMBER`, refused unless it is a decimal pull request number with no
+    leading zero: the apply record carries it, and the apply refuses a record whose number
+    is not the dispatch's own."""
+    value = os.environ.get("SHIPMATE_PR_NUMBER", "")
+    if not PR_NUMBER_RE.fullmatch(value):
+        raise SystemExit(
+            f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {value!r})"
+        )
+    return value
 
 
 def check_name(stack, env):
@@ -130,17 +144,19 @@ def app_done_names(check_run_lines, app_id):
 
 
 def plan_records(check_run_lines, app_id):
-    """Map each App-authored apply check name to `(plan run id, plan-text sha256)`, read from
-    the `external_id` record pending-checks wrote on it. Runs app_done_names' primitives --
-    parse_jsonl, the fail-closed from_app filter, and latest_by_name's newest-by-id grouping --
-    so only the newest App-authored run per name is consulted.
+    """Map each App-authored apply check name to `(plan run id, plan-text sha256, pull request
+    number)`, read from the `external_id` record pending-checks wrote on it. Runs
+    app_done_names' primitives -- parse_jsonl, the fail-closed from_app filter, and
+    latest_by_name's newest-by-id grouping -- so only the newest App-authored run per name is
+    consulted.
 
     A name is absent when that newest run carries no decodable record: a null/empty/non-JSON
     external_id (a bare hex digest included), or one that decodes to something other than an
     object. No JSONDecodeError escapes. A present name's run is its decimal-digit `plan_run`
-    and its digest the 64-lowercase-hex `plan_sha256` that the trusted summary job published;
-    either is None when the record carries no such value. Absence is not an error here: each
-    caller decides per cell what a missing run or an unbound plan text means.
+    and its digest the 64-lowercase-hex `plan_sha256` that the trusted summary job published,
+    and its pull request the `pr` string `PR_NUMBER_RE` matches; each is None when the record
+    carries no such value. Absence is not an error here: each caller decides per cell what a
+    missing run, an unbound plan text or a missing pull request means.
 
     `--plan-runs` prints `{name: run}` for every record whose run is not None and does not
     narrow it for any other reason: authorize reads that projection as PLAN_RUN_JSON and
@@ -157,9 +173,11 @@ def plan_records(check_run_lines, app_id):
             continue
         plan_run = record.get("plan_run")
         digest = record.get("plan_sha256")
+        pr = record.get("pr")
         out[name] = (
             plan_run if isinstance(plan_run, str) and re.fullmatch(r"[0-9]+", plan_run) else None,
             digest if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) else None,
+            pr if isinstance(pr, str) and PR_NUMBER_RE.fullmatch(pr) else None,
         )
     return out
 
@@ -178,7 +196,7 @@ def main():
     app_id = os.environ["SHIPMATE_APP_ID"]
     if mode:
         records = plan_records(sys.stdin, app_id)
-        print(json.dumps({name: run for name, (run, _) in records.items() if run is not None}))
+        print(json.dumps({name: run for name, (run, _, _) in records.items() if run is not None}))
         return
     runs = app_runs(sys.stdin, app_id)
     v = verdict(runs)

@@ -8,6 +8,9 @@ inputs:
   head-sha:
     description: PR head SHA carrying the pending apply checks.
     required: true
+  pr-number:
+    description: The pull request the apply was authorized on. A pending apply check whose record names another pull request, or none, refuses.
+    required: true
   app-id:
     description: shipmate App id (repo/org variable); only checks authored by this App count as done.
     required: true
@@ -47,6 +50,7 @@ runs:
         GH_TOKEN: ${{ github.token }}
         SHIPMATE_ENV: ${{ inputs.environment }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_REVIEW_DECISION: ${{ inputs.review-decision }}
         SHIPMATE_GITHUB_VARS: ${{ inputs.github-vars }}

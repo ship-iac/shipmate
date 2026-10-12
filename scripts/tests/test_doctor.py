@@ -2240,7 +2240,7 @@ def _apply_check(cid, name, plan_run):
         "name": name,
         "status": "queued",
         "started_at": "t",
-        "external_id": json.dumps({"plan_run": plan_run}),
+        "external_id": json.dumps({"plan_run": plan_run, "pr": "8"}),
         "app": {"id": int(_APP_ID)},
         "app_slug": "shipmate",
     }
@@ -2452,12 +2452,12 @@ def test_a_check_run_in_the_projected_shape_yields_its_plan_run():
             "name": "apply / stacks/app / dev-eu",
             "status": "completed",
             "started_at": "2026-08-24T00:00:00Z",
-            "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"}),
+            "external_id": json.dumps({"fingerprint": "a" * 64, "plan_run": "1281", "pr": "8"}),
             "app": {"id": 4326562},
         }
     )
     mapping = load_script("apply-gate").plan_records([line], "4326562")
-    assert mapping == {"apply / stacks/app / dev-eu": ("1281", None)}
+    assert mapping == {"apply / stacks/app / dev-eu": ("1281", None, "8")}
 
 
 def test_the_plan_records_are_read_from_the_listing_before_any_download(monkeypatch, tmp_path):
@@ -2499,7 +2499,11 @@ def test_a_non_decimal_plan_run_id_never_reaches_gh(monkeypatch, tmp_path):
     monkeypatch.setattr(
         doctor.ag,
         "plan_records",
-        lambda lines, app_id: {"a": ("12/../x", None), "b": ("7", None), "c": (None, None)},
+        lambda lines, app_id: {
+            "a": ("12/../x", None, "8"),
+            "b": ("7", None, "8"),
+            "c": (None, None, None),
+        },
     )
     calls = _run_check_ids(monkeypatch, tmp_path, {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: ""})
     assert [argv for argv, _ in calls if argv[:3] == ("gh", "run", "download")] == [
@@ -2531,9 +2535,21 @@ def test_unreadable_plan_records_skip_the_downloads(monkeypatch, tmp_path, capsy
 #: where the newer check names run 1290; a cell only the older run planned; and one whose newest
 #: check carries a legacy bare-hex record, naming no plan run.
 _PLANNED = [
-    ("apply / stacks/app / dev-eu", 1, json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"})),
-    ("apply / stacks/app / dev-eu", 2, json.dumps({"fingerprint": "a" * 64, "plan_run": "1290"})),
-    ("apply / stacks/db / dev-us", 3, json.dumps({"fingerprint": "a" * 64, "plan_run": "1281"})),
+    (
+        "apply / stacks/app / dev-eu",
+        1,
+        json.dumps({"fingerprint": "a" * 64, "plan_run": "1281", "pr": "8"}),
+    ),
+    (
+        "apply / stacks/app / dev-eu",
+        2,
+        json.dumps({"fingerprint": "a" * 64, "plan_run": "1290", "pr": "8"}),
+    ),
+    (
+        "apply / stacks/db / dev-us",
+        3,
+        json.dumps({"fingerprint": "a" * 64, "plan_run": "1281", "pr": "8"}),
+    ),
     ("apply / stacks/cache / dev-ap", 4, "b" * 64),
 ]
 #: What each run's `cell-summary.<env>.<slug>` artifact holds. The two copies of the replanned

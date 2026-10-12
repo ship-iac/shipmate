@@ -2287,7 +2287,7 @@ def _download_cells(repo, lines, app_id):
         records = {}
     # The id reaches a `gh` argv and a directory name, so only a decimal string passes.
     run_ids = sorted(
-        {r for r, _ in records.values() if isinstance(r, str) and re.fullmatch(r"[0-9]+", r)}
+        {r for r, _, _ in records.values() if isinstance(r, str) and re.fullmatch(r"[0-9]+", r)}
     )
     pathlib.Path("doctor-cells").mkdir(exist_ok=True)
     for rid in run_ids:

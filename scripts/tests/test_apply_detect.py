@@ -6,6 +6,7 @@ from _detect_fixtures import (
     APP_ID,
     HEAD,
     PLAN_SHA,
+    PR_NUMBER,
     _apply_check,
     _record,
 )
@@ -212,6 +213,7 @@ def _apply_env(monkeypatch, tmp_path, table=None, reads=None, **overrides):
         "GITHUB_REPOSITORY": "acme/iac",
         "SHIPMATE_ENV": "dev-eu",
         "SHIPMATE_HEAD_SHA": "a" * 40,
+        "SHIPMATE_PR_NUMBER": PR_NUMBER,
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
         "SHIPMATE_REVIEW_DECISION": "APPROVED",
@@ -817,4 +819,82 @@ def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
         f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
         "cells=2 completed=0 pending=2 waves=[1, 1, 0, 0, 0, 0, 0, 0] empty=False"
         in capsys.readouterr().out.splitlines()
+    )
+
+
+def _foreign_message(listed):
+    return (
+        f"::error::apply aborted: the plan recorded for {listed} was not made on pull request "
+        "#8, so this apply is refused. Re-plan on this pull request (push or comment `shipmate "
+        "plan`), then apply again; if another open pull request shares this head commit, the "
+        "newest plan decides which one may apply."
+    )
+
+
+def test_a_record_for_another_or_no_pull_request_refuses_naming_each():
+    """`stacks/app` records PR 7 and `stacks/dns` records none; both are named with what they
+    record. Mutation: skip records without `pr` (`if pr and pr != pr_number`) -- the `none`
+    entry drops, red."""
+    lines = _lines(_apply_check("stacks/app", pr="7"), _apply_check("stacks/dns", pr=None))
+    with pytest.raises(SystemExit) as exc_info:
+        ad.refuse_foreign_records(_TWO_CELLS, lines, APP_ID, "8")
+    assert str(exc_info.value) == _foreign_message(
+        "apply / stacks/app / dev-eu (pull request #7), "
+        "apply / stacks/dns / dev-eu (pull request none)"
+    )
+
+
+@pytest.mark.parametrize(("recorded", "dispatched"), [("18", "8"), ("1", "18"), ("7", "8")])
+def test_a_pull_request_number_is_compared_whole(recorded, dispatched):
+    """One number a substring of the other still refuses. Mutations: `pr_number not in pr`
+    (`("18", "8")` passes, red); `pr not in pr_number` (`("1", "18")` passes, red)."""
+    with pytest.raises(SystemExit):
+        ad.refuse_foreign_records(
+            _TWO_CELLS[:1], _lines(_apply_check("stacks/app", pr=recorded)), APP_ID, dispatched
+        )
+
+
+def test_records_for_this_pull_request_pass():
+    """Mutation: refuse unconditionally -- red."""
+    lines = _lines(_apply_check("stacks/app"), _apply_check("stacks/dns"))
+    assert ad.refuse_foreign_records(_TWO_CELLS, lines, APP_ID, PR_NUMBER) is None
+
+
+def test_main_refuses_a_pending_cell_recorded_for_another_pull_request(monkeypatch, tmp_path):
+    """Mutation: delete the `refuse_foreign_records` call in `main` -- red."""
+    _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", pr="7")])
+    with pytest.raises(SystemExit) as exc_info:
+        ad.main()
+    assert str(exc_info.value) == _foreign_message("apply / stacks/app / dev-eu (pull request #7)")
+
+
+def test_main_never_consults_an_applied_cells_record(monkeypatch, tmp_path):
+    """`stacks/dns` is applied, and its completed check records PR 7. Only cells still to be
+    applied are bound to this pull request. Mutation: call `refuse_foreign_records` on `cells`,
+    before `filter_pending` -- red."""
+    out = _apply_env(monkeypatch, tmp_path)
+    _stub_apply(
+        monkeypatch,
+        {"stacks/app": set(), "stacks/dns": set()},
+        [
+            _apply_check("stacks/app"),
+            _check(name="apply / stacks/dns / dev-eu", external_id=_record("42", pr="7")),
+        ],
+    )
+    ad.main()
+    assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
+        "stacks/app"
+    ]
+
+
+def test_main_refuses_an_unusable_pull_request_number(monkeypatch, tmp_path):
+    """Mutation: read `SHIPMATE_PR_NUMBER` unvalidated in `main` -- the foreign-record refusal
+    names `#12a` instead, red."""
+    _apply_env(monkeypatch, tmp_path, SHIPMATE_PR_NUMBER="12a")
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
+    with pytest.raises(SystemExit) as exc_info:
+        ad.main()
+    assert str(exc_info.value) == (
+        "::error::SHIPMATE_PR_NUMBER must be a pull request number (got: '12a')"
     )

@@ -97,7 +97,8 @@ def with_plan_runs(cells, check_run_lines, app_id):
     named = []
     for c in cells:
         name = ag.check_name(c["stack"], c["environment"])
-        named.append((c, name, *records.get(name, (None, None))))
+        run, digest, _ = records.get(name, (None, None, None))
+        named.append((c, name, run, digest))
     missing = [name for _, name, run, _ in named if not run]
     if missing:
         raise SystemExit(
@@ -117,6 +118,30 @@ def with_plan_runs(cells, check_run_lines, app_id):
             "new pull request touching them plans and applies them afresh."
         )
     return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest in named]
+
+
+def refuse_foreign_records(cells, check_run_lines, app_id, pr_number):
+    """Refuse when any of `cells` has a newest App-authored record whose pull request is not
+    `pr_number`, whole-string compared: a dispatch pairing one pull request's number with
+    another's head must not apply a plan made for that other pull request.
+
+    Run on `with_plan_runs`' output, so every cell here has a record and "none" means the
+    record carries no usable `pr`, which refuses too. The deploy path never calls this: its
+    pull request comes from the merge commit, not from a dispatch input."""
+    records = ag.plan_records(check_run_lines, app_id)
+    foreign = []
+    for c in cells:
+        name = ag.check_name(c["stack"], c["environment"])
+        _, _, pr = records.get(name, (None, None, None))
+        if pr != pr_number:
+            foreign.append(f"{name} (pull request {'#' + pr if pr else 'none'})")
+    if foreign:
+        raise SystemExit(
+            f"::error::apply aborted: the plan recorded for {', '.join(foreign)} was not made "
+            f"on pull request #{pr_number}, so this apply is refused. Re-plan on this pull "
+            "request (push or comment `shipmate plan`), then apply again; if another open pull "
+            "request shares this head commit, the newest plan decides which one may apply."
+        )
 
 
 def cells_from_checks(check_names, stacks_by_env, tags_by_stack):
@@ -263,6 +288,7 @@ def bare_main():
     head = os.environ["SHIPMATE_HEAD_SHA"]
 
     validate_head_sha(head)
+    pr_number = ag.env_pr_number()
 
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     app_id = os.environ["SHIPMATE_APP_ID"]
@@ -293,6 +319,7 @@ def bare_main():
     runnable = with_plan_runs(
         [c for c in pending if c["environment"] not in dropped], lines, app_id
     )
+    refuse_foreign_records(runnable, lines, app_id, pr_number)
     bm.refuse_workload_gaps(runnable, table)
     # From `runnable`, never from `pending & ungated`: an ungated env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
@@ -351,6 +378,7 @@ def main():
 
     validate_head_sha(head)
     validate_env(env)
+    pr_number = ag.env_pr_number()
 
     # Structure-validated before the refusal reads `gated`; `validate` re-runs it
     # below, which costs nothing and parses nothing again.
@@ -381,6 +409,7 @@ def main():
     cells = bm.stamp_rows(cells, table, "apply")
 
     pending = with_plan_runs(filter_pending(cells, completed), lines, app_id)
+    refuse_foreign_records(pending, lines, app_id, pr_number)
     bm.refuse_workload_gaps(pending, table)
 
     # Before the padding, whose over-depth refusal is where this line helps most.

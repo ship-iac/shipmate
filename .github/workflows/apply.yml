@@ -132,6 +132,7 @@ jobs:
         with:
           environment: ${{ inputs.environment }}
           head-sha: ${{ inputs.ref }}
+          pr-number: ${{ inputs.pr_number }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           # Passed through raw, never defaulted: an empty decision means the review signal never
           # arrived, which refuses a targeted apply and holds every environment of a bare one.

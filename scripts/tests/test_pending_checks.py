@@ -4,12 +4,13 @@ import json
 import os
 
 import pytest
-from _loader import load_script
+from _loader import action_yaml, load_script
 
 pc = load_script("pending-checks")
 
 HEAD = "a" * 40
 RUN_ID = "32668143791"
+PR = "4217"
 
 # Hand-written: the bytes and the digest below were computed once, off the tree, so an
 # assertion cannot be satisfied by the same hashlib call the code under test makes. The
@@ -23,6 +24,7 @@ SHA_B = "016cf8c84f06456af2ec0f1866e01c39d69ecd581daddf619528719a31e3dbc8"
 @pytest.fixture(autouse=True)
 def _plan_run(monkeypatch):
     monkeypatch.setenv("GITHUB_RUN_ID", RUN_ID)
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", PR)
 
 
 def _write_cell(tmp_path, env, slug, plan_text=PLAN_A, **cell):
@@ -36,6 +38,7 @@ def _write_cell(tmp_path, env, slug, plan_text=PLAN_A, **cell):
 
 
 def test_changed_cell_yields_queued_body(tmp_path):
+    """Mutation: omit `"pr"` from the record -- red."""
     _write_cell(
         tmp_path,
         "dev-eu",
@@ -51,6 +54,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
         "fingerprint": "f" * 64,
         "plan_run": RUN_ID,
         "plan_sha256": SHA_A,
+        "pr": PR,
     }
     assert body == {
         "name": "apply / stacks/app / dev-eu",
@@ -83,6 +87,7 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         "fingerprint": "0" * 64,
         "plan_run": RUN_ID,
         "plan_sha256": SHA_B,
+        "pr": PR,
     }
 
 
@@ -143,11 +148,13 @@ def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
         fingerprint="f" * 64,
     )
     monkeypatch.setenv("GITHUB_RUN_ID", "409181227")
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", "31")
     (body,) = pc.bodies(str(tmp_path), HEAD)
     assert json.loads(body["external_id"]) == {
         "fingerprint": "f" * 64,
         "plan_run": "409181227",
         "plan_sha256": SHA_A,
+        "pr": "31",
     }
 
 
@@ -167,6 +174,62 @@ def test_unusable_plan_run_id_fails_loud(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_RUN_ID", "not-a-run-id")
     with pytest.raises(SystemExit, match="GITHUB_RUN_ID"):
         pc.bodies(str(tmp_path), HEAD)
+
+
+@pytest.mark.parametrize("value", ["", "12a", "0", "012", " 8"])
+def test_an_unusable_pull_request_number_refuses_naming_the_variable(tmp_path, monkeypatch, value):
+    """apply-detect refuses a record whose `pr` is not the dispatch's, so a record written with
+    a malformed number strands its cell. Mutation: drop the validation (`pr =
+    os.environ.get("SHIPMATE_PR_NUMBER", "")`) -- red."""
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-app",
+        stack="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="f" * 64,
+    )
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", value)
+    with pytest.raises(SystemExit) as exc_info:
+        pc.bodies(str(tmp_path), HEAD)
+    assert str(exc_info.value) == (
+        f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {value!r})"
+    )
+
+
+def test_an_unset_pull_request_number_refuses(tmp_path, monkeypatch):
+    """Explicit literal beside the parametrization. Mutation: drop the validation -- red."""
+    _write_cell(
+        tmp_path,
+        "dev-eu",
+        "stacks-app",
+        stack="stacks/app",
+        environment="dev-eu",
+        changed=True,
+        fingerprint="f" * 64,
+    )
+    monkeypatch.delenv("SHIPMATE_PR_NUMBER")
+    with pytest.raises(SystemExit) as exc_info:
+        pc.bodies(str(tmp_path), HEAD)
+    assert (
+        str(exc_info.value) == "::error::SHIPMATE_PR_NUMBER must be a pull request number (got: '')"
+    )
+
+
+def test_the_publishing_step_hands_the_script_exactly_these_names():
+    """The whole `env:` of the summary step running pending-checks. Mutation: drop
+    `SHIPMATE_PR_NUMBER` from it -- red."""
+    (step,) = [
+        s
+        for s in action_yaml("summary")["runs"]["steps"]
+        if "scripts/pending-checks" in str(s.get("run", ""))
+    ]
+    assert step["env"] == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
+        "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
+    }
 
 
 def test_cells_sorted_and_multiple(tmp_path):
