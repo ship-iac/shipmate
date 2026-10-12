@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 - **Each apply check records the pull request its plan was made on, and an apply refuses a cell whose check records another pull request or none; re-plan on the pull request to clear it.**
 - **`shipmate apply` and `shipmate unlock` refuse a pull request whose head is in a fork or a deleted repository.**
 - **An apply or unlock refuses, before it starts, to bind a GitHub Environment with no deployment branch policy.**
+- **`shipmate doctor` warns on an apply or shared GitHub Environment with no deployment branch policy; run `scripts/onboard` to scope it to the default branch.**
 
 ## [0.44.2] — 2026-10-11
 
