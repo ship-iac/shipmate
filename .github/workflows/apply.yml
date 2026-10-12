@@ -36,8 +36,8 @@ jobs:
     # approval dismissed in between holds.
     needs: [guard]
     # Re-reads the decision server-side, away from branch-controlled HCL (CONTRACT.md
-    # §Comment-ops). A targeted `apply-detect` refuses and a bare one holds on it; this job only
-    # fetches it.
+    # §Comment-ops). A targeted `apply-detect` refuses and a bare one holds on it. A hand-made
+    # dispatch never reaches decide(), so this job also binds `ref` to the open PR's own head.
     runs-on: ubuntu-slim
     # Reaches the App key the same way `summary` does.
     environment: shipmate-engine
@@ -64,15 +64,37 @@ jobs:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           OWNER: ${{ github.repository_owner }}
           PR_NUMBER: ${{ inputs.pr_number }}
+          REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          # NONE: no review rule, or code-owner review owns no changed file. Nothing here proves the
-          # PR exists, and a number matching none returns a null `pullRequest`, no errors, exit 0:
-          # MISSING_PR. Targeted, apply-detect refuses it; bare, it holds every env.
+          # A number matching no PR returns a null `pullRequest` with exit 0; select() makes that
+          # empty output. Every @tsv field is non-empty: `read` collapses adjacent tabs.
           # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
-          rd=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision}}}' \
+          pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision state isDraft isCrossRepository headRefOid}}}' \
             -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
-            --jq '.data.repository.pullRequest | if type == "object" then (.reviewDecision // "NONE") else "MISSING_PR" end')
+            --jq '.data.repository.pullRequest | select(. != null) | [.state, .isDraft, .isCrossRepository, .headRefOid, (.reviewDecision // "NONE")] | @tsv')
+          if [[ -z "$pr" ]]; then
+            echo "::error::Pull request #$PR_NUMBER does not exist in this repository; nothing applies."
+            exit 1
+          fi
+          IFS=$'\t' read -r state draft cross head rd <<< "$pr"
+          if [[ "$state" != OPEN ]]; then
+            echo "::error::Pull request #$PR_NUMBER is $state, not OPEN; nothing applies. A merged pull request's plans apply through the merge deploy."
+            exit 1
+          fi
+          if [[ "$draft" != false ]]; then
+            echo "::error::Pull request #$PR_NUMBER is a draft; nothing applies. Mark it ready for review first."
+            exit 1
+          fi
+          if [[ "$cross" != false ]]; then
+            echo "::error::Pull request #$PR_NUMBER comes from a fork; nothing applies."
+            exit 1
+          fi
+          if [[ "$head" != "$REF" ]]; then
+            echo "::error::Pull request #$PR_NUMBER head is $head, but this dispatch names $REF; nothing applies. Comment \`shipmate apply\` on the pull request."
+            exit 1
+          fi
+          # NONE: no review rule, or code-owner review owns no changed file.
           echo "decision=$rd" >> "$GITHUB_OUTPUT"
 
   detect:
