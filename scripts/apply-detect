@@ -87,12 +87,18 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
     check that exists. It refuses rather than applying unverified because an
     accepted absence is a guard the plan cell switches off by omitting a file.
 
-    The refusals are shared by all three detects, so they are worded for both
-    paths: deploy's candidates come from the git diff rather than from the
-    checks, so a cell here may have no apply check whatsoever, and its pull
-    request is already merged — a remedy phrased as "re-plan on this pull
-    request" would send a post-merge operator to a pull request that no longer
-    accepts commits."""
+    The run and digest refusals are shared by all three detects, so they are
+    worded for both paths: deploy's candidates come from the git diff rather
+    than from the checks, so a cell here may have no apply check whatsoever, and
+    its pull request is already merged — a remedy phrased as "re-plan on this
+    pull request" would send a post-merge operator to a pull request that no
+    longer accepts commits.
+
+    `pr_number` binds each record to the dispatching pull request, and only the
+    pre-merge paths pass one: a cell whose check records another pull request,
+    or none, refuses with a re-plan remedy. Deploy passes None, which skips the
+    check, because its pull request comes from `commits/{sha}/pulls` on the
+    merged head rather than from a dispatch input."""
     records = ag.plan_records(check_run_lines, app_id)
     named = []
     for c in cells:

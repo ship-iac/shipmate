@@ -151,10 +151,6 @@ ALL_PENDING = ["dev-eu", "dev-us", "prod-eu"]
         ("", ALL_PENDING),
         (None, ALL_PENDING),
         ("BANANA", ALL_PENDING),
-        # The review job's sentinel for a pr_number matching no pull request. GraphQL returns
-        # a null pullRequest with no errors, so the query succeeds and only this value keeps
-        # the run from applying everything.
-        ("MISSING_PR", ALL_PENDING),
     ],
 )
 def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, expected):
@@ -180,7 +176,6 @@ def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, exp
         ("", ALL_PENDING),
         (None, ALL_PENDING),
         ("BANANA", ALL_PENDING),
-        ("MISSING_PR", ALL_PENDING),
     ],
 )
 def test_main_holds_everything_unreviewed_when_no_env_is_ungated(

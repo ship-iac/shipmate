@@ -52,8 +52,9 @@ live probes.
   entry of `.github/shipmate-config.yml`, read from the default branch's copy that every
   run binds from; when that copy cannot be read or is invalid, these environment
   probes are skipped with a note. A shared environment carrying approval rules warns that they stall the plan
-  cells and every drift sweep covering it; its missing approval rules and its branch
-  policy are notes.
+  cells and every drift sweep covering it; its missing approval rules are a note. An apply or shared environment with
+  no deployment branch policy warns, because every apply, unlock and deploy
+  binding it refuses.
 - **The secrets a plan environment holds, names only.** The API never returns a
   value. A plan cell runs branch code with whatever that environment releases
   and control 8 forbids protecting it, so the finding is a note giving the count
