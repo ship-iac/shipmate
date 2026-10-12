@@ -223,6 +223,14 @@ def test_cell_line_escapes_author_controlled_names():
     )
 
 
+def test_cell_line_names_mention_nobody():
+    """Mutation: `_md_escape` for `_md_name` on the stack in `cell_line` -- a live `@acme`.
+    Mutation: the same on the env -- a live `@v`."""
+    assert sc.cell_line("🟡", "@acme/ops/y", "e@v", "+1 ~0 -0") == (
+        "🟡 @<!-- -->acme/ops/y (e@<!-- -->v): +1 ~0 -0"
+    )
+
+
 def test_header_forms():
     """Mutations: dropping `_md_escape` reddens the escaped-environment case; keeping `env` when
     `verb` is empty reddens the empty-verb-with-env case."""
@@ -447,7 +455,7 @@ def test_the_lost_pairs_line_follows_the_unmanaged_line_and_mentions_nobody():
     mention a user or team.
 
     Mutation: drop the lost line from `build_comment` -- it is missing.
-    Mutation: drop the `@` replacement in `names_line` -- both lines carry a live `@acme`."""
+    Mutation: `_md_escape` for `_md_name` in `names_line` -- both lines carry a live `@acme`."""
     lost = {"count": 12, "pairs": ["@acme/ops/y / prod", *(f"s{i:02} / dev" for i in range(9))]}
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "@acme/admins/x"), lost) == (
         HEAD

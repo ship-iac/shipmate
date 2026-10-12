@@ -142,6 +142,14 @@ def _md_escape(s):
     )
 
 
+def _md_name(s):
+    """`_md_escape(s)` with each `@` followed by an empty HTML comment, for a stack or
+    environment name outside a code span, so a name cannot mention a user or team: `&#64;`
+    still renders a mention (GitHub markdown API, 2026-10-12); an empty HTML comment after `@`
+    does not. Inside a code span the comment would show as written."""
+    return _md_escape(s).replace("@", "@<!-- -->")
+
+
 #: Every circle a comment uses, worst first.
 CIRCLES = ("🔴", "🟠", "🟡", "⚪", "🟢")
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -161,9 +169,9 @@ def link(url, text):
 
 def cell_line(circle, stack, env, state, url=None, text=""):
     """`<circle> <stack> (<env>): <state>`, then a space and `link(url, text)` unless `url` is
-    None. `stack` and `env` are `_md_escape`d here; `state` is the caller's and must already be
+    None. `stack` and `env` are `_md_name`d here; `state` is the caller's and must already be
     safe (a blocked reason is escaped by its caller)."""
-    line = f"{circle} {_md_escape(stack)} ({_md_escape(env)}): {state}"
+    line = f"{circle} {_md_name(stack)} ({_md_name(env)}): {state}"
     return line if url is None else f"{line} {link(url, text)}"
 
 
@@ -292,17 +300,15 @@ def names_line(value, key, lead):
     """`lead` with its count, then the first names of build-matrix's `{"count": N, key: [...]}`
     output (at most `UNMANAGED_NAMES` by `_named_output`'s shape check) that fit in
     `UNMANAGED_LINE_CAP` characters, then `, and M more` for the other `count - named`. Each
-    name is `_md_escape`d, then each `@` is followed by an empty HTML comment so a path cannot
-    mention a user or team: `&#64;` still renders a mention (GitHub markdown API, 2026-10-12);
-    an empty HTML comment after `@` does not. When not even the first fits, a fixed sentence
-    names none. Empty for `None` or a zero count."""
+    name is `_md_name`d. When not even the first fits, a fixed sentence names none. Empty for
+    `None` or a zero count."""
     if not value or not value["count"]:
         return ""
     count = value["count"]
     lead = lead.format(count)
     line, names = "", []
     for name in value[key]:
-        names.append(_md_escape(name).replace("@", "@<!-- -->"))
+        names.append(_md_name(name))
         more = count - len(names)
         candidate = f"{lead}: {', '.join(names)}" + (f", and {more} more" if more else "")
         if len(candidate) > UNMANAGED_LINE_CAP:

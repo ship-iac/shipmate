@@ -2112,8 +2112,7 @@ and `lost` outputs, which the same rule reads.
   both. Same caps and fallback as the unmanaged line, ending `; their pairs are
   too long to list here.` A drift sweep and a run with no pull-request base
   have no such line. On both lines each name is escaped like a cell line's
-  stack, and each `@` is followed by an empty HTML comment (`@<!-- -->`), so a
-  path cannot mention a user or team.
+  stack, `@` included.
 - **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the
@@ -2124,7 +2123,10 @@ and `lost` outputs, which the same rule reads.
   the cell's `(stack-path, environment)` pair using the check-name grammar
   above; when the check run cannot be resolved, it is the workflow-run URL. The
   link is raw HTML because a Markdown link renders literally inside
-  `<summary>`.
+  `<summary>`. `<stack>` and `<env>` are escaped, and each `@` in them is
+  followed by an empty HTML comment (`@<!-- -->`), so a stack path cannot
+  mention a user or team; the apply comment's cell lines and its notes'
+  bold cell names do the same.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped

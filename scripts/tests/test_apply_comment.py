@@ -188,6 +188,28 @@ def test_a_blocked_reason_renders_escaped_on_its_bare_line():
     )
 
 
+def test_a_stack_name_mentions_nobody_in_the_apply_comment():
+    """Every place the apply comment prints a cell name outside a code span breaks its `@`.
+
+    Mutation: `_md_escape` for `_md_name` in `cell_line` -- the cell line pings `@acme`.
+    Mutation: the same in `_unrecorded_note` -- the note pings.
+    Mutation: the same in `_lock_cell` -- the lock cell pings."""
+    row = _row(stack="@acme/ops/y", status="blocked", reason="r", apply_text=None)
+    assert _comment([row]) == (
+        f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n"
+        '⚪ @<!-- -->acme/ops/y (dev-eu): blocked: r <a href="https://gh/run/1">logs</a>\n\n' + HINT
+    )
+    rows = [_row(stack="@acme/ops/y", status="unrecorded")]
+    assert ac._unrecorded_note(rows) == (
+        "not recorded: **@<!-- -->acme/ops/y (dev-eu)**. The apply succeeded but its apply "
+        "check is not recorded as complete (it failed, was cancelled, or a newer plan "
+        "re-created it), so `shipmate / gate` stays pending. Re-plan and re-apply."
+    )
+    assert ac._lock_cell(rows[0], {"id": "0f866bdc", "created": ""}) == (
+        "**@<!-- -->acme/ops/y (dev-eu)** (lock **0f866bdc**)"
+    )
+
+
 def test_a_mixed_run_renders_every_status_in_one_comment():
     """Every status across two environments, in `(environment, stack)` order: fold-outs for the
     rows with output, bare lines for the rest, a blank line on both sides of every fold-out, the
