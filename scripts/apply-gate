@@ -30,14 +30,14 @@ import os
 import re
 import sys
 
+from _shipmate import is_pr_number
+
 APPLY_PREFIX = "apply / "
 #: The consumer names its engine-calling job `shipmate`, and GitHub names a called workflow's
 #: check runs `<caller job> / <callee job>`. `shipmate doctor` reports a job carrying another
 #: name, and `CONTRACT.md` §Check names states it.
 CALLER_PREFIX = "shipmate / "
 DONE_CONCLUSIONS = {"success", "neutral"}
-#: A pull request number as the apply record carries it and the apply dispatch sends it.
-PR_NUMBER_RE = re.compile(r"[1-9][0-9]*")
 
 
 def env_pr_number():
@@ -45,7 +45,7 @@ def env_pr_number():
     leading zero: the apply record carries it, and the apply refuses a record whose number
     is not the dispatch's own."""
     value = os.environ.get("SHIPMATE_PR_NUMBER", "")
-    if not PR_NUMBER_RE.fullmatch(value):
+    if not is_pr_number(value):
         raise SystemExit(
             f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {value!r})"
         )
@@ -154,9 +154,9 @@ def plan_records(check_run_lines, app_id):
     external_id (a bare hex digest included), or one that decodes to something other than an
     object. No JSONDecodeError escapes. A present name's run is its decimal-digit `plan_run`
     and its digest the 64-lowercase-hex `plan_sha256` that the trusted summary job published,
-    and its pull request the `pr` string `PR_NUMBER_RE` matches; each is None when the record
-    carries no such value. Absence is not an error here: each caller decides per cell what a
-    missing run, an unbound plan text or a missing pull request means.
+    and its pull request the `pr` string `_shipmate.is_pr_number` accepts; each is None when
+    the record carries no such value. Absence is not an error here: each caller decides per
+    cell what a missing run, an unbound plan text or a missing pull request means.
 
     `--plan-runs` prints `{name: run}` for every record whose run is not None and does not
     narrow it for any other reason: authorize reads that projection as PLAN_RUN_JSON and
@@ -177,7 +177,7 @@ def plan_records(check_run_lines, app_id):
         out[name] = (
             plan_run if isinstance(plan_run, str) and re.fullmatch(r"[0-9]+", plan_run) else None,
             digest if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) else None,
-            pr if isinstance(pr, str) and PR_NUMBER_RE.fullmatch(pr) else None,
+            pr if isinstance(pr, str) and is_pr_number(pr) else None,
         )
     return out
 

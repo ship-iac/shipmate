@@ -450,11 +450,13 @@ def test_plan_records_reads_the_recorded_pull_request(pr):
 
 
 # Each value is truthy or a non-string: "0" and "012" are not pull request numbers, 8 is a JSON
-# number where pending-checks writes a string, and "8 " fails the fullmatch.
-@pytest.mark.parametrize("pr", [None, "", "0", "012", "12a", "8 ", 8, True])
+# number where pending-checks writes a string, "8 " fails the fullmatch, and eleven digits
+# exceed `is_pr_number`'s bound.
+@pytest.mark.parametrize("pr", [None, "", "0", "012", "12a", "8 ", "12345678901", 8, True])
 def test_plan_records_unusable_pull_request_reads_as_none(pr):
     """Mutation: keep any truthy `pr` (`pr if pr else None`); `"0"`, `"012"`, `"12a"`, `8` and
-    `True` turn red. Mutation: drop the `isinstance(pr, str)` guard; `8` and `True` raise."""
+    `True` turn red. Mutation: drop the `isinstance(pr, str)` guard; `8` and `True` raise.
+    Mutation: `re.fullmatch(r"[1-9][0-9]*", pr)` for `is_pr_number(pr)`; `"12345678901"` red."""
     line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64, pr=pr))
     assert ag.plan_records([line], "999") == {
         "apply / stacks/app / dev-eu": ("111", "c" * 64, None)

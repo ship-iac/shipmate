@@ -176,11 +176,12 @@ def test_unusable_plan_run_id_fails_loud(tmp_path, monkeypatch):
         pc.bodies(str(tmp_path), HEAD)
 
 
-@pytest.mark.parametrize("value", ["", "12a", "0", "012", " 8"])
+@pytest.mark.parametrize("value", ["", "12a", "0", "012", " 8", "12345678901"])
 def test_an_unusable_pull_request_number_refuses_naming_the_variable(tmp_path, monkeypatch, value):
     """apply-detect refuses a record whose `pr` is not the dispatch's, so a record written with
     a malformed number strands its cell. Mutation: drop the validation (`pr =
-    os.environ.get("SHIPMATE_PR_NUMBER", "")`) -- red."""
+    os.environ.get("SHIPMATE_PR_NUMBER", "")`) -- red. Mutation: `re.fullmatch(r"[1-9][0-9]*",
+    value)` for `is_pr_number(value)` in `env_pr_number` -- `"12345678901"` red."""
     _write_cell(
         tmp_path,
         "dev-eu",
