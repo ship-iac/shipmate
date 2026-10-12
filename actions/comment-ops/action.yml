@@ -1,5 +1,5 @@
 name: shipmate comment-ops
-description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR satisfies the branch ruleset's review policy + mergeable + reviewed-plan-exists), and react or reject. Outputs feed actions/dispatch. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
+description: Parse a shipmate command comment, authorize it (every verb but `help` needs the commenter's write access to this repository; `apply` additionally requires that the PR comes from this repository, not a fork, and satisfies the branch ruleset's review policy + mergeable + not-draft + reviewed-plan-exists; `unlock` additionally requires that the PR comes from this repository), and react or reject. Outputs feed actions/dispatch. Reads the job's GITHUB_TOKEN, which needs issues:write and pull-requests:write for reactions, refusal comments and pull request reads.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable).
