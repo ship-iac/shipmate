@@ -26,7 +26,8 @@ Probes:
 - GitHub Environments exist for every planned env: the <env>-plan/<env>-apply
   pair, or a single shared <env>.
 - protection shape of those: plan envs open, apply envs reviewed, a shared env
-  open and therefore ungated.
+  open and therefore ungated; an apply or shared env without a deployment branch
+  policy warns.
 - `shipmate-engine`: exists, with a branch policy naming the default branch.
 - secrets held by each declared plan environment.
 - the consumer's workflow files parse as YAML; the other workflow probes skip one that does

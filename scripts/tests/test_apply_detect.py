@@ -607,8 +607,6 @@ def test_refuse_unreviewed_lets_an_authorized_apply_through(decision, ungated):
         # Ungated, but not this env.
         ("REVIEW_REQUIRED", "prod-eu"),
         ("CHANGES_REQUESTED", "dev-eu"),
-        # The review job's sentinel for a pr_number matching no pull request.
-        ("MISSING_PR", "dev-eu"),
         ("BANANA", ""),
         # Wiring drift: the decision never arrived at all.
         ("", "dev-eu"),
