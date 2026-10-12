@@ -17,9 +17,10 @@ pending cells, bucketed into env-levels by the entries' `needs`, after the
 exclusions its docstring names.
 
 A named environment selects the targeted form, scoped to that ONE environment.
-A targeted `shipmate apply <env>` is explicit by design — it never blocks on
-other environments. It passes `waves.env_level_waves` an empty order, which puts
-every cell at env-level 0 and leaves levels 1-3 empty. Before any of that, the
+It does not order by `needs`: it passes `waves.env_level_waves` an empty order,
+which puts every cell at env-level 0 and leaves levels 1-3 empty. A cell that runs
+after a cell pending in another environment waits (`waves.waiting_cells`): it stays
+pending, `waiting_cells` names it, and the rest apply. Before any of that, the
 PR's review decision — read server-side by the `review` job, narrowed by
 `gated: false` on the environment's entry — must authorize this environment, or
 the run refuses.
@@ -153,6 +154,59 @@ def filter_pending(cells, completed_names):
     return [c for c in cells if ag.check_name(c["stack"], c["environment"]) not in completed_names]
 
 
+def pending_tuples(check_names, completed_names, stacks_by_env):
+    """Every (stack, env) whose apply check is on the head and not done, in every env.
+
+    Tuples, never cells: `cells_for_env` refuses a two-workload stack, and another
+    environment's stack must not refuse this run."""
+    return {
+        (p, e)
+        for e, stacks in stacks_by_env.items()
+        for p in paths_with_checks(e, stacks, check_names)
+        if ag.check_name(p, e) not in completed_names
+    }
+
+
+def drop_waiting(cells, waiting):
+    keys = {(w["stack"], w["environment"]) for w in waiting}
+    return [c for c in cells if (c["stack"], c["environment"]) not in keys]
+
+
+def settle(order, stopped, pending, deps, tags, level):
+    """(sorted skipped envs, run cells, waiting cells) at the joint fixpoint of `needs`
+    skips and waiting cells.
+
+    An env with a waiting cell is not fully applying, so it stops its `needs` successors
+    like a stopped env, and each new skip can make more cells wait. Its ready cells still
+    run: it joins `unavailable`, never `skipped`. `unavailable` only grows over a finite
+    set, so the loop ends."""
+    envs = {c["environment"] for c in pending} - stopped
+    present = {(c["stack"], c["environment"]) for c in pending}
+    unavailable, last = set(stopped), None
+    while True:
+        skipped = wv.blocked_envs(order, unavailable, envs)
+        run = [c for c in pending if c["environment"] not in stopped | skipped]
+        waiting = wv.waiting_cells(run, present, deps, tags, level)
+        if (skipped, waiting) == last:
+            return sorted(skipped), run, waiting
+        last = (skipped, waiting)
+        unavailable = stopped | skipped | {w["environment"] for w in waiting}
+
+
+def refuse_inversions(order, stopped, pending, deps, tags, level):
+    """Refuse when a pending cell whose env is neither stopped nor skipped by `needs` runs
+    after a pending cell `needs` puts on a later env-level.
+
+    A held or explicit upstream counts: it is not in this run, so the dependent would
+    apply first. `settle`'s one-pass waiting walk relies on this refusal running first."""
+    skipped = wv.blocked_envs(order, stopped, {c["environment"] for c in pending} - stopped)
+    roots = [c for c in pending if c["environment"] not in stopped | skipped]
+    present = {(c["stack"], c["environment"]) for c in pending}
+    pairs = wv.inversions(roots, present, deps, tags, level)
+    if pairs:
+        raise SystemExit(wv.inversion_error(pairs, order, level))
+
+
 def _check_run_lines(repo, head_sha):
     """The commit's check-runs as JSONL lines, for the apply and unlock name queries."""
     return _run(
@@ -259,7 +313,9 @@ def bare_main():
     the one site that does); a stack with no `env/*` tag is in no environment and
     adds no cell.
 
-    Three exclusions distinguish the bare form from deploy:
+    It refuses a pending cell that runs after a pending cell `needs` puts on a later
+    env-level (`refuse_inversions`). Four exclusions distinguish the bare form from
+    deploy:
     - envs whose entry holds `explicit: true` (typically prod) are removed
       before env-levels are built; their apply checks stay pending, so
       `shipmate / gate` keeps gating the merge until a targeted
@@ -271,7 +327,10 @@ def bare_main():
       level;
     - envs the PR's review decision does not authorize are held until it carries
       an approving review, dropped the same way; an entry holding
-      `gated: false` is exempt from that hold.
+      `gated: false` is exempt from that hold;
+    - cells that run after a pending cell not applying this run wait, named in
+      `waiting_cells`. An env with a waiting cell stops its `needs` successors, and
+      each new skip can make more cells wait: `settle` runs both to one fixpoint.
     """
     repo = os.environ["GITHUB_REPOSITORY"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
@@ -288,7 +347,9 @@ def bare_main():
 
     pending = filter_pending(cells, ag.app_done_names(lines, app_id))
 
+    deps = run_graph_deps()
     order = bm.ec.env_order(table)
+    levels = wv.cell_levels(order, tags_by_stack)
     pending_envs = {c["environment"] for c in pending}
     ungated = bm.ec.ungated_envs(table)
     decision = os.environ.get("SHIPMATE_REVIEW_DECISION", "")
@@ -297,20 +358,15 @@ def bare_main():
     held = sorted(e for e in pending_envs if az._review_reason(decision, e, ungated))
     explicit = bm.ec.explicit_envs(table)
     stopped = pending_envs & set(explicit + held)
-    skipped = sorted(wv.blocked_envs(order, stopped, pending_envs - stopped))
+    refuse_inversions(order, stopped, pending, deps, tags_by_stack, levels)
+    skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels)
     # Every pending explicit env, held or not: the comment names a held one's
     # explicit command under the hold. A held env that is not explicit stays out.
     excluded = sorted(pending_envs & set(explicit))
-    dropped = set(excluded) | set(skipped) | set(held)
-    # The plan runs attach to `runnable`, not `pending`: an excluded or held env's checks
-    # stay pending by design for a later targeted apply, and that apply refuses on its own
-    # over a record-less cell, so refusing here would strand the envs that CAN apply.
-    runnable = with_plan_runs(
-        [c for c in pending if c["environment"] not in dropped],
-        lines,
-        app_id,
-        pr_number=pr_number,
-    )
+    # The plan runs attach to `runnable`, not `pending`: an excluded, held or waiting cell's
+    # check stays pending by design for a later apply, and that apply refuses on its own over
+    # a record-less cell, so refusing here would strand the cells that CAN apply.
+    runnable = with_plan_runs(drop_waiting(run, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(runnable, table)
     # From `runnable`, never from `pending & ungated`: an ungated env can still be
     # excluded or skipped, and claiming it applied is worse than saying nothing.
@@ -330,7 +386,6 @@ def bare_main():
         }
     )
 
-    deps = run_graph_deps()
     # Before the padding, whose over-depth refusal is where this line helps most.
     print(dag_shape_notice(deps))
     per_level = wv.env_level_waves(runnable, order, deps)
@@ -341,7 +396,7 @@ def bare_main():
         f"::notice title=apply-all-detect::head={head} "
         f"cells={len(cells)} pending={len(pending)} envlevels={level_counts} "
         f"excluded_explicit={excluded} skipped_after_explicit={skipped} "
-        f"review_held={held} applied_ungated={applied_ungated} "
+        f"review_held={held} waiting={len(waiting)} applied_ungated={applied_ungated} "
         # The hold cause: an everything-held run is otherwise indistinguishable
         # from a CHANGES_REQUESTED one, and an absent decision (a mis-wired
         # review job) renders visibly as ''.
@@ -355,6 +410,7 @@ def bare_main():
         fh.write(f"review_held_envs={json.dumps(held)}\n")
         fh.write(f"applied_ungated_envs={json.dumps(applied_ungated)}\n")
         fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
+        fh.write(f"waiting_cells={json.dumps(waiting)}\n")
 
 
 def main():
@@ -396,7 +452,14 @@ def main():
     table = bm.env_config(cells, table=table)
     cells = bm.stamp_rows(cells, table, "apply")
 
-    pending = with_plan_runs(filter_pending(cells, completed), lines, app_id, pr_number=pr_number)
+    tag_map = bm.all_tags()
+    all_pending = pending_tuples(names, completed, wv.env_stacks(tag_map))
+    pending = filter_pending(cells, completed)
+    levels = wv.cell_levels(bm.ec.env_order(table), tag_map)
+    waiting = wv.waiting_cells(pending, all_pending, deps, tag_map, levels)
+    # Waiting cells drop before `with_plan_runs`: their checks stay pending for a later
+    # apply, which refuses on its own over a record-less cell.
+    pending = with_plan_runs(drop_waiting(pending, waiting), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(pending, table)
 
     # Before the padding, whose over-depth refusal is where this line helps most.
@@ -406,12 +469,13 @@ def main():
     print(
         f"::notice title=apply-detect::env={env} head={head} "
         f"cells={len(cells)} completed={len(completed)} pending={len(pending)} "
-        f"waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
+        f"waiting={len(waiting)} waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         wv.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
         fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
+        fh.write(f"waiting_cells={json.dumps(waiting)}\n")
 
 
 if __name__ == "__main__":

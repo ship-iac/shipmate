@@ -847,7 +847,8 @@ def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
         (
             f"::notice title=apply-all-detect::head={HEAD} cells=1 pending=1 envlevels=[1, 0, 0, "
             "0] "
-            "excluded_explicit=[] skipped_after_explicit=[] review_held=[] applied_ungated=[] "
+            "excluded_explicit=[] skipped_after_explicit=[] review_held=[] waiting=0 "
+            "applied_ungated=[] "
             "review_decision='APPROVED'"
         )
     ]
@@ -904,3 +905,142 @@ def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
     ]
     assert json.loads(parsed["review_held_envs"]) == ["dev-us", "prod-eu"]
     assert json.loads(parsed["excluded_envs"]) == ["prod-eu"]
+
+
+#: `platform` (dev-eu) runs after `dns`, tagged in dev-us only; `workers` and `box` stand alone.
+_X_TREE = {
+    "dev-eu": ["stacks/platform", "stacks/workers"],
+    "dev-us": ["stacks/dns"],
+    "prod-eu": ["stacks/box"],
+}
+_X_TAGS = {
+    "stacks/platform": ["env/dev-eu"],
+    "stacks/workers": ["env/dev-eu"],
+    "stacks/dns": ["env/dev-us"],
+    "stacks/box": ["env/prod-eu"],
+}
+_X_DEPS = {
+    "stacks/dns": set(),
+    "stacks/platform": {"stacks/dns"},
+    "stacks/workers": set(),
+    "stacks/box": set(),
+}
+_PLATFORM_WAITS = [
+    {
+        "stack": "stacks/platform",
+        "environment": "dev-eu",
+        "after_stack": "stacks/dns",
+        "after_environment": "dev-us",
+    }
+]
+
+
+def _cross_env(tmp_path, monkeypatch, checks, **kw):
+    return _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=[],
+        tree=_X_TREE,
+        tags=_X_TAGS,
+        deps=_X_DEPS,
+        checks=checks,
+        **kw,
+    )
+
+
+def _applied(parsed):
+    return [(c["stack"], c["environment"]) for c in _wave_cells(parsed)]
+
+
+def test_main_holds_only_the_cell_whose_upstream_is_held(tmp_path, monkeypatch):
+    """`dns/dev-us` is held for review, so `platform/dev-eu` waits on it; `workers/dev-eu` has
+    no upstream and applies. The waiting env is not skipped.
+
+    Mutation: in `settle`, add the waiting envs to `skipped`
+    (`... | (unavailable - stopped)`) -- `workers` stops applying and dev-eu is skipped."""
+    parsed = _cross_env(
+        tmp_path,
+        monkeypatch,
+        [
+            _apply_check("stacks/platform", "dev-eu"),
+            _apply_check("stacks/workers", "dev-eu"),
+            _apply_check("stacks/dns", "dev-us"),
+        ],
+        ungated="dev-eu",
+        decision="REVIEW_REQUIRED",
+    )
+    assert _applied(parsed) == [("stacks/workers", "dev-eu")]
+    assert json.loads(parsed["waiting_cells"]) == _PLATFORM_WAITS
+    assert json.loads(parsed["skipped_envs"]) == []
+    assert json.loads(parsed["review_held_envs"]) == ["dev-us"]
+
+
+def test_main_skips_the_needs_successor_of_an_env_with_a_waiting_cell(tmp_path, monkeypatch):
+    """dev-us is explicit, so `platform/dev-eu` waits on `dns/dev-us`; dev-eu is then not fully
+    applying, so prod-eu, which needs it, is skipped and `box/prod-eu` does not apply.
+
+    Mutation: compute `blocked_envs` once in `settle` (pass `stopped` for `unavailable`) --
+    prod-eu applies."""
+    parsed = _cross_env(
+        tmp_path,
+        monkeypatch,
+        [
+            _apply_check("stacks/platform", "dev-eu"),
+            _apply_check("stacks/dns", "dev-us"),
+            _apply_check("stacks/box", "prod-eu"),
+        ],
+        order={"prod-eu": ["dev-eu"]},
+        explicit=["dev-us"],
+        decision="APPROVED",
+    )
+    assert _applied(parsed) == []
+    assert json.loads(parsed["skipped_envs"]) == ["prod-eu"]
+    assert json.loads(parsed["waiting_cells"]) == _PLATFORM_WAITS
+    assert json.loads(parsed["excluded_envs"]) == ["dev-us"]
+
+
+def test_main_refuses_a_cell_after_a_held_upstream_on_a_later_env_level(tmp_path, monkeypatch):
+    """dev-us needs dev-eu, and `platform/dev-eu` runs after `dns/dev-us`, held for review. The
+    held upstream is in no run, so only the pending half of the refusal sees it.
+
+    Mutation: build `present` in `refuse_inversions` from `roots` instead of `pending` -- no
+    refusal, `platform` waits instead."""
+    with pytest.raises(SystemExit) as exc_info:
+        _cross_env(
+            tmp_path,
+            monkeypatch,
+            [_apply_check("stacks/platform", "dev-eu"), _apply_check("stacks/dns", "dev-us")],
+            order={"dev-us": ["dev-eu"]},
+            ungated="dev-eu",
+            decision="REVIEW_REQUIRED",
+        )
+    assert str(exc_info.value) == (
+        "::error::needs orders stacks/platform / dev-eu before stacks/dns / dev-us, which it "
+        "runs after:\n"
+        "- stacks/platform / dev-eu (env-level 0) after stacks/dns / dev-us (env-level 1); "
+        "dev-us's level comes from dev-eu -> dev-us\n"
+        "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
+        "in that chain on the default branch, or retag the stacks so the edge stays inside "
+        "environments that order it."
+    )
+
+
+def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
+    """`platform/dev-eu` already applied, so the inversion with the pending `dns/dev-us` has no
+    cell left to misorder.
+
+    Mutation: pass `cells` instead of `pending` to `refuse_inversions` -- the completed
+    `platform` is a root and the run refuses."""
+    parsed = _cross_env(
+        tmp_path,
+        monkeypatch,
+        [
+            check_run(name="apply / stacks/platform / dev-eu"),
+            _apply_check("stacks/workers", "dev-eu"),
+            _apply_check("stacks/dns", "dev-us"),
+        ],
+        order={"dev-us": ["dev-eu"]},
+        decision="APPROVED",
+    )
+    assert _applied(parsed) == [("stacks/workers", "dev-eu"), ("stacks/dns", "dev-us")]
+    assert json.loads(parsed["waiting_cells"]) == []

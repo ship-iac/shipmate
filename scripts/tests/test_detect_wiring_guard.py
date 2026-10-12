@@ -99,6 +99,7 @@ _APPLY_DETECT_OUTPUTS = {
     "review_held_envs": "${{ steps.d.outputs.review_held_envs }}",
     "applied_ungated_envs": "${{ steps.d.outputs.applied_ungated_envs }}",
     "review_not_required_envs": "${{ steps.d.outputs.review_not_required_envs }}",
+    "waiting_cells": "${{ steps.d.outputs.waiting_cells }}",
 }
 
 #: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, eleven cell steps,
