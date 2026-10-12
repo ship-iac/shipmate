@@ -2128,7 +2128,10 @@ Every comment-ops apply run — targeted `shipmate apply <env>` and bare
 `actions/apply-summary`. Unlike the plan comment above, it is deliberately
 not upserted against a marker: every run's comment is new, so a
 failure-then-retry sequence stays visible as separate comments rather than
-overwriting the evidence of the failure — an audit trail.
+overwriting the evidence of the failure — an audit trail. A run refused or
+cancelled at `apply.yml`'s `review` job (the pull request closed, re-pushed or
+turned draft since the comment) posts no comment and writes no gate: the red run
+is the only signal.
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, one line or fold-out per row, the

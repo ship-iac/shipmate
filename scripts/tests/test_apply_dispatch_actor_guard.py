@@ -10,10 +10,10 @@ have to be told apart:
   apply check records no plan run -- must still reach `summary`, or the developer gets no failure
   comment and no gate refresh at all.
 
-`if: always() && needs.detect.result == 'success'` silenced both. Keying `summary` on `guard`
-instead separates them, and every fan-out job carries `guard` in its `needs` so the rejection
-reaches its `!failure()` clause: a rejected dispatch leaves `detect` skipped, a skipped `detect`
-reads its outputs as empty strings, and the fan-out jobs' `!= 'true'` guards read empty as
+`if: always() && needs.detect.result == 'success'` silenced both. Keying `summary` on `review`,
+which needs `guard`, separates them, and every fan-out job carries `guard` in its `needs` so the
+rejection reaches its `!failure()` clause: a rejected dispatch leaves `detect` skipped, a skipped
+`detect` reads its outputs as empty strings, and the fan-out jobs' `!= 'true'` guards read empty as
 "not empty" and would start on it.
 
 A guard on `deploy.yml`'s `detect` would break every post-merge deploy, where `github.actor` is
@@ -77,7 +77,7 @@ DOWNSTREAM_NEEDS = {
     # nothing here mints the App key.
     "unlock.yml": {"unlock": ["guard", "detect"]},
 }
-SUMMARY_IF = "${{ always() && needs.guard.result == 'success' }}"
+SUMMARY_IF = "${{ always() && needs.review.result == 'success' }}"
 #: Every workflow `actions/dispatch` can target that carries the bot-actor rejection.
 DISPATCH_PATHS = ("apply.yml", "unlock.yml")
 
@@ -177,14 +177,16 @@ def test_deploy_detect_carries_no_bot_actor_guard():
     )
 
 
-def test_apply_summary_is_gated_on_the_guard_and_not_on_detect():
+def test_apply_summary_is_gated_on_the_review_and_not_on_detect():
     """`if: always()` alone runs `summary` regardless of every `needs` conclusion, and
     `summary`'s steps read raw workflow_call inputs (pr_number, ref) rather than anything gated
-    on `detect`. So a bare `always()`, or `always() || needs.guard.result == 'success'`, still
-    unconditionally `true`, would let a rejected dispatch mint the App key and post a pull
-    request comment. Gating on `needs.detect.result` instead is the opposite regression: it also
-    silences every genuine detect failure, so the developer gets no failure comment and no gate
-    refresh. The whole expression is pinned so either escape fails."""
+    on `detect`. So a bare `always()`, or one gated on `guard` alone, would let a dispatch whose
+    `review` refused the `pr_number`/`ref` binding mint the App key, comment on that pull request
+    and refresh its gate. `review` needs `guard`, so its success implies the guard's. Gating on
+    `needs.detect.result` instead is the opposite regression: it also silences every genuine
+    detect failure, so the developer gets no failure comment and no gate refresh. The whole
+    expression is pinned so either escape fails.
+    Mutation: replace the review clause with `needs.guard.result == 'success'` -> red."""
     job = workflow_jobs("apply.yml")["summary"]
     summary_if = job.get("if")
     assert summary_if == SUMMARY_IF, (

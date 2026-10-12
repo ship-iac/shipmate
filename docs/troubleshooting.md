@@ -998,6 +998,9 @@ request's current head commit is the dispatched `ref`, compared whole. A push
 landed between the `shipmate apply` comment and the run. Wait for the new head's
 plan, then comment `shipmate apply` again.
 
+A run refused or cancelled in `review` posts no apply comment and leaves the
+gate as it was: the red run is the only signal.
+
 The same step refuses, also before any wave:
 
 - **`Pull request #<n> is MERGED, not OPEN`** (or `CLOSED`). A merged pull
