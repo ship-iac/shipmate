@@ -84,7 +84,7 @@ def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
     # this cell's plan. Mutation: write `"plan_sha256": run` in `with_plan_runs` -- the
     # digests become run ids, red.
     lines = _lines(_APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256="b" * 64))
-    out = ad.with_plan_runs(_TWO_CELLS, lines, APP_ID)
+    out = ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
     assert out == [
         {
             "stack": "stacks/app",
@@ -110,6 +110,7 @@ def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
             _TWO_CELLS,
             _lines(_APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256=None)),
             APP_ID,
+            pr_number=PR_NUMBER,
         )
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan-text digest recorded for apply / stacks/dns / dev-eu: "
@@ -127,7 +128,7 @@ def test_a_cell_whose_check_names_no_plan_run_refuses():
     # missing-run one: a cell with no check at all is not a cell whose digest went missing.
     # Mutation: raise the missing-digest refusal before the missing-run one -- red.
     with pytest.raises(SystemExit) as exc_info:
-        ad.with_plan_runs(_TWO_CELLS, _lines(_APP_CHECK), APP_ID)
+        ad.with_plan_runs(_TWO_CELLS, _lines(_APP_CHECK), APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == (
         "::error::apply aborted: no plan run recorded for apply / stacks/dns / dev-eu: the "
         "apply check names no plan run to apply from (post-merge, the cell may have no apply "
@@ -833,15 +834,44 @@ def _foreign_message(listed):
 
 def test_a_record_for_another_or_no_pull_request_refuses_naming_each():
     """`stacks/app` records PR 7 and `stacks/dns` records none; both are named with what they
-    record. Mutation: skip records without `pr` (`if pr and pr != pr_number`) -- the `none`
-    entry drops, red."""
+    record. Mutation: skip records without `pr` (`and pr and pr != pr_number`) -- the
+    `stacks/dns` entry drops, red."""
     lines = _lines(_apply_check("stacks/app", pr="7"), _apply_check("stacks/dns", pr=None))
     with pytest.raises(SystemExit) as exc_info:
-        ad.refuse_foreign_records(_TWO_CELLS, lines, APP_ID, "8")
+        ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number="8")
     assert str(exc_info.value) == _foreign_message(
         "apply / stacks/app / dev-eu (pull request #7), "
-        "apply / stacks/dns / dev-eu (pull request none)"
+        "apply / stacks/dns / dev-eu (records no pull request)"
     )
+
+
+def test_a_record_with_no_plan_run_refuses_before_its_pull_request_is_compared():
+    """`stacks/app` records PR 7 and no plan run: the run refusal speaks first, as the digest
+    one does. Mutation: raise the foreign-record refusal before the missing-run one -- red."""
+    lines = _lines(_apply_check("stacks/app", plan_run=None, pr="7"))
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number="8")
+    assert str(exc_info.value) == (
+        "::error::apply aborted: no plan run recorded for apply / stacks/app / dev-eu: the "
+        "apply check names no plan run to apply from (post-merge, the cell may have no apply "
+        "check at all), so the apply is refused. Re-plan these stacks on their pull request, "
+        "then apply again; if that pull request has already merged, a new pull request "
+        "touching them plans and applies them afresh."
+    )
+
+
+def test_no_pull_request_number_never_compares_a_record():
+    """Deploy's call: post-merge the head comes from `commits/{sha}/pulls`, so a record naming
+    PR 7 applies. Mutation: drop `pr_number is not None and` -- red."""
+    lines = _lines(_apply_check("stacks/app", pr="7"))
+    assert ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=None) == [
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "plan_run_id": "123456",
+            "plan_sha256": PLAN_SHA,
+        }
+    ]
 
 
 @pytest.mark.parametrize(("recorded", "dispatched"), [("18", "8"), ("1", "18"), ("7", "8")])
@@ -849,19 +879,24 @@ def test_a_pull_request_number_is_compared_whole(recorded, dispatched):
     """One number a substring of the other still refuses. Mutations: `pr_number not in pr`
     (`("18", "8")` passes, red); `pr not in pr_number` (`("1", "18")` passes, red)."""
     with pytest.raises(SystemExit):
-        ad.refuse_foreign_records(
-            _TWO_CELLS[:1], _lines(_apply_check("stacks/app", pr=recorded)), APP_ID, dispatched
+        ad.with_plan_runs(
+            _TWO_CELLS[:1],
+            _lines(_apply_check("stacks/app", pr=recorded)),
+            APP_ID,
+            pr_number=dispatched,
         )
 
 
 def test_records_for_this_pull_request_pass():
     """Mutation: refuse unconditionally -- red."""
     lines = _lines(_apply_check("stacks/app"), _apply_check("stacks/dns"))
-    assert ad.refuse_foreign_records(_TWO_CELLS, lines, APP_ID, PR_NUMBER) is None
+    assert [
+        c["stack"] for c in ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
+    ] == ["stacks/app", "stacks/dns"]
 
 
 def test_main_refuses_a_pending_cell_recorded_for_another_pull_request(monkeypatch, tmp_path):
-    """Mutation: delete the `refuse_foreign_records` call in `main` -- red."""
+    """Mutation: pass `pr_number=None` to `with_plan_runs` in `main` -- red."""
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", pr="7")])
     with pytest.raises(SystemExit) as exc_info:
@@ -871,8 +906,8 @@ def test_main_refuses_a_pending_cell_recorded_for_another_pull_request(monkeypat
 
 def test_main_never_consults_an_applied_cells_record(monkeypatch, tmp_path):
     """`stacks/dns` is applied, and its completed check records PR 7. Only cells still to be
-    applied are bound to this pull request. Mutation: call `refuse_foreign_records` on `cells`,
-    before `filter_pending` -- red."""
+    applied are bound to this pull request. Mutation: run `with_plan_runs` on `cells` in
+    `main`, before `filter_pending` -- red."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,

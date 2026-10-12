@@ -864,7 +864,7 @@ def _foreign_message(listed):
 
 
 def test_main_refuses_a_runnable_cell_recorded_for_another_pull_request(tmp_path, monkeypatch):
-    """Mutation: delete the `refuse_foreign_records` call in `bare_main` -- red."""
+    """Mutation: pass `pr_number=None` to `with_plan_runs` in `bare_main` -- red."""
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -878,8 +878,8 @@ def test_main_refuses_a_runnable_cell_recorded_for_another_pull_request(tmp_path
 
 def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
     """Every record but dev-eu `stacks/app`'s names PR 7: `stacks/dns` is applied, prod-eu is
-    explicit and dev-us is held for review, so none of them applies this run. Mutation: call
-    `refuse_foreign_records` on `pending` -- red."""
+    explicit and dev-us is held for review, so none of them applies this run. Mutation: pass
+    `pending` to `with_plan_runs` in `bare_main` instead of the `dropped`-filtered list -- red."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,

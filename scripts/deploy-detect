@@ -137,7 +137,7 @@ def main():
     )
     # AFTER the pending filter, as on both pre-merge paths: an applied cell needs no record,
     # so a completed check that carries none never refuses the deploy.
-    pending = ad.with_plan_runs(pending, lines, app_id)
+    pending = ad.with_plan_runs(pending, lines, app_id, pr_number=None)
     bm.refuse_workload_gaps(pending, table)
     deps = ad.run_graph_deps()
     # Before the padding, whose over-depth refusal is where this line helps most.
