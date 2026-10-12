@@ -114,7 +114,8 @@ def refuse_inversions(pending, order, deps):
     """Refuse when a pending cell runs after a pending cell `needs` puts on a later env-level.
 
     Every pending cell of the merge is in the run, so none waits; the refusal applies
-    nothing, and the message names every pending cell the remedy pull request must change."""
+    nothing, and the message names every pending cell. A re-run reads `needs` from the
+    default branch but tags from this commit, so only a retag needs a new pull request."""
     present = {(c["stack"], c["environment"]) for c in pending}
     cells = ", ".join(sorted(f"{s} / {e}" for s, e in present))
     wv.refuse_inversions(
@@ -124,10 +125,11 @@ def refuse_inversions(pending, order, deps):
         bm.all_tags(),
         order,
         remedy=f"This deploy applies nothing, so none of these cells of this merge is "
-        f"applied: {cells}. Fix the `needs` entry or the tags on the default branch, then "
-        "open a new pull request that changes every listed stack (any edit `terramate list "
-        "--changed` marks); its plan and deploy apply them. Re-running this deploy checks "
-        "out the same commit and refuses again.",
+        f"applied: {cells}. A fix by `needs`: merge it, then re-run this deploy, which reads "
+        "`needs` from the default branch and applies these cells. A fix by retagging: tags "
+        "live in this merged commit, so a re-run refuses again; open a new pull request that "
+        "retags the stacks and changes every listed stack (any edit `terramate list "
+        "--changed` marks); its plan and deploy apply them.",
     )
 
 

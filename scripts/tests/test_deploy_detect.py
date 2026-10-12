@@ -676,6 +676,7 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
     `workers / dev-eu` is in no pair and is named all the same: the deploy applies nothing.
 
     Mutation: list only the pairs' cells in the remedy -- `workers / dev-eu` drops out.
+    Mutation: restore the remedy that sends a `needs` fix to a new pull request -- red.
     Mutation: drop the `refuse_inversions` call from `main` -- the deploy writes waves."""
     with pytest.raises(SystemExit) as exc_info:
         _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
@@ -691,10 +692,11 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
         "in that chain on the default branch, or retag the stacks so the edge stays inside "
         "environments that order it. This deploy applies nothing, so none of these cells of "
         "this merge is applied: dns / dev-us, edge / dev-us, gr / dev-eu, platform / dev-eu, "
-        "workers / dev-eu. Fix the `needs` entry or the tags on the default branch, then open "
-        "a new pull request that changes every listed stack (any edit `terramate list "
-        "--changed` marks); its plan and deploy apply them. Re-running this deploy checks out "
-        "the same commit and refuses again."
+        "workers / dev-eu. A fix by `needs`: merge it, then re-run this deploy, which reads "
+        "`needs` from the default branch and applies these cells. A fix by retagging: tags "
+        "live in this merged commit, so a re-run refuses again; open a new pull request that "
+        "retags the stacks and changes every listed stack (any edit `terramate list "
+        "--changed` marks); its plan and deploy apply them."
     )
 
 

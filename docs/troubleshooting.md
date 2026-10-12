@@ -1042,9 +1042,11 @@ chain that sets the later level.
 3. On a refused plan, re-plan the original pull request (push, or comment
    `shipmate plan`). On a refused bare apply, comment `shipmate apply` again.
 
-A refused deploy appends the cells of the merge it left pending. Open a new
-pull request that changes every listed stack; its plan and deploy apply them.
-Re-running the refused deploy checks out the same commit and refuses again.
+A refused deploy appends the cells of the merge it left pending. After a
+`needs` fix merges, re-run the refused deploy: it reads `needs` from the
+default branch and applies them. For a retag, open a new pull request that
+retags the stacks and changes every listed stack; its plan and deploy apply
+them. A re-run reads tags from the merged commit and refuses again.
 
 A targeted `shipmate apply <env>` never refuses this: it does not order by
 `needs`, and a cell whose upstream is pending in another environment waits
