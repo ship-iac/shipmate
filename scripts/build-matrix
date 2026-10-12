@@ -249,7 +249,8 @@ def all_tags():
     """Every stack's tags in one Terramate call, as `parse_metadata` keys them.
 
     Reading the whole tree costs no availability: a stack's `tags` cannot reference
-    `global.*`, and an expression that fails to evaluate there fails `terramate list` too."""
+    `global.*`, and such a reference fails `terramate list` too, so every detect already
+    refuses it. A stack whose `globals` fail to evaluate still prints its tags."""
     return parse_metadata(_run(["terramate", "debug", "show", "metadata"]))
 
 

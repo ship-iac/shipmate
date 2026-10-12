@@ -542,7 +542,8 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     """The whole-tree tag map reaches the cells, and only the workset becomes cells.
 
     Mutations: pass `{}` as the map to `cells_for_env` -- the cell loses its workload; pass
-    the map's keys as the paths -- `stacks/unrelated` becomes a cell."""
+    the map's keys as the paths -- `stacks/unrelated` joins the workset and refuses for want
+    of a plan run."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
