@@ -193,17 +193,6 @@ def settle(order, stopped, pending, deps, tags, level):
         unavailable = stopped | skipped | {w["environment"] for w in waiting}
 
 
-def refuse_inversions(order, run, pending, deps, tags):
-    """Refuse when a cell of `run`, settle's run cells, runs after a pending cell `needs` puts
-    on a later env-level.
-
-    After `settle`, so a cell of an env it skips is no root. A waiting run cell stays one, and
-    a held or explicit upstream counts: the contradiction refuses rather than wait for a
-    review or apply that would only reach this refusal."""
-    present = {(c["stack"], c["environment"]) for c in pending}
-    wv.refuse_inversions(run, present, deps, tags, order)
-
-
 def _check_run_lines(repo, head_sha):
     """The commit's check-runs as JSONL lines, for the apply and unlock name queries."""
     return _run(
@@ -311,8 +300,10 @@ def bare_main():
     adds no cell.
 
     After `settle`, it refuses a run cell that runs after a pending cell `needs` puts on a
-    later env-level (`refuse_inversions`). Four exclusions distinguish the bare form from
-    deploy:
+    later env-level (`waves.refuse_inversions`): a cell of an env `settle` skips is no root. A
+    waiting run cell stays one, and a held or explicit upstream counts, so the contradiction
+    refuses rather than wait for a review or apply that would only reach this refusal. Four
+    exclusions distinguish the bare form from deploy:
     - envs whose entry holds `explicit: true` (typically prod) are removed
       before env-levels are built; their apply checks stay pending, so
       `shipmate / gate` keeps gating the merge until a targeted
@@ -357,7 +348,9 @@ def bare_main():
     explicit = bm.ec.explicit_envs(table)
     stopped = pending_envs & set(explicit + held)
     skipped, run, waiting = settle(order, stopped, pending, deps, tags_by_stack, levels)
-    refuse_inversions(order, run, pending, deps, tags_by_stack)
+    wv.refuse_inversions(
+        run, {(c["stack"], c["environment"]) for c in pending}, deps, tags_by_stack, order
+    )
     # Every pending explicit env, held or not: the comment names a held one's
     # explicit command under the hold. A held env that is not explicit stays out.
     excluded = sorted(pending_envs & set(explicit))

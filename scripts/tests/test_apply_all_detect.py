@@ -1003,8 +1003,8 @@ def test_main_refuses_a_cell_after_a_held_upstream_on_a_later_env_level(tmp_path
     """dev-us needs dev-eu, and `platform/dev-eu` runs after `dns/dev-us`, held for review. The
     held upstream is in no run, so only the pending half of the refusal sees it.
 
-    Mutation: build `present` in `refuse_inversions` from `roots` instead of `pending` -- no
-    refusal, `platform` waits instead."""
+    Mutation: build `bare_main`'s `present` for `wv.refuse_inversions` from `run` instead of
+    `pending` -- no refusal, `platform` waits instead."""
     with pytest.raises(SystemExit) as exc_info:
         _cross_env(
             tmp_path,
@@ -1029,8 +1029,8 @@ def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
     """`platform/dev-eu` already applied, so the inversion with the pending `dns/dev-us` has no
     cell left to misorder.
 
-    Mutation: pass `cells` instead of `pending` to `refuse_inversions` -- the completed
-    `platform` is a root and the run refuses."""
+    Mutation: pass `cells` instead of `run` as `bare_main`'s roots for `wv.refuse_inversions`
+    -- the completed `platform` is a root and the run refuses."""
     parsed = _cross_env(
         tmp_path,
         monkeypatch,
@@ -1046,12 +1046,32 @@ def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
     assert json.loads(parsed["waiting_cells"]) == []
 
 
+def test_main_never_refuses_over_a_completed_upstream(tmp_path, monkeypatch):
+    """`dns/dev-us` already applied, so `platform/dev-eu`, after it on an earlier env-level,
+    has nothing left to wait on or misorder, and applies.
+
+    Mutation: build `bare_main`'s `present` for `wv.refuse_inversions` from `cells` instead of
+    `pending` -- the completed `dns` is present and the run refuses."""
+    parsed = _cross_env(
+        tmp_path,
+        monkeypatch,
+        [
+            _apply_check("stacks/platform", "dev-eu"),
+            check_run(name="apply / stacks/dns / dev-us"),
+        ],
+        order={"dev-us": ["dev-eu"]},
+        decision="APPROVED",
+    )
+    assert _applied(parsed) == [("stacks/platform", "dev-eu")]
+    assert json.loads(parsed["waiting_cells"]) == []
+
+
 def test_main_never_refuses_over_a_cell_of_an_env_settle_skips(tmp_path, monkeypatch):
     """dev-us is explicit, so `platform/dev-eu` waits on `dns/dev-us`; settle then skips
     stg-eu, which needs dev-eu, and prd-eu after it. `app/stg-eu` runs after `db/prd-eu`, a
     later env-level, but applies nothing this run, so nothing refuses and `workers` applies.
 
-    Mutation: take `refuse_inversions`' roots from the pre-settle skip
+    Mutation: take `bare_main`'s roots for `wv.refuse_inversions` from the pre-settle skip
     (`blocked_envs(order, stopped, ...)` over `pending`) -- the run refuses."""
     tree = {
         "dev-eu": ["stacks/platform", "stacks/workers"],
