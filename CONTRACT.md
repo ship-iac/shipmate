@@ -139,7 +139,8 @@ commit-scoped and immune. (The per-unit `plan`/`apply` checks stay check-runs;
 they are not required, so a stale-suite copy is only cosmetic.)
 
 `shipmate / gate` is created (and refreshed on every plan run) by the
-`summary` action, and is completed to success by whichever of these happens
+`summary` action, or held by `plan.yml`'s `gate-hold` when the per-head group
+evicts a pending `summary`, and is completed to success by whichever of these happens
 first, each through `scripts/gate-status` and one at a time per head
 (§Comment-ops, "The aggregate gate"):
 
