@@ -593,7 +593,8 @@ no split of its own.
   with push access: a plan cell runs `terramate`/`tofu` over branch code, which
   is arbitrary code execution with whatever that environment holds. Read-only,
   blast-radius-free credentials only. Assume `SHIPMATE_PLAN_PASSPHRASE` is
-  readable by the same people for the same reason.
+  readable by the same people for the same reason, and with it every plan
+  artifact and cached state entry.
 
   The strongest version of this control is a plan environment with no secret in
   it at all, and it is reachable: name a read-only OIDC role in the
@@ -887,9 +888,10 @@ included, because it compares the policy names against the default branch alone.
 
 The documented file's jobs pass three secrets by name:
 `SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
-writes or reads an encrypted plan artifact (the `plan`, `deploy` and `apply`
-jobs; `unlock` passes neither engine secret), and `SHIPMATE_SECRETS` on every
-job whose callee runs a cell. Nothing
+writes or reads an encrypted plan artifact or encrypted local state (the `plan`,
+`deploy` and `apply` jobs, and each drift file's `drift` job; `unlock` passes
+neither engine secret), and `SHIPMATE_SECRETS` on every job whose callee runs a
+cell. Nothing
 else crosses into a called workflow, because GHA forwards no secret a caller does
 not name.
 
@@ -1152,12 +1154,20 @@ for exactly the exposure control 1 exists to limit.
   drift and apply cells restore, in every environment and on every later pull
   request. Nothing verifies a restored archive: the lock file verifies provider
   packages, not the archive around them, and nothing verifies restored state.
+  Its encryption gives confidentiality, not integrity: AES-256-CTR is
+  unauthenticated, and the check that the entry decrypts to OpenTofu state
+  catches a wrong passphrase or a corrupt entry, not who saved it.
   Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval
   count (see "The gate is an assertion, not a proof"). The cache is per
   repository: put an ungated tier in its own repository to keep it from
-  reaching your gated environments' cells.
+  reaching your gated environments' cells. Reading an entry is not this
+  exposure: any workflow run, a fork's pull request included, can restore a
+  `state/` entry, anyone who can read the repository's Actions runs can download
+  a plan artifact, and both are ciphertext under
+  `SHIPMATE_PLAN_PASSPHRASE` (`CONTRACT.md` §Plan artifact encryption). Whoever
+  holds the passphrase reads both (§7–9).
 - **Unconditional OIDC minting in every cell-running job.** GHA's `permissions:`
   cannot be an expression, so `id-token: write` on the wave, unlock, plan and
   drift jobs is not gated on a role resolving — every consumer, cloud or not, runs

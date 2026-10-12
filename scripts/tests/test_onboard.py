@@ -2035,7 +2035,7 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
 FRESH_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
-todo          SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
+todo          SHIPMATE_PLAN_PASSPHRASE repository secret
     gh secret set SHIPMATE_PLAN_PASSPHRASE
     An organization secret of that name is not visible to this read.
 
@@ -2085,7 +2085,7 @@ todo          adoption pull request
 CONFIGURED_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
-ok            SHIPMATE_PLAN_PASSPHRASE repository secret (optional)
+ok            SHIPMATE_PLAN_PASSPHRASE repository secret
 ok            `.github/shipmate-config.yml`
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
@@ -2199,8 +2199,8 @@ def test_todo_items_leave_the_exit_code_at_0(monkeypatch, tmp_path, capsys):
 
 
 def test_the_passphrase_is_read_from_the_repository_secrets():
-    """Mutation: read `engine_secrets` for it."""
-    item = "SHIPMATE_PLAN_PASSPHRASE repository secret (optional)"
+    """Mutations: read `engine_secrets` for it; put `(optional)` back in the item label."""
+    item = "SHIPMATE_PLAN_PASSPHRASE repository secret"
     placed = ctx(repo_secrets={"SHIPMATE_PLAN_PASSPHRASE"})
     assert onboard._passphrase_item(placed) == ("ok", item, [])
     assert onboard._passphrase_item(ctx()) == (

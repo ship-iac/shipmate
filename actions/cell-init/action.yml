@@ -10,6 +10,10 @@ inputs:
   slug:
     description: The stack path with `/` replaced by `-`, the key the state artifact is stored under.
     required: true
+  plan-passphrase:
+    description: SHIPMATE_PLAN_PASSPHRASE, forwarded to actions/state to decrypt the restored local state. Empty refuses the restore, which runs only for a local backend.
+    required: false
+    default: ""
 outputs:
   cache-hit:
     description: '"true" when the provider cache restore found an exact match. Empty when the stack has no lock file and the restore was skipped.'
@@ -80,3 +84,4 @@ runs:
         env: ${{ inputs.env }}
         mode: restore
         path: ${{ steps.locate-state.outputs.path }}
+        passphrase: ${{ inputs.plan-passphrase }}

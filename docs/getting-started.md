@@ -538,6 +538,7 @@ jobs:
       actions: read
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 ```
 
@@ -582,23 +583,26 @@ where it resolves one, the role's own trust-policy claim condition is the bound
 because the job requests it whether or not the step fires.
 
 **The state path is read from `tofu init`, not configured.** A local backend's
-state is cached at the path `tofu init` records for each stack, and restored
-before every plan and saved after every apply; a remote backend such as this
+state is cached at the path `tofu init` records for each stack, encrypted with
+`SHIPMATE_PLAN_PASSPHRASE`, and restored before every plan and saved after
+every apply; a remote backend such as this
 page's S3 example owns its state, and the engine's state steps are skipped
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
-`SHIPMATE_PLAN_PASSPHRASE` is optional — unset, plan artifacts are stored
-unencrypted. If you set it, set it as a repository or organization secret, or
-as the same value on both `<env>-plan` and `<env>-apply`. An environment secret
-reaches only a job that binds that environment, and a plan cell binds its own
-plan environment, so these placements fail
-([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
+`SHIPMATE_PLAN_PASSPHRASE` is required: it encrypts every plan artifact and a
+local backend's cached state, and a cell without it refuses. Set it as a
+repository or organization secret, or as the same value on both `<env>-plan`
+and `<env>-apply`. An environment secret reaches only a job that binds that
+environment, and a plan cell binds its own plan environment, so these placements
+fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
 - As a variable, every cell refuses it by name.
-- As a secret on `shipmate-engine`, it reaches no cell: no plan or apply cell
-  binds that environment, so plans upload unencrypted with no message.
-- As a secret on `<env>-apply` alone, plans upload unencrypted and every apply
-  in that environment refuses its plaintext-artifact check.
+- As a secret on `shipmate-engine`, it reaches no cell, so every plan cell
+  refuses at `Require the plan passphrase`, before it initializes the stack.
+- As a secret on `<env>-apply` alone, every plan cell in that environment
+  refuses the same way.
+- As a secret on `<env>-plan` alone, every apply in that environment refuses at
+  `Decrypt reviewed plan artifact`.
 
 ## Required — apply
 
@@ -740,9 +744,9 @@ Two reasons, and the second one is a hard failure:
 
 Pass only what each callee declares. `comment-ops.yml` declares
 `SHIPMATE_APP_PRIVATE_KEY` alone — it mints an App token, reads no plan
-artifact, and runs no cell. `plan.yml`, `apply.yml` and
+artifact, and runs no cell. `plan.yml`, `drift.yml`, `apply.yml` and
 `deploy.yml` declare `SHIPMATE_PLAN_PASSPHRASE` too, because each of them writes
-or reads an encrypted plan artifact. Every callee that runs a cell —
+or reads an encrypted plan artifact or encrypted local state. Every callee that runs a cell —
 `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml` and `unlock.yml` — also declares
 `SHIPMATE_SECRETS`, which is why `unlock.yml` declares neither engine secret and
 still takes a `secrets:` block.
@@ -844,7 +848,8 @@ a cell; the run fails telling you to rotate what it held. A
 `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE` variable is refused too,
 each with its own message: rotate the key and set it as a secret on
 `shipmate-engine`; choose a new passphrase and set it as a repository or
-organization secret. The other direction cannot be
+organization secret (a new passphrase cannot decrypt cached local state:
+[`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption, "Rotation"). The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 

@@ -22,6 +22,21 @@ key rather than colliding with the immutable original, which
 Invalid `mode` fails loud: the action validates `mode` is exactly `restore`
 or `save` before anything else, so a typo cannot silently skip both steps.
 
+**State is encrypted at rest with `passphrase`**, the consumer's
+`SHIPMATE_PLAN_PASSPHRASE`, through `scripts/plan-crypt` (the same cipher as
+the plan artifact). An empty `passphrase` refuses both modes before any cache
+call.
+
+- Save: the file is encrypted in place, then saved. An absent or 0-byte file is
+  not saved; the step prints a notice instead.
+- Restore: a matched entry is decrypted in place before tofu reads it. A cache
+  miss restores nothing and runs no decrypt. An unencrypted entry, a wrong
+  passphrase or a corrupt entry fails the restore, naming the matched cache key
+  and the `gh cache` commands that recover. A failed restore makes the cell skip
+  its state save, so the entry is never overwritten.
+- The save leaves ciphertext in the workspace, so no step after it reads the
+  state file.
+
 **State loss is acceptable**: this is a cache, not a source of truth, and
 GitHub cache entries can be evicted at any time. Sample-repo stacks use
 `null_resource`/`random_pet`, which re-create on a cache miss. The small window
