@@ -9,7 +9,8 @@ Env-levels come from each environment's `needs` in `.github/shipmate-config.yml`
 the envs that must fully apply before it, collected by `env-config.env_order`
 into env -> predecessors and topologically sorted into levels. A deploy applies
 level 0 fully, then level 1, etc. Unlisted envs are level 0; no `needs` anywhere
--> {} -> all level 0.
+-> {} -> all level 0. A stack-wave spans every environment of its env-level. Cells
+order across environments by `upstream`'s walk over the `after` edges and env tags.
 
 Nothing here reads anything: the callers pass the mapping `env-config` already
 loaded for the operation, which comes from the default branch. A pull request
@@ -175,6 +176,129 @@ def env_level_waves(cells, order, deps):
         bucket = [c for c in cells if env_level[c["environment"]] == lvl]
         out.append(pad_waves(assign_waves(graph_levels, bucket)))
     return out
+
+
+def _envs_of(tags, stack):
+    return sorted(t[len("env/") :] for t in tags.get(stack, ()) if t.startswith("env/"))
+
+
+def env_stacks(tags):
+    """{env: sorted stacks} from every stack's `env/*` tags."""
+    out = {}
+    for stack in sorted(tags):
+        for env in _envs_of(tags, stack):
+            out.setdefault(env, []).append(stack)
+    return out
+
+
+def cell_levels(order, tags):
+    """{env: level} over every env of `order` and every env an `env/*` tag in `tags` names.
+
+    A tag env absent from `order` is level 0."""
+    envs = set(order).union(*order.values(), *(_envs_of(tags, s) for s in tags))
+    return env_levels(order, envs)
+
+
+def needs_chain(order, level, env):
+    """The longest `needs` chain ending at `env`, first env first: a predecessor one level
+    lower each step, the sorted-first at every tie. `level` holds `order`'s levels."""
+    chain = [env]
+    while level.get(chain[-1], 0):
+        chain.append(min(p for p in order[chain[-1]] if level[p] == level[chain[-1]] - 1))
+    return chain[::-1]
+
+
+def _reach(pred, env, envs, root_level, level):
+    """The cells of `pred` (env tags `envs`) a walked node in `env` reaches.
+
+    The same environment when `pred` has it; else every instance at or below the ROOT's
+    level, since `needs` orders a later-level instance after the root; else (a dead end)
+    every instance, so `inversions` sees it."""
+    if env in envs:
+        return [(pred, env)]
+    below = [(pred, e) for e in envs if level.get(e, 0) <= root_level]
+    return below or [(pred, e) for e in envs]
+
+
+def upstream(root, deps, tags, level):
+    """Every cell the walk from `root` (a (stack, env) tuple) reaches, root excluded.
+
+    `deps` is `parse_dot`'s map over the full run-graph and `tags` every stack's tags, so an
+    unchanged middle stack does not cut a chain. A stack with no `env/*` tag is no cell: the
+    walk passes through it in the walked node's environment."""
+    root_level = level.get(root[1], 0)
+    seen, reached, todo = {root}, set(), [root]
+    while todo:
+        stack, env = todo.pop()
+        for pred in deps.get(stack, ()):
+            envs = _envs_of(tags, pred)
+            nodes = _reach(pred, env, envs, root_level, level) if envs else [(pred, env)]
+            if envs:
+                reached.update(nodes)
+            todo.extend(n for n in nodes if n not in seen)
+            seen.update(nodes)
+    return reached
+
+
+def inversions(cells, present, deps, tags, level):
+    """Sorted [(v, u)] of (stack, env) pairs: run cell v reaches u in `present`,
+    level(u) > level(v).
+
+    `needs` applies u's env-level after v's, `after` wants u first: no order meets both."""
+    roots = [(c["stack"], c["environment"]) for c in cells]
+    return sorted(
+        {
+            (v, u)
+            for v in roots
+            for u in upstream(v, deps, tags, level) & present
+            if level.get(u[1], 0) > level.get(v[1], 0)
+        }
+    )
+
+
+def inversion_error(pairs, order, level, remedy=""):
+    """The `::error::` text for `inversions`' pairs; `remedy` is appended after one space.
+
+    The first line names one whole pair: a gate description shows only that line."""
+    (vs, ve), (us, ue) = pairs[0]
+    lines = [f"::error::needs orders {vs} / {ve} before {us} / {ue}, which it runs after:"]
+    lines += [
+        f"- {v[0]} / {v[1]} (env-level {level.get(v[1], 0)}) after {u[0]} / {u[1]} "
+        f"(env-level {level.get(u[1], 0)}); {u[1]}'s level comes from "
+        f"{' -> '.join(needs_chain(order, level, u[1]))}"
+        for v, u in pairs
+    ]
+    lines.append(
+        "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
+        "in that chain on the default branch, or retag the stacks so the edge stays inside "
+        "environments that order it." + (f" {remedy}" if remedy else "")
+    )
+    return "\n".join(lines)
+
+
+def waiting_cells(run, pending, deps, tags, level):
+    """[{stack, environment, after_stack, after_environment}] for each run cell that waits.
+
+    A run cell waits when its walk reaches a cell pending outside the run. One pass: the
+    walk is transitive. The blocker is the sorted-first such cell that waits on nothing
+    itself, so the user can apply it now; else the sorted-first. Sorted by (environment, stack)."""
+    out = pending - {(c["stack"], c["environment"]) for c in run}
+    waits = []
+    for c in run:
+        hit = sorted(upstream((c["stack"], c["environment"]), deps, tags, level) & out)
+        if not hit:
+            continue
+        ready = [b for b in hit if not upstream(b, deps, tags, level) & out]
+        after_stack, after_env = (ready or hit)[0]
+        waits.append(
+            {
+                "stack": c["stack"],
+                "environment": c["environment"],
+                "after_stack": after_stack,
+                "after_environment": after_env,
+            }
+        )
+    return sorted(waits, key=lambda d: (d["environment"], d["stack"]))
 
 
 def write_env_level_waves(fh, per_level):

@@ -313,3 +313,190 @@ def test_blocked_envs_unrelated_env_not_blocked():
 
 def test_blocked_envs_nothing_unavailable():
     assert w.blocked_envs({"prod": ["stage"]}, set(), {"stage", "prod"}) == set()
+
+
+def _tags(**envs):
+    """`{stack: ["env/<e>", ...]}` from `stack="e1 e2"` keywords."""
+    return {s: [f"env/{e}" for e in es.split()] for s, es in envs.items()}
+
+
+def _cell(stack, env):
+    return {"stack": stack, "environment": env}
+
+
+def _wait(stack, env, after_stack, after_env):
+    return {
+        "stack": stack,
+        "environment": env,
+        "after_stack": after_stack,
+        "after_environment": after_env,
+    }
+
+
+def test_env_stacks_and_cell_levels_read_every_env_tag():
+    """Mutations: drop the `startswith("env/")` filter -- `workload/app` becomes an env; or
+    build `cell_levels` from `order` alone -- `qa` drops out."""
+    tags = {"vpc": ["env/dev-us", "env/dev-eu"], "app": ["env/qa", "workload/app"], "m": []}
+    assert w.env_stacks(tags) == {"dev-eu": ["vpc"], "dev-us": ["vpc"], "qa": ["app"]}
+    assert w.cell_levels({"dev-us": ["dev-eu"]}, tags) == {"dev-eu": 0, "dev-us": 1, "qa": 0}
+
+
+def test_upstream_keeps_a_shared_stack_inside_its_environment():
+    """Rule 1. Mutation: drop the same-environment branch -- rule 2 then also returns
+    `("vpc", "dev-eu")`."""
+    tags = _tags(app="dev-eu dev-us", vpc="dev-eu dev-us")
+    level = w.cell_levels({"dev-us": ["dev-eu"]}, tags)
+    assert w.upstream(("app", "dev-us"), {"app": {"vpc"}}, tags, level) == {("vpc", "dev-us")}
+
+
+def test_upstream_drops_instances_needs_orders_after_the_root():
+    """Rule 2's level filter, prod shape. Mutation: drop the level filter -- `platform/dev-eu`
+    also reaches `dns/prod-us`."""
+    tags = _tags(dns="dev-us prod-us", platform="dev-eu prod-eu")
+    order = {"prod-eu": ["dev-eu", "dev-us"], "prod-us": ["dev-eu", "dev-us"]}
+    level = w.cell_levels(order, tags)
+    deps = {"platform": {"dns"}}
+    assert w.upstream(("platform", "dev-eu"), deps, tags, level) == {("dns", "dev-us")}
+    assert w.upstream(("platform", "prod-eu"), deps, tags, level) == {
+        ("dns", "dev-us"),
+        ("dns", "prod-us"),
+    }
+
+
+def test_upstream_filters_by_the_root_level_across_two_hops():
+    """Mutation: filter at `(a, uu)` by the walked node's level (L0) -- `(b, zz)` drops."""
+    tags = _tags(v="ee", a="uu", b="ww zz")
+    level = w.cell_levels({"ee": ["uu"], "zz": ["ww"]}, tags)
+    deps = {"v": {"a"}, "a": {"b"}}
+    assert w.upstream(("v", "ee"), deps, tags, level) == {("a", "uu"), ("b", "ww"), ("b", "zz")}
+
+
+def test_upstream_walks_through_a_stack_with_no_env_tag():
+    """Rule 3. Mutation: `continue` at an untagged stack -- the result is empty."""
+    tags = {"s": ["env/dev-eu"], "m": ["workload/app"], "a": ["env/dev-eu"]}
+    deps = {"s": {"m"}, "m": {"a"}}
+    assert w.upstream(("s", "dev-eu"), deps, tags, w.cell_levels({}, tags)) == {("a", "dev-eu")}
+
+
+def test_a_dead_end_reaches_the_later_instance_and_refuses():
+    """Mutation: return no instances at a dead end -- no pair."""
+    tags = _tags(v="eu", a="us")
+    level = w.cell_levels({"us": ["eu"]}, tags)
+    present = {("v", "eu"), ("a", "us")}
+    pairs = w.inversions([_cell("v", "eu")], present, {"v": {"a"}}, tags, level)
+    assert pairs == [(("v", "eu"), ("a", "us"))]
+
+
+_PROBE_DEPS = {"dns": set(), "platform": {"dns"}, "edge": {"platform"}, "gr": {"edge", "dns"}}
+_PROBE_TAGS = _tags(dns="dev-us", platform="dev-eu", edge="dev-us", gr="dev-eu")
+_PROBE_CELLS = [
+    _cell("dns", "dev-us"),
+    _cell("platform", "dev-eu"),
+    _cell("edge", "dev-us"),
+    _cell("gr", "dev-eu"),
+]
+_PROBE_PRESENT = {(c["stack"], c["environment"]) for c in _PROBE_CELLS}
+
+
+def test_the_zigzag_with_no_needs_refuses_nothing():
+    """Mutation: `>=` for `>` -- level 0 = level 0 refuses."""
+    level = w.cell_levels({}, _PROBE_TAGS)
+    assert w.inversions(_PROBE_CELLS, _PROBE_PRESENT, _PROBE_DEPS, _PROBE_TAGS, level) == []
+
+
+def test_the_zigzag_under_needs_names_every_inverted_pair():
+    """Mutation: drop the level comparison -- `edge / dev-us` after `platform / dev-eu` (a
+    level lower) joins the message."""
+    order = {"dev-us": ["dev-eu"]}
+    level = w.cell_levels(order, _PROBE_TAGS)
+    pairs = w.inversions(_PROBE_CELLS, _PROBE_PRESENT, _PROBE_DEPS, _PROBE_TAGS, level)
+    assert w.inversion_error(pairs, order, level, "Open a new pull request.") == (
+        "::error::needs orders gr / dev-eu before dns / dev-us, which it runs after:\n"
+        "- gr / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes "
+        "from dev-eu -> dev-us\n"
+        "- gr / dev-eu (env-level 0) after edge / dev-us (env-level 1); dev-us's level comes "
+        "from dev-eu -> dev-us\n"
+        "- platform / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level "
+        "comes from dev-eu -> dev-us\n"
+        "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
+        "in that chain on the default branch, or retag the stacks so the edge stays inside "
+        "environments that order it. Open a new pull request."
+    )
+
+
+def test_inversions_roots_only_run_cells():
+    """Mutation: iterate `present` instead of `cells` as roots -- the `v`/`a` pair appears."""
+    tags = _tags(v="eu", a="us")
+    level = w.cell_levels({"us": ["eu"]}, tags)
+    assert w.inversions([], {("v", "eu"), ("a", "us")}, {"v": {"a"}}, tags, level) == []
+
+
+def test_a_zigzag_without_needs_refuses_nothing():
+    """Six cross-environment edges over two environments, no `needs`.
+
+    Mutation: `>=` for `>` -- every edge refuses."""
+    tags = {f"s{i}": [f"env/{'eu' if i % 2 else 'us'}"] for i in range(7)}
+    deps = {f"s{i}": {f"s{i - 1}"} for i in range(1, 7)}
+    cells = [_cell(s, t[0][len("env/") :]) for s, t in tags.items()]
+    present = {(c["stack"], c["environment"]) for c in cells}
+    assert w.inversions(cells, present, deps, tags, w.cell_levels({}, tags)) == []
+
+
+def test_upstream_reads_an_environment_missing_from_the_levels_as_level_zero():
+    """`layout: folder`/`workspace` envs need no table entry. Mutation: `level[env]` for
+    `level.get(env, 0)` -- `KeyError`."""
+    tags = _tags(app="qa", vpc="stg")
+    assert w.upstream(("app", "qa"), {"app": {"vpc"}}, tags, {}) == {("vpc", "stg")}
+
+
+def test_upstream_visits_each_node_of_a_diamond_lattice_once():
+    """40 stacks, `s_i` after `s_{i-1}` and `s_{i-2}`, environments alternating.
+
+    Mutation: drop `seen` -- 2^n paths; the test runs past `timeout 60`."""
+    tags = {f"s{i}": [f"env/{'b' if i % 2 else 'a'}"] for i in range(40)}
+    deps = {f"s{i}": {f"s{j}" for j in (i - 1, i - 2) if j >= 0} for i in range(40)}
+    reached = w.upstream(("s39", "b"), deps, tags, w.cell_levels({}, tags))
+    assert reached == {(f"s{i}", "b" if i % 2 else "a") for i in range(39)}
+
+
+def test_a_run_cell_waits_on_a_pending_cell_outside_the_run():
+    """Mutation: `out = pending & run` -- the first case returns `[]`."""
+    tags = _tags(platform="eu", dns="us")
+    level = w.cell_levels({}, tags)
+    deps = {"platform": {"dns"}}
+    run = [_cell("platform", "eu")]
+    pending = {("dns", "us"), ("platform", "eu")}
+    assert w.waiting_cells(run, pending, deps, tags, level) == [
+        _wait("platform", "eu", "dns", "us")
+    ]
+    assert w.waiting_cells(run, {("platform", "eu")}, deps, tags, level) == []
+
+
+def test_the_blocker_is_a_cell_the_user_can_apply_now():
+    """`platform / eu` sorts first but waits on `zdns / us` itself.
+
+    Mutation: take the sorted-first member without the own-upstream test -- `platform / eu`."""
+    tags = _tags(zdns="us", platform="eu", edge="us")
+    deps = {"platform": {"zdns"}, "edge": {"platform"}}
+    pending = {("zdns", "us"), ("platform", "eu"), ("edge", "us")}
+    got = w.waiting_cells([_cell("edge", "us")], pending, deps, tags, w.cell_levels({}, tags))
+    assert got == [_wait("edge", "us", "zdns", "us")]
+
+
+def test_three_targeted_runs_apply_a_zigzag_without_deadlock():
+    """`dns/us -> platform/eu -> edge/us`, both environments explicit: apply us, eu, us.
+
+    Mutation: drop the `- run` subtraction from `out` -- run 1 names `dns / us`, which it
+    applies, as the blocker."""
+    tags = _tags(dns="us", platform="eu", edge="us")
+    level = w.cell_levels({}, tags)
+    deps = {"platform": {"dns"}, "edge": {"platform"}}
+    run1 = [_cell("dns", "us"), _cell("edge", "us")]
+    pending = {("dns", "us"), ("platform", "eu"), ("edge", "us")}
+    assert w.waiting_cells(run1, pending, deps, tags, level) == [
+        _wait("edge", "us", "platform", "eu")
+    ]
+    pending -= {("dns", "us")}
+    assert w.waiting_cells([_cell("platform", "eu")], pending, deps, tags, level) == []
+    pending -= {("platform", "eu")}
+    assert w.waiting_cells([_cell("edge", "us")], pending, deps, tags, level) == []
