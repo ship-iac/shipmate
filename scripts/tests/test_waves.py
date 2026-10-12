@@ -334,7 +334,7 @@ def _wait(stack, env, after_stack, after_env):
 
 
 def test_env_stacks_and_cell_levels_read_every_env_tag():
-    """Mutations: drop the `startswith("env/")` filter -- `workload/app` becomes an env; or
+    """Mutations: drop the `startswith("env/")` filter -- `load/app` becomes an env; or
     build `cell_levels` from `order` alone -- `qa` drops out."""
     tags = {"vpc": ["env/dev-us", "env/dev-eu"], "app": ["env/qa", "workload/app"], "m": []}
     assert w.env_stacks(tags) == {"dev-eu": ["vpc"], "dev-us": ["vpc"], "qa": ["app"]}
@@ -521,3 +521,10 @@ def test_a_cell_after_a_waiting_cell_waits_on_its_blocker():
         _wait("b", "e0", "c", "ex"),
         _wait("r", "e1", "c", "ex"),
     ]
+
+
+def test_upstream_excludes_the_root_on_a_cycle():
+    """Mutation: return `reached` without `- {root}` -- `a / e` is in its own walk."""
+    tags = _tags(a="e", b="e")
+    got = w.upstream(("a", "e"), {"a": {"b"}, "b": {"a"}}, tags, w.cell_levels({}, tags))
+    assert got == {("b", "e")}

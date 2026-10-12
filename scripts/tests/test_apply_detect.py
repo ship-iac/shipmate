@@ -1013,3 +1013,15 @@ def test_a_waiting_cell_whose_check_records_no_plan_run_does_not_refuse(monkeypa
         _apply_check("stacks/dns", "dev-us"),
     ]
     assert _zigzag(monkeypatch, tmp_path, checks) == ([], _PLATFORM_WAITS)
+
+
+def test_main_notice_counts_a_waiting_cell_as_pending(monkeypatch, tmp_path, capsys):
+    """`pending=` counts before the waiting drop, as on the bare form; `waiting=` counts the
+    drop. Mutation: print `len(runnable)` for `pending=` -- `pending=0`."""
+    checks = [_apply_check("stacks/platform"), _apply_check("stacks/dns", "dev-us")]
+    _zigzag(monkeypatch, tmp_path, checks)
+    assert (
+        f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "
+        "cells=1 completed=0 pending=1 waiting=1 waves=[0, 0, 0, 0, 0, 0, 0, 0] empty=True"
+        in capsys.readouterr().out.splitlines()
+    )

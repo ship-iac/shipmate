@@ -1980,7 +1980,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   apply order), so `after` orders cells across environments: a cell waits on
   every lower wave of its env-level, in any environment.
 - A cell `(stack, env)` runs after these cells of each stack its stack is
-  `after`, directly or transitively:
+  `after`, directly or transitively. "The same environment" below is the
+  environment of the cell each step walks from, not only the starting cell's:
   - the same environment, when the upstream stack is tagged into it;
   - otherwise each of the upstream stack's environments whose env-level is at
     or before the dependent cell's, the cell the walk started from: `needs`
@@ -2324,10 +2325,12 @@ actionable warning cannot be lost on either path. In the order they render:
   (§Fan-out) is pending and not applying this run; the second pair is that
   blocker. Both forms render these lines. The blocker is a cell that waits on
   nothing itself when there is one, so it can apply now. `<remedy>` is
-  `it is held until the pull request is approved` when the blocker's
-  environment is held, `` its environment waits on `needs`; apply those
-  environments first `` when it is skipped, and otherwise
-  `` apply it first with `shipmate apply <env>` `` naming the blocker's
+  `` it is held until the pull request is approved, then comment
+  `shipmate apply <env>` `` when the blocker's environment is held and
+  explicit, `it is held until the pull request is approved` when it is held,
+  `` its environment waits on its `needs` predecessors, which must apply first,
+  including any held for review `` when it is skipped, and otherwise
+  `` apply it first with `shipmate apply <env>` ``, each naming the blocker's
   environment. The targeted form has no held or skipped environments to
   consult, so its remedy always names `shipmate apply <env>`, even for a blocker
   that waits on a review or on `needs`.

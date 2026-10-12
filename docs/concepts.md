@@ -121,8 +121,9 @@ applies that exact plan. It never re-plans: a plan that state has moved under
 is refused rather than refreshed. A cell already applied has a completed apply
 check, so the post-merge deploy skips it. Applies run in waves along the
 Terramate `after` DAG, across environments as well as inside one
-([`CONTRACT.md`](../CONTRACT.md) §Fan-out, §Env apply order), and a comment-triggered apply and a post-merge deploy share one
-concurrency group per stack × environment, so they never race on the same cell.
+([`CONTRACT.md`](../CONTRACT.md) §Fan-out, §Env apply order), and a
+comment-triggered apply and a post-merge deploy share one concurrency group per
+stack × environment, so they never race on the same cell.
 
 Each drift sweep is a workflow file of its own: on its schedule or a
 `workflow_dispatch` it plans every stack × environment, or the cells its

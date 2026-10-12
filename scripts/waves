@@ -237,7 +237,7 @@ def upstream(root, deps, tags, level):
                 reached.update(nodes)
             todo.extend(n for n in nodes if n not in seen)
             seen.update(nodes)
-    return reached
+    return reached - {root}
 
 
 def inversions(cells, present, deps, tags, level):
@@ -257,7 +257,8 @@ def inversions(cells, present, deps, tags, level):
 
 
 def inversion_error(pairs, order, level, remedy=""):
-    """The `::error::` text for `inversions`' pairs; `remedy` is appended after one space.
+    """The `::error::` text for `inversions`' pairs, which must be non-empty; `remedy` is
+    appended after one space.
 
     The first line names one whole pair: a gate description shows only that line."""
     (vs, ve), (us, ue) = pairs[0]

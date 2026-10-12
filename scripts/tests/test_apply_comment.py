@@ -1791,37 +1791,46 @@ def test_a_partly_applied_run_with_waiting_cells_is_never_green():
 
 
 def test_each_waiting_cell_names_the_remedy_its_blocker_needs():
-    """A held blocker clears with a review; a blocker in a `needs`-skipped environment never names
-    its `shipmate apply`, since a targeted apply would bypass `needs`; any other blocker, an
-    explicit one included, names it. Waiting cells keep their own lines below the dispositions.
+    """A held blocker clears with a review, and a held explicit one then names its
+    `shipmate apply`; a blocker in a `needs`-skipped environment never names its
+    `shipmate apply`, since a targeted apply would bypass `needs`, and its remedy holds whether a
+    predecessor is held or not applied; any other blocker, an explicit one included, names it.
+    Waiting cells keep their own lines below the dispositions.
 
     Mutation: render waiting under `skipped` (add the waiting envs to `skipped` in
     `_dispositions` and drop the waiting lines) -- red.
     Mutation: drop the `held` test from `_waiting_remedy` -- the held blocker names
     `shipmate apply dev`, red.
     Mutation: drop the `skipped` test from it -- the skipped blocker names `shipmate apply stg`,
+    red.
+    Mutation: drop the held-and-explicit test from it -- the `ops` blocker names no command,
     red."""
     waiting = [
         _waits("stacks/a", "qa", "stacks/dns", "dev"),
         _waits("stacks/b", "qa", "stacks/net", "stg"),
         _waits("stacks/c", "qa", "stacks/edge", "prod"),
+        _waits("stacks/d", "qa", "stacks/vault", "ops"),
     ]
     body = ac.build_comment(
-        [], [], RUN_URL, ["prod"], ["stg"], "", "success", ["dev"], SHA, waiting
+        [], [], RUN_URL, ["ops", "prod"], ["stg"], "", "success", ["dev", "ops"], SHA, waiting
     )
     assert body == (
         f"### shipmate apply\n\n⚪ nothing applied, environments are held for review {AT}\n\n"
         "🟡 prod: left pending (explicit), comment `shipmate apply prod`\n"
         "⚪ stg: skipped, ordered after an environment not fully applying this run\n"
         "⚪ dev: held, the review state does not permit applying\n"
+        "⚪ ops: held, the review state does not permit applying; once it clears, comment "
+        "`shipmate apply ops`\n"
         "held: get an approving review, or resolve or dismiss a requested-changes review. "
         "The run log's apply-all-detect notice names the decision seen.\n"
         "⚪ stacks/a / qa: waits on stacks/dns / dev, not applied yet; it is held until the pull "
         "request is approved\n"
         "⚪ stacks/b / qa: waits on stacks/net / stg, not applied yet; its environment waits on "
-        "`needs`; apply those environments first\n"
+        "its `needs` predecessors, which must apply first, including any held for review\n"
         "⚪ stacks/c / qa: waits on stacks/edge / prod, not applied yet; apply it first with "
-        "`shipmate apply prod`\n\n" + HINT
+        "`shipmate apply prod`\n"
+        "⚪ stacks/d / qa: waits on stacks/vault / ops, not applied yet; it is held until the pull "
+        "request is approved, then comment `shipmate apply ops`\n\n" + HINT
     )
 
 
@@ -1879,8 +1888,8 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
             "stacks/a / qa, stacks/c / qa"
         ),
         (
-            "⚪ waiting on stacks/net / stg (its environment waits on `needs`; apply those "
-            "environments first): stacks/b / qa"
+            "⚪ waiting on stacks/net / stg (its environment waits on its `needs` predecessors, "
+            "which must apply first, including any held for review): stacks/b / qa"
         ),
         (
             "⚪ waiting on stacks/edge / explicit-environment-000-eu-west-1-prod (apply it first "

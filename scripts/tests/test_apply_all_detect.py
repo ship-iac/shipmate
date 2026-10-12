@@ -1046,13 +1046,16 @@ def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
     assert json.loads(parsed["waiting_cells"]) == []
 
 
-def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(tmp_path, monkeypatch):
+def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
+    tmp_path, monkeypatch, capsys
+):
     """`r/e1` after `b/e0` after `a` (e1, e2) after `c` (ex, e1); ex is explicit, e1 needs ez
     and e2 needs e1. Only `b`'s walk, through the dead end at `a`, reaches `c/ex`; `r` runs
     after `b`, so it waits too, and nothing applies.
 
-    Mutation: `break` after the first pass of the loop in `waves.waiting_cells` -- `r/e1`
-    applies before `b/e0`."""
+    Mutations: `break` after the first pass of the loop in `waves.waiting_cells` -- `r/e1`
+    applies before `b/e0`; print `len(runnable)` for the notice's `pending=` -- `pending=0`,
+    though `pending=` counts before the waiting drop."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -1077,3 +1080,8 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(tmp_path, 
     ]
     assert json.loads(parsed["skipped_envs"]) == []
     assert json.loads(parsed["excluded_envs"]) == ["ex"]
+    assert (
+        f"::notice title=apply-all-detect::head={HEAD} cells=3 pending=3 envlevels=[0, 0, 0, 0] "
+        "excluded_explicit=['ex'] skipped_after_explicit=[] review_held=[] waiting=2 "
+        "applied_ungated=[] review_decision='APPROVED'"
+    ) in capsys.readouterr().out.splitlines()

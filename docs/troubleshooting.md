@@ -1064,11 +1064,16 @@ stays pending and the rest of the run applied. Follow the remedy:
 
 - ``apply it first with `shipmate apply <env>` ``: apply the blocker's
   environment, then apply the waiting cell's environment again.
+- ``it is held until the pull request is approved, then comment
+  `shipmate apply <env>` ``: the blocker's environment is held and explicit.
+  Get an approving review, then comment `shipmate apply <env>` for it.
 - `it is held until the pull request is approved`: get an approving review
   (§An environment was held for review, or the apply was refused), then comment
   `shipmate apply`.
-- ``its environment waits on `needs`; apply those environments first``: apply
-  the environments that environment `needs`, then comment `shipmate apply`.
+- ``its environment waits on its `needs` predecessors, which must apply first,
+  including any held for review``: get any review the predecessors are held
+  for, apply an explicit one with `shipmate apply <env>`, then comment
+  `shipmate apply`.
 
 A targeted apply always names `shipmate apply <env>`, even when the blocker's
 environment is held or ordered by `needs`, because the targeted form's comment

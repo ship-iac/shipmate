@@ -526,15 +526,21 @@ def notices(rows, applied_ungated, review_not_required):
     ]
 
 
-def _waiting_remedy(env, held, skipped):
+def _waiting_remedy(env, held, skipped, excluded):
     """What clears a waiting cell's blocker in `env`. A targeted apply ignores `needs`, so a
-    blocker in a `needs`-skipped environment never gets its `shipmate apply` command. The
-    targeted form passes `held` and `skipped` empty, so its remedy is always
-    `shipmate apply <env>`."""
+    blocker in a `needs`-skipped environment never gets its `shipmate apply` command; a
+    predecessor it waits on may itself be held, so that remedy names both causes. A held
+    explicit blocker needs the approval and then its command. The targeted form passes
+    `held`, `skipped` and `excluded` empty, so its remedy is always `shipmate apply <env>`."""
+    if env in held and env in excluded:
+        return f"it is held until the pull request is approved, then comment `shipmate apply {env}`"
     if env in held:
         return "it is held until the pull request is approved"
     if env in skipped:
-        return "its environment waits on `needs`; apply those environments first"
+        return (
+            "its environment waits on its `needs` predecessors, which must apply first, "
+            "including any held for review"
+        )
     return f"apply it first with `shipmate apply {env}`"
 
 
@@ -555,7 +561,7 @@ def _dispositions(excluded, skipped, held, waiting=()):
         "skipped": skipped,
         "held": held,
         "held_explicit": [e for e in held if e in excluded],
-        "waiting": [(*c, _waiting_remedy(c[3], held, skipped)) for c in cells],
+        "waiting": [(*c, _waiting_remedy(c[3], held, skipped, excluded)) for c in cells],
     }
 
 
