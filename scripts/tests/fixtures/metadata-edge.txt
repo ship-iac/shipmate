@@ -1,0 +1,105 @@
+Available metadata:
+
+stack "/desc":
+	terramate.stack.name="n"
+	terramate.stack.description="terramate.stack.tags=[\"env/evil\"]"
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/desc"
+	terramate.stack.path.basename="desc"
+	terramate.stack.path.relative="desc"
+	terramate.stack.path.to_root=".."
+
+stack "/descnl":
+	terramate.stack.name="n"
+	terramate.stack.description="x\n\tterramate.stack.tags=[\"env/evil\"]"
+	terramate.stack.tags=[]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/descnl"
+	terramate.stack.path.basename="descnl"
+	terramate.stack.path.relative="descnl"
+	terramate.stack.path.to_root=".."
+
+stack "/empty":
+	terramate.stack.name="n"
+	terramate.stack.description=""
+	terramate.stack.tags=[]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/empty"
+	terramate.stack.path.basename="empty"
+	terramate.stack.path.relative="empty"
+	terramate.stack.path.to_root=".."
+
+stack "/notags":
+	terramate.stack.name="n"
+	terramate.stack.description=""
+	terramate.stack.tags=[]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/notags"
+	terramate.stack.path.basename="notags"
+	terramate.stack.path.relative="notags"
+	terramate.stack.path.to_root=".."
+
+stack "/outer":
+	terramate.stack.name="n"
+	terramate.stack.description=""
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/outer"
+	terramate.stack.path.basename="outer"
+	terramate.stack.path.relative="outer"
+	terramate.stack.path.to_root=".."
+
+stack "/outer/inner":
+	terramate.stack.name="n"
+	terramate.stack.description=""
+	terramate.stack.tags=["env/dev-us","workload/app"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/outer/inner"
+	terramate.stack.path.basename="inner"
+	terramate.stack.path.relative="outer/inner"
+	terramate.stack.path.to_root="../.."
+
+stack "/quo\uf022te":
+	terramate.stack.name="n"
+	terramate.stack.description=""
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/quo\uf022te"
+	terramate.stack.path.basename="quo\uf022te"
+	terramate.stack.path.relative="quo\uf022te"
+	terramate.stack.path.to_root=".."
+
+stack "/with space/app":
+	terramate.stack.name="n"
+	terramate.stack.description=""
+	terramate.stack.tags=["env/dev-eu"]
+	terramate.stack.before=[]
+	terramate.stack.after=[]
+	terramate.stack.wants=[]
+	terramate.stack.wanted_by=[]
+	terramate.stack.path.absolute="/with space/app"
+	terramate.stack.path.basename="app"
+	terramate.stack.path.relative="with space/app"
+	terramate.stack.path.to_root="../.."

@@ -269,8 +269,10 @@ runner is fixed:
 - `ubuntu-slim`: the control jobs, which run neither `tofu` nor `terramate`.
   These are `guard`, `review` and `summary` in `apply.yml`, `snapshot` and
   `complete` in `apply-env-level.yml`, `summary` in `deploy.yml`, `guard` in
-  `unlock.yml`, `ops` in `comment-ops.yml`, and `gate-hold` in `plan.yml`, which
-  the `plan` job's `runs_on:` does not reach.
+  `unlock.yml`, `ops` in `comment-ops.yml`, and `facts` and `gate-hold` in
+  `plan.yml`, which the `plan` job's `runs_on:` does not reach. `plan.yml`'s
+  `summary` takes `runs_on:`: its doctor step needs PyYAML, which `ubuntu-slim`
+  lacks, so the engine installs it there with `apt-get` on every run.
 - `ubuntu-latest`: every detect job, which runs `terramate`, and every apply
   and unlock cell, which runs `tofu`.
 

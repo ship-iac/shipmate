@@ -57,12 +57,11 @@ def cells_for_env(env, paths, tags_by_stack):
     """Wave cells for `paths` in `env`.
 
     The workload comes from the tags, never from the check name — the name
-    carries no workload. A stack missing from the map carries "" and applies with
-    the environment's generic role; the map itself is REQUIRED, so a caller that
-    stops deriving it raises here instead of silently applying every cell with
-    the generic role. A stack carrying two `workload/*` tags refuses (`workload_of`)."""
+    carries no workload. A stack missing from the map raises `KeyError`: `tags_of`
+    refuses such a stack first. A stack carrying two `workload/*` tags refuses
+    (`workload_of`)."""
     return [
-        {"stack": p, "environment": env, "workload": bm.workload_of(tags_by_stack.get(p, []), p)}
+        {"stack": p, "environment": env, "workload": bm.workload_of(tags_by_stack[p], p)}
         for p in paths
     ]
 
@@ -396,11 +395,8 @@ def main():
     names = apply_check_names(lines, app_id)
     completed = ag.app_done_names(lines, app_id)
 
-    # Tags only for the workset: this path reconstructs its cells from the head's
-    # apply checks plus the run-graph, and evaluating the whole tree would let one
-    # unrelated stack's unresolvable expression block an approved plan.
     paths = paths_with_checks(env, list(deps.keys()), names)
-    cells = cells_for_env(env, paths, {p: bm._tags(p) for p in paths})
+    cells = cells_for_env(env, paths, bm.tags_of(paths))
     table = bm.env_config(cells, table=table)
     cells = bm.stamp_rows(cells, table, "apply")
 

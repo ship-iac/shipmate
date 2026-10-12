@@ -46,9 +46,7 @@ def test_workset_forward_constructs_the_name_and_never_parses_it():
 
 def test_cells_take_the_workload_from_the_tags():
     """Never from the check name: the name carries no workload, and a cell that invented one
-    from its path would assume the wrong environment role. A stack missing from the map carries
-    "", because the map comes from a separate terramate query and a missing entry must never be
-    able to raise here."""
+    from its path would assume the wrong environment role."""
     cells = ad.cells_for_env(
         "dev-eu",
         ["stacks/app", "stacks/dns"],
@@ -62,6 +60,14 @@ def test_cells_take_the_workload_from_the_tags():
         },
         {"stack": "stacks/dns", "environment": "dev-eu", "workload": ""},
     ]
+
+
+def test_cells_raise_on_a_stack_missing_from_the_map():
+    """`tags_of` refuses such a stack before this runs, so no default applies it with the
+    generic role. Mutation: `tags_by_stack.get(p, [])` in `cells_for_env` -- `stacks/dns`
+    becomes a cell with no workload."""
+    with pytest.raises(KeyError):
+        ad.cells_for_env("dev-eu", ["stacks/app", "stacks/dns"], {"stacks/app": ["env/dev-eu"]})
 
 
 _TWO_CELLS = [
@@ -256,7 +262,9 @@ def _stub_apply(monkeypatch, deps, checks):
     monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
     monkeypatch.setattr(ad, "_run", _run)
     monkeypatch.setattr(ad.bm, "_run", _run)
-    monkeypatch.setattr(ad.bm, "_tags", lambda stack: ["env/dev-eu", "workload/app"])
+    monkeypatch.setattr(
+        ad.bm, "all_tags", lambda: {s: ["env/dev-eu", "workload/app"] for s in deps}
+    )
     return urls
 
 
@@ -537,21 +545,21 @@ def test_duplicate_run_newer_queued_stays_pending():
 
 
 def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
-    """Two claims at once: the map reaches the cells, and it is derived for the workset alone.
-    Fails when the map never reaches the cells: every cell is then role-less and the suite stays
-    green. Evaluating `stacks/unrelated` would let a stack this apply never touches block an
-    approved plan."""
+    """The whole-tree tag map reaches the cells, and only the workset becomes cells.
+
+    Mutations: pass `{}` as the map to `cells_for_env` -- the cell loses its workload; pass
+    the map's keys as the paths -- `stacks/unrelated` joins the workset and refuses for want
+    of a plan run."""
     out = _apply_env(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
         {"stacks/app": set(), "stacks/unrelated": set()},
         [_apply_check("stacks/app", plan_run="42")],
     )
-    evaluated = []
     monkeypatch.setattr(
         ad.bm,
-        "_tags",
-        lambda stack: evaluated.append(stack) or ["env/dev-eu", "workload/net-edge"],
+        "all_tags",
+        lambda: {"stacks/app": ["env/dev-eu", "workload/net-edge"], "stacks/unrelated": []},
     )
     ad.main()
     parsed = github_outputs(out)
@@ -569,7 +577,21 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
             "plan_sha256": PLAN_SHA,
         }
     ]
-    assert evaluated == ["stacks/app"]
+
+
+def test_main_refuses_a_workset_stack_the_metadata_lacks(tmp_path, monkeypatch):
+    """Mutation: index `all_tags()` with `.get(p, [])` in `main` -- the cell plans untagged."""
+    _apply_env(monkeypatch, tmp_path)
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    monkeypatch.setattr(ad.bm, "all_tags", lambda: {})
+    with pytest.raises(SystemExit) as e:
+        ad.main()
+    assert str(e.value) == (
+        "::error::terramate debug show metadata printed no tags for 1 stack(s): stacks/app. "
+        "Two causes produce this: a working directory other than the repository root, where "
+        "`terramate list` prints stack paths relative to it and the metadata does not; or "
+        "metadata output this parser does not read, as after a Terramate version change."
+    )
 
 
 def _gate(ungated):

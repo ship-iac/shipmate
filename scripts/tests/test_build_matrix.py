@@ -5,7 +5,7 @@ import sys
 
 import pytest
 from _detect_fixtures import spy_env_config
-from _loader import action_yaml, github_outputs, load_script
+from _loader import action_yaml, github_outputs, load_script, record_calls
 
 bm = load_script("build-matrix")
 
@@ -70,7 +70,7 @@ def test_whole_tree_sweep_above_256_cells_names_drift_files(monkeypatch):
     """
     stacks = [f"stacks/s{i}" for i in range(257)]
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
-    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {s: ["env/dev-eu"] for s in stacks})
     with pytest.raises(SystemExit) as exc_info:
         bm.compute_cells(all_stacks=True)
     assert str(exc_info.value) == (
@@ -89,8 +89,11 @@ def test_the_matrix_limit_counts_the_cells_a_query_keeps(monkeypatch):
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: stacks)
     monkeypatch.setattr(
         bm,
-        "_tags",
-        lambda s: ["env/dev-eu", "workload/keep" if s < "stacks/s010" else "workload/drop"],
+        "all_tags",
+        lambda: {
+            s: ["env/dev-eu", "workload/keep" if s < "stacks/s010" else "workload/drop"]
+            for s in stacks
+        },
     )
     _, cells, tree, _ = bm.compute_cells(all_stacks=True, tags="workload/keep")
     assert [c["stack"] for c in cells] == [f"stacks/s{i:03}" for i in range(10)]
@@ -175,24 +178,117 @@ def test_list_stacks_all_omits_changed_flag(monkeypatch):
     assert captured["args"] == ["terramate", "list"]
 
 
-def test_tags_evals_with_as_json(monkeypatch):
-    captured = {}
-    monkeypatch.setattr(bm, "_run", lambda args: captured.update(args=args) or '["env/dev-eu"]')
-    assert bm._tags("stacks/app") == ["env/dev-eu"]
-    assert captured["args"] == [
-        "terramate",
-        "-C",
-        "stacks/app",
-        "experimental",
-        "eval",
-        "--as-json",
-        "terramate.stack.tags",
-    ]
+#: Raw `terramate debug show metadata > metadata-<name>.txt` captures (stdout to a file, not a
+#: TTY) from terramate 0.17.1 windows_x86_64, run at the root of: `repo-example-stacks`
+#: aabb04b, `repo-example-folders` bdea16c, `repo-example-workspaces` df8c25b (`stacks`,
+#: `folders`, `workspaces`); a scratch repository of stacks `outer`, `outer/inner`,
+#: `with space/app`, `quo"te` (Windows stores the `"` as U+F022, which the header escapes as
+#: `\uf022` and `terramate list` prints raw), `empty` (`tags = []`), `notags` (no `tags`),
+#: `desc` (`description = "terramate.stack.tags=[\"env/evil\"]"`) and `descnl` (the same
+#: description after `x\n\t`) (`edge`); a scratch repository with a stack at its root and one
+#: at `child` (`root`). A literal `"` cannot reach a Windows directory name, so the `\"`
+#: header escape is decoded by the same `json.loads` but was never captured.
+_METADATA = {
+    "stacks": {
+        "stacks/app": ["env/dev-eu", "env/dev-us"],
+        "stacks/auth": ["env/dev-eu"],
+        "stacks/dns": ["env/dev-us", "workload/net"],
+        "stacks/platform": ["env/dev-eu"],
+        "stacks/sandbox/box": ["env/sbx"],
+        "stacks/tenant-a": ["env/dev-eu", "env/dev-us"],
+        "stacks/tenant-b": ["env/dev-eu", "env/dev-us"],
+        "stacks/workers": ["env/dev-eu"],
+    },
+    "folders": {
+        "envs/dev-eu/eu-west-1/app": ["env/dev-eu"],
+        "envs/dev-eu/eu-west-1/platform": ["env/dev-eu"],
+        "envs/dev-us/us-east-1/dns": ["env/dev-us"],
+    },
+    "workspaces": {"components/app": ["env/dev-eu", "env/dev-us"]},
+    "edge": {
+        "desc": ["env/dev-eu"],
+        "descnl": [],
+        "empty": [],
+        "notags": [],
+        "outer": ["env/dev-eu"],
+        "outer/inner": ["env/dev-us", "workload/app"],
+        "quo\uf022te": ["env/dev-eu"],
+        "with space/app": ["env/dev-eu"],
+    },
+    "root": {".": ["env/dev-eu"], "child": ["env/dev-us"]},
+}
+
+
+def _metadata(name):
+    path = pathlib.Path(__file__).parent / "fixtures" / f"metadata-{name}.txt"
+    return path.read_bytes().decode("utf-8")
+
+
+@pytest.mark.parametrize("name", list(_METADATA))
+def test_parse_metadata_reads_every_stacks_tags_keyed_as_list_prints_it(name):
+    """Mutations: match `tags=` anywhere in a line -- `edge`'s `desc` description raises;
+    strip the header's quotes instead of decoding them -- `quo\\uf022te` keeps its escape;
+    drop `or "."` -- `root` keys its root stack `""`; keep the leading `/` -- every case."""
+    assert bm.parse_metadata(_metadata(name)) == _METADATA[name]
+
+
+def test_a_detect_reads_every_stacks_tags_with_one_terramate_call(monkeypatch):
+    """Mutation: read each stack's tags with its own `all_tags` call in `env_membership` --
+    eight metadata calls."""
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        if args == ["terramate", "list"]:
+            return "".join(f"{s}\n" for s in _METADATA["stacks"])
+        return _metadata("stacks")
+
+    monkeypatch.setattr(bm, "_run", run)
+    _, tags_by_stack = bm.env_membership(all_stacks=True)
+    assert tags_by_stack == _METADATA["stacks"]
+    assert calls == [["terramate", "list"], ["terramate", "debug", "show", "metadata"]]
+
+
+def test_a_listed_stack_the_metadata_lacks_refuses_naming_it(monkeypatch):
+    """Mutation: default a missing stack to `[]` in `tags_of` -- `stacks/new` reads as
+    unmanaged and detect goes on."""
+    monkeypatch.setattr(
+        bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/new", "stacks/old"]
+    )
+    monkeypatch.setattr(bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu"]})
+    with pytest.raises(SystemExit) as e:
+        bm.env_membership(all_stacks=True)
+    assert str(e.value) == (
+        "::error::terramate debug show metadata printed no tags for 2 stack(s): "
+        "stacks/new, stacks/old. Two causes produce this: a working directory other than the "
+        "repository root, where `terramate list` prints stack paths relative to it and the "
+        "metadata does not; or metadata output this parser does not read, as after a "
+        "Terramate version change."
+    )
+
+
+def test_a_metadata_line_that_does_not_decode_refuses_naming_it():
+    """A header holding a raw control character is not JSON. Mutation: drop the
+    `json.JSONDecodeError` handler in `parse_metadata` -- the decode error escapes."""
+    with pytest.raises(SystemExit) as e:
+        bm.parse_metadata('stack "/a\x1fb":\n\tterramate.stack.tags=[]\n')
+    assert str(e.value) == (
+        "::error::terramate debug show metadata printed a line that does not parse as JSON: "
+        "'stack \"/a\\x1fb\":'."
+    )
+
+
+def test_tags_of_an_empty_workset_reads_no_metadata(monkeypatch):
+    """Mutation: drop `if not stacks: return {}` in `tags_of` -- `_run` is called."""
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
+    assert bm.tags_of([]) == {}
 
 
 def test_compute_cells_fans_out_multi_env(monkeypatch):
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
-    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu", "env/dev-us", "workload/app"])
+    monkeypatch.setattr(
+        bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu", "env/dev-us", "workload/app"]}
+    )
     _, cells, _, _ = bm.compute_cells(all_stacks=True)
     assert cells == [
         {"stack": "stacks/app", "environment": "dev-eu", "workload": "app"},
@@ -206,7 +302,7 @@ def test_env_membership_groups_stacks_by_env_tag(monkeypatch):
         "stacks/app": ["env/dev-eu", "env/dev-us"],
         "stacks/dns": ["env/dev-eu", "workload/dns"],
     }
-    monkeypatch.setattr(bm, "_tags", lambda s: tags[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: tags)
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     assert stacks_by_env == {"dev-eu": ["stacks/app", "stacks/dns"], "dev-us": ["stacks/app"]}
     assert tags_by_stack == tags
@@ -247,7 +343,7 @@ def test_env_membership_refuses_a_tag_no_environment_can_take(monkeypatch, tag, 
     `is_env_name` -- `env/prod-apply` passes; delete the `ENGINE_ENV` check from
     `check_env_name`, or change `ENGINE_ENV`'s value -- `env/shipmate-engine` passes."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app", "stacks/c"])
-    monkeypatch.setattr(bm, "_tags", lambda s: [tag] if s == "stacks/c" else ["env/dev-eu"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu"], "stacks/c": [tag]})
     with pytest.raises(SystemExit) as e:
         bm.env_membership(all_stacks=True)
     assert str(e.value) == message
@@ -265,7 +361,7 @@ def test_env_membership_skips_untagged_stacks_with_a_whole_tree_notice(monkeypat
     """Two stacks with no `env/*` tag are in the tag map, in no environment, and named in one
     sorted notice. Mutation: restore the `SystemExit` refusal."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
-    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: _UNMANAGED_TREE)
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     assert stacks_by_env == {"dev-eu": ["stacks/app"]}
     assert tags_by_stack == _UNMANAGED_TREE
@@ -278,7 +374,7 @@ def test_env_membership_skips_untagged_stacks_with_a_whole_tree_notice(monkeypat
 def test_the_changed_set_scan_names_its_scope_in_the_notice(monkeypatch, capsys):
     """Mutation: print the whole-tree wording on both scans."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
-    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: _UNMANAGED_TREE)
     bm.env_membership(all_stacks=False, base="deadbeef")
     assert capsys.readouterr().out == (
         "::notice::2 changed stack(s) carry no env/* tag and are not managed by shipmate: "
@@ -289,7 +385,7 @@ def test_the_changed_set_scan_names_its_scope_in_the_notice(monkeypatch, capsys)
 def test_the_notice_names_ten_paths_and_counts_the_rest(monkeypatch, capsys):
     """Mutation: name every path -- the notice lists all twenty."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_TWENTY_UNMANAGED))
-    monkeypatch.setattr(bm, "_tags", lambda s: _TWENTY_UNMANAGED[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: _TWENTY_UNMANAGED)
     bm.env_membership(all_stacks=True)
     assert capsys.readouterr().out == (
         "::notice::20 stack(s) carry no env/* tag and are not managed by shipmate: "
@@ -301,7 +397,7 @@ def test_the_notice_names_ten_paths_and_counts_the_rest(monkeypatch, capsys):
 def test_no_unmanaged_stack_prints_nothing(monkeypatch, capsys):
     """Mutation: print the notice with N = 0."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/app"])
-    monkeypatch.setattr(bm, "_tags", lambda s: ["env/dev-eu"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {"stacks/app": ["env/dev-eu"]})
     bm.env_membership(all_stacks=True)
     assert capsys.readouterr().out == ""
 
@@ -309,7 +405,7 @@ def test_no_unmanaged_stack_prints_nothing(monkeypatch, capsys):
 def test_compute_cells_refuses_a_changed_stacks_env_tag_no_environment_can_take(monkeypatch):
     """Mutation: `compute_cells` passes `check_names=False` to `env_membership`."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: ["stacks/c"])
-    monkeypatch.setattr(bm, "_tags", lambda s: ["env/a.b"])
+    monkeypatch.setattr(bm, "all_tags", lambda: {"stacks/c": ["env/a.b"]})
     with pytest.raises(SystemExit) as e:
         bm.compute_cells(all_stacks=False, base="deadbeef")
     assert str(e.value) == "::error::stack 'stacks/c' tag 'env/a.b'" + _CHARSET
@@ -319,7 +415,7 @@ def test_compute_cells_leaves_an_unmanaged_stack_out_of_cells_and_tree(monkeypat
     """The fourth element lists it, and no cell or tree entry names it, so drift closes its
     Issues. Mutation: add unmanaged stacks to `tree`."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
-    monkeypatch.setattr(bm, "_tags", lambda s: _UNMANAGED_TREE[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: _UNMANAGED_TREE)
     _, cells, tree, unmanaged = bm.compute_cells(all_stacks=True)
     assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     assert tree == [{"environment": "dev-eu", "stack": "stacks/app"}]
@@ -330,7 +426,7 @@ def test_two_workload_tags_on_an_unmanaged_stack_draw_no_refusal(monkeypatch):
     """Mutation: call `workload_of` over every stack in `tags_by_stack` in `full_tree`."""
     tree = {"stacks/app": ["env/dev-eu"], "stacks/odd": ["workload/a", "workload/b"]}
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
-    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
     _, cells, _, unmanaged = bm.compute_cells(all_stacks=True)
     assert cells == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
     assert unmanaged == ["stacks/odd"]
@@ -399,18 +495,17 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
 
 
 def _fake_run(head_sha, diffs, diff_calls):
-    """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with the text
-    of the `diffs` stack whose `.tm.hcl` pathspec it names, recording the diff argv. A diff
-    naming no `diffs` stack raises `KeyError` with its argv."""
+    """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with, per
+    `diffs` stack, a `diff --git` header for its `stack.tm.hcl` and its `diffs` text, recording
+    the diff argv."""
 
     def fake_run(args):
         if args[:2] != ["git", "diff"]:
             return f"{head_sha}\n"
         diff_calls.append(args)
-        for s, text in diffs.items():
-            if f":(glob){s}/*.tm.hcl" in args:
-                return text
-        raise KeyError(f"no `diffs` entry for {args}")
+        return "".join(
+            f"diff --git a/{s}/stack.tm.hcl b/{s}/stack.tm.hcl\n{text}" for s, text in diffs.items()
+        )
 
     return fake_run
 
@@ -441,7 +536,7 @@ def _run_main(
     replaces the default-branch read, which otherwise answers `table`.
 
     The double returns `unmanaged` as the scan's unmanaged stacks. `diffs`, `{stack: diff
-    text}`, answers each `git diff` naming that stack's `.tm.hcl` pathspec and appends its argv
+    text}`, answers the `git diff` naming that stack's `.tm.hcl` pathspec and appends its argv
     to `diff_calls`; it needs `head_sha`.
 
     `head_sha` states that commit AND makes `git rev-parse HEAD` answer it, which is what a
@@ -491,7 +586,7 @@ def _run_main(
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
     else:
         monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
-        monkeypatch.setattr(bm, "_tags", lambda s: stacks[s])
+        monkeypatch.setattr(bm, "all_tags", lambda: stacks)
     monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
     bm.main()
     parsed = github_outputs(out)
@@ -1683,6 +1778,26 @@ def test_a_one_env_query_plans_that_env_and_outputs_the_whole_tree(monkeypatch, 
     assert json.loads(outputs["cells"]) == _MULTI_ENV_CELLS
 
 
+def test_a_detect_runs_the_shared_sweep_chain_once_each(monkeypatch, tmp_path):
+    """`compute_cells` selects through `select_cells` and `_detect` checks through
+    `check_cells`, each once, so a refusal added inside either helper reaches detect and
+    onboard's drift-sweep item alike. `test_onboard.py` pins onboard's side.
+
+    Mutations: inline `cap_cells(filter_cells(...))` back into `compute_cells` -- no
+    `select_cells` call; inline `stamp_rows` and `refuse_workload_gaps` back into `_detect` --
+    no `check_cells` call.
+    """
+    calls = record_calls(monkeypatch, bm, "select_cells", "check_cells")
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu"},
+        stacks={"stacks/app": ["env/dev-eu"], "stacks/web": ["env/dev-us"]},
+    )
+    assert [name for name, _, _ in calls] == ["select_cells", "check_cells"]
+    assert calls[1][1][0] == [{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}]
+
+
 def test_a_query_matching_no_cell_is_an_empty_sweep_with_a_notice(monkeypatch, tmp_path, capsys):
     """Exit 0 with an empty matrix: a drift file may precede its first tagged stack. `cells`
     stays the whole tree, so no Issue is closed for a cell the query never planned.
@@ -1736,7 +1851,7 @@ def test_a_filtered_sweep_still_refuses_a_slug_collision_outside_it(monkeypatch)
     """
     tree = {"stacks/app": ["env/dev-eu"], "a/b": ["env/dev-us"], "a-b": ["env/dev-us"]}
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
-    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
     with pytest.raises(SystemExit) as exc_info:
         bm.compute_cells(all_stacks=True, tags="env/dev-eu")
     assert str(exc_info.value) == (
@@ -1756,7 +1871,7 @@ def test_a_filtered_sweep_still_refuses_two_workload_tags_outside_it(monkeypatch
         "stacks/dns": ["env/prod-eu", "workload/network", "workload/net"],
     }
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
-    monkeypatch.setattr(bm, "_tags", lambda s: tree[s])
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
     with pytest.raises(SystemExit) as exc_info:
         bm.compute_cells(all_stacks=True, tags="env/dev-eu")
     assert exc_info.value.code == _TWO_WORKLOADS_ERROR
@@ -1958,10 +2073,66 @@ def test_lost_env_tags_names_a_stack_whose_diff_removes_an_env_line(git_repo):
     assert bm.lost_env_tags(base, {"s": set(), "t": set()}) == {"s": ["dev"]}
 
 
+def test_lost_env_tags_attributes_one_diff_to_each_stack(git_repo, monkeypatch):
+    """Four stacks, one nested in another, one under a path git prints unquoted with a space,
+    one under a path git quotes as octal escapes (`ø`), each losing its own tag, read through one
+    `git diff`.
+
+    Mutations: one `git diff` per stack again -- four `_run` calls; attribute a file to the
+    first sorted stack whose path prefixes it (shortest prefix) -- `a/b`'s `prod` lands on `a`;
+    return `rest[2:]` for an unquoted header -- each file's directory ends ` b/<stack>`, so no
+    tag is attributed; skip the C-unquoting -- `ø` reads as its escape."""
+    stacks = ["a", "a/b", "with space", "ø"]
+    tags = ["dev", "prod", "qa", "uat"]
+    base = _commit(
+        {f"{s}/stack.tm.hcl": _stack(f'["env/{t}"]') for s, t in zip(stacks, tags, strict=True)},
+        "base",
+    )
+    _git("checkout", "-q", "-b", "pr")
+    _commit({f"{s}/stack.tm.hcl": _stack("[]") for s in stacks}, "untag")
+    calls = record_calls(monkeypatch, bm, "_run")
+    assert bm.lost_env_tags(base, dict.fromkeys(stacks, set())) == {
+        "a": ["dev"],
+        "a/b": ["prod"],
+        "with space": ["qa"],
+        "ø": ["uat"],
+    }
+    assert len(calls) == 1
+
+
+def test_lost_env_tags_reads_a_file_moved_between_stacks_as_a_removal(git_repo):
+    """Mutation: drop `--no-renames` -- git pairs the move as a rename and `s` loses nothing."""
+    base = _commit(
+        {"s/tags.tm.hcl": _stack('["env/dev"]'), "t/stack.tm.hcl": _stack("[]", "t")}, "base"
+    )
+    _git("checkout", "-q", "-b", "pr")
+    _commit({"s/tags.tm.hcl": None, "t/tags.tm.hcl": _stack('["env/dev"]')}, "move")
+    assert bm.lost_env_tags(base, {"s": set(), "t": {"dev"}}) == {"s": ["dev"]}
+
+
+def test_lost_env_tags_ignores_a_file_in_no_stacks_directory(git_repo):
+    """`modules/shared.tm.hcl`, `s/sub/extra.tm.hcl` and the root's `root.tm.hcl` each drop
+    `"env/dev"`; none of their directories is a stack. Mutation: drop `and stack in head_envs`
+    -- `KeyError`."""
+    files = ["modules/shared.tm.hcl", "s/sub/extra.tm.hcl", "root.tm.hcl"]
+    base = _commit(
+        {"s/stack.tm.hcl": _stack("[]")} | dict.fromkeys(files, 'tags = ["env/dev"]\n'), "base"
+    )
+    _git("checkout", "-q", "-b", "pr")
+    _commit(dict.fromkeys(files, "tags = []\n"), "untag")
+    assert bm.lost_env_tags(base, {"s": set()}) == {}
+
+
+def test_lost_env_tags_of_no_stacks_runs_no_git(monkeypatch):
+    """No stack, no diff and no blob fetch. Mutation: drop `if not head_envs: return {}` --
+    `_run` is called."""
+    monkeypatch.setattr(bm, "_run", lambda args: pytest.fail(f"ran {args}"))
+    assert bm.lost_env_tags("deadbeef", {}) == {}
+
+
 def test_lost_env_tags_names_the_root_stack(git_repo):
-    """Terramate lists the root stack as `.`, so its pathspec is `:(glob)./*.tm.hcl`.
-    Mutation: `stack.removeprefix(".")` in both pathspecs -- `:(glob)/*.tm.hcl` lies outside
-    the repository, `git diff` exits 128 and `_run` raises `SystemExit`."""
+    """Terramate lists the root stack as `.`, and a root file's directory is empty. Mutation:
+    drop `or "."` from the attribution -- the file reads as stack `""` and is skipped."""
     base = _commit({"stack.tm.hcl": _stack('["env/dev"]')}, "base")
     _git("checkout", "-q", "-b", "pr")
     _commit({"stack.tm.hcl": _stack("[]")}, "untag")
@@ -1991,7 +2162,8 @@ def test_lost_env_tags_diffs_from_the_merge_base(git_repo):
 
 def test_lost_env_tags_reads_only_the_stacks_own_terramate_files(git_repo):
     """A child stack's retag and the parent's `.tf` losing `"env/prod"` both remove an `env/`
-    tag literal under the parent's directory. Mutation: pathspec `f"{stack}/"`."""
+    tag literal under the parent's directory. Mutation: pathspec `":(glob)**"` -- the `.tf`
+    removal lands on `stacks/app`."""
     base = _commit(
         {
             "stacks/app/stack.tm.hcl": _stack("[]"),
@@ -2104,8 +2276,8 @@ def test_detect_warns_about_each_env_a_tagged_stack_lost(monkeypatch, tmp_path, 
 
 
 def test_detect_diffs_every_scanned_stack_once(monkeypatch, tmp_path):
-    """`stacks/app` is in the tree in two environments. Mutations: diff only `unmanaged` --
-    the tree stacks go undiffed; diff once per tree row -- `stacks/app` is diffed twice."""
+    """`stacks/app` is in the tree in two environments. Mutation: call `lost_env_tags` once
+    per tree row -- three diffs."""
     diff_calls = []
     _run_main(
         monkeypatch,
@@ -2122,12 +2294,12 @@ def test_detect_diffs_every_scanned_stack_once(monkeypatch, tmp_path):
             "git",
             "diff",
             "-U0",
+            "--no-renames",
             f"{'b' * 40}...HEAD",
             "--",
-            f":(glob){s}/*.tm.hcl",
-            f":(glob){s}/*.tm",
+            ":(glob)**/*.tm.hcl",
+            ":(glob)**/*.tm",
         ]
-        for s in ("stacks/app", "stacks/db", "stacks/gone")
     ]
 
 

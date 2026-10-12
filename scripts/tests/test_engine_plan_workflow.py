@@ -91,14 +91,18 @@ def test_every_checkout_takes_the_head_the_facts_job_named():
     build-matrix's own refusals still pass, because they read the facts job. `fetch-depth: 0` is
     load-bearing in `detect` only: without the full history `terramate list --changed` and
     `lost_env_tags`' `git diff` find nothing and report it as no change. `plan` diffs nothing.
+    `filter: blob:none` keeps that history and fetches file contents on demand.
 
     Mutations: `ref: ${{ github.sha }}` on `detect`, the same on `plan`, `fetch-depth` deleted
-    from `detect`, `fetch-depth: 0` added to `plan`, and `expected-head: ${{ github.sha }}` on
-    the cell.
+    from `detect`, `filter` deleted from `detect`, `fetch-depth: 0` added to `plan`, and
+    `expected-head: ${{ github.sha }}` on the cell.
     """
     head = "${{ needs.facts.outputs.head-sha }}"
     # PyYAML gives the int 0, not "0".
-    expected = {"detect": {"ref": head, "fetch-depth": 0}, "plan": {"ref": head}}
+    expected = {
+        "detect": {"ref": head, "fetch-depth": 0, "filter": "blob:none"},
+        "plan": {"ref": head},
+    }
     for job_id, with_block in expected.items():
         checkouts = [
             s.get("with")

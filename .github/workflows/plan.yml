@@ -3,7 +3,7 @@ on:
   workflow_call:
     inputs:
       # The three local samples run a slimmer image than the apply path's fixed ubuntu-latest.
-      # Every job but `gate-hold` takes it; `gate-hold` runs on ubuntu-slim.
+      # `detect`, the plan cells and `summary` take it; `facts` and `gate-hold` run on ubuntu-slim.
       runs_on: { required: false, default: ubuntu-latest, type: string }
     secrets:
       # Both `required: false`, for apply.yml's reason: the `summary` job binds
@@ -23,7 +23,7 @@ jobs:
   # step: `detect` can fail on a fmt check or stale codegen, and `summary` must still be told which
   # head to gate -- an empty `head-repo` there refuses, turning a failing gate into no gate at all.
   facts:
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-slim
     permissions:
       pull-requests: read
     outputs:
@@ -58,7 +58,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.facts.outputs.head-sha }}
+          # Full history for the `--changed` and tag-loss diffs; file contents are fetched only
+          # when a diff or read needs them, so the history costs commits and trees, not blobs.
           fetch-depth: 0
+          filter: blob:none
       - uses: $/actions/setup
         with: { tofu: "false" }
       # Before the two terramate steps, not after: this step is where a fork's pull request is

@@ -13,6 +13,9 @@ section below names the SHA the release tags.
 ### Changed
 
 - **Every engine job binds `shipmate-engine` with `deployment: false`, so plan, apply, deploy, drift and comment runs create no deployment on it. GitHub fails such a job while the environment has a custom deployment protection rule; `scripts/onboard` reports an enabled one with the command that removes it.**
+- **Detect and `scripts/onboard` read every stack's tags with one `terramate debug show metadata` call instead of one call per stack. A stack `terramate list` names that the metadata prints no tags for refuses, naming it, and so does a metadata line that does not parse.**
+- **The plan and deploy detect jobs check out the full history without file contents (`filter: blob:none`); git fetches a file's contents when a diff or read needs them.**
+- **The plan workflow's `facts` job runs on `ubuntu-slim` whatever `runs_on` the caller passes.**
 
 ### Fixed
 

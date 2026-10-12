@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 import pytest
-from _loader import ENGINE, load_script
+from _loader import ENGINE, load_script, record_calls
 from _shipmate import load_workflow_text
 
 onboard = load_script("onboard")
@@ -2884,7 +2884,7 @@ def test_an_untagged_stack_is_adopted_through_the_real_membership(monkeypatch, t
     Mutation: restore the refusal of an untagged stack in build-matrix's `env_membership`.
     """
     monkeypatch.setattr(onboard.bm, "_list_stacks", lambda all_stacks, base: ["a", "b"])
-    monkeypatch.setattr(onboard.bm, "_tags", lambda s: {"a": ["env/dev-eu"], "b": []}[s])
+    monkeypatch.setattr(onboard.bm, "all_tags", lambda: {"a": ["env/dev-eu"], "b": []})
     _, exc = run_main(monkeypatch, tmp_path, {}, ["--dry-run"], membership=None)
     assert exc.code == 0
     assert (
@@ -3904,11 +3904,27 @@ def test_a_file_calling_drift_yml_twice_is_cannot_check(tmp_path):
     )
 
 
+def test_a_sweep_runs_the_detect_chain_through_build_matrix(tmp_path, monkeypatch):
+    """`_sweep` calls `build-matrix`'s `select_cells` and `check_cells`, each once, and no other
+    part of the chain, so a refusal added inside either helper reaches onboard and detect alike.
+    `test_build_matrix.py` pins detect's side.
+
+    Mutation: inline `filter_cells`, `cap_cells`, `stamp_rows` and `refuse_workload_gaps` back
+    into `_sweep` -- nothing is recorded.
+    """
+    calls = record_calls(monkeypatch, onboard.bm, "select_cells", "check_cells")
+    cells, tags = _tree(("a", "dev-eu"), ("b", "dev-us"))
+    context = _drift_ctx(tmp_path, {}, cells=cells, tags_by_stack=tags)
+    assert onboard._sweep(context, "drift.yml", "env/dev-eu") == ([], {("a", "dev-eu")})
+    assert [name for name, _, _ in calls] == ["select_cells", "check_cells"]
+    assert calls[1][1][0] == [{"stack": "a", "environment": "dev-eu", "workload": ""}]
+
+
 def test_a_sweep_refusing_a_workload_gap_covers_no_cell(tmp_path):
     """A drift detect runs `stamp_rows` and `refuse_workload_gaps` on its kept cells, and the
     gap refuses the whole sweep, so the folders file sweeps nothing here.
 
-    Mutation: drop the `refuse_workload_gaps` call from `_sweep` -- `ok`.
+    Mutation: drop the `refuse_workload_gaps` call from `build-matrix`'s `check_cells` -- `ok`.
     """
     cells = [{"stack": "a", "environment": "dev-eu", "workload": "net"}]
     context = _drift_ctx(

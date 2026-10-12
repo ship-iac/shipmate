@@ -171,16 +171,18 @@ def test_the_detect_step_is_exactly_this_step(workflow, uses):
 
 def test_the_deploy_detect_checkout_takes_the_full_history():
     """`deploy-detect` diffs against the previous default-branch tip, which a one-commit
-    checkout does not hold. PyYAML gives the int 0, not "0".
+    checkout does not hold. `blob:none` keeps that history and fetches file contents on demand.
+    PyYAML gives the int 0, not "0".
 
     Mutation: delete `fetch-depth` from `deploy.yml`'s detect checkout.
+    Mutation: delete `filter` from `deploy.yml`'s detect checkout.
     """
     checkouts = [
         s.get("with")
         for s in workflow_yaml("deploy.yml")["jobs"]["detect"]["steps"]
         if str(s.get("uses", "")).split("@")[0] == "actions/checkout"
     ]
-    assert checkouts == [{"fetch-depth": 0}]
+    assert checkouts == [{"fetch-depth": 0, "filter": "blob:none"}]
 
 
 def test_the_apply_detect_job_outputs_exactly_these_expressions():

@@ -9,8 +9,10 @@ GH_TOKEN: it comes from the default branch through the contents API, not from th
 checked-out tree.
 """
 
+import codecs
 import json
 import os
+import posixpath
 import re
 
 from _shipmate import _load, _run, named
@@ -206,6 +208,16 @@ def cap_cells(cells, all_stacks):
     return cells
 
 
+def select_cells(full, tags_by_stack, query, all_stacks):
+    """The cells of `full` a run plans: narrowed by the `tags` query, then capped.
+
+    The first half of the sweep chain, shared by `compute_cells` and onboard's drift-sweep
+    item; `check_cells` is the second. A refusal that needs no table belongs in here; it runs
+    on every plan, drift and deploy detect and on onboard's drift-sweep item, not only on
+    sweeps."""
+    return cap_cells(filter_cells(full, tags_by_stack, query), all_stacks)
+
+
 _ZERO_SHA = "0" * 40
 _ENV_TAG_LITERAL = re.compile(f'"env/({ec._ENV_ENTRY.pattern})"')
 
@@ -222,11 +234,61 @@ def _list_stacks(all_stacks, base):
     return [s.strip() for s in _run(args).splitlines() if s.strip()]
 
 
-def _tags(stack):
-    out = _run(
-        ["terramate", "-C", stack, "experimental", "eval", "--as-json", "terramate.stack.tags"]
-    )
-    return json.loads(out)
+_METADATA_STACK = re.compile(r'^stack ("(?:[^"\\]|\\.)*"):$')
+_METADATA_TAGS = "\tterramate.stack.tags="
+
+
+def parse_metadata(text):
+    """`{stack: [tags...]}` from `terramate debug show metadata` output, keyed as `terramate
+    list` prints paths from the repository root (`stacks/app`; the root stack is `.`).
+
+    Each `stack "<path>":` header opens a stack; its tab-indented `terramate.stack.tags=` line
+    holds a JSON list. The header path is quoted with escapes and decodes as JSON (`\\uf022`
+    in a header is the character `list` prints raw). A line is a tags line only from its start: a
+    `description` holding the same text is a different attribute. A stack with no tags line
+    has no key. A header or tags line that does not decode raises `SystemExit` naming it."""
+    tags = {}
+    stack = None
+    for line in text.splitlines():
+        try:
+            if m := _METADATA_STACK.match(line):
+                stack = json.loads(m.group(1)).removeprefix("/") or "."
+            elif stack is not None and line.startswith(_METADATA_TAGS):
+                tags[stack] = json.loads(line[len(_METADATA_TAGS) :])
+        except json.JSONDecodeError:
+            raise SystemExit(
+                "::error::terramate debug show metadata printed a line that does not parse "
+                f"as JSON: {line[:200]!r}."
+            ) from None
+    return tags
+
+
+def all_tags():
+    """Every stack's tags in one Terramate call, as `parse_metadata` keys them.
+
+    Reading the whole tree costs no availability: a stack's `tags` cannot reference
+    `global.*`, and such a reference fails `terramate list` too, so every detect already
+    refuses it. A stack whose `globals` fail to evaluate still prints its tags."""
+    return parse_metadata(_run(["terramate", "debug", "show", "metadata"]))
+
+
+def tags_of(stacks):
+    """`{stack: [tags...]}` for `stacks` from `all_tags`, or `SystemExit` naming each stack
+    the metadata has no tags for: a default of no tags would read as unmanaged and drop the
+    stack from CI. An empty `stacks` reads nothing."""
+    if not stacks:
+        return {}
+    tags = all_tags()
+    missing = [s for s in stacks if s not in tags]
+    if missing:
+        raise SystemExit(
+            f"::error::terramate debug show metadata printed no tags for {len(missing)} "
+            f"stack(s): {named(missing, UNMANAGED_NAMES)}. Two causes produce this: a working "
+            "directory other than the repository root, where `terramate list` prints stack "
+            "paths relative to it and the metadata does not; or metadata output this parser "
+            "does not read, as after a Terramate version change."
+        )
+    return {s: tags[s] for s in stacks}
 
 
 def unmanaged_stacks(tags_by_stack):
@@ -240,8 +302,8 @@ def unmanaged_stacks(tags_by_stack):
 def lost_env_tags(base, head_envs):
     """`{stack: sorted env names}` for each stack of `head_envs` whose diff from the merge base
     of `base` to `HEAD` removes a line holding a complete tag literal `"env/<name>"`, `<name>`
-    in the environment-name charset, from the stack's own Terramate files (`<stack>/*.tm.hcl`,
-    `<stack>/*.tm`; no `**`, so a child stack and a `.tf` are out), less the names in
+    in the environment-name charset, from the stack's own Terramate files (`*.tm.hcl` and
+    `*.tm` directly in its directory, so a child stack and a `.tf` are out), less the names in
     `head_envs[stack]`, the environments the stack carries at `HEAD`. Stacks with no such name
     are left out. A backend key such as `"env/${global.x}/state"` is not a tag literal.
 
@@ -252,30 +314,43 @@ def lost_env_tags(base, head_envs):
     refuses.
 
     A nonzero `git diff`, as when `base` and `HEAD` share no merge base, exits the run through
-    `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs."""
+    `_run`'s `::error::`: fail-closed, on the same precondition `terramate list -B` needs.
+
+    One tree-wide `git diff` covers every stack, because a blobless checkout fetches each
+    call's blobs lazily, and per-stack pathspecs would grow the command line with the tree. A
+    file belongs to the stack whose directory holds it, read from the `diff --git` header; a
+    file in no stack's directory is skipped. `--no-renames` keeps a file moved between two
+    stacks a removal from the first, as a diff scoped to one stack would show it."""
+    if not head_envs:
+        return {}
+    pathspecs = [":(glob)**/*.tm.hcl", ":(glob)**/*.tm"]
+    diff = _run(["git", "diff", "-U0", "--no-renames", f"{base}...HEAD", "--", *pathspecs])
+    removed = {}
+    stack = None
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            stack = posixpath.dirname(_diff_path(line)) or "."
+        elif line.startswith("-") and stack in head_envs:
+            removed.setdefault(stack, set()).update(
+                m.group(1) for m in _ENV_TAG_LITERAL.finditer(line)
+            )
     lost = {}
-    for stack in sorted(head_envs):
-        diff = _run(
-            [
-                "git",
-                "diff",
-                "-U0",
-                f"{base}...HEAD",
-                "--",
-                f":(glob){stack}/*.tm.hcl",
-                f":(glob){stack}/*.tm",
-            ]
-        )
-        removed = {
-            m.group(1)
-            for line in diff.splitlines()
-            if line.startswith("-")
-            for m in _ENV_TAG_LITERAL.finditer(line)
-        }
-        names = sorted(removed - head_envs[stack])
+    for stack, envs in sorted(removed.items()):
+        names = sorted(envs - head_envs[stack])
         if names:
             lost[stack] = names
     return lost
+
+
+def _diff_path(header):
+    """The path of a `diff --git a/<path> b/<path>` header from a diff with no renames, so both
+    halves are equal; git quotes both, C-style, when the path holds `"`, `\\`, a control
+    character or, under the default `core.quotePath`, a non-ASCII byte."""
+    rest = header.removeprefix("diff --git ")
+    if rest.startswith('"'):
+        quoted = rest[3 : 3 + (len(rest) - 8) // 2]
+        return codecs.escape_decode(quoted.encode())[0].decode()
+    return rest[2 : 2 + (len(rest) - 5) // 2]
 
 
 def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
@@ -324,7 +399,7 @@ def env_membership(all_stacks=False, base="", check_names=True):
     table entry need check the name: a stack `c` tagged `env/a.b` and a stack `b.c` tagged
     `env/a` would both render the artifact `plan.a.b.c`."""
     stacks = _list_stacks(all_stacks, base)
-    tags_by_stack = {s: _tags(s) for s in stacks}
+    tags_by_stack = tags_of(stacks)
     unmanaged = unmanaged_stacks(tags_by_stack)
     if unmanaged:
         scope = "stack(s)" if all_stacks else "changed stack(s)"
@@ -369,12 +444,12 @@ def compute_cells(all_stacks=False, base="", tags="", errors=None):
     to `env_config` as `tagged`, and re-scanning would be a second source that can disagree
     with this one. The tree-wide checks here -- slug collisions, two `workload/*` tags on one
     stack -- run over the whole tree's managed stacks; `tags` narrows only the cells to
-    plan, and the matrix limit counts those. The caller's per-cell checks (`stamp_rows`'
-    resolution and `env_binding` refusal, `refuse_workload_gaps`) see only the returned cells.
+    plan, and the matrix limit counts those. The caller's per-cell checks (`check_cells`) see
+    only the returned cells.
     The tree is `[{environment, stack}]` in matrix order, uncapped. `errors` is `full_tree`'s."""
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
     full = full_tree(sorted(stacks_by_env), stacks_by_env, tags_by_stack, errors)
-    cells = cap_cells(filter_cells(full, tags_by_stack, tags), all_stacks)
+    cells = select_cells(full, tags_by_stack, tags, all_stacks)
     tree = [{"environment": c["environment"], "stack": c["stack"]} for c in full]
     return (
         tagged_workloads(stacks_by_env, tags_by_stack),
@@ -450,6 +525,18 @@ def refuse_workload_gaps(rows, table):
             f"environments.<env>.workloads in {ec.CONFIG_PATH} on the default branch, which is "
             "where this table is read from: merge it there on its own pull request first."
         )
+
+
+def check_cells(cells, table):
+    """`cells` stamped with the plan tier's resolved fields, after the table's per-cell
+    refusals: `stamp_rows`, then `refuse_workload_gaps` over the stamped rows.
+
+    The second half of the sweep chain, shared by `_detect` and onboard's drift-sweep item;
+    `select_cells` is the first. A refusal that reads the table belongs in here; it runs on
+    every plan and drift detect and on onboard's drift-sweep item, not only on sweeps."""
+    rows = stamp_rows(cells, table, "plan")
+    refuse_workload_gaps(rows, table)
+    return rows
 
 
 def fork_pr_error(repository, head_repo, sweep: bool):
@@ -640,8 +727,7 @@ def _detect():
         # report every unchanged environment as an unused table entry on every plan. The
         # table is checked against `tree`, so a `tags` filter cannot hide an uncovered env.
         table = env_config(tree, tagged if sweep else None)
-        cells = stamp_rows(cells, table, "plan")
-        refuse_workload_gaps(cells, table)
+        cells = check_cells(cells, table)
     if errors:
         raise SystemExit("\n".join(errors))
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)

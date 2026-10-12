@@ -34,7 +34,7 @@ def test_cells_are_the_tree_candidates_whose_check_is_on_the_head_in_every_env()
         "dev-eu": ["stacks/app", "stacks/dns", "stacks/platform"],
         "dev-us": ["stacks/app"],
     }
-    cells = aad.cells_from_checks(names, stacks_by_env, {})
+    cells = aad.cells_from_checks(names, stacks_by_env, dict.fromkeys(stacks_by_env["dev-eu"], []))
     assert sorted((c["environment"], c["stack"]) for c in cells) == [
         ("dev-eu", "stacks/app"),
         ("dev-eu", "stacks/dns"),
@@ -48,13 +48,12 @@ def test_cells_forward_construct_the_check_name_and_never_parse_it():
     # Forward construction never has to decide.
     stacks_by_env = {"dev-eu": ["components/app", "a / b", "stacks/unplanned"]}
     names = {"apply / components/app / dev-eu", "apply / a / b / dev-eu"}
-    cells = aad.cells_from_checks(names, stacks_by_env, {})
+    cells = aad.cells_from_checks(names, stacks_by_env, dict.fromkeys(stacks_by_env["dev-eu"], []))
     assert [c["stack"] for c in cells] == ["components/app", "a / b"]
 
 
 def test_cells_take_the_workload_from_the_tags():
-    # Never from the check name, which carries no workload. A stack missing from the map carries
-    # "" and applies with the environment's generic role.
+    # Never from the check name, which carries no workload.
     cells = aad.cells_from_checks(
         {
             "apply / stacks/app / dev-eu",
@@ -62,7 +61,7 @@ def test_cells_take_the_workload_from_the_tags():
             "apply / stacks/app / dev-us",
         },
         {"dev-eu": ["stacks/app", "stacks/dns"], "dev-us": ["stacks/app"]},
-        {"stacks/app": ["workload/net-edge"]},  # stacks/dns is absent, so its workload is "".
+        {"stacks/app": ["workload/net-edge"], "stacks/dns": ["env/dev-eu"]},
     )
     assert cells == [
         {
@@ -81,7 +80,9 @@ def test_cells_take_the_workload_from_the_tags():
 
 def test_env_without_a_check_contributes_nothing():
     cells = aad.cells_from_checks(
-        {"apply / stacks/app / dev-eu"}, {"dev-eu": ["stacks/app"], "prod": ["stacks/app"]}, {}
+        {"apply / stacks/app / dev-eu"},
+        {"dev-eu": ["stacks/app"], "prod": ["stacks/app"]},
+        {"stacks/app": []},
     )
     assert all(c["environment"] == "dev-eu" for c in cells)
 
@@ -91,7 +92,9 @@ def test_slug_alike_paths_never_enrol_each_other():
     check, so only `a-b` is work. A pull request adding `a-b` beside an unchanged `a/b` never
     shows the pair to build-matrix's plan-time collision guard, so nothing resolving a name back
     to a path is the whole protection: there is no slug to collide over any more."""
-    cells = aad.cells_from_checks({"apply / a-b / dev-eu"}, {"dev-eu": ["a/b", "a-b"]}, {})
+    cells = aad.cells_from_checks(
+        {"apply / a-b / dev-eu"}, {"dev-eu": ["a/b", "a-b"]}, {"a/b": [], "a-b": []}
+    )
     assert [c["stack"] for c in cells] == ["a-b"]
 
 
@@ -231,7 +234,7 @@ def _run_main(
     would mask a caller that stopped passing the table. One entry is appended to `reads` per
     `read_table` call. Each `env_membership` call appends its `(args, kwargs)` to `membership`
     when one is given. `deps` replaces the run-graph, which defaults to the tree's stacks with
-    no edges."""
+    no edges, and `tags` the tag map, which defaults to no tags for each of them."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -271,7 +274,9 @@ def _run_main(
     monkeypatch.setattr(aad, "_run", _run)
     monkeypatch.setattr(aad.bm, "_run", _run)
     monkeypatch.setattr(
-        aad.bm, "env_membership", _membership_double(tree, tags or {"stacks/app": []}, membership)
+        aad.bm,
+        "env_membership",
+        _membership_double(tree, tags or {p: [] for ps in tree.values() for p in ps}, membership),
     )
     stub_read_table(monkeypatch, (aad.bm.ec,), table, order, explicit, reads)
     aad.main()

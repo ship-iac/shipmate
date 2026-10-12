@@ -778,11 +778,10 @@ no stack tags is unused and warns.
 ### What the diagnostics can and cannot see
 
 The unused-entry warning, and its sibling naming a listed workload that no stack
-in its environment tags, need the whole-tree tag map, and they never trigger a
-scan of their own — evaluating the whole tree on a targeted apply would let one
-unrelated stack's unresolvable expression block an approved plan. So they fire
-only where a whole-tree scan already happened: every drift sweep, `unlock`,
-and a bare `shipmate apply`. The plan, deploy and targeted-apply paths see a
+in its environment tags, need every stack's environment membership, and they
+never trigger a whole-tree scan of their own. So they fire only where a
+whole-tree scan already happened: every drift sweep, `unlock`, and a bare
+`shipmate apply`. The plan, deploy and targeted-apply paths see a
 changed set or a workset and stay silent.
 
 **A `needs` predecessor is checked the same way.** It names an environment
@@ -1776,7 +1775,8 @@ The five jobs:
   (comment shipmate plan or push): its plan summary was cancelled before it
   published". A `summary` refused by its fork `if:` is `skipped`, not
   `cancelled`, so `gate-hold` holds the App key only for a head `summary`
-  admitted. It runs on `ubuntu-slim` whatever `runs_on` the caller passes.
+  admitted. It runs on `ubuntu-slim` whatever `runs_on` the caller passes, as
+  `facts` does.
 - **`apply.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
@@ -1917,9 +1917,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and the control jobs below call `gh api` on the comment, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
-- The engine's nine control jobs, which run neither `tofu` nor `terramate`,
-  take no runner input and run on `ubuntu-slim`. `gate-hold` runs on
-  `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
+- The engine's ten control jobs, which run neither `tofu` nor `terramate`,
+  take no runner input and run on `ubuntu-slim`. `plan.yml`'s `facts` and
+  `gate-hold` run on `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
   `docs/aws.md` §Runner choice lists them. An account that cannot use that
   label leaves them waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config

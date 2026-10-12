@@ -13,11 +13,9 @@ that stranded it, those plan artifacts may be long expired, and unlock
 consumes no plan. The pending apply checks ARE the queue, the same authority
 deploy-detect uses.
 
-`all_stacks=True` evaluates tags across the whole tree, which the apply path
-deliberately avoids (one unrelated stack's unresolvable expression would
-block an approved plan). That trade is inverted here on purpose: unlock has
-no plan to protect, and it must reach a cell whose plan artifacts expired
-long ago. A stack with no `env/*` tag is in no environment, so it adds no
+`all_stacks=True` lists the whole tree, where the targeted apply path takes
+only its workset: unlock must reach a cell whose plan artifacts expired long
+ago. A stack with no `env/*` tag is in no environment, so it adds no
 cell and cannot make unlock unavailable. For the same reason the walk passes
 `check_names=False`: another stack's unusable `env/*` tag refuses every other
 run, and must not strand this env's lock; `validate_env` checked `env` itself.

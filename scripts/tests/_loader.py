@@ -461,3 +461,19 @@ def run_with_gate_gh(
     }
     proc = run_step(tmp_path, body, env)
     return proc, read_calls(calls)
+
+
+def record_calls(monkeypatch, module, *names):
+    """Wrap each named function of ``module`` so every call is appended to the returned list as
+    ``(name, args, kwargs)`` and then passed through to the real function. Patch the instance
+    the caller reads: ``_load`` returns a fresh module per call."""
+    calls = []
+    for name in names:
+        real = getattr(module, name)
+
+        def recorder(*args, _name=name, _real=real, **kwargs):
+            calls.append((_name, args, kwargs))
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, recorder)
+    return calls
