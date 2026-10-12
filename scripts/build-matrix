@@ -343,8 +343,8 @@ def lost_env_tags(base, head_envs):
 
 def _diff_path(header):
     """The path of a `diff --git a/<path> b/<path>` header from a diff with no renames, so both
-    halves are equal; git quotes both, C-style, when the path holds `"`, `\\` or a control
-    character."""
+    halves are equal; git quotes both, C-style, when the path holds `"`, `\\`, a control
+    character or, under the default `core.quotePath`, a non-ASCII byte."""
     rest = header.removeprefix("diff --git ")
     if rest.startswith('"'):
         quoted = rest[3 : 3 + (len(rest) - 8) // 2]
