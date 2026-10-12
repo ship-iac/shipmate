@@ -51,7 +51,10 @@ not leaves every job waiting for a runner that never arrives.
 **The state path is read from `tofu init`, not configured.** A local backend's
 state is restored from the path `tofu init` records before each drift cell
 plans; a remote backend owns its state and the restore is skipped
-([`../CONTRACT.md`](../CONTRACT.md) §State backend).
+([`../CONTRACT.md`](../CONTRACT.md) §State backend). The cached state is
+encrypted with `SHIPMATE_PLAN_PASSPHRASE`, so a drift file whose stacks use a
+local backend maps that secret in the `drift` job's `secrets:`; without it each
+cell refuses at `Initialize the stack` (its `Restore state` step).
 
 **`contents: read`, `id-token: write` and `actions: read` are all required** on
 the `drift` job, cloud credentials or not. A called workflow's permissions are

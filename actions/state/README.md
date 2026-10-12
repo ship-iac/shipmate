@@ -31,10 +31,9 @@ call.
   not saved; the step prints a notice instead.
 - Restore: a matched entry is decrypted in place before tofu reads it. A cache
   miss restores nothing and runs no decrypt. An unencrypted entry, a wrong
-  passphrase or a corrupt entry fails the restore, naming the matched cache key;
-  for an unencrypted entry the message also gives the command that deletes
-  every entry under its prefix. A failed restore makes the cell skip its state
-  save, so the entry is never overwritten.
+  passphrase or a corrupt entry fails the restore, naming the matched cache key
+  and the `gh cache` commands that recover. A failed restore makes the cell skip
+  its state save, so the entry is never overwritten.
 - The save leaves ciphertext in the workspace, so no step after it reads the
   state file.
 

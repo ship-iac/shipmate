@@ -812,7 +812,9 @@ the repository root, or none:
   restore a default-branch cache entry. An empty passphrase refuses the restore
   and the save. A plaintext entry, or one that does not decrypt to OpenTofu
   state, fails the restore naming the matched cache key, so tofu never reads it
-  and the cell skips its save.
+  and the cell skips its save. Rotating the passphrase makes every cached entry
+  fail that way: set the old passphrase back, or delete the `state/` entries,
+  which discards that state (§Plan artifact encryption, "Rotation").
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -2399,7 +2401,8 @@ reaches the process.
   would export nothing while its value sat world-readable in the repository UI,
   and the engine's own namespace has no legitimate reading as a consumer
   variable. The refusal says to delete the variable, rotate what it held, and
-  set the secret.
+  set the secret. A rotated `SHIPMATE_PLAN_PASSPHRASE` no longer decrypts a
+  local backend's cached state (§Plan artifact encryption, "Rotation").
 - **Name validation.** Every envelope key must match `[A-Za-z_][A-Za-z0-9_]*`.
   `$GITHUB_ENV` is written in heredoc form, so a key holding a newline would
   inject further assignments; this is the trust boundary, so a bad key is
@@ -2535,9 +2538,8 @@ environment, and a plan cell names its own plan environment. The same value on b
 - **As a variable**, every cell refuses it by name (`scripts/env-inject`).
 - **As a secret on `shipmate-engine`**, no plan or apply cell binds that
   environment, so the passphrase resolves to empty on both sides and every plan
-  cell refuses: a local backend at `Initialize the stack` (its `Restore state`
-  step), any other backend at `Encrypt plan artifact at rest`, before the
-  upload.
+  cell refuses at `Require the plan passphrase`, before it initializes the
+  stack.
 - **As a secret on `<env>-apply` alone**, every plan cell in that environment
   refuses the same way, so no apply ever has a plan.
 - **As a secret on `<env>-plan` alone**, plans upload encrypted and every apply
@@ -2549,9 +2551,9 @@ name one and read it.
 Unlike the App private key, this secret must be readable wherever plans are
 produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
-- **Required.** An empty or unset passphrase refuses: `plan-cell` before the
-  upload, `apply-cell` before the decrypt, and `actions/state` before any cache
-  call. No plan artifact uploads unencrypted.
+- **Required.** An empty or unset passphrase refuses: `plan-cell` before it
+  initializes the stack, `apply-cell` before the decrypt, and `actions/state`
+  before any cache call. No plan artifact uploads unencrypted.
 - **Fail-safe on mismatch.** apply-cell refuses an artifact without the
   `Salted__` magic header, with a re-plan instruction, rather than apply it. A
   wrong passphrase is not detected
@@ -2570,6 +2572,12 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   §Consumption's one-change rule keeps the same on both paths; the passphrase
   must match on both too. A mismatch surfaces as the fail-safe above, not a
   silent wrong apply.
+- **Rotation.** A new passphrase cannot decrypt anything the old one encrypted.
+  Outstanding plans fail at apply; re-plan them. Every cached local-state entry
+  fails its restore with `does not decrypt to OpenTofu state`, and older entries
+  under the same prefix were saved with the old passphrase too. Either set the
+  old passphrase back, or delete the `state/` entries, which discards that
+  state: OpenTofu no longer tracks the resources it recorded.
 
 ## Engine-owned tofu invocation
 

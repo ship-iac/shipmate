@@ -598,8 +598,7 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
 - As a variable, every cell refuses it by name.
 - As a secret on `shipmate-engine`, it reaches no cell, so every plan cell
-  refuses: a local backend at `Initialize the stack` (its `Restore state`
-  step), any other backend before the plan artifact uploads.
+  refuses at `Require the plan passphrase`, before it initializes the stack.
 - As a secret on `<env>-apply` alone, every plan cell in that environment
   refuses the same way.
 - As a secret on `<env>-plan` alone, every apply in that environment refuses at
@@ -849,7 +848,8 @@ a cell; the run fails telling you to rotate what it held. A
 `SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE` variable is refused too,
 each with its own message: rotate the key and set it as a secret on
 `shipmate-engine`; choose a new passphrase and set it as a repository or
-organization secret. The other direction cannot be
+organization secret (a new passphrase cannot decrypt cached local state:
+[`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption, "Rotation"). The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 

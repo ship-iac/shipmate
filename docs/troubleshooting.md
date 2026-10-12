@@ -714,6 +714,52 @@ Two locks this verb does not reach:
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
 
+### `SHIPMATE_PLAN_PASSPHRASE is not set`, or `SHIPMATE_PLAN_PASSPHRASE is empty`
+
+The cell received no passphrase. It encrypts every plan artifact and a local
+backend's cached state, so nothing proceeds without it
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
+
+- `SHIPMATE_PLAN_PASSPHRASE is not set` comes from `scripts/plan-crypt`: a plan
+  cell at `Require the plan passphrase`, before it initializes the stack, or an
+  apply cell at `Decrypt reviewed plan artifact`.
+- `shipmate/actions/state: SHIPMATE_PLAN_PASSPHRASE is empty` comes from a local
+  backend's state restore or save, which is where a drift cell refuses.
+
+Set `SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret, or as the
+same value on both `<env>-plan` and `<env>-apply`, and map it by name in the
+`secrets:` block of `shipmate.yml`'s `plan`, `deploy` and `apply` jobs and of
+each drift file's `drift` job. A secret on `shipmate-engine` or on one half of a
+split environment alone reaches the wrong cells
+([`getting-started.md`](getting-started.md) lists each placement).
+
+### `state cache entry ... is plaintext`
+
+A local backend's restore matched a cache entry that was saved unencrypted, and
+refused before tofu read it. The message names the entry and gives the command
+that deletes every entry under its prefix; the restore matches by prefix, so
+deleting only the named entry restores the next-older plaintext one. Run the
+command, then re-run the cell.
+
+Deleting discards that state: OpenTofu no longer tracks the resources it
+recorded. A sample stack's null and random resources re-create; a real
+resource can collide with or be duplicated by its re-creation.
+
+### `state cache entry ... does not decrypt to OpenTofu state`
+
+A local backend's restore decrypted the matched entry to something that is not
+OpenTofu state, and refused before tofu read it. AES-256-CTR decrypts with any
+passphrase, so the cause is either a passphrase that differs from the one that
+saved the entry, or a corrupt entry:
+
+- **The entry is corrupt.** `gh cache delete <key> --repo <owner>/<repo>`, with
+  the key from the message, deletes it; the next restore uses the previous
+  entry.
+- **The passphrase was rotated.** Every older entry under the prefix was saved
+  with the old passphrase too. Set the old passphrase back, or delete every
+  entry under the prefix with the command the message gives, which discards
+  that state as in §`state cache entry ... is plaintext`.
+
 ### `could not install python3-yaml`, or `the engine needs PyYAML`
 
 The engine's scripts parse YAML with PyYAML, through the runner's `python3`.

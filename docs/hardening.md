@@ -1153,9 +1153,10 @@ for exactly the exposure control 1 exists to limit.
   none), code in that apply can save a provider or state entry that other plan,
   drift and apply cells restore, in every environment and on every later pull
   request. Nothing verifies a restored archive: the lock file verifies provider
-  packages, not the archive around them, and a restored state entry is checked
-  only for decrypting to OpenTofu state, which an apply holding
-  `SHIPMATE_PLAN_PASSPHRASE` produces.
+  packages, not the archive around them, and nothing verifies restored state.
+  Its encryption gives confidentiality, not integrity: AES-256-CTR is
+  unauthenticated, and the check that the entry decrypts to OpenTofu state
+  catches a wrong passphrase or a corrupt entry, not who saved it.
   Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval
