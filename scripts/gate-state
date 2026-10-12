@@ -19,11 +19,7 @@ the sticky comment as it is. An on-demand plan never takes that branch: a
 skipped `detect` there is a failure like any other non-success.
 """
 
-import json
 import os
-import sys
-
-from _shipmate import current_run_url
 
 _HOLD = "hold"
 _POST = "post"
@@ -181,13 +177,8 @@ def main():
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"state={state or ''}\n")
+        fh.write(f"description={desc[:140]}\n")
         fh.write(f"comment_mode={mode}\n")
-    if state is None:
-        return
-    body = {"state": state, "context": "shipmate / gate", "description": desc[:140]}
-    # This job runs inside the plan run, so this run's URL is the right target.
-    body["target_url"] = current_run_url()
-    json.dump(body, sys.stdout)
 
 
 if __name__ == "__main__":

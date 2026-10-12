@@ -36,6 +36,8 @@ REDACTED = "***"
 #: and a value beginning with '-' reads to a CLI as a flag.
 REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 ENGINE_ENV = "shipmate-engine"
+#: The commit-status context of the merge gate. `scripts/gate-status` is its one writer.
+GATE_CONTEXT = "shipmate / gate"
 # Named `APP_KEY_NAME`, not `..._SECRET`: ruff's S105 hardcoded-password rule fires on a
 # "SECRET" token in the binding name, and this is a secret's *name*.
 APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"

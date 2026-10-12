@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""Read and write the `shipmate / gate` commit status: the one script that does either.
+
+    gate-status newest <sha>                     print `<state> <run id>` of the newest gate
+    gate-status post <sha> <state> <description> write the gate
+    gate-status hold <sha> <description>         write a `failure` gate
+    gate-status refresh <sha>                    green the gate once every apply check is done
+    gate-status deploy <sha> <results>           write the post-merge verdict over job results
+
+The gate is a commit status, not a check-run: a check-run binds to a check-suite and can land in
+a stale one when a commit carries two plan runs, which blocks the merge forever. Every write sets
+`target_url` to this run. Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL`,
+`GITHUB_RUN_ID`, and `SHIPMATE_APP_ID` for `refresh`. A `<sha>` that is not 40 lowercase hex
+characters is refused before any API call. A failed API call exits 1 with an `::error::` line.
+"""
+
+import os
+import re
+import sys
+
+from _shipmate import GATE_CONTEXT, _load, _run, current_run_url
+
+ag = _load("apply-gate")
+
+_SHA = re.compile(r"[0-9a-f]{40}")
+_RUN_ID = re.compile(r"/actions/runs/([0-9]+)$")
+#: The fields `apply-gate` judges.
+_CHECK_RUNS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
+_STATUSES_JQ = ".[] | {context, state, target_url}"
+_GOOD_RESULTS = {"success", "skipped"}
+
+
+def _repo():
+    return os.environ["GITHUB_REPOSITORY"]
+
+
+def deploy_verdict(results):
+    """(state, description) over the comma-separated job results of a deploy run.
+
+    Any result but `success` or `skipped` (failure, cancelled, timed_out) is incomplete, and so
+    is an empty string: no env-level job reported, so nothing was applied."""
+    tokens = results.split(",")
+    if all(t in _GOOD_RESULTS for t in tokens):
+        return "success", "all env-levels applied (deploy env-level applies completed)"
+    return "failure", "deploy incomplete (deploy env-level applies completed)"
+
+
+def newest_gate(sha):
+    """(state, run id) of the newest gate status on `sha`, or None when it carries none.
+
+    The run id is the `/actions/runs/<id>` suffix of `target_url`, `-` when it has none. The
+    statuses listing is newest first and paginated: a head with many other contexts can push
+    its gate past the first page."""
+    out = _run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{_repo()}/commits/{sha}/statuses?per_page=100",
+            "--jq",
+            _STATUSES_JQ,
+        ]
+    )
+    for status in ag.parse_jsonl(out.splitlines()):
+        if status.get("context") == GATE_CONTEXT:
+            m = _RUN_ID.search(status.get("target_url") or "")
+            return status["state"], m.group(1) if m else "-"
+    return None
+
+
+def post(sha, state, description):
+    _run(
+        [
+            "gh",
+            "api",
+            f"repos/{_repo()}/statuses/{sha}",
+            "-f",
+            f"state={state}",
+            "-f",
+            f"context={GATE_CONTEXT}",
+            "-f",
+            f"description={description[:140]}",
+            "-f",
+            f"target_url={current_run_url()}",
+        ]
+    )
+
+
+def refresh(sha):
+    """Green the gate when every App-authored apply check on `sha` is done and no hold stands.
+
+    A hold must not be cleared by the applies it exists to prevent: `shipmate apply` never
+    consults the gate, so the parsed cells can all complete while stacks whose summaries were
+    never read have no apply check at all. Only a fresh plan run exits a hold."""
+    out = _run(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{_repo()}/commits/{sha}/check-runs?filter=all&per_page=100",
+            "--jq",
+            _CHECK_RUNS_JQ,
+        ]
+    )
+    runs = ag.app_runs(out.splitlines(), os.environ.get("SHIPMATE_APP_ID", ""))
+    if ag.verdict(runs) == "pending":
+        open_ = sorted(set(ag.latest_by_name(runs)) - ag.done_names(runs))
+        print(
+            f"apply checks on {sha} are not all done ({len(open_)} open); the gate is left as it is"
+        )
+        return
+    newest = newest_gate(sha)
+    if newest and newest[0] == "failure":
+        raise SystemExit(
+            f"::error::{GATE_CONTEXT} is held for {sha}; its status description on the pull "
+            "request names the cause. A hold clears only when a new plan run rewrites the "
+            "gate: comment shipmate plan, or push."
+        )
+    post(sha, "success", "all applies complete, nothing left to apply")
+
+
+def _newest(sha):
+    newest = newest_gate(sha)
+    if newest:
+        print(*newest)
+
+
+#: command -> (argument count after the sha, handler)
+_COMMANDS = {
+    "newest": (0, _newest),
+    "post": (2, post),
+    "hold": (1, lambda sha, description: post(sha, "failure", description)),
+    "refresh": (0, refresh),
+    "deploy": (1, lambda sha, results: post(sha, *deploy_verdict(results))),
+}
+
+
+def main(argv):
+    cmd, *args = argv or [""]
+    if cmd not in _COMMANDS or len(args) != _COMMANDS[cmd][0] + 1:
+        raise SystemExit(
+            f"::error::usage: gate-status {'|'.join(_COMMANDS)} <sha> ... (got {argv})"
+        )
+    sha = args[0]
+    if not _SHA.fullmatch(sha):
+        if cmd == "deploy" and not sha:
+            raise SystemExit("::error::detect produced no head SHA; deploy cannot gate")
+        raise SystemExit(f"::error::head SHA must be 40 lowercase hex characters (got: {sha!r})")
+    _COMMANDS[cmd][1](*args)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

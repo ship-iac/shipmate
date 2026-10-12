@@ -1,7 +1,5 @@
-import json
-
 import pytest
-from _loader import load_script
+from _loader import github_outputs, load_script
 
 gate_state = load_script("gate-state")
 
@@ -101,7 +99,7 @@ def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
     )
 
 
-#: 300 characters, with a `"` the JSON body must escape.
+#: 300 characters.
 _LONG_REFUSAL = 'stack "a/b" ' + "x" * 288
 
 
@@ -114,10 +112,11 @@ def test_main_cuts_a_long_refusal_to_the_statuses_limit(tmp_path, monkeypatch, c
         SHIPMATE_DETECT_RESULT="failure",
         SHIPMATE_DETECT_REFUSAL=_LONG_REFUSAL,
     )
-    assert (body["state"], body["description"]) == (
-        "failure",
-        'detect failed: stack "a/b" ' + "x" * 113,
-    )
+    assert body == {
+        "state": "failure",
+        "description": 'detect failed: stack "a/b" ' + "x" * 113,
+        "comment_mode": "hold",
+    }
 
 
 def test_empty_matrix_greens_the_gate():
@@ -206,22 +205,22 @@ def test_every_description_fits_the_statuses_api(kw):
 
 
 def _main_body(tmp_path, monkeypatch, capsys, **env):
+    """The outputs `main()` writes, after asserting it printed nothing: the gate is written by
+    `scripts/gate-status`, never from this script's stdout. Mutation: print the old JSON body."""
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out"))
     monkeypatch.setenv("SHIPMATE_DETECT_RESULT", "success")
     monkeypatch.setenv("SHIPMATE_PLAN_RESULT", "success")
     monkeypatch.setenv("SHIPMATE_PLANNED_CELLS", "3")
     monkeypatch.setenv("SHIPMATE_CELL_COUNT", "3")
     monkeypatch.setenv("SHIPMATE_PENDING", "true")
-    monkeypatch.setenv("GITHUB_SERVER_URL", "https://example.invalid")
-    monkeypatch.setenv("GITHUB_REPOSITORY", "acme/demo")
-    monkeypatch.setenv("GITHUB_RUN_ID", "999")
     for k, v in env.items():
         if v is None:
             monkeypatch.delenv(k, raising=False)
         else:
             monkeypatch.setenv(k, v)
     gate_state.main()
-    return json.loads(capsys.readouterr().out)
+    assert capsys.readouterr().out == ""
+    return github_outputs(tmp_path / "out")
 
 
 def test_main_holds_the_gate_on_an_empty_planned_count_env(tmp_path, monkeypatch, capsys):
@@ -229,8 +228,14 @@ def test_main_holds_the_gate_on_an_empty_planned_count_env(tmp_path, monkeypatch
     # empty string, which is the real GHA shape. `_main_body` applies **env after its own
     # defaults, so this overrides the default "3".
     body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_PLANNED_CELLS="")
-    assert body["state"] == "failure"
-    assert "planned cell count was not reported" in body["description"]
+    assert body == {
+        "state": "failure",
+        "description": (
+            "the planned cell count was not reported, so this run's evidence is unknown; "
+            "re-plan before merging"
+        ),
+        "comment_mode": "hold",
+    }
 
 
 def test_main_holds_the_gate_when_the_planned_count_env_is_absent(tmp_path, monkeypatch, capsys):
@@ -238,20 +243,18 @@ def test_main_holds_the_gate_when_the_planned_count_env_is_absent(tmp_path, monk
     # this is the only test that can see `main()`'s default, and a default of "0" there would
     # green a quiet gate for a run whose count nobody ever reported.
     body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_PLANNED_CELLS=None)
-    assert body["state"] == "failure"
-    assert "planned cell count was not reported" in body["description"]
-
-
-def test_gate_links_to_this_run(tmp_path, monkeypatch, capsys):
-    """Mutation: set `target_url` to `os.environ["GITHUB_SERVER_URL"]` alone."""
-    # The summary job runs inside the plan run, so this run's URL holds the plan logs and the
-    # plan artifacts the gate points at.
-    body = _main_body(tmp_path, monkeypatch, capsys)
-    assert body["target_url"] == "https://example.invalid/acme/demo/actions/runs/999"
+    assert body == {
+        "state": "failure",
+        "description": (
+            "the planned cell count was not reported, so this run's evidence is unknown; "
+            "re-plan before merging"
+        ),
+        "comment_mode": "hold",
+    }
 
 
 def _main_draft(tmp_path, monkeypatch, capsys, on_demand):
-    body = _main_body(
+    return _main_body(
         tmp_path,
         monkeypatch,
         capsys,
@@ -263,18 +266,21 @@ def _main_draft(tmp_path, monkeypatch, capsys, on_demand):
         SHIPMATE_IS_DRAFT="true",
         SHIPMATE_ON_DEMAND=on_demand,
     )
-    return body, (tmp_path / "out").read_text(encoding="utf-8")
 
 
 def test_main_reads_the_draft_flag(tmp_path, monkeypatch, capsys):
     """Mutation: misspell `SHIPMATE_IS_DRAFT` in `main()` -> `state=failure`."""
-    body, out = _main_draft(tmp_path, monkeypatch, capsys, "false")
-    assert out == "state=pending\ncomment_mode=draft\n"
-    assert body["description"] == gate_state.DRAFT_DESCRIPTION
+    assert _main_draft(tmp_path, monkeypatch, capsys, "false") == {
+        "state": "pending",
+        "description": gate_state.DRAFT_DESCRIPTION,
+        "comment_mode": "draft",
+    }
 
 
 def test_main_reads_the_on_demand_flag(tmp_path, monkeypatch, capsys):
     """Mutation: misspell `SHIPMATE_ON_DEMAND` in `main()` -> `state=pending`."""
-    body, out = _main_draft(tmp_path, monkeypatch, capsys, "true")
-    assert out == "state=failure\ncomment_mode=hold\n"
-    assert body["description"] == _DETECT_SKIPPED_DESCRIPTION
+    assert _main_draft(tmp_path, monkeypatch, capsys, "true") == {
+        "state": "failure",
+        "description": _DETECT_SKIPPED_DESCRIPTION,
+        "comment_mode": "hold",
+    }
