@@ -1000,7 +1000,8 @@ goes green over a stack that plans nothing. When a pull request removes a
 stack's last `env/*` tag, plan detect also writes a `::warning::` naming it,
 because the same green gate then hides a live stack's unapplied change. A pull
 request removing one `env/*` tag from a stack that keeps another gets a
-`::warning::` naming each `<stack> / <env>` pair, for the same reason. A
+`::warning::` and a plan comment line naming each `<stack> / <env>` pair, for the
+same reason. A
 deploy refuses when its merged pull request holds an open apply check for a
 stack and environment the merge no longer pairs: the stack, changed by that
 pull request, lost that `env/*` tag (or every one) after the pull request was
@@ -2110,7 +2111,8 @@ and `lost` outputs, which the same rule reads.
   both. Same caps and fallback as the unmanaged line, ending `; their pairs are
   too long to list here.` A drift sweep and a run with no pull-request base
   have no such line. On both lines each name is escaped like a cell line's
-  stack, and `@` renders as `&#64;`, so a path cannot mention a user or team.
+  stack, and each `@` is followed by an empty HTML comment (`@<!-- -->`), so a
+  path cannot mention a user or team.
 - **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the

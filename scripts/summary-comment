@@ -292,15 +292,17 @@ def names_line(value, key, lead):
     """`lead` with its count, then the first names of build-matrix's `{"count": N, key: [...]}`
     output (at most `UNMANAGED_NAMES` by `_named_output`'s shape check) that fit in
     `UNMANAGED_LINE_CAP` characters, then `, and M more` for the other `count - named`. Each
-    name is `_md_escape`d with `@` as `&#64;`, so a path cannot mention a user or team. When
-    not even the first fits, a fixed sentence names none. Empty for `None` or a zero count."""
+    name is `_md_escape`d, then each `@` is followed by an empty HTML comment so a path cannot
+    mention a user or team: `&#64;` still renders a mention (GitHub markdown API, 2026-10-12);
+    an empty HTML comment after `@` does not. When not even the first fits, a fixed sentence
+    names none. Empty for `None` or a zero count."""
     if not value or not value["count"]:
         return ""
     count = value["count"]
     lead = lead.format(count)
     line, names = "", []
     for name in value[key]:
-        names.append(_md_escape(name).replace("@", "&#64;"))
+        names.append(_md_escape(name).replace("@", "@<!-- -->"))
         more = count - len(names)
         candidate = f"{lead}: {', '.join(names)}" + (f", and {more} more" if more else "")
         if len(candidate) > UNMANAGED_LINE_CAP:

@@ -443,7 +443,8 @@ _LOST_LEAD = (
 
 
 def test_the_lost_pairs_line_follows_the_unmanaged_line_and_mentions_nobody():
-    """Each name is escaped, and `@` is `&#64;` so a path cannot mention a user or team.
+    """Each name is escaped, and an empty HTML comment follows each `@` so a path cannot
+    mention a user or team.
 
     Mutation: drop the lost line from `build_comment` -- it is missing.
     Mutation: drop the `@` replacement in `names_line` -- both lines carry a live `@acme`."""
@@ -452,9 +453,9 @@ def test_the_lost_pairs_line_follows_the_unmanaged_line_and_mentions_nobody():
         HEAD
         + f"🟢 no changes {AT}\n\n"
         + _LEAD.format(1)
-        + ": &#64;acme/admins/x\n\n"
+        + ": @<!-- -->acme/admins/x\n\n"
         + _LOST_LEAD.format(12)
-        + ": &#64;acme/ops/y / prod, s00 / dev, s01 / dev, s02 / dev, s03 / dev, s04 / dev, "
+        + ": @<!-- -->acme/ops/y / prod, s00 / dev, s01 / dev, s02 / dev, s03 / dev, s04 / dev, "
         "s05 / dev, s06 / dev, s07 / dev, s08 / dev, and 2 more",
         True,
         True,

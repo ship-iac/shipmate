@@ -652,9 +652,10 @@ def _detect():
         fh.write(f"cells={json.dumps(tree)}\n")
         named = {"count": len(unmanaged), "paths": unmanaged[:UNMANAGED_NAMES]}
         fh.write(f"unmanaged={json.dumps(named)}\n")
+        lost = ""
         if pairs is not None:
-            pairs = json.dumps({"count": len(pairs), "pairs": pairs[:UNMANAGED_NAMES]})
-        fh.write(f"lost={pairs or ''}\n")
+            lost = json.dumps({"count": len(pairs), "pairs": pairs[:UNMANAGED_NAMES]})
+        fh.write(f"lost={lost}\n")
     listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
     print(f"{len(cells)} cell(s): {listing}")
 

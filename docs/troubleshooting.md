@@ -1053,7 +1053,9 @@ edit — plans nothing. This is expected, not a fault.
 
 A changed stack with no `env/*` tag is unmanaged and plans nothing either. The
 plan comment names it under the verdict, and the `detect` log carries a notice
-naming it. Tag it `env/<name>` to bring it under shipmate ([`../CONTRACT.md`](../CONTRACT.md) §Tag
+naming it. A pull request that removes one `env/*` tag from a stack that keeps
+another drops that stack / environment pair the same way; the plan comment names
+the pair on its own line. Tag the stack `env/<name>` to bring it under shipmate ([`../CONTRACT.md`](../CONTRACT.md) §Tag
 grammar).
 
 The same rule drops a stack whose change was applied before merge and then
