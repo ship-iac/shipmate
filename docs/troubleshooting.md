@@ -1044,9 +1044,10 @@ chain that sets the later level.
 
 A refused deploy appends the cells of the merge it left pending. After a
 `needs` fix merges, re-run the refused deploy: it reads `needs` from the
-default branch and applies them. For a retag, open a new pull request that
-retags the stacks and changes every listed stack; its plan and deploy apply
-them. A re-run reads tags from the merged commit and refuses again.
+default branch and applies them. For a fix to tags or `after`, open a new pull
+request that makes it and changes every listed stack; its plan and deploy
+apply them. A re-run reads tags and `after` from the merged commit and refuses
+again.
 
 A targeted `shipmate apply <env>` never refuses this: it does not order by
 `needs`, and a cell whose upstream is pending in another environment waits

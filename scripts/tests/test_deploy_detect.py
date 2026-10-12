@@ -702,6 +702,7 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
 
     Mutation: list only the pairs' cells in the remedy -- `workers / dev-eu` drops out.
     Mutation: restore the remedy that sends a `needs` fix to a new pull request -- red.
+    Mutation: restore the remedy that names only a retag for the new pull request -- red.
     Mutation: drop the `refuse_inversions` call from `main` -- the deploy writes waves."""
     with pytest.raises(SystemExit) as exc_info:
         _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
@@ -718,9 +719,9 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
         "environments that order it. This deploy applies nothing, so none of these cells of "
         "this merge is applied: dns / dev-us, edge / dev-us, gr / dev-eu, platform / dev-eu, "
         "workers / dev-eu. A fix by `needs`: merge it, then re-run this deploy, which reads "
-        "`needs` from the default branch and applies these cells. A fix by retagging: tags "
-        "live in this merged commit, so a re-run refuses again; open a new pull request that "
-        "retags the stacks and changes every listed stack (any edit `terramate list "
+        "`needs` from the default branch and applies these cells. A fix to tags or `after`: "
+        "both live in this merged commit, so a re-run refuses again; open a new pull request "
+        "that makes the fix and changes every listed stack (any edit `terramate list "
         "--changed` marks); its plan and deploy apply them."
     )
 

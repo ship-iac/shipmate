@@ -2937,10 +2937,10 @@ The refusal reads only the run's cells, never the whole tree: a pull request
 that only changes `needs` plans no cell and passes, and the inversion surfaces
 on the first pull request that changes both ends. The deploy refusal applies
 nothing and appends the cells of the merge it leaves pending, with the remedy.
-A re-run reads `needs` from the default branch and tags from the merged commit:
-after a `needs` fix merges, re-running the deploy applies the cells; a retag
-needs a new pull request that retags the stacks and changes every listed
-stack. A targeted apply and a drift sweep never refuse it.
+A re-run reads `needs` from the default branch, and tags and `after` from the
+merged commit: after a `needs` fix merges, re-running the deploy applies the
+cells; a fix to tags or `after` needs a new pull request that makes it and
+changes every listed stack. A targeted apply and a drift sweep never refuse it.
 
 A targeted `shipmate apply <env>` applies one environment's pending cells and
 does not order by `needs`: it runs them as one env-level. A cell of it that
