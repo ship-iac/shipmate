@@ -210,3 +210,82 @@ def test_only_the_listed_steps_carry_the_variables():
                 if "toJSON(vars)" in yaml.safe_dump(step):
                     found.add((path.name, job_id, step.get("uses") or step.get("name")))
     assert found == _VARS_HOLDERS
+
+
+#: The whole `outputs:` of `actions/apply-detect`, hand-written. `apply.yml`'s `detect` reads
+#: each by name, and an output the action stops declaring reads '' there: a dropped
+#: `waiting_cells` renders a fully waiting targeted apply as `🟢 no pending applies`.
+_APPLY_DETECT_ACTION_OUTPUTS = {
+    "envlevel0_waves": {
+        "description": (
+            "JSON wave0..wave7 map for env-level 0. A targeted apply puts every cell here."
+        ),
+        "value": "${{ steps.d.outputs.envlevel0_waves }}",
+    },
+    **{
+        f"envlevel{n}_waves": {
+            "description": f"JSON wave0..wave7 map for env-level {n}",
+            "value": f"${{{{ steps.d.outputs.envlevel{n}_waves }}}}",
+        }
+        for n in (1, 2, 3)
+    },
+    **{
+        f"envlevel{n}_empty": {
+            "description": f"'true' when env-level {n} has no cell in any wave.",
+            "value": f"${{{{ steps.d.outputs.envlevel{n}_empty }}}}",
+        }
+        for n in (0, 1, 2, 3)
+    },
+    "head_sha": {
+        "description": "The echoed head SHA.",
+        "value": "${{ steps.d.outputs.head_sha }}",
+    },
+    "excluded_envs": {
+        "description": (
+            "Bare apply only: JSON list of explicit envs left pending, including held ones; the "
+            "comment lists a held one under the hold. The targeted form writes none."
+        ),
+        "value": "${{ steps.d.outputs.excluded_envs }}",
+    },
+    "skipped_envs": {
+        "description": (
+            "Bare apply only: JSON list of envs skipped because they are ordered after an env "
+            "not fully applying this run (held for review, excluded as explicit, or holding a "
+            "waiting cell). The targeted form writes none."
+        ),
+        "value": "${{ steps.d.outputs.skipped_envs }}",
+    },
+    "review_held_envs": {
+        "description": (
+            "Bare apply only: JSON list of envs held because the PR is not reviewed. The "
+            "targeted form writes none."
+        ),
+        "value": "${{ steps.d.outputs.review_held_envs }}",
+    },
+    "applied_ungated_envs": {
+        "description": (
+            "Bare apply only: JSON list of envs applied without an approving review because "
+            "their entry holds `gated: false`. The targeted form writes none."
+        ),
+        "value": "${{ steps.d.outputs.applied_ungated_envs }}",
+    },
+    "review_not_required_envs": {
+        "description": (
+            "JSON list of gated envs authorized under a null review decision, because the pull "
+            "request's review state required none, else []."
+        ),
+        "value": "${{ steps.d.outputs.review_not_required_envs }}",
+    },
+    "waiting_cells": {
+        "description": (
+            "JSON list of cells left pending because a cell they run after (CONTRACT.md "
+            "§Fan-out) is pending and not applying this run, each with that cell; both forms."
+        ),
+        "value": "${{ steps.d.outputs.waiting_cells }}",
+    },
+}
+
+
+def test_the_apply_detect_action_declares_exactly_these_outputs():
+    """Mutation: delete the `waiting_cells` output from `actions/apply-detect/action.yml`."""
+    assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS

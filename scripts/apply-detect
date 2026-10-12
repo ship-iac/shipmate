@@ -321,8 +321,9 @@ def bare_main():
       `shipmate / gate` keeps gating the merge until a targeted
       `shipmate apply <env>` completes them. `excluded_envs` names every one with
       pending work, including those also held for review;
-    - envs ordered (transitively) after an env not applying this run — held or
-      excluded as explicit — are skipped with a notice — their ordering
+    - envs ordered (transitively) after an env not fully applying this run — held,
+      excluded as explicit, or holding a waiting cell — are skipped with a notice
+      (`skipped_after_explicit`, named for its first cause) — their ordering
       precondition cannot be met this run, exactly like a failed predecessor
       level;
     - envs the PR's review decision does not authorize are held until it carries

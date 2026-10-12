@@ -5,10 +5,10 @@ Reads the run's jobs listing as JSON Lines on stdin (one object per line,
 keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
 '.jobs[]'`), per-cell `apply-summary.*` artifacts from the $CELLS directory,
 the expected-cell set (per-env-level waves JSON), the head SHA,
-the excluded/skipped/held envs (bare form only) and the ungated and no-review envs,
-and writes a fresh comment.md -- this comment is never upserted, unlike the plan
-sticky comment. The ungated and no-review envs go to stdout, the step log, as
-`notices` annotations, not into the comment.
+the excluded/skipped/held envs (bare form only), the waiting cells (both forms)
+and the ungated and no-review envs, and writes a fresh comment.md -- this comment is
+never upserted, unlike the plan sticky comment. The ungated and no-review envs go to
+stdout, the step log, as `notices` annotations, not into the comment.
 
 DO NOT refactor this and summary-comment into one renderer with a
 `mode=plan|apply` switch. The injection-critical primitives (fence escaping,
@@ -438,11 +438,23 @@ def render_apply_section(line, text, url, limit):
     return line
 
 
-def _verdict(rows, failed_run, held, head_sha, run_url):
+def _empty_verdict(failed_run, held, waiting):
+    if failed_run:
+        return "🔴", "failed"
+    if held:
+        # Work WAS pending and the engine refused it.
+        return "⚪", "nothing applied, environments are held for review"
+    if waiting:
+        return "⚪", "nothing applied, cells wait on pending cells they run after"
+    return "🟢", "no pending applies"
+
+
+def _verdict(rows, failed_run, held, head_sha, run_url, waiting=()):
     """(circle, line): the line under the header and its circle. With rows: a count per
     status in `_STATUS` order, zero counts omitted, led by a bare `failed` when the run failed
-    and no failed or blocked row shows it; the circle is the worst row's, or 🔴 for a failed
-    run. Without rows: `🔴 failed`, the held sentence, or `🟢 no pending applies`. Then
+    and no failed or blocked row shows it, then `N waiting` when cells wait; the circle is the
+    worst of the rows' and, when cells wait, ⚪, or 🔴 for a failed run. Without rows:
+    `🔴 failed`, the held sentence, the waiting sentence, or `🟢 no pending applies`. Then
     `provenance`. The circle is returned with the line so the footer decision reads it, never
     the rendered text.
 
@@ -452,19 +464,17 @@ def _verdict(rows, failed_run, held, head_sha, run_url):
     before any cell reported (a denied apply environment, a job-level cancel), whose rows read
     `not attempted`; suppressing on it would hide that environment's only failure signal."""
     if not rows:
-        if failed_run:
-            circle, text = "🔴", "failed"
-        elif held:
-            # Work WAS pending and the engine refused it.
-            circle, text = "⚪", "nothing applied, environments are held for review"
-        else:
-            circle, text = "🟢", "no pending applies"
+        circle, text = _empty_verdict(failed_run, held, waiting)
     else:
         n = collections.Counter(r["status"] for r in rows)
         tokens = [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
         if failed_run and not (n["failed"] or n["blocked"]):
             tokens.insert(0, "failed")
-        circle = "🔴" if failed_run else sc.worst(_STATUS[s][0] for s in n)
+        circles = [_STATUS[s][0] for s in n]
+        if waiting:
+            tokens.append(f"{len(waiting)} waiting")
+            circles.append("⚪")
+        circle = "🔴" if failed_run else sc.worst(circles)
         text = ", ".join(tokens)
     return circle, f"{circle} {text} {sc.provenance(head_sha, run_url)}"
 
@@ -516,17 +526,34 @@ def notices(rows, applied_ungated, review_not_required):
     ]
 
 
-def _dispositions(excluded, skipped, held):
+def _waiting_remedy(env, held, skipped):
+    """What clears a waiting cell's blocker in `env`. A targeted apply ignores `needs`, so a
+    blocker in a `needs`-skipped environment never gets its `shipmate apply` command."""
+    if env in held:
+        return "it is held until the pull request is approved"
+    if env in skipped:
+        return "its environment waits on `needs`; apply those environments first"
+    return f"apply it first with `shipmate apply {env}`"
+
+
+def _dispositions(excluded, skipped, held, waiting=()):
     """Each disposition's environments, `_md_escape`d, for both renderings of the footer lines.
-    All are all-environments sets; the caller passes them empty in the targeted form, because
-    apply.yml reads them from the bare-apply detector only. A held env that is also explicit
-    is listed under `held` only, and under `held_explicit` for its command."""
-    excluded, held = _esc(excluded), _esc(held)
+    `excluded`, `skipped` and `held` are all-environments sets; the caller passes them empty in
+    the targeted form, because apply.yml reads them from the bare-apply detector only.
+    `waiting` comes from both forms: each cell becomes an escaped
+    `(stack, env, after_stack, after_env, remedy)`. A held env that is also explicit is
+    listed under `held` only, and under `held_explicit` for its command."""
+    excluded, skipped, held = _esc(excluded), _esc(skipped), _esc(held)
+    cells = [
+        _esc((w["stack"], w["environment"], w["after_stack"], w["after_environment"]))
+        for w in waiting
+    ]
     return {
         "explicit": [e for e in excluded if e not in held],
-        "skipped": _esc(skipped),
+        "skipped": skipped,
         "held": held,
         "held_explicit": [e for e in held if e in excluded],
+        "waiting": [(*c, _waiting_remedy(c[3], held, skipped)) for c in cells],
     }
 
 
@@ -535,17 +562,33 @@ def _per_env_lines(d):
         f"🟡 {e}: left pending (explicit), comment `shipmate apply {e}`" for e in d["explicit"]
     ]
     lines += [
-        f"⚪ {e}: skipped, ordered after an environment not applying this run" for e in d["skipped"]
+        f"⚪ {e}: skipped, ordered after an environment not fully applying this run"
+        for e in d["skipped"]
     ]
     lines += [_held_line(e, e in d["held_explicit"]) for e in d["held"]]
     if d["held"]:
         lines.append(_HELD_REMEDY)
-    return lines
+    return lines + [
+        f"⚪ {s} / {e}: waits on {a_s} / {a_e}, not applied yet; {remedy}"
+        for s, e, a_s, a_e, remedy in d["waiting"]
+    ]
+
+
+def _grouped_waiting(waiting):
+    """One line per blocker, naming its remedy and every cell waiting on it, in first-seen order."""
+    by_blocker = {}
+    for s, e, a_s, a_e, remedy in waiting:
+        by_blocker.setdefault((a_s, a_e, remedy), []).append(f"{s} / {e}")
+    return [
+        f"⚪ waiting on {a_s} / {a_e} ({remedy}): {', '.join(cells)}"
+        for (a_s, a_e, remedy), cells in by_blocker.items()
+    ]
 
 
 def _grouped_lines(d):
-    """The compact form's footer lines: one per disposition, its environments comma-separated."""
-    g = {k: ", ".join(v) for k, v in d.items()}
+    """The compact form's footer lines: one per disposition, its environments comma-separated,
+    then one per blocker of the waiting cells."""
+    g = {k: ", ".join(v) for k, v in d.items() if k != "waiting"}
     lines = []
     if g["explicit"]:
         lines.append(
@@ -553,7 +596,7 @@ def _grouped_lines(d):
         )
     if g["skipped"]:
         lines.append(
-            f"⚪ skipped, ordered after an environment not applying this run: {g['skipped']}"
+            f"⚪ skipped, ordered after an environment not fully applying this run: {g['skipped']}"
         )
     if g["held"]:
         line = f"⚪ held, the review state does not permit applying: {g['held']}"
@@ -562,18 +605,19 @@ def _grouped_lines(d):
                 f"; once the hold clears, comment `shipmate apply <env>` for {g['held_explicit']}"
             )
         lines += [line, _HELD_REMEDY]
-    return lines
+    return lines + _grouped_waiting(d["waiting"])
 
 
-def _footer_parts(excluded, skipped, held=(), compact=False):
-    """The lines above the footer, produced only when the caller passes the all-environments
-    sets, which apply.yml reads from the bare-apply detector only: one line per environment
-    for each disposition this run produced (explicit left pending, skipped, held for review) and
-    a `held:` remedy line when any is held. Env names are author-controlled, so `_md_escape`d.
-    `compact` renders each disposition as one line naming its environments comma-separated, with
-    the same meanings, for the hard-cap fallback. Applied-ungated and no-review environments are
-    not comment lines: `notices` reports them in the run log, and the `shipmate / gate` status
-    shows the gate's state.
+def _footer_parts(excluded, skipped, held=(), waiting=(), compact=False):
+    """The lines above the footer: one line per environment for each disposition this run
+    produced (explicit left pending, skipped, held for review) and a `held:` remedy line when
+    any is held, then one line per waiting cell naming its blocker and the blocker's remedy.
+    Only `waiting` comes from both forms; apply.yml reads the other sets from the bare-apply
+    detector only. Stack and env names are author-controlled, so `_md_escape`d. `compact`
+    renders each disposition as one line naming its environments comma-separated, and the
+    waiting cells as one line per blocker, with the same meanings, for the hard-cap fallback.
+    Applied-ungated and no-review environments are not comment lines: `notices` reports them
+    in the run log, and the `shipmate / gate` status shows the gate's state.
 
     `excluded` can overlap `held`. A held env that is also in `excluded` is
     listed once, on its held line, with its `shipmate apply <env>` command: once
@@ -583,7 +627,7 @@ def _footer_parts(excluded, skipped, held=(), compact=False):
     and an unknown or absent decision) and only the run's own detect notice
     carries which one, since the decision never reaches this renderer; the
     `held:` line names every remedy and points there."""
-    d = _dispositions(excluded, skipped, held)
+    d = _dispositions(excluded, skipped, held, waiting)
     return _grouped_lines(d) if compact else _per_env_lines(d)
 
 
@@ -637,6 +681,7 @@ def build_comment(
     results_csv="",
     held=(),
     head_sha="",
+    waiting=(),
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, every row in order (a fold-out
     for an applied, failed or unrecorded row with output, else its bare line), the notes, the
@@ -647,7 +692,7 @@ def build_comment(
     reserved up front, together, so an early giant apply.txt cannot starve a later row. When
     even the bare lines overflow HARD_CAP, `_compact` renders them without the blocked reasons
     and with one footer line per disposition; past that a SystemExit names the cause."""
-    circle, verdict = _verdict(rows, _results_failed(results_csv), held, head_sha, run_url)
+    circle, verdict = _verdict(rows, _results_failed(results_csv), held, head_sha, run_url, waiting)
     head = f"{sc.header('apply', env_name)}\n\n{verdict}"
     hint = sc.footer_hint(circle)
     notes = (
@@ -655,7 +700,7 @@ def build_comment(
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
     )
-    dispositions = (excluded, skipped, held)
+    dispositions = (excluded, skipped, held, waiting)
     parts = _footer_parts(*dispositions)
     tail = _tail(notes, parts, hint)
     urls = [_job_url(r, jobs, run_url) for r in rows]
@@ -714,6 +759,7 @@ def main():
         os.environ.get("SHIPMATE_RESULTS", "") or "",
         json.loads(os.environ.get("SHIPMATE_REVIEW_HELD_ENVS") or "[]"),
         os.environ.get("SHIPMATE_HEAD_SHA", ""),
+        json.loads(os.environ.get("SHIPMATE_WAITING_CELLS") or "[]"),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

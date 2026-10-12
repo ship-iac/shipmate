@@ -2279,10 +2279,10 @@ function, and the size budget never sheds a footer line — so the comment's mos
 actionable warning cannot be lost on either path. In the order they render:
 
 - **explicit** — ``🟡 <env>: left pending (explicit), comment `shipmate apply <env>` ``.
-- **skipped** — `⚪ <env>: skipped, ordered after an environment not applying
-  this run`. It names no cause, since being skipped can mean either an
-  unapplied explicit environment or a held one — the explicit and held lines
-  carry that distinction instead.
+- **skipped** — `⚪ <env>: skipped, ordered after an environment not fully
+  applying this run`. It names no cause, since being skipped can mean an
+  unapplied explicit environment, a held one, or one holding a waiting cell —
+  the explicit, held and waiting lines carry that distinction instead.
 - **held** — `⚪ <env>: held, the review state does not permit applying`. A held
   environment that is also explicit is listed once, here and not on an explicit
   line, with its command: ``⚪ prod: held, the review state does not permit
@@ -2386,7 +2386,7 @@ environments comma-separated (`<envs>`), in the per-environment order; the
 `held:` remedy line is unchanged:
 
 - `` 🟡 left pending (explicit): <envs>; comment `shipmate apply <env>` for each ``
-- `⚪ skipped, ordered after an environment not applying this run: <envs>`
+- `⚪ skipped, ordered after an environment not fully applying this run: <envs>`
 - `⚪ held, the review state does not permit applying: <envs>`, followed by
   `` ; once the hold clears, comment `shipmate apply <env>` for <envs> `` naming
   the held environments that are also explicit, when there are any
@@ -2879,10 +2879,12 @@ env-levels and applies level 0 fully before level 1, with the same
 failure-skips-successor-levels rule. An environment excluded as explicit keeps
 its position in the order: environments that do not depend on it run normally at
 their own level, while environments ordered (transitively) after an environment
-not applying this run — held for review or excluded as explicit — are skipped
-with a notice — their ordering precondition cannot be met in that run, exactly
-like a failed predecessor level. Completed cells skip idempotently, so
-re-commenting `shipmate apply` resumes where the previous run stopped.
+not fully applying this run — held for review, excluded as explicit, or holding
+a waiting cell — are skipped with a notice — their ordering precondition cannot
+be met in that run, exactly like a failed predecessor level. The apply-all-detect
+notice names them `skipped_after_explicit`, for every one of those causes.
+Completed cells skip idempotently, so re-commenting `shipmate apply` resumes
+where the previous run stopped.
 
 The engine ships this as a reusable, parameterized workflow
 (`.github/workflows/apply-env-level.yml`) that the engine's own `deploy.yml`
