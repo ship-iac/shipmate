@@ -405,12 +405,12 @@ actual work here:
   base ref, so nothing else would stop that job. Being on the job, a refusal
   never enters the environment.
 - A draft is not refused there. A draft's autoplan skips its plan jobs, enters
-  `shipmate-engine` like any other plan run, and
-  the `summary` job writes `shipmate / gate` pending with the draft reason. The run
-  creates no apply check, so `gate-refresh` has nothing to green that status
-  over, and the draft status is written only on a head that carries no gate
-  status yet, so a draft run never replaces an earlier gate. A *requested*
-  plan of a draft does run, and `on-demand` is how the caller says so.
+  `shipmate-engine` like any other plan run, and the `summary` job writes
+  `shipmate / gate` pending with the draft reason. The run creates no apply
+  check, so `gate-refresh` has nothing to green that status over, and the draft
+  status is written only on a head that carries no gate status yet, so a draft
+  run never replaces an earlier gate. A *requested* plan of a draft does run,
+  and `on-demand` is how the caller says so.
 
 What none of this defends against is a change to the trusted workflow files
 themselves — the consumer's `shipmate.yml` and drift workflow files, and the engine's `plan.yml`,

@@ -280,8 +280,8 @@ _review_rule_warnings.parses_yaml = True
 
 def no_code_owners(path, place, branch):
     """The finding for a `CODEOWNERS` that owns nothing: `path` is the file GitHub reads,
-    None when there is none, and `place` where it was read (`on `<branch>``, or `onboard`'s
-    working tree)."""
+    None when there is none, and `place` where it was read (``on `<branch>` ``, or
+    `onboard`'s working tree)."""
     where = (
         f"`{path}` {place} holds no rule line"
         if path
