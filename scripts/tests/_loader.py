@@ -439,6 +439,7 @@ def run_with_gate_gh(
     bin_dir.mkdir(exist_ok=True)
     write_python3_shim(bin_dir)
     (bin_dir / "gh").write_text(_GATE_GH, encoding="utf-8", newline="\n")
+    (bin_dir / "gh").chmod(0o755)
     calls = tmp_path / "gh-calls"
     env = {
         **env,
