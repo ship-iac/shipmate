@@ -11,7 +11,7 @@ inputs:
     description: The commit this run is planning, e.g. the pull request's head SHA. Empty is refused; a plan whose provenance is unrecorded cannot be applied.
     required: true
   plan-passphrase:
-    description: Passphrase to encrypt the .otplan artifact at rest and to decrypt the cached local state. Required; empty refuses the upload.
+    description: Passphrase to encrypt the .otplan artifact at rest and to decrypt the cached local state. Required; empty refuses before the stack is initialized.
     required: false
     default: ""
   tf-vars:
@@ -47,6 +47,13 @@ runs:
           exit 1
         fi
         echo "head=$observed" >> "$GITHUB_OUTPUT"
+
+    - name: Require the plan passphrase
+      shell: bash
+      env:
+        PLAN_PASSPHRASE: ${{ inputs.plan-passphrase }}
+      # Before init and the plan, so an unset secret refuses in seconds rather than after a plan.
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" require
 
     - name: Inject identity variables
       shell: bash

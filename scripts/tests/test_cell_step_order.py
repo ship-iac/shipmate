@@ -28,6 +28,7 @@ _EXPECTED = {
     ],
     "plan-cell": [
         "Record the planned commit",
+        "Require the plan passphrase",
         "Inject identity variables",
         "Stack slug",
         "Initialize the stack",
