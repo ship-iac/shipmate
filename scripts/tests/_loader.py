@@ -323,6 +323,19 @@ exit "${FAKE_WRITE_RC:-0}"
 """
 
 
+def read_calls(path):
+    """The calls a recording ``gh`` stub appended to ``path``: one argv list per call, each
+    terminated by a ``--`` line; empty when the stub never ran."""
+    recorded, current = [], []
+    for line in path.read_text(encoding="utf-8").splitlines() if path.exists() else []:
+        if line == "--":
+            recorded.append(current)
+            current = []
+        else:
+            current.append(line)
+    return recorded
+
+
 def run_with_gh_recorder(tmp_path, body, env, *, listing="", list_rc=0, write_rc=0):
     """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and a recording ``gh`` first
     on PATH; return (process, the argv after ``gh`` of each call, in order).
@@ -344,14 +357,7 @@ def run_with_gh_recorder(tmp_path, body, env, *, listing="", list_rc=0, write_rc
         "FAKE_WRITE_RC": str(write_rc),
     }
     proc = run_step(tmp_path, body, env)
-    recorded, current = [], []
-    for line in calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []:
-        if line == "--":
-            recorded.append(current)
-            current = []
-        else:
-            current.append(line)
-    return proc, recorded
+    return proc, read_calls(calls)
 
 
 def run_step(tmp_path, body, env, *, cwd=None, timeout=30):
@@ -385,3 +391,68 @@ def github_outputs(path):
     raises ``ValueError``, so no assertion can pass over a line the parser dropped.
     """
     return dict(ln.split("=", 1) for ln in path.read_text(encoding="utf-8").splitlines())
+
+
+#: A bash ``gh`` for ``run_with_gate_gh``, keyed on the whole argv of the three listings and the
+#: write ``scripts/gate-status`` makes; any other call prints to stderr and exits 1. It records
+#: each call's argv as ``run_with_gh_recorder``'s stub does. The statuses listing answers
+#: ``$FAKE_PAGE1$FAKE_PAGE2`` when paginated and ``$FAKE_PAGE1`` alone when not, as GitHub would.
+_GATE_GH = """\
+#!/bin/bash
+printf '%s\n' "$@" -- >> "$CALLS"
+head="repos/acme/demo/commits/$FAKE_SHA"
+checks="$head/check-runs?filter=all&per_page=100 --jq $FAKE_CHECKS_JQ"
+statuses="$head/statuses?per_page=100 --jq $FAKE_STATUSES_JQ"
+if [ "$*" = "api --paginate $checks" ]; then
+  printf '%s' "$FAKE_CHECKS"
+  exit "${FAKE_CHECKS_RC:-0}"
+elif [ "$*" = "api --paginate $statuses" ]; then
+  printf '%s%s' "$FAKE_PAGE1" "$FAKE_PAGE2"
+  exit "${FAKE_STATUSES_RC:-0}"
+elif [ "$*" = "api $statuses" ]; then
+  printf '%s' "$FAKE_PAGE1"
+elif [ "$1 $2" = "api repos/acme/demo/statuses/$FAKE_SHA" ]; then
+  echo '{}'
+else
+  printf 'unexpected gh call: %s\n' "$*" >&2
+  exit 1
+fi
+"""
+
+#: The `--jq` projections `scripts/gate-status` sends, hand-written so a changed projection is an
+#: unexpected call rather than one the stub follows.
+GATE_CHECKS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
+GATE_STATUSES_JQ = ".[] | {context, state, target_url}"
+
+
+def run_with_gate_gh(
+    tmp_path, body, env, *, sha, checks="", checks_rc=0, page1="", page2="", statuses_rc=0
+):
+    """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and ``_GATE_GH`` first on
+    PATH; return (process, the argv after ``gh`` of each call, in order).
+
+    ``sha`` is the head the stub answers for; ``checks`` the check-runs listing (exit
+    ``checks_rc``); ``page1``/``page2`` the statuses listing's two pages, JSON Lines each
+    (paginated exit ``statuses_rc``).
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    write_python3_shim(bin_dir)
+    (bin_dir / "gh").write_text(_GATE_GH, encoding="utf-8", newline="\n")
+    (bin_dir / "gh").chmod(0o755)
+    calls = tmp_path / "gh-calls"
+    env = {
+        **env,
+        "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
+        "CALLS": str(calls),
+        "FAKE_SHA": sha,
+        "FAKE_CHECKS_JQ": GATE_CHECKS_JQ,
+        "FAKE_STATUSES_JQ": GATE_STATUSES_JQ,
+        "FAKE_CHECKS": checks,
+        "FAKE_CHECKS_RC": str(checks_rc),
+        "FAKE_PAGE1": page1,
+        "FAKE_PAGE2": page2,
+        "FAKE_STATUSES_RC": str(statuses_rc),
+    }
+    proc = run_step(tmp_path, body, env)
+    return proc, read_calls(calls)

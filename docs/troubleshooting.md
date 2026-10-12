@@ -895,21 +895,39 @@ exist now.
 **The gate is deliberately held.** A gate whose state is `failure` with a
 description telling you what to do is not "no changes"; it is a hold.
 `gate-state` compares the cells `detect` planned against the cell summaries the
-trusted summary job actually read, and writes a hold when they disagree in
+trusted summary job actually read, and the job writes a hold when they disagree in
 either direction, when the plan job failed or was skipped with cells planned,
 when `detect` did not succeed, or when the planned count was not reported at
 all. A run whose cell count is zero for any of those reasons must not claim
 nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
 never apply. The summary job also holds the gate while it publishes the apply
-checks, and a job that failed before its final gate write leaves that hold,
-reading "its plan summary did not finish". Both an evidence shortfall and that
-hold clear the same way: comment `shipmate plan` or push. Do not re-run the plan
-jobs, whose artifact uploads are not `overwrite:` and 409 on a re-run, and do
-not re-run the summary job, which would republish pending checks over cells
-applied since; a re-run of a plan job re-runs the summary too. `gate-refresh`
-refuses to green a held gate from apply checks alone: the apply run fails with
-"shipmate / gate is held", pointing at this status description.
+checks, and a plan run that ended before its final gate write (a failed summary
+job, or a cancelled plan job after the summary downloaded a cell summary) leaves
+that hold, reading "its plan run ended before writing a final gate". The summary
+job also holds the gate when it cannot read the head's gate statuses or apply
+checks, or cannot build the checks to publish (a cell summary missing a key),
+whether or not it downloaded a cell summary: a failed download leaves none over
+planned cells. Its final write refuses, writing nothing and keeping that hold,
+when a newer plan run of the same head holds the gate by then. A plan run
+whose `summary` job was cancelled before it ran, because a later gate writer on
+the same head queued behind it (`CONTRACT.md` §Comment-ops, "The aggregate
+gate"), holds the gate from its `gate-hold` job, reading "its plan summary was
+cancelled before it published". That hold can land after another run's summary
+greened the head, closing a gate over work already applied. Every one of these
+holds clears the same way: comment `shipmate plan` or push.
+
+"Re-run failed jobs" on the plan run is safe only when that run is the newest
+plan run of the head. The re-run re-enters the `plan-<pr>` concurrency group,
+whose `cancel-in-progress: true` cancels a newer run in flight, or the newer run
+cancels it. A re-run summary publishes no apply check its own run already
+published, so it leaves alone a check an apply completed or is completing. It
+refuses before writing anything when a newer plan run holds the gate or published
+apply checks on the head. A re-run of a plan job whose artifact upload succeeded
+fails, because the uploads are not `overwrite:` and 409.
+
+`gate-refresh` refuses to green a held gate from apply checks alone: the apply
+run fails with "shipmate / gate is held", pointing at this status description.
 
 **The required check does not match the status.** The ruleset pins
 `integration_id` to the shipmate App id, so a `shipmate / gate` status of the
@@ -988,6 +1006,14 @@ The job reads the pull request the dispatch names and refuses unless that pull
 request's current head commit is the dispatched `ref`, compared whole. A push
 landed between the `shipmate apply` comment and the run. Wait for the new head's
 plan, then comment `shipmate apply` again.
+
+A run refused or cancelled in `review` posts no apply comment and leaves the
+gate as it was: the red run is the only signal.
+
+An apply run whose `summary` job was cancelled before it ran, because a later
+gate writer on the same head queued behind it, also posts no apply comment. The
+later writer refreshes the gate. A wave that failed in the cancelled run shows
+only on that run's page.
 
 The same step refuses, also before any wave:
 
@@ -1140,3 +1166,7 @@ stacks stay pending and visible, which is the recoverable state: re-run that
 deploy. `deploy-detect` rebuilds its work queue from the
 apply checks that are still pending, so a re-run is idempotent — anything
 already applied is skipped.
+
+A deploy whose `summary` job alone was cancelled, because a later gate writer
+on the same head queued behind it, leaves the merged head's gate as it was.
+Re-run that deploy the same way.

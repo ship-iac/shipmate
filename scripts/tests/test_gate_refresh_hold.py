@@ -2,113 +2,131 @@
 
 `gate-state`'s hold verdict lives only in the transient commit status, and `shipmate apply` never
 consults the gate -- `scripts/authorize` reads `reviewDecision`. So a partial plan download holds
-the gate, the parsed cells apply anyway, and `apply-gate` reports verdict=complete over those
-cells' checks. Without this guard `gate-refresh` then PATCHes `shipmate / gate` to success, and
-the pull request merges with planned stacks that were never applied and never would be:
-`deploy-detect`'s work queue is the pending apply checks, and stacks whose summaries were never
-read have no check at all.
+the gate, the parsed cells apply anyway, and every apply check reads done. Without this guard
+`gate-refresh` then greens `shipmate / gate`, and the pull request merges with planned stacks that
+were never applied and never would be: `deploy-detect`'s work queue is the pending apply checks,
+and stacks whose summaries were never read have no check at all.
 
 Invariant: the only exit from a hold is a fresh plan run.
 
-The tests execute the real, unmodified `Complete gate` step with `gh` replaced by a bash
-function. Bash resolves a function before searching PATH, so this needs no fake executable. The
-greening runs also pin the write's whole argv: endpoint, method and every field.
+The tests run the real `Write the gate` step through `_loader.run_with_gate_gh`, so the step's
+dispatch and `scripts/gate-status` both execute.
 """
 
+import json
 import os
 
-from _loader import ACTIONS, bash_only, run_step, step_by
+import pytest
+from _loader import ACTIONS, bash_only, run_with_gate_gh, step_by
 
 HEAD_SHA = "a" * 40
-
-# Dispatches on the two `gh api` calls the step makes: the pre-write gate read
-# (`api --paginate .../commits/<sha>/status?per_page=100 --jq ...`; any other read fails the
-# step), and the write (`/statuses/<sha>`), whose argv it records.
-GH_STUB = """
-gh() {
-  case "$*" in
-    "api --paginate repos/acme/demo/commits/$HEAD_SHA/status?per_page=100 --jq "*)
-      printf '%s' "$FAKE_GATE_STATE" ;;
-    *"/statuses/"*) printf '%s\\n' "$@" > "$WROTE" ;;
-    *) printf 'unexpected gh call: %s\\n' "$*" >&2 ; return 1 ;;
-  esac
-}
-"""
+RUN_URL = "https://example.invalid/acme/demo/actions/runs/999"
+DONE = json.dumps(
+    {
+        "name": "apply / a / dev",
+        "status": "completed",
+        "conclusion": "success",
+        "id": 1,
+        "app": {"id": 7},
+    }
+)
 
 
-def _run_step(tmp_path, gate_state):
-    wrote = tmp_path / "wrote"
-    proc = run_step(
+def _gate(state):
+    return json.dumps({"context": "shipmate / gate", "state": state, "target_url": RUN_URL}) + "\n"
+
+
+def _status_argv(state, description):
+    return [
+        "api",
+        f"repos/acme/demo/statuses/{HEAD_SHA}",
+        "-f",
+        f"state={state}",
+        "-f",
+        "context=shipmate / gate",
+        "-f",
+        f"description={description}",
+        "-f",
+        f"target_url={RUN_URL}",
+    ]
+
+
+GREEN_ARGV = _status_argv("success", "all applies complete, nothing left to apply")
+
+
+def _run_step(tmp_path, *, gate="", deploy_results="", hold_description=""):
+    proc, calls = run_with_gate_gh(
         tmp_path,
-        GH_STUB + step_by("gate-refresh", name="Complete gate")["run"],
+        step_by("gate-refresh", name="Write the gate")["run"],
         {
             **os.environ,
             "GH_TOKEN": "x",
             "GITHUB_ACTION_PATH": str(ACTIONS / "gate-refresh"),
             "HEAD_SHA": HEAD_SHA,
-            # A different SHA, so posting to the merge commit instead of the head reddens.
-            "GITHUB_SHA": "b" * 40,
+            "SHIPMATE_APP_ID": "7",
+            "DEPLOY_RESULTS": deploy_results,
+            "HOLD_DESCRIPTION": hold_description,
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_SERVER_URL": "https://example.invalid",
             "GITHUB_RUN_ID": "999",
-            "FAKE_GATE_STATE": gate_state,
-            "WROTE": str(wrote),
         },
+        sha=HEAD_SHA,
+        checks=DONE + "\n",
+        page1=gate,
     )
-    posted = wrote.read_text(encoding="utf-8").splitlines() if wrote.exists() else None
-    return proc, posted
-
-
-#: The whole `gh` argv a greening run must send, hand-written rather than read back from the
-#: `Complete gate` run block: a derived expectation passes whatever that block says. This is the one
-#: place the endpoint, the method (POST, implied by the fields), the context, the state and the run
-#: link are pinned together. Matches the values `_run_step` supplies.
-GREEN_ARGV = [
-    "api",
-    f"repos/acme/demo/statuses/{HEAD_SHA}",
-    "-f",
-    "state=success",
-    "-f",
-    "context=shipmate / gate",
-    "-f",
-    "description=all applies complete, nothing left to apply",
-    "-f",
-    "target_url=https://example.invalid/acme/demo/actions/runs/999",
-]
-
-
-def test_the_gate_is_read_before_it_is_written():
-    # Structural companion to the behavioural tests: an ordering inversion would read the status
-    # that the write itself made.
-    run = step_by("gate-refresh", name="Complete gate")["run"]
-    assert run.index("held=$(gh api") < run.index("/statuses/$HEAD_SHA")
+    return proc, [c for c in calls if c[1].startswith("repos/acme/demo/statuses/")]
 
 
 @bash_only
 def test_refuses_to_green_a_held_gate(tmp_path):
-    proc, posted = _run_step(tmp_path, "failure")
-    assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert proc.stdout == (
-        "::error::shipmate / gate is held for " + "a" * 40 + "; its status description on the pull"
-        " request names the cause. A hold clears only when a new plan run rewrites the gate:"
-        " comment shipmate plan, or push.\n"
+    """The step turns `gate-status`'s hold exit into one `::error::` line and exit 1.
+    Mutations: delete the hold check in `gate-status refresh` -> the hold is greened; drop the
+    step's `rc = 3` branch -> exit 3 and no annotation."""
+    proc, posted = _run_step(tmp_path, gate=_gate("failure"))
+    assert (proc.returncode, proc.stdout, proc.stderr) == (
+        1,
+        (
+            f"::error::shipmate / gate is held for {HEAD_SHA}; its status description on the pull"
+            " request names the cause. A hold clears only when a new plan run rewrites the gate:"
+            " comment shipmate plan, or push.\n"
+        ),
+        "",
     )
-    assert posted is None, f"a held gate was overwritten with {posted!r}"
+    assert posted == []
 
 
 @bash_only
-def test_a_pending_gate_still_greens(tmp_path):
-    # The legitimate transition this refusal must not break: gate-state writes `pending` while
+@pytest.mark.parametrize("gate", [_gate("pending"), ""])
+def test_a_pending_or_absent_gate_still_greens(tmp_path, gate):
+    # The legitimate transition the refusal must not break: gate-state writes `pending` while
     # applies are outstanding, and completing them is what gate-refresh exists to record.
-    proc, posted = _run_step(tmp_path, "pending")
+    proc, posted = _run_step(tmp_path, gate=gate)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert posted == GREEN_ARGV
+    assert posted == [GREEN_ARGV]
 
 
 @bash_only
-def test_an_absent_gate_still_greens(tmp_path):
-    # `.[0].state // empty` yields an empty string when no gate status exists for the head SHA
-    # at all. That is not a hold.
-    proc, posted = _run_step(tmp_path, "")
+def test_a_hold_description_writes_a_hold(tmp_path):
+    """Mutation: swap the `hold` and `refresh` branches of the dispatch -> a green POST."""
+    proc, posted = _run_step(tmp_path, hold_description="re-plan this pull request")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert posted == GREEN_ARGV
+    assert posted == [_status_argv("failure", "re-plan this pull request")]
+
+
+@bash_only
+def test_deploy_results_write_the_deploy_verdict(tmp_path):
+    """Mutation: drop the `deploy` branch of the dispatch -> a refresh greens the head."""
+    proc, posted = _run_step(tmp_path, deploy_results="success,cancelled")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert posted == [
+        _status_argv("failure", "deploy incomplete (deploy env-level applies completed)")
+    ]
+
+
+@bash_only
+def test_two_modes_at_once_are_refused(tmp_path):
+    """Mutation: drop the two-modes check -> the hold is written and the step passes."""
+    proc, posted = _run_step(tmp_path, deploy_results="success", hold_description="re-plan")
+    assert proc.returncode == 1
+    assert proc.stdout == "::error::set at most one of deploy-results and hold-description\n"
+    assert posted == []

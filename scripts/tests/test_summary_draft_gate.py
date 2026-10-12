@@ -1,80 +1,118 @@
-"""A draft autoplan's gate is written only over a head that carries none.
+"""A draft autoplan's gate is written only over a head that carries none; a `pending` gate is
+refreshed in the same step.
 
 gate-state decides a draft autoplan `pending` with comment mode `draft`. `gate-refresh` treats
 only `failure` as a hold and greens `pending` once every apply check is done, so a draft status
 written over a held head -- a re-run of an old draft run, or a draft reopened at the same head --
 would turn the hold into something `gate-refresh` can green. `Create/refresh gate` therefore reads
-the head's gate first, with `gate-refresh`'s own read, and writes the draft status only when that
-read succeeds and finds none. Every other mode writes as before, without the read.
+the head's gate first with `gate-status newest`, and writes the draft status only when that read
+succeeds and finds none. Every mode then reads `gate-status newer-hold` before its write.
+
+A non-draft `pending` write is followed by `gate-status refresh`, unless this run published a
+queued apply check: an apply's refresh serialized before this write would otherwise leave applied
+cells behind a `pending` nobody upgrades. The refresh only upgrades a fail-closed write, so its
+failure, a hold included, warns and the step passes.
 
 The upsert step leaves the sticky comment as it is on a draft run and makes no comment API call.
 
-Both steps run for real: `Create/refresh gate` with `gh` replaced by a bash function, as in
-`test_gate_refresh_hold.py`; the upsert step through `run_with_gh_recorder`.
+Both steps run for real: `Create/refresh gate` through `_loader.run_with_gate_gh`, the upsert step
+through `run_with_gh_recorder`.
 """
 
+import json
 import os
-import re
 
 import pytest
-from _loader import ACTIONS, bash_only, run_step, run_with_gh_recorder, step_by
+from _loader import ACTIONS, bash_only, run_with_gate_gh, run_with_gh_recorder, step_by
 
 HEAD_SHA = "a" * 40
+RUN_URL = "https://example.invalid/acme/demo/actions/runs/999"
 READ_ARGV = [
     "api",
     "--paginate",
-    f"repos/acme/demo/commits/{HEAD_SHA}/status?per_page=100",
+    f"repos/acme/demo/commits/{HEAD_SHA}/statuses?per_page=100",
     "--jq",
-    '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty',
+    ".[] | {context, state, target_url}",
 ]
-WRITE_ARGV = ["api", f"repos/acme/demo/statuses/{HEAD_SHA}", "--input", "gate.json"]
-
-# Records every call's argv, one line per argument and a `--` line after each call, then answers
-# the gate read with FAKE_GATE_STATE, or fails it when FAKE_READ_FAILS is set.
-GH_STUB = """
-gh() {
-  printf '%s\\n' "$@" -- >> "$CALLS"
-  case "$*" in
-    "api --paginate repos/acme/demo/commits/$HEAD_SHA/status?per_page=100 --jq "*)
-      [ -z "${FAKE_READ_FAILS:-}" ] || return 1
-      printf '%s' "$FAKE_GATE_STATE" ;;
-    *"/statuses/"*) ;;
-    *) printf 'unexpected gh call: %s\\n' "$*" >&2 ; return 1 ;;
-  esac
-}
-"""
-
-
-def _calls(path):
-    if not path.exists():
-        return []
-    calls, current = [], []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line == "--":
-            calls.append(current)
-            current = []
-        else:
-            current.append(line)
-    return calls
+CHECKS_ARGV = [
+    "api",
+    "--paginate",
+    f"repos/acme/demo/commits/{HEAD_SHA}/check-runs?filter=all&per_page=100",
+    "--jq",
+    ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}",
+]
+DONE = json.dumps(
+    {
+        "name": "apply / a / dev",
+        "status": "completed",
+        "conclusion": "success",
+        "id": 1,
+        "app": {"id": 7},
+    }
+)
 
 
-def _run_gate(tmp_path, mode, head_state, *, read_fails=False):
-    calls = tmp_path / "calls"
+def _write_argv(state, description):
+    return [
+        "api",
+        f"repos/acme/demo/statuses/{HEAD_SHA}",
+        "-f",
+        f"state={state}",
+        "-f",
+        "context=shipmate / gate",
+        "-f",
+        f"description={description}",
+        "-f",
+        f"target_url={RUN_URL}",
+    ]
+
+
+def _gate(state):
+    return json.dumps({"context": "shipmate / gate", "state": state, "target_url": RUN_URL}) + "\n"
+
+
+#: A no-changes body, as `pending-checks` writes it: completed, so the refresh still runs.
+NO_CHANGES_BODY = json.dumps(
+    {"name": "apply / b / dev", "status": "completed", "conclusion": "neutral"}
+)
+
+
+def _run_gate(
+    tmp_path,
+    mode,
+    head_state,
+    *,
+    state="pending",
+    read_fails=False,
+    checks_rc=0,
+    bodies=NO_CHANGES_BODY + "\n",
+):
+    if bodies is not None:
+        (tmp_path / "bodies.jsonl").write_text(bodies, encoding="utf-8")
     env = {
         **os.environ,
         "GH_TOKEN": "x",
+        "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "HEAD_SHA": HEAD_SHA,
-        "STATE": "pending",
+        "STATE": state,
+        "DESCRIPTION": "the reason",
         "MODE": mode,
         "PLAN_RESULT": "skipped",
+        "SHIPMATE_APP_ID": "7",
         "GITHUB_REPOSITORY": "acme/demo",
-        "FAKE_GATE_STATE": head_state,
-        "CALLS": str(calls),
+        "GITHUB_SERVER_URL": "https://example.invalid",
+        "GITHUB_RUN_ID": "999",
     }
-    if read_fails:
-        env["FAKE_READ_FAILS"] = "1"
-    proc = run_step(tmp_path, GH_STUB + step_by("summary", name="Create/refresh gate")["run"], env)
-    return proc, _calls(calls)
+    return run_with_gate_gh(
+        tmp_path,
+        step_by("summary", name="Create/refresh gate")["run"],
+        env,
+        sha=HEAD_SHA,
+        checks=DONE + "\n",
+        checks_rc=checks_rc,
+        page1=_gate(head_state) if head_state else "",
+        statuses_rc=1 if read_fails else 0,
+    )
 
 
 @bash_only
@@ -84,15 +122,19 @@ def test_a_draft_run_keeps_an_existing_gate(tmp_path, head_state):
     proc, calls = _run_gate(tmp_path, "draft", head_state)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [READ_ARGV]
-    assert f"keeps its {head_state} gate status" in proc.stdout
+    assert proc.stdout == (
+        f"{HEAD_SHA} keeps its {head_state} gate status; the draft gate status was not written\n"
+    )
 
 
 @bash_only
-def test_a_draft_run_writes_the_gate_on_a_head_with_none(tmp_path):
-    """Mutation: invert the emptiness test (`-n` -> `-z`) -> no write."""
+def test_a_draft_run_writes_the_gate_on_a_head_with_none_and_does_not_refresh(tmp_path):
+    """Mutations: invert the emptiness test (`-n` -> `-z`) -> no write; drop
+    `[ "$MODE" != "draft" ]` from the refresh condition -> a check-runs listing follows."""
     proc, calls = _run_gate(tmp_path, "draft", "")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [READ_ARGV, WRITE_ARGV]
+    # The `newest` read, then the `newer-hold` read before the write.
+    assert calls == [READ_ARGV, READ_ARGV, _write_argv("pending", "the reason")]
 
 
 @bash_only
@@ -101,35 +143,82 @@ def test_a_failed_read_writes_nothing_and_warns(tmp_path):
     proc, calls = _run_gate(tmp_path, "draft", "", read_fails=True)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [READ_ARGV]
-    assert "::warning::" in proc.stdout
+    assert proc.stdout == (
+        f"::warning::could not read the gate status of {HEAD_SHA}; the draft gate status was "
+        "not written\n"
+    )
 
 
 @bash_only
-def test_a_post_run_writes_without_reading(tmp_path):
-    """Mutation: key the read on `post` instead of `draft` -> a read, and no write."""
+def test_a_post_run_writes_over_this_runs_own_hold(tmp_path):
+    """A post run reads only for a newer run's hold; this run's own (999) is no refusal.
+    Mutation: key the `newest` read on `post` instead of `draft` -> it keeps the hold, no write."""
+    proc, calls = _run_gate(tmp_path, "post", "failure", state="success")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert calls == [READ_ARGV, _write_argv("success", "the reason")]
+
+
+@bash_only
+def test_a_pending_post_run_refreshes_the_gate_it_wrote(tmp_path):
+    """No queued body was published (a no-changes body is completed), so the refresh runs.
+    Mutations: remove the refresh call -> only the pending POST; match any `"status"` in the skip
+    grep -> no refresh."""
+    proc, calls = _run_gate(tmp_path, "post", "pending")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert calls == [
+        READ_ARGV,
+        _write_argv("pending", "the reason"),
+        CHECKS_ARGV,
+        READ_ARGV,
+        _write_argv("success", "all applies complete, nothing left to apply"),
+    ]
+
+
+@bash_only
+def test_no_bodies_file_skips_the_refresh(tmp_path):
+    """Without the publish step's `bodies.jsonl` nothing shows this run published no queued check,
+    so the gate stays `pending`. Mutation: drop `[ -f bodies.jsonl ]` -> grep fails on the missing
+    file, its negation passes, and the refresh greens the gate."""
+    proc, calls = _run_gate(tmp_path, "post", "pending", bodies=None)
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert calls == [READ_ARGV, _write_argv("pending", "the reason")]
+
+
+@bash_only
+def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
+    """The listing's `::error::` reaches the log unannotated: the step passes, so the failure is a
+    warning only. Mutations: drop the `if !` around the refresh -> `set -e` fails the step; drop
+    the `sed` -> an `::error::` line."""
+    proc, calls = _run_gate(tmp_path, "post", "pending", checks_rc=1)
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert calls == [READ_ARGV, _write_argv("pending", "the reason"), CHECKS_ARGV]
+    assert (proc.stdout, proc.stderr) == (
+        (
+            f"command failed (1): gh {' '.join(CHECKS_ARGV)}\n"
+            f"::warning::could not refresh the gate of {HEAD_SHA}; it stays pending until an "
+            "apply refreshes it\n"
+        ),
+        "",
+    )
+
+
+@bash_only
+def test_a_held_refresh_warns_without_an_error_annotation(tmp_path):
+    """`gate-status refresh` over a hold (this run's own, 999) exits 3 with unannotated text.
+    Mutations: treat a refresh failure as fatal (drop the `if !`) -> exit 3; drop the `sed` and
+    prefix the hold text with `::error::` in `gate-status` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "failure")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert calls == [WRITE_ARGV]
-
-
-_GATE_READ = re.compile(
-    r"""gh api [^"\n]*"repos/\$GITHUB_REPOSITORY/commits/\$HEAD_SHA/status[^"]*" """
-    r"""\\\n\s*--jq '[^']*'"""
-)
-
-
-def _gate_read(action, step):
-    reads = _GATE_READ.findall(step_by(action, name=step)["run"])
-    assert len(reads) == 1, f"{action} / {step}: {reads!r}"
-    return re.sub(r"\\\n\s*", "", reads[0])
-
-
-def test_the_draft_read_is_gate_refreshs_own():
-    """Both sites decide "is this head held"; if they read differently, one greens or overwrites
-    a hold the other would have seen. Mutation: change one site's `per_page`.
-    """
-    assert _gate_read("summary", "Create/refresh gate") == _gate_read(
-        "gate-refresh", "Complete gate"
+    assert calls == [READ_ARGV, _write_argv("pending", "the reason"), CHECKS_ARGV, READ_ARGV]
+    assert (proc.stdout, proc.stderr) == (
+        (
+            f"shipmate / gate is held for {HEAD_SHA}; its status description on the pull request "
+            "names the cause. A hold clears only when a new plan run rewrites the gate: comment "
+            "shipmate plan, or push.\n"
+            f"::warning::could not refresh the gate of {HEAD_SHA}; it stays pending until an "
+            "apply refreshes it\n"
+        ),
+        "",
     )
 
 

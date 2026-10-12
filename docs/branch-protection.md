@@ -22,7 +22,9 @@ is enforced entirely by GitHub branch protection requiring one aggregate check:
   was updated and merged to main since this branch forked is rolled back in real
   infrastructure. Update the branch before running a pre-merge apply.
 
-`shipmate / gate` is created by `actions/summary` on the PR head commit and
+`shipmate / gate` is written on the PR head commit by `scripts/gate-status`,
+through `actions/summary` (the plan run) and `actions/gate-refresh` (the
+pre-merge refresh, the post-merge deploy, and `plan.yml`'s `gate-hold`), and
 resolves to:
 
 | State | gate | Merge |
@@ -30,7 +32,8 @@ resolves to:
 | `detect` failed with an `::error::` line (a refusal or a failed tool or API call) | `failure` — "detect failed: <first `::error::` line>", cut to 140 characters | blocked |
 | `detect` failed without an `::error::` line (a fmt or codegen failure, a crash with none) | `failure` — "change detection did not succeed" | blocked |
 | A plan cell failed | `failure` — "plan incomplete" | blocked |
-| The plan job was cancelled | no status written at all | blocked (the required check never arrives) |
+| The plan job was cancelled | no final gate: the summary's publish hold (`failure` — "re-plan this pull request (comment shipmate plan or push): its plan run ended before writing a final gate") stays when it downloaded any cell summary; otherwise the head keeps its earlier gate | blocked by the hold; otherwise as the earlier gate allows (none: blocked, the required check never arrives) |
+| The plan summary was cancelled by a later gate writer on the same head | `failure` — "re-plan this pull request (comment shipmate plan or push): its plan summary was cancelled before it published" | blocked |
 | Plans succeeded, applies still pending | `pending` | blocked |
 | Nothing left to apply | `success` | allowed |
 

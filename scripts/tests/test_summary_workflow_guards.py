@@ -54,7 +54,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
     "refusal": "${{ steps.matrix.outputs.refusal }}",
 }
-EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary"]
+EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary", "gate-hold"]
 
 
 def _summary_job():

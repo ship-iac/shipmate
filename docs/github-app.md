@@ -367,9 +367,10 @@ actual work here:
   default branch's workflow code, and `apply.yml`'s `review` job binds an apply
   dispatch's inputs to its pull request (`CONTRACT.md` §Comment-ops). The unlock
   dispatch reaches no key (`docs/hardening.md` names its residual).
-- **The one job that holds the key runs no consumer repository content.** That
-  `summary` job checks out nothing, and a consumer cannot add a checkout: they
-  call the workflow, they do not own its steps.
+- **The plan-run jobs that hold the key run no consumer repository content.**
+  The `summary` job and `gate-hold`, which runs only when the gate-writer
+  concurrency group cancelled `summary`, check out nothing, and a consumer
+  cannot add a checkout: they call the workflow, they do not own its steps.
   Reaching the key from a pull-request-side trigger is safe only in that shape —
   see `CONTRACT.md`
   §Post-plan topology and `docs/hardening.md`.
@@ -400,7 +401,7 @@ actual work here:
   creates no deployment at all.
 - A draft is not refused there. A draft's autoplan skips its plan jobs, enters
   `shipmate-engine` and creates a deployment like any other plan run, and
-  `gate-state` writes `shipmate / gate` pending with the draft reason. The run
+  the `summary` job writes `shipmate / gate` pending with the draft reason. The run
   creates no apply check, so `gate-refresh` has nothing to green that status
   over, and the draft status is written only on a head that carries no gate
   status yet, so a draft run never replaces an earlier gate. A *requested*

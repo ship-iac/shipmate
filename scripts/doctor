@@ -58,6 +58,7 @@ import re
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
 from _shipmate import ENGINE_ENV as _ENGINE_ENV
 from _shipmate import (
+    GATE_CONTEXT,
     _load,
     approval_rules,
     current_run_url,
@@ -81,7 +82,7 @@ class _Rendered(str):
     is, so an engine literal such as `<env>` keeps its angle brackets in a code span."""
 
 
-GATE = "shipmate / gate"
+GATE = GATE_CONTEXT
 
 MODES = ("annotate", "report", "check-ids")
 DOCTOR_TITLE = "shipmate doctor"

@@ -6,8 +6,8 @@ on:
       # and no environment supplies it (the waves bind the env's apply environment). Without it
       # every env-level apply refuses at its decrypt.
       SHIPMATE_PLAN_PASSPHRASE: { required: false }
-      # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud one
-      # step earlier, in that job's `Verify the App key arrived`.
+      # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud in
+      # gate-refresh's `Verify the App key arrived`, before the mint.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
 jobs:
@@ -92,52 +92,21 @@ jobs:
     needs: [detect, envlevel0, envlevel1, envlevel2, envlevel3]
     if: always()
     runs-on: ubuntu-slim
+    # One gate writer per head at a time, across the plan, apply and deploy runs; the run-id
+    # fallback keeps a failed detect's empty head SHA out of a shared group.
+    concurrency:
+      group: shipmate-gate-${{ needs.detect.outputs.head_sha || github.run_id }}
+      cancel-in-progress: false
     # The gate write goes through a minted App token, not GITHUB_TOKEN. Same environment as
     # apply-env-level.yml's `complete` job: deployment branch policy restricts it to the default
     # branch, which is also this workflow's own trigger, so it never blocks the real run.
     environment: shipmate-engine
     permissions: {}
     steps:
-      - name: Verify the App key arrived
-        uses: $/actions/verify-app-key
+      - name: Complete gate on the merged PR head SHA
+        uses: $/actions/gate-refresh
         with:
+          head-sha: ${{ needs.detect.outputs.head_sha }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      - name: Mint App installation token
-        id: token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.SHIPMATE_APP_ID }}
-          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: ${{ github.event.repository.name }}
-          permission-statuses: write
-      - name: Complete gate on the merged PR head SHA
-        env:
-          GH_TOKEN: ${{ steps.token.outputs.token }}
-          HEAD_SHA: ${{ needs.detect.outputs.head_sha }}
-          RESULTS: ${{ join(needs.*.result, ',') }}
-        run: |
-          set -euo pipefail
-          # A failed `detect` leaves no head SHA. Fail loud rather than post a gate reading green.
-          if [ -z "$HEAD_SHA" ]; then
-            echo "::error::detect produced no head SHA; deploy cannot gate"; exit 1
-          fi
-          # Any env-level result but success or skipped (failure, cancelled, timed_out) blocks the
-          # gate. Scanned in-process: a pipeline whose reader exits early inverts the verdict under
-          # `pipefail`, SIGPIPE 141 reading as "all clean".
-          concl=success; title="all env-levels applied"
-          IFS=',' read -ra results <<< "$RESULTS"
-          # An empty result string means no env-level job reported at all. Nothing was applied,
-          # so it must read as incomplete rather than all-clean.
-          [ ${#results[@]} -gt 0 ] || results=("")
-          for r in "${results[@]}"; do
-            case "$r" in
-              success|skipped) ;;
-              *) concl=failure; title="deploy incomplete"; break ;;
-            esac
-          done
-          # Commit status, not a check-run (see actions/summary for why).
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state="$concl" \
-            -f context="shipmate / gate" -f description="$title (deploy env-level applies completed)" \
-            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          deploy-results: ${{ join(needs.*.result, ',') }}

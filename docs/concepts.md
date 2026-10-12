@@ -83,12 +83,14 @@ carries (`TF_VAR_env` and `TF_VAR_region`, `TF_WORKSPACE`, or nothing) and
 whether a role is named for that environment at all. Both come from the
 repository's environment table on the default branch.
 
-A plan cell runs branch-authored code, so it holds no App credential. One
-trusted job per run, bound to the `shipmate-engine` GitHub Environment and
+A plan cell runs branch-authored code, so it holds no App credential. A
+trusted `summary` job, bound to the `shipmate-engine` GitHub Environment and
 checking out nothing, holds the App key and authors what the pull request
 shows: the pending `apply / <stack> / <env>` checks, the sticky plan comment
 and `shipmate / gate` ([`github-app.md`](github-app.md) §Key-exposure
-boundary). Fork pull requests are refused before any plan cell starts
+boundary). Its sibling `gate-hold`, bound and checking out nothing the same way,
+also holds the App key and writes the gate: a hold when the plan run's
+`summary` was cancelled before it published. Fork pull requests are refused before any plan cell starts
 ([hardening](hardening.md) §Contributors without push access).
 
 Plan text lives in each plan job's step summary, one click from its check,

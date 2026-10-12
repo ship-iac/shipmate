@@ -269,7 +269,8 @@ runner is fixed:
 - `ubuntu-slim`: the control jobs, which run neither `tofu` nor `terramate`.
   These are `guard`, `review` and `summary` in `apply.yml`, `snapshot` and
   `complete` in `apply-env-level.yml`, `summary` in `deploy.yml`, `guard` in
-  `unlock.yml`, and `ops` in `comment-ops.yml`.
+  `unlock.yml`, `ops` in `comment-ops.yml`, and `gate-hold` in `plan.yml`, which
+  the `plan` job's `runs_on:` does not reach.
 - `ubuntu-latest`: every detect job, which runs `terramate`, and every apply
   and unlock cell, which runs `tofu`.
 

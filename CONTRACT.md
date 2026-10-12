@@ -57,7 +57,7 @@ it counts as completed, so it holds no all-clear back.
 
 The apply check keeps its `apply / ` verb prefix: it is created pending (by
 `actions/summary`) on the same head SHA that carries the plan job's check, and
-it is what keeps `apply-gate` / `gate-refresh`, which select the pending-apply
+it is what keeps `apply-gate` / `scripts/gate-status`, which select the pending-apply
 queue by the `apply / ` prefix, from ever picking up a plan check.
 
 This same forward-built string is also the apply-env-level job's own `name:`
@@ -139,9 +139,14 @@ commit-scoped and immune. (The per-unit `plan`/`apply` checks stay check-runs;
 they are not required, so a stale-suite copy is only cosmetic.)
 
 `shipmate / gate` is created (and refreshed on every plan run) by the
-`summary` action, and is completed to success by whichever of these happens
-first:
+`summary` action, or held by `plan.yml`'s `gate-hold` when the per-head group
+evicts a pending `summary`, and is completed to success by whichever of these happens
+first, each through `scripts/gate-status` and one at a time per head
+(§Comment-ops, "The aggregate gate"):
 
+- the plan run's own `summary`, right after it writes `pending`, when it
+  published no queued apply check and every `apply / <stack> / <env>` check on
+  the PR head is already complete (an apply's refresh ran before that write);
 - the pre-merge apply path (`gate-refresh`, called from the apply
   workflow's summary job) once every `apply / <stack> / <env>` check on
   the PR head is complete — a targeted `shipmate apply <env>` of only some
@@ -1520,9 +1525,35 @@ check/status/comment/issue that crosses a workflow-run boundary:
   workflow-run boundary (check runs are only updatable by the app that
   created them; using the same App on both sides keeps that identity
   consistent).
-- **The aggregate gate** (`shipmate / gate`) — created/refreshed by
-  `actions/summary`, completed pre-merge by `actions/gate-refresh`, completed
-  post-merge inline in `deploy.yml` — all three via App token.
+- **The aggregate gate** (`shipmate / gate`) — read and written only by
+  `scripts/gate-status`, under an App token, called by `actions/summary` in
+  `plan.yml`'s `summary` job (the plan run's gate) and by `actions/gate-refresh`
+  in `apply.yml`'s `summary` job (the pre-merge refresh), `deploy.yml`'s
+  `summary` job (the post-merge verdict) and `plan.yml`'s `gate-hold` job (a
+  hold). The three `summary` jobs run in one job-level concurrency group,
+  `shipmate-gate-<head sha>` with `cancel-in-progress: false`, shared across
+  runs and called workflows, so one of them at a time reads and writes a head's
+  gate. An empty head SHA (a failed `facts` or `detect`) keys the group on the
+  run id instead, so that job shares no group. GitHub keeps one pending job per
+  group, so a third arrival cancels the pending one. What each eviction costs:
+  - a pending plan `summary`: its run publishes nothing, and `gate-hold` writes
+    a hold naming the recovery, `shipmate plan`. `gate-hold` writes outside the
+    group, since a hold only closes the gate, and is not ordered against the
+    `summary` that evicted its own: its hold can land after that `summary`
+    greened the head, a closed gate over applied work that `shipmate plan`
+    reopens;
+  - a pending apply `summary`: the later writer refreshes the gate, and the
+    evicted run posts no apply comment, so a failed wave in it shows only on the
+    red run;
+  - a pending deploy `summary`: the merged head keeps its last gate; re-run that
+    deploy, as for any superseded deploy.
+
+  One race stays open. A refresh already past its status read and before its
+  `success` write, one API round trip, can overwrite a `gate-hold` hold. It
+  needs three gate writers for one head within a minute (a running apply
+  `summary`, a pending same-head re-plan `summary`, a third arrival evicting it)
+  and the hold landing inside that round trip. Closing it needs a conditional
+  write, which GitHub commit statuses lack.
 - **The sticky plan comment** — App-authored (marker + any Bot author for the
   lookup, since a consumer org's App bot login may differ from
   `shipmate[bot]`), upserted in place by `actions/summary` through
@@ -1599,11 +1630,12 @@ The drift sweep is not in that file. Each drift workflow file holds one job,
 `drift`, with no `if:`, calling engine `drift.yml` from the file's own
 `schedule` and `workflow_dispatch` triggers (`docs/drift.md`).
 
-Engine `plan.yml` is four jobs: `facts`, `detect`, `plan`, `summary`. `facts`
-is `actions/pr-facts`, the single producer of every pull-request fact the other
-three decide on. `detect` and `plan` are untrusted: they check out the pull
-request's own head and hold no App credential. `summary` is the one trusted job
-— `environment: shipmate-engine`, and it checks out nothing. Every App-authored
+Engine `plan.yml` is five jobs: `facts`, `detect`, `plan`, `summary`,
+`gate-hold`. `facts` is `actions/pr-facts`, the single producer of every
+pull-request fact the others decide on. `detect` and `plan` are untrusted: they
+check out the pull request's own head and hold no App credential. `summary` and
+`gate-hold` are the trusted jobs — `environment: shipmate-engine`, and neither
+checks anything out. Every App-authored
 surface listed above (apply checks, the gate, the sticky comments, drift
 issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
@@ -1637,7 +1669,7 @@ plans.
 
 **Each job's `permissions:` block must be a superset of every per-job block in
 the workflow it calls** — for the `plan` job, `contents: read`,
-`pull-requests: read` and `id-token: write` between engine `plan.yml`'s four
+`pull-requests: read` and `id-token: write` between engine `plan.yml`'s
 jobs. A called workflow's permissions are capped at each `uses:` boundary, so a
 caller that grants less kills the run at startup: no job, no log, no annotation,
 and no `shipmate / gate`. Fail-closed, since the pull request cannot merge
@@ -1667,19 +1699,19 @@ attaches to the dispatch ref rather than to the pull request — which is why th
 `summary` job mirrors this run's completed `shipmate / ` checks onto the head
 commit on an `on-demand` run.
 
-**Requirement: no job in engine `plan.yml` other than `summary` may reference a
-`shipmate-engine` secret.** Under either trigger every job in that file runs at
+**Requirement: no job in engine `plan.yml` other than `summary` and `gate-hold`
+may reference a `shipmate-engine` secret.** Under either trigger every job in that file runs at
 a ref the environment's policy admits — the base ref, or the ref the plan was
 dispatched on — and the `plan` job's `environment:` is chosen by
 branch-authored `env/*` tags, so the file naming no such secret outside
-`summary` is what keeps the key out of branch reach.
+`summary` and `gate-hold` is what keeps the key out of branch reach.
 `scripts/tests/test_cells_hold_no_app_key.py` is the guard;
 `docs/github-app.md` §Key-exposure boundary has the reasoning. The consumer's
 `plan` job names `SHIPMATE_APP_PRIVATE_KEY` in its own `secrets:` block, and
 that copy of the file is the base branch's or the default branch's — never the
 pull request's own.
 
-The four jobs:
+The five jobs:
 
 - **`facts`** (engine, either trigger) — `actions/pr-facts` alone. It authors
   nothing and mints no App token; it holds `pull-requests: read`, the one grant
@@ -1726,6 +1758,14 @@ The four jobs:
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
+- **`gate-hold`** (engine, `environment: shipmate-engine`, `permissions: {}`) —
+  runs only when `summary` was cancelled, which the gate-writer concurrency
+  group does to a pending `summary` (§Comment-ops, "The aggregate gate"). It
+  calls `actions/gate-refresh` to write a hold reading "re-plan this pull request
+  (comment shipmate plan or push): its plan summary was cancelled before it
+  published". A `summary` refused by its fork `if:` is `skipped`, not
+  `cancelled`, so `gate-hold` holds the App key only for a head `summary`
+  admitted. It runs on `ubuntu-slim` whatever `runs_on` the caller passes.
 - **`apply.yml` / `apply-env-level.yml` /
   `deploy.yml`** (engine, reached through the `apply` and `deploy` jobs —
   `workflow_dispatch` via comment-ops, or `push` to the default branch) — the
@@ -1866,8 +1906,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and the control jobs below call `gh api` on the comment, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
-- The engine's eight control jobs, which run neither `tofu` nor `terramate`, run
-  on `ubuntu-slim` unconditionally: their workflows take no runner input.
+- The engine's nine control jobs, which run neither `tofu` nor `terramate`,
+  take no runner input and run on `ubuntu-slim`. `gate-hold` runs on
+  `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
   `docs/aws.md` §Runner choice lists them. An account that cannot use that
   label leaves them waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
@@ -2115,10 +2156,28 @@ it holds the gate in either direction.
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
 only some checks published leaves a hold that `gate-refresh` will not green.
-The job's final gate write replaces the hold, so a re-run of the summary job
-clears it too, but re-plan instead: that re-run republishes pending checks over
-cells applied since, and a run whose plan job was cancelled writes no final gate
-and keeps the hold.
+The same hold is written when the job cannot read the head's gate statuses,
+list the head's apply checks or build the ones to publish, whether or not it
+downloaded a cell summary: a failed download leaves none over planned cells.
+The job's final gate write replaces the hold. A run whose plan job was
+cancelled writes no final gate, and keeps the hold when it downloaded any cell
+summary.
+
+The job publishes only the apply checks its own run has not published yet,
+judged by the run id each App-authored check records. A re-run of the summary
+job therefore leaves alone a check an apply has completed, or is completing,
+since. It refuses before writing anything when a newer plan run of the same
+head holds the gate ("plan run <id> holds the gate of <sha> and is newer than
+this run") or published apply checks there ("plan run <id>, newer than this run
+(<id>), published apply checks on this head"), so an older run never overwrites
+a newer run's gate or checks. Its final gate write reads the statuses again and
+refuses the same way, writing nothing, when a newer run of the same head holds
+the gate by then (that run's `summary` was evicted); a failed read writes
+nothing either, so the publish hold stands. A final `pending` gate is followed
+by a refresh, unless this run published a queued apply check, which cannot be
+done yet: when every apply check is already done (an apply's refresh ran before
+this write), the summary greens the gate itself. A failed refresh, or one
+refused by a hold, warns and leaves the `pending` standing.
 
 ## Apply result comment
 
@@ -2128,7 +2187,10 @@ Every comment-ops apply run — targeted `shipmate apply <env>` and bare
 `actions/apply-summary`. Unlike the plan comment above, it is deliberately
 not upserted against a marker: every run's comment is new, so a
 failure-then-retry sequence stays visible as separate comments rather than
-overwriting the evidence of the failure — an audit trail.
+overwriting the evidence of the failure — an audit trail. A run refused or
+cancelled at `apply.yml`'s `review` job (the pull request closed, re-pushed or
+turned draft since the comment) posts no comment and writes no gate: the red run
+is the only signal.
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, one line or fold-out per row, the

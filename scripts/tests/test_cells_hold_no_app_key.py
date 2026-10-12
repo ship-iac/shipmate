@@ -33,8 +33,8 @@ APP_KEY_ENV = "SHIPMATE_APP_PRIVATE_KEY"
 LEVEL = WORKFLOWS / "apply-env-level.yml"
 
 PLAN_WF = WORKFLOWS / "plan.yml"
-#: Every job in plan.yml that runs repository content. `summary` is deliberately absent: it is
-#: the one job that holds the key, and it checks nothing out.
+#: Every job in plan.yml that runs repository content. `summary` and `gate-hold` are
+#: deliberately absent: they hold the key, and neither checks anything out.
 UNTRUSTED_PLAN_JOBS = ("facts", "detect", "plan")
 
 

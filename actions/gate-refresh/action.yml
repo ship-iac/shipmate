@@ -1,5 +1,7 @@
 name: shipmate gate-refresh
-description: Complete the shipmate / gate check on a PR head once every apply check is done (pre-merge applies).
+description: >-
+  Write the shipmate / gate commit status on a head through scripts/gate-status: green it once
+  every apply check is done, write a deploy run's verdict, or write a hold.
 inputs:
   head-sha:
     description: PR head SHA carrying the apply checks and the gate.
@@ -10,6 +12,18 @@ inputs:
   private-key:
     description: shipmate App private key (from the shipmate-engine environment secret).
     required: true
+  deploy-results:
+    description: >-
+      A deploy run's comma-separated job results; writes the post-merge verdict instead of a
+      refresh. At most one of deploy-results and hold-description may be set.
+    required: false
+    default: ""
+  hold-description:
+    description: >-
+      Writes a `failure` gate with this description instead of a refresh; leads with the
+      recovery, since the statuses API keeps 140 characters.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -29,43 +43,33 @@ runs:
         permission-checks: read
         permission-statuses: write
 
-    - name: Scan apply checks on the head commit
-      id: scan
+    - name: Write the gate
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
-      # filter=all: a re-created check name keeps its old runs; apply-gate judges the newest per
-      # name. A duplicate created mid-apply stays pending (apply-complete completes only the ids
-      # apply-snapshot took before the waves), so the gate waits until its plan is applied.
+        DEPLOY_RESULTS: ${{ inputs.deploy-results }}
+        HOLD_DESCRIPTION: ${{ inputs.hold-description }}
       run: |
         set -euo pipefail
-        [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
-        gh api --paginate \
-          "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
-          --jq '.check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}' \
-          | python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate"
-    - name: Complete gate
-      if: ${{ steps.scan.outputs.verdict == 'complete' }}
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-        HEAD_SHA: ${{ inputs.head-sha }}
-      run: |
-        set -euo pipefail
-        # A hold must not be cleared by the applies it exists to prevent: `shipmate apply` never
-        # consults the gate, so the parsed cells can reach verdict=complete while the stacks whose
-        # summaries were never read still have no apply check at all.
-        held=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status?per_page=100" \
-          --jq '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty')
-        # Matched on the STATE alone, so a pending -> success refresh is untouched and no wording
-        # has to stay in sync. Only a fresh plan run, which rewrites the gate, exits a plan hold.
-        if [ "$held" = "failure" ]; then
-          echo "::error::shipmate / gate is held for $HEAD_SHA; its status description on the pull request names the cause. A hold clears only when a new plan run rewrites the gate: comment shipmate plan, or push."
+        gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
+        if [ -n "$DEPLOY_RESULTS" ] && [ -n "$HOLD_DESCRIPTION" ]; then
+          echo "::error::set at most one of deploy-results and hold-description"
           exit 1
         fi
-        # Commit status, not a check-run (see actions/summary for why).
-        gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" -f state=success \
-          -f context="shipmate / gate" -f description="all applies complete, nothing left to apply" \
-          -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+        if [ -n "$HOLD_DESCRIPTION" ]; then
+          python3 "$gate_status" hold "$HEAD_SHA" "$HOLD_DESCRIPTION"
+        elif [ -n "$DEPLOY_RESULTS" ]; then
+          python3 "$gate_status" deploy "$HEAD_SHA" "$DEPLOY_RESULTS"
+        else
+          rc=0
+          out=$(python3 "$gate_status" refresh "$HEAD_SHA") || rc=$?
+          # Exit 3 is gate-status' hold: this refresh was due and is refused, so the step fails.
+          if [ "$rc" = 3 ]; then
+            echo "::error::$out"
+            exit 1
+          fi
+          if [ -n "$out" ]; then echo "$out"; fi
+          exit "$rc"
+        fi

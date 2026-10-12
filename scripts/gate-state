@@ -19,11 +19,7 @@ the sticky comment as it is. An on-demand plan never takes that branch: a
 skipped `detect` there is a failure like any other non-success.
 """
 
-import json
 import os
-import sys
-
-from _shipmate import current_run_url
 
 _HOLD = "hold"
 _POST = "post"
@@ -74,9 +70,8 @@ def _evidence_gap(*, cell_count, planned):
     that produced more cells than were planned describes a run nobody can
     account for, which holds for the same reason.
 
-    The recovery is a fresh plan run. Re-running this run's plan jobs 409s, since
-    `plan-cell`'s uploads are not `overwrite:`, and re-running this job (which a plan
-    job re-run also does) republishes pending checks over cells applied since. The
+    The recovery is a fresh plan run: comment `shipmate plan` or push. Re-running this
+    run's plan jobs 409s, since `plan-cell`'s uploads are not `overwrite:`. The
     description is truncated to 140 characters by `main()`, so it leads with the
     recovery.
     """
@@ -181,13 +176,8 @@ def main():
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"state={state or ''}\n")
+        fh.write(f"description={desc[:140]}\n")
         fh.write(f"comment_mode={mode}\n")
-    if state is None:
-        return
-    body = {"state": state, "context": "shipmate / gate", "description": desc[:140]}
-    # This job runs inside the plan run, so this run's URL is the right target.
-    body["target_url"] = current_run_url()
-    json.dump(body, sys.stdout)
 
 
 if __name__ == "__main__":
