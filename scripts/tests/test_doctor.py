@@ -1,5 +1,7 @@
+import ast
 import json
 import os
+import re
 import sys
 
 import pytest
@@ -2800,6 +2802,83 @@ def test_the_shim_job_name_row_keeps_the_engine_placeholders():
         "runs and the gate is unaffected; what is lost is every `plan` link in the plan "
         "comment, which falls back to the workflow-run page instead of the cell's own check. "
         "Rename the job `shipmate` (docs/getting-started.md)."
+    )
+
+
+def test_the_config_valid_row_keeps_the_onboard_placeholder():
+    """Mutation: drop `CONFIG_VALID`'s `_Rendered` -- `&lt;id&gt;` shows in the code span."""
+    assert doctor._finding_row(doctor.NOTICE, doctor.CONFIG_VALID) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `.github/shipmate-config.yml` at the commit "
+        "under examination parses, and passes every check a file can be judged on by itself: "
+        "its top-level keys, `layout`, the identities and the environment entries. Not checked "
+        "here, for want of a plan matrix and a whole-tree environment scan: `tf_vars`-layout "
+        "coverage of the planned environments, entries that no stack tags, workload tags "
+        "outside an environment's `workloads` and listed workloads no stack tags. `detect` "
+        "checks each of those on the runs where it applies, and "
+        "`scripts/onboard --app-id <id> --dry-run` checks them over a checkout. Execution reads "
+        "the default branch's copy of this file, never this branch's."
+    )
+
+
+_ESCAPED_IN_A_SPAN = re.compile(r"`([^`]*)`")
+
+
+def _unrendered_span_literals(source):
+    """(line, spans) for every string literal in `source`, docstrings aside, holding a code
+    span that `_md_escape` would alter and not passed straight to `_Rendered(...)`. An
+    f-string is one string, each interpolation a NUL, so a span around one keeps its pairing."""
+    tree = ast.parse(source)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    out = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            text = node.value
+        elif isinstance(node, ast.JoinedStr):
+            text = "".join(
+                str(v.value) if isinstance(v, ast.Constant) else "\0" for v in node.values
+            )
+        else:
+            continue
+        parent = parents.get(node)
+        # A string statement is a docstring; an f-string's parts were joined above.
+        if isinstance(parent, (ast.Expr, ast.JoinedStr)):
+            continue
+        spans = [s for s in _ESCAPED_IN_A_SPAN.findall(text) if re.search(r"[<>\[\]&]", s)]
+        rendered = (
+            isinstance(parent, ast.Call)
+            and isinstance(parent.func, ast.Name)
+            and parent.func.id == "_Rendered"
+        )
+        if spans and not rendered:
+            out.append((node.lineno, spans))
+    return out
+
+
+def test_every_engine_span_doctor_escapes_would_change_is_rendered():
+    """A finding literal whose code span holds `<`, `>`, `[`, `]` or `&` is `_Rendered`, or
+    `_finding_row`'s escape shows the entity inside the span.
+
+    Mutation: drop `CONFIG_VALID`'s `_Rendered` -- its line is listed.
+    Mutation: add `(WARNING, "run `x <y>`")` as a plain finding -- its line is listed."""
+    source = (SCRIPTS / "doctor").read_text(encoding="utf-8")
+    assert _unrendered_span_literals(source) == []
+
+
+def test_a_branch_name_in_a_finding_stays_escaped(monkeypatch):
+    """A repository-supplied name holding backticks and HTML is escaped by `_finding_row`.
+
+    Mutation: return `_REVIEW_RULE_ABSENT`'s finding `_Rendered` -- `<b>` renders raw."""
+    branch = "``<b>x</b>"
+    ctx = _ctx(default_branch=branch)
+    responses = {f"repos/{_REPO}/rules/branches/{branch}?per_page=100": []}
+    monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
+    [(level, text)] = doctor._review_rule_warnings(ctx)
+    assert doctor._finding_row(level, text) == (
+        f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} no active ruleset puts a `pull_request` rule "
+        "on ```&lt;b&gt;x&lt;/b&gt;`, so nothing there requires the code-owner review that a "
+        "leaked App private key cannot forge (docs/hardening.md #3 to #5). Classic branch "
+        "protection is not reported by this endpoint, so check it if that is what this "
+        "repository uses."
     )
 
 

@@ -79,7 +79,9 @@ _md_escape = sc._md_escape
 
 class _Rendered(str):
     """Finding text whose repository parts are already escaped: `_finding_row` prints it as
-    is, so an engine literal such as `<env>` keeps its angle brackets in a code span."""
+    is, so an engine literal such as `<env>` keeps its angle brackets in a code span.
+    `test_every_engine_span_doctor_escapes_would_change_is_rendered` lists a literal that
+    needs it and lacks it."""
 
 
 GATE = GATE_CONTEXT
@@ -1667,7 +1669,7 @@ CONFIG_NO_COMMIT = (
 # The verdict names the checks it did NOT run: each needs the plan matrix or the whole-tree
 # environment scan, neither of which doctor has, so a bare "valid" here would claim a clean
 # bill over the rest of the rules.
-CONFIG_VALID = (
+CONFIG_VALID = _Rendered(
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
     "file can be judged on by itself: its top-level keys, `layout`, the "
     "identities and the environment entries. Not checked here, for want of a plan matrix "
