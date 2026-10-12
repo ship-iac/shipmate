@@ -223,9 +223,20 @@ _OPEN = {
 }
 
 
-def _run_rd(tmp_path, pull_request):
+#: What `gh api graphql` printed for this query with pr=999999 on 2026-10-12: the raw body on
+#: stdout, `--jq` not applied, the message on stderr, exit 1.
+_NOT_FOUND_GH = """#!/bin/bash
+echo '{"data":{"repository":{"pullRequest":null}},"errors":[{"type":"NOT_FOUND",\
+"path":["repository","pullRequest"],"locations":[{"line":1,"column":82}],\
+"message":"Could not resolve to a PullRequest with the number of 7."}]}'
+echo 'gh: Could not resolve to a PullRequest with the number of 7.' >&2
+exit 1
+"""
+
+
+def _run_rd(tmp_path, pull_request, gh=_JQ_GH):
     """Run the shipped `rd` body for PR 7 at ref `_HEAD`; return (exit code, stdout, outputs)."""
-    (tmp_path / "gh").write_text(_JQ_GH, encoding="utf-8", newline="\n")
+    (tmp_path / "gh").write_text(gh, encoding="utf-8", newline="\n")
     (tmp_path / "gh").chmod(0o755)
     out_file = tmp_path / "github_output"
     out_file.write_text("", encoding="utf-8")
@@ -249,9 +260,20 @@ _needs_jq = pytest.mark.skipif(shutil.which("jq") is None, reason="jq not instal
 
 @bash_only
 @_needs_jq
-def test_a_pull_request_that_does_not_exist_refuses(tmp_path):
-    """A hand-made dispatch naming no pull request is the threat shape; GitHub answers a null
-    `pullRequest` with exit 0.
+def test_a_pull_request_github_cannot_find_refuses_at_the_query(tmp_path):
+    """A hand-made dispatch naming no pull request is the threat shape. GitHub answers it with
+    NOT_FOUND and gh exits 1, so `set -e` refuses on the assignment, before any message.
+
+    Mutation: append `|| true` to the gh call -- the raw body then reaches the state check, which
+    refuses with a message naming JSON as the state."""
+    assert _run_rd(tmp_path, None, gh=_NOT_FOUND_GH) == (1, "", "")
+
+
+@bash_only
+@_needs_jq
+def test_a_bare_null_pull_request_refuses(tmp_path):
+    """A null `pullRequest` with exit 0 is not what GitHub sends for an unknown number (that is
+    NOT_FOUND, above); select() still refuses it rather than reading empty fields.
 
     Mutation: replace the `-z "$pr"` branch's `echo ...; exit 1` with
     `echo "decision=MISSING_PR" >> "$GITHUB_OUTPUT"; exit 0`."""

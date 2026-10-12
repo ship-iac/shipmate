@@ -67,8 +67,9 @@ jobs:
           REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          # A number matching no PR returns a null `pullRequest` with exit 0; select() makes that
-          # empty output. Every @tsv field is non-empty: `read` collapses adjacent tabs.
+          # A number matching no PR is a NOT_FOUND error: gh exits non-zero and `set -e` refuses
+          # here. select() turns a bare null `pullRequest` into empty output. Every @tsv field is
+          # non-empty: `read` collapses adjacent tabs.
           # shellcheck disable=SC2016 # $owner/$repo/$pr are GraphQL variables bound via -F.
           pr=$(gh api graphql -f query='query($owner:String!,$repo:String!,$pr:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$pr){reviewDecision state isDraft isCrossRepository headRefOid}}}' \
             -F owner="$OWNER" -F repo="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" \
