@@ -130,7 +130,8 @@ def _run_main(
     into `urls` are the ones the work set itself asks for; `head` is what the stub returns.
 
     `stacks`, a `{stack: [tags]}` map, runs the real `compute_cells` over that tree instead of
-    the double, and leaves `cells` unused.
+    the double, and leaves `cells` unused. Without it, `all_tags` tags each stack of `cells`
+    with the env of each of its cells.
 
     `order` is folded into the stubbed table rather than stubbed on `wv`: the ordering map is
     a field of the mapping this path loads, so a double on the reader would mask a caller
@@ -172,6 +173,10 @@ def _run_main(
                 [],
             ),
         )
+        tags = {}
+        for c in cells:
+            tags.setdefault(c["stack"], []).append(f"env/{c['environment']}")
+        monkeypatch.setattr(dd.bm, "all_tags", lambda: tags)
     else:
         monkeypatch.setattr(dd.bm, "_list_stacks", lambda all_stacks, base: list(stacks))
         monkeypatch.setattr(dd.bm, "all_tags", lambda: stacks)
@@ -637,3 +642,70 @@ def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path,
         deps={"stacks/app": set(), "stacks/gone": set()},
     )
     assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+
+
+_PROBE_DEPS = {
+    "dns": set(),
+    "platform": {"dns"},
+    "edge": {"platform"},
+    "gr": {"edge", "dns"},
+    "workers": set(),
+}
+_PROBE_CELLS = [
+    _cell("dns", "dev-us"),
+    _cell("platform", "dev-eu"),
+    _cell("edge", "dev-us"),
+    _cell("gr", "dev-eu"),
+    _cell("workers", "dev-eu"),
+]
+
+
+def _run_probe(tmp_path, monkeypatch, order):
+    return _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=_PROBE_CELLS,
+        checks=[_apply_check(c["stack"], c["environment"]) for c in _PROBE_CELLS],
+        deps=_PROBE_DEPS,
+        order=order,
+    )
+
+
+def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch):
+    """`dev-us` needs `dev-eu`, yet `platform` and `gr` (dev-eu) run after dev-us stacks.
+    `workers / dev-eu` is in no pair and is named all the same: the deploy applies nothing.
+
+    Mutation: list only the pairs' cells in the remedy -- `workers / dev-eu` drops out.
+    Mutation: drop the `refuse_inversions` call from `main` -- the deploy writes waves."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
+    assert str(exc_info.value) == (
+        "::error::needs orders gr / dev-eu before dns / dev-us, which it runs after:\n"
+        "- gr / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes "
+        "from dev-eu -> dev-us\n"
+        "- gr / dev-eu (env-level 0) after edge / dev-us (env-level 1); dev-us's level comes "
+        "from dev-eu -> dev-us\n"
+        "- platform / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level "
+        "comes from dev-eu -> dev-us\n"
+        "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
+        "in that chain on the default branch, or retag the stacks so the edge stays inside "
+        "environments that order it. This deploy applies nothing, so none of these cells of "
+        "this merge is applied: dns / dev-us, edge / dev-us, gr / dev-eu, platform / dev-eu, "
+        "workers / dev-eu. Fix the `needs` entry or the tags on the default branch, then open "
+        "a new pull request that changes every listed stack (any edit `terramate list "
+        "--changed` marks); its plan and deploy apply them. Re-running this deploy checks out "
+        "the same commit and refuses again."
+    )
+
+
+def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
+    """With no `needs` every env is level 0, so no `after` edge contradicts one.
+
+    Mutation: `>=` for `>` in `inversions` -- level 0 = level 0 refuses."""
+    parsed = _run_probe(tmp_path, monkeypatch, {})
+    assert [
+        (c["stack"], c["environment"]) for c in json.loads(parsed["envlevel0_waves"])["wave0"]
+    ] == [
+        ("dns", "dev-us"),
+        ("workers", "dev-eu"),
+    ]

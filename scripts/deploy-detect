@@ -10,7 +10,8 @@ This is the path with no comment, no dispatch inputs and no operator watching, s
 a pending cell whose check records no plan run refuses the whole run — a default
 would apply it from nowhere and a skip would leave its check pending with nothing
 said. Every pending cell here is also runnable: this path holds nothing back, unlike
-the bare-apply path's explicit and held envs.
+the bare-apply path's explicit and held envs, so a pending cell that `after` runs behind a
+pending cell `needs` puts on a later env-level refuses the whole run.
 """
 
 import os
@@ -109,6 +110,32 @@ def refuse_stranded_checks(tree, unmanaged, open_names, pending):
     )
 
 
+def refuse_inversions(pending, order, deps):
+    """Refuse when a pending cell runs after a pending cell `needs` puts on a later env-level.
+
+    Every pending cell of the merge is in the run, so none waits; the refusal applies
+    nothing, and the message names every pending cell the remedy pull request must change."""
+    tag_map = bm.all_tags()
+    levels = wv.cell_levels(order, tag_map)
+    present = {(c["stack"], c["environment"]) for c in pending}
+    pairs = wv.inversions(pending, present, deps, tag_map, levels)
+    if not pairs:
+        return
+    cells = ", ".join(sorted(f"{s} / {e}" for s, e in present))
+    raise SystemExit(
+        wv.inversion_error(
+            pairs,
+            order,
+            levels,
+            remedy=f"This deploy applies nothing, so none of these cells of this merge is "
+            f"applied: {cells}. Fix the `needs` entry or the tags on the default branch, then "
+            "open a new pull request that changes every listed stack (any edit `terramate list "
+            "--changed` marks); its plan and deploy apply them. Re-running this deploy checks "
+            "out the same commit and refuses again.",
+        )
+    )
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
@@ -140,9 +167,11 @@ def main():
     pending = ad.with_plan_runs(pending, lines, app_id, pr_number=None)
     bm.refuse_workload_gaps(pending, table)
     deps = ad.run_graph_deps()
+    order = bm.ec.env_order(table)
+    refuse_inversions(pending, order, deps)
     # Before the padding, whose over-depth refusal is where this line helps most.
     print(ad.dag_shape_notice(deps))
-    per_level = wv.env_level_waves(pending, bm.ec.env_order(table), deps)
+    per_level = wv.env_level_waves(pending, order, deps)
     level_counts = [sum(map(len, w.values())) for w in per_level]
     print(
         f"::notice title=deploy-detect::base={os.environ.get('SHIPMATE_BASE_SHA', '')} "
