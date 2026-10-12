@@ -7,6 +7,10 @@ inputs:
   env:
     description: Environment name, e.g. dev-eu.
     required: true
+  plan-passphrase:
+    description: SHIPMATE_PLAN_PASSPHRASE, which decrypts the cached local state. Empty refuses the state restore, which runs only for a local backend.
+    required: false
+    default: ""
   tf-vars:
     description: The matrix row's resolved tf_vars, serialised with toJSON. Anything but a JSON object of strings is refused; the empty object is a legitimate value and an omitted input is not.
     required: true
@@ -48,6 +52,7 @@ runs:
         stack: ${{ inputs.stack }}
         env: ${{ inputs.env }}
         slug: ${{ steps.ids.outputs.slug }}
+        plan-passphrase: ${{ inputs.plan-passphrase }}
 
     - name: Check the provider cache
       id: provider-cache-files

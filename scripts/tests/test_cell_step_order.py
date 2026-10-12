@@ -33,7 +33,7 @@ _EXPECTED = {
         "Initialize the stack",
         "Plan",
         "Render + classify plan",
-        "Encrypt plan artifact at rest (no-op without a passphrase)",
+        "Encrypt plan artifact at rest",
         "Step summary (plan text, 64KiB cap)",
         "Record the planned commit in the artifact",
         "Upload plan artifact",
