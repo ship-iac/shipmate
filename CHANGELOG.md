@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Security
+
+- **A local backend's cached state was plaintext in the default branch's Actions cache, readable by any pull-request workflow, a fork's included, and plans uploaded unencrypted when `SHIPMATE_PLAN_PASSPHRASE` was unset. Both are now encrypted, and every plan, apply and local-state restore or save refuses without the secret.** Set `SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret, and map it in each drift workflow file's `secrets:` (a local-backend drift sweep refuses at `Restore state` without it). Then delete every `state/` cache entry: `gh cache list --key state/ --limit 1000 --json id --jq '.[].id' | xargs -n1 gh cache delete`. Deleting discards that state: the next apply re-creates those stacks' resources.
+
 ## [0.44.2] — 2026-10-11
 
 Tags `230b988`.

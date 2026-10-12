@@ -806,7 +806,13 @@ the repository root, or none:
 
 - **A path** — a local backend. The cell restores that path through
   `actions/state` before it plans or applies, and `apply-cell` saves it after the
-  apply (`plan-cell` and `drift-cell` restore only; neither writes state).
+  apply (`plan-cell` and `drift-cell` restore only; neither writes state). The
+  cached file is encrypted with `SHIPMATE_PLAN_PASSPHRASE` (§Plan artifact
+  encryption), because any workflow run, a fork's pull request included, can
+  restore a default-branch cache entry. An empty passphrase refuses the restore
+  and the save. A plaintext entry, or one that does not decrypt to OpenTofu
+  state, fails the restore naming the matched cache key, so tofu never reads it
+  and the cell skips its save.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -2505,20 +2511,21 @@ engine, and both are equally visible in the plan artifact — the machine plan
 
 ## Plan artifact encryption
 
-The reviewed machine plan file (`stack.otplan`) can be encrypted at rest in the
-uploaded artifact. When the consumer sets the optional `plan-passphrase` input
-on `plan-cell` (in `plan.yml`), the engine encrypts the plan before upload
-using a single symmetric cipher: `openssl enc -aes-256-ctr -pbkdf2 -salt`,
-passphrase supplied via `-pass env:` (never on the command line). `apply-cell`
-decrypts it after download on every apply path: both paths pass it
-as the optional `SHIPMATE_PLAN_PASSPHRASE` secret into the reusable
-`apply-env-level.yml` workflow — via the engine `deploy.yml` for the
+The reviewed machine plan file (`stack.otplan`) is encrypted at rest in the
+uploaded artifact. `plan-cell` (in `plan.yml`) encrypts the plan with its
+required `plan-passphrase` input before upload, using a single symmetric cipher:
+`openssl enc -aes-256-ctr -pbkdf2 -salt`, passphrase supplied via `-pass env:`
+(never on the command line). `apply-cell` decrypts it after download on every
+apply path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
+reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
-forms. Consumers set
+forms. The same cipher and secret encrypt a local backend's cached state
+(§State backend). Consumers set
 `SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret and forward it
 by name in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`
-and `apply` jobs. Never `secrets: inherit`: it hands the engine the caller's whole
-secret set, and across an organization boundary it delivers nothing at all.
+and `apply` jobs and of each drift file's `drift` job. Never `secrets: inherit`:
+it hands the engine the caller's whole secret set, and across an organization
+boundary it delivers nothing at all.
 
 Not a variable, and not a secret on one half of a split environment alone: a
 secret on one environment is released only to a job that *names* that
@@ -2527,11 +2534,13 @@ environment, and a plan cell names its own plan environment. The same value on b
 
 - **As a variable**, every cell refuses it by name (`scripts/env-inject`).
 - **As a secret on `shipmate-engine`**, no plan or apply cell binds that
-  environment, so the passphrase resolves to empty on both sides and plans
-  upload unencrypted with no message — the ref the plan run happens to be at
-  is beside the point.
-- **As a secret on `<env>-apply` alone**, the plan cell encrypts nothing and
-  every apply in that environment refuses its plaintext-artifact check.
+  environment, so the passphrase resolves to empty on both sides and every plan
+  cell refuses: a local backend at `Restore state`, any other backend at
+  `Encrypt plan artifact at rest`, before the upload.
+- **As a secret on `<env>-apply` alone**, every plan cell in that environment
+  refuses the same way, so no apply ever has a plan.
+- **As a secret on `<env>-plan` alone**, plans upload encrypted and every apply
+  in that environment refuses at `Decrypt reviewed plan artifact`.
 
 Scoping it to a plan environment buys nothing either — those must have no
 branch policy at all (`docs/hardening.md` §6), so any branch's workflow can
@@ -2539,22 +2548,22 @@ name one and read it.
 Unlike the App private key, this secret must be readable wherever plans are
 produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
-- **Optional.** An empty/unset `plan-passphrase` leaves the plan
-  plaintext and the uploaded bytes byte-identical to a no-encryption run.
-- **Fail-safe on mismatch.** apply-cell refuses to proceed rather than apply the
-  wrong thing: a plaintext artifact when a passphrase is configured, or an
-  encrypted artifact (`Salted__` magic header) when none is, both fail loud with
-  a re-plan / set-the-secret instruction. A wrong passphrase is not detected
+- **Required.** An empty or unset passphrase refuses: `plan-cell` before the
+  upload, `apply-cell` before the decrypt, and `actions/state` before any cache
+  call. No plan artifact uploads unencrypted.
+- **Fail-safe on mismatch.** apply-cell refuses an artifact without the
+  `Salted__` magic header, with a re-plan instruction, rather than apply it. A
+  wrong passphrase is not detected
   at decrypt (AES-CTR is unauthenticated and decrypts to garbage without error);
   the exact-plan invariant catches it — `tofu apply` rejects the garbage plan and
   the apply check stays pending.
-- **Scope: the machine plan file only.** `fingerprint.txt` and
+- **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and
   the job step summary — stays plaintext: it is the
   deliberately-public reviewer view, as is `apply.txt`. Encryption protects the
-  machine plan at rest and nothing else; redaction in the published text comes
-  from `sensitive` marking (see Secrets in published output, above).
+  machine plan and the cached state at rest and nothing else; redaction in the
+  published text comes from `sensitive` marking (see Secrets in published output, above).
 - **Both sides must agree.** `plan-cell` (encrypt) and `apply-cell` (decrypt)
   run at the commit of the engine reference that called them, which
   §Consumption's one-change rule keeps the same on both paths; the passphrase

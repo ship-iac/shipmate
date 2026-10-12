@@ -685,7 +685,7 @@ _CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 
 
 def _passphrase_item(ctx):
-    item = "SHIPMATE_PLAN_PASSPHRASE repository secret (optional)"
+    item = "SHIPMATE_PLAN_PASSPHRASE repository secret"
     if "SHIPMATE_PLAN_PASSPHRASE" in ctx["repo_secrets"]:
         return "ok", item, []
     return (

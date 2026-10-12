@@ -120,8 +120,8 @@ def test_the_cell_passes_this_whole_with_block():
     """The whole mapping against a hand-written constant, not the keys this file happens to
     reason about elsewhere: a key checked one at a time relocates the hole to whichever key is
     not named, and a dropped `with:` line reaches a composite action as the empty string rather
-    than as an error. plan-cell refuses an empty `expected-head`; an empty `plan-passphrase`
-    stores every plan artifact in the clear and fails no cell.
+    than as an error. plan-cell refuses an empty `expected-head` and an empty
+    `plan-passphrase`, but only once a run reaches the cell.
 
     Mutations: `plan-passphrase` deleted, and `expected-head: ${{ github.sha }}`.
     """
