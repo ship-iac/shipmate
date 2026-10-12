@@ -188,6 +188,8 @@ def _run(
     bin_dir.mkdir(exist_ok=True)
     write_python3_shim(bin_dir)
     (bin_dir / "gh").write_text(GH_STUB, encoding="utf-8", newline="\n")
+    # Without the exec bit, bash on Linux skips the stub on PATH and runs the real `gh`.
+    (bin_dir / "gh").chmod(0o755)
     calls = tmp_path / "calls"
     env = {
         **os.environ,
