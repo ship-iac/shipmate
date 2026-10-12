@@ -1050,10 +1050,9 @@ def test_env_protection_reads_nothing_when_no_environment_was_declared(monkeypat
 
 def test_env_protection_unreadable_existing_env_is_a_notice_naming_it(monkeypatch):
     """`_gh_json`'s exception carries `gh`'s stderr as free text the environment probes never
-    parse, so a
-    403 or 5xx on an environment that IS in the listing is indistinguishable from a 404;
-    swallowing it lets the report say the settings probes found no problems. Listing first
-    separates the two: present-but-unreadable is a note that names the environment."""
+    parse, so a 403 or 5xx on an environment that IS in the listing is indistinguishable from
+    a 404; swallowing it lets the report say the settings probes found no problems. Listing
+    first separates the two: present-but-unreadable is a note that names the environment."""
     responses = _protection(_env("dev-eu-plan"), listed=["dev-eu-plan", "dev-eu-apply"])
 
     def gh(path):
@@ -1109,8 +1108,7 @@ def test_missing_engine_environment_warns(monkeypatch):
     """The headline case: `shipmate-engine` absent from the environments listing itself,
     never a per-environment-read failure standing in for absence -- `_gh_json`'s
     exception carries `gh`'s stderr as free text the environment probes never parse, so they
-    cannot tell
-    that apart from a 403 or a 5xx on an environment that does exist."""
+    cannot tell that apart from a 403 or a 5xx on an environment that does exist."""
     monkeypatch.setattr(doctor, "_gh_json", _engine_env_responses(listed=False))
     out = doctor._engine_environment_warnings(_ctx())
     assert len(out) == 1
@@ -2846,7 +2844,11 @@ def _unrendered_span_literals(source):
         # A string statement is a docstring; an f-string's parts were joined above.
         if isinstance(parent, (ast.Expr, ast.JoinedStr)):
             continue
-        spans = [s for s in _ESCAPED_IN_A_SPAN.findall(text) if re.search(r"[<>\[\]&]", s)]
+        spans = [
+            s
+            for s in _ESCAPED_IN_A_SPAN.findall(text)
+            if re.search(r"[<>\[\]]", s) or doctor.sc._ENTITY_START.search(s)
+        ]
         rendered = (
             isinstance(parent, ast.Call)
             and isinstance(parent.func, ast.Name)
@@ -2858,13 +2860,21 @@ def _unrendered_span_literals(source):
 
 
 def test_every_engine_span_doctor_escapes_would_change_is_rendered():
-    """A finding literal whose code span holds `<`, `>`, `[`, `]` or `&` is `_Rendered`, or
-    `_finding_row`'s escape shows the entity inside the span.
+    """A finding literal whose code span holds `<`, `>`, `[`, `]` or an `&` starting an entity
+    is `_Rendered`, or `_finding_row`'s escape shows the entity inside the span.
 
     Mutation: drop `CONFIG_VALID`'s `_Rendered` -- its line is listed.
     Mutation: add `(WARNING, "run `x <y>`")` as a plain finding -- its line is listed."""
     source = (SCRIPTS / "doctor").read_text(encoding="utf-8")
     assert _unrendered_span_literals(source) == []
+
+
+def test_the_span_guard_lists_only_what_the_escape_would_change():
+    """`_md_escape` leaves an `&` that starts no entity alone, so `a && b` needs no `_Rendered`.
+
+    Mutation: flag every `&` in `_unrendered_span_literals` -- the `a && b` line is listed."""
+    source = 'x = "run `a && b`"\ny = "run `&amp;`"\nz = "run `x <y>`"\n'
+    assert _unrendered_span_literals(source) == [(2, ["&amp;"]), (3, ["x <y>"])]
 
 
 def test_a_branch_name_in_a_finding_stays_escaped(monkeypatch):
@@ -5425,10 +5435,9 @@ def test_no_declared_env_reads_nothing_and_says_nothing(monkeypatch):
 def test_an_environment_that_does_not_exist_is_never_read(monkeypatch):
     """Existence comes from the environments *listing*, never from the per-environment
     read's exception: it carries `gh`'s stderr as free text the environment probes never parse,
-    so a 404
-    for a declared-but-absent environment is indistinguishable from a 403, and the degrade
-    note would claim it exists. Asserted on the paths requested, since a probe that read the
-    absent environment and swallowed the error also returns []."""
+    so a 404 for a declared-but-absent environment is indistinguishable from a 403, and the
+    degrade note would claim it exists. Asserted on the paths requested, since a probe that
+    read the absent environment and swallowed the error also returns []."""
     responses = {
         f"repos/{_REPO}/environments?per_page=100": _environments("dev-eu-plan"),
         f"repos/{_REPO}/environments/dev-eu-plan/secrets?per_page=100": _secrets(),
