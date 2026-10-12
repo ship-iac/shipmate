@@ -302,7 +302,8 @@ NEWER_CHECK = (
 @pytest.mark.parametrize("newest", ["pending", "success"])
 def test_a_newer_runs_apply_check_refuses_before_any_write(tmp_path, newest):
     """A newer run published a check but its gate reads `pending` or `success`, no hold.
-    Mutation: write the publish hold before `pending-checks` -> a hold POST."""
+    Mutations: write the publish hold before `pending-checks` -> a hold POST; exit pending-checks'
+    refusal 1 (`NEWER_RUN = 1`) -> a hold POST."""
     _write_cells(tmp_path, "a")
     codes, calls, stderr = _run(
         tmp_path,
@@ -335,6 +336,19 @@ def test_a_newer_runs_hold_refuses_before_any_write(tmp_path, statuses):
     _write_cells(tmp_path, "a")
     codes, calls, stderr = _run(tmp_path, statuses=statuses)
     assert (codes, calls, stderr) == ([1], [STATUSES_LIST], REFUSED)
+
+
+@bash_only
+def test_a_pending_checks_failure_with_cells_holds(tmp_path):
+    """Any pending-checks failure but the newer-run refusal holds: here a cell missing its
+    `fingerprint`. Mutation: exit before the hold on every non-zero exit (`[ "$rc" = 3 ]` ->
+    `[ "$rc" != 0 ]`) -> no POST, and an earlier green stands over the unpublished cells."""
+    d = tmp_path / "cells" / "cell-summary.dev.stacks-a"
+    d.mkdir(parents=True)
+    cell = {"stack": "stacks/a", "environment": "dev", "changed": True}
+    (d / "cell.json").write_text(json.dumps(cell), encoding="utf-8")
+    codes, calls, _ = _run(tmp_path)
+    assert (codes, calls) == ([1], [STATUSES_LIST, APPLY_LIST, HOLD_POST])
 
 
 @bash_only

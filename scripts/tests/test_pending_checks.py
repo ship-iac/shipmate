@@ -404,9 +404,10 @@ def test_a_cell_this_run_published_is_skipped_and_every_other_is_emitted(monkeyp
     ]
 
 
-def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monkeypatch):
-    """A newer run's record on a name this run did not plan still refuses. Mutation: drop the
-    newer-run refusal -> `unpublished` returns the cells."""
+def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monkeypatch, capsys):
+    """A newer run's record on a name this run did not plan still refuses, with exit code 3.
+    Mutations: drop the newer-run refusal -> `unpublished` returns the cells; `NEWER_RUN = 1` ->
+    red."""
     monkeypatch.setenv("GITHUB_RUN_ID", "10")
     lines = [
         _record_line(1, "apply / a / dev", _ext("10")),
@@ -415,12 +416,13 @@ def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monk
     ]
     with pytest.raises(SystemExit) as exc_info:
         pc.unpublished(_names("a", "b"), lines, APP_ID)
-    assert str(exc_info.value) == (
+    refusal = (
         "::error::plan run 11, newer than this run (10), published apply checks on this head "
         "(apply / gone / dev); this run publishes nothing over them. That run's summary writes "
         "the gate; if it did not finish, re-plan this pull request (comment shipmate plan or "
-        "push)."
+        "push).\n"
     )
+    assert (exc_info.value.code, capsys.readouterr().err) == (3, refusal)
 
 
 def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monkeypatch, capsys):

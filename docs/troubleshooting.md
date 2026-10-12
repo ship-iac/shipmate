@@ -905,7 +905,8 @@ never apply. The summary job also holds the gate while it publishes the apply
 checks, and a plan run that ended before its final gate write (a failed summary
 job, or a cancelled plan job) leaves that hold, reading "its plan run ended
 before writing a final gate". The summary job also holds the gate when it cannot
-read the head's gate statuses, or its apply checks with cells planned. Every one
+read the head's gate statuses, or, with cells planned, cannot read its apply
+checks or build the ones to publish (a cell summary missing a key). Every one
 of these holds clears the same way: comment `shipmate plan` or push.
 
 "Re-run failed jobs" on the plan run is safe only when that run is the newest

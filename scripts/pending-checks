@@ -20,7 +20,7 @@ Only cells this run has not published are emitted, judged against the head's che
 JSONL file `SHIPMATE_CHECK_RUNS` (the App `SHIPMATE_APP_ID`'s, newest per name): a re-run of the
 summary job leaves alone a check an apply has completed, or is completing, since. A record from a
 newer plan run refuses before anything is emitted, so an older run never replaces a newer run's
-checks.
+checks. That refusal alone exits `NEWER_RUN`: the summary step holds the gate on any other failure.
 """
 
 import hashlib
@@ -28,10 +28,12 @@ import json
 import os
 import pathlib
 import re
+import sys
 
 from _shipmate import _load, cell_summaries
 
 ag = _load("apply-gate")
+NEWER_RUN = 3
 
 
 def bodies(cells_dir, head_sha):
@@ -102,12 +104,14 @@ def unpublished(bodies, check_run_lines, app_id):
     }
     newer = sorted(name for name, run in runs.items() if run > this_run)
     if newer:
-        raise SystemExit(
+        print(
             f"::error::plan run {max(runs[n] for n in newer)}, newer than this run ({this_run}), "
             f"published apply checks on this head ({', '.join(newer)}); this run publishes nothing "
             "over them. That run's summary writes the gate; if it did not finish, re-plan this "
-            "pull request (comment shipmate plan or push)."
+            "pull request (comment shipmate plan or push).",
+            file=sys.stderr,
         )
+        raise SystemExit(NEWER_RUN)
     return [b for b in bodies if runs.get(b["name"]) != this_run]
 
 
