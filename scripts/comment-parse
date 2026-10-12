@@ -6,8 +6,8 @@ must match one anchored regex; nothing is ever passed to a shell. The verbs are
 `apply`, `doctor`, `help`, `plan` and `unlock`; any other verb is unknown.
 env is optional for `apply` and required for `unlock`: a bare `shipmate apply`
 targets every non-explicit environment (env=None -> "all"), while a bare
-`shipmate unlock` is rejected. A second token outside the env charset, or a
-third token, is malformed.
+`shipmate unlock` is rejected. A line outside the grammar is refused with a
+reply naming its cause (`_malformed_error`).
 """
 
 import os
@@ -16,9 +16,12 @@ import sys
 
 from _shipmate import _load, current_run_url
 
+ec = _load("env-config")
+
 # `shipmate` as a whole word, a verb, then an optional env in env-config's `_ENV_ENTRY` charset.
-_CMD = re.compile(r"^shipmate (?P<verb>[a-z]+)(?: (?P<env>[a-z0-9][a-z0-9_-]*))?$")
+_CMD = re.compile(rf"^shipmate (?P<verb>[a-z]+)(?: (?P<env>{ec._ENV_ENTRY.pattern}))?$")
 _SHIPMATE_LINE = re.compile(r"^shipmate\b")
+_HELP_HINT = " (try `shipmate help`)"
 
 HELP_MARKER = "<!-- shipmate:help -->"
 
@@ -78,12 +81,35 @@ def _verb_error(verb, env):
     """
     spec = VERBS.get(verb)
     if spec is None:
-        return f"unknown verb `{verb}` (try `shipmate help`)"
+        return f"unknown verb `{verb}`{_HELP_HINT}"
     if spec["args"] == "" and env is not None:
         return f"`{verb}` takes no arguments (use `shipmate {verb}`)"
     if spec["args"].startswith("<") and env is None:
         return f"`{verb}` requires an environment (use `shipmate {verb} <env>`)"
     return None
+
+
+def _quotable(token):
+    """Whether the reply may quote `token`. Commenter text appears only inside a code span,
+    which stops `@` mentions and HTML; a backtick would close the span early."""
+    return 0 < len(token) <= 40 and "`" not in token
+
+
+def _malformed_error(line):
+    """The reply to a `shipmate` line `_CMD` refuses: the verb's own rejection when it takes no
+    arguments, else the token at fault for an env-taking verb, else the grammar."""
+    words = line.split(" ")
+    spec = VERBS.get(words[1]) if len(words) > 2 and words[0] == "shipmate" else None
+    if spec is None or "" in words:
+        return f"malformed: expected `shipmate <verb> [env]`{_HELP_HINT}"
+    verb, env, *extra = words[1:]
+    if not spec["args"]:
+        return _verb_error(verb, env)
+    if ec.is_env_name(env):
+        token = f"unexpected `{extra[0]}`" if _quotable(extra[0]) else "an unexpected token"
+        return f"{token} after the environment{_HELP_HINT}"
+    name = f"environment `{env}`" if _quotable(env) else "the environment name"
+    return f"{name} holds characters outside {ec.ENV_NAME_RULE}{_HELP_HINT}"
 
 
 def parse(body):
@@ -108,10 +134,8 @@ def parse(body):
     result["is_command"] = True
     m = _CMD.match(line)
     if not m:
-        # Same `shipmate help` hint as the unknown-verb path: the shapes that
-        # land here (a capitalized verb, a double space, an env outside its
-        # charset, a third token) are typos, and the verb list is what resolves them.
-        result["error"] = "malformed: expected `shipmate <verb> [env]` (try `shipmate help`)"
+        # Verb, env and route stay empty: the reply header prints them outside a code span.
+        result["error"] = _malformed_error(line)
         return result
     verb, env = m.group("verb"), m.group("env")
     result.update(verb=verb, env=env)

@@ -119,25 +119,57 @@ def test_shipmatey_prefix_is_not_a_command():
 _MALFORMED = "malformed: expected `shipmate <verb> [env]` (try `shipmate help`)"
 
 
+_HINT = " (try `shipmate help`)"
+_OUTSIDE = (
+    "holds characters outside lowercase letters, digits, `-` and `_`, starting with a letter "
+    "or digit" + _HINT
+)
+
+
 @pytest.mark.parametrize(
-    "body",
+    ("body", "error"),
     [
-        "shipmate apply dev-eu foo",
-        "shipmate apply DEV-EU",
-        "shipmate unlock DEV-EU",
-        "shipmate plan Foo",
+        ("shipmate unlock dev-eu extra", "unexpected `extra` after the environment" + _HINT),
+        ("shipmate apply dev-eu a b", "unexpected `a` after the environment" + _HINT),
+        ("shipmate unlock Dev.EU", "environment `Dev.EU` " + _OUTSIDE),
+        ("shipmate apply @acme/admins", "environment `@acme/admins` " + _OUTSIDE),
+        ("shipmate plan @acme/admins", "`plan` takes no arguments (use `shipmate plan`)"),
+        ("shipmate doctor x y", "`doctor` takes no arguments (use `shipmate doctor`)"),
+        ("shipmate apply  dev-eu", _MALFORMED),
+        ("shipmate Doctor", _MALFORMED),
+        ("shipmate-x apply Dev", _MALFORMED),
+        ("shipmate apply " + "A" * 40, f"environment `{'A' * 40}` " + _OUTSIDE),
+        ("shipmate apply " + "A" * 41, "the environment name " + _OUTSIDE),
+        ("shipmate apply a`b", "the environment name " + _OUTSIDE),
+        ("shipmate apply dev-eu a`b", "an unexpected token after the environment" + _HINT),
     ],
 )
-def test_a_token_outside_the_grammar_is_malformed(body):
-    """The env charset is lowercase letters, digits, `-` and `_`, and nothing may follow the env,
-    so these fail the grammar outright. Pinned as a deliberate choice: the user sees the malformed
-    error with its help hint, not a missing or invalid env one.
+def test_a_malformed_line_names_its_cause(body, error):
+    """The reply names the token at fault, in a code span only when it is at most 40 characters
+    and holds no backtick, and writes no verb, env or route for the reply header to print.
 
-    Mutation: restore the `(?: (?P<tag>[A-Za-z0-9][A-Za-z0-9/_:.-]*))?` group in `_CMD`, and
-    every case parses and gets a verb-specific error instead.
+    Mutation: drop `_quotable`'s length cap -- the 41-character token is quoted.
+    Mutation: drop `_quotable`'s backtick check -- `a`b` is quoted.
+    Mutation: classify every known verb as taking an env -- `plan @acme/admins` gets the
+    charset error. Mutation: set `result["env"]` to the bad token -- `env` is not None.
+    Mutation: drop the `words[0] == "shipmate"` check -- `shipmate-x` gets the charset error.
     """
-    r = cp.parse(body)
-    assert (r["is_command"], r["valid"], r["route"], r["error"]) == (True, False, None, _MALFORMED)
+    assert cp.parse(body) == {
+        "is_command": True,
+        "valid": False,
+        "verb": None,
+        "env": None,
+        "route": None,
+        "error": error,
+    }
+
+
+def test_the_env_group_is_env_configs_charset():
+    """Mutation: copy `[a-z0-9][a-z0-9-]*` into `_CMD` in place of `_ENV_ENTRY.pattern`."""
+    ec = load_script("env-config")
+    assert cp._CMD.pattern == (
+        rf"^shipmate (?P<verb>[a-z]+)(?: (?P<env>{ec._ENV_ENTRY.pattern}))?$"
+    )
 
 
 def test_an_env_holding_an_underscore_is_targetable():
@@ -182,7 +214,7 @@ def test_earlier_shipmate_prefixed_chatter_does_not_block_later_valid_command():
 
 def test_a_known_verb_with_a_stray_token_is_refused_not_skipped():
     """A known verb followed by a token outside the grammar is the command the commenter meant,
-    so it is refused as malformed rather than skipped for a later bare apply.
+    so it is refused rather than skipped for a later bare apply.
 
     Mutation: revert `_is_recognized_command` to `_CMD.match(line)` plus the `VERBS` check, and
     the later `shipmate apply` routes.
@@ -194,7 +226,7 @@ def test_a_known_verb_with_a_stray_token_is_refused_not_skipped():
         "verb": None,
         "env": None,
         "route": None,
-        "error": _MALFORMED,
+        "error": "unexpected `stacks/app` after the environment" + _HINT,
     }
 
 
@@ -245,14 +277,13 @@ def test_unknown_verb_points_at_help():
     ],
 )
 def test_malformed_command_points_at_help(body):
-    """Everything that fails _CMD outright lands on the malformed message, and every one of
-    these is a typo the verb list resolves, so it carries the same `shipmate help` hint the
-    unknown-verb path does."""
+    """Every line that fails _CMD with a verb outside the no-argument case is a typo the verb
+    list resolves, so its reply carries the same `shipmate help` hint the unknown-verb path
+    does."""
     r = cp.parse(body)
     assert r["is_command"] is True
     assert r["valid"] is False
-    assert "malformed" in r["error"]
-    assert "shipmate help" in r["error"]
+    assert r["error"].endswith(_HINT)
 
 
 def test_help_markdown_lists_every_verb():
@@ -384,6 +415,20 @@ def test_main_writes_the_verb_of_a_refused_known_verb(tmp_path, monkeypatch):
     ]
 
 
+def test_main_writes_no_header_for_a_known_verb_with_a_stray_token(tmp_path, monkeypatch):
+    """The reply header prints verb and env outside a code span, so both stay empty.
+
+    Mutation: set `result["verb"]` from the line on a malformed parse -- `verb=plan`."""
+    assert _main_output(tmp_path, monkeypatch, "shipmate plan @acme/admins") == [
+        "is_command=true",
+        "valid=false",
+        "verb=",
+        "env=",
+        "route=",
+        "error=`plan` takes no arguments (use `shipmate plan`)",
+    ]
+
+
 def test_main_writes_no_verb_for_a_malformed_line(tmp_path, monkeypatch):
     """Mutation: write `r['verb']` without the `VERBS` check, and a line the grammar rejects
     writes `verb=None`."""
@@ -404,7 +449,7 @@ def test_parse_does_not_import_summary_comment(tmp_path):
     Mutation: load summary-comment at module level, and the run exits non-zero with no output.
     """
     scripts = pathlib.Path(cp.__file__).parent
-    for name in ("comment-parse", "_shipmate.py"):
+    for name in ("comment-parse", "_shipmate.py", "env-config"):
         shutil.copy(scripts / name, tmp_path / name)
     (tmp_path / "summary-comment").write_text("raise RuntimeError('broken')\n", encoding="utf-8")
     out = tmp_path / "out.txt"
