@@ -264,7 +264,7 @@ When the release refuses a key the default branch's table still holds, a `verb=p
 dispatch on the scratch branch, or that drift-file dispatch, stops at detect on that
 key: expected, and that release's smoke is the `verb=apply` dispatch alone. Otherwise a `verb=plan`
 dispatch on the scratch branch runs the cells and stops at
-`plan.yml`'s `summary`, the only job holding the App key. It binds the
+`plan.yml`'s `summary`, which holds the App key. It binds the
 `shipmate-engine` environment, whose deployment branch policy allows the
 default branch only, so the job fails at startup: zero steps, no log, and the
 reason only in the check-run annotations — `Branch "smoke/vX.Y.Z" is not

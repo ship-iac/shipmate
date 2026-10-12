@@ -8,6 +8,15 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **Gate writers on one head commit run one at a time: the plan, apply and deploy runs' `summary` jobs share a `shipmate-gate-<head sha>` concurrency group, so a refresh and a re-plan can no longer interleave a read and a write. A plan summary cancelled while pending holds the gate until a fresh plan.**
+- **A plan summary greens its own `pending` gate when every apply check on the head is already done, so an apply that finished before the summary wrote no longer leaves the gate pending.**
+- **A plan summary publishes no apply check its own run already published and refuses before writing anything when a newer plan run of the head holds the gate or published checks there, so a re-run never resets an applied cell to pending or overwrites a newer run's gate. It holds the gate when it cannot read the gate statuses, or, with cells planned, list the apply checks.**
+- **An apply run refused at its review binding posts no apply comment and writes no gate.**
+
 ## [0.44.3] — 2026-10-12
 
 Tags `50a2d44`.

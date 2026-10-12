@@ -3,6 +3,7 @@ on:
   workflow_call:
     inputs:
       # The three local samples run a slimmer image than the apply path's fixed ubuntu-latest.
+      # Every job but `gate-hold` takes it; `gate-hold` runs on ubuntu-slim.
       runs_on: { required: false, default: ubuntu-latest, type: string }
     secrets:
       # Both `required: false`, for apply.yml's reason: the `summary` job binds

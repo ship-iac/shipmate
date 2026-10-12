@@ -31,6 +31,7 @@ resolves to:
 | `detect` failed without an `::error::` line (a fmt or codegen failure, a crash with none) | `failure` — "change detection did not succeed" | blocked |
 | A plan cell failed | `failure` — "plan incomplete" | blocked |
 | The plan job was cancelled | no status written at all | blocked (the required check never arrives) |
+| The plan summary was cancelled by a later gate writer on the same head | `failure` — "re-plan this pull request (comment shipmate plan or push): its plan summary was cancelled before it published" | blocked |
 | Plans succeeded, applies still pending | `pending` | blocked |
 | Nothing left to apply | `success` | allowed |
 
