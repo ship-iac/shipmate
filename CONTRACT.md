@@ -143,9 +143,9 @@ they are not required, so a stale-suite copy is only cosmetic.)
 first, each through `scripts/gate-status` and one at a time per head
 (§Comment-ops, "The aggregate gate"):
 
-- the plan run's own `summary`, right after it writes `pending`, when every
-  `apply / <stack> / <env>` check on the PR head is already complete (an
-  apply's refresh ran before that write);
+- the plan run's own `summary`, right after it writes `pending`, when it
+  published no queued apply check and every `apply / <stack> / <env>` check on
+  the PR head is already complete (an apply's refresh ran before that write);
 - the pre-merge apply path (`gate-refresh`, called from the apply
   workflow's summary job) once every `apply / <stack> / <env>` check on
   the PR head is complete — a targeted `shipmate apply <env>` of only some
@@ -1905,9 +1905,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and the control jobs below call `gh api` on the comment, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
-- The engine's nine control jobs, which run neither `tofu` nor `terramate`, run
-  on `ubuntu-slim` unconditionally: no runner input reaches them, `plan.yml`'s
-  `runs_on` included, which `gate-hold` ignores.
+- The engine's nine control jobs, which run neither `tofu` nor `terramate`,
+  take no runner input and run on `ubuntu-slim`. `gate-hold` runs on
+  `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
   `docs/aws.md` §Runner choice lists them. An account that cannot use that
   label leaves them waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
@@ -2155,10 +2155,12 @@ it holds the gate in either direction.
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
 only some checks published leaves a hold that `gate-refresh` will not green.
-The same hold is written when the job cannot read the head's gate statuses, or,
-with cells planned, cannot list the head's apply checks or build the ones to
-publish. The job's final gate write replaces the hold. A run whose plan job was
-cancelled writes no final gate and keeps the hold.
+The same hold is written when the job cannot read the head's gate statuses,
+list the head's apply checks or build the ones to publish, whether or not it
+downloaded a cell summary: a failed download leaves none over planned cells.
+The job's final gate write replaces the hold. A run whose plan job was
+cancelled writes no final gate, and keeps the hold when it downloaded any cell
+summary.
 
 The job publishes only the apply checks its own run has not published yet,
 judged by the run id each App-authored check records. A re-run of the summary
@@ -2167,10 +2169,14 @@ since. It refuses before writing anything when a newer plan run of the same
 head holds the gate ("plan run <id> holds the gate of <sha> and is newer than
 this run") or published apply checks there ("plan run <id>, newer than this run
 (<id>), published apply checks on this head"), so an older run never overwrites
-a newer run's gate or checks. A final `pending` gate is followed by a refresh:
-when every apply check is already done (an apply's refresh ran before this
-write), the summary greens the gate itself. A failed refresh warns and leaves the
-`pending` standing.
+a newer run's gate or checks. Its final gate write reads the statuses again and
+refuses the same way, writing nothing, when a newer run of the same head holds
+the gate by then (that run's `summary` was evicted); a failed read writes
+nothing either, so the publish hold stands. A final `pending` gate is followed
+by a refresh, unless this run published a queued apply check, which cannot be
+done yet: when every apply check is already done (an apply's refresh ran before
+this write), the summary greens the gate itself. A failed refresh, or one
+refused by a hold, warns and leaves the `pending` standing.
 
 ## Apply result comment
 

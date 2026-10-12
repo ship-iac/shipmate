@@ -13,8 +13,8 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **Gate writers on one head commit run one at a time: the plan, apply and deploy runs' `summary` jobs share a `shipmate-gate-<head sha>` concurrency group, so a refresh and a re-plan can no longer interleave a read and a write. A plan summary cancelled while pending holds the gate until a fresh plan.**
-- **A plan summary greens its own `pending` gate when every apply check on the head is already done, so an apply that finished before the summary wrote no longer leaves the gate pending.**
-- **A plan summary publishes no apply check its own run already published and refuses before writing anything when a newer plan run of the head holds the gate or published checks there, so a re-run never resets an applied cell to pending or overwrites a newer run's gate. It holds the gate when it cannot read the gate statuses, or, with cells planned, list the apply checks.**
+- **A plan summary greens its own `pending` gate when it published no queued apply check and every apply check on the head is already done, so an apply that finished before the summary wrote no longer leaves the gate pending. A hold found by that refresh is a warning on the plan run, not an error.**
+- **A plan summary publishes no apply check its own run already published and refuses before writing anything when a newer plan run of the head holds the gate or published checks there, so a re-run never resets an applied cell to pending or overwrites a newer run's gate. It holds the gate when it cannot read the gate statuses, list the apply checks or build the ones to publish, even when no cell summary arrived, and its final write refuses over a newer run's hold.**
 - **An apply run refused at its review binding posts no apply comment and writes no gate.**
 
 ## [0.44.3] — 2026-10-12

@@ -903,10 +903,13 @@ nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
 never apply. The summary job also holds the gate while it publishes the apply
 checks, and a plan run that ended before its final gate write (a failed summary
-job, or a cancelled plan job) leaves that hold, reading "its plan run ended
-before writing a final gate". The summary job also holds the gate when it cannot
-read the head's gate statuses, or, with cells planned, cannot read its apply
-checks or build the ones to publish (a cell summary missing a key). A plan run
+job, or a cancelled plan job after the summary downloaded a cell summary) leaves
+that hold, reading "its plan run ended before writing a final gate". The summary
+job also holds the gate when it cannot read the head's gate statuses or apply
+checks, or cannot build the checks to publish (a cell summary missing a key),
+whether or not it downloaded a cell summary: a failed download leaves none over
+planned cells. Its final write refuses, writing nothing and keeping that hold,
+when a newer plan run of the same head holds the gate by then. A plan run
 whose `summary` job was cancelled before it ran, because a later gate writer on
 the same head queued behind it (`CONTRACT.md` §Comment-ops, "The aggregate
 gate"), holds the gate from its `gate-hold` job, reading "its plan summary was
