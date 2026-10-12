@@ -272,7 +272,7 @@ runner is fixed:
   `unlock.yml`, `ops` in `comment-ops.yml`, and `facts` and `gate-hold` in
   `plan.yml`, which the `plan` job's `runs_on:` does not reach. `plan.yml`'s
   `summary` takes `runs_on:`: its doctor step needs PyYAML, which `ubuntu-slim`
-  lacks and installs with `apt-get`.
+  lacks, so the engine would install it there with `apt-get`.
 - `ubuntu-latest`: every detect job, which runs `terramate`, and every apply
   and unlock cell, which runs `tofu`.
 
