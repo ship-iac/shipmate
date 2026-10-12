@@ -110,10 +110,8 @@ runs:
         # mid-publish would let an apply of the published cells merge the unpublished ones.
         # `Create/refresh gate` replaces this hold.
         if [ -s bodies.jsonl ]; then
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$SHIPMATE_HEAD_SHA" -f state=failure \
-            -f context="shipmate / gate" \
-            -f description="re-plan this pull request (comment shipmate plan or push): its plan summary did not finish" \
-            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" hold "$SHIPMATE_HEAD_SHA" \
+            "re-plan this pull request (comment shipmate plan or push): its plan summary did not finish"
         fi
 
     - name: Create apply checks (pending / no-changes)
@@ -234,7 +232,7 @@ runs:
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
       run: |
         set -euo pipefail
-        python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state" > gate.json
+        python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state"
 
     - name: Upsert sticky comment
       shell: bash
@@ -281,29 +279,36 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
         STATE: ${{ steps.gate.outputs.state }}
+        DESCRIPTION: ${{ steps.gate.outputs.description }}
         MODE: ${{ steps.gate.outputs.comment_mode }}
         PLAN_RESULT: ${{ inputs.plan-result }}
+        SHIPMATE_APP_ID: ${{ inputs.app-id }}
       run: |
         set -euo pipefail
-        # A commit STATUS, not a check-run: a check-run can land in a stale check-suite and block
-        # the merge forever (CONTRACT.md says why). An empty state from gate-state means
-        # a cancelled plan job, so nothing is written.
+        gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
+        # An empty state from gate-state means a cancelled plan job, so nothing is written.
         if [ -z "${STATE}" ]; then
           echo "plan job was ${PLAN_RESULT}; no gate written"
           exit 0
         fi
         # A draft status never replaces an existing gate: gate-refresh treats only `failure` as
         # a hold and greens `pending`, so a re-run draft run over a held head would open that
-        # hold (scripts/tests/test_summary_draft_gate.py). The read is gate-refresh's own.
+        # hold (scripts/tests/test_summary_draft_gate.py).
         if [ "$MODE" = "draft" ]; then
-          if ! held=$(gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status?per_page=100" \
-            --jq '[.statuses[] | select(.context == "shipmate / gate")] | .[0].state // empty'); then
+          if ! held=$(python3 "$gate_status" newest "$HEAD_SHA"); then
             echo "::warning::could not read the gate status of $HEAD_SHA; the draft gate status was not written"
             exit 0
           fi
           if [ -n "$held" ]; then
-            echo "$HEAD_SHA keeps its $held gate status; the draft gate status was not written"
+            echo "$HEAD_SHA keeps its ${held%% *} gate status; the draft gate status was not written"
             exit 0
           fi
         fi
-        gh api "repos/$GITHUB_REPOSITORY/statuses/$HEAD_SHA" --input gate.json >/dev/null
+        python3 "$gate_status" post "$HEAD_SHA" "$STATE" "$DESCRIPTION"
+        # Degrades: the `pending` above is the fail-closed write, and the refresh only upgrades it
+        # when every apply check is already done (an apply's refresh that ran before this write).
+        if [ "$STATE" = "pending" ] && [ "$MODE" != "draft" ]; then
+          if ! python3 "$gate_status" refresh "$HEAD_SHA"; then
+            echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
+          fi
+        fi

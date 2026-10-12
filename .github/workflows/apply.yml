@@ -208,6 +208,10 @@ jobs:
     # cycle) still gets the comment and gate refresh, as a failed or cancelled apply does.
     if: ${{ always() && needs.guard.result == 'success' }}
     runs-on: ubuntu-slim
+    # One gate writer per head at a time, across the plan, apply and deploy runs.
+    concurrency:
+      group: shipmate-gate-${{ inputs.ref || github.run_id }}
+      cancel-in-progress: false
     # Both steps mint the App key from secrets.SHIPMATE_APP_PRIVATE_KEY, the same as
     # apply-env-level.yml's `complete` job. Deployment branch policy restricts this environment to
     # the default branch, so a branch-authored workflow naming it is denied and never sees the key.

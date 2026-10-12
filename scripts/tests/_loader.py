@@ -408,6 +408,7 @@ if [ "$*" = "api --paginate $checks" ]; then
   exit "${FAKE_CHECKS_RC:-0}"
 elif [ "$*" = "api --paginate $statuses" ]; then
   printf '%s%s' "$FAKE_PAGE1" "$FAKE_PAGE2"
+  exit "${FAKE_STATUSES_RC:-0}"
 elif [ "$*" = "api $statuses" ]; then
   printf '%s' "$FAKE_PAGE1"
 elif [ "$1 $2" = "api repos/acme/demo/statuses/$FAKE_SHA" ]; then
@@ -424,12 +425,15 @@ GATE_CHECKS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app
 GATE_STATUSES_JQ = ".[] | {context, state, target_url}"
 
 
-def run_with_gate_gh(tmp_path, body, env, *, sha, checks="", checks_rc=0, page1="", page2=""):
+def run_with_gate_gh(
+    tmp_path, body, env, *, sha, checks="", checks_rc=0, page1="", page2="", statuses_rc=0
+):
     """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and ``_GATE_GH`` first on
     PATH; return (process, the argv after ``gh`` of each call, in order).
 
     ``sha`` is the head the stub answers for; ``checks`` the check-runs listing (exit
-    ``checks_rc``); ``page1``/``page2`` the statuses listing's two pages, JSON Lines each.
+    ``checks_rc``); ``page1``/``page2`` the statuses listing's two pages, JSON Lines each
+    (paginated exit ``statuses_rc``).
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -447,6 +451,7 @@ def run_with_gate_gh(tmp_path, body, env, *, sha, checks="", checks_rc=0, page1=
         "FAKE_CHECKS_RC": str(checks_rc),
         "FAKE_PAGE1": page1,
         "FAKE_PAGE2": page2,
+        "FAKE_STATUSES_RC": str(statuses_rc),
     }
     proc = run_step(tmp_path, body, env)
     return proc, read_calls(calls)

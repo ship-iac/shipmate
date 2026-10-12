@@ -6,9 +6,10 @@ apply-check POST and `Create/refresh gate` would therefore let an apply of the p
 green the gate and merge the unpublished ones. `Hold the gate while apply checks publish` writes a
 `failure` gate first, which `gate-refresh` refuses to green.
 
-Both steps run for real, in order, with `gh` and `python3` (standing in for `pending-checks`)
-replaced by bash functions, as in `test_summary_draft_gate.py`. A failed step ends the sequence,
-as it skips the later default-`success()` steps on a runner.
+Both steps run for real, in order, with `gh` and `python3` replaced by bash functions: `python3`
+stands in for `pending-checks` and records each `scripts/gate-status` call, whose argv
+`test_gate_status.py` pins. A failed step ends the sequence, as it skips the later
+default-`success()` steps on a runner.
 """
 
 import os
@@ -20,19 +21,10 @@ HOLD = "Hold the gate while apply checks publish"
 CREATE = "Create apply checks (pending / no-changes)"
 GATE = "Create/refresh gate"
 HOLD_ARGV = [
-    "api",
-    f"repos/acme/demo/statuses/{HEAD_SHA}",
-    "-f",
-    "state=failure",
-    "-f",
-    "context=shipmate / gate",
-    "-f",
-    (
-        "description=re-plan this pull request (comment shipmate plan or push): "
-        "its plan summary did not finish"
-    ),
-    "-f",
-    "target_url=https://github.com/acme/demo/actions/runs/42",
+    "gate-status",
+    "hold",
+    HEAD_SHA,
+    "re-plan this pull request (comment shipmate plan or push): its plan summary did not finish",
 ]
 BODIES = [
     '{"name": "apply / a / dev"}',
@@ -41,19 +33,21 @@ BODIES = [
 ]
 
 # Records every call's argv one line per argument, then the stdin of an `--input -` call, then a
-# `--` line. FAKE_FAIL_CHECK fails that check-runs call (1-based); FAKE_STATUS_RC is the status
-# write's exit code. A gate read answers `failure`, the hold. Pipeline members run in
-# subshells, so the check counter lives in a file.
+# `--` line. FAKE_FAIL_CHECK fails that check-runs call (1-based); FAKE_STATUS_RC is every
+# gate-status call's exit code. `gate-status newest` answers `failure 42`, the hold. Pipeline
+# members run in subshells, so the check counter lives in a file.
 GH_STUB = r"""
-python3() { printf '%s' "$FAKE_BODIES"; }
+python3() {
+  if [ "${1##*/}" != "gate-status" ]; then printf '%s' "$FAKE_BODIES"; return; fi
+  printf '%s\n' gate-status "${@:2}" -- >> "$CALLS"
+  [ "$2" != "newest" ] || echo "failure 42"
+  return "$FAKE_STATUS_RC"
+}
 gh() {
   printf '%s\n' "$@" >> "$CALLS"
   if [ "${*: -1}" = "-" ]; then cat >> "$CALLS"; printf '\n' >> "$CALLS"; fi
   printf -- '--\n' >> "$CALLS"
   case "$*" in
-    "api repos/acme/demo/statuses/$SHIPMATE_HEAD_SHA "*) return "$FAKE_STATUS_RC" ;;
-    "api --paginate repos/acme/demo/commits/$SHIPMATE_HEAD_SHA/status?per_page=100 --jq "*)
-      printf 'failure' ;;
     "api repos/acme/demo/check-runs --input -")
       n=$(( $(cat "$COUNT" 2>/dev/null || echo 0) + 1 ))
       echo "$n" > "$COUNT"
@@ -89,6 +83,7 @@ def _run(tmp_path, bodies, *, fail_check=0, status_rc=0, steps=(HOLD, CREATE)):
         "SHIPMATE_HEAD_SHA": HEAD_SHA,
         "HEAD_SHA": HEAD_SHA,
         "STATE": "pending",
+        "DESCRIPTION": "waiting",
         "MODE": "post",
         "PLAN_RESULT": "success",
         "GITHUB_REPOSITORY": "acme/demo",
@@ -113,7 +108,7 @@ def _run(tmp_path, bodies, *, fail_check=0, status_rc=0, steps=(HOLD, CREATE)):
 @bash_only
 def test_the_hold_is_written_before_any_apply_check(tmp_path):
     """Mutations: move the hold's `if` block to the end of `Create apply checks` -> the hold
-    follows the checks; `state=failure` -> `state=pending` -> the argv differs."""
+    follows the checks; `gate-status hold` -> `gate-status post` -> the argv differs."""
     codes, calls = _run(tmp_path, BODIES[:2])
     assert codes == [0, 0]
     assert calls == [HOLD_ARGV, _check(BODIES[0]), _check(BODIES[1])]
@@ -137,8 +132,8 @@ def test_no_body_writes_no_hold(tmp_path):
 
 @bash_only
 def test_a_failed_hold_write_publishes_no_check(tmp_path):
-    """Mutation: append `|| true` to the status write -> the hold step passes and the checks
-    post over no hold."""
+    """Mutation: append `|| true` to the `gate-status hold` call -> the hold step passes and the
+    checks post over no hold."""
     codes, calls = _run(tmp_path, BODIES[:2], status_rc=1)
     assert codes == [1]
     assert calls == [HOLD_ARGV]
@@ -148,11 +143,11 @@ def test_a_failed_hold_write_publishes_no_check(tmp_path):
 def test_the_final_gate_write_replaces_the_hold(tmp_path):
     """Mutation: run `Create/refresh gate`'s held-read for every mode (`[ "$MODE" = "draft" ]` ->
     `true`) -> it reads the hold, keeps it, and never writes the final gate."""
-    (tmp_path / "gate.json").write_text("{}", encoding="utf-8")
     codes, calls = _run(tmp_path, BODIES[:1], steps=(HOLD, CREATE, GATE))
     assert codes == [0, 0, 0]
     assert calls == [
         HOLD_ARGV,
         _check(BODIES[0]),
-        ["api", f"repos/acme/demo/statuses/{HEAD_SHA}", "--input", "gate.json"],
+        ["gate-status", "post", HEAD_SHA, "pending", "waiting"],
+        ["gate-status", "refresh", HEAD_SHA],
     ]

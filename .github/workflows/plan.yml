@@ -108,9 +108,10 @@ jobs:
           expected-head: ${{ needs.facts.outputs.head-sha }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
-  # The only job here that holds the App key. It checks out nothing, so it runs no consumer
-  # repository content, which is what makes `pull_request_target` safe for this file. Its trust
-  # decision is on its own `if:`, reading the one producer above.
+  # One of the two jobs here that hold the App key, with `gate-hold` below. Neither checks out
+  # anything, so neither runs consumer repository content, which is what makes
+  # `pull_request_target` safe for this file. Its trust decision is on its own `if:`, reading the
+  # one producer above.
   summary:
     needs: [facts, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
@@ -120,6 +121,11 @@ jobs:
       ${{ !cancelled() && needs.facts.outputs.head-repo != '' &&
       needs.facts.outputs.head-repo == github.repository }}
     runs-on: ${{ inputs.runs_on }}
+    # One gate writer per head at a time, across the plan, apply and deploy runs. A later arrival
+    # evicts a pending one, and `gate-hold` then holds the gate.
+    concurrency:
+      group: shipmate-gate-${{ needs.facts.outputs.head-sha || github.run_id }}
+      cancel-in-progress: false
     # The guard is on the job, not on a step: a skipped job creates no deployment and never enters
     # the environment, whereas a first-step check would already hold the App key in scope.
     environment: shipmate-engine
@@ -146,3 +152,23 @@ jobs:
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
           github-vars: ${{ toJSON(vars) }}
           unmanaged-stacks: ${{ needs.detect.outputs.unmanaged }}
+
+  # The group above cancels a pending `summary` when a later gate writer queues behind it, so this
+  # run's cells would never publish. A hold only closes the gate, so this job writes outside the
+  # group. It holds the App key only after `summary`'s fork `if:` admitted the head: a summary
+  # that refused is `skipped`, not `cancelled`.
+  gate-hold:
+    needs: [facts, summary]
+    if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}
+    runs-on: ubuntu-slim
+    environment: shipmate-engine
+    permissions: {}
+    steps:
+      - uses: $/actions/gate-refresh
+        with:
+          head-sha: ${{ needs.facts.outputs.head-sha }}
+          app-id: ${{ vars.SHIPMATE_APP_ID }}
+          private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          hold-description: >-
+            re-plan this pull request (comment shipmate plan or push): its plan summary was
+            cancelled before it published

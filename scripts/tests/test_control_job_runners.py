@@ -33,6 +33,7 @@ EXPECTED = {
     ("plan.yml", "detect"): INPUT,
     ("plan.yml", "plan"): INPUT,
     ("plan.yml", "summary"): INPUT,
+    ("plan.yml", "gate-hold"): SLIM,
     ("unlock.yml", "guard"): SLIM,
     ("unlock.yml", "detect"): LATEST,
     ("unlock.yml", "unlock"): LATEST,

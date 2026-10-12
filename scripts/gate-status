@@ -91,7 +91,10 @@ def refresh(sha):
 
     A hold must not be cleared by the applies it exists to prevent: `shipmate apply` never
     consults the gate, so the parsed cells can all complete while stacks whose summaries were
-    never read have no apply check at all. Only a fresh plan run exits a hold."""
+    never read have no apply check at all. Only a fresh plan run exits a hold.
+
+    `filter=all`: a re-created check name keeps its old runs, and `apply-gate` judges the newest
+    per name, so a duplicate created mid-apply stays open until its own plan is applied."""
     out = _run(
         [
             "gh",

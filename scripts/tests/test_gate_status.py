@@ -178,6 +178,8 @@ def test_refresh_finds_a_hold_past_the_first_statuses_page(tmp_path):
 
 @bash_only
 def test_refresh_fails_when_the_check_listing_fails(tmp_path):
+    """Mutation: swallow the check-runs listing's failure and exit 0 -> the run reads green over
+    a gate nobody refreshed."""
     proc, calls = _run(tmp_path, "refresh", SHA, checks=DONE, checks_rc=1)
     assert proc.returncode == 1
     assert calls == [CHECKS_ARGV]

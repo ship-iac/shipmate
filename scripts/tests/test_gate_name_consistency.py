@@ -1,120 +1,68 @@
-"""Freeze the aggregate gate check name across its writers.
+"""Freeze the aggregate gate's context to one definition, and its writes to one script.
 
-The gate `shipmate / gate` is created pending by `actions/summary`, completed pre-merge by
-`actions/gate-refresh`, and completed post-merge inline in `deploy.yml`. All three must emit the
-byte-identical name, or the gate greens on one path and sticks on another. This guards that
-invariant the same way test_check_runs_filter_aligned guards the check-runs read discipline.
+`_shipmate.GATE_CONTEXT` is the only place the `shipmate / gate` context is spelled as a value,
+and `scripts/gate-status` is the only script that reads or writes the status. A second spelling
+greens the gate on one path and leaves it stuck on another. `test_gate_status.py` pins the
+whole argv of every write, the commit-statuses endpoint included.
 """
 
-from _loader import ENGINE, ENGINE_CALL_SECRETS, WORKFLOWS, workflow_yaml
+import ast
+
+from _loader import (
+    ACTIONS,
+    ENGINE,
+    ENGINE_CALL_SECRETS,
+    SCRIPTS,
+    WORKFLOWS,
+    action_yaml,
+    step_by,
+    workflow_yaml,
+)
 
 GATE = "shipmate / gate"
-# `scripts/gate-state` builds the plan run's body, which `actions/summary` POSTs after its own
-# publish hold. The hold and the two completion writers post their fields with `gh api -f`, and
-# `actions/gate-refresh/action.yml` also names the gate in its hold refusal, which must move with
-# the context if it is renamed.
-WRITERS = [
-    "scripts/gate-state",
-    "actions/summary/action.yml",
-    "actions/gate-refresh/action.yml",
-    ".github/workflows/deploy.yml",
-]
 
 
-def test_gate_literal_present_in_every_writer():
-    for rel in WRITERS:
-        text = (ENGINE / rel).read_text(encoding="utf-8")
-        assert GATE in text, f"{rel} is missing the gate literal {GATE!r}"
-
-
-def _gate_writing_run_blocks(text):
-    """Yield each `run:` block, as a single string, that writes the gate: it either posts the
-    gate context as a field (`-f context="shipmate / gate"`), or -- `actions/summary`'s final
-    write -- POSTs the specific body `scripts/gate-state` produced (`--input gate.json`). A step
-    that merely names the gate in a comment or echo does not count. `actions/summary` has two
-    such blocks, its publish hold and that final write; this scans generically rather than
-    assume a fixed line layout."""
-    blocks = []
-    current = []
-    in_run = False
-    run_indent = 0
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("run:") or stripped == "run: |":
-            if current:
-                blocks.append("\n".join(current))
-            current = []
-            in_run = True
-            run_indent = len(line) - len(line.lstrip())
+def _gate_literals():
+    """(file, line) of every string constant equal to the whole gate literal in the scripts
+    directly under `scripts/` that parse as Python, extensionless helpers included."""
+    found = set()
+    for path in sorted(SCRIPTS.glob("*")):
+        if not path.is_file():
             continue
-        if in_run:
-            indent = len(line) - len(line.lstrip()) if line.strip() else run_indent + 1
-            if line.strip() and indent <= run_indent:
-                blocks.append("\n".join(current))
-                current = []
-                in_run = False
-            else:
-                current.append(line)
-    if current:
-        blocks.append("\n".join(current))
-    return [b for b in blocks if f'-f context="{GATE}"' in b or "--input gate.json" in b]
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value == GATE:
+                found.add((path.name, node.lineno))
+    return found
 
 
-def _writer_gate_segments(rel, text):
-    """The text segments of one WRITERS entry to check for the commit-status invariant.
-
-    A `.yml` writer, a composite action or a workflow, gets the `run:`-block extraction,
-    because a step may hold other unrelated `run:` blocks that must not be conflated with the
-    gate-writing one. `scripts/gate-state` is not YAML and has no `run:` blocks at all -- it is
-    a plain script whose only job is building the gate body, the POST living in
-    `actions/summary`'s `Create/refresh gate` step over a body it did not build -- so the whole
-    file is the one segment to check.
-    """
-    if not rel.endswith((".yml", ".yaml")):
-        return [text] if GATE in text else []
-    return _gate_writing_run_blocks(text)
+def test_the_gate_literal_is_defined_once():
+    """Mutation: restore `GATE = "shipmate / gate"` in `scripts/doctor` -> a second site."""
+    assert _gate_literals() == {("_shipmate.py", 40)}
 
 
-def test_gate_written_as_commit_status_not_check_run():
-    """The gate must be a commit status, not a check-run.
-
-    A check-run binds to a check-suite, and an imperatively-created one lands in an arbitrary
-    suite when a commit carries two plan runs (draft to ready, or a rapid re-push). The merge
-    evaluator reads the live suite, finds no gate and blocks the pull request forever while the
-    green gate sits in the stale suite. A commit status is commit-scoped and immune, so every
-    writer is locked onto the statuses API.
-
-    Scoped to the gate-writing steps only -- the block referencing the `shipmate / gate` context
-    and POSTing it, or, for `actions/summary`, POSTing the specific body `scripts/gate-state`
-    produced -- not every line in the writer file. `actions/summary` also legitimately creates
-    apply check-runs, in a step of their own: in its publish-hold step they would be flagged here.
-
-    `scripts/gate-state` never calls `gh api` at all and only builds the body JSON that
-    `actions/summary` later POSTs, so it cannot itself target the wrong endpoint. The guard
-    narrows there to the weaker claim that it never names the check-runs endpoint.
-    """
-    for rel in WRITERS:
-        text = (ENGINE / rel).read_text(encoding="utf-8")
-        gate_segments = _writer_gate_segments(rel, text)
-        assert gate_segments, f"{rel}: no gate-writing segment found (context+POST)"
-        for segment in gate_segments:
-            if "gh api" not in segment:
-                # A body-only writer: no POST of its own to mistarget.
-                assert "check-runs" not in segment, (
-                    f"{rel}: gate body construction references the check-runs API"
-                )
-                continue
-            assert "statuses/" in segment, (
-                f"{rel}: gate-writing step must POST to the commit statuses API: {segment!r}"
-            )
-            # One logical shell line per entry, so a backslash-continued call is matched whole.
-            for line in segment.replace("\\\n", " ").splitlines():
-                assert not ("check-runs" in line and "gh api" in line), (
-                    f"{rel}: gate POST still targets the check-runs API: {line.strip()}"
-                )
+def _run_blocks():
+    """(file, `run:` value) for every step in the composite actions and engine workflows."""
+    for path in sorted(ACTIONS.glob("*/action.yml")):
+        for step in action_yaml(path)["runs"].get("steps") or []:
+            yield path.parent.name, step.get("run") or ""
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for job in (workflow_yaml(path).get("jobs") or {}).values():
+            for step in job.get("steps") or []:
+                yield path.name, step.get("run") or ""
 
 
-GATE_WRITER_ACTIONS = ("actions/gate-refresh", "actions/summary")
+def test_no_run_block_names_the_gate():
+    """Every gate read and write goes through `scripts/gate-status`, so no shell body spells the
+    context. Mutations: re-inline deploy.yml's status write; a `select(.context == "shipmate /
+    gate")` read in a summary step."""
+    offenders = [where for where, run in _run_blocks() if GATE in run]
+    assert offenders == []
+
+
 CREDENTIALED_ACTIONS = (
     "actions/gate-refresh",
     "actions/summary",
@@ -145,82 +93,39 @@ def test_credentialed_actions_exist_or_are_pending():
         )
 
 
-def _job_writes_gate(job):
-    """A workflow job writes the gate when a step calls gate-refresh or summary, which POST the
-    status internally, or posts the gate status inline in the same run block, as deploy.yml
-    does. Prose that merely mentions the gate name in a comment body does not count: inline
-    detection requires the statuses API call and the gate context in the same step."""
-    for step in job.get("steps") or []:
-        uses = step.get("uses") or ""
-        if any(action in uses for action in GATE_WRITER_ACTIONS):
-            return True
-        run = step.get("run") or ""
-        if "statuses/" in run and GATE in run:
-            return True
-    return False
+#: gate-refresh's mint, whole: the gate write needs `statuses: write`, the refresh's check scan
+#: `checks: read`.
+EXPECTED_GATE_MINT = {
+    "client-id": "${{ inputs.app-id }}",
+    "private-key": "${{ inputs.private-key }}",
+    "owner": "${{ github.repository_owner }}",
+    "repositories": "${{ github.event.repository.name }}",
+    "permission-checks": "read",
+    "permission-statuses": "write",
+}
 
 
-def _inline_gate_steps(job):
-    """Steps within a job that inline-POST the gate status, statuses/ and GATE in the same run
-    block -- the deploy.yml style writer, as opposed to a job delegating to the gate-refresh or
-    summary composite actions, which mint and use their own App token internally."""
-    return [
-        step
-        for step in (job.get("steps") or [])
-        if "statuses/" in (step.get("run") or "") and GATE in (step.get("run") or "")
-    ]
+#: The gate write's whole env: `GH_TOKEN` is the minted token, never `github.token`.
+EXPECTED_WRITE_ENV = {
+    "GH_TOKEN": "${{ steps.token.outputs.token }}",
+    "HEAD_SHA": "${{ inputs.head-sha }}",
+    "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+    "DEPLOY_RESULTS": "${{ inputs.deploy-results }}",
+    "HOLD_DESCRIPTION": "${{ inputs.hold-description }}",
+}
 
 
-def _app_statuses_token_step_id(job):
-    """The id of a step in the job that mints a shipmate App installation token scoped
-    `permission-statuses: write`, or None if there is none."""
-    for step in job.get("steps") or []:
-        if "create-github-app-token" not in (step.get("uses") or ""):
-            continue
-        if (step.get("with") or {}).get("permission-statuses") == "write":
-            return step.get("id")
-    return None
+def test_gate_refresh_mints_an_app_statuses_token():
+    """The ambient `github.token` cannot write a commit status the ruleset pins by
+    `integration_id` to the App, so the gate is written with the App token gate-refresh mints.
+    test_no_engine_job_grants_stale_checks_or_statuses_write covers the GITHUB_TOKEN side.
 
-
-def test_inline_gate_write_job_mints_app_statuses_token():
-    """Every job that writes the gate inline -- a `run:` step posting to the commit-statuses
-    API with the `shipmate / gate` context, rather than delegating to the gate-refresh or
-    summary composite actions -- must mint its own shipmate App installation token scoped
-    `permission-statuses: write`. The inline POST step's `GH_TOKEN` must be that minted token,
-    never the ambient `github.token`, which cannot write a commit status pinned by
-    `integration_id` to the shipmate App.
-    test_no_engine_job_grants_stale_checks_or_statuses_write covers the GITHUB_TOKEN-scope side.
-
-    A job that only delegates is skipped, because those actions mint and scope their own token
-    internally.
+    Mutations: drop `permission-statuses` from the mint; `GH_TOKEN: ${{ github.token }}`.
     """
-    offenders = []
-    for wf in sorted(WORKFLOWS.glob("*.yml")):
-        doc = workflow_yaml(wf)
-        for job_name, job in (doc.get("jobs") or {}).items():
-            if not isinstance(job, dict) or not _job_writes_gate(job):
-                continue
-            inline_steps = _inline_gate_steps(job)
-            if not inline_steps:
-                continue  # It delegates, so it is not this guard's concern.
-            token_id = _app_statuses_token_step_id(job)
-            if token_id is None:
-                offenders.append(
-                    f"{wf.name}:{job_name}: no create-github-app-token step scoped "
-                    "permission-statuses: write"
-                )
-                continue
-            expected = "${{ steps." + token_id + ".outputs.token }}"
-            for step in inline_steps:
-                got = (step.get("env") or {}).get("GH_TOKEN")
-                if got != expected:
-                    offenders.append(
-                        f"{wf.name}:{job_name}: inline gate-POST step GH_TOKEN is "
-                        f"{got!r}, expected the minted App token {expected!r}"
-                    )
-    assert not offenders, (
-        f"inline gate-writing job(s) not using a minted App statuses token: {offenders}"
+    assert step_by("gate-refresh", name="Mint App installation token")["with"] == (
+        EXPECTED_GATE_MINT
     )
+    assert step_by("gate-refresh", name="Write the gate")["env"] == EXPECTED_WRITE_ENV
 
 
 def _grants_stale_perm(job, workflow_perms):

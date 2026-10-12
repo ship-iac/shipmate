@@ -85,7 +85,6 @@ _SITES = {
     ACTIONS / "gate-refresh" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "dispatch" / "action.yml": (("runs", "steps"), _ACTION_WITH),
     ACTIONS / "drift-issues" / "action.yml": (("runs", "steps"), _ACTION_WITH),
-    WORKFLOWS / "deploy.yml": (("jobs", "summary", "steps"), _WORKFLOW_WITH),
     WORKFLOWS / "apply.yml": (("jobs", "review", "steps"), _WORKFLOW_WITH),
     ACTIONS / "comment-ops" / "action.yml": None,
 }
