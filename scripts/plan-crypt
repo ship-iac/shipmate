@@ -1,21 +1,24 @@
 #!/usr/bin/env python3
-"""Shared plan-artifact cipher: symmetric encrypt/decrypt of the .otplan file.
+"""Shared cipher for the plan artifact and the cached local state file.
 
 Single definition of the openssl invocation so plan-cell (encrypt before
-upload) and apply-cell (decrypt after download) can never drift. The openssl
-flags live ONLY here.
+upload), apply-cell (decrypt after download) and actions/state (encrypt before
+save, decrypt after restore) can never drift. The openssl flags live ONLY here.
 
 Cipher: openssl enc -aes-256-ctr -pbkdf2 -salt, passphrase from the
-PLAN_PASSPHRASE env var (never argv). Empty/unset PLAN_PASSPHRASE means "no
-passphrase": encrypt is a no-op (uploaded bytes stay identical to the plaintext
-path) and decrypt expects plaintext.
+PLAN_PASSPHRASE env var (never argv). The passphrase is required: every
+operation refuses when it is empty or unset, and every decrypt refuses an
+unsalted (plaintext) file.
 
 AES-256-CTR is an unauthenticated stream cipher: a WRONG passphrase decrypts to
-garbage WITH EXIT 0 -- it does NOT error. The wrong-passphrase fail-safe is
-enforced downstream by `tofu apply stack.otplan` rejecting the garbage plan
-(exact-plan invariant), so the apply check stays pending.
+garbage WITH EXIT 0 -- it does NOT error. For a plan, the wrong-passphrase
+fail-safe is enforced downstream by `tofu apply stack.otplan` rejecting the
+garbage plan (exact-plan invariant), so the apply check stays pending. For
+state, decrypt-state checks the result itself, because tofu reads an empty
+state file as no state.
 """
 
+import json
 import os
 import subprocess
 import sys
@@ -57,36 +60,81 @@ def _openssl(path, *, decrypt):
     os.replace(tmp, path)
 
 
+def _require_passphrase():
+    if not _passphrase():
+        raise SystemExit(
+            "::error::SHIPMATE_PLAN_PASSPHRASE is not set; it is required for every plan upload "
+            "and every local-state save. Set the secret and forward it to the shipmate workflows."
+        )
+
+
 def encrypt(path):
-    """Encrypt in place when a passphrase is set; otherwise leave bytes untouched."""
-    if _passphrase():
-        _openssl(path, decrypt=False)
+    """Encrypt in place, or refuse without a passphrase."""
+    _require_passphrase()
+    _openssl(path, decrypt=False)
 
 
 def decrypt(path):
-    """Decrypt in place, or refuse when the passphrase and the artifact disagree."""
-    has_pass = bool(_passphrase())
-    salted = _is_encrypted(path)
-    if has_pass and salted:
-        _openssl(path, decrypt=True)
-    elif has_pass and not salted:
+    """Decrypt a plan artifact in place, or refuse without a passphrase or on plaintext.
+
+    A wrong passphrase is not detected here: `tofu apply` rejects the garbage plan.
+    """
+    _require_passphrase()
+    if not _is_encrypted(path):
         raise SystemExit(
-            "::error::plan artifact is plaintext but a plan-passphrase is configured; "
-            "refusing to apply an unencrypted plan. Re-plan to produce an encrypted plan: comment "
-            "shipmate plan or push, or after the merge open a new pull request touching the "
-            "stack."
+            "::error::plan artifact is plaintext; refusing to apply an unencrypted plan. "
+            "Re-plan to produce an encrypted plan: comment shipmate plan or push, or after the "
+            "merge open a new pull request touching the stack."
         )
-    elif not has_pass and salted:
+    _openssl(path, decrypt=True)
+
+
+def _is_state(path):
+    with open(path, "rb") as fh:
+        try:
+            doc = json.loads(fh.read())
+        except ValueError:
+            return False
+    return isinstance(doc, dict) and "version" in doc
+
+
+def decrypt_state(path, cache_key):
+    """Decrypt a restored state cache entry in place, or refuse before tofu can read it.
+
+    Refuses without a passphrase, on a plaintext entry, and on a result that is not a
+    JSON object with `version` (wrong passphrase, or a corrupt entry). Never prints the
+    file's contents.
+    """
+    _require_passphrase()
+    if not _is_encrypted(path):
+        prefix = cache_key.rpartition("/")[0] + "/"
         raise SystemExit(
-            "::error::plan artifact is encrypted but no plan-passphrase is configured; "
-            "set the plan-passphrase secret (SHIPMATE_PLAN_PASSPHRASE) to apply this plan."
+            f"::error::state cache entry `{cache_key}` is plaintext. Delete every entry under "
+            f"its prefix, then re-run: `gh cache list --key {prefix} --limit 1000 --json id "
+            "--jq '.[].id' | xargs -n1 gh cache delete` (the restore matches by prefix, so "
+            f"deleting only `{cache_key}` restores the next-older plaintext entry). Deleting "
+            "discards that state: the next plan starts from empty state and plans to create "
+            "the stack's resources again."
         )
+    _openssl(path, decrypt=True)
+    if not _is_state(path):
+        raise SystemExit(
+            f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state: "
+            "SHIPMATE_PLAN_PASSPHRASE does not match the one that saved the entry, or the entry "
+            "is corrupt. tofu was not run."
+        )
+
+
+USAGE = "usage: plan-crypt {encrypt|decrypt} <file> | plan-crypt decrypt-state <file> <cache-key>"
 
 
 def main(argv):
-    if len(argv) != 3 or argv[1] not in ("encrypt", "decrypt"):
-        raise SystemExit("usage: plan-crypt {encrypt|decrypt} <file>")
-    (encrypt if argv[1] == "encrypt" else decrypt)(argv[2])
+    if len(argv) == 4 and argv[1] == "decrypt-state":
+        decrypt_state(argv[2], argv[3])
+    elif len(argv) == 3 and argv[1] in ("encrypt", "decrypt"):
+        (encrypt if argv[1] == "encrypt" else decrypt)(argv[2])
+    else:
+        raise SystemExit(USAGE)
 
 
 if __name__ == "__main__":
