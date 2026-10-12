@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 import pytest
-from _loader import ENGINE, load_script
+from _loader import ENGINE, load_script, record_calls
 from _shipmate import load_workflow_text
 
 onboard = load_script("onboard")
@@ -3904,11 +3904,45 @@ def test_a_file_calling_drift_yml_twice_is_cannot_check(tmp_path):
     )
 
 
+def test_a_sweep_runs_the_detect_chain_through_build_matrix(tmp_path, monkeypatch):
+    """`_sweep` calls `build-matrix`'s `select_cells` and `check_cells`, each once, and no other
+    part of the chain, so a refusal added inside either helper reaches onboard and detect alike.
+    `test_build_matrix.py` pins detect's side.
+
+    Mutation: inline `filter_cells`, `cap_cells`, `stamp_rows` and `refuse_workload_gaps` back
+    into `_sweep` -- nothing is recorded.
+    """
+    calls = record_calls(monkeypatch, onboard.bm, "select_cells", "check_cells")
+    cells, tags = _tree(("a", "dev-eu"), ("b", "dev-us"))
+    context = _drift_ctx(tmp_path, {}, cells=cells, tags_by_stack=tags)
+    assert onboard._sweep(context, "drift.yml", "env/dev-eu") == ([], {("a", "dev-eu")})
+    assert calls == [
+        (
+            "select_cells",
+            (
+                [
+                    {"stack": "a", "environment": "dev-eu", "workload": ""},
+                    {"stack": "b", "environment": "dev-us", "workload": ""},
+                ],
+                {"a": ["env/dev-eu"], "b": ["env/dev-us"]},
+                "env/dev-eu",
+                True,
+            ),
+            {},
+        ),
+        (
+            "check_cells",
+            ([{"stack": "a", "environment": "dev-eu", "workload": ""}], DRIFT_TABLE),
+            {},
+        ),
+    ]
+
+
 def test_a_sweep_refusing_a_workload_gap_covers_no_cell(tmp_path):
     """A drift detect runs `stamp_rows` and `refuse_workload_gaps` on its kept cells, and the
     gap refuses the whole sweep, so the folders file sweeps nothing here.
 
-    Mutation: drop the `refuse_workload_gaps` call from `_sweep` -- `ok`.
+    Mutation: drop the `refuse_workload_gaps` call from `build-matrix`'s `check_cells` -- `ok`.
     """
     cells = [{"stack": "a", "environment": "dev-eu", "workload": "net"}]
     context = _drift_ctx(

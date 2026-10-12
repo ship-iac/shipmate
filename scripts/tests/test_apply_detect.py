@@ -581,7 +581,9 @@ def test_main_refuses_a_workset_stack_the_metadata_lacks(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as e:
         ad.main()
     assert str(e.value) == (
-        "::error::terramate debug show metadata printed no tags for 1 stack(s): stacks/app"
+        "::error::terramate debug show metadata printed no tags for 1 stack(s): stacks/app. "
+        "Run detect and onboard from the repository root: from a subdirectory, `terramate list` "
+        "prints stack paths relative to it, and the metadata does not."
     )
 
 

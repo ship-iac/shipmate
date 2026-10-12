@@ -1070,9 +1070,9 @@ def _sweep(ctx, name, query):
     drift run's detect makes, a refusal by any of them running no cell."""
     errors, notices, swept = [], io.StringIO(), set()
     with ec._gather(errors), contextlib.redirect_stdout(notices):
-        kept = bm.filter_cells(ctx["cells"], ctx["tags_by_stack"], query)
-        bm.cap_cells(kept, True)
-        bm.refuse_workload_gaps(bm.stamp_rows(kept, ctx["table"], "plan"), ctx["table"])
+        kept = bm.check_cells(
+            bm.select_cells(ctx["cells"], ctx["tags_by_stack"], query, True), ctx["table"]
+        )
         # Assigned last: a refusal above leaves the sweep running no cell.
         swept = {(c["stack"], c["environment"]) for c in kept}
     found = [n.removeprefix("::notice::") for n in notices.getvalue().splitlines()]
@@ -1080,11 +1080,11 @@ def _sweep(ctx, name, query):
 
 
 def _drift_sweeps_item(ctx):
-    """Each drift file's `tags` query run over the whole tree through `filter_cells` and
-    `cap_cells`, then `stamp_rows` and `refuse_workload_gaps` (`_sweep`). Their notices and
-    refusals are listed, then the cells no file sweeps; a refused sweep covers none. Coverage
-    is computed only when every query was read, the tree is whole and the table is present
-    and validates: a drift run refuses without one."""
+    """Each drift file's `tags` query run over the whole tree through `build-matrix`'s
+    `select_cells` and `check_cells` (`_sweep`). Their notices and refusals are listed, then the
+    cells no file sweeps; a refused sweep covers none. Coverage is computed only when every
+    query was read, the tree is whole and the table is present and validates: a drift run
+    refuses without one."""
     item = "drift sweeps"
     files = _drift_files(ctx["root"])
     if not files:

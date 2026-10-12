@@ -5,7 +5,7 @@ import sys
 
 import pytest
 from _detect_fixtures import spy_env_config
-from _loader import action_yaml, github_outputs, load_script
+from _loader import action_yaml, github_outputs, load_script, record_calls
 
 bm = load_script("build-matrix")
 
@@ -260,7 +260,9 @@ def test_a_listed_stack_the_metadata_lacks_refuses_naming_it(monkeypatch):
         bm.env_membership(all_stacks=True)
     assert str(e.value) == (
         "::error::terramate debug show metadata printed no tags for 2 stack(s): "
-        "stacks/new, stacks/old"
+        "stacks/new, stacks/old. Run detect and onboard from the repository root: from a "
+        "subdirectory, `terramate list` prints stack paths relative to it, and the metadata "
+        "does not."
     )
 
 
@@ -1757,6 +1759,44 @@ def test_a_one_env_query_plans_that_env_and_outputs_the_whole_tree(monkeypatch, 
         ("dev-eu", "stacks/db"),
     ]
     assert json.loads(outputs["cells"]) == _MULTI_ENV_CELLS
+
+
+def test_a_detect_runs_the_shared_sweep_chain_once_each(monkeypatch, tmp_path):
+    """`compute_cells` selects through `select_cells` and `_detect` checks through
+    `check_cells`, each once, so a refusal added inside either helper reaches detect and
+    onboard's drift-sweep item alike. `test_onboard.py` pins onboard's side.
+
+    Mutations: inline `cap_cells(filter_cells(...))` back into `compute_cells` -- no
+    `select_cells` call; inline `stamp_rows` and `refuse_workload_gaps` back into `_detect` --
+    no `check_cells` call.
+    """
+    calls = record_calls(monkeypatch, bm, "select_cells", "check_cells")
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu"},
+        stacks={"stacks/app": ["env/dev-eu"], "stacks/web": ["env/dev-us"]},
+    )
+    assert calls == [
+        (
+            "select_cells",
+            (
+                [
+                    {"stack": "stacks/app", "environment": "dev-eu", "workload": ""},
+                    {"stack": "stacks/web", "environment": "dev-us", "workload": ""},
+                ],
+                {"stacks/app": ["env/dev-eu"], "stacks/web": ["env/dev-us"]},
+                "env/dev-eu",
+                True,
+            ),
+            {},
+        ),
+        (
+            "check_cells",
+            ([{"stack": "stacks/app", "environment": "dev-eu", "workload": ""}], _MINIMAL_TABLE),
+            {},
+        ),
+    ]
 
 
 def test_a_query_matching_no_cell_is_an_empty_sweep_with_a_notice(monkeypatch, tmp_path, capsys):

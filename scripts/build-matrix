@@ -206,6 +206,15 @@ def cap_cells(cells, all_stacks):
     return cells
 
 
+def select_cells(full, tags_by_stack, query, all_stacks):
+    """The cells of `full` a run plans: narrowed by the `tags` query, then capped.
+
+    The first half of the sweep chain, shared by `compute_cells` and onboard's drift-sweep
+    item; `check_cells` is the second. A sweep refusal that needs no table belongs in here,
+    so detect and onboard both apply it with no change to either caller."""
+    return cap_cells(filter_cells(full, tags_by_stack, query), all_stacks)
+
+
 _ZERO_SHA = "0" * 40
 _ENV_TAG_LITERAL = re.compile(f'"env/({ec._ENV_ENTRY.pattern})"')
 
@@ -263,7 +272,9 @@ def tags_of(stacks):
     if missing:
         raise SystemExit(
             f"::error::terramate debug show metadata printed no tags for {len(missing)} "
-            f"stack(s): {named(missing, UNMANAGED_NAMES)}"
+            f"stack(s): {named(missing, UNMANAGED_NAMES)}. Run detect and onboard from the "
+            "repository root: from a subdirectory, `terramate list` prints stack paths relative "
+            "to it, and the metadata does not."
         )
     return {s: tags[s] for s in stacks}
 
@@ -408,12 +419,12 @@ def compute_cells(all_stacks=False, base="", tags="", errors=None):
     to `env_config` as `tagged`, and re-scanning would be a second source that can disagree
     with this one. The tree-wide checks here -- slug collisions, two `workload/*` tags on one
     stack -- run over the whole tree's managed stacks; `tags` narrows only the cells to
-    plan, and the matrix limit counts those. The caller's per-cell checks (`stamp_rows`'
-    resolution and `env_binding` refusal, `refuse_workload_gaps`) see only the returned cells.
+    plan, and the matrix limit counts those. The caller's per-cell checks (`check_cells`) see
+    only the returned cells.
     The tree is `[{environment, stack}]` in matrix order, uncapped. `errors` is `full_tree`'s."""
     stacks_by_env, tags_by_stack = env_membership(all_stacks, base)
     full = full_tree(sorted(stacks_by_env), stacks_by_env, tags_by_stack, errors)
-    cells = cap_cells(filter_cells(full, tags_by_stack, tags), all_stacks)
+    cells = select_cells(full, tags_by_stack, tags, all_stacks)
     tree = [{"environment": c["environment"], "stack": c["stack"]} for c in full]
     return (
         tagged_workloads(stacks_by_env, tags_by_stack),
@@ -489,6 +500,18 @@ def refuse_workload_gaps(rows, table):
             f"environments.<env>.workloads in {ec.CONFIG_PATH} on the default branch, which is "
             "where this table is read from: merge it there on its own pull request first."
         )
+
+
+def check_cells(cells, table):
+    """`cells` stamped with the plan tier's resolved fields, after the table's per-cell
+    refusals: `stamp_rows`, then `refuse_workload_gaps` over the stamped rows.
+
+    The second half of the sweep chain, shared by `_detect` and onboard's drift-sweep item;
+    `select_cells` is the first. A sweep refusal that reads the table belongs in here, so
+    detect and onboard both apply it with no change to either caller."""
+    rows = stamp_rows(cells, table, "plan")
+    refuse_workload_gaps(rows, table)
+    return rows
 
 
 def fork_pr_error(repository, head_repo, sweep: bool):
@@ -679,8 +702,7 @@ def _detect():
         # report every unchanged environment as an unused table entry on every plan. The
         # table is checked against `tree`, so a `tags` filter cannot hide an uncovered env.
         table = env_config(tree, tagged if sweep else None)
-        cells = stamp_rows(cells, table, "plan")
-        refuse_workload_gaps(cells, table)
+        cells = check_cells(cells, table)
     if errors:
         raise SystemExit("\n".join(errors))
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
