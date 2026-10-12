@@ -6,6 +6,8 @@ from typing import Any
 HEAD = "0" * 40
 APP_ID = "999"
 PLAN_SHA = "d" * 64
+#: The pull request every fixture record and every apply-detect run names.
+PR_NUMBER = "8"
 
 
 def check_run(**kw):
@@ -22,22 +24,24 @@ def check_run(**kw):
     return base
 
 
-def _record(plan_run, plan_sha256=PLAN_SHA):
+def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER):
     """An `external_id` record as pending-checks writes it. `plan_sha256=None` omits the
-    digest."""
+    digest, `pr=None` the pull request."""
     record = {"fingerprint": "a" * 64, "plan_run": plan_run}
     if plan_sha256 is not None:
         record["plan_sha256"] = plan_sha256
+    if pr is not None:
+        record["pr"] = pr
     return json.dumps(record)
 
 
-def _apply_check(stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, **kw):
+def _apply_check(stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, pr=PR_NUMBER, **kw):
     """A pending App-authored apply check carrying its plan-run record."""
     return check_run(
         name=f"apply / {stack} / {env}",
         status="queued",
         conclusion=None,
-        external_id=_record(plan_run, plan_sha256),
+        external_id=_record(plan_run, plan_sha256, pr),
         **kw,
     )
 

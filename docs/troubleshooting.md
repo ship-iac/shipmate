@@ -392,7 +392,8 @@ error normally means the state moved rather than that the wrong plan was chosen.
 The dispatched apply workflow refuses in its `guard` job any dispatch whose
 actor is not a `[bot]` — a hand-run one fails with `apply refused: the
 dispatching actor is not a [bot]; comment 'shipmate apply' on the pull request
-instead of running a direct workflow_dispatch` — and
+instead of running a direct workflow_dispatch` — its `review` job refuses a
+`ref` that is not the open pull request's current head, and
 comment-ops reads the plan run each `apply / <stack> / <env>` check on the pull
 request's current head records, refusing the command when that head names none.
 These fail-safes are defence in depth behind that control, not the only thing
@@ -527,11 +528,13 @@ every environment the applies would have bound that the repository does not have
 
 Why `snapshot` refuses instead of warning: GitHub creates a missing environment
 on demand, with no reviewers, no wait timer and no deployment branch policy, and
-the apply then runs inside it. Nothing else catches that: a cell's variables come
-from the environment table and `matrix.environment`, so plan and apply hash
-identically whatever environment the job actually bound, and the apply-match
-fingerprint pins nothing about the binding. Existence, checked before the waves,
-is the only control.
+the apply then runs inside it. An existing environment with no branch policy is
+open the same way: a workflow on any branch can bind it. Nothing else catches
+either: a cell's variables come from the environment table and
+`matrix.environment`, so plan and apply hash identically whatever environment the
+job actually bound, and the apply-match fingerprint pins nothing about the
+binding. Existence and a branch policy, both checked before the waves, are the
+only controls.
 
 Two fixes, and the error names both because either can be the right one:
 
@@ -563,12 +566,22 @@ Two neighbouring failures from the same step, both also fail-closed:
   repository's environments, so a missing environment cannot be told from an
   unread one. Reduce the number of environments, or re-run — this is a hard
   ceiling around 100 environments, not a transient.
+- **`GitHub Environment(s) ... have no deployment branch policy`.** Each named
+  environment exists, but a workflow on any branch can bind it and reach its
+  secrets and OIDC role; `shipmate doctor` warns on each one before an apply
+  reaches it. Run `scripts/onboard`, which scopes each apply environment to the
+  default branch, or set a policy in the environment's settings; either kind
+  (selected branches or protected branches) passes. A shared bare `<env>` whose
+  pull requests target branches besides the default one needs those branches
+  added to its policy, not the policy removed.
 
 What this does not cover, deliberately: the plan and drift bindings (those jobs
 bind the row's `env_binding`; detect refuses an unusable one, but nothing on those
-paths checks that the environment exists), an environment
-that exists but is mis-scoped or unprotected (`shipmate doctor`'s subject), and
-an environment deleted between the pre-flight and the wave that binds it.
+paths checks that the environment exists), an environment whose branch policy
+names the wrong branches (nothing checks it; `shipmate doctor` warns on a missing
+policy only), an environment with no approval rules (`shipmate doctor` notes
+it), and an environment deleted between the pre-flight and the wave that binds
+it.
 
 ### `.github/shipmate-config.yml` is rejected, or its settings do not take effect
 
@@ -967,6 +980,38 @@ ungated. `gated` and `explicit` are independent: the first decides whether a
 review is required, the second only decides that a bare apply will not reach it.
 An environment that must never apply unreviewed must not hold `gated: false`.
 
+### `Pull request #<n> head is <sha>, but this dispatch names <sha>`
+
+The apply run failed in its `review` job, before any wave, and nothing applied.
+The job reads the pull request the dispatch names and refuses unless that pull
+request's current head commit is the dispatched `ref`, compared whole. A push
+landed between the `shipmate apply` comment and the run. Wait for the new head's
+plan, then comment `shipmate apply` again.
+
+The same step refuses, also before any wave:
+
+- **`Pull request #<n> is MERGED, not OPEN`** (or `CLOSED`). A merged pull
+  request's plans apply through the merge deploy, not through `shipmate apply`.
+- **`Pull request #<n> is a draft`.** It was converted to a draft after the
+  comment. Mark it ready for review, then comment the apply again.
+- **`Pull request #<n> comes from a fork`.** See
+  §`shipmate applies and unlocks only branches of this repository`.
+- **A run that fails at the query itself, with `Could not resolve to a
+  PullRequest`.** The dispatched number names no pull request in this
+  repository. `shipmate apply` always sends the commenting pull request's
+  number, so look for a dispatch that comment-ops did not send.
+
+### `apply aborted: the plan recorded for ... was not made on pull request #<n>`
+
+The apply detect refused every cell it would apply whose
+`apply / <stack> / <env>` check records a different pull request, or none, and
+nothing applied. Each check records the pull request its plan run planned; two
+open pull requests can share one head commit, and only the newest plan on that
+commit decides which of them may apply. Re-plan on this pull request (push, or
+comment `shipmate plan`), then comment the apply again. A cell whose check
+already completed is not compared. The post-merge deploy does not read the
+record's pull request.
+
 ### A pull request planned zero cells
 
 No `shipmate / <stack> / <env>` checks appear, no plan comment is posted — unless
@@ -1020,6 +1065,13 @@ access states why, and what a fork's plan cell would receive.
 
 Push the branch to this repository (`gh pr checkout`, then push) and open the
 pull request there.
+
+### `shipmate applies and unlocks only branches of this repository`
+
+`shipmate apply` or `shipmate unlock` was refused at comment time because the
+pull request's head branch is in a fork, or in a repository that was deleted.
+Nothing was dispatched. As for a plan, push the branch to this repository
+(`gh pr checkout`, then push) and open the pull request there.
 
 ### An apply check never completes after a successful apply
 

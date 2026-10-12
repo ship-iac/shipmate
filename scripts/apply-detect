@@ -67,7 +67,7 @@ def cells_for_env(env, paths, tags_by_stack):
     ]
 
 
-def with_plan_runs(cells, check_run_lines, app_id):
+def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
     """Each cell gains the plan run id and the plan-text digest ITS OWN check
     records in `check_run_lines`, so a cell recovered by a re-run plan job downloads
     from the run that re-planned it, and is bound to the plan text reviewed for it,
@@ -97,8 +97,9 @@ def with_plan_runs(cells, check_run_lines, app_id):
     named = []
     for c in cells:
         name = ag.check_name(c["stack"], c["environment"])
-        named.append((c, name, *records.get(name, (None, None))))
-    missing = [name for _, name, run, _ in named if not run]
+        run, digest, pr = records.get(name, (None, None, None))
+        named.append((c, name, run, digest, pr))
+    missing = [name for _, name, run, _, _ in named if not run]
     if missing:
         raise SystemExit(
             f"::error::apply aborted: no plan run recorded for {', '.join(missing)}: the "
@@ -107,7 +108,7 @@ def with_plan_runs(cells, check_run_lines, app_id):
             "request, then apply again; if that pull request has already merged, a new pull "
             "request touching them plans and applies them afresh."
         )
-    unbound = [name for _, name, _, digest in named if not digest]
+    unbound = [name for _, name, _, digest, _ in named if not digest]
     if unbound:
         raise SystemExit(
             f"::error::apply aborted: no plan-text digest recorded for {', '.join(unbound)}: "
@@ -116,7 +117,19 @@ def with_plan_runs(cells, check_run_lines, app_id):
             "their pull request, then apply again; if that pull request has already merged, a "
             "new pull request touching them plans and applies them afresh."
         )
-    return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest in named]
+    foreign = [
+        f"{name} ({'pull request #' + pr if pr else 'records no pull request'})"
+        for _, name, _, _, pr in named
+        if pr_number is not None and pr != pr_number
+    ]
+    if foreign:
+        raise SystemExit(
+            f"::error::apply aborted: the plan recorded for {', '.join(foreign)} was not made "
+            f"on pull request #{pr_number}, so this apply is refused. Re-plan on this pull "
+            "request (push or comment `shipmate plan`), then apply again; if another open pull "
+            "request shares this head commit, the newest plan decides which one may apply."
+        )
+    return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest, _ in named]
 
 
 def cells_from_checks(check_names, stacks_by_env, tags_by_stack):
@@ -263,6 +276,7 @@ def bare_main():
     head = os.environ["SHIPMATE_HEAD_SHA"]
 
     validate_head_sha(head)
+    pr_number = ag.env_pr_number()
 
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True)
     app_id = os.environ["SHIPMATE_APP_ID"]
@@ -291,7 +305,10 @@ def bare_main():
     # stay pending by design for a later targeted apply, and that apply refuses on its own
     # over a record-less cell, so refusing here would strand the envs that CAN apply.
     runnable = with_plan_runs(
-        [c for c in pending if c["environment"] not in dropped], lines, app_id
+        [c for c in pending if c["environment"] not in dropped],
+        lines,
+        app_id,
+        pr_number=pr_number,
     )
     bm.refuse_workload_gaps(runnable, table)
     # From `runnable`, never from `pending & ungated`: an ungated env can still be
@@ -351,6 +368,7 @@ def main():
 
     validate_head_sha(head)
     validate_env(env)
+    pr_number = ag.env_pr_number()
 
     # Structure-validated before the refusal reads `gated`; `validate` re-runs it
     # below, which costs nothing and parses nothing again.
@@ -380,7 +398,7 @@ def main():
     table = bm.env_config(cells, table=table)
     cells = bm.stamp_rows(cells, table, "apply")
 
-    pending = with_plan_runs(filter_pending(cells, completed), lines, app_id)
+    pending = with_plan_runs(filter_pending(cells, completed), lines, app_id, pr_number=pr_number)
     bm.refuse_workload_gaps(pending, table)
 
     # Before the padding, whose over-depth refusal is where this line helps most.

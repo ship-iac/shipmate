@@ -328,8 +328,12 @@ def _ext(name, id, external_id, app_id=999, started_at="2026-07-18T10:00:00Z"):
 LEGACY_HEX = "a3f" + "b" * 61
 
 
-def _record(plan_run="111", **extra):
-    return json.dumps({"fingerprint": "a" * 64, "plan_run": plan_run, **extra})
+def _record(plan_run="111", pr="8", **extra):
+    """A record as pending-checks writes it, `pr` included unless None."""
+    record = {"fingerprint": "a" * 64, "plan_run": plan_run, **extra}
+    if pr is not None:
+        record["pr"] = pr
+    return json.dumps(record)
 
 
 def test_plan_records_newest_app_run_supplies_the_record():
@@ -349,7 +353,7 @@ def test_plan_records_newest_app_run_supplies_the_record():
         started_at="2026-07-18T09:00:00Z",
     )
     assert ag.plan_records([newer, older], "999") == {
-        "apply / stacks/app / dev-eu": ("222", "b" * 64)
+        "apply / stacks/app / dev-eu": ("222", "b" * 64, "8")
     }
 
 
@@ -363,7 +367,7 @@ def test_plan_records_ignores_foreign_app_even_when_newest():
         app_id=15368,
     )
     assert ag.plan_records([ours, foreign], "999") == {
-        "apply / stacks/app / dev-eu": ("111", "a" * 64)
+        "apply / stacks/app / dev-eu": ("111", "a" * 64, "8")
     }
 
 
@@ -391,7 +395,7 @@ def test_plan_records_bad_plan_run_value_reads_as_none(record):
     """Mutation: keep any truthy `plan_run` (`plan_run if plan_run else None`); `"12x4"` and
     `1234` turn red."""
     line = _ext("apply / stacks/app / dev-eu", 1, json.dumps(record))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": (None, None)}
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": (None, None, None)}
 
 
 def test_plan_records_only_apply_prefixed_names():
@@ -400,14 +404,14 @@ def test_plan_records_only_apply_prefixed_names():
     apply_line = _ext("apply / stacks/app / dev-eu", 1, _record())
     plan_line = _ext("stacks/app / dev-eu", 2, _record())
     assert ag.plan_records([apply_line, plan_line], "999") == {
-        "apply / stacks/app / dev-eu": ("111", None)
+        "apply / stacks/app / dev-eu": ("111", None, "8")
     }
 
 
 def test_plan_records_reads_the_recorded_digest():
     """Mutation: read the digest from `record.get("fingerprint")`, also 64 lowercase hex."""
     line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", "c" * 64)}
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", "c" * 64, "8")}
 
 
 # 64 chars where the value is merely not lowercase hex, so a length-only substitute for the
@@ -420,7 +424,7 @@ def test_plan_records_reads_the_recorded_digest():
 def test_plan_records_unusable_digest_reads_as_none(digest):
     """Mutation: the digest pattern `.{64}`; `"z" * 64` and `"C" * 64` turn red."""
     line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256=digest))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None)}
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None, "8")}
 
 
 def test_plan_records_uppercase_digest_reads_as_none():
@@ -428,14 +432,42 @@ def test_plan_records_uppercase_digest_reads_as_none():
     and the comparison at apply is a string equality, so an uppercase record would never match
     anyway. Mutation: the digest pattern `.{64}`."""
     line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="ABCDEF" + "a" * 58))
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None)}
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None, "8")}
 
 
 def test_plan_records_missing_digest_reads_as_none():
     """A record that carries no digest; with_plan_runs refuses on a falsy digest, so the slot
     is None, not a placeholder. Mutation: `else ""` for the digest slot."""
     line = _ext("apply / stacks/app / dev-eu", 1, _record())
-    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None)}
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None, "8")}
+
+
+@pytest.mark.parametrize("pr", ["8", "1", "4096"])
+def test_plan_records_reads_the_recorded_pull_request(pr):
+    """Mutation: read the pull request from `record.get("plan_run")`, also decimal -- red."""
+    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64, pr=pr))
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", "c" * 64, pr)}
+
+
+# Each value is truthy or a non-string: "0" and "012" are not pull request numbers, 8 is a JSON
+# number where pending-checks writes a string, "8 " fails the fullmatch, and eleven digits
+# exceed `is_pr_number`'s bound.
+@pytest.mark.parametrize("pr", [None, "", "0", "012", "12a", "8 ", "12345678901", 8, True])
+def test_plan_records_unusable_pull_request_reads_as_none(pr):
+    """Mutation: keep any truthy `pr` (`pr if pr else None`); `"0"`, `"012"`, `"12a"`, `8` and
+    `True` turn red. Mutation: drop the `isinstance(pr, str)` guard; `8` and `True` raise.
+    Mutation: `re.fullmatch(r"[1-9][0-9]*", pr)` for `is_pr_number(pr)`; `"12345678901"` red."""
+    line = _ext("apply / stacks/app / dev-eu", 1, _record(plan_sha256="c" * 64, pr=pr))
+    assert ag.plan_records([line], "999") == {
+        "apply / stacks/app / dev-eu": ("111", "c" * 64, None)
+    }
+
+
+def test_plan_records_zero_pull_request_reads_as_none():
+    """Explicit literal beside the parametrization: `"0"` is a decimal string, so only the
+    leading-digit rule refuses it. Mutation: the pattern `[0-9]+`."""
+    line = _ext("apply / stacks/app / dev-eu", 1, _record(pr="0"))
+    assert ag.plan_records([line], "999") == {"apply / stacks/app / dev-eu": ("111", None, None)}
 
 
 def _plan_runs_stdout(monkeypatch, capsys, *lines):
@@ -452,14 +484,17 @@ def _plan_runs_stdout(monkeypatch, capsys, *lines):
 def test_plan_runs_mode_prints_the_run_projection_and_writes_no_verdict(monkeypatch, capsys):
     """comment-ops' reviewed-plan lookup is this mode, read by authorize as PLAN_RUN_JSON; its
     bytes are compared whole. Mutation: project every record, `None` runs included -- the
-    record without a plan run prints as `null`, red."""
+    record without a plan run prints as `null`, red. Mutation: project only records carrying a
+    `pr` -- `stacks/web`, recorded before pull requests were, drops out, red."""
     out = _plan_runs_stdout(
         monkeypatch,
         capsys,
         _ext("apply / stacks/app / dev-eu", 1, _record(plan_run="777")),
         _ext("apply / stacks/api / dev-eu", 2, LEGACY_HEX),
         _ext("apply / stacks/dns / dev-eu", 3, json.dumps({"plan_sha256": "c" * 64})),
-        _ext("apply / stacks/web / dev-eu", 4, _record(plan_run="778", plan_sha256="c" * 64)),
+        _ext(
+            "apply / stacks/web / dev-eu", 4, _record(plan_run="778", plan_sha256="c" * 64, pr=None)
+        ),
     )
     assert out == '{"apply / stacks/app / dev-eu": "777", "apply / stacks/web / dev-eu": "778"}\n'
 

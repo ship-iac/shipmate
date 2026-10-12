@@ -6,7 +6,8 @@ otherwise have landed fail-open, so each has its own test:
 - a binding no environment satisfies fails the run, naming every missing one;
 - a listing that could not be read fails the run, in the action's bash, with text saying a
   transient failure clears on a re-run;
-- a listing whose `total_count` exceeds what was read fails the run.
+- a listing whose `total_count` exceeds what was read fails the run;
+- a binding whose environment has no deployment branch policy fails the run, naming every one.
 
 The bash tests execute the real, unmodified action step with `gh` replaced by a bash function and
 `python3` pointed at the interpreter running pytest, so the whole chain -- listing, refusal text,
@@ -29,10 +30,19 @@ WAVES = {
 }
 
 
-def _listing(names, total=None):
+#: The policy `scripts/onboard` sets on every apply and shared environment.
+CUSTOM = {"protected_branches": False, "custom_branch_policies": True}
+PROTECTED = {"protected_branches": True, "custom_branch_policies": False}
+
+
+def _listing(names, total=None, policies=None):
+    """Each environment carries `CUSTOM` unless `policies` names another (None: no policy)."""
+    policies = policies or {}
     return {
         "total_count": len(names) if total is None else total,
-        "environments": [{"name": n} for n in names],
+        "environments": [
+            {"name": n, "deployment_branch_policy": policies.get(n, CUSTOM)} for n in names
+        ],
     }
 
 
@@ -84,8 +94,17 @@ def test_a_listing_without_a_total_count_is_not_taken_as_complete():
         vf.existing_names({"environments": [{"name": "dev-eu-apply"}]})
 
 
-def test_a_complete_listing_yields_its_names():
-    assert vf.existing_names(_listing(["dev-eu-apply", "prod"])) == {"dev-eu-apply", "prod"}
+def test_a_complete_listing_yields_each_name_with_its_policy():
+    """An environment the listing shows with no policy key reads as having no policy.
+
+    Mutation: read `e["deployment_branch_policy"]` (KeyError on `prod`)."""
+    listing = _listing(["dev-eu-plan", "dev-eu-apply", "prod"], policies={"dev-eu-plan": None})
+    del listing["environments"][2]["deployment_branch_policy"]
+    assert vf.existing_names(listing) == {
+        "dev-eu-plan": None,
+        "dev-eu-apply": {"protected_branches": False, "custom_branch_policies": True},
+        "prod": None,
+    }
 
 
 def _run_step(tmp_path, listing, waves_json, gh_exit=0):
@@ -183,3 +202,67 @@ def test_a_shared_env_is_satisfied_by_the_bare_environment(tmp_path):
     waves = {"wave0": [{"stack": "app", "environment": "dev-eu", "env_binding": "dev-eu"}]}
     proc = _run_step(tmp_path, _listing(["dev-eu"]), json.dumps(waves))
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+
+
+#: The refusal for bindings with no deployment branch policy, hand-written.
+NO_POLICY_REASON = (
+    "::error::GitHub Environment(s) `dev-eu-apply`, `prod` have no deployment branch policy, "
+    "so a workflow on any branch can bind them and reach their secrets and OIDC role. Run "
+    "`scripts/onboard` (docs/getting-started.md), which scopes each apply environment to the "
+    "default branch, or set the policy in the environment's settings.\n"
+)
+POLICY_WAVES = {
+    "wave0": [
+        {"stack": "a", "environment": "dev-eu", "env_binding": "dev-eu-apply"},
+        {"stack": "b", "environment": "prod", "env_binding": "prod"},
+        {"stack": "c", "environment": "stg", "env_binding": "stg-apply"},
+    ]
+}
+
+
+@bash_only
+def test_a_binding_with_no_branch_policy_fails_the_run_naming_every_one(tmp_path):
+    """A plan environment with no policy is not a binding here, so it is not named.
+
+    Mutation: delete the `is None` refusal in `main` (the run passes)."""
+    listing = _listing(
+        ["dev-eu-plan", "dev-eu-apply", "prod", "stg-apply"],
+        policies={"dev-eu-plan": None, "dev-eu-apply": None, "prod": None},
+    )
+    proc = _run_step(tmp_path, listing, json.dumps(POLICY_WAVES))
+    assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert proc.stderr == NO_POLICY_REASON
+
+
+@bash_only
+@pytest.mark.parametrize("policy", [CUSTOM, PROTECTED], ids=["custom", "protected"])
+def test_a_custom_or_protected_branches_policy_passes(tmp_path, policy):
+    """Mutation: refuse unless `custom_branch_policies` is truthy, in place of `is None` (the
+    protected-branches case fails)."""
+    listing = _listing(
+        ["dev-eu-apply", "prod", "stg-apply"],
+        policies={name: policy for name in ("dev-eu-apply", "prod", "stg-apply")},
+    )
+    proc = _run_step(tmp_path, listing, json.dumps(POLICY_WAVES))
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert proc.stdout == (
+        "::notice::apply-path environments verified: dev-eu-apply, prod, stg-apply\n"
+    )
+
+
+@bash_only
+def test_a_missing_environment_is_refused_before_an_unscoped_one(tmp_path):
+    """Mutation: move the policy refusal above the missing-environment refusal (`prod` raises
+    KeyError, so stderr carries a traceback)."""
+    listing = _listing(["dev-eu-apply", "stg-apply"], policies={"dev-eu-apply": None})
+    proc = _run_step(tmp_path, listing, json.dumps(POLICY_WAVES))
+    assert proc.returncode != 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert proc.stderr == (
+        "::error::this apply would bind GitHub Environment(s) that do not exist: prod. GitHub "
+        "creates a missing environment on demand with no reviewers, no wait timer and no "
+        "deployment branch policy, so the apply would run outside every control that "
+        "environment is meant to carry. Two ways to fix it: create each environment named "
+        "above, or correct the environment's entry in `.github/shipmate-config.yml` so the "
+        "apply binds the environments you did create (`shared: true` binds the bare <env>, "
+        "anything else binds <env>-apply).\n"
+    )

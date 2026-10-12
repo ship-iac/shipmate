@@ -318,13 +318,14 @@ def test_the_unlock_detect_passes_exactly_these_inputs():
 
 
 def test_the_unlock_detect_refuses_an_unlock_into_a_missing_environment():
+    """Mutation: point the unlock pre-flight step's `uses:` at `$/actions/verify-app-key`."""
     steps = _job(UNLOCK, "detect")["steps"]
     preflight = [s for s in steps if PREFLIGHT_ACTION in str(s.get("uses", ""))]
     assert len(preflight) == 1, (
         f"{UNLOCK}'s detect job declares {len(preflight)} {PREFLIGHT_ACTION} steps, not 1 "
         "-- without it an unlock binding an environment nobody created gets one "
-        "auto-created with no reviewers, which then satisfies the apply path's own "
-        "pre-flight forever"
+        "auto-created with no reviewers and no branch policy, and GitHub keeps it, "
+        "which retires that environment's reviewer gate"
     )
     step = preflight[0]
     assert step.get("if") == PREFLIGHT_IF, (

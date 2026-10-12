@@ -5,6 +5,7 @@ from _detect_fixtures import (
     APP_ID,
     MINIMAL_TABLE,
     PLAN_SHA,
+    PR_NUMBER,
     _apply_check,
     _record,
     check_run,
@@ -241,6 +242,7 @@ def _run_main(
         "GITHUB_REPOSITORY": "o/r",
         "SHIPMATE_ENV": "",
         "SHIPMATE_HEAD_SHA": HEAD,
+        "SHIPMATE_PR_NUMBER": PR_NUMBER,
         "GITHUB_OUTPUT": str(out),
         "SHIPMATE_APP_ID": APP_ID,
     }.items():
@@ -850,3 +852,55 @@ def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
         )
     ]
     assert "apply-all-detect notice" in load_script("apply-comment")._HELD_REMEDY
+
+
+def _foreign_message(listed):
+    return (
+        f"::error::apply aborted: the plan recorded for {listed} was not made on pull request "
+        "#8, so this apply is refused. Re-plan on this pull request (push or comment `shipmate "
+        "plan`), then apply again; if another open pull request shares this head commit, the "
+        "newest plan decides which one may apply."
+    )
+
+
+def test_main_refuses_a_runnable_cell_recorded_for_another_pull_request(tmp_path, monkeypatch):
+    """Mutation: pass `pr_number=None` to `with_plan_runs` in `bare_main` -- red."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            envs=["dev-eu"],
+            decision="APPROVED",
+            checks=[_apply_check("stacks/app", "dev-eu", pr="7")],
+        )
+    assert str(exc_info.value) == _foreign_message("apply / stacks/app / dev-eu (pull request #7)")
+
+
+def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
+    """Every record but dev-eu `stacks/app`'s names PR 7: `stacks/dns` is applied, prod-eu is
+    explicit and dev-us is held for review, so none of them applies this run. Mutation: pass
+    `pending` to `with_plan_runs` in `bare_main` instead of the `dropped`-filtered list -- red."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        envs=["dev-eu", "dev-us", "prod-eu"],
+        explicit=["prod-eu"],
+        ungated="dev-eu",
+        decision="REVIEW_REQUIRED",
+        tree={
+            "dev-eu": ["stacks/app", "stacks/dns"],
+            "dev-us": ["stacks/app"],
+            "prod-eu": ["stacks/app"],
+        },
+        checks=[
+            _apply_check("stacks/app", "dev-eu"),
+            check_run(name="apply / stacks/dns / dev-eu", external_id=_record("42", pr="7")),
+            _apply_check("stacks/app", "dev-us", pr="7"),
+            _apply_check("stacks/app", "prod-eu", pr="7"),
+        ],
+    )
+    assert [(c["stack"], c["environment"]) for c in _wave_cells(parsed)] == [
+        ("stacks/app", "dev-eu")
+    ]
+    assert json.loads(parsed["review_held_envs"]) == ["dev-us", "prod-eu"]
+    assert json.loads(parsed["excluded_envs"]) == ["prod-eu"]

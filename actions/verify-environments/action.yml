@@ -1,5 +1,5 @@
 name: shipmate verify-environments
-description: Refuse an apply run before its first wave when a cell would bind a GitHub Environment that does not exist. Holds no App key; GITHUB_TOKEN lists environments with checks:read plus actions:read, which a private repository needs as well.
+description: Refuse an apply run before its first wave when a cell would bind a GitHub Environment that does not exist or has no deployment branch policy. Holds no App key; GITHUB_TOKEN lists environments with checks:read plus actions:read, which a private repository needs as well.
 inputs:
   waves-json:
     description: This run's wave matrices (the apply-env-level.yml waves_json shape).
@@ -7,7 +7,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Verify the apply-path environments exist
+    - name: Verify the apply-path environments exist and carry a branch policy
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}

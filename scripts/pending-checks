@@ -6,11 +6,12 @@ token, so the App private key never enters the plan matrix cells (they execute
 PR-head code) and a 256-cell run mints one token, not 256. Changed cells get a
 queued "apply pending" check, no-change cells a completed/neutral "no changes"
 check. Each check's external_id is a JSON record of the TF_VAR fingerprint, the
-id of the plan run that produced the cell, and the sha256 of the plan text that
-run published, on either branch. That digest is computed here, over the whole
-plan.txt this job downloaded, never copied from the cell: it is what binds the
-reviewed text to the plan apply executes. The comment embeds a capped prefix of
-the same file, so the digest covers at least what a reviewer saw and often more.
+id of the plan run that produced the cell, the number of the pull request it
+planned, and the sha256 of the plan text that run published, on either branch.
+That digest is computed here, over the whole plan.txt this job downloaded,
+never copied from the cell: it is what binds the reviewed text to the plan
+apply executes. The comment embeds a capped prefix of the same file, so the
+digest covers at least what a reviewer saw and often more.
 The check name uses the stack PATH so deploy-detect (which only has the path)
 reconstructs it exactly. A missing pending check is not a quiet degradation: the pre-apply snapshot
 refuses over it, and deploy-detect's work queue comes up empty.
@@ -35,6 +36,7 @@ def bodies(cells_dir, head_sha):
             "check must record the plan run that produced its cell, or apply can "
             "never find the reviewed plan."
         )
+    pr = ag.env_pr_number()
     out = []
     for cj, cell in cell_summaries(
         cells_dir,
@@ -60,6 +62,7 @@ def bodies(cells_dir, head_sha):
                     "fingerprint": cell["fingerprint"],
                     "plan_run": plan_run,
                     "plan_sha256": plan_sha256,
+                    "pr": pr,
                 }
             ),
             "output": {

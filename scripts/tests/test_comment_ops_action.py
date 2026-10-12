@@ -662,7 +662,17 @@ def test_the_authorize_step_reads_the_files_the_gather_step_writes(tmp_path, mon
     env = _authorize_step()["env"]
     body = _gather_step()["run"]
     for key, content in (
-        ("PR_JSON", '{"mergeable": true, "mergeable_state": "clean", "head": {"sha": "abc123"}}'),
+        (
+            "PR_JSON",
+            json.dumps(
+                {
+                    "mergeable": True,
+                    "mergeable_state": "clean",
+                    "head": {"sha": "abc123", "repo": {"full_name": "o/r"}},
+                    "base": {"repo": {"full_name": "o/r"}},
+                }
+            ),
+        ),
         ("PLAN_RUN_JSON", '{"apply / stacks/app / dev-eu": "555"}'),
     ):
         path = env[key]

@@ -6,7 +6,13 @@ from _loader import github_outputs, load_script
 
 az = load_script("authorize")
 
-PR_OK = {"mergeable": True, "mergeable_state": "clean", "head": {"sha": "abc123"}}
+REPO = {"full_name": "ship-iac/repo-example-stacks"}
+PR_OK = {
+    "mergeable": True,
+    "mergeable_state": "clean",
+    "head": {"sha": "abc123", "repo": REPO},
+    "base": {"repo": REPO},
+}
 #: What the gather step hands over: the plan run each App-authored apply check on
 #: the PR head records. No head SHA anywhere -- a record read from that head's own
 #: check-runs is for that head by construction.
@@ -100,9 +106,7 @@ def test_permission_decision_table(permission, verb, expected):
 
 
 def test_unmergeable_rejected():
-    ok, reason = _decide(
-        pr={"mergeable": False, "mergeable_state": "dirty", "head": {"sha": "abc123"}}
-    )
+    ok, reason = _decide(pr={**PR_OK, "mergeable": False, "mergeable_state": "dirty"})
     assert not ok and "not mergeable" in reason and "dirty" in reason
 
 
@@ -266,9 +270,7 @@ def test_no_apply_check_naming_a_plan_run_refuses_with_the_shipped_sentence():
 def test_mergeable_null_reports_still_computing_not_conflict():
     # null or unknown means GitHub has not finished computing, which gets its own non-blaming
     # message. It must not say conflicts or not-mergeable.
-    ok, reason = _decide(
-        pr={"mergeable": None, "mergeable_state": "unknown", "head": {"sha": "abc123"}}
-    )
+    ok, reason = _decide(pr={**PR_OK, "mergeable": None, "mergeable_state": "unknown"})
     assert not ok and "computing" in reason and "conflict" not in reason
 
 
@@ -374,9 +376,7 @@ def test_exemption_does_not_reach_the_other_checks():
     exempt = dict(review_decision="REVIEW_REQUIRED", environment="dev-eu", ungated_envs=UNGATED_DEV)
     ok, reason = _decide(permission="read", **exempt)
     assert (ok, reason) == (False, _a1("apply", "read"))
-    ok, reason = _decide(
-        pr={"mergeable": False, "mergeable_state": "dirty", "head": {"sha": "abc123"}}, **exempt
-    )
+    ok, reason = _decide(pr={**PR_OK, "mergeable": False, "mergeable_state": "dirty"}, **exempt)
     assert not ok and "not mergeable" in reason
     ok, reason = _decide(plan_runs={}, **exempt)
     assert not ok and "no reviewed plan" in reason
@@ -474,7 +474,7 @@ def test_ungated_exemption_is_not_reported_when_a_later_requirement_refused(tmp_
             "REVIEW_REQUIRED",
             "dev-eu",
             "dev-eu",
-            {"mergeable": False, "mergeable_state": "dirty", "head": {"sha": "abc123"}},
+            {**PR_OK, "mergeable": False, "mergeable_state": "dirty"},
             "false",
         ),
     ],
@@ -514,7 +514,7 @@ def test_draft_refusal_runs_before_the_mergeable_check():
     # A draft with conflicts reports mergeable_state "dirty", so keying on that field, or
     # ordering the draft check after it, hides the draft.
     ok, reason = _decide(
-        pr={"mergeable": False, "mergeable_state": "dirty", "draft": True, "head": {"sha": "abc"}}
+        pr={**PR_OK, "mergeable": False, "mergeable_state": "dirty", "draft": True}
     )
     assert (ok, reason) == (False, DRAFT_REASON)
 
@@ -523,7 +523,7 @@ def test_unlock_on_a_draft_is_still_authorized():
     ok, reason = az.decide(
         permission="write",
         review_decision="",
-        pr={"mergeable": None, "draft": True, "head": {"sha": "a" * 40}},
+        pr={**PR_OK, "mergeable": None, "mergeable_state": "unknown", "draft": True},
         plan_runs={},
         environment="dev-eu",
         verb="unlock",
@@ -531,11 +531,14 @@ def test_unlock_on_a_draft_is_still_authorized():
     assert (ok, reason) == (True, "")
 
 
-def test_unlock_needs_only_write_access():
+def test_unlock_needs_only_write_access_and_a_same_repository_head():
+    """Mutation: delete the `verb == "unlock"` early return in `decide()` (the merged pull
+    request's null mergeability refuses the unlock)."""
     ok, reason = az.decide(
         permission="write",
         review_decision="",  # There is no decision at all.
-        pr={"mergeable": None, "head": {"sha": "a" * 40}},  # The pull request is merged.
+        # The pull request is merged.
+        pr={**PR_OK, "mergeable": None, "mergeable_state": "unknown"},
         plan_runs={},  # There is no reviewed plan.
         environment="dev-eu",
         verb="unlock",
@@ -547,7 +550,7 @@ def test_unlock_still_refuses_a_read_only_commenter():
     ok, reason = az.decide(
         permission="read",
         review_decision="APPROVED",
-        pr={"mergeable": True, "head": {"sha": "a" * 40}},
+        pr=PR_OK,
         plan_runs=RUNS_OK,
         environment="dev-eu",
         verb="unlock",
@@ -560,11 +563,70 @@ def test_apply_is_unchanged_by_the_verb_default():
     ok, reason = az.decide(
         permission="write",
         review_decision="",
-        pr={"mergeable": None, "head": {"sha": "a" * 40}},
+        pr={**PR_OK, "mergeable": None, "mergeable_state": "unknown"},
         plan_runs={},
         environment="dev-eu",
     )
     assert not ok
+
+
+#: The fork-head refusals, hand-written: they are the sentences a commenter reads on a PR.
+FORK_REASON = (
+    "this pull request's head is in `someone/repo-example-stacks`; shipmate applies and "
+    "unlocks only branches of this repository."
+)
+DELETED_FORK_REASON = (
+    "this pull request's head is in a deleted repository; shipmate applies and unlocks only "
+    "branches of this repository."
+)
+FORK_PR = {**PR_OK, "head": {"sha": "abc123", "repo": {"full_name": "someone/repo-example-stacks"}}}
+
+
+@pytest.mark.parametrize("verb", ["apply", "unlock"])
+def test_a_fork_head_is_refused(verb):
+    """A fork's branch is not this repository's to apply or unlock, whatever else holds.
+
+    Mutation: delete the head-repository condition in `_head_repo_reason` (both verbs authorize)."""
+    assert _decide(pr=FORK_PR, verb=verb) == (False, FORK_REASON)
+
+
+@pytest.mark.parametrize("verb", ["apply", "unlock"])
+@pytest.mark.parametrize(
+    "head",
+    [{"sha": "abc123", "repo": None}, {"sha": "abc123"}],
+    ids=["head-repo-null", "head-repo-missing"],
+)
+def test_a_head_in_a_deleted_repository_is_refused(verb, head):
+    """REST reports a deleted fork's `head.repo` as null; that refuses rather than raising.
+
+    Mutations: delete the head-repository condition (every case authorizes); drop `or {}` after
+    `.get("repo")` (both cases raise AttributeError)."""
+    assert _decide(pr={**PR_OK, "head": head}, verb=verb) == (False, DELETED_FORK_REASON)
+
+
+def test_a_pull_request_with_no_base_repository_is_refused():
+    """Mutation: compare only when `base.repo` is present (this case authorizes)."""
+    pr = {key: value for key, value in PR_OK.items() if key != "base"}
+    assert _decide(pr=pr) == (
+        False,
+        (
+            "this pull request's head is in `ship-iac/repo-example-stacks`; shipmate applies "
+            "and unlocks only branches of this repository."
+        ),
+    )
+
+
+def test_a_same_repository_head_reaches_the_existing_checks():
+    """Mutation: invert the head-repository comparison `!=` -> `==` (both cases get the fork
+    refusal naming this repository)."""
+    assert _decide(pr={**PR_OK, "draft": True}) == (False, DRAFT_REASON)
+    assert _decide(pr=PR_OK, verb="unlock", plan_runs={}) == (True, "")
+
+
+def test_the_fork_check_runs_after_the_permission_check():
+    """Mutation: swap the `or` operands in `decide()` (the read-only commenter is told about
+    the fork)."""
+    assert _decide(permission="read", pr=FORK_PR) == (False, _a1("apply", "read"))
 
 
 def test_unlock_with_ungated_exemption_does_not_produce_false_audit_line(tmp_path, monkeypatch):

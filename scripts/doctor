@@ -511,8 +511,8 @@ def _env_shape_findings(name, env, data, role):
                     "deployment branch policy. On a shared environment that policy is what "
                     "scopes which branches may claim its secrets, and it is also what refuses "
                     "plan cells whose base ref it does not name. Correct while every pull "
-                    "request targets a branch it names; open it up, or split into "
-                    f"`{env}-plan` and `{env}-apply`, if they do not."
+                    "request targets a branch it names. If some do not, add the branches they "
+                    f"target to its policy, or split into `{env}-plan` and `{env}-apply`."
                 ),
             )
         )
@@ -559,6 +559,22 @@ def _env_protection_warnings(ctx):
             )
             continue
         out.extend(_env_shape_findings(name, env, data, role))
+        # The binding verify-environments refuses. Not in `_env_shape_findings`: onboard
+        # shares that function and repairs a missing policy itself.
+        if role in ("apply", "shared") and data.get("deployment_branch_policy") is None:
+            out.append(
+                (
+                    WARNING,
+                    (
+                        f"GitHub Environment `{name}` has no deployment branch policy, so a "
+                        "workflow on any branch can bind it and reach its secrets and OIDC "
+                        "role, and every apply to it is refused before its first wave. Run "
+                        "`scripts/onboard` (docs/getting-started.md), which scopes each apply "
+                        "environment to the default branch, or set the policy in the "
+                        "environment's settings."
+                    ),
+                )
+            )
     return out
 
 
@@ -2287,7 +2303,7 @@ def _download_cells(repo, lines, app_id):
         records = {}
     # The id reaches a `gh` argv and a directory name, so only a decimal string passes.
     run_ids = sorted(
-        {r for r, _ in records.values() if isinstance(r, str) and re.fullmatch(r"[0-9]+", r)}
+        {r for r, _, _ in records.values() if isinstance(r, str) and re.fullmatch(r"[0-9]+", r)}
     )
     pathlib.Path("doctor-cells").mkdir(exist_ok=True)
     for rid in run_ids:

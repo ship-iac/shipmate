@@ -101,6 +101,7 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+        SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
       run: |
         set -euo pipefail
         [[ "$SHIPMATE_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $SHIPMATE_HEAD_SHA)"; exit 1; }

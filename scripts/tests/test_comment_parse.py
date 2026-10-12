@@ -309,9 +309,11 @@ _HELP = (
     "recover a partial apply. |\n"
     "\n"
     "The environment is a GitHub Environment name such as `dev-eu`. Applying requires write "
-    "access to this repository, an approving review where the branch ruleset asks for one, a "
-    "plan for the current head commit, and a pull request that is not a draft. Unlocking "
-    "requires write access to this repository, but no review, no plan and no such readiness. "
+    "access to this repository, a pull request from this repository rather than a fork, an "
+    "approving review where the branch ruleset asks for one, a plan for the current head "
+    "commit, and a pull request that is not a draft. Unlocking requires write access to this "
+    "repository and a pull request from this repository, but no review, no plan and no such "
+    "readiness. "
     "`doctor` and `help` are read-only, and `plan` changes no infrastructure. `help` answers "
     "anyone; `doctor` and `plan` require write access to this repository.\n"
     "\n"
@@ -324,7 +326,8 @@ def test_help_carries_the_shared_header_and_a_footer_without_the_hint():
     The whole body, so a reworded row or paragraph between the header and footer fails too.
 
     Mutations: render the footer with the hint; restore `### shipmate commands`; drop
-    "including on a draft" from `plan`'s description.
+    "including on a draft" from `plan`'s description; drop "and a pull request from this
+    repository" from the unlock sentence.
     """
     assert cp.help_markdown(_RUN_URL) == _HELP
 

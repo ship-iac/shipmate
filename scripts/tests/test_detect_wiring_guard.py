@@ -24,6 +24,7 @@ _SCRIPT_ENV = {
         "GH_TOKEN": "${{ github.token }}",
         "SHIPMATE_ENV": "${{ inputs.environment }}",
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
+        "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
         "SHIPMATE_REVIEW_DECISION": "${{ inputs.review-decision }}",
         "SHIPMATE_GITHUB_VARS": "${{ inputs.github-vars }}",
@@ -63,6 +64,7 @@ _DETECT_STEPS = {
         "with": {
             "environment": "${{ inputs.environment }}",
             "head-sha": "${{ inputs.ref }}",
+            "pr-number": "${{ inputs.pr_number }}",
             "app-id": "${{ vars.SHIPMATE_APP_ID }}",
             "review-decision": "${{ needs.review.outputs.decision }}",
             "github-vars": "${{ toJSON(vars) }}",
@@ -118,7 +120,8 @@ _VARS_HOLDERS = {
 
 @pytest.mark.parametrize("action", sorted(_SCRIPT_ENV))
 def test_every_apply_side_detect_action_hands_its_script_exactly_these_names(action):
-    """Mutation: delete `SHIPMATE_REVIEW_DECISION` from `apply-detect`'s script step."""
+    """Mutation: delete `SHIPMATE_REVIEW_DECISION` from `apply-detect`'s script step.
+    Mutation: delete `SHIPMATE_PR_NUMBER` from it."""
     doc = action_yaml(action)
     steps = [s for s in doc["runs"]["steps"] if "/../../scripts/" in str(s.get("run", ""))]
     assert len(steps) == 1, f"{action}: expected one script step, got {len(steps)}"
@@ -158,7 +161,8 @@ def test_every_table_reader_declares_the_variables_input(action):
 def test_the_detect_step_is_exactly_this_step(workflow, uses):
     """Mutation: delete the `github-vars:` line from `deploy.yml`'s detect step.
     Mutation: give `apply.yml`'s detect step an `if: ${{ inputs.environment != '' }}`.
-    Mutation: delete `review-decision` from `apply.yml`'s detect step."""
+    Mutation: delete `review-decision` from `apply.yml`'s detect step.
+    Mutation: delete `pr-number` from `apply.yml`'s detect step."""
     doc = workflow_yaml(workflow)
     steps = [s for s in doc["jobs"]["detect"]["steps"] if s.get("uses") == uses]
     assert len(steps) == 1, f"{workflow}: {len(steps)} {uses} steps"

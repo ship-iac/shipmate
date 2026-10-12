@@ -10,14 +10,23 @@ A branch may carry its own workflow files. GitHub runs them, with whatever
 secrets that job's own environment bindings grant, on push — before a pull
 request exists, before review, and before `CODEOWNERS` applies.
 `SHIPMATE_APP_PRIVATE_KEY` itself is out of reach this way, so a branch-pushed
-workflow mints no App token, writes no gate status, submits no App review,
-completes no apply check and sends no apply dispatch (row 16;
-`docs/github-app.md` §Key-exposure boundary) — but the gate's verdict is still
-computed from artifacts the branch's own plan run produced (see "What none of
-this fixes").
+workflow mints no App token, writes no gate status, submits no App review and
+completes no apply check (row 16; `docs/github-app.md` §Key-exposure boundary)
+— but the gate's verdict is still computed from artifacts the branch's own plan
+run produced (see "What none of this fixes"). It can still dispatch the apply
+and unlock verbs with its own `GITHUB_TOKEN`, which the `guard` jobs of
+`apply.yml` and `unlock.yml` admit as a bot actor. The apply dispatch is bound
+to a pull request: the `review` job refuses it unless the pull request is open,
+not a draft, from this repository, and its head commit is the dispatched `ref`,
+and detect refuses a cell whose apply check records another pull request or
+none (`CONTRACT.md` §Comment-ops). The unlock dispatch is not bound: it takes
+`{environment, ref}` and runs `tofu init` over that ref inside `<env>-apply`
+with OIDC. It escalates nothing beyond a comment-time `shipmate unlock`, which
+needs only write access and runs the same init over a pull request head; write
+access and the `<env>-apply` environment's reviewers bound both.
 
-Two things a branch-pushed workflow *can* still do, absent the rest of this
-checklist:
+Beyond those dispatches, two things a branch-pushed workflow *can* still do,
+absent the rest of this checklist:
 
 - declare `environment: <env>-apply` itself and claim that environment's cloud
   credentials directly, if that environment carries no deployment branch policy
@@ -82,7 +91,7 @@ compares all five of those expressions, whole, against the fence `getting-starte
 | 5 | Block force-push and deletion on the default branch | Branch ruleset | History rewrite after apply |
 | 6 | Required reviewers + "Prevent self-review" on the `<env>-apply` environments you decide to gate (§6 states the trade-off; the choice is yours) — on a private repository this rule needs Enterprise, see "Plan prerequisites" | Environment | Unforgeable at apply time — the last line of defense once a merge has happened, on each environment you apply it to |
 | 7 | Cloud credentials scoped to the environment that needs them — the OIDC path's role named by the identity each environment's entry names in the environment table; any residual static key as an environment secret — never repo- or org-level | Environment table (role); Environment (secret) | Repo-wide exposure (for a secret, bounded *only* on an environment that also carries row 6; for the role the table's resolution rule is the scoping — see §7–9) |
-| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, where a default-branch policy is row 17 doing real work and plan cells still pass it (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
+| 8 | Plan environments (`<env>-plan`; in shared mode the bare `<env>`, which must hold the apply role instead — §7–9) hold read-only, blast-radius-free credentials, no approval rules, and no branch policy — except on a shared environment, which must carry one: it is row 17 doing real work, plan cells pass a default-branch policy at their base ref, and pull requests targeting another branch need that branch added (see below) — ideally no secret at all (`shipmate doctor` reports what it finds) | Environment | Plan-time code execution |
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since every cell-running job (plan, drift, apply, unlock) mints OIDC tokens unconditionally, this claim condition is the only thing that decides which role any of them may assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
@@ -95,6 +104,7 @@ compares all five of those expressions, whole, against the fence `getting-starte
 | 18 | An identity named by each environment you want cloud access from, with separate `aws.plan` and `aws.apply` roles in `.github/shipmate-config.yml` (§7–9) | Environment table | Opting in per environment. An identity is a role named once and picked up by every environment that names it, so one edit to `identities.<name>` retargets every environment carrying `identity: <name>`; `shipmate doctor`'s roles lines show what the branch's table resolves for each environment, and in them a referenced role shows the value comment-ops resolves, where a `shipmate-engine` Environment variable of the same name wins; a cell never reads that variable. What each cell may do is bounded by the named role's own trust policy (§7–9). The table is default-branch content, so naming a role is an ordinary pull request under row 4 rather than a settings change — and row 4's code-owner half is a no-op unless a `CODEOWNERS` entry covers `/.github/shipmate-config.yml` (`branch-protection.md`) |
 | 19 | `id-token: write` on every job of `shipmate.yml` but `comment-ops`, and on each drift file's `drift` job | Consumer workflow YAML | Nothing — it is required: GitHub caps a called workflow's permissions at each `uses:` boundary, so without it every plan, drift, apply and unlock run fails at workflow-resolution time, cloud or not |
 | 20 | Require actions to be pinned to a full-length commit SHA | Settings → Actions | A tag or branch ref moving under a workflow that was pinned only by convention |
+| 21 | Row 4's `pull_request` rule targets every branch a pull request may use as a base (for example `~ALL`) | Branch ruleset | An unreviewed apply: a pull request into a branch no review rule covers has no review decision, which the apply path reads as no review required |
 
 Rows 6, 7, 17 and 18 name `<env>-apply`, which is the apply environment in the
 default split naming (`<env>-plan` + `<env>-apply`). A logical env whose
@@ -111,8 +121,10 @@ both paths instead (CONTRACT.md §Env model). On such an environment:
   *base* ref), a drift sweep covering it when scheduled or dispatched at the
   default branch, and the apply, while still refusing a
   branch-authored workflow that names the environment — the control row 17
-  exists for. A repository using release branches must open the policy up, and
-  then row 17 is forfeited too.
+  exists for. The apply pre-flight refuses a shared environment with no policy,
+  so a repository whose pull requests target release branches adds those
+  branches to the policy; each added branch can then claim the environment's
+  secrets too.
 
 ### Plan prerequisites
 
@@ -458,12 +470,14 @@ approval is only as good as that habit.
 A deployment branch policy on `<env>-apply`, scoped to the default branch,
 does not change *which code the engine applies* — the pre-merge apply is
 always dispatched on the default branch and applies the pull request head
-passed as an input, policy or not. It is a control on secret release. Without
+passed as an input, which the `review` job requires to be the open pull
+request's current head, policy or not. It is a control on secret release. Without
 one, a branch-authored workflow that declares `environment: dev-eu-apply` in its
 own YAML is handed that environment's secrets directly on push, bypassing
 comment-ops, the gate, and everything else in this list — the same path row 16
 closes for the App key. Set it on every `<env>-apply`, restricted to the default
-branch, and do count it as a control.
+branch, and do count it as a control: the apply and unlock pre-flight refuses an
+environment with no policy.
 
 ## 7–9. Credentials
 
@@ -587,8 +601,9 @@ no split of its own.
   the pull request's *base* ref). Either leaves the gate red until it is removed
   (`shipmate doctor` warns; see `docs/troubleshooting.md`). One carve-out, and
   only for the branch policy: on a shared environment a default-branch policy is
-  row 17 doing real work, plan cells pass it at the base ref, and doctor notes it
-  rather than warning. The approval-rule half is absolute in both namings. That
+  row 17 doing real work, plan cells pass it at the base ref, the apply
+  pre-flight refuses the environment without one, and doctor notes it rather
+  than warning. The approval-rule half is absolute in both namings. That
   constraint is not negotiable, so treat a plan environment as readable by anyone
   with push access: a plan cell runs `terramate`/`tofu` over branch code, which
   is arbitrary code execution with whatever that environment holds. Read-only,
@@ -1074,9 +1089,12 @@ cannot lie about its own head repository, and a number naming a fork's pull
 request resolves to that fork, which the `build-matrix` step refuses in `detect`
 exactly as it refuses one on the autoplan leg. What the dispatch leg does add is
 `pull-requests: read` on the one job that looks the pull request up, and an
-authorization step ahead of it: only a comment from a commenter whose permission
-on the repository is `write` or `admin` is dispatched at all
-([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops).
+authorization step ahead of comment-ops' dispatch: it sends one only for a
+commenter whose permission on the repository is `write` or `admin`
+([`../CONTRACT.md`](../CONTRACT.md) §Comment-ops). A branch-pushed workflow can
+send the same dispatch with its own `GITHUB_TOKEN`; the run still executes only
+the default branch's workflow code, and derives every fact from the number as
+above.
 
 **The outer of the two fork guards does not reach this leg, which is why step
 order matters here.** The `actions/checkout` refusal above was measured under
