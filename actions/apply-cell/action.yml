@@ -99,7 +99,7 @@ runs:
           exit 1
         fi
 
-    - name: Decrypt reviewed plan artifact (fail-safe on config/plaintext mismatch)
+    - name: Decrypt reviewed plan artifact
       id: decrypt
       shell: bash
       env:

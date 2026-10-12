@@ -598,8 +598,8 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
 - As a variable, every cell refuses it by name.
 - As a secret on `shipmate-engine`, it reaches no cell, so every plan cell
-  refuses: a local backend at `Restore state`, any other backend before the
-  plan artifact uploads.
+  refuses: a local backend at `Initialize the stack` (its `Restore state`
+  step), any other backend before the plan artifact uploads.
 - As a secret on `<env>-apply` alone, every plan cell in that environment
   refuses the same way.
 - As a secret on `<env>-plan` alone, every apply in that environment refuses at

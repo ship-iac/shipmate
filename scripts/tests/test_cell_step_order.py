@@ -55,7 +55,7 @@ _EXPECTED = {
         "Stack slug",
         "Download reviewed plan artifact (fail-safe if missing)",
         "Verify the plan was produced from this commit",
-        "Decrypt reviewed plan artifact (fail-safe on config/plaintext mismatch)",
+        "Decrypt reviewed plan artifact",
         "Verify fingerprint matches the reviewed plan",
         "Check the reviewed plan text's digest reached this action",
         "Initialize the stack",

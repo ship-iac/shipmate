@@ -2535,8 +2535,9 @@ environment, and a plan cell names its own plan environment. The same value on b
 - **As a variable**, every cell refuses it by name (`scripts/env-inject`).
 - **As a secret on `shipmate-engine`**, no plan or apply cell binds that
   environment, so the passphrase resolves to empty on both sides and every plan
-  cell refuses: a local backend at `Restore state`, any other backend at
-  `Encrypt plan artifact at rest`, before the upload.
+  cell refuses: a local backend at `Initialize the stack` (its `Restore state`
+  step), any other backend at `Encrypt plan artifact at rest`, before the
+  upload.
 - **As a secret on `<env>-apply` alone**, every plan cell in that environment
   refuses the same way, so no apply ever has a plan.
 - **As a secret on `<env>-plan` alone**, plans upload encrypted and every apply
