@@ -2127,7 +2127,7 @@ and `lost` outputs, which the same rule reads.
   `<summary>`. `<stack>` and `<env>` are escaped, and each `@` in them is
   followed by an empty HTML comment (`@<!-- -->`), so a stack path cannot
   mention a user or team; the apply comment's cell lines and its notes'
-  bold cell names do the same.
+  bold cell names and the doctor report's check headers do the same.
 - **Fold-out.** A changed cell with plan text renders as
   `<details><summary>` + its cell line + `</summary>`, then the rendered plan
   inside a `diff`-tagged code fence (change signs moved to column 0; `~` mapped

@@ -3043,6 +3043,15 @@ def test_harvest_header_one_lines_a_pathological_check_name():
     assert len(header) < 130  # `_one_line(name, 120)` plus the wrapping, never 5000.
 
 
+def test_harvest_header_mentions_nobody():
+    """A check name carries the stack path, printed in bold outside a code span.
+
+    Mutation: `_md_escape` for `sc._md_name` in `_emit_section` -- a live `@acme`."""
+    anns = [_ann(check="shipmate / @acme/ops/y / dev", title="t", message="m")]
+    lines, _ = doctor._harvest_lines(doctor.harvest_sections(anns), anns, budget=10_000)
+    assert lines == ["- **shipmate / @<!-- -->acme/ops/y / dev**", "  - 🟠 t: m"]
+
+
 def test_harvest_never_emits_a_dangling_section_header():
     # A section whose header fits but whose only row doesn't must not leave
     # a bullet with no children -- both the header and the row are dropped

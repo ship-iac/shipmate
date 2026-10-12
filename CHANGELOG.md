@@ -22,7 +22,7 @@ section below names the SHA the release tags.
 - **An apply run refused at its review binding posts no apply comment and writes no gate.**
 - **`shipmate doctor`'s line for a valid `.github/shipmate-config.yml` shows `scripts/onboard --app-id <id> --dry-run` with its placeholder intact instead of `&lt;id&gt;`.**
 - **The reply to a malformed `shipmate` comment names the token it refused, in a code span, when the token is non-empty, at most 40 characters and holds no backtick, and describes it otherwise; an unknown verb is quoted under the same rule.**
-- **The plan comment names each stack / environment pair a pull request drops by removing one of a stack's two or more `env/*` tags; a stack that lost its last tag stays on the unmanaged line. An `@` in a stack or environment name anywhere in the plan or apply comment outside a code span is followed by an empty HTML comment, so a stack path cannot mention a user or team.**
+- **The plan comment names each stack / environment pair a pull request drops by removing one of a stack's two or more `env/*` tags; a stack that lost its last tag stays on the unmanaged line. An `@` in a stack or environment name anywhere in the plan, apply or doctor comment outside a code span is followed by an empty HTML comment, so a stack path cannot mention a user or team.**
 - **`shipmate doctor` warns when a `pull_request` rule requires code-owner review and the default branch's `CODEOWNERS` owns no path (no file, or no line naming a pattern and an owner), since that review then holds no pull request; `scripts/onboard` reports it as a `todo`.**
 
 ## [0.44.3] — 2026-10-12

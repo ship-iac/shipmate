@@ -2550,7 +2550,7 @@ def _emit_section(lines, name, rows, used, budget):
     also fits -- otherwise it would dangle with no children. `rows` is never
     empty: `harvest_sections` creates a group only by appending to it.
     Returns (new_used, rows_added, rows_dropped)."""
-    header = f"- **{_md_escape(_one_line(name, 120))}**"
+    header = f"- **{sc._md_name(_one_line(name, 120))}**"
     rendered = [_render_annotation_row(a) for a in rows]
     if used + len(header) + 1 + len(rendered[0]) + 1 > budget:
         return used, 0, len(rows)
