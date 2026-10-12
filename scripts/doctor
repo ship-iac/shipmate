@@ -58,14 +58,14 @@ import pathlib
 import re
 
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
+from _shipmate import ENGINE_ENV as _ENGINE_ENV
 from _shipmate import (
-    CODEOWNERS_PATHS,
     GATE_CONTEXT,
     _load,
     approval_rules,
     code_owner_review,
-    codeowners_rules,
     current_run_url,
+    first_codeowners,
     gate_check,
     load_workflow_text,
     review_count,
@@ -73,7 +73,6 @@ from _shipmate import (
     utf8_output,
     yaml_error_text,
 )
-from _shipmate import ENGINE_ENV as _ENGINE_ENV
 from _shipmate import gh_json as _gh_json
 
 ec = _load("env-config")
@@ -246,13 +245,14 @@ def _review_rule_warnings(ctx):
     whatever else is set: a sole maintainer cannot approve their own last push, so
     cannot merge, and the sole-maintainer note is then omitted.
 
-    Two limits, both stated in the finding text or the docs rather than probed:
-    the endpoint returns rulesets only (classic branch protection reads as no
-    rule), and `require_code_owner_review` is a no-op for changed files no
-    `CODEOWNERS` entry owns."""
+    Two limits. The endpoint returns rulesets only (classic branch protection
+    reads as no rule), stated in the finding text rather than probed. And
+    `require_code_owner_review` is a no-op for changed files no `CODEOWNERS`
+    entry owns: `_codeowners_warnings` reports a file that owns nothing, and
+    which paths an entry owns is not checked."""
     branch = ctx["default_branch"]
     rules = _read_once(ctx, f"repos/{ctx['repo']}/rules/branches/{branch}?per_page=100")
-    found = readable = code_owner = last_push = False
+    found = readable = last_push = False
     for rule in rules:
         if rule.get("type") != "pull_request":
             continue
@@ -261,8 +261,8 @@ def _review_rule_warnings(ctx):
         if not params:
             continue
         readable = True
-        code_owner = code_owner or bool(params.get("require_code_owner_review"))
         last_push = last_push or bool(params.get("require_last_push_approval"))
+    code_owner = code_owner_review(rules)
     if not found:
         return [(WARNING, _REVIEW_RULE_ABSENT.format(branch=branch))]
     if not readable:
@@ -293,7 +293,8 @@ def no_code_owners(path, place, branch):
 def _codeowners_warnings(ctx):
     """A WARNING when a `pull_request` rule requires code-owner review and the default
     branch's `CODEOWNERS` owns nothing: no file, or no rule line in the first of
-    `CODEOWNERS_PATHS` present. GitHub then requires no owner's review on any pull request.
+    `CODEOWNERS_PATHS` present (`first_codeowners`). GitHub then requires no owner's review
+    on any pull request.
 
     A sibling of `_review_rule_warnings`, not part of it: a failed `CODEOWNERS` read
     degrades this probe alone instead of replacing every review-rule finding. Only a 404
@@ -306,21 +307,21 @@ def _codeowners_warnings(ctx):
         return []
     if not code_owner_review(rules):
         return []
-    for path in CODEOWNERS_PATHS:
+
+    def read(path):
         try:
             blob = _gh_json(f"repos/{ctx['repo']}/contents/{path}")
         except SystemExit as e:
             if "HTTP 404" in str(e):
-                continue
+                return None
             raise
         # A file over 1 MB answers `encoding: "none"` with empty content, not an empty file.
         if blob.get("encoding") != "base64":
             raise ValueError(f"{path} is not readable through the contents API")
-        text = base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
-        if codeowners_rules(text):
-            return []
-        return [(WARNING, no_code_owners(path, f"on `{branch}`", branch))]
-    return [(WARNING, no_code_owners(None, f"on `{branch}`", branch))]
+        return base64.b64decode(blob.get("content", "")).decode("utf-8", "replace")
+
+    path, owns = first_codeowners(read)
+    return [] if owns else [(WARNING, no_code_owners(path, f"on `{branch}`", branch))]
 
 
 _codeowners_warnings.label = "CODEOWNERS"

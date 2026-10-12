@@ -80,10 +80,26 @@ def code_owner_review(rules):
 CODEOWNERS_PATHS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 
 
+#: Where a `CODEOWNERS` comment starts: a `#` not escaped by `\`.
+_CODEOWNERS_COMMENT = re.compile(r"(?<!\\)#")
+
+
 def codeowners_rules(text):
-    """True when `CODEOWNERS` text holds a rule line: one neither blank nor a `#` comment.
-    Which paths a rule matches is GitHub's matching, not read here."""
-    return any(ln.strip() and not ln.strip().startswith("#") for ln in text.splitlines())
+    """True when `CODEOWNERS` text holds a rule line: a pattern and at least one owner once
+    any `#` comment is cut off. A pattern with no owner un-owns its paths (GitHub), so it owns
+    nothing. Which paths a rule matches is GitHub's matching, not read here."""
+    return any(len(_CODEOWNERS_COMMENT.split(ln, 1)[0].split()) > 1 for ln in text.splitlines())
+
+
+def first_codeowners(read):
+    """`(path, owns)` for the first of `CODEOWNERS_PATHS` that `read(path)` returns text for,
+    `owns` being `codeowners_rules` of it; `(None, False)` when `read` returns None for all.
+    `read` raises for a failure that is not absence."""
+    for path in CODEOWNERS_PATHS:
+        text = read(path)
+        if text is not None:
+            return path, codeowners_rules(text)
+    return None, False
 
 
 def approval_rules(env):

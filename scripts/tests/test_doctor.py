@@ -6,7 +6,7 @@ import sys
 
 import pytest
 from _loader import ENGINE, SCRIPTS, load_script
-from _shipmate import codeowners_rules, load_workflow_text
+from _shipmate import codeowners_rules, first_codeowners, load_workflow_text
 from test_env_config_yaml_fixtures import CANONICAL
 
 doctor = load_script("doctor")
@@ -4622,12 +4622,33 @@ def _codeowners_gh(code_owner, files):
 
 @pytest.mark.parametrize(
     ("text", "owns"),
-    [(_COMMENTS_ONLY, False), (_COMMENTS_ONLY + "* @o/ops\n", True), ("", False)],
-    ids=["comments-only", "rule-after-comments", "empty"],
+    [
+        (_COMMENTS_ONLY, False),
+        (_COMMENTS_ONLY + "* @o/ops\n", True),
+        ("", False),
+        ("*\n", False),
+        ("/infra/ @org/team\n", True),
+        ("* # note\n", False),
+    ],
+    ids=["comments-only", "rule-after-comments", "empty", "no-owner", "owner", "comment-owner"],
 )
-def test_codeowners_rules_is_any_line_neither_blank_nor_a_comment(text, owns):
-    """Mutation: count a `#` line as a rule."""
+def test_codeowners_rules_needs_a_pattern_and_an_owner(text, owns):
+    """A pattern with no owner un-owns its paths, and a trailing `#` comment is no owner.
+
+    Mutation: count a `#` line as a rule -- comments-only red.
+    Mutation: count any line neither blank nor a `#` comment -- no-owner and comment-owner red.
+    Mutation: count tokens without cutting the comment -- comment-owner red."""
     assert codeowners_rules(text) is owns
+
+
+def test_the_first_codeowners_present_is_the_one_judged():
+    """Mutation: `continue` past a present file that owns nothing -- `docs/CODEOWNERS` is
+    judged. Mutation: return `(path, True)` for a present file -- the comment-only one owns."""
+    files = {".github/CODEOWNERS": None, "CODEOWNERS": "# none\n", "docs/CODEOWNERS": "* @o\n"}
+    assert first_codeowners(files.get) == ("CODEOWNERS", False)
+    files["CODEOWNERS"] = None
+    assert first_codeowners(files.get) == ("docs/CODEOWNERS", True)
+    assert first_codeowners(lambda path: None) == (None, False)
 
 
 def test_code_owner_review_over_a_codeowners_with_no_rule_line_warns(monkeypatch):

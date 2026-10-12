@@ -52,11 +52,12 @@ import urllib.parse
 
 from _shipmate import (
     APP_ID_VAR,
+    CODEOWNERS_PATHS,
     ENGINE_ENV,
     REPO_RE,
     _load,
     code_owner_review,
-    codeowners_rules,
+    first_codeowners,
     gate_check,
     gh_json,
     load_workflow_text,
@@ -65,7 +66,6 @@ from _shipmate import (
     yaml_error_text,
 )
 from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
-from _shipmate import CODEOWNERS_PATHS as _CODEOWNERS_PATHS
 from _shipmate import run as _run
 
 ec = _load("env-config")
@@ -832,18 +832,19 @@ def _codeowners_item(ctx):
     when the first file GitHub reads holds no rule line either: that review then holds no
     pull request."""
     item = "CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS"
-    found = [p for p in _CODEOWNERS_PATHS if (pathlib.Path(ctx["root"]) / p).is_file()]
-    text = (pathlib.Path(ctx["root"]) / found[0]).read_text("utf-8", "replace") if found else ""
-    if ctx["code_owner_review"] and not codeowners_rules(text):
-        path = found[0] if found else None
+    root = pathlib.Path(ctx["root"])
+    path, owns = first_codeowners(
+        lambda p: (root / p).read_text("utf-8", "replace") if (root / p).is_file() else None
+    )
+    if ctx["code_owner_review"] and not owns:
         finding = dr.no_code_owners(path, "in this working tree", ctx["default_branch"])
         return "todo", item, textwrap.wrap(finding, width=80)
-    if not found:
-        return "todo", item, [f"Add one in `{_CODEOWNERS_PATHS[0]}`."]
+    if path is None:
+        return "todo", item, [f"Add one in `{CODEOWNERS_PATHS[0]}`."]
     return (
         "cannot check",
         item,
-        [f"`{found[0]}` exists. Which paths it covers is GitHub's matching, not this run's."],
+        [f"`{path}` exists. Which paths it covers is GitHub's matching, not this run's."],
     )
 
 

@@ -43,8 +43,9 @@ live probes.
   layered rulesets.
 - **A `CODEOWNERS` that owns nothing while code-owner review is required.** The
   default branch's `.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS`, the
-  first one present as GitHub reads them, holds no line that is not blank or a
-  `#` comment, or none of the three exists. No path then has a code owner, so the
+  first one present as GitHub reads them, holds no line naming a pattern and at
+  least one owner once a `#` comment is cut off, or none of the three exists. A
+  pattern with no owner un-owns its paths. No path then has a code owner, so the
   code-owner review holds no pull request. Which paths a rule line matches is not
   checked. A failed file read degrades this probe alone; an unreadable ruleset
   leaves it silent, since the review-rule probe already reports that read.
