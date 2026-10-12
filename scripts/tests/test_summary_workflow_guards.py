@@ -18,7 +18,7 @@ A draft is not refused here: it reaches the job, and gate-state writes its gate 
 reason.
 """
 
-from _loader import WORKFLOWS, action_yaml, local_action, step_by, workflow_yaml
+from _loader import ENGINE_ENVIRONMENT, WORKFLOWS, action_yaml, local_action, step_by, workflow_yaml
 
 WF = WORKFLOWS / "plan.yml"
 
@@ -88,7 +88,7 @@ def test_the_trusted_job_refuses_forks():
 
 def test_the_trusted_job_binds_the_engine_environment():
     job, _ = _summary_job()
-    assert job["environment"] == "shipmate-engine"
+    assert job["environment"] == ENGINE_ENVIRONMENT
 
 
 def test_the_trusted_job_checks_out_nothing_and_runs_exactly_these_steps():

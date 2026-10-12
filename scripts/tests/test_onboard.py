@@ -72,6 +72,8 @@ def make_gh(routes):
 ENGINE_PATH = "repos/o/r/environments/shipmate-engine"
 ENGINE_POLICIES = f"{ENGINE_PATH}/deployment-branch-policies"
 ENGINE_SECRETS = f"{ENGINE_PATH}/secrets?per_page=100"
+ENGINE_RULES = f"{ENGINE_PATH}/deployment_protection_rules"
+NO_CUSTOM_RULES = {"total_count": 0, "custom_deployment_protection_rules": []}
 # Named without the word ruff S105 flags: this is a command line, not a credential.
 REPO_KEY_LIST = "gh secret list --json name"
 VARIABLE_LIST = "gh variable list --json name,value"
@@ -523,6 +525,7 @@ def test_main_calls_every_stage_in_order():
 _CONFORMING_ENGINE = {
     ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
     ENGINE_POLICIES: {"total_count": 1, "branch_policies": [{"name": "main"}]},
+    ENGINE_RULES: NO_CUSTOM_RULES,
 }
 #: The secret-name set `main` reads when the App key is already on `shipmate-engine`.
 PLACED = {"SHIPMATE_APP_PRIVATE_KEY"}
@@ -2171,6 +2174,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
         ENGINE_PATH: {"deployment_branch_policy": CUSTOM_POLICY},
         ENGINE_POLICIES: MAIN_POLICY,
         ENGINE_SECRETS: {"secrets": [{"name": KEY}]},
+        ENGINE_RULES: NO_CUSTOM_RULES,
         REPO_KEY_LIST: [{"name": "SHIPMATE_PLAN_PASSPHRASE"}],
         "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
         "repos/o/r/environments/dev-eu-apply": REVIEWED_APPLY,
@@ -2196,6 +2200,81 @@ def test_todo_items_leave_the_exit_code_at_0(monkeypatch, tmp_path, capsys):
     assert "\ntodo  " in capsys.readouterr().out
     assert [v for v, _s, _d in onboard.REPORT if v == "differs"] == []
     assert exit_.code == 0
+
+
+def _custom_rule(rule_id, slug, enabled):
+    return {"id": rule_id, "enabled": enabled, "app": {"id": 7, "slug": slug}}
+
+
+def _custom_rule_items(monkeypatch, answer):
+    monkeypatch.setattr(onboard, "_run", make_gh({ENGINE_RULES: answer}))
+    return onboard._custom_rule_items(ctx(apply_envs={"shipmate-engine": {}}))
+
+
+def test_an_enabled_custom_rule_on_the_engine_environment_is_todo(monkeypatch):
+    """Mutations: ignore `enabled`, so the disabled rule is listed too; read the
+    environment's `protection_rules` instead of the dedicated endpoint."""
+    answer = {
+        "total_count": 2,
+        "custom_deployment_protection_rules": [
+            _custom_rule(3, "gatekeeper", True),
+            _custom_rule(4, "dormant", False),
+        ],
+    }
+    assert _custom_rule_items(monkeypatch, answer) == [
+        (
+            "todo",
+            "custom deployment protection rules on shipmate-engine",
+            [
+                "The engine's jobs bind `shipmate-engine` with `deployment: false`, which GitHub",
+                "refuses while the environment has a custom deployment protection rule, so every",
+                "engine job fails. Enabled: gatekeeper. Remove each:",
+                (
+                    "gh api -X DELETE "
+                    "repos/o/r/environments/shipmate-engine/deployment_protection_rules/3"
+                ),
+            ],
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"total_count": 1, "custom_deployment_protection_rules": [_custom_rule(4, "d", False)]},
+        NO_CUSTOM_RULES,
+        SystemExit("gh: Not Found (HTTP 404)"),
+    ],
+    ids=["disabled", "none", "absent"],
+)
+def test_no_enabled_custom_rule_on_the_engine_environment_is_no_item(monkeypatch, answer):
+    """Mutation: ignore `enabled`, so the disabled case lists its rule."""
+    assert _custom_rule_items(monkeypatch, answer) == []
+
+
+def test_an_unreadable_custom_rule_list_cannot_be_checked(monkeypatch):
+    """Mutation: catch nothing around the read, so the failure ends the run."""
+    assert _custom_rule_items(monkeypatch, SystemExit("gh: Server Error (HTTP 500)")) == [
+        (
+            "cannot check",
+            "custom deployment protection rules on shipmate-engine",
+            [
+                (
+                    "`repos/o/r/environments/shipmate-engine/deployment_protection_rules` could "
+                    "not be read."
+                )
+            ],
+        )
+    ]
+
+
+def test_the_checklist_reports_an_enabled_custom_rule(monkeypatch, tmp_path, capsys):
+    """Mutation: drop `_custom_rule_items` from `_checklist`."""
+    rules = {"total_count": 1, "custom_deployment_protection_rules": [_custom_rule(3, "g", True)]}
+    routes = {**_CONFORMING_ENGINE, ENGINE_SECRETS: {"secrets": [{"name": KEY}]}}
+    run_main(monkeypatch, tmp_path, {**routes, ENGINE_RULES: rules}, ["--dry-run"])
+    items = checklist_items(checklist_of(capsys.readouterr().out))
+    assert items["custom deployment protection rules on shipmate-engine"][0] == "todo"
 
 
 def test_the_passphrase_is_read_from_the_repository_secrets():

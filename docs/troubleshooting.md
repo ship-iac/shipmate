@@ -309,7 +309,13 @@ its `todo` items.
 | --- | --- |
 | `ok` | what the run read already satisfies the item. |
 | `todo` | the item is not done; what to do follows. |
-| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
+| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, `shipmate-engine`'s custom deployment protection rules could not be listed, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
+
+`custom deployment protection rules on shipmate-engine` appears only when the
+environment exists and has an enabled custom deployment protection rule, or its
+rule list cannot be read. The `todo` names each enabled rule's App and the
+command that removes it: every engine job fails under one (§Every engine job
+fails before its first step).
 
 Three items check the working tree's stacks and drift files the way a run
 would, so a run that would refuse or skip shows up before the pull request
@@ -1101,6 +1107,20 @@ pull request there.
 pull request's head branch is in a fork, or in a repository that was deleted.
 Nothing was dispatched. As for a plan, push the branch to this repository
 (`gh pr checkout`, then push) and open the pull request there.
+
+### Every engine job fails before its first step
+
+The plan run's `summary`, the comment-ops `ops` job, apply's `review`, the
+trailing completion jobs and drift's `issues` job fail before any step runs, so
+no `shipmate / gate` status, sticky comment or comment reply is written.
+
+`shipmate-engine` has an enabled custom deployment protection rule. Every engine
+job binds that environment with `deployment: false`, which creates no deployment,
+and GitHub fails such a job when the environment has a custom deployment
+protection rule. `shipmate doctor` runs inside those jobs, so it cannot report
+this; `scripts/onboard --dry-run` does, with the command that removes the rule.
+List the rules with
+`gh api repos/<owner>/<repo>/environments/shipmate-engine/deployment_protection_rules`.
 
 ### An apply check never completes after a successful apply
 

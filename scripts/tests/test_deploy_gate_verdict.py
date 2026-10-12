@@ -5,7 +5,7 @@ The verdict over the env-level results is `gate-status deploy`, whose cases live
 the step into a refresh, which greens the merged head without reading a single deploy result.
 """
 
-from _loader import workflow_jobs
+from _loader import ENGINE_ENVIRONMENT, workflow_jobs
 
 #: The whole job, hand-written: a value read back from the workflow passes whatever it says.
 EXPECTED_SUMMARY = {
@@ -16,7 +16,7 @@ EXPECTED_SUMMARY = {
         "group": "shipmate-gate-${{ needs.detect.outputs.head_sha || github.run_id }}",
         "cancel-in-progress": False,
     },
-    "environment": "shipmate-engine",
+    "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
     "steps": [
         {

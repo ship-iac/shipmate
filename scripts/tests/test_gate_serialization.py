@@ -13,7 +13,7 @@ naming the recovery. It runs outside the group: a hold only closes the gate.
 """
 
 import pytest
-from _loader import workflow_jobs
+from _loader import ENGINE_ENVIRONMENT, workflow_jobs
 
 #: Hand-written per workflow: each names its head SHA differently, and a hyphen/underscore slip
 #: keys an empty value, which the fallback turns into a group of one.
@@ -49,7 +49,7 @@ EXPECTED_GATE_HOLD = {
     "needs": ["facts", "summary"],
     "if": "${{ !cancelled() && needs.summary.result == 'cancelled' }}",
     "runs-on": "ubuntu-slim",
-    "environment": "shipmate-engine",
+    "environment": ENGINE_ENVIRONMENT,
     "permissions": {},
     "steps": [
         {

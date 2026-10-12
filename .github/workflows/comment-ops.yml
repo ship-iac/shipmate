@@ -15,7 +15,7 @@ jobs:
     # can follow other lines.
     if: ${{ github.event.issue.pull_request && !endsWith(github.event.comment.user.login, '[bot]') && contains(github.event.comment.body, 'shipmate') }}
     runs-on: ubuntu-slim
-    environment: shipmate-engine
+    environment: { name: shipmate-engine, deployment: false }
     permissions:
       contents: read
       issues: write

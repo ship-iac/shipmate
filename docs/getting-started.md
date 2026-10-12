@@ -692,7 +692,7 @@ nothing else: `issue_comment` fires on issues too, and the engine's own `ops` jo
 carries that filter, so a consumer cannot drop it. The engine `ops` job's
 `if:` also skips a comment by a bot or one without `shipmate` in it.
 
-The engine's `ops` job behind that call names `environment: shipmate-engine`.
+The engine's `ops` job behind that call binds `shipmate-engine`.
 `shipmate-engine` is the one *literal* environment name that appears in workflow
 YAML
 ([`../CONTRACT.md`](../CONTRACT.md)'s one carve-out to "no env names in workflow
@@ -738,7 +738,7 @@ Two reasons, and the second one is a hard failure:
 - **`inherit` works only within one organization or enterprise.** Called from a
   repository outside the engine's organization it delivers nothing. It does
   not fall back, it *suppresses*: the callee job binds
-  `environment: shipmate-engine`, that environment resolves in your own
+  `shipmate-engine`, that environment resolves in your own
   repository, and its value would have been used, except that `inherit`
   replaced the secrets context wholesale. So "add the environment and keep
   `inherit`" does not work; the App key never arrives, and every App-authored

@@ -9,7 +9,14 @@ the App key is never minted for a run with no cell to report.
 """
 
 import yaml
-from _loader import WORKFLOWS, local_action, step_using, workflow_jobs, workflow_yaml
+from _loader import (
+    ENGINE_ENVIRONMENT,
+    WORKFLOWS,
+    local_action,
+    step_using,
+    workflow_jobs,
+    workflow_yaml,
+)
 
 WF = WORKFLOWS / "drift.yml"
 
@@ -124,7 +131,7 @@ def test_only_the_issues_job_holds_the_app_key():
         job_id for job_id, job in jobs.items() if "SHIPMATE_APP_PRIVATE_KEY" in yaml.safe_dump(job)
     ]
     assert holders == ["issues"]
-    assert jobs["issues"]["environment"] == "shipmate-engine"
+    assert jobs["issues"]["environment"] == ENGINE_ENVIRONMENT
     assert "environment" not in jobs["detect"]
 
 
@@ -148,11 +155,8 @@ def test_every_job_binds_the_environment_it_should_and_no_other():
     Mutations: `drift` bound to `shipmate-engine`; `drift`'s expression replaced by a literal
     `dev-eu`; `detect` given an `environment:`.
     """
-    parsed = {
-        j: (" ".join(v["environment"].split()) if "environment" in v else None)
-        for j, v in workflow_jobs(WF).items()
-    }
-    assert parsed == {"detect": None, "drift": _CELL_ENV, "issues": "shipmate-engine"}
+    parsed = {j: v.get("environment") for j, v in workflow_jobs(WF).items()}
+    assert parsed == {"detect": None, "drift": _CELL_ENV, "issues": ENGINE_ENVIRONMENT}
 
 
 def test_every_checkout_takes_no_with_block():

@@ -8,7 +8,14 @@ the dispatch step is lost, any commenter's apply reaches the apply path with an 
 authorization decision is made exactly once, in the first step, and read exactly once, here.
 """
 
-from _loader import WORKFLOWS, local_action, step_using, workflow_jobs, workflow_yaml
+from _loader import (
+    ENGINE_ENVIRONMENT,
+    WORKFLOWS,
+    local_action,
+    step_using,
+    workflow_jobs,
+    workflow_yaml,
+)
 
 WF = WORKFLOWS / "comment-ops.yml"
 
@@ -80,7 +87,7 @@ def test_every_job_binds_the_engine_environment():
     Mutation: delete the `environment:`.
     """
     bound = {j: v.get("environment") for j, v in workflow_jobs(WF).items()}
-    assert bound == {"ops": "shipmate-engine"}
+    assert bound == {"ops": ENGINE_ENVIRONMENT}
 
 
 def test_the_authz_step_passes_this_whole_with_block():

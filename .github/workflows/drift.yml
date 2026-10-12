@@ -82,7 +82,7 @@ jobs:
     # zero-match pattern download succeeds.
     if: ${{ always() && needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
     runs-on: ${{ inputs.runs_on }}
-    environment: shipmate-engine
+    environment: { name: shipmate-engine, deployment: false }
     permissions: { actions: read, contents: read }
     steps:
       - uses: $/actions/drift-issues

@@ -888,6 +888,15 @@ the base branch ref. Both halves were run against a live repository rather than
 read out of documentation; they are what the plan path's trusted `summary` job
 rests on.
 
+**No deployment, and no custom deployment protection rule.** Every engine job
+binds this environment as `{ name: shipmate-engine, deployment: false }`, so a
+run creates no deployment object. GitHub still releases the environment's secrets
+and variables to the job and still enforces the branch policy (measured: such a
+job from a non-default branch is refused), required reviewers and a wait timer.
+The cost: GitHub fails a `deployment: false` job when the environment has a
+custom deployment protection rule, so `shipmate-engine` takes none.
+`scripts/onboard` reports an enabled one.
+
 **Tag pushes are covered, and there is one way to uncover them.** A deployment
 branch policy is typed: the entry naming your default branch is a branch
 policy, and it matches no tag, so a workflow run at `refs/tags/…` that declares

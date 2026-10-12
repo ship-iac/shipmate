@@ -1643,7 +1643,8 @@ Engine `plan.yml` is five jobs: `facts`, `detect`, `plan`, `summary`,
 `gate-hold`. `facts` is `actions/pr-facts`, the single producer of every
 pull-request fact the others decide on. `detect` and `plan` are untrusted: they
 check out the pull request's own head and hold no App credential. `summary` and
-`gate-hold` are the trusted jobs — `environment: shipmate-engine`, and neither
+`gate-hold` are the trusted jobs — bound to `shipmate-engine` with
+`deployment: false`, like every engine job binding it, and neither
 checks anything out. Every App-authored
 surface listed above (apply checks, the gate, the sticky comments, drift
 issues) is created by a job bound to that fixed GitHub Environment
@@ -1755,7 +1756,7 @@ The five jobs:
   drift path is unaffected because engine `drift.yml` states that it is a sweep
   with no pull request (`sweep: "true"`), which is the only opt-out
   and appears in no other engine workflow.
-- **`summary`** (engine, `environment: shipmate-engine`) — it calls
+- **`summary`** (engine, bound to `shipmate-engine`) — it calls
   `actions/summary`, which downloads this same run's cell summaries and, under
   an App token minted inside that environment, publishes the results. This is
   what creates the pending `apply / <stack> / <env>` checks, the sticky plan
@@ -1767,7 +1768,7 @@ The five jobs:
   policy. It reads every fact it decides on from `needs.facts.outputs`, and the
   rest from the two other jobs' results; nothing is recovered from artifacts or
   from a second API lookup.
-- **`gate-hold`** (engine, `environment: shipmate-engine`, `permissions: {}`) —
+- **`gate-hold`** (engine, bound to `shipmate-engine`, `permissions: {}`) —
   runs only when `summary` was cancelled, which the gate-writer concurrency
   group does to a pending `summary` (§Comment-ops, "The aggregate gate"). It
   calls `actions/gate-refresh` to write a hold reading "re-plan this pull request

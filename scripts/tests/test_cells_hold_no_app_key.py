@@ -15,7 +15,7 @@ satisfies it, and the way a cell would actually regain the key -- a direct
 
 import pytest
 import yaml
-from _loader import WORKFLOWS, action_steps, action_yaml, strings, workflow_jobs
+from _loader import ENGINE_ENVIRONMENT, WORKFLOWS, action_steps, action_yaml, strings, workflow_jobs
 
 CELLS = ("apply-cell", "drift-cell", "plan-cell")
 
@@ -107,6 +107,35 @@ def test_the_completer_is_the_only_job_naming_the_engine_environment():
     # would keep the count at 1 and the test green while releasing the key to consumer code.
     # Assert the specific job, not the count.
     named = {
-        n for n, j in workflow_jobs(LEVEL).items() if j.get("environment") == "shipmate-engine"
+        n for n, j in workflow_jobs(LEVEL).items() if "shipmate-engine" in str(j.get("environment"))
     }
     assert named == {"complete"}
+
+
+#: Every (workflow, job) binding `shipmate-engine`, hand-written. Each holds the App key.
+ENGINE_BOUND_JOBS = {
+    ("apply-env-level.yml", "complete"),
+    ("apply.yml", "review"),
+    ("apply.yml", "summary"),
+    ("comment-ops.yml", "ops"),
+    ("deploy.yml", "summary"),
+    ("drift.yml", "issues"),
+    ("plan.yml", "summary"),
+    ("plan.yml", "gate-hold"),
+}
+
+
+def test_exactly_these_jobs_bind_the_engine_environment_and_create_no_deployment():
+    """Whole map over every engine workflow, so a new job holding the App key is a decision this
+    test is edited for. Each binding is the whole `ENGINE_ENVIRONMENT` mapping: a plain
+    `environment: shipmate-engine` creates a deployment on every run.
+
+    Mutations: bind a ninth job; revert one binding to the plain string; set `deployment: true`.
+    """
+    bound = {
+        (wf.name, n): j["environment"]
+        for wf in sorted(WORKFLOWS.glob("*.yml"))
+        for n, j in workflow_jobs(wf).items()
+        if "shipmate-engine" in str(j.get("environment"))
+    }
+    assert bound == dict.fromkeys(ENGINE_BOUND_JOBS, ENGINE_ENVIRONMENT)

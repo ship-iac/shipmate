@@ -128,9 +128,9 @@ jobs:
     concurrency:
       group: shipmate-gate-${{ needs.facts.outputs.head-sha || github.run_id }}
       cancel-in-progress: false
-    # The guard is on the job, not on a step: a skipped job creates no deployment and never enters
-    # the environment, whereas a first-step check would already hold the App key in scope.
-    environment: shipmate-engine
+    # The guard is on the job, not on a step: a skipped job never enters the environment,
+    # whereas a first-step check would already hold the App key in scope.
+    environment: { name: shipmate-engine, deployment: false }
     permissions:
       contents: read
     steps:
@@ -164,7 +164,7 @@ jobs:
     needs: [facts, summary]
     if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}
     runs-on: ubuntu-slim
-    environment: shipmate-engine
+    environment: { name: shipmate-engine, deployment: false }
     permissions: {}
     steps:
       - uses: $/actions/gate-refresh

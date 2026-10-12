@@ -85,6 +85,11 @@ ENGINE_CALL_SECRETS = {
     "unlock.yml": _CONSUMER_SECRETS,
 }
 
+#: The whole `environment:` value of every engine job that holds the App key. `deployment: false`
+#: keeps the environment's secrets, branch policy, reviewers and wait timer but creates no
+#: deployment object.
+ENGINE_ENVIRONMENT = {"name": "shipmate-engine", "deployment": False}
+
 
 @functools.cache
 def _parse_yaml(path):

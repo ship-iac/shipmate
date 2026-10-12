@@ -747,6 +747,37 @@ def _app_item(ctx):
     )
 
 
+def _custom_rule_items(ctx):
+    """A `todo` naming each enabled custom deployment protection rule on `shipmate-engine`.
+
+    The engine jobs bind it with `deployment: false`, and GitHub fails such a job before
+    any step while the environment has a custom rule, so `doctor`, which runs inside those
+    jobs, can never report one. Empty while the environment is absent, which the
+    environment item already covers.
+    """
+    if ctx["apply_envs"].get(ENGINE_ENV) is None:
+        return []
+    item = f"custom deployment protection rules on {ENGINE_ENV}"
+    path = f"repos/{ctx['repo']}/environments/{ENGINE_ENV}/deployment_protection_rules"
+    try:
+        data = _gh_json_or_none(path)
+    except SystemExit:
+        return [("cannot check", item, [f"`{path}` could not be read."])]
+    enabled = [
+        r for r in (data or {}).get("custom_deployment_protection_rules", []) if r.get("enabled")
+    ]
+    if not enabled:
+        return []
+    names = ", ".join((r.get("app") or {}).get("slug") or str(r.get("id")) for r in enabled)
+    lines = textwrap.wrap(
+        f"The engine's jobs bind `{ENGINE_ENV}` with `deployment: false`, which GitHub "
+        f"refuses while the environment has a custom deployment protection rule, so every "
+        f"engine job fails. Enabled: {names}. Remove each:",
+        width=80,
+    )
+    return [("todo", item, [*lines, *(f"gh api -X DELETE {path}/{r.get('id')}" for r in enabled)])]
+
+
 def _reviewed(env):
     """True when `env` requires a named reviewer and prevents self-review."""
     return env is not None and any(
@@ -1089,6 +1120,7 @@ def _checklist(ctx):
     reviewed = [ec.env_names(env, False)["apply"] for env in gated if env not in ctx["shared"]]
     items = [_passphrase_item(ctx), _table_item(ctx)]
     items.append(_app_item(ctx))
+    items += _custom_rule_items(ctx)
     if gated:
         items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))
     items += [
