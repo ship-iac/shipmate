@@ -117,11 +117,22 @@ def _run(tmp_path, *args, **fakes):
 def test_deploy_verdict(results, expected):
     """Mutation: drop empty tokens (`if t`) from the split -> `""` reads as success."""
     assert (
-        gs.deploy_verdict(results)
+        gs.deploy_verdict("success", results)
         == {
             "success": ("success", "all env-levels applied (deploy env-level applies completed)"),
             "failure": ("failure", "deploy incomplete (deploy env-level applies completed)"),
         }[expected]
+    )
+
+
+@pytest.mark.parametrize("detect", ["failure", "cancelled"])
+def test_a_deploy_stopped_at_detect_says_so(detect):
+    """A refused deploy's detect writes the head, then fails; its env-levels skip.
+
+    Mutation: drop the `detect != "success"` branch -> "deploy incomplete"."""
+    assert gs.deploy_verdict(detect, f"{detect},skipped,skipped,skipped,skipped") == (
+        "failure",
+        f"deploy stopped at detect ({detect}), nothing applied; see the run",
     )
 
 
@@ -226,11 +237,11 @@ def test_newest_prints_the_newest_gate_state_and_run_id(tmp_path, page1, printed
         (("hold", SHA, "re-plan"), _status_argv("failure", "re-plan")),
         (("post", SHA, "success", "x" * 150), _status_argv("success", "x" * 140)),
         (
-            ("deploy", SHA, "success,skipped"),
+            ("deploy", SHA, "success", "success,skipped"),
             _status_argv("success", "all env-levels applied (deploy env-level applies completed)"),
         ),
         (
-            ("deploy", SHA, "success,cancelled"),
+            ("deploy", SHA, "success", "success,cancelled"),
             _status_argv("failure", "deploy incomplete (deploy env-level applies completed)"),
         ),
     ],
@@ -246,7 +257,10 @@ def test_post_and_hold_send_this_whole_argv(tmp_path, args, argv):
 @pytest.mark.parametrize(
     ("args", "error"),
     [
-        (("deploy", "", "success"), "::error::detect produced no head SHA; deploy cannot gate\n"),
+        (
+            ("deploy", "", "failure", "failure"),
+            "::error::detect produced no head SHA; deploy cannot gate\n",
+        ),
         (
             ("hold", "A" * 40, "x"),
             f"::error::head SHA must be 40 lowercase hex characters (got: {'A' * 40!r})\n",

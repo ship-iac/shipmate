@@ -1267,8 +1267,8 @@ pull request is needed.
 
 The refused deploy's apply checks stay open on the merged pull request and are
 never read again; its `summary` turns the merged head's `shipmate / gate` to
-`failure` ("deploy incomplete"). Do not re-run the refused deploy: it checks out the same
-commit and refuses again.
+`failure` ("deploy stopped at detect (failure), nothing applied; see the run"). Do
+not re-run the refused deploy: it checks out the same commit and refuses again.
 
 ### The post-merge deploy was dropped as superseded
 

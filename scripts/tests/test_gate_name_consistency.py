@@ -113,6 +113,7 @@ EXPECTED_WRITE_ENV = {
     "HEAD_SHA": "${{ inputs.head-sha }}",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
     "DEPLOY_RESULTS": "${{ inputs.deploy-results }}",
+    "DETECT_RESULT": "${{ inputs.detect-result }}",
     "HOLD_DESCRIPTION": "${{ inputs.hold-description }}",
 }
 
