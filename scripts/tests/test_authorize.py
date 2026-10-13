@@ -21,10 +21,11 @@ RUNS_OK = {"apply / stacks/app / dev-eu": "555"}
 #: sentence a commenter reads on a PR, not an implementation detail.
 NO_PLAN_REASON = (
     "no reviewed plan for the current PR head: no apply check on it names a plan run. If "
-    "`shipmate / gate` is green, this head has nothing to apply. Otherwise its description and "
-    "linked run say why no apply check was published: fix that, plan this head (push or comment "
-    "`shipmate plan`; a re-run alone will not clear a plan from before an engine re-pin), then "
-    "`shipmate apply` again."
+    "`shipmate / gate` is absent or pending, wait for the plan run to finish, then `shipmate "
+    "apply` again. If it is green, this head has nothing to apply. If it is red, its description "
+    "and linked run say why no apply check was published: fix that, plan this head (push or "
+    "comment `shipmate plan`; a re-run alone will not clear a plan from before an engine "
+    "re-pin), then `shipmate apply` again."
 )
 UNGATED_DEV = frozenset({"dev-eu"})
 #: The refusal an apply on a draft gets, hand-written: it is the sentence a
@@ -265,8 +266,9 @@ def test_a_head_whose_apply_checks_name_a_plan_run_authorizes():
 
 
 def test_no_apply_check_naming_a_plan_run_refuses_with_the_shipped_sentence():
-    """A docs-only head (green gate, no apply check) reaches this refusal too, and re-planning
-    it plans zero cells again. Mutation: drop the green-gate sentence in `authorize` -- red."""
+    """A head whose plan is still running (gate absent or pending) and a docs-only head (green
+    gate, no apply check) reach this refusal too; re-planning either does not help. Mutations:
+    drop the in-flight sentence in `authorize` -- red; drop the green-gate sentence -- red."""
     ok, reason = _decide(plan_runs={})
     assert (ok, reason) == (False, NO_PLAN_REASON)
 

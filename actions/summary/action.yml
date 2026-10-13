@@ -21,7 +21,7 @@ inputs:
     description: 'Result of the plan workflow''s plan matrix job (needs.plan.result). "skipped" is the NORMAL empty-matrix case, not a failure.'
     required: true
   planned-cells:
-    description: How many cells detect planned (its `count` output). Compared against the cell summaries this job parses; any disagreement holds the gate.
+    description: How many cells detect planned (its `count` output). Compared against the cell summaries this job parses; any disagreement holds the gate and publishes no apply check.
     required: true
   on-demand:
     description: >-

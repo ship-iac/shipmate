@@ -938,6 +938,9 @@ gate"), holds the gate from its `gate-hold` job, reading "its plan summary was
 cancelled before it published". That hold can land after another run's summary
 greened the head, closing a gate over work already applied. Every one of these
 holds clears the same way: comment `shipmate plan` or push.
+A run held for its plan job or its cell count also publishes no apply check, so a
+`shipmate apply` on the head replies "no reviewed plan for the current PR head"
+until a plan of every cell succeeds.
 
 "Re-run failed jobs" on the plan run is safe only when that run is the newest
 plan run of the head. The re-run re-enters the `plan-<pr>` concurrency group,
