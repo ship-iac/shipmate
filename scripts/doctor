@@ -65,6 +65,7 @@ from _shipmate import (
     approval_rules,
     check_runs,
     code_owner_review,
+    command_data,
     current_run_url,
     first_codeowners,
     gate_check,
@@ -2149,7 +2150,7 @@ def warnings(ctx):
 
 
 def render_annotations(findings):
-    return [f"::{lvl} title={DOCTOR_TITLE}::{sc.command_data(text)}" for lvl, text in findings]
+    return [f"::{lvl} title={DOCTOR_TITLE}::{command_data(text)}" for lvl, text in findings]
 
 
 def _declared_envs(cells_dir):

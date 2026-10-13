@@ -1030,8 +1030,10 @@ An environment that must never apply unreviewed must not hold `gated: false`.
 
 ### `stack ordering cycle through <stacks>`
 
+The annotation reads:
+
 ```text
-::error::stack ordering cycle through stacks/app, stacks/dns: a stack ordered after itself, directly or through other stacks, has no first wave. Remove one `after` or `before` entry on that loop in the stack configuration.
+stack ordering cycle through stacks/app, stacks/dns: a stack ordered after itself, directly or through other stacks, has no first wave. Remove one `after` or `before` entry on that loop in the stack configuration.
 ```
 
 The `after` and `before` entries of the named stacks form a loop, or one stack
@@ -1064,12 +1066,12 @@ annotation read as under
 
 A drift sweep does not refuse a cycle: its cells on the loop fail at init.
 
-### `needs orders <stack> / <env> before <stack> / <env>`
+### `needs order inverted, fix default-branch needs or tags`
 
 The annotation reads:
 
 ```text
-needs orders platform / dev-eu before dns / dev-us but it runs after; fix default-branch needs or tags
+needs order inverted, fix default-branch needs or tags: platform / dev-eu before dns / dev-us, which it runs after
 - platform / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes from dev-eu -> dev-us
 Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry in that chain on the default branch, or retag the stacks so the edge stays inside environments that order it.
 ```
@@ -1281,8 +1283,10 @@ the environment exists and that its policy actually names the default branch.
 
 ### A deploy refused an apply check on a stack that lost its env tag
 
+The annotation reads:
+
 ```text
-::error::deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
+deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
 after this pull request was planned, so its reviewed change was not applied. This deploy
 applies nothing, so these other cells of this merge are not applied either:
 <other stack> / <env>. Open a new pull request that retags each stranded stack and

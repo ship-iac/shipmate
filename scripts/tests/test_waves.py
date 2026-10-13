@@ -480,16 +480,30 @@ def test_the_zigzag_with_no_needs_refuses_nothing():
     assert w.inversions(_PROBE_CELLS, _PROBE_PRESENT, _PROBE_DEPS, _PROBE_TAGS, level) == []
 
 
+def test_the_gate_description_keeps_the_inversion_remedy_over_a_long_pair():
+    """`gate-state` cuts `detect failed: <first line>` to 140 characters, and these paths run
+    past it: the cut drops the pair's tail, never the remedy. Mutation: put the pair first and
+    the remedy last on the first line -- the remedy is cut."""
+    pairs = [(("stacks/platform/network", "prod-eu"), ("stacks/dns/zones", "prod-us"))]
+    order = {"prod-us": ["prod-eu"]}
+    first = w.inversion_error(pairs, order, {"prod-eu": 0, "prod-us": 1}).splitlines()[0]
+    gap = load_script("gate-state")._detect_gap("failure", first.removeprefix("::error::"))
+    assert gap == (
+        "detect failed: needs order inverted, fix default-branch needs or tags: "
+        "stacks/platform/network / prod-eu before stacks/dns/zones / prod-us, "
+    )
+
+
 def test_the_zigzag_under_needs_names_every_inverted_pair():
     """Mutation: drop the level comparison -- `edge / dev-us` after `platform / dev-eu` (a
-    level lower) joins the message. Mutation: restore `, which it runs after:` as the first
-    line's end -- red."""
+    level lower) joins the message. Mutation: put the pair before the remedy on the first line
+    -- red."""
     order = {"dev-us": ["dev-eu"]}
     level = w.cell_levels(order, _PROBE_TAGS)
     pairs = w.inversions(_PROBE_CELLS, _PROBE_PRESENT, _PROBE_DEPS, _PROBE_TAGS, level)
     assert w.inversion_error(pairs, order, level, "Open a new pull request.") == (
-        "::error::needs orders gr / dev-eu before dns / dev-us but it runs after; fix "
-        "default-branch needs or tags\n"
+        "::error::needs order inverted, fix default-branch needs or tags: gr / dev-eu before "
+        "dns / dev-us, which it runs after\n"
         "- gr / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes "
         "from dev-eu -> dev-us\n"
         "- gr / dev-eu (env-level 0) after edge / dev-us (env-level 1); dev-us's level comes "

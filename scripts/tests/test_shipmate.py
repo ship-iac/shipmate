@@ -267,8 +267,23 @@ def _annotated(main, capsys):
 def test_run_annotated_prints_a_refusal_as_one_escaped_command(capsys):
     """A literal `%0A` or `%25` in a stack path stays verbatim in the annotation, and every line
     of a multi-line refusal reaches it. Mutation: print `code` unescaped -- red."""
-    main = _raising("::error::needs a%0Ab\n- 100%25 x\r")
-    assert _annotated(main, capsys) == (1, "::error::needs a%250Ab%0A- 100%2525 x%0D\n")
+    main = _raising("::error::needs a%0Ab\n- 100%25 x")
+    assert _annotated(main, capsys) == (1, "::error::needs a%250Ab%0A- 100%2525 x\n")
+
+
+def test_run_annotated_ends_a_line_at_cr_lf_and_crlf(capsys):
+    """`build-matrix`'s `refusal` output takes the first line with `splitlines`, so the
+    annotation splits the same way: its first line is the gate description's. Mutation: split
+    on `"\\n"` only -- `%0D` appears."""
+    main = _raising("::error::first\r\nsecond\rthird")
+    assert _annotated(main, capsys) == (1, "::error::first%0Asecond%0Athird\n")
+
+
+def test_run_annotated_drops_trailing_empty_lines(capsys):
+    """A refusal ending in newlines, alone or before another error, prints no trailing `%0A`.
+    Mutation: drop the `rstrip` -- red."""
+    main = _raising("::error::first\n\n::error::second\n\n")
+    assert _annotated(main, capsys) == (1, "::error::first\n::error::second\n")
 
 
 def test_run_annotated_prints_each_joined_error_as_its_own_command(capsys):

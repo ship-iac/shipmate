@@ -28,6 +28,7 @@ import re
 import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
+from typing import TypeGuard
 
 _D = pathlib.Path(__file__).resolve().parent
 
@@ -182,29 +183,39 @@ def command_data(s):
     return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
+def is_refusal(code) -> TypeGuard[str]:
+    """True when a `SystemExit` code is an `::error::` refusal: a `str` starting `::error::`.
+    The one test `run_annotated` and `build-matrix`'s `refusal` output share."""
+    return isinstance(code, str) and code.startswith("::error::")
+
+
 def run_annotated(main):
     """Call `main`; print an `::error::` exit as one escaped workflow command per error.
 
     The runner parses workflow commands per line, so a raw multi-line refusal annotates only its
-    first line. The code splits at each line starting `::error::` (joined refusals keep one
-    annotation each), every other line stays with the error above it, and each chunk prints
-    through `command_data`, which also keeps a literal `%0A` or `%25` in a stack path verbatim.
-    Exits 1 after printing. Any other `SystemExit` passes through unchanged. Producers stay raw:
-    this is the one print site of a detect refusal.
+    first line. The code splits into lines with `splitlines`, as `build-matrix`'s `refusal`
+    output takes its first line, so CR, LF and CRLF each end a line on both surfaces. A new
+    error starts at each line starting `::error::` (joined refusals keep one annotation each),
+    every other line stays with the error above it, trailing empty lines are dropped, and each
+    error prints through `command_data`, which also keeps a literal `%0A` or `%25` in a stack
+    path verbatim. Exits 1 after printing. Any other `SystemExit` passes through unchanged.
+    Producers stay raw: this is the one print site of a detect refusal.
     """
     try:
         main()
     except SystemExit as exc:
-        if not (isinstance(exc.code, str) and exc.code.startswith("::error::")):
+        code = exc.code
+        if not is_refusal(code):
             raise
-        chunks = []
-        for line in exc.code.split("\n"):
+        errors = []
+        for line in code.splitlines():
             if line.startswith("::error::"):
-                chunks.append(line.removeprefix("::error::"))
+                errors.append([line.removeprefix("::error::")])
             else:
-                chunks[-1] += "\n" + line
-        for chunk in chunks:
-            sys.stderr.write(f"::error::{command_data(chunk)}\n")
+                errors[-1].append(line)
+        for lines in errors:
+            message = "\n".join(lines).rstrip("\n")
+            sys.stderr.write(f"::error::{command_data(message)}\n")
         sys.stderr.flush()
         raise SystemExit(1) from None
 

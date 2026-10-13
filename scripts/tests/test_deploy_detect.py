@@ -739,13 +739,13 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
     Mutation: list only the pairs' cells in the remedy -- `workers / dev-eu` drops out.
     Mutation: restore the remedy that sends a `needs` fix to a new pull request -- red.
     Mutation: restore the remedy that names only a retag for the new pull request -- red.
-    Mutation: restore `, which it runs after:` as the first line's end -- red.
+    Mutation: put the pair before the remedy on the first line -- red.
     Mutation: drop the `refuse_inversions` call from `main` -- the deploy writes waves."""
     with pytest.raises(SystemExit) as exc_info:
         _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
     assert str(exc_info.value) == (
-        "::error::needs orders gr / dev-eu before dns / dev-us but it runs after; fix "
-        "default-branch needs or tags\n"
+        "::error::needs order inverted, fix default-branch needs or tags: gr / dev-eu before "
+        "dns / dev-us, which it runs after\n"
         "- gr / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes "
         "from dev-eu -> dev-us\n"
         "- gr / dev-eu (env-level 0) after edge / dev-us (env-level 1); dev-us's level comes "
@@ -839,7 +839,7 @@ def test_an_inversion_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
     """Mutation: write `head_sha` with the waves only -- the file stays empty."""
     with pytest.raises(SystemExit) as exc:
         _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
-    assert str(exc.value).startswith("::error::needs orders")
+    assert str(exc.value).startswith("::error::needs order inverted")
     assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD}
 
 
