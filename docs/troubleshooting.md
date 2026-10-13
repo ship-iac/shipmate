@@ -1030,8 +1030,9 @@ Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` e
 A stack is `after` a stack in another environment, and `needs` puts that other
 environment on a later env-level, so no order meets both. The plan, a bare
 `shipmate apply` or the merge deploy refused before anything applied; a plan
-refusal holds the gate. Each `- ` line names one inverted pair and the `needs`
-chain that sets the later level.
+refusal holds the gate, and a deploy refusal turns the merged head's gate to
+`failure`. Each `- ` line names one inverted pair and the `needs` chain that
+sets the later level.
 
 1. Pick the order you want. Remove or reverse the `needs` entry in the named
    chain in `.github/shipmate-config.yml`, or retag the stacks so the `after`
@@ -1265,7 +1266,8 @@ When the message lists no other cell and no stranded stack needs a retag, no
 pull request is needed.
 
 The refused deploy's apply checks stay open on the merged pull request and are
-never read again. Do not re-run the refused deploy: it checks out the same
+never read again; its `summary` turns the merged head's `shipmate / gate` to
+`failure` ("deploy incomplete"). Do not re-run the refused deploy: it checks out the same
 commit and refuses again.
 
 ### The post-merge deploy was dropped as superseded

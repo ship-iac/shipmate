@@ -1544,8 +1544,11 @@ check/status/comment/issue that crosses a workflow-run boundary:
   hold). The three `summary` jobs run in one job-level concurrency group,
   `shipmate-gate-<head sha>` with `cancel-in-progress: false`, shared across
   runs and called workflows, so one of them at a time reads and writes a head's
-  gate. An empty head SHA (a failed `facts` or `detect`) keys the group on the
-  run id instead, so that job shares no group. GitHub keeps one pending job per
+  gate. An empty head SHA (a failed plan `facts`, or a deploy `detect` that
+  failed before it validated the merged head) keys the group on the run id
+  instead, so that job shares no group. A deploy `detect` writes the head before
+  any refusal, so a refused deploy's `summary` writes `failure` on the merged
+  head. GitHub keeps one pending job per
   group, so a third arrival cancels the pending one. What each eviction costs:
   - a pending plan `summary`: its run publishes nothing, and `gate-hold` writes
     a hold naming the recovery, `shipmate plan`. `gate-hold` writes outside the
