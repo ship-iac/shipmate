@@ -131,3 +131,13 @@ def test_two_modes_at_once_are_refused(tmp_path):
     assert proc.returncode == 1
     assert proc.stdout == "::error::set at most one of deploy-results and hold-description\n"
     assert posted == []
+
+
+@bash_only
+def test_deploy_results_without_a_detect_result_are_refused(tmp_path):
+    """Mutation: drop the empty detect-result check -> a stopped-at-detect verdict is written and
+    the step passes."""
+    proc, posted = _run_step(tmp_path, deploy_results="success")
+    assert proc.returncode == 1
+    assert proc.stdout == "::error::deploy-results needs detect-result, which is empty\n"
+    assert posted == []

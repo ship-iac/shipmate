@@ -20,7 +20,7 @@ inputs:
     default: ""
   detect-result:
     description: >-
-      The deploy run's `detect` job result, read with deploy-results; any value but `success`
+      The deploy run's `detect` job result, required with deploy-results; any value but `success`
       writes a stopped-at-detect verdict, since nothing applied.
     required: false
     default: ""
@@ -63,6 +63,10 @@ runs:
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
         if [ -n "$DEPLOY_RESULTS" ] && [ -n "$HOLD_DESCRIPTION" ]; then
           echo "::error::set at most one of deploy-results and hold-description"
+          exit 1
+        fi
+        if [ -n "$DEPLOY_RESULTS" ] && [ -z "$DETECT_RESULT" ]; then
+          echo "::error::deploy-results needs detect-result, which is empty"
           exit 1
         fi
         if [ -n "$HOLD_DESCRIPTION" ]; then
