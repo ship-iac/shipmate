@@ -220,7 +220,8 @@ def test_an_unset_pull_request_number_refuses(tmp_path, monkeypatch):
 
 def test_the_publishing_step_hands_the_script_exactly_these_names():
     """The whole `env:` of the summary step running pending-checks. Mutations: drop
-    `SHIPMATE_PR_NUMBER` from it -- red; drop `SHIPMATE_APP_ID` -- red."""
+    `SHIPMATE_PR_NUMBER` from it -- red; drop `SHIPMATE_APP_ID` -- red; drop
+    `SHIPMATE_PLANNED_CELLS` -- red."""
     (step,) = [
         s
         for s in action_yaml("summary")["runs"]["steps"]
@@ -231,6 +232,8 @@ def test_the_publishing_step_hands_the_script_exactly_these_names():
         "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_PR_NUMBER": "${{ inputs.pr-number }}",
         "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
+        "SHIPMATE_PLAN_RESULT": "${{ inputs.plan-result }}",
+        "SHIPMATE_PLANNED_CELLS": "${{ inputs.planned-cells }}",
     }
 
 
@@ -426,7 +429,9 @@ def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monk
 
 
 def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monkeypatch, capsys):
-    """Mutation: emit `bodies(...)` without `unpublished` -> the published cell is printed."""
+    """The evidence count is every parsed cell, published or not. Mutations: emit `bodies(...)`
+    without `unpublished` -> the published cell is printed; count the unpublished bodies for
+    `cell_count` -> nothing is printed."""
     for slug, fingerprint in (("stacks-app", "1"), ("stacks-dns", "2")):
         _write_cell(
             tmp_path,
@@ -445,6 +450,118 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
     monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path))
     monkeypatch.setenv("SHIPMATE_CHECK_RUNS", str(listing))
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+    monkeypatch.setenv("SHIPMATE_PLAN_RESULT", "success")
+    monkeypatch.setenv("SHIPMATE_PLANNED_CELLS", "2")
     pc.main()
     printed = [json.loads(line)["name"] for line in capsys.readouterr().out.splitlines()]
     assert printed == ["apply / stacks/dns / dev-eu"]
+
+
+PLAN_FAILED = (
+    "plan incomplete (plan job: failure); fix the failing shipmate / <stack> / <env> plan check "
+    "before merging"
+)
+
+
+def _main(tmp_path, monkeypatch, *, cells=2, plan_result="success", planned="2", records=()):
+    """Run `main()` over `cells` changed cells and a check-run listing of `records`, with
+    `plan_result` and `planned` as the evidence; `planned=None` leaves the count unset."""
+    for i in range(cells):
+        _write_cell(
+            tmp_path / "cells",
+            "dev",
+            f"stacks-c{i}",
+            stack=f"stacks/c{i}",
+            environment="dev",
+            changed=True,
+            fingerprint="f" * 64,
+        )
+    listing = tmp_path / "apply-check-runs.jsonl"
+    listing.write_text("".join(f"{r}\n" for r in records), encoding="utf-8")
+    monkeypatch.setenv("SHIPMATE_HEAD_SHA", HEAD)
+    monkeypatch.setenv("SHIPMATE_CELLS_DIR", str(tmp_path / "cells"))
+    monkeypatch.setenv("SHIPMATE_CHECK_RUNS", str(listing))
+    monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
+    monkeypatch.setenv("SHIPMATE_PLAN_RESULT", plan_result)
+    if planned is None:
+        monkeypatch.delenv("SHIPMATE_PLANNED_CELLS", raising=False)
+    else:
+        monkeypatch.setenv("SHIPMATE_PLANNED_CELLS", planned)
+    pc.main()
+
+
+def test_a_failed_plan_job_publishes_nothing_and_warns(tmp_path, monkeypatch, capsys):
+    """Two cells summarized, but the plan job failed: a third cell may have no summary at all.
+    Mutation: delete the `evidence_gap` call in `pending-checks` (`gap = None`) -> both bodies are
+    printed and nothing is warned."""
+    _main(tmp_path, monkeypatch, plan_result="failure")
+    out, err = capsys.readouterr()
+    assert (out, err) == ("", f"::warning::this run publishes no apply check: {PLAN_FAILED}\n")
+
+
+def test_an_empty_run_with_no_count_publishes_nothing_silently(tmp_path, monkeypatch, capsys):
+    """Nothing is withheld, so nothing is warned. Mutation: print the warning whether or not a
+    body was withheld (drop `if emit:`) -> red."""
+    _main(tmp_path, monkeypatch, cells=0, planned="")
+    assert capsys.readouterr() == ("", "")
+
+
+def test_an_unset_planned_count_publishes_nothing(tmp_path, monkeypatch, capsys):
+    """No numeric default: a count nobody reported is not the number of cells this job parsed.
+    Mutation: default `SHIPMATE_PLANNED_CELLS` to the cell count (`os.environ.get(...,
+    str(len(parsed)))`) -> both bodies are printed."""
+    _main(tmp_path, monkeypatch, planned=None)
+    not_reported = (
+        "the planned cell count was not reported, so this run's evidence is unknown; re-plan "
+        "before merging"
+    )
+    assert capsys.readouterr() == (
+        "",
+        f"::warning::this run publishes no apply check: {not_reported}\n",
+    )
+
+
+def test_a_newer_run_refuses_before_the_evidence_check(tmp_path, monkeypatch, capsys):
+    """A run with an evidence gap still refuses over a newer run's checks with `NEWER_RUN`, so the
+    summary step exits without holding over them. Mutation: run the gap check before `unpublished`
+    (return on a gap first) -> `main()` returns, exit code 3 never raised."""
+    monkeypatch.setenv("GITHUB_RUN_ID", "10")
+    with pytest.raises(SystemExit) as exc_info:
+        _main(
+            tmp_path,
+            monkeypatch,
+            plan_result="failure",
+            records=[_record_line(1, "apply / stacks/c0 / dev", _ext("11"))],
+        )
+    refusal = (
+        "::error::plan run 11, newer than this run (10), published apply checks on this head "
+        "(apply / stacks/c0 / dev); this run publishes nothing over them. That run's summary "
+        "writes the gate; if it did not finish, re-plan this pull request (comment shipmate plan "
+        "or push).\n"
+    )
+    assert (exc_info.value.code, capsys.readouterr()) == (3, ("", refusal))
+
+
+@pytest.mark.parametrize(
+    ("plan_result", "planned", "held"),
+    [
+        ("success", "2", False),
+        ("success", "", True),
+        ("success", "two", True),
+        ("success", "3", True),
+        ("success", "1", True),
+        ("failure", "2", True),
+        ("cancelled", "2", True),
+        ("skipped", "2", True),
+        ("skipped", "0", True),
+    ],
+)
+def test_two_cells_publish_only_over_complete_evidence(
+    tmp_path, monkeypatch, capsys, plan_result, planned, held
+):
+    """A hand-written table, independent of `gate-state`'s own tests. Mutation: replace the
+    `evidence_gap` call with an inline `plan_result != "success"` -> the `("success", "")` row
+    publishes."""
+    _main(tmp_path, monkeypatch, plan_result=plan_result, planned=planned)
+    printed = [json.loads(line)["name"] for line in capsys.readouterr().out.splitlines()]
+    assert printed == ([] if held else ["apply / stacks/c0 / dev", "apply / stacks/c1 / dev"])

@@ -190,7 +190,12 @@ def _run(
     steps=(HOLD, CREATE),
     refresh_checks=None,
     head=HEAD_SHA,
+    plan_result="success",
+    planned_cells=None,
 ):
+    """`planned_cells=None` reports as many planned cells as the test wrote cell summaries."""
+    if planned_cells is None:
+        planned_cells = str(len(list((tmp_path / "cells").rglob("cell.json"))))
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
     write_python3_shim(bin_dir)
@@ -205,6 +210,8 @@ def _run(
         "SHIPMATE_HEAD_SHA": head,
         "SHIPMATE_PR_NUMBER": "7",
         "SHIPMATE_APP_ID": APP_ID,
+        "SHIPMATE_PLAN_RESULT": plan_result,
+        "SHIPMATE_PLANNED_CELLS": planned_cells,
         "HEAD_SHA": HEAD_SHA,
         "STATE": "pending",
         "DESCRIPTION": "waiting",
@@ -248,6 +255,17 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
     codes, calls, _ = _run(tmp_path)
     assert codes == [0, 0]
     assert calls == [STATUSES_LIST, APPLY_LIST, HOLD_POST, _check_post("a"), _check_post("b")]
+
+
+@bash_only
+def test_a_failed_plan_job_holds_and_publishes_no_check(tmp_path):
+    """Two cells summarized under a failed plan job: the hold is written and no apply check is
+    posted, so a pre-merge apply has nothing to apply. Mutation: skip the gap check in
+    `pending-checks` (`gap = None`) -> both check-runs POSTs follow the hold."""
+    _write_cells(tmp_path, "a", "b")
+    codes, calls, _ = _run(tmp_path, plan_result="failure")
+    assert codes == [0, 0]
+    assert calls == [STATUSES_LIST, APPLY_LIST, HOLD_POST]
 
 
 @bash_only

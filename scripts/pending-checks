@@ -21,6 +21,11 @@ JSONL file `SHIPMATE_CHECK_RUNS` (the App `SHIPMATE_APP_ID`'s, newest per name):
 summary job leaves alone a check an apply has completed, or is completing, since. A record from a
 newer plan run refuses before anything is emitted, so an older run never replaces a newer run's
 checks. That refusal alone exits `NEWER_RUN`: the summary step holds the gate on any other failure.
+
+A run whose evidence `gate-state.evidence_gap` rejects (a plan job that did not succeed, a missing
+or unparseable `SHIPMATE_PLANNED_CELLS`, or parsed cell summaries that do not match it) emits
+nothing, with a `::warning::` when that withholds a body. The check runs after the newer-run
+refusal, so an older run still exits `NEWER_RUN` rather than falling through to the hold.
 """
 
 import hashlib
@@ -33,6 +38,7 @@ import sys
 from _shipmate import _load, cell_summaries
 
 ag = _load("apply-gate")
+gs = _load("gate-state")
 NEWER_RUN = 3
 
 
@@ -119,7 +125,18 @@ def main():
     head = os.environ["SHIPMATE_HEAD_SHA"]
     cells = os.environ.get("SHIPMATE_CELLS_DIR", "cells")
     lines = pathlib.Path(os.environ["SHIPMATE_CHECK_RUNS"]).read_text(encoding="utf-8").splitlines()
-    for body in unpublished(bodies(cells, head), lines, os.environ.get("SHIPMATE_APP_ID", "")):
+    parsed = bodies(cells, head)
+    emit = unpublished(parsed, lines, os.environ.get("SHIPMATE_APP_ID", ""))
+    gap = gs.evidence_gap(
+        plan_result=os.environ.get("SHIPMATE_PLAN_RESULT", ""),
+        planned_cells=os.environ.get("SHIPMATE_PLANNED_CELLS", ""),
+        cell_count=len(parsed),
+    )
+    if gap:
+        if emit:
+            print(f"::warning::this run publishes no apply check: {gap}", file=sys.stderr)
+        return
+    for body in emit:
         print(json.dumps(body))
 
 

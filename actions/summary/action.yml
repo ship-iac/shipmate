@@ -112,6 +112,8 @@ runs:
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_PR_NUMBER: ${{ inputs.pr-number }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
+        SHIPMATE_PLAN_RESULT: ${{ inputs.plan-result }}
+        SHIPMATE_PLANNED_CELLS: ${{ inputs.planned-cells }}
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
