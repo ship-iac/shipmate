@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed
+
+- **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**
+
 ### Fixed
 
 - **The plan, both apply forms and the merge deploy refuse a Terramate stack ordering cycle, a stack ordered after itself included, when they read the run-graph and before any other ordering check, naming the stacks on it. The plan refuses even with no cell to plan, instead of failing each planned cell on the loop, and the deploy's refusal also lists the merge's pending cells. Every plan but a drift sweep now runs `terramate experimental run-graph` and refuses when it fails, a plan with no cell and one in a repository with no `needs` included.**

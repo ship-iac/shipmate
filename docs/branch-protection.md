@@ -32,7 +32,7 @@ resolves to:
 | `detect` failed with an `::error::` line (a refusal or a failed tool or API call) | `failure` — "detect failed: <the first line of the `::error::` refusal message>", cut to 140 characters | blocked |
 | `detect` failed without an `::error::` line (a fmt or codegen failure, a crash with none) | `failure` — "change detection did not succeed" | blocked |
 | A plan cell failed | `failure` — "plan incomplete" | blocked |
-| The plan job was cancelled | no final gate: the summary's publish hold (`failure` — "re-plan this pull request (comment shipmate plan or push): its plan run ended before writing a final gate") stays when it downloaded any cell summary; otherwise the head keeps its earlier gate | blocked by the hold; otherwise as the earlier gate allows (none: blocked, the required check never arrives) |
+| The plan job was cancelled | no final gate: the summary's publish hold (`failure` — "plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended") stays when it downloaded any cell summary; otherwise the head keeps its earlier gate | blocked by the hold; otherwise as the earlier gate allows (none: blocked, the required check never arrives) |
 | The plan summary was cancelled by a later gate writer on the same head | `failure` — "re-plan this pull request (comment shipmate plan or push): its plan summary was cancelled before it published" | blocked |
 | Plans succeeded, applies still pending | `pending` | blocked |
 | Nothing left to apply | `success` | allowed |

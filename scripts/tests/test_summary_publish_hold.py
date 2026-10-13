@@ -40,6 +40,10 @@ HOLD_DESCRIPTION = (
     "re-plan this pull request (comment shipmate plan or push): "
     "its plan run ended before writing a final gate"
 )
+PUBLISH_HOLD = (
+    "plan run 42 holds this gate while it publishes; "
+    "re-plan (comment shipmate plan or push) if that run has ended"
+)
 STATUSES_JQ = ".[] | {context, state, target_url}"
 APPLY_CHECKS_JQ = (
     ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}, external_id}"
@@ -78,6 +82,7 @@ def _status_post(state, description):
 
 
 HOLD_POST = _status_post("failure", HOLD_DESCRIPTION)
+PUBLISH_HOLD_POST = _status_post("failure", PUBLISH_HOLD)
 #: `gate-status refuse-newer`'s whole refusal, the one message of both steps' newer-run check.
 REFUSED = (
     f"::error::plan run 50 holds the gate of {HEAD_SHA} and is newer than this run ({RUN_ID}); "
@@ -248,13 +253,23 @@ def _run(
 
 @bash_only
 def test_the_hold_is_written_before_any_apply_check(tmp_path):
-    """`APPLY_LIST` pins the hold's whole projection. Mutations: move the hold below the publish
-    loop -> the hold follows the checks; drop the `refuse-newer` read -> the statuses listing is
-    missing; drop `external_id` from the projection -> an unexpected listing call."""
+    """`APPLY_LIST` pins the hold's whole projection, and `PUBLISH_HOLD_POST` the publish hold's
+    whole POST, `state=failure` included: a `pending` hold is what gate-refresh greens.
+    Mutations: move the hold below the publish loop -> the hold follows the checks; drop the
+    `refuse-newer` read -> the statuses listing is missing; drop `external_id` from the
+    projection -> an unexpected listing call; pass the publish hold `"$ended"`, or drop
+    `$GITHUB_RUN_ID` from its text -> every publish-hold test red; post `pending` from
+    `gate-status hold` -> every hold test red."""
     _write_cells(tmp_path, "a", "b")
     codes, calls, _ = _run(tmp_path)
     assert codes == [0, 0]
-    assert calls == [STATUSES_LIST, APPLY_LIST, HOLD_POST, _check_post("a"), _check_post("b")]
+    assert calls == [
+        STATUSES_LIST,
+        APPLY_LIST,
+        PUBLISH_HOLD_POST,
+        _check_post("a"),
+        _check_post("b"),
+    ]
 
 
 @bash_only
@@ -265,7 +280,7 @@ def test_a_failed_plan_job_holds_and_publishes_no_check(tmp_path):
     _write_cells(tmp_path, "a", "b")
     codes, calls, _ = _run(tmp_path, plan_result="failure")
     assert codes == [0, 0]
-    assert calls == [STATUSES_LIST, APPLY_LIST, HOLD_POST]
+    assert calls == [STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -274,7 +289,13 @@ def test_a_failed_check_post_fails_the_step_and_stops_publishing(tmp_path):
     _write_cells(tmp_path, "a", "b", "c")
     codes, calls, _ = _run(tmp_path, fail_check=2)
     assert codes == [0, 1]
-    assert calls == [STATUSES_LIST, APPLY_LIST, HOLD_POST, _check_post("a"), _check_post("b")]
+    assert calls == [
+        STATUSES_LIST,
+        APPLY_LIST,
+        PUBLISH_HOLD_POST,
+        _check_post("a"),
+        _check_post("b"),
+    ]
 
 
 @bash_only
@@ -294,7 +315,7 @@ def test_a_re_run_that_publishes_nothing_still_holds(tmp_path):
     checks = _lines(_record(1, "a", RUN_ID), _record(2, "b", RUN_ID, status="queued"))
     codes, calls, _ = _run(tmp_path, apply_checks=checks)
     assert codes == [0, 0]
-    assert calls == [STATUSES_LIST, APPLY_LIST, HOLD_POST]
+    assert calls == [STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -304,7 +325,7 @@ def test_a_failed_hold_write_publishes_no_check(tmp_path):
     _write_cells(tmp_path, "a", "b")
     codes, calls, _ = _run(tmp_path, status_post_rc=1)
     assert codes == [1]
-    assert calls == [STATUSES_LIST, APPLY_LIST, HOLD_POST]
+    assert calls == [STATUSES_LIST, APPLY_LIST, PUBLISH_HOLD_POST]
 
 
 @bash_only
@@ -322,7 +343,7 @@ def test_the_final_gate_write_replaces_the_hold_and_skips_the_refresh(tmp_path):
     assert calls == [
         STATUSES_LIST,
         APPLY_LIST,
-        HOLD_POST,
+        PUBLISH_HOLD_POST,
         _check_post("a"),
         STATUSES_LIST,
         _status_post("pending", "waiting"),
@@ -390,7 +411,8 @@ def test_a_newer_runs_hold_refuses_before_any_write(tmp_path, statuses):
 def test_a_pending_checks_failure_with_cells_holds(tmp_path):
     """Any pending-checks failure but the newer-run refusal holds: here a cell missing its
     `fingerprint`. Mutation: exit before the hold on every non-zero exit (`[ "$rc" = 3 ]` ->
-    `[ "$rc" != 0 ]`) -> no POST, and an earlier green stands over the unpublished cells."""
+    `[ "$rc" != 0 ]`) -> no POST, and an earlier green stands over the unpublished cells; pass
+    that hold the publish text -> red."""
     d = tmp_path / "cells" / "cell-summary.dev.stacks-a"
     d.mkdir(parents=True)
     cell = {"stack": "stacks/a", "environment": "dev", "changed": True}
@@ -401,8 +423,8 @@ def test_a_pending_checks_failure_with_cells_holds(tmp_path):
 
 @bash_only
 def test_a_failed_statuses_read_holds(tmp_path):
-    """Mutation: delete the `hold` call in the `rc != 0` branch after `refuse-newer` -> no
-    POST."""
+    """Mutations: delete the `hold` call in the `rc != 0` branch after `refuse-newer` -> no
+    POST; pass that hold the publish text -> red."""
     _write_cells(tmp_path, "a")
     codes, calls, _ = _run(tmp_path, statuses_rc=1)
     assert (codes, calls) == ([1], [STATUSES_LIST, HOLD_POST])
@@ -413,7 +435,8 @@ def test_a_failed_statuses_read_holds(tmp_path):
 def test_a_failed_check_listing_holds(tmp_path, slugs):
     """No cell summary is no proof of no work: a failed download leaves `cells/` empty over
     planned cells. Mutations: replace the failed listing's `hold; exit 1` with `true` -> no POST
-    in either case; restore the `[ -n "$cells" ]` condition on it -> `no-cells` posts nothing."""
+    in either case; restore the `[ -n "$cells" ]` condition on it -> `no-cells` posts nothing;
+    pass that hold the publish text -> both red."""
     _write_cells(tmp_path, *slugs)
     codes, calls, _ = _run(tmp_path, apply_rc=1)
     assert (codes, calls) == ([1], [STATUSES_LIST, APPLY_LIST, HOLD_POST])
@@ -422,7 +445,8 @@ def test_a_failed_check_listing_holds(tmp_path, slugs):
 @bash_only
 def test_a_pending_checks_failure_without_cells_holds(tmp_path):
     """A malformed check-runs line fails `pending-checks` with no cell summary downloaded.
-    Mutation: guard that hold with `[ -n "$cells" ]` -> no POST."""
+    Mutations: guard that hold with `[ -n "$cells" ]` -> no POST; pass that hold the publish
+    text -> red."""
     codes, calls, _ = _run(tmp_path, apply_checks="not json\n")
     assert (codes, calls) == ([1], [STATUSES_LIST, APPLY_LIST, HOLD_POST])
 

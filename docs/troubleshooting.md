@@ -925,13 +925,15 @@ all. A run whose cell count is zero for any of those reasons must not claim
 nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
 never apply. The summary job also holds the gate while it publishes the apply
-checks, and a plan run that ended before its final gate write (a failed summary
-job, or a cancelled plan job after the summary downloaded a cell summary) leaves
-that hold, reading "its plan run ended before writing a final gate". The summary
-job also holds the gate when it cannot read the head's gate statuses or apply
+checks, reading "plan run <id> holds this gate while it publishes; re-plan
+(comment shipmate plan or push) if that run has ended". That hold stays when the
+run ends before its final gate write (a failed or cancelled summary job, or a
+cancelled plan job after the summary downloaded a cell summary). The summary job
+also holds the gate when it cannot read the head's gate statuses or apply
 checks, or cannot build the checks to publish (a cell summary missing a key),
 whether or not it downloaded a cell summary: a failed download leaves none over
-planned cells. Its final write refuses, writing nothing and keeping that hold,
+planned cells. That hold reads "re-plan this pull request (comment shipmate plan
+or push): its plan run ended before writing a final gate". Its final write refuses, writing nothing and keeping that hold,
 when a newer plan run of the same head holds the gate by then. A plan run
 whose `summary` job was cancelled before it ran, because a later gate writer on
 the same head queued behind it (`CONTRACT.md` §Comment-ops, "The aggregate
