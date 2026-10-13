@@ -933,14 +933,15 @@ also holds the gate when it cannot read the head's gate statuses or apply
 checks, or cannot build the checks to publish (a cell summary missing a key),
 whether or not it downloaded a cell summary: a failed download leaves none over
 planned cells. That hold reads "re-plan this pull request (comment shipmate plan
-or push): its plan run ended before writing a final gate". Its final write refuses, writing nothing and keeping that hold,
-when a newer plan run of the same head holds the gate by then. A plan run
-whose `summary` job was cancelled before it ran, because a later gate writer on
-the same head queued behind it (`CONTRACT.md` §Comment-ops, "The aggregate
-gate"), holds the gate from its `gate-hold` job, reading "its plan summary was
-cancelled before it published". That hold can land after another run's summary
-greened the head, closing a gate over work already applied. Every one of these
-holds clears the same way: comment `shipmate plan` or push.
+or push): its plan run ended before writing a final gate". Its final write
+refuses, writing nothing and keeping the gate as it stands, when a newer plan
+run of the same head holds the gate by then. A plan run whose `summary` job was
+cancelled before it ran, because a later gate writer on the same head queued
+behind it (`CONTRACT.md` §Comment-ops, "The aggregate gate"), holds the gate
+from its `gate-hold` job, reading "its plan summary was cancelled before it
+published". That hold can land after another run's summary greened the head,
+closing a gate over work already applied. Every one of these holds clears the
+same way: comment `shipmate plan` or push.
 A run held for its plan job or its cell count also publishes no apply check.
 Checks an earlier plan run of the same head published stay; on a head with none,
 a `shipmate apply` replies "no reviewed plan for the current PR head".

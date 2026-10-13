@@ -2577,8 +2577,10 @@ def test_detect_warns_about_a_stack_that_lost_its_last_env_tag(monkeypatch, tmp_
 def test_the_lost_tag_warning_keeps_a_percent_in_a_stack_path(monkeypatch, tmp_path, capsys):
     """A stack path is a directory name and can hold `%`: escaped as workflow-command data, the
     warning shows it verbatim. `env-config`'s three warnings go through the same escaper but
-    have no such case: every name they print (environment, `needs` predecessor, workload) is
-    held to the lowercase tag charset first.
+    have no such case: `validate_structure` runs first, and its `_check_entries` holds every name
+    they print to the lowercase tag charset (entry names through `check_env_name`, `needs`
+    through `validate_env_name_list`, workloads through `_check_workloads`' `_is_workload`), and
+    any refusal there raises before the warnings print.
 
     Mutation: drop `command_data` from the last-tag warning's `print` -- red."""
     _run_main(
