@@ -882,8 +882,12 @@ def _assert_cycle_refusal(exc, tmp_path, stacks):
 )
 def test_run_graph_deps_refuses_a_cycle(monkeypatch, shape, stacks):
     """The fixtures are the raw Terramate 0.17.1 captures `test_waves.py` documents
-    (`terramate experimental run-graph --label stack.dir` to a file, not a TTY). This covers
-    `apply-detect` and `deploy-detect` too: their doubles stub `run_graph_deps`.
+    (`terramate experimental run-graph --label stack.dir` to a file, not a TTY). `offcycle`
+    refuses although `c` is on no loop: the read covers the whole tree. `apply-detect` and
+    `deploy-detect` reach this function through `bm.run_graph_deps`, which
+    `test_apply_detect.py::test_main_reads_the_run_graph_through_build_matrix`,
+    `test_apply_all_detect.py::test_main_refuses_a_cycle_before_an_inversion` and
+    `test_deploy_detect.py::test_main_refuses_a_cycle_before_an_inversion` pin.
 
     Mutation: drop the `stack_levels` call from `run_graph_deps` (every shape returns)."""
     monkeypatch.setattr(bm, "_run", lambda args: _dot(shape) if args == _RUN_GRAPH_ARGV else "")
@@ -955,24 +959,6 @@ def test_a_plan_with_no_cell_refuses_a_cycle(monkeypatch, tmp_path):
     _assert_cycle_refusal(exc, tmp_path, "a, b")
 
 
-def test_a_plan_refuses_a_cycle_off_its_cells(monkeypatch, tmp_path):
-    """The one cell is on `c`, which the `a`/`b` loop does not reach: the read covers the whole
-    tree. No mutation reddens this alone, since `run_graph_deps` has no cells in scope; it
-    documents the whole-tree read. Fixture as `test_run_graph_deps_refuses_a_cycle`."""
-    with pytest.raises(SystemExit) as exc:
-        _run_main(
-            monkeypatch,
-            tmp_path,
-            _PR_ENV,
-            cells=(("c", "dev-eu"),),
-            head_sha="cafe1234",
-            table=_ONE_ENV,
-            tag_map={"c": ["env/dev-eu"]},
-            dot=_dot("cycle-offcycle"),
-        )
-    _assert_cycle_refusal(exc, tmp_path, "a, b")
-
-
 _DNS_PLATFORM_LOOP = (
     "digraph  {\n\t\n"
     '\tn1[label="/stacks/dns"];\n'
@@ -1006,7 +992,9 @@ def test_a_cycle_refuses_before_an_inversion(monkeypatch, tmp_path):
 
 def test_a_drift_sweep_reads_no_run_graph(monkeypatch, tmp_path):
     """A sweep applies nothing, and refusing a cycle there would blank drift for every stack off
-    the loop. Mutation: drop `not sweep` from the read's guard in `_detect`."""
+    the loop. Mutation: drop `not sweep` from the read's guard in `_detect`; it also reddens
+    `test_a_drift_sweep_does_not_refuse_an_inverted_edge`, which proves no inversion refuses a
+    sweep, while this one proves a sweep never reads the run-graph at all."""
 
     def boom():
         raise AssertionError("a drift sweep read the run-graph")

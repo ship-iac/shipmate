@@ -185,7 +185,9 @@ _CYCLE_SHAPES = [
 
 
 def _cycle_fixture(shape):
-    return (_dir / "tests" / "fixtures" / f"run-graph-cycle-{shape}.dot").read_text()
+    return (_dir / "tests" / "fixtures" / f"run-graph-cycle-{shape}.dot").read_text(
+        encoding="utf-8"
+    )
 
 
 @pytest.mark.parametrize(("shape", "deps", "_stacks"), _CYCLE_SHAPES)

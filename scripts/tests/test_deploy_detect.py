@@ -111,6 +111,9 @@ def _cell(stack, env="dev-eu"):
     return {"stack": stack, "environment": env, "workload": ""}
 
 
+_RUN_GRAPH_ARGV = ["terramate", "experimental", "run-graph", "--label", "stack.dir"]
+
+
 def _run_main(
     tmp_path,
     monkeypatch,
@@ -125,6 +128,7 @@ def _run_main(
     stacks=None,
     head=HEAD,
     tag_reads=None,
+    dot=None,
 ):
     """main() over the merged pull request's head, with every GitHub and Terramate call
     stubbed. `_merged_head` is stubbed rather than fed, so the only `gh api` paths collected
@@ -138,6 +142,9 @@ def _run_main(
     `order` is folded into the stubbed table rather than stubbed on `wv`: the ordering map is
     a field of the mapping this path loads, so a double on the reader would mask a caller
     that stopped passing the table. One entry is appended to `reads` per `read_table` call.
+
+    `dot`, run-graph text, keeps `run_graph_deps` real and answers its Terramate call; `deps`
+    otherwise replaces the run-graph.
 
     Returns the parsed GITHUB_OUTPUT."""
     out = tmp_path / "out.txt"
@@ -153,6 +160,8 @@ def _run_main(
     jsonl = "\n".join(json.dumps(c) for c in checks)
 
     def _run(args):
+        if dot is not None and args == _RUN_GRAPH_ARGV:
+            return dot
         # Every terramate call must be stubbed, because CI installs uv alone: a real
         # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
@@ -193,7 +202,9 @@ def _run_main(
     # module lands in `urls`.
     monkeypatch.setattr(dd.ad, "_run", _run)
     monkeypatch.setattr(dd.bm, "_run", _run)
-    monkeypatch.setattr(dd.bm, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
+    stubbed = deps or {c["stack"]: set() for c in cells}
+    graph = dd.bm.run_graph_deps if dot is not None else lambda: stubbed
+    monkeypatch.setattr(dd.bm, "run_graph_deps", graph)
     dd.main()
     return github_outputs(out)
 
@@ -738,6 +749,42 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
         "both live in this merged commit, so a re-run refuses again; open a new pull request "
         "that makes the fix and changes every listed stack (any edit `terramate list "
         "--changed` marks); its plan and deploy apply them."
+    )
+
+
+_DNS_PLATFORM_LOOP = (
+    "digraph  {\n\t\n"
+    '\tn1[label="/dns"];\n'
+    '\tn2[label="/platform"];\n'
+    '\tn1->n2[color="red"];\n'
+    '\tn2->n1[color="red"];\n'
+    "\t\n}\n"
+)
+
+
+def test_main_refuses_a_cycle_before_an_inversion(tmp_path, monkeypatch):
+    """`platform` and `dns` are each `after` the other, and dev-us needs dev-eu, so the pair
+    also inverts. The deploy reads the run-graph through `bm.run_graph_deps`, whose sort
+    refuses before `refuse_inversions`. The DOT is hand-built for these two stacks in the shape
+    of the raw Terramate 0.17.1 captures; `_run` answers the run-graph argv, so
+    `run_graph_deps` is real.
+
+    Mutation: `deps = wv.parse_dot(bm._run([...run-graph argv...]))` for `main`'s
+    `bm.run_graph_deps()` -- the inversion message appears instead."""
+    cells = [_cell("platform", "dev-eu"), _cell("dns", "dev-us")]
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=cells,
+            checks=[_apply_check(c["stack"], c["environment"]) for c in cells],
+            order={"dev-us": ["dev-eu"]},
+            dot=_DNS_PLATFORM_LOOP,
+        )
+    assert str(exc_info.value) == (
+        "::error::stack ordering cycle through dns, platform: a stack ordered after itself, "
+        "directly or through other stacks, has no first wave. Remove one `after` or `before` "
+        "entry on that loop in the stack configuration."
     )
 
 

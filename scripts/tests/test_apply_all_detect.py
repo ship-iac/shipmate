@@ -206,6 +206,14 @@ def _membership_double(tree, tags, calls):
     return _record
 
 
+_RUN_GRAPH_ARGV = ["terramate", "experimental", "run-graph", "--label", "stack.dir"]
+
+
+def _answering_run_graph(run, dot):
+    """`run`, except that the run-graph argv answers `dot`."""
+    return lambda args: dot if args == _RUN_GRAPH_ARGV else run(args)
+
+
 def _run_main(
     tmp_path,
     monkeypatch,
@@ -223,6 +231,7 @@ def _run_main(
     reads=None,
     membership=None,
     deps=None,
+    dot=None,
 ):
     """main() with an empty SHIPMATE_ENV, which is bare_main(), over the head's apply checks,
     with everything the script reaches from GitHub or Terramate stubbed. Defaults to one
@@ -234,7 +243,8 @@ def _run_main(
     would mask a caller that stopped passing the table. One entry is appended to `reads` per
     `read_table` call. Each `env_membership` call appends its `(args, kwargs)` to `membership`
     when one is given. `deps` replaces the run-graph, which defaults to the tree's stacks with
-    no edges, and `tags` the tag map, which defaults to no tags for each of them."""
+    no edges, and `tags` the tag map, which defaults to no tags for each of them. `dot`,
+    run-graph text, keeps `run_graph_deps` real and answers its Terramate call instead."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -270,9 +280,11 @@ def _run_main(
 
     tree = tree or {e: ["stacks/app"] for e in envs}
     deps = deps or {p: set() for ps in tree.values() for p in ps}
-    monkeypatch.setattr(aad.bm, "run_graph_deps", lambda: deps)
-    monkeypatch.setattr(aad, "_run", _run)
-    monkeypatch.setattr(aad.bm, "_run", _run)
+    graph = aad.bm.run_graph_deps if dot is not None else lambda: deps
+    monkeypatch.setattr(aad.bm, "run_graph_deps", graph)
+    runner = _answering_run_graph(_run, dot) if dot is not None else _run
+    monkeypatch.setattr(aad, "_run", runner)
+    monkeypatch.setattr(aad.bm, "_run", runner)
     monkeypatch.setattr(
         aad.bm,
         "env_membership",
@@ -1022,6 +1034,41 @@ def test_main_refuses_a_cell_after_a_held_upstream_on_a_later_env_level(tmp_path
         "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
         "in that chain on the default branch, or retag the stacks so the edge stays inside "
         "environments that order it."
+    )
+
+
+_DNS_PLATFORM_LOOP = (
+    "digraph  {\n\t\n"
+    '\tn1[label="/stacks/dns"];\n'
+    '\tn2[label="/stacks/platform"];\n'
+    '\tn1->n2[color="red"];\n'
+    '\tn2->n1[color="red"];\n'
+    "\t\n}\n"
+)
+
+
+def test_main_refuses_a_cycle_before_an_inversion(tmp_path, monkeypatch):
+    """`stacks/platform` and `stacks/dns` are each `after` the other, and dev-us needs dev-eu,
+    so the pair also inverts. The bare form reads the run-graph through `bm.run_graph_deps`,
+    whose sort refuses before `refuse_inversions`. The DOT is hand-built for these two stacks
+    in the shape of the raw Terramate 0.17.1 captures; `_run` answers the run-graph argv, so
+    `run_graph_deps` is real.
+
+    Mutation: `deps = wv.parse_dot(bm._run([...run-graph argv...]))` for `bare_main`'s
+    `bm.run_graph_deps()` -- the inversion message appears instead."""
+    with pytest.raises(SystemExit) as exc_info:
+        _cross_env(
+            tmp_path,
+            monkeypatch,
+            [_apply_check("stacks/platform", "dev-eu"), _apply_check("stacks/dns", "dev-us")],
+            order={"dev-us": ["dev-eu"]},
+            decision="APPROVED",
+            dot=_DNS_PLATFORM_LOOP,
+        )
+    assert str(exc_info.value) == (
+        "::error::stack ordering cycle through stacks/dns, stacks/platform: a stack ordered "
+        "after itself, directly or through other stacks, has no first wave. Remove one `after` "
+        "or `before` entry on that loop in the stack configuration."
     )
 
 
