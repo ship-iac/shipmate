@@ -169,7 +169,7 @@ def _run_main(
         # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
         if urls is not None:
-            urls.append(args[-1])
+            urls.append(next(a for a in args if a.startswith("repos/")))
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: head)

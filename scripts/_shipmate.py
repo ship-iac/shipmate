@@ -8,7 +8,8 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 Also holds the subprocess runner, its ``::error::`` wrapper and ``gh api`` reader for the CI
 scripts, the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
 share, and the UTF-8 switch for their console output. It also holds the pull-request number
-check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the ruleset,
+check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the head-SHA check
+and the one check-runs listing every reader of a head's checks uses, the ruleset,
 environment and ``CODEOWNERS`` readers and the names ``doctor`` and ``onboard`` share, reads
 the per-cell ``cell.json`` summaries, builds this run's page link and joins a capped list of
 names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both
@@ -45,6 +46,9 @@ APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 #: the run-time scripts under the same literal name (`test_detect_app_scoping.py`).
 APP_ID_VAR = "SHIPMATE_APP_ID"
 _PR_NUMBER = re.compile(r"[1-9][0-9]{0,9}")
+_HEAD_SHA = re.compile(r"[0-9a-f]{40}")
+#: The default projection of `check_runs`: each check-run object whole.
+CHECK_RUNS_JQ = ".check_runs[]"
 
 
 def gate_check(rules, gate):
@@ -213,6 +217,40 @@ def is_pr_number(value):
     Bounded and anchored, with no leading zero, because callers bind it into an API path.
     """
     return _PR_NUMBER.fullmatch(value) is not None
+
+
+def is_head_sha(value):
+    """Whether `value` is a str of exactly 40 lowercase hex characters."""
+    return isinstance(value, str) and _HEAD_SHA.fullmatch(value) is not None
+
+
+def validate_head_sha(value, source="SHIPMATE_HEAD_SHA"):
+    """Refuse a head SHA that is not 40 lowercase hex characters, so a malformed value
+    cannot retarget the gh api URLs built from it (e.g. `/`, `?`, `..`). `source` names
+    where the value came from in the refusal. Safe to echo — not a secret."""
+    if not is_head_sha(value):
+        raise SystemExit(f"::error::{source} must be a 40-char lowercase hex SHA (got: {value!r})")
+
+
+def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None):
+    """Every check-run on `sha` as `gh api --jq` output: one `jq` projection per line.
+
+    `sha` is refused before any call unless it is a head SHA. `filter=all`, because a
+    re-created check name keeps its older runs and `apply-gate` judges the newest per name, so
+    every reader must see the same set. `--paginate --jq` prints one JSON object per line
+    across every page, so a head with more than 100 checks drops none. `run` defaults to
+    `_run`."""
+    validate_head_sha(sha, "head SHA")
+    return (run or _run)(
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{repo}/commits/{sha}/check-runs?filter=all&per_page=100",
+            "--jq",
+            jq,
+        ]
+    )
 
 
 def named(items, cap):

@@ -43,7 +43,7 @@ because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
 import json
 import os
 
-from _shipmate import _load
+from _shipmate import _load, validate_head_sha
 
 ad = _load("apply-detect")
 # Aliases, not loads: unlock-detect and apply-detect share one build-matrix instance.
@@ -56,7 +56,7 @@ def main():
     env = os.environ["SHIPMATE_ENV"]
     head = os.environ["SHIPMATE_HEAD_SHA"]
 
-    ad.validate_head_sha(head)
+    validate_head_sha(head)
     ad.validate_env(env)
 
     stacks_by_env, tags_by_stack = bm.env_membership(all_stacks=True, check_names=False)

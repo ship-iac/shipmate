@@ -269,7 +269,7 @@ def _run_main(
         # Every terramate call must be stubbed, because CI installs uv alone: a real
         # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
-        requested.append(args[-1])
+        requested.append(next(a for a in args if a.startswith("repos/")))
         return jsonl
 
     tree = tree or {e: ["stacks/app"] for e in envs}

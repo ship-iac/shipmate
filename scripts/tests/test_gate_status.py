@@ -276,16 +276,16 @@ def test_post_and_hold_send_this_whole_argv(tmp_path, args, argv):
         ),
         (
             ("hold", "A" * 40, "x"),
-            f"::error::head SHA must be 40 lowercase hex characters (got: {'A' * 40!r})\n",
+            f"::error::head SHA must be a 40-char lowercase hex SHA (got: {'A' * 40!r})\n",
         ),
         (
             ("refresh", SHA[:39]),
-            f"::error::head SHA must be 40 lowercase hex characters (got: {SHA[:39]!r})\n",
+            f"::error::head SHA must be a 40-char lowercase hex SHA (got: {SHA[:39]!r})\n",
         ),
     ],
 )
 def test_a_bad_sha_is_refused_before_any_call(tmp_path, args, error):
-    """Mutation: drop the `_SHA.fullmatch` check -> the stub records a call."""
+    """Mutation: drop the `validate_head_sha` call in `main` -> the stub records a call."""
     proc, calls = _run(tmp_path, *args)
     assert (proc.returncode, proc.stderr, calls) == (1, error, [])
 

@@ -63,10 +63,12 @@ from _shipmate import (
     GATE_CONTEXT,
     _load,
     approval_rules,
+    check_runs,
     code_owner_review,
     current_run_url,
     first_codeowners,
     gate_check,
+    is_head_sha,
     load_workflow_text,
     review_count,
     run,
@@ -2315,16 +2317,7 @@ def _harvest(repo, head, app_id):
     lines, ids, failed = [], [], False
     try:
         with _gh_token(app_token):
-            listing = run(
-                [
-                    "gh",
-                    "api",
-                    "--paginate",
-                    f"repos/{repo}/commits/{head}/check-runs?filter=all&per_page=100",
-                    "--jq",
-                    _CHECK_RUNS_JQ,
-                ]
-            )
+            listing = check_runs(repo, head, _CHECK_RUNS_JQ, run=run)
         lines = listing.splitlines()
     except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor degrades, never fails
         _degrade(e, "check-runs listing failed; doctor reports settings probes only")
@@ -2406,7 +2399,7 @@ def check_ids():
     repo = os.environ["GITHUB_REPOSITORY"]
     app_id = os.environ.get("SHIPMATE_APP_ID", "")
     head = _head_sha(repo)
-    if not re.fullmatch(r"[0-9a-f]{40}", head):
+    if not is_head_sha(head):
         print("::warning::could not read the PR head SHA; doctor reports settings probes only")
         for name, value in (("head_sha", ""), ("plan_run_ids", ""), ("harvest_failed", True)):
             _write_step_output(name, value)

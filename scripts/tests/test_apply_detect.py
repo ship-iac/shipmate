@@ -259,7 +259,7 @@ def _stub_apply(monkeypatch, deps, checks, dot=None):
 
     def _run(args):
         assert args[0] == "gh", args
-        urls.append(args[-1])
+        urls.append(next(a for a in args if a.startswith("repos/")))
         return "\n".join(json.dumps(c) for c in checks)
 
     runner = _run

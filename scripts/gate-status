@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Read and write the `shipmate / gate` commit status: the one script that does either.
+"""Read and write the `shipmate / gate` commit status: the one script that does either. Its
+`checks` subcommand serves `_shipmate.check_runs` to the bash sites.
 
     gate-status newest <sha>                     print `<state> <run id>` of the newest gate
     gate-status newer-hold <sha>                 print the run id of a newer run's hold
@@ -21,11 +22,10 @@ import os
 import re
 import sys
 
-from _shipmate import GATE_CONTEXT, _load, _run, current_run_url
+from _shipmate import GATE_CONTEXT, _load, _run, check_runs, current_run_url, validate_head_sha
 
 ag = _load("apply-gate")
 
-_SHA = re.compile(r"[0-9a-f]{40}")
 _RUN_ID = re.compile(r"/actions/runs/([0-9]+)$")
 #: The fields `apply-gate` judges.
 _CHECK_RUNS_JQ = ".check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}}"
@@ -131,16 +131,7 @@ def refresh(sha):
 
     `filter=all`: a re-created check name keeps its old runs, and `apply-gate` judges the newest
     per name, so a duplicate created mid-apply stays open until its own plan is applied."""
-    out = _run(
-        [
-            "gh",
-            "api",
-            "--paginate",
-            f"repos/{_repo()}/commits/{sha}/check-runs?filter=all&per_page=100",
-            "--jq",
-            _CHECK_RUNS_JQ,
-        ]
-    )
+    out = check_runs(_repo(), sha, _CHECK_RUNS_JQ)
     runs = ag.app_runs(out.splitlines(), os.environ.get("SHIPMATE_APP_ID", ""))
     if ag.verdict(runs) == "pending":
         open_ = sorted(set(ag.latest_by_name(runs)) - ag.done_names(runs))
@@ -189,10 +180,9 @@ def main(argv):
             f"::error::usage: gate-status {'|'.join(_COMMANDS)} <sha> ... (got {argv})"
         )
     sha = args[0]
-    if not _SHA.fullmatch(sha):
-        if cmd == "deploy" and not sha:
-            raise SystemExit("::error::detect produced no head SHA; deploy cannot gate")
-        raise SystemExit(f"::error::head SHA must be 40 lowercase hex characters (got: {sha!r})")
+    if cmd == "deploy" and not sha:
+        raise SystemExit("::error::detect produced no head SHA; deploy cannot gate")
+    validate_head_sha(sha, "head SHA")
     _COMMANDS[cmd][1](*args)
 
 
