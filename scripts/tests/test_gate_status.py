@@ -127,7 +127,8 @@ def test_deploy_verdict(results, expected):
 
 @pytest.mark.parametrize("detect", ["failure", "cancelled"])
 def test_a_deploy_stopped_at_detect_says_so(detect):
-    """A refused deploy's detect writes the head, then fails; its env-levels skip.
+    """Any detect result but `success` names itself in the description, whatever the env-level
+    results.
 
     Mutation: drop the `detect != "success"` branch -> "deploy incomplete"."""
     assert gs.deploy_verdict(detect, f"{detect},skipped,skipped,skipped,skipped") == (
