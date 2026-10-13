@@ -20,9 +20,9 @@ RUNS_OK = {"apply / stacks/app / dev-eu": "555"}
 #: The refusal when the head names no plan run at all, hand-written: it is the
 #: sentence a commenter reads on a PR, not an implementation detail.
 NO_PLAN_REASON = (
-    "no reviewed plan for the current PR head: no apply check on it names a plan run. Re-plan "
-    "this head (comment `shipmate plan` or push), then `shipmate apply` again; a green "
-    "`shipmate / gate` means there is nothing to apply."
+    "no reviewed plan for the current PR head: no apply check on it names a plan run. "
+    "`shipmate / gate` on this pull request says why and what to do; a green gate means there "
+    "is nothing to apply."
 )
 UNGATED_DEV = frozenset({"dev-eu"})
 #: The refusal an apply on a draft gets, hand-written: it is the sentence a
@@ -263,9 +263,9 @@ def test_a_head_whose_apply_checks_name_a_plan_run_authorizes():
 
 
 def test_no_apply_check_naming_a_plan_run_refuses_with_the_shipped_sentence():
-    """One remedy, true whatever the gate reads: a re-plan publishes the checks this head is
-    missing, and a docs-only head (green gate, no apply check) has nothing to apply. Mutation:
-    drop the green-gate clause in `authorize` -- red."""
+    """No remedy of its own: the gate's description carries the one for this head's state, and a
+    docs-only head (green gate, no apply check) has nothing to apply. Mutation: drop the
+    green-gate clause in `authorize` -- red."""
     ok, reason = _decide(plan_runs={})
     assert (ok, reason) == (False, NO_PLAN_REASON)
 

@@ -212,9 +212,8 @@ def decide(
     if not plan_runs:
         return False, (
             "no reviewed plan for the current PR head: no apply check on it names a "
-            "plan run. Re-plan this head (comment `shipmate plan` or push), then "
-            "`shipmate apply` again; a green `shipmate / gate` means there is nothing "
-            "to apply."
+            "plan run. `shipmate / gate` on this pull request says why and what to do; "
+            "a green gate means there is nothing to apply."
         )
     return True, ""
 
