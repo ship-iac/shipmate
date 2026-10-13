@@ -1270,6 +1270,13 @@ never read again; its `summary` turns the merged head's `shipmate / gate` to
 `failure` ("deploy stopped at detect (failure), nothing applied; see the run"). Do
 not re-run the refused deploy: it checks out the same commit and refuses again.
 
+The same gate description appears when `detect` failed for another reason after
+it named the head, such as a GitHub API error while listing the head's check
+runs. Read the `detect` job's `::error::` annotation: this refusal starts with
+`deploy aborted:`, while an API error starts with `command failed` and quotes
+the `gh api` call and its HTTP error. An API error is not a refusal: re-run the
+deploy.
+
 ### The post-merge deploy was dropped as superseded
 
 A pull request merged, the `deploy` job for that merge was cancelled before it
