@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 import pytest
-from _detect_fixtures import RUN_GRAPH_ARGV, run_graph_capture, spy_env_config
+from _detect_fixtures import answering_run_graph, run_graph_capture, spy_env_config
 from _loader import action_yaml, github_outputs, load_script, record_calls
 
 bm = load_script("build-matrix")
@@ -500,8 +500,6 @@ def _fake_run(head_sha, diffs, diff_calls, dot=None):
     the diff argv. `dot`, when given, answers the run-graph argv."""
 
     def fake_run(args):
-        if dot is not None and args == RUN_GRAPH_ARGV:
-            return dot
         if args[:2] != ["git", "diff"]:
             return f"{head_sha}\n"
         diff_calls.append(args)
@@ -509,7 +507,7 @@ def _fake_run(head_sha, diffs, diff_calls, dot=None):
             f"diff --git a/{s}/stack.tm.hcl b/{s}/stack.tm.hcl\n{text}" for s, text in diffs.items()
         )
 
-    return fake_run
+    return fake_run if dot is None else answering_run_graph(fake_run, dot)
 
 
 def _run_main(
@@ -878,9 +876,7 @@ def test_run_graph_deps_refuses_a_cycle(monkeypatch, shape, stacks):
     detect tests pin that those detects reach this function.
 
     Mutation: drop the `stack_levels` call from `run_graph_deps` (every shape returns)."""
-    monkeypatch.setattr(
-        bm, "_run", lambda args: run_graph_capture(shape) if args == RUN_GRAPH_ARGV else ""
-    )
+    monkeypatch.setattr(bm, "_run", answering_run_graph(lambda args: "", run_graph_capture(shape)))
     with pytest.raises(SystemExit) as exc:
         bm.run_graph_deps()
     assert exc.value.code == _CYCLE.format(stacks)
@@ -890,7 +886,7 @@ def test_run_graph_deps_returns_the_acyclic_graph(monkeypatch):
     """`run-graph-stacks.dot` is the stacks flavor's graph. Mutation: `return
     wv.stack_levels(deps)` from `run_graph_deps` (the levels list comes back)."""
     monkeypatch.setattr(
-        bm, "_run", lambda args: run_graph_capture("stacks") if args == RUN_GRAPH_ARGV else ""
+        bm, "_run", answering_run_graph(lambda args: "", run_graph_capture("stacks"))
     )
     assert bm.run_graph_deps() == {
         "stacks/app": {"stacks/auth", "stacks/workers"},

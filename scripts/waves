@@ -26,12 +26,14 @@ Bumping it needs, per new level N:
   actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line.
 
 A module, never a program: the detects, `env-config` and `apply-comment` `_load` it.
-It runs nothing on import -- it only defines functions, one exception class and constants.
+It runs nothing on import -- it only defines functions and constants.
 """
 
 import json
 import re
 from graphlib import CycleError, TopologicalSorter
+
+from _shipmate import StackCycle
 
 MAX_WAVES = 8
 # Cap on env-DAG depth. COUPLED to fixed GHA job and output slots; see the module docstring.
@@ -75,10 +77,6 @@ def levels(deps):
         for n in ready:
             ts.done(n)
     return out
-
-
-class StackCycle(SystemExit):
-    """`stack_levels`' cycle refusal: a `SystemExit`, typed so a caller can add a remedy."""
 
 
 def stack_levels(deps):

@@ -551,9 +551,11 @@ def test_the_earliest_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
 #: The refusal's fixed remedy, hand-written.
 _REMEDY = (
     "Open a new pull request that retags each stranded stack and changes every other listed "
-    "stack (any edit that `terramate list --changed` marks, such as a comment line); its plan "
-    "and deploy apply the current default branch for all of them, this merged change "
-    "included. If an untag was deliberate, apply that stranded change by hand instead of "
+    "stack (any edit that `terramate list --changed` marks, such as a comment line). It plans "
+    "the current default branch for all of them, this merged change included, and its cells "
+    "are applied before merge under a required gate (`shipmate apply`, and `shipmate apply "
+    "<env>` for an `explicit` environment), or by its deploy otherwise. If an untag was "
+    "deliberate, apply that stranded change by hand instead of "
     "retagging; the pull request still changes every listed stack, and with none listed no "
     "pull request is needed. Re-running this deploy checks out the same commit and refuses "
     "again. This deploy's apply checks are never read again and stay open on the merged pull "
@@ -754,7 +756,9 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
         "`needs` from the default branch and applies these cells. A fix to tags or `after`: "
         "both live in this merged commit, so a re-run refuses again; open a new pull request "
         "that makes the fix and changes every listed stack (any edit `terramate list "
-        "--changed` marks); its plan and deploy apply them."
+        "--changed` marks); its cells are applied before merge under a required gate "
+        "(`shipmate apply`, and `shipmate apply <env>` for an `explicit` environment), or by "
+        "its deploy otherwise."
     )
 
 
@@ -764,15 +768,13 @@ _AB_CELLS = [_cell("a", "dev-eu"), _cell("b", "dev-us")]
 def test_main_refuses_a_cycle_before_an_inversion_naming_the_pending_cells(tmp_path, monkeypatch):
     """`a` and `b` are each `after` the other, and dev-us needs dev-eu, so `a / dev-eu` after
     `b / dev-us` also inverts. The deploy reads the run-graph through `bm.run_graph_deps`,
-    whose sort refuses before `refuse_inversions`; the cycle message stays first, so the gate
-    text is the plan's. `run_graph_capture("cycle-two")` is the raw capture; `_run` answers the
-    run-graph argv, so `run_graph_deps` is real.
+    whose sort refuses before `refuse_inversions`, and the plan's message comes first.
+    `run_graph_capture("cycle-two")` is the raw capture; `_run` answers the run-graph argv, so
+    `run_graph_deps` is real.
 
     Mutations: `deps = wv.parse_dot(bm._run([...run-graph argv...]))` for the read in `main`
     (the inversion message appears); `bm.run_graph_deps()` for `run_graph_deps(pending)` in
-    `main` (no cells, no remedy); drop `{listed}` from the refusal (no cells); `except
-    wv.StackCycle` for `except bm.wv.StackCycle` (deploy-detect's own waves module is another
-    class, so the remedy is lost)."""
+    `main` (no cells listed)."""
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -785,24 +787,17 @@ def test_main_refuses_a_cycle_before_an_inversion_naming_the_pending_cells(tmp_p
     assert str(exc_info.value) == (
         "::error::stack ordering cycle through a, b: a stack ordered after itself, directly or "
         "through other stacks, has no first wave. Remove one `after` or `before` entry on that "
-        "loop in the stack configuration."
-        " This deploy applies nothing, so none of these cells of this merge is applied: "
-        "a / dev-eu, b / dev-us."
-        " The loop lives in this merged commit, so a re-run refuses again, and so does every "
-        "later deploy until a fix merges. Open a new pull request that removes one `after` or "
-        "`before` entry on the loop and changes the stack of every listed cell (any edit "
-        "`terramate list --changed` marks), and apply its cells with `shipmate apply` before "
-        "merging it. This deploy's apply checks are never read again and stay open on the "
-        "merged pull request."
+        "loop in the stack configuration; pending on this merge: a / dev-eu, b / dev-us; see "
+        "`stack ordering cycle through <stacks>` in docs/troubleshooting.md."
     )
 
 
-def test_a_cycle_refusal_with_no_pending_cell_lists_none(tmp_path, monkeypatch):
+def test_a_cycle_refusal_with_no_pending_cell_is_the_plans(tmp_path, monkeypatch):
     """Both cells were applied before the merge, so the deploy has no pending cell, and the
-    loop still refuses it. Capture as in the test above.
+    loop still refuses it with the plan's message unchanged. Capture as in the test above.
 
-    Mutation: `if True` for `if cells` in deploy-detect's `run_graph_deps` (an empty list
-    appears)."""
+    Mutation: drop `if not pending: raise` from deploy-detect's `run_graph_deps` (an empty
+    list is appended)."""
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -815,21 +810,15 @@ def test_a_cycle_refusal_with_no_pending_cell_lists_none(tmp_path, monkeypatch):
         "::error::stack ordering cycle through a, b: a stack ordered after itself, directly or "
         "through other stacks, has no first wave. Remove one `after` or `before` entry on that "
         "loop in the stack configuration."
-        " The loop lives in this merged commit, so a re-run refuses again, and so does every "
-        "later deploy until a fix merges. Open a new pull request that removes one `after` or "
-        "`before` entry on the loop and changes the stack of every listed cell (any edit "
-        "`terramate list --changed` marks), and apply its cells with `shipmate apply` before "
-        "merging it. This deploy's apply checks are never read again and stay open on the "
-        "merged pull request."
     )
 
 
 def test_a_failed_run_graph_read_refuses_unchanged(monkeypatch):
-    """Only the cycle refusal gains the cell list and remedy; a failed Terramate call keeps
-    its own message.
+    """Only the cycle refusal gains the cell list; a failed Terramate call keeps its own
+    message.
 
-    Mutation: `except SystemExit` for `except bm.wv.StackCycle` in deploy-detect's
-    `run_graph_deps` (the cycle remedy is appended)."""
+    Mutation: `except SystemExit` for `except StackCycle` in deploy-detect's `run_graph_deps`
+    (the cell list is appended)."""
 
     def fail(args):
         assert args == RUN_GRAPH_ARGV, args

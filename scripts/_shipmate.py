@@ -152,6 +152,12 @@ def run(args, secrets=(), stdin=None):
     return p.stdout.decode("utf-8", "replace")
 
 
+class StackCycle(SystemExit):
+    """`waves.stack_levels`' refusal of a Terramate stack ordering cycle: a `SystemExit`, typed
+    so `deploy-detect` can append the cells it leaves pending. Homed here so every module that
+    loads `waves` raises and catches one class."""
+
+
 def _run(args):
     """stdout of `args` through `run`, its failure re-raised as an ::error:: annotation.
     `run` stays unprefixed for the hand-run scripts that share it.
