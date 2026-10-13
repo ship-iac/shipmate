@@ -139,18 +139,17 @@ def refuse_inversions(pending, order, deps, tag_map):
 
 
 def run_graph_deps(pending):
-    """`bm.run_graph_deps()`. A stack ordering cycle refuses with the plan's message; with any
-    `pending` cell, which the refusal leaves unapplied, it also lists them and names the
+    """`bm.run_graph_deps()`. A stack ordering cycle refuses with the plan's message, then the
+    `pending` cells, which the refusal leaves unapplied, when there are any, then the
     troubleshooting entry that holds the remedy."""
     try:
         return bm.run_graph_deps()
     except StackCycle as e:
-        if not pending:
-            raise
         cells = ", ".join(sorted(f"{c['stack']} / {c['environment']}" for c in pending))
+        listed = f"; pending on this merge: {cells}" if cells else ""
         raise SystemExit(
-            f"{e.code.removesuffix('.')}; pending on this merge: {cells}; see "
-            "`stack ordering cycle through <stacks>` in docs/troubleshooting.md."
+            f"{e.code.removesuffix('.')}{listed}; see `stack ordering cycle through <stacks>` "
+            "in docs/troubleshooting.md."
         ) from e
 
 

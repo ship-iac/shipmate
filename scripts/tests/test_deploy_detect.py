@@ -792,12 +792,12 @@ def test_main_refuses_a_cycle_before_an_inversion_naming_the_pending_cells(tmp_p
     )
 
 
-def test_a_cycle_refusal_with_no_pending_cell_is_the_plans(tmp_path, monkeypatch):
+def test_a_cycle_refusal_with_no_pending_cell_lists_none(tmp_path, monkeypatch):
     """Both cells were applied before the merge, so the deploy has no pending cell, and the
-    loop still refuses it with the plan's message unchanged. Capture as in the test above.
+    loop still refuses it, pointing to the remedy. Capture as in the test above.
 
-    Mutation: drop `if not pending: raise` from deploy-detect's `run_graph_deps` (an empty
-    list is appended)."""
+    Mutations: `if True` for `if cells` in deploy-detect's `run_graph_deps` (an empty list is
+    appended); drop the troubleshooting pointer (red here and in the test above)."""
     with pytest.raises(SystemExit) as exc_info:
         _run_main(
             tmp_path,
@@ -809,13 +809,14 @@ def test_a_cycle_refusal_with_no_pending_cell_is_the_plans(tmp_path, monkeypatch
     assert str(exc_info.value) == (
         "::error::stack ordering cycle through a, b: a stack ordered after itself, directly or "
         "through other stacks, has no first wave. Remove one `after` or `before` entry on that "
-        "loop in the stack configuration."
+        "loop in the stack configuration; see `stack ordering cycle through <stacks>` in "
+        "docs/troubleshooting.md."
     )
 
 
 def test_a_failed_run_graph_read_refuses_unchanged(monkeypatch):
-    """Only the cycle refusal gains the cell list; a failed Terramate call keeps its own
-    message.
+    """Only the cycle refusal gains the cell list and pointer; a failed Terramate call keeps
+    its own message.
 
     Mutation: `except SystemExit` for `except StackCycle` in deploy-detect's `run_graph_deps`
     (the cell list is appended)."""
