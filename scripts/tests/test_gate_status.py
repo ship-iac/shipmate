@@ -297,8 +297,8 @@ def _run_url(run):
 def _newer(run):
     return (
         f"::error::plan run {run} holds the gate of {SHA} and is newer than this run (999); this "
-        "run writes nothing. Re-plan this pull request (comment shipmate plan or push) if that run "
-        "did not finish.\n"
+        "run stops without writing its final gate. Re-plan this pull request (comment shipmate "
+        "plan or push) if that run did not finish.\n"
     )
 
 
@@ -392,10 +392,11 @@ def _checks_argv(jq):
 @bash_only
 def test_checks_writes_the_listing_bytes_as_utf8_with_lf(tmp_path):
     """Bash sites redirect this stdout into a file they parse, and check names are
-    consumer-controlled, so the bytes must be the listing's own: UTF-8, LF, nothing appended.
+    consumer-controlled, so stdout must be UTF-8 with LF line ends and nothing appended.
 
-    Mutations: write with `print(out, end="")` -> on Windows `\n` becomes `\r\n` and the bytes
-    differ; append a `print()` -> a trailing newline."""
+    Mutations: write with `print(out, end="")` -> red on Windows only, where `\n` becomes `\r\n`
+    and the code page re-encodes (on Linux the bytes match); append a `print()` -> a trailing
+    newline."""
     listing = _lines(
         json.dumps({"name": "apply / é / dev — x"}, ensure_ascii=False), json.dumps({"name": "b"})
     )
@@ -439,3 +440,17 @@ def test_checks_fails_unannotated_when_the_listing_fails(tmp_path):
     assert proc.stderr.startswith("command failed (1): gh api --paginate ")
     assert not [ln for ln in proc.stderr.splitlines() if ln.startswith("::error::")]
     assert calls == [_checks_argv(".check_runs[]")]
+
+
+@bash_only
+def test_checks_refuses_a_malformed_sha_unannotated(tmp_path):
+    """A degrading site's warning must stay the only annotation on its passing step, a malformed
+    head included. Mutation: drop the `checks` branch in `main` -> `validate_head_sha`'s
+    `::error::` line."""
+    proc, calls = _run(tmp_path, "checks", "A" * 40, ".check_runs[]", checks_jq=".check_runs[]")
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        1,
+        "",
+        f"head SHA must be a 40-char lowercase hex SHA (got: {'A' * 40!r})\n",
+        [],
+    )

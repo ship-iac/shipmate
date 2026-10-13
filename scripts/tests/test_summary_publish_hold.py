@@ -81,8 +81,8 @@ HOLD_POST = _status_post("failure", HOLD_DESCRIPTION)
 #: `gate-status refuse-newer`'s whole refusal, the one message of both steps' newer-run check.
 REFUSED = (
     f"::error::plan run 50 holds the gate of {HEAD_SHA} and is newer than this run ({RUN_ID}); "
-    "this run writes nothing. Re-plan this pull request (comment shipmate plan or push) if that "
-    "run did not finish.\n"
+    "this run stops without writing its final gate. Re-plan this pull request (comment shipmate "
+    "plan or push) if that run did not finish.\n"
 )
 
 # Records every call's argv one line per argument, then the stdin of an `--input -` call, then a
