@@ -1036,9 +1036,9 @@ no cell to plan refuses too.
 
 A loop can still reach the default branch, for example when two pull requests
 each add one half of it (each head plans without a cycle, and the second merge
-closes it), or through a direct push. The deploy of that commit then refuses
-and applies nothing. When the merge left cells pending, the annotation appends
-`; pending on this merge: <stack> / <env>, ...`. The loop now lives on the
+closes it). The deploy of that merge then refuses, applies nothing, and points
+to this entry; when the merge left cells pending, the annotation lists them
+after `pending on this merge:`. The loop now lives on the
 default branch, so a re-run refuses again, every later deploy refuses until a
 fix lands, and every plan whose head carries the loop refuses.
 
