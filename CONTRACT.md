@@ -1311,7 +1311,9 @@ its own actionable rejection reason:
   records that run at plan time). The records are read from that head's own
   check runs, so no plan run reached here can belong to another head and none is
   compared against one: a head new commits landed on carries no apply checks
-  yet, names no plan run, and is refused — re-plan required.
+  yet, names no plan run, and is refused — re-plan required. A plan run with
+  incomplete evidence publishes no apply check (§Plan comment), so a head whose
+  only plan runs are such runs is in the same state.
 
 `undiverged` is only the comment-time half of shipmate's exact-plan rule.
 The cell that applies re-verifies the reviewed `.otplan` against current state,
@@ -2236,6 +2238,17 @@ by a refresh, unless this run published a queued apply check, which cannot be
 done yet: when every apply check is already done (an apply's refresh ran before
 this write), the summary greens the gate itself. A failed refresh, or one
 refused by a hold, warns and leaves the `pending` standing.
+
+A run with incomplete evidence publishes no apply check at all, changed or not: a
+plan job whose result is neither `success` nor `skipped`, or `skipped` while cells
+were planned; a planned count that was not reported; or a parsed cell count that
+disagrees with it. The gate holds every such run except one whose plan job was
+cancelled, for which it writes nothing and leaves any earlier hold standing. A
+plan job skipped with no cell planned is the empty matrix and is not held.
+`gate-state` holds the one rule for both decisions. The newer-run refusal above
+runs first, before any cell summary is read. Apply checks an earlier plan run of
+the same head published stay, and a pre-merge `shipmate apply` applies those; on
+a head with none it names no plan run and is refused (§Comment-ops, "undiverged").
 
 ## Apply result comment
 

@@ -212,8 +212,9 @@ def decide(
     if not plan_runs:
         return False, (
             "no reviewed plan for the current PR head: no apply check on it names a "
-            "plan run. Plan this head (push; a re-run alone will not clear a plan from "
-            "before an engine re-pin), then `shipmate apply` again."
+            "plan run. If `shipmate / gate` is red, its description says why; if it is "
+            "green, there is nothing to apply; otherwise wait for this head's plan run, "
+            "or start one (comment `shipmate plan` or push), then `shipmate apply` again."
         )
     return True, ""
 

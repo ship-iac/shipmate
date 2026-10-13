@@ -83,6 +83,26 @@ def _evidence_gap(*, cell_count, planned):
     return None
 
 
+def evidence_gap(*, plan_result, planned_cells, cell_count):
+    """A hold description when this plan run's evidence is not trustworthy, else None.
+
+    The one predicate the gate and the apply-check publisher share: `decide` holds the gate on
+    it, and `pending-checks` publishes no apply check on it. `planned_cells` is the count as
+    reported (a string, possibly empty); `cell_count` is the number of cell summaries parsed.
+    The plan-job checks run before the evidence check, so a plan job that broke or never ran is
+    reported as a plan problem rather than shadowed by the evidence shortfall it also produces.
+    """
+    planned = _as_int(planned_cells)
+    if planned is None:
+        return (
+            "the planned cell count was not reported, so this run's evidence is "
+            "unknown; re-plan before merging"
+        )
+    return _plan_gap(plan_result=plan_result, planned=planned) or _evidence_gap(
+        cell_count=cell_count, planned=planned
+    )
+
+
 def _detect_gap(detect_result, refusal):
     """The hold description for a `detect` that did not succeed.
 
@@ -131,22 +151,7 @@ def decide(
         return "failure", _detect_gap(detect_result, refusal), _HOLD
     if plan_result == "cancelled":
         return None, "", _HOLD
-    planned = _as_int(planned_cells)
-    if planned is None:
-        return (
-            "failure",
-            (
-                "the planned cell count was not reported, so this run's evidence is "
-                "unknown; re-plan before merging"
-            ),
-            _HOLD,
-        )
-    # `or`, so the plan-job checks still run before the evidence check: a plan
-    # job that broke or never ran is reported as a plan problem rather than
-    # shadowed by the evidence-shortfall message it also produces.
-    gap = _plan_gap(plan_result=plan_result, planned=planned) or _evidence_gap(
-        cell_count=cell_count, planned=planned
-    )
+    gap = evidence_gap(plan_result=plan_result, planned_cells=planned_cells, cell_count=cell_count)
     if gap:
         return "failure", gap, _HOLD
     if pending:
@@ -155,7 +160,9 @@ def decide(
             "one or more stacks are waiting to be applied; merge is blocked until applies complete",
             _POST,
         )
-    if planned == 0:
+    # Safe only below the gap check: a None gap means `cell_count` equals the planned count,
+    # so moving this branch above it would green a run nobody reported a count for.
+    if cell_count == 0:
         return "success", "no pending applies for this PR", _NOTHING
     return "success", "no pending applies for this PR", _POST
 

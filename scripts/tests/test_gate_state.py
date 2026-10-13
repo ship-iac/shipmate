@@ -284,3 +284,72 @@ def test_main_reads_the_on_demand_flag(tmp_path, monkeypatch, capsys):
         "description": _DETECT_SKIPPED_DESCRIPTION,
         "comment_mode": "hold",
     }
+
+
+_NOT_REPORTED = (
+    "the planned cell count was not reported, so this run's evidence is unknown; "
+    "re-plan before merging"
+)
+
+
+@pytest.mark.parametrize(
+    ("plan_result", "planned_cells", "cell_count", "description"),
+    [
+        ("success", "2", 2, None),
+        (
+            "failure",
+            "2",
+            1,
+            (
+                "plan incomplete (plan job: failure); fix the failing "
+                "shipmate / <stack> / <env> plan check before merging"
+            ),
+        ),
+        (
+            "success",
+            "2",
+            1,
+            (
+                "re-plan this pull request (comment shipmate plan or push): "
+                "2 cell(s) planned but 1 cell summary/summaries read"
+            ),
+        ),
+        (
+            "success",
+            "1",
+            2,
+            (
+                "re-plan this pull request (comment shipmate plan or push): "
+                "1 cell(s) planned but 2 cell summary/summaries read"
+            ),
+        ),
+        (
+            "skipped",
+            "2",
+            0,
+            "the plan job did not run for 2 planned cell(s); re-plan before merging",
+        ),
+        ("skipped", "0", 0, None),
+        ("success", "", 0, _NOT_REPORTED),
+        ("success", "x", 0, _NOT_REPORTED),
+        (
+            "cancelled",
+            "1",
+            1,
+            (
+                "plan incomplete (plan job: cancelled); fix the failing "
+                "shipmate / <stack> / <env> plan check before merging"
+            ),
+        ),
+    ],
+)
+def test_evidence_gap_is_the_one_evidence_rule(plan_result, planned_cells, cell_count, description):
+    """Mutations: drop the not-an-integer branch in `evidence_gap` -- the `""` and `"x"` rows
+    (they still hold, as "None cell(s) planned"); `!=` -> `<` in `_evidence_gap` -- the
+    `("success", "1", 2)` row."""
+    assert (
+        gate_state.evidence_gap(
+            plan_result=plan_result, planned_cells=planned_cells, cell_count=cell_count
+        )
+        == description
+    )
