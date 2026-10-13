@@ -411,9 +411,11 @@ def test_a_pending_checks_failure_without_cells_holds(tmp_path):
 
 @bash_only
 def test_a_malformed_head_fails_the_hold_step_before_any_call(tmp_path):
-    """The later steps run only after this one, so it is the head check for all of them.
+    """The later steps run only after this one, so it is the head check for all of them. Both
+    `refuse-newer` and the `hold` its failure calls refuse the head, so two `::error::` lines.
     Mutation: skip `validate_head_sha` in `gate-status`'s `main` -> the stub records a statuses
     call."""
     _write_cells(tmp_path, "a")
-    codes, calls, _ = _run(tmp_path, head="A" * 40)
-    assert (codes, calls) == ([1], [])
+    codes, calls, stderr = _run(tmp_path, head="A" * 40)
+    refusal = f"::error::head SHA must be a 40-char lowercase hex SHA (got: {'A' * 40!r})\n"
+    assert (codes, calls, stderr) == ([1], [], refusal * 2)

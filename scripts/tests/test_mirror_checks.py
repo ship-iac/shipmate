@@ -230,9 +230,10 @@ def test_the_action_declares_the_on_demand_input_it_decides_on():
 
 
 #: Answers each POST `gh` call, recording every body it was handed and refusing the first.
-#: `python3` stands in for `gate-status checks`, printing `$FAKE_LISTING` and returning
-#: `$FAKE_LISTING_RC` without reading stdin, and for mirror-checks otherwise. Bash resolves a
-#: function before searching PATH, so this needs no fake executables.
+#: `python3` stands in for `gate-status checks`: it refuses any argv but the Mirror step's whole
+#: one, else prints `$FAKE_LISTING` and returns `$FAKE_LISTING_RC` without reading stdin. Any
+#: other `python3` call is mirror-checks. Bash resolves a function before searching PATH, so this
+#: needs no fake executables.
 _GH_STUB = """
 gh() {
   case "$*" in
@@ -244,6 +245,10 @@ gh() {
 }
 python3() {
   if [[ "$1" == */scripts/gate-status ]]; then
+    want="$GITHUB_ACTION_PATH/../../scripts/gate-status checks $GITHUB_SHA .check_runs[]"
+    if [ "$*" != "$want" ]; then
+      printf 'unexpected gate-status call: %s\\n' "$*" >&2 ; return 1
+    fi
     printf '%s' "${FAKE_LISTING:-}"
     return "${FAKE_LISTING_RC:-0}"
   fi
@@ -256,7 +261,8 @@ python3() {
 def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
     """The listing is unordered, so abandoning the remaining bodies drops an arbitrary suffix of
     them, which can be exactly the failed cell the mirror exists to put on the pull request. The
-    step still exits 0."""
+    step still exits 0. Mutations: list `$SHIPMATE_HEAD_SHA` instead of `$GITHUB_SHA`, or change
+    the `.check_runs[]` projection -> the stub refuses the listing and nothing is posted."""
     posted = tmp_path / "posted"
     proc = run_step(
         tmp_path,
@@ -284,8 +290,8 @@ def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
 @bash_only
 def test_a_failed_listing_warns_and_mirrors_nothing(tmp_path):
     """Reviewer-facing only, so a failed listing degrades rather than failing the job before
-    `Create/refresh gate`. Mutation: drop the `if !` around the listing -> `set -e` ends the step
-    with exit 1."""
+    `Create/refresh gate`, and adds no annotation of its own. Mutation: drop the `if !` around
+    the listing -> `set -e` ends the step with exit 1."""
     posted = tmp_path / "posted"
     proc = run_step(
         tmp_path,
@@ -302,12 +308,12 @@ def test_a_failed_listing_warns_and_mirrors_nothing(tmp_path):
             "POSTED": str(posted),
         },
     )
-    assert (proc.returncode, proc.stdout, posted.exists()) == (
+    assert (proc.returncode, proc.stdout, proc.stderr, posted.exists()) == (
         0,
         (
             "::warning::could not list this run's own check runs; the per-cell plan checks were "
             "not mirrored onto the pull request head\n"
         ),
+        "",
         False,
     )
-    assert not [ln for ln in proc.stderr.splitlines() if ln.startswith("::error::")]
