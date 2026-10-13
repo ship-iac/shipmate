@@ -132,7 +132,8 @@ def test_a_deploy_stopped_at_detect_says_so(detect, level):
     results.
 
     Mutations: drop the `detect != "success"` branch -> "deploy incomplete"; add
-    `and "success" not in tokens[1:]` to it -> the `success` rows say "deploy incomplete"."""
+    `and "success" not in results.split(",")[1:]` to it -> the `success` rows say "deploy
+    incomplete"."""
     assert gs.deploy_verdict(detect, f"{detect},{level},{level},{level},{level}") == (
         "failure",
         f"deploy stopped at detect ({detect}), nothing applied; see the run",
