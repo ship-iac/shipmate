@@ -778,15 +778,15 @@ no stack tags is unused and warns.
 ### What the diagnostics can and cannot see
 
 The unused-entry warning, and its sibling naming a listed workload that no stack
-in its environment tags, need every stack's environment membership, and they
-never trigger a whole-tree scan of their own. So they fire only where a
-whole-tree scan already happened: every drift sweep, `unlock`, and a bare
-`shipmate apply`. The plan, deploy and targeted-apply paths see a
-changed set or a workset and stay silent.
+in its environment tags, are computed over every stack's environment membership
+on the sweep paths only: every drift sweep, `unlock`, and a bare
+`shipmate apply`. The plan, deploy and targeted-apply paths read every stack's
+tags too, but build membership over a changed set or a workset, compute neither
+warning, and stay silent.
 
 **A `needs` predecessor is checked the same way.** It names an environment
 rather than declaring one, and a predecessor matching no tag warns by name under
-the same whole-tree rule, naming what it therefore fails to do: it is fail-open,
+the same rule, on the same paths, naming what it therefore fails to do: it is fail-open,
 and orders nothing. A predecessor needs no entry of its own, so it warns rather
 than refuses. `explicit` and `gated` sit on the entry itself, so a flag on a
 misspelled entry is named by the unused-entry warning above. The charset refusal
@@ -794,9 +794,10 @@ catches only names no environment name could take; a plain misspelling reaches
 these warnings instead.
 
 **A typo'd table key therefore does not surface on the pull request that
-introduces it.** It surfaces on the next run of any drift sweep. Refusals are
-unaffected — they need only the environments already in the matrix, so a tagged
-environment missing from the table still refuses on every path.
+introduces it.** It surfaces on the next drift sweep, `unlock` or bare
+`shipmate apply`. Refusals are unaffected — they need only the environments
+already in the matrix, so a tagged environment missing from the table still
+refuses on every path.
 
 ## State backend
 
@@ -1544,8 +1545,11 @@ check/status/comment/issue that crosses a workflow-run boundary:
   hold). The three `summary` jobs run in one job-level concurrency group,
   `shipmate-gate-<head sha>` with `cancel-in-progress: false`, shared across
   runs and called workflows, so one of them at a time reads and writes a head's
-  gate. An empty head SHA (a failed `facts` or `detect`) keys the group on the
-  run id instead, so that job shares no group. GitHub keeps one pending job per
+  gate. An empty head SHA (a failed plan `facts`, or a deploy `detect` that
+  failed before it validated the merged head) keys the group on the run id
+  instead, so that job shares no group. A deploy `detect` writes the head before
+  any refusal past head validation, so a refused deploy's `summary` writes
+  `failure` on the merged head. GitHub keeps one pending job per
   group, so a third arrival cancels the pending one. What each eviction costs:
   - a pending plan `summary`: its run publishes nothing, and `gate-hold` writes
     a hold naming the recovery, `shipmate plan`. `gate-hold` writes outside the
@@ -1553,9 +1557,10 @@ check/status/comment/issue that crosses a workflow-run boundary:
     `summary` that evicted its own: its hold can land after that `summary`
     greened the head, a closed gate over applied work that `shipmate plan`
     reopens;
-  - a pending apply `summary`: the later writer refreshes the gate, and the
-    evicted run posts no apply comment, so a failed wave in it shows only on the
-    red run;
+  - a pending apply `summary`: the evicted run posts no apply comment, so its
+    results and its waiting cells show only in the run itself. Its waiting
+    cells keep their apply checks pending, so the gate cannot turn green until
+    they apply;
   - a pending deploy `summary`: the merged head keeps its last gate; re-run that
     deploy, as for any superseded deploy.
 

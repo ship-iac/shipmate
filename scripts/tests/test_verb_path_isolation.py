@@ -223,13 +223,15 @@ def test_each_envlevel_job_runs_on_every_apply_dispatch():
 
 
 def test_both_summary_steps_run_on_every_apply_dispatch():
+    """A gate refresh that finds a hold once every check is done, or hits an API error, fails
+    its step; the result comment still posts the run's results. Mutation: delete the comment
+    step's `if:` (the default `success()` skips it) -- red."""
     steps = _job(APPLY, "summary")["steps"]
     assert len(steps) == 2, f"summary no longer has exactly two steps: {len(steps)}"
     conditions = [s.get("if") for s in steps]
-    assert conditions == [None, None], (
-        f"summary's steps carry `if:` {conditions!r} -- the only condition they ever had "
-        "was the unlock skip, and a gate refresh or result comment that silently stops "
-        "running leaves the developer no feedback and the gate unrefreshed"
+    assert conditions == [None, "${{ !cancelled() }}"], (
+        f"summary's steps carry `if:` {conditions!r} -- a gate refresh or result comment "
+        "that silently stops running leaves the developer no feedback and the gate unrefreshed"
     )
 
 

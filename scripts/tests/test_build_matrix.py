@@ -829,7 +829,7 @@ def test_a_drift_sweep_does_not_refuse_an_inverted_edge(monkeypatch, tmp_path):
 
 
 def test_a_plan_reads_the_tag_metadata_once(monkeypatch, tmp_path):
-    """The real `compute_cells` scans the tree and the inversion check runs over its cell.
+    """The real `compute_cells` scans the tree, and the plan reads no second tag map.
 
     Mutation: drop the `tag_map` pass-through from `compute_cells` to `env_membership` --
     two reads."""
@@ -847,6 +847,34 @@ def test_an_empty_plan_reads_no_run_graph(monkeypatch, tmp_path):
 
     outputs, _ = _run_inverted(monkeypatch, tmp_path, _PR_ENV, (), graph=boom)
     assert outputs["empty"] == "true"
+
+
+@pytest.mark.parametrize(
+    "environments",
+    [
+        {"dev-eu": {}, "dev-us": {}},
+        {"dev-eu": {}, "dev-us": {"needs": []}},
+    ],
+    ids=["no-needs", "empty-needs"],
+)
+def test_a_plan_without_needs_reads_no_run_graph(monkeypatch, tmp_path, environments):
+    """Every env sits on one level, so no `after` edge can invert. Mutations: drop the
+    `any(order.values())` guard (both red); replace it with `order` (`empty-needs` red)."""
+
+    def boom():
+        raise AssertionError("read the run-graph for a table that orders no environment")
+
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        cells=(("stacks/platform", "dev-eu"), ("stacks/dns", "dev-us")),
+        head_sha="cafe1234",
+        table={"layout": "folder", "environments": environments},
+        tag_map=_INVERTED_TAGS,
+        graph=boom,
+    )
+    assert outputs["count"] == "2"
 
 
 def test_a_stated_head_equal_to_the_checkout_is_planned(monkeypatch):

@@ -18,6 +18,12 @@ inputs:
       refresh. At most one of deploy-results and hold-description may be set.
     required: false
     default: ""
+  detect-result:
+    description: >-
+      The deploy run's `detect` job result, required with deploy-results; any value but `success`
+      writes a stopped-at-detect verdict, since nothing applied.
+    required: false
+    default: ""
   hold-description:
     description: >-
       Writes a `failure` gate with this description instead of a refresh; leads with the
@@ -50,6 +56,7 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         DEPLOY_RESULTS: ${{ inputs.deploy-results }}
+        DETECT_RESULT: ${{ inputs.detect-result }}
         HOLD_DESCRIPTION: ${{ inputs.hold-description }}
       run: |
         set -euo pipefail
@@ -58,10 +65,14 @@ runs:
           echo "::error::set at most one of deploy-results and hold-description"
           exit 1
         fi
+        if [ -n "$DEPLOY_RESULTS" ] && [ -z "$DETECT_RESULT" ]; then
+          echo "::error::deploy-results needs detect-result, which is empty"
+          exit 1
+        fi
         if [ -n "$HOLD_DESCRIPTION" ]; then
           python3 "$gate_status" hold "$HEAD_SHA" "$HOLD_DESCRIPTION"
         elif [ -n "$DEPLOY_RESULTS" ]; then
-          python3 "$gate_status" deploy "$HEAD_SHA" "$DEPLOY_RESULTS"
+          python3 "$gate_status" deploy "$HEAD_SHA" "$DETECT_RESULT" "$DEPLOY_RESULTS"
         else
           rc=0
           out=$(python3 "$gate_status" refresh "$HEAD_SHA") || rc=$?

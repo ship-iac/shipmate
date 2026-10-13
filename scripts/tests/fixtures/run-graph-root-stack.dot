@@ -1,0 +1,7 @@
+digraph  {
+	
+	n1[label="/"];
+	n2[label="/child"];
+	n2->n1;
+	
+}

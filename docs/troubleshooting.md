@@ -626,7 +626,7 @@ branch's** copy of the file — that is the only copy execution reads.
 | `environment <env> names identity <name>, whose roles vary by workload, and lists no workloads` | the identity's roles depend on the workload tag, so the entry must list the workloads it admits: `workloads: […]` |
 | `environment <env> lists workload <w>, and identities.<name>.aws.<field> has no <w> entry` | a listed workload has no role (or, for a role name, no account) in that map. Add the entry, or remove the workload from the list |
 | `<n> cell(s) carry a workload tag their environment's workloads list does not name` | each named stack's `workload/<name>` tag is outside its environment's `workloads`. Retag the stack, or add the workload to the list on the default branch in a pull request of its own first; the plan reads the default branch's table, so the same pull request cannot fix it |
-| `environments.<env>.workloads lists <w>, which no stack in <env> tags` | a warning, on the paths that scan the whole tree. The workload was listed ahead of the branch that tags it, or its last tag was dropped: tag a stack with it, or remove it from the list once the branch dropping its last tag has merged. An environment no stack tags at all gets the unused-entry warning instead |
+| `environments.<env>.workloads lists <w>, which no stack in <env> tags` | a warning, on drift, `unlock` and a bare `shipmate apply` only. The workload was listed ahead of the branch that tags it, or its last tag was dropped: tag a stack with it, or remove it from the list once the branch dropping its last tag has merged. An environment no stack tags at all gets the unused-entry warning instead |
 | `environments.<name> is not an environment name` or `environments.<name> carries the environment suffix` | an `environments.<name>` entry whose name no stack tag can carry: Terramate refuses an uppercase letter in a tag, and the name is the bare logical env name, never `<env>-plan` or `<env>-apply`. Rename the entry to the name in the stacks' `env/<name>` tags |
 | `... names 'shipmate-engine', the engine's own environment` | an entry, a `needs` item, a stack's `env/*` tag or a dispatched environment names `shipmate-engine`, with or without a `-plan`/`-apply` suffix. A `shared: true` entry of that name would bind the engine's own environment, which holds the App private key, so the name is refused as a table entry, a `needs` item, a stack tag and a dispatched environment. Rename the entry, retag the stack, or comment another environment |
 | `<key> references GitHub variable <NAME>, which is not set` | no repository or organization variable of that name reaches the repository. Set it with `gh variable set <NAME>`; the next run reads it, no pull request needed. A variable on a cell's `<env>-plan`, `<env>-apply` or shared `<env>` Environment is never read, and on GitHub Free an organization variable does not reach a private repository ([`../CONTRACT.md`](../CONTRACT.md) §Variable references) |
@@ -1030,8 +1030,9 @@ Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` e
 A stack is `after` a stack in another environment, and `needs` puts that other
 environment on a later env-level, so no order meets both. The plan, a bare
 `shipmate apply` or the merge deploy refused before anything applied; a plan
-refusal holds the gate. Each `- ` line names one inverted pair and the `needs`
-chain that sets the later level.
+refusal holds the gate, and a deploy refusal turns the merged head's gate to
+`failure`. Each `- ` line names one inverted pair and the `needs` chain that
+sets the later level.
 
 1. Pick the order you want. Remove or reverse the `needs` entry in the named
    chain in `.github/shipmate-config.yml`, or retag the stacks so the `after`
@@ -1265,8 +1266,16 @@ When the message lists no other cell and no stranded stack needs a retag, no
 pull request is needed.
 
 The refused deploy's apply checks stay open on the merged pull request and are
-never read again. Do not re-run the refused deploy: it checks out the same
-commit and refuses again.
+never read again; its `summary` turns the merged head's `shipmate / gate` to
+`failure` ("deploy stopped at detect (failure), nothing applied; see the run"). Do
+not re-run the refused deploy: it checks out the same commit and refuses again.
+
+The same gate description appears when `detect` failed for another reason after
+it named the head, such as a GitHub API error while listing the head's check
+runs. Read the `detect` job's `::error::` annotation: this refusal starts with
+`deploy aborted:`, while an API error starts with `command failed` and quotes
+the `gh api` call and its HTTP error. An API error is not a refusal: re-run the
+deploy.
 
 ### The post-merge deploy was dropped as superseded
 

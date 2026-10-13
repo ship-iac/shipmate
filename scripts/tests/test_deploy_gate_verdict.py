@@ -26,6 +26,7 @@ EXPECTED_SUMMARY = {
                 "head-sha": "${{ needs.detect.outputs.head_sha }}",
                 "app-id": "${{ vars.SHIPMATE_APP_ID }}",
                 "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
+                "detect-result": "${{ needs.detect.result }}",
                 "deploy-results": "${{ join(needs.*.result, ',') }}",
             },
         }
@@ -34,5 +35,6 @@ EXPECTED_SUMMARY = {
 
 
 def test_the_deploy_gate_step_hands_gate_refresh_every_result():
-    """Mutations: drop `deploy-results`; add back a mint step; `head_sha` -> `head-sha`."""
+    """Mutations: drop `deploy-results` or `detect-result`; add back a mint step;
+    `head_sha` -> `head-sha`."""
     assert workflow_jobs("deploy.yml")["summary"] == EXPECTED_SUMMARY

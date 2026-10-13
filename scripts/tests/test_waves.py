@@ -17,6 +17,31 @@ def test_parse_dot_matches_fixture_dag():
     assert deps["stacks/sandbox/box"] == set()  # isolated node, still present
 
 
+ROOT_FIXTURE = (_dir / "tests" / "fixtures" / "run-graph-root-stack.dot").read_text()
+
+
+def test_parse_dot_keys_the_root_stack_dot():
+    """The fixture is `terramate experimental run-graph --label stack.dir` captured raw to a file
+    (not a TTY) with Terramate 0.17.1, the `VERSIONS` pin, from a root stack `after =
+    ["/child"]`. A stack `after` the root is a Terramate cycle, so the root takes the edge.
+    Mutation: drop `or "."` from `parse_dot` (the root keys `""`)."""
+    assert w.parse_dot(ROOT_FIXTURE) == {".": {"child"}, "child": set()}
+
+
+def test_a_root_stack_cell_gets_a_wave():
+    """`terramate list` and the tag metadata name the root stack `.`, so its cell must find that
+    node. Called as deploy-detect and apply-detect call it. Mutation: drop `or "."` from
+    `parse_dot` -> `env_level_waves` refuses "stack '.' is not a node in the run-graph"."""
+    cell = {"stack": ".", "environment": "dev-eu", "workload": ""}
+    empty = {f"wave{i}": [] for i in range(8)}
+    assert w.env_level_waves([cell], {}, w.parse_dot(ROOT_FIXTURE)) == [
+        {**empty, "wave1": [cell]},
+        empty,
+        empty,
+        empty,
+    ]
+
+
 def test_levels_are_topological():
     deps = w.parse_dot(FIXTURE)
     lv = w.levels(deps)

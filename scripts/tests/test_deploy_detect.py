@@ -193,7 +193,7 @@ def _run_main(
     # module lands in `urls`.
     monkeypatch.setattr(dd.ad, "_run", _run)
     monkeypatch.setattr(dd.bm, "_run", _run)
-    monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
+    monkeypatch.setattr(dd.bm, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
     dd.main()
     return github_outputs(out)
 
@@ -516,6 +516,21 @@ def test_main_refuses_a_cyclic_needs_before_sorting_env_levels(tmp_path, monkeyp
     )
 
 
+def test_the_earliest_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
+    """The summary writes the gate's failure on the head only if detect named it. Mutation: move
+    the `head_sha` write to just before `refuse_stranded_checks` -- the file stays empty."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[_cell("stacks/app", "a"), _cell("stacks/app", "b")],
+            checks=[_apply_check("stacks/app", "a"), _apply_check("stacks/app", "b")],
+            order={"a": ["b"], "b": ["a"]},
+        )
+    assert str(exc.value).startswith("::error::needs is cyclic")
+    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD}
+
+
 #: The refusal's fixed remedy, hand-written.
 _REMEDY = (
     "Open a new pull request that retags each stranded stack and changes every other listed "
@@ -724,6 +739,14 @@ def test_main_refuses_a_needs_order_that_contradicts_after(tmp_path, monkeypatch
         "that makes the fix and changes every listed stack (any edit `terramate list "
         "--changed` marks); its plan and deploy apply them."
     )
+
+
+def test_an_inversion_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
+    """Mutation: write `head_sha` with the waves only -- the file stays empty."""
+    with pytest.raises(SystemExit) as exc:
+        _run_probe(tmp_path, monkeypatch, {"dev-us": ["dev-eu"]})
+    assert str(exc.value).startswith("::error::needs orders")
+    assert github_outputs(tmp_path / "out.txt") == {"head_sha": HEAD}
 
 
 def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):

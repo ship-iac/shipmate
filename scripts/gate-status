@@ -6,7 +6,7 @@
     gate-status post <sha> <state> <description> write the gate
     gate-status hold <sha> <description>         write a `failure` gate
     gate-status refresh <sha>                    green the gate once every apply check is done
-    gate-status deploy <sha> <results>           write the post-merge verdict over job results
+    gate-status deploy <sha> <detect> <results>  write the post-merge verdict over job results
 
 The gate is a commit status, not a check-run: a check-run binds to a check-suite and can land in
 a stale one when a commit carries two plan runs, which blocks the merge forever. Every write sets
@@ -38,11 +38,15 @@ def _repo():
     return os.environ["GITHUB_REPOSITORY"]
 
 
-def deploy_verdict(results):
-    """(state, description) over the comma-separated job results of a deploy run.
+def deploy_verdict(detect, results):
+    """(state, description) over a deploy run's `detect` result and its comma-separated job
+    results.
 
-    Any result but `success` or `skipped` (failure, cancelled, timed_out) is incomplete, and so
-    is an empty string: no env-level job reported, so nothing was applied."""
+    A `detect` that did not succeed applied nothing: it refused or stopped after writing the head.
+    Otherwise any result but `success` or `skipped` (failure, cancelled, timed_out) is incomplete,
+    and so is an empty string: no env-level job reported, so nothing was applied."""
+    if detect != "success":
+        return "failure", f"deploy stopped at detect ({detect}), nothing applied; see the run"
     tokens = results.split(",")
     if all(t in _GOOD_RESULTS for t in tokens):
         return "success", "all env-levels applied (deploy env-level applies completed)"
@@ -171,7 +175,7 @@ _COMMANDS = {
     "post": (2, post),
     "hold": (1, lambda sha, description: post(sha, "failure", description)),
     "refresh": (0, refresh),
-    "deploy": (1, lambda sha, results: post(sha, *deploy_verdict(results))),
+    "deploy": (2, lambda sha, detect, results: post(sha, *deploy_verdict(detect, results))),
 }
 
 

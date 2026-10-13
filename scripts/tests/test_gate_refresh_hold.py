@@ -54,7 +54,7 @@ def _status_argv(state, description):
 GREEN_ARGV = _status_argv("success", "all applies complete, nothing left to apply")
 
 
-def _run_step(tmp_path, *, gate="", deploy_results="", hold_description=""):
+def _run_step(tmp_path, *, gate="", detect_result="", deploy_results="", hold_description=""):
     proc, calls = run_with_gate_gh(
         tmp_path,
         step_by("gate-refresh", name="Write the gate")["run"],
@@ -64,6 +64,7 @@ def _run_step(tmp_path, *, gate="", deploy_results="", hold_description=""):
             "GITHUB_ACTION_PATH": str(ACTIONS / "gate-refresh"),
             "HEAD_SHA": HEAD_SHA,
             "SHIPMATE_APP_ID": "7",
+            "DETECT_RESULT": detect_result,
             "DEPLOY_RESULTS": deploy_results,
             "HOLD_DESCRIPTION": hold_description,
             "GITHUB_REPOSITORY": "acme/demo",
@@ -116,7 +117,7 @@ def test_a_hold_description_writes_a_hold(tmp_path):
 @bash_only
 def test_deploy_results_write_the_deploy_verdict(tmp_path):
     """Mutation: drop the `deploy` branch of the dispatch -> a refresh greens the head."""
-    proc, posted = _run_step(tmp_path, deploy_results="success,cancelled")
+    proc, posted = _run_step(tmp_path, detect_result="success", deploy_results="success,cancelled")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert posted == [
         _status_argv("failure", "deploy incomplete (deploy env-level applies completed)")
@@ -129,4 +130,14 @@ def test_two_modes_at_once_are_refused(tmp_path):
     proc, posted = _run_step(tmp_path, deploy_results="success", hold_description="re-plan")
     assert proc.returncode == 1
     assert proc.stdout == "::error::set at most one of deploy-results and hold-description\n"
+    assert posted == []
+
+
+@bash_only
+def test_deploy_results_without_a_detect_result_are_refused(tmp_path):
+    """Mutation: drop the empty detect-result check -> a stopped-at-detect verdict is written and
+    the step passes."""
+    proc, posted = _run_step(tmp_path, deploy_results="success")
+    assert proc.returncode == 1
+    assert proc.stdout == "::error::deploy-results needs detect-result, which is empty\n"
     assert posted == []

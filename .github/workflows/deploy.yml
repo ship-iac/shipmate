@@ -111,4 +111,5 @@ jobs:
           head-sha: ${{ needs.detect.outputs.head_sha }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+          detect-result: ${{ needs.detect.result }}
           deploy-results: ${{ join(needs.*.result, ',') }}

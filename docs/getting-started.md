@@ -135,6 +135,11 @@ python <engine-checkout>/scripts/onboard \
 Use `python3` where the platform has no `python` (macOS, Debian and Ubuntu
 ship none by default).
 
+To pipe or redirect onboard's output under Windows PowerShell 5.1, run
+`[Console]::OutputEncoding = [Text.Encoding]::UTF8` first. onboard writes UTF-8, and
+PowerShell decodes a native command's piped output with the console code page, so `§`
+reads as `┬º`.
+
 `--key` is needed until the App key is on `shipmate-engine`; a later run can
 leave it off.
 
