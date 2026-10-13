@@ -37,3 +37,12 @@ def test_a_script_run_through_the_shim_reaches_the_stub_gh_with_its_own_argument
     result = run_step(tmp_path, f'python3 "{scripts / "probe"}" "one word" two\n', env, cwd=cwd)
     assert result.returncode == 0, result.stderr
     assert result.stdout == "api\none word\ntwo\n"
+
+
+@bash_only
+def test_python3_dash_c_runs_on_the_real_interpreter(tmp_path):
+    """Mutation: remove the shim's `-c` branch -> the shim runs `-c` as a script path and fails."""
+    write_python3_shim(tmp_path)
+    env = {**os.environ, "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}"}
+    result = run_step(tmp_path, "python3 -c 'print(1)'\n", env)
+    assert (result.returncode, result.stdout) == (0, "1\n"), result.stderr

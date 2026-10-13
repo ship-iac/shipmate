@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from _detect_fixtures import APP_ID, spy_env_config, stub_read_table
+from _detect_fixtures import APP_ID, forbid_shared_runner, spy_env_config, stub_read_table
 from _detect_fixtures import check_run as _check
 from _loader import github_outputs, load_script
 
@@ -61,6 +61,7 @@ def _stub_unlock_tree(monkeypatch, cells, checks=None):
 
     runs = _DEV_EU_PENDING_CHECKS if checks is None else checks
     monkeypatch.setattr(ud.ad, "_run", lambda args: "\n".join(json.dumps(r) for r in runs))
+    forbid_shared_runner(monkeypatch)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
     monkeypatch.setattr(ud.bm, "env_membership", _membership)
     return seen
@@ -304,7 +305,7 @@ def test_unlock_notice_names_the_env_and_counts(monkeypatch, tmp_path, capsys):
 def test_main_validates_its_inputs_before_any_read(monkeypatch, tmp_path, name, value, error):
     """The head SHA is interpolated into the check-run URL, and the env names the queue.
 
-    Mutation: delete the `ad.validate_head_sha` call -- the head-sha case reaches the tree walk.
+    Mutation: delete the `validate_head_sha` call -- the head-sha case reaches the tree walk.
     Mutation: delete the `ad.validate_env` call -- both env cases reach the tree walk."""
     _unlock_env(monkeypatch, tmp_path, **{name: value})
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
@@ -324,6 +325,7 @@ def _stub_one_pending_check(monkeypatch):
     """One pending App-authored check, for `stacks/app / dev-eu`, as the raw JSONL `gh` emits."""
     line = json.dumps(_check(name="apply / stacks/app / dev-eu", status="queued", conclusion=None))
     monkeypatch.setattr(ud.ad, "_run", lambda args: line)
+    forbid_shared_runner(monkeypatch)
     monkeypatch.setenv("SHIPMATE_APP_ID", APP_ID)
 
 

@@ -24,14 +24,9 @@ runs:
         HEAD_SHA: ${{ inputs.head-sha }}
         SHIPMATE_WAVES_JSON: ${{ inputs.waves-json }}
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
-      # Check-runs are paginated (a 256-cell level yields >100); stream them
-      # all with --paginate --jq so scripts/apply-snapshot reads one JSON
-      # object per line on stdin, not one aggregate per page.
       run: |
         set -euo pipefail
-        [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
-        gh api --paginate --jq '.check_runs[]' \
-          "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
+        python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" '.check_runs[]' \
           > "$RUNNER_TEMP/checks.jsonl"
         snap=$(python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" < "$RUNNER_TEMP/checks.jsonl")
         echo "snapshot=$snap" >> "$GITHUB_OUTPUT"

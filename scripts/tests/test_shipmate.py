@@ -9,11 +9,14 @@ from _loader import ENGINE
 from _shipmate import (
     _run,
     approval_rules,
+    check_runs,
     gate_check,
+    is_head_sha,
     is_pr_number,
     named,
     review_count,
     utf8_output,
+    validate_head_sha,
 )
 
 
@@ -150,3 +153,88 @@ def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
 def test_named_lists_cap_items_whole_and_counts_the_rest():
     """Mutation: `>=` for `>` in `named` -- red on the `len == cap` case."""
     assert [named(["a", "b"], 2), named(["a", "b", "c"], 2)] == ["a, b", "a, b, and 1 more"]
+
+
+_SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_is_head_sha_accepts_40_lowercase_hex_only():
+    """Mutation: `match` for `fullmatch` -- the 41-character value reds."""
+    table = {
+        "valid": _SHA,
+        "upper": _SHA.upper(),
+        "non-hex": "g" * 40,
+        "short": _SHA[:39],
+        "long": _SHA + "0",
+        "none": None,
+    }
+    assert {k: is_head_sha(v) for k, v in table.items()} == {
+        "valid": True,
+        "upper": False,
+        "non-hex": False,
+        "short": False,
+        "long": False,
+        "none": False,
+    }
+
+
+def test_validate_head_sha_names_its_source_in_the_refusal():
+    """Mutation: change the message text in `validate_head_sha`."""
+    with pytest.raises(SystemExit) as exc:
+        validate_head_sha("../x", "the head")
+    assert str(exc.value) == "::error::the head must be a 40-char lowercase hex SHA (got: '../x')"
+
+
+def test_validate_head_sha_names_shipmate_head_sha_by_default():
+    """The default `source` is the variable both apply-detect forms and unlock-detect read.
+
+    Mutation: change `source`'s default -- the whole message differs."""
+    with pytest.raises(SystemExit) as exc:
+        validate_head_sha("abc123")
+    assert str(exc.value) == (
+        "::error::SHIPMATE_HEAD_SHA must be a 40-char lowercase hex SHA (got: 'abc123')"
+    )
+
+
+def _recording():
+    calls = []
+
+    def run(args):
+        calls.append(args)
+        return "listing"
+
+    return calls, run
+
+
+@pytest.mark.parametrize(
+    ("jq", "expected"),
+    [((), ".check_runs[]"), ((".check_runs[] | {name}",), ".check_runs[] | {name}")],
+    ids=["default-jq", "passed-jq"],
+)
+def test_check_runs_sends_this_whole_argv(jq, expected):
+    """Mutations, each run: drop `filter=all`; drop `--paginate`; `per_page=100` ->
+    `per_page=30`."""
+    calls, run = _recording()
+    assert check_runs("o/r", _SHA, *jq, run=run) == "listing"
+    assert calls == [
+        [
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/o/r/commits/{_SHA}/check-runs?filter=all&per_page=100",
+            "--jq",
+            expected,
+        ]
+    ]
+
+
+@pytest.mark.parametrize("sha", ["A" * 40, "a" * 39, "../x"])
+def test_check_runs_refuses_a_bad_sha_before_any_call(sha):
+    """Mutation: move `validate_head_sha` after the `run` call -- the double records a call."""
+    calls, run = _recording()
+    with pytest.raises(SystemExit) as exc:
+        check_runs("o/r", sha, run=run)
+    assert (str(exc.value), calls) == (
+        f"::error::head SHA must be a 40-char lowercase hex SHA (got: {sha!r})",
+        [],
+    )

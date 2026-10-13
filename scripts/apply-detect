@@ -28,12 +28,8 @@ the run refuses.
 
 import json
 import os
-import re
 
-from _shipmate import _load, _run
-
-_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-
+from _shipmate import _load, _run, check_runs, validate_head_sha
 
 bm = _load("build-matrix")
 wv = _load("waves")
@@ -195,19 +191,7 @@ def settle(order, stopped, pending, deps, tags, level):
 
 def _check_run_lines(repo, head_sha):
     """The commit's check-runs as JSONL lines, for the apply and unlock name queries."""
-    return _run(
-        [
-            "gh",
-            "api",
-            # filter=all keeps this listing in step with gate-refresh's
-            # (test_check_runs_filter_aligned); --paginate --jq streams JSONL so
-            # no page — hence no completed apply — is dropped on a >100-check PR.
-            "--paginate",
-            "--jq",
-            ".check_runs[]",
-            f"repos/{repo}/commits/{head_sha}/check-runs?filter=all&per_page=100",
-        ]
-    ).splitlines()
+    return check_runs(repo, head_sha, run=_run).splitlines()
 
 
 def apply_check_names(check_run_lines, app_id):
@@ -237,14 +221,6 @@ def dag_shape_notice(deps):
         f"{len(lv)} wave levels; {max((len(x) for x in lv), default=0)} stacks would apply "
         "concurrently"
     )
-
-
-def validate_head_sha(value, source="SHIPMATE_HEAD_SHA"):
-    """Refuse a head SHA that is not 40 lowercase hex characters, so a malformed value
-    cannot retarget the gh api URLs built from it (e.g. `/`, `?`, `..`). `source` names
-    where the value came from in the refusal. Safe to echo — not a secret."""
-    if not _SHA_RE.fullmatch(value):
-        raise SystemExit(f"::error::{source} must be a 40-char lowercase hex SHA (got: {value!r})")
 
 
 def validate_env(value):

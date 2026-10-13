@@ -296,8 +296,8 @@ def write_python3_shim(bin_dir):
     stub alone cannot reach a ``gh`` that Python spawns on Windows: the spawn resolves the real
     ``gh.EXE`` past it, and an extensionless stub run by full path raises FileNotFoundError.
     ``sys.argv`` and ``sys.path[0]`` are set as ``python3 script`` sets them, so the script reads
-    only its own arguments and imports its siblings with no PYTHONPATH. Only that
-    ``python3 <script> args...`` form runs; ``python3 -c`` and ``python3 -`` do not.
+    only its own arguments and imports its siblings with no PYTHONPATH. ``python3 -c <code>
+    args...`` runs on the real interpreter, unshimmed; ``python3 -`` does not run.
     """
     bash = usable_bash()
     assert bash is not None, "callers are bash_only-gated"
@@ -307,7 +307,10 @@ def write_python3_shim(bin_dir):
     )
     python3 = bin_dir / "python3"
     python3.write_text(
-        f'#!/bin/bash\nexec "{sys.executable}" "{shim}" "$@"\n', encoding="utf-8", newline="\n"
+        f'#!/bin/bash\nif [ "$1" = -c ]; then exec "{sys.executable}" "$@"; fi\n'
+        f'exec "{sys.executable}" "{shim}" "$@"\n',
+        encoding="utf-8",
+        newline="\n",
     )
     python3.chmod(0o755)
 
@@ -352,6 +355,7 @@ def run_with_gh_recorder(tmp_path, body, env, *, listing="", list_rc=0, write_rc
     bin_dir.mkdir(exist_ok=True)
     write_python3_shim(bin_dir)
     (bin_dir / "gh").write_text(_GH_RECORDER, encoding="utf-8", newline="\n")
+    (bin_dir / "gh").chmod(0o755)
     calls = tmp_path / "gh-calls"
     env = {
         **env,
@@ -365,7 +369,7 @@ def run_with_gh_recorder(tmp_path, body, env, *, listing="", list_rc=0, write_rc
     return proc, read_calls(calls)
 
 
-def run_step(tmp_path, body, env, *, cwd=None, timeout=30):
+def run_step(tmp_path, body, env, *, cwd=None, timeout=30, text=True):
     """Run ``body`` as a bash script written under ``tmp_path``; return the CompletedProcess.
 
     ``env`` is the whole environment, passed as given: a test that wants the host's variables
@@ -373,7 +377,8 @@ def run_step(tmp_path, body, env, *, cwd=None, timeout=30):
     endings, because bash reads a CR as part of the command. The run's cwd is ``cwd``, or
     ``tmp_path`` when that is not given. Output is decoded as UTF-8, not the locale default: the
     shipped messages carry em dashes, and a cp1252 decode mangles them into a mismatch that looks
-    like a real diff.
+    like a real diff. With ``text=False`` the output stays bytes, for a test that pins line ends.
+    Stdin is ``/dev/null``, so a body that reads it ends rather than waiting out ``timeout``.
     """
     bash = usable_bash()
     assert bash is not None, "callers are bash_only-gated"
@@ -384,7 +389,8 @@ def run_step(tmp_path, body, env, *, cwd=None, timeout=30):
         cwd=cwd or tmp_path,
         env=env,
         capture_output=True,
-        encoding="utf-8",
+        stdin=subprocess.DEVNULL,
+        encoding="utf-8" if text else None,
         timeout=timeout,
     )
 
@@ -431,14 +437,25 @@ GATE_STATUSES_JQ = ".[] | {context, state, target_url}"
 
 
 def run_with_gate_gh(
-    tmp_path, body, env, *, sha, checks="", checks_rc=0, page1="", page2="", statuses_rc=0
+    tmp_path,
+    body,
+    env,
+    *,
+    sha,
+    checks="",
+    checks_rc=0,
+    checks_jq=GATE_CHECKS_JQ,
+    page1="",
+    page2="",
+    statuses_rc=0,
+    text=True,
 ):
     """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and ``_GATE_GH`` first on
     PATH; return (process, the argv after ``gh`` of each call, in order).
 
-    ``sha`` is the head the stub answers for; ``checks`` the check-runs listing (exit
-    ``checks_rc``); ``page1``/``page2`` the statuses listing's two pages, JSON Lines each
-    (paginated exit ``statuses_rc``).
+    ``sha`` is the head the stub answers for; ``checks`` the check-runs listing for the
+    ``checks_jq`` projection (exit ``checks_rc``); ``page1``/``page2`` the statuses listing's two
+    pages, JSON Lines each (paginated exit ``statuses_rc``). ``text`` goes to ``run_step``.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -451,7 +468,7 @@ def run_with_gate_gh(
         "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
         "CALLS": str(calls),
         "FAKE_SHA": sha,
-        "FAKE_CHECKS_JQ": GATE_CHECKS_JQ,
+        "FAKE_CHECKS_JQ": checks_jq,
         "FAKE_STATUSES_JQ": GATE_STATUSES_JQ,
         "FAKE_CHECKS": checks,
         "FAKE_CHECKS_RC": str(checks_rc),
@@ -459,7 +476,7 @@ def run_with_gate_gh(
         "FAKE_PAGE2": page2,
         "FAKE_STATUSES_RC": str(statuses_rc),
     }
-    proc = run_step(tmp_path, body, env)
+    proc = run_step(tmp_path, body, env, text=text)
     return proc, read_calls(calls)
 
 

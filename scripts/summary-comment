@@ -30,7 +30,7 @@ import pathlib
 import re
 import sys
 
-from _shipmate import _load, cell_summaries, current_run_url
+from _shipmate import _load, cell_summaries, current_run_url, is_head_sha
 
 ag = _load("apply-gate")
 
@@ -152,7 +152,6 @@ def _md_name(s):
 
 #: Every circle a comment uses, worst first.
 CIRCLES = ("🔴", "🟠", "🟡", "⚪", "🟢")
-_SHA = re.compile(r"[0-9a-f]{40}")
 
 
 def worst(circles):
@@ -190,7 +189,7 @@ def provenance(sha, run_url):
     verdict is display, so an unreadable SHA never costs the comment. Reads the runner's
     `GITHUB_SERVER_URL`, `GITHUB_REPOSITORY` and `GITHUB_RUN_NUMBER`."""
     run = f"in [run #{os.environ['GITHUB_RUN_NUMBER']}]({run_url})"
-    if not _SHA.fullmatch(sha or ""):
+    if not is_head_sha(sha):
         return f"at an unknown commit {run}"
     commit = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/commit/{sha}"
     return f"at [{sha[:7]}]({commit}) {run}"

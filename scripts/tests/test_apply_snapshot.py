@@ -1,8 +1,9 @@
 import io
 import json
+import os
 
 import pytest
-from _loader import load_script
+from _loader import ACTIONS, bash_only, load_script, run_with_gate_gh, step_by
 
 apply_snapshot = load_script("apply-snapshot")
 
@@ -121,3 +122,43 @@ def test_an_empty_app_id_is_reported_before_malformed_input(monkeypatch):
         "::error::SHIPMATE_APP_ID is empty; set the SHIPMATE_APP_ID repo/org "
         "variable to the shipmate App id (see docs/github-app.md)."
     )
+
+
+_HEAD = "d" * 40
+
+
+@bash_only
+@pytest.mark.parametrize(("checks_rc", "expected_rc"), [(0, 0), (1, 1)], ids=["listed", "failed"])
+def test_a_failed_listing_fails_the_snapshot_step(tmp_path, checks_rc, expected_rc):
+    """An empty wave set needs no check, so the listing is the step's only way to fail; the
+    `listed` case is the control. Mutation: append `|| true` to the listing -> `failed` exits
+    0."""
+    env = {
+        **os.environ,
+        "GH_TOKEN": "x",
+        "HEAD_SHA": _HEAD,
+        "SHIPMATE_WAVES_JSON": "{}",
+        "SHIPMATE_APP_ID": str(APP_ID),
+        "GITHUB_ACTION_PATH": str(ACTIONS / "apply-snapshot"),
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+        "RUNNER_TEMP": str(tmp_path),
+    }
+    proc, calls = run_with_gate_gh(
+        tmp_path,
+        step_by("apply-snapshot", id="snap")["run"],
+        env,
+        sha=_HEAD,
+        checks_rc=checks_rc,
+        checks_jq=".check_runs[]",
+    )
+    assert proc.returncode == expected_rc, proc.stderr
+    assert calls == [
+        [
+            "api",
+            "--paginate",
+            f"repos/acme/demo/commits/{_HEAD}/check-runs?filter=all&per_page=100",
+            "--jq",
+            ".check_runs[]",
+        ]
+    ]

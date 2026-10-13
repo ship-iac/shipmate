@@ -4,8 +4,16 @@ import os
 import pathlib
 
 import pytest
+from _loader import (
+    ACTIONS,
+    action_steps,
+    bash_only,
+    load_script,
+    run_lines,
+    run_with_gate_gh,
+    step_by,
+)
 from _loader import ENGINE as _ENGINE
-from _loader import action_steps, load_script, run_lines, step_by
 from _shipmate import load_workflow_text
 
 sc = load_script("summary-comment")
@@ -1079,3 +1087,63 @@ def test_import_and_forget_counts_from_raw_tofu_captures(name, tally, state):
     got = sc.counts(_FIXTURES / f"{name}.plan.txt")
     assert got == tally
     assert sc.state({"changed": True, **dict(zip(_COUNT_KEYS, got, strict=True))}) == state
+
+
+#: The Build step's check-runs projection, hand-written.
+_BUILD_JQ = ".check_runs[] | {name, html_url, id}"
+_BUILD_LISTING = '{"name": "shipmate / a / dev", "html_url": "https://gh/c/1", "id": 1}\n'
+
+
+def _run_build(tmp_path, checks_rc=0):
+    """Run `Build comment + gate state` with no cell summaries; return (process, gh calls)."""
+    env = {
+        **os.environ,
+        "GH_TOKEN": "x",
+        "HEAD_SHA": SHA,
+        "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_SERVER_URL": "https://gh",
+        "GITHUB_RUN_ID": "1",
+        "GITHUB_RUN_NUMBER": "1",
+        "GITHUB_OUTPUT": str(tmp_path / "out.txt"),
+    }
+    return run_with_gate_gh(
+        tmp_path,
+        step_by("summary", name="Build comment + gate state")["run"],
+        env,
+        sha=SHA,
+        checks=_BUILD_LISTING,
+        checks_rc=checks_rc,
+        checks_jq=_BUILD_JQ,
+    )
+
+
+@bash_only
+def test_the_build_step_lists_the_heads_check_runs_with_its_projection(tmp_path):
+    """Mutation: drop `html_url` from the projection -> the stub refuses the call, the step
+    degrades, and the recorded argv differs."""
+    proc, calls = _run_build(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert calls == [
+        [
+            "api",
+            "--paginate",
+            f"repos/acme/demo/commits/{SHA}/check-runs?filter=all&per_page=100",
+            "--jq",
+            _BUILD_JQ,
+        ]
+    ]
+    assert (tmp_path / "check-runs.jsonl").read_text(encoding="utf-8") == _BUILD_LISTING
+
+
+@bash_only
+def test_a_failed_build_listing_warns_and_renders_from_an_empty_file(tmp_path):
+    """Reviewer-facing links only, so the step degrades and the gate is still written.
+    Mutations: delete the `::warning::` echo -> stdout loses the line; replace the `if ! ...; fi`
+    with the bare listing -> `set -e` fails the step."""
+    proc, _ = _run_build(tmp_path, checks_rc=1)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout == (
+        "::warning::check-runs listing failed; comment links degrade to the workflow-run URL\n"
+    )
+    assert (tmp_path / "check-runs.jsonl").read_text(encoding="utf-8") == ""

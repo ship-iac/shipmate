@@ -17,7 +17,7 @@ pending cell `needs` puts on a later env-level refuses the whole run.
 import os
 import time
 
-from _shipmate import StackCycle, _load
+from _shipmate import StackCycle, _load, validate_head_sha
 from _shipmate import gh_json as _gh_json
 
 bm = _load("build-matrix")
@@ -157,7 +157,7 @@ def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
     head = _merged_head(repo, merge_sha)
-    ad.validate_head_sha(
+    validate_head_sha(
         head,
         "the deploy's head SHA (the merged pull request's head from "
         f"commits/{merge_sha}/pulls, else GITHUB_SHA)",

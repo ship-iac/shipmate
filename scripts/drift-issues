@@ -39,11 +39,10 @@ were owed did not happen.
 import functools
 import json
 import os
-import re
 import subprocess
 from urllib.parse import quote
 
-from _shipmate import _run, cell_summaries, current_run_url
+from _shipmate import _run, cell_summaries, current_run_url, is_head_sha
 
 CELL_KEYS = (
     "stack",
@@ -178,7 +177,7 @@ def default_branch_head(branch):
     env = {**os.environ, "GH_TOKEN": os.environ.get("SHIPMATE_READ_TOKEN", "")}
     p = subprocess.run(args, capture_output=True, text=True, env=env)  # noqa: S603
     head = p.stdout.strip() if p.returncode == 0 else ""
-    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+    return head if is_head_sha(head) else None
 
 
 def close_removed(rows, present, url):

@@ -6,6 +6,7 @@ from _detect_fixtures import (
     RUN_GRAPH_ARGV,
     _apply_check,
     answering_run_graph,
+    forbid_shared_runner,
     run_graph_capture,
     spy_env_config,
     stub_read_table,
@@ -169,7 +170,7 @@ def _run_main(
         # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
         if urls is not None:
-            urls.append(args[-1])
+            urls.append(next(a for a in args if a.startswith("repos/")))
         return jsonl
 
     monkeypatch.setattr(dd, "_merged_head", lambda repo, merge_sha: head)
@@ -211,6 +212,7 @@ def _run_main(
         runner = answering_run_graph(_run, dot)
     monkeypatch.setattr(dd.ad, "_run", runner)
     monkeypatch.setattr(dd.bm, "_run", runner)
+    forbid_shared_runner(monkeypatch)
     dd.main()
     return github_outputs(out)
 
@@ -248,8 +250,8 @@ def test_main_refuses_a_malformed_merged_head_before_any_api_read(tmp_path, monk
     """The merged head is interpolated into the check-run listing's URL, so a malformed one
     is refused before any `gh api` path is requested.
 
-    Mutation: delete the `ad.validate_head_sha` call -- the listing URL lands in `urls`.
-    Mutation: move the call after `_check_run_lines` -- the listing URL lands in `urls`."""
+    Mutation: delete the `validate_head_sha` call -- `check_runs` refuses instead, with its
+    `head SHA` message. Mutation: move the call after `_check_run_lines` -- the same."""
     urls = []
     with pytest.raises(SystemExit) as exc_info:
         _run_main(

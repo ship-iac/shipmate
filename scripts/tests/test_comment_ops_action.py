@@ -9,7 +9,6 @@ import json
 import os
 import re
 import shlex
-import sys
 
 import pytest
 from _loader import (
@@ -726,27 +725,47 @@ def test_the_authorize_step_binds_exactly_this_env():
     assert _authorize_step()["env"] == _AUTHORIZE_ENV
 
 
-#: A `gh` that logs the endpoint each call reads and answers it as the API does after `--jq`.
-_GATHER_GH = """#!/bin/bash
+_GATHER_HEAD = "e" * 40
+
+#: A `gh` that logs the endpoint each call reads, and the token it read it with, and answers it
+#: as the API does after `--jq`; the check-runs listing answers `$FAKE_LISTING`.
+_GATHER_GH = f"""#!/bin/bash
 for a in "$@"; do
-  if [[ "$a" == repos/* || "$a" == graphql ]]; then echo "$a" >> endpoints.txt; break; fi
+  if [[ "$a" == repos/* || "$a" == graphql ]]; then
+    echo "$a" >> endpoints.txt
+    echo "$GH_TOKEN $a" >> tokens.txt
+    break
+  fi
 done
 if [[ "$*" == *pulls/* ]]; then
-  echo '{"mergeable": true, "mergeable_state": "clean", "head": {"sha": "abc"}}'
+  echo '{{"mergeable": true, "mergeable_state": "clean", "head": {{"sha": "{_GATHER_HEAD}"}}}}'
 elif [[ "$*" == *graphql* ]]; then
   echo APPROVED
+elif [[ "$*" == */check-runs* ]]; then
+  printf '%s' "$FAKE_LISTING"
 fi
 """
+
+#: The head's one App-authored apply check (App id 1, the gather env's), recording plan run 77.
+_GATHER_LISTING = (
+    json.dumps(
+        {
+            "name": "apply / stacks/a / dev",
+            "status": "queued",
+            "id": 5,
+            "app": {"id": 1},
+            "external_id": json.dumps({"plan_run": "77"}),
+        }
+    )
+    + "\n"
+)
 
 
 def _run_gather(tmp_path):
     """Run the gather step's shipped body; return (outputs, endpoints read in order)."""
-    for tool, text in (
-        ("gh", _GATHER_GH),
-        ("python3", f'#!/bin/bash\nexec "{sys.executable}" "$@"\n'),
-    ):
-        (tmp_path / tool).write_text(text, encoding="utf-8", newline="\n")
-        (tmp_path / tool).chmod(0o755)
+    write_python3_shim(tmp_path)
+    (tmp_path / "gh").write_text(_GATHER_GH, encoding="utf-8", newline="\n")
+    (tmp_path / "gh").chmod(0o755)
     out_file = tmp_path / "github_output"
     out_file.write_text("", encoding="utf-8")
     env = {
@@ -761,6 +780,8 @@ def _run_gather(tmp_path):
         "SHIPMATE_VERB": "apply",
         "SHIPMATE_APP_ID": "1",
         "APP_TOKEN": "app_token",
+        "GH_TOKEN": "workflow_token",
+        "FAKE_LISTING": _GATHER_LISTING,
     }
     result = run_step(tmp_path, _gather_step()["run"], env)
     assert result.returncode == 0, result.stderr
@@ -780,24 +801,28 @@ def test_the_gather_step_reads_no_permission(tmp_path):
     assert endpoints == [
         "repos/org/repo/pulls/42",
         "graphql",
-        "repos/org/repo/commits/abc/check-runs?filter=all&per_page=100",
+        f"repos/org/repo/commits/{_GATHER_HEAD}/check-runs?filter=all&per_page=100",
     ]
     assert outputs == {"review_decision": "APPROVED"}
 
 
-def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs():
+@bash_only
+def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs(tmp_path):
     """The reviewed-plan lookup is the head's own apply checks, each of which records the plan run
-    its plan came from. The plan-workflow lookup it replaced resolved one run for the whole command
-    and had to compare that run's head against the PR's -- a comparison this listing makes
-    unnecessary and, being keyed on the head already, unfalsifiable."""
-    body = _code(_gather_step()["run"])
-    assert '"repos/$GITHUB_REPOSITORY/commits/$head/check-runs?filter=all&per_page=100"' in body
-    assert "workflows/plan.yml" not in body
-    # The mapping comes from apply-gate's `--plan-runs` mode: without the flag the
-    # same invocation writes a gate verdict and leaves plan_run.json empty.
-    assert (
-        '| python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs > plan_run.json'
-    ) in body
+    its plan came from, read with the App token. The plan-workflow lookup it replaced resolved one
+    run for the whole command and had to compare that run's head against the PR's -- a comparison
+    this listing makes unnecessary and, being keyed on the head already, unfalsifiable.
+
+    Mutations: drop `--plan-runs` -> apply-gate writes a verdict and `plan_run.json` is empty;
+    drop `GH_TOKEN="$APP_TOKEN"` -> the listing is read with the workflow token."""
+    _run_gather(tmp_path)
+    plan_runs = (tmp_path / "plan_run.json").read_text(encoding="utf-8")
+    assert plan_runs == '{"apply / stacks/a / dev": "77"}\n'
+    assert (tmp_path / "tokens.txt").read_text(encoding="utf-8").splitlines() == [
+        "workflow_token repos/org/repo/pulls/42",
+        "workflow_token graphql",
+        f"app_token repos/org/repo/commits/{_GATHER_HEAD}/check-runs?filter=all&per_page=100",
+    ]
 
 
 def test_the_gather_step_receives_the_app_id_the_plan_run_lookup_scopes_on():

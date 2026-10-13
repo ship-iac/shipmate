@@ -114,15 +114,11 @@ runs:
       # artifact against a still-pending check (CONTRACT.md, the apply result comment).
       run: |
         set -euo pipefail
-        [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::head-sha must be a 40-char lowercase hex SHA (got: $HEAD_SHA)"; exit 1; }
-        # filter=all for the same reason gate-refresh uses it: a re-created check name keeps its
-        # historical runs and apply-gate judges the newest run per name. Degrade, never fail --
-        # the renderer treats an absent name as unknown and falls back to artifact-only status.
-        if ! gh api --paginate \
-          "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/check-runs?filter=all&per_page=100" \
-          --jq '.check_runs[] | {name, status, conclusion, id, app: {id: .app.id}}' > checks.jsonl; then
+        # Degrade, never fail -- the renderer treats an absent name as unknown and falls back to
+        # artifact-only status.
+        if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \
+          '.check_runs[] | {name, status, conclusion, id, app: {id: .app.id}}' > checks.jsonl; then
           echo "::warning::apply-check scan failed; the comment falls back to artifact-only status"
-          : > checks.jsonl
         fi
 
     - name: List run jobs (log links; degrade to none on failure)

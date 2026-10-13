@@ -229,21 +229,31 @@ def test_the_action_declares_the_on_demand_input_it_decides_on():
     assert (declared["required"], declared["default"]) == (False, "")
 
 
-#: Dispatches the step's two `gh` calls: the listing, whose stdout the step redirects into
-#: run-checks.jsonl, and each POST, recording every body it was handed and refusing the first.
-#: `python3` stands in for mirror-checks; bash resolves a function before searching PATH, so this
+#: Answers each POST `gh` call, recording every body it was handed and refusing the first.
+#: `python3` stands in for `gate-status checks`: it refuses any argv but the Mirror step's whole
+#: one, else prints `$FAKE_LISTING` and returns `$FAKE_LISTING_RC` without reading stdin. Any
+#: other `python3` call is mirror-checks. Bash resolves a function before searching PATH, so this
 #: needs no fake executables.
 _GH_STUB = """
 gh() {
   case "$*" in
-    *"/check-runs?filter=all"*) printf '' ;;
     *"/check-runs"*) body=$(cat)
       printf '%s\\n' "$body" >> "$POSTED"
       case "$body" in *"first cell"*) return 1 ;; esac ;;
     *) printf 'unexpected gh call: %s\\n' "$*" >&2 ; return 1 ;;
   esac
 }
-python3() { cat > /dev/null ; printf '%s\\n' "$FAKE_BODIES" ; }
+python3() {
+  if [[ "$1" == */scripts/gate-status ]]; then
+    want="$GITHUB_ACTION_PATH/../../scripts/gate-status checks $GITHUB_SHA .check_runs[]"
+    if [ "$*" != "$want" ]; then
+      printf 'unexpected gate-status call: %s\\n' "$*" >&2 ; return 1
+    fi
+    printf '%s' "${FAKE_LISTING:-}"
+    return "${FAKE_LISTING_RC:-0}"
+  fi
+  cat > /dev/null ; printf '%s\\n' "$FAKE_BODIES"
+}
 """
 
 
@@ -251,7 +261,8 @@ python3() { cat > /dev/null ; printf '%s\\n' "$FAKE_BODIES" ; }
 def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
     """The listing is unordered, so abandoning the remaining bodies drops an arbitrary suffix of
     them, which can be exactly the failed cell the mirror exists to put on the pull request. The
-    step still exits 0."""
+    step still exits 0. Mutations: list `$SHIPMATE_HEAD_SHA` instead of `$GITHUB_SHA`, or change
+    the `.check_runs[]` projection -> the stub refuses the listing and nothing is posted."""
     posted = tmp_path / "posted"
     proc = run_step(
         tmp_path,
@@ -274,3 +285,35 @@ def test_a_failed_post_still_attempts_the_rest_and_names_what_it_lost(tmp_path):
     assert attempted == ["first cell", "second"], f"stdout={proc.stdout!r}"
     assert '::warning::could not mirror the check "first cell"' in proc.stdout
     assert "second" not in proc.stdout
+
+
+@bash_only
+def test_a_failed_listing_warns_and_mirrors_nothing(tmp_path):
+    """Reviewer-facing only, so a failed listing degrades rather than failing the job before
+    `Create/refresh gate`, and adds no annotation of its own. Mutation: drop the `if !` around
+    the listing -> `set -e` ends the step with exit 1."""
+    posted = tmp_path / "posted"
+    proc = run_step(
+        tmp_path,
+        _GH_STUB + step_by("summary", name=_MIRROR)["run"],
+        {
+            **os.environ,
+            "GH_TOKEN": "x",
+            "GITHUB_REPOSITORY": "acme/demo",
+            "GITHUB_SHA": RUN_COMMIT,
+            "GITHUB_ACTION_PATH": str(tmp_path),
+            "SHIPMATE_HEAD_SHA": HEAD,
+            "FAKE_LISTING_RC": "1",
+            "FAKE_BODIES": json.dumps({"name": "first cell", "head_sha": HEAD}),
+            "POSTED": str(posted),
+        },
+    )
+    assert (proc.returncode, proc.stdout, proc.stderr, posted.exists()) == (
+        0,
+        (
+            "::warning::could not list this run's own check runs; the per-cell plan checks were "
+            "not mirrored onto the pull request head\n"
+        ),
+        "",
+        False,
+    )
