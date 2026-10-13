@@ -135,6 +135,14 @@ def test_a_detect_result_alone_writes_the_deploy_verdict(tmp_path):
 
 
 @bash_only
+def test_deploy_results_alone_write_the_deploy_verdict(tmp_path):
+    """Mutation: dispatch on `-n "$DETECT_RESULT"` alone -> a refresh greens the head."""
+    proc, posted = _run_step(tmp_path, deploy_results="success,success")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert posted == [_status_argv("failure", "deploy gate got no detect result; see the run")]
+
+
+@bash_only
 @pytest.mark.parametrize(("detect_result", "deploy_results"), [("", "success"), ("success", "")])
 def test_two_modes_at_once_are_refused(tmp_path, detect_result, deploy_results):
     """Mutations: drop the two-modes check, or test only `-n "$DEPLOY_RESULTS"` in it -> the hold
@@ -147,6 +155,6 @@ def test_two_modes_at_once_are_refused(tmp_path, detect_result, deploy_results):
     )
     assert proc.returncode == 1
     assert proc.stdout == (
-        "::error::set at most one of deploy-results or detect-result, and hold-description\n"
+        "::error::hold-description cannot be set with deploy-results or detect-result\n"
     )
     assert posted == []

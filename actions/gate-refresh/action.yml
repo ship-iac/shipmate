@@ -62,11 +62,11 @@ runs:
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
-        if [ -n "$DEPLOY_RESULTS$DETECT_RESULT" ] && [ -n "$HOLD_DESCRIPTION" ]; then
-          echo "::error::set at most one of deploy-results or detect-result, and hold-description"
-          exit 1
-        fi
         if [ -n "$HOLD_DESCRIPTION" ]; then
+          if [ -n "$DEPLOY_RESULTS$DETECT_RESULT" ]; then
+            echo "::error::hold-description cannot be set with deploy-results or detect-result"
+            exit 1
+          fi
           python3 "$gate_status" hold "$HEAD_SHA" "$HOLD_DESCRIPTION"
         elif [ -n "$DEPLOY_RESULTS$DETECT_RESULT" ]; then
           python3 "$gate_status" deploy "$HEAD_SHA" "$DETECT_RESULT" "$DEPLOY_RESULTS"
