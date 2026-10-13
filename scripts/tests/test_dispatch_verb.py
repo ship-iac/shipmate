@@ -78,7 +78,8 @@ def test_plan_body_is_the_dispatch_ref_the_verb_and_pr_number_alone():
     than the head SHA, because a plan states no head.
 
     Mutations: drop the `verb` key; add `ref` or `environment` to the plan inputs; swap the
-    top-level ref for the head SHA.
+    top-level ref for the head SHA; drop `return_run_details`, which every body carries so the
+    API answers with the started run's id.
     """
     body = _build_dispatch_body("plan", environment="dev-eu")
     assert body == {
@@ -92,8 +93,8 @@ def test_apply_body_omits_the_environment_when_it_is_empty():
     """A bare `shipmate apply` sends {verb, ref, pr_number} and no environment key, which
     `apply.yml` reads as `inputs.environment == ''` and runs as the bare form.
 
-    Mutation: drop the `if os.environ.get("ENVIRONMENT")` guard -- the body carries an empty
-    `environment`, red.
+    Mutations: drop the `if os.environ.get("ENVIRONMENT")` guard -- the body carries an empty
+    `environment`, red; drop `return_run_details`.
     """
     assert _build_dispatch_body("apply") == {
         "ref": "main",
@@ -105,7 +106,7 @@ def test_apply_body_omits_the_environment_when_it_is_empty():
 def test_apply_body_carries_the_environment_when_it_is_set():
     """A targeted `shipmate apply dev-eu` sends {verb, ref, pr_number, environment}.
 
-    Mutation: drop the environment key entirely.
+    Mutations: drop the environment key entirely; drop `return_run_details`.
     """
     assert _build_dispatch_body("apply", environment="dev-eu") == {
         "ref": "main",
@@ -125,7 +126,8 @@ def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
     and `pr_number` is `required: false` on `shipmate.yml` precisely so this body is legal.
 
     Mutations: add `pr_number` to the unlock branch; drop `verb`, and the dispatched run
-    matches no job's `if:` and unlocks nothing while reporting success.
+    matches no job's `if:` and unlocks nothing while reporting success; drop
+    `return_run_details`.
     """
     assert _build_dispatch_body("unlock", environment="dev-eu") == {
         "ref": "main",
