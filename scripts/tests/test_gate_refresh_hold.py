@@ -125,19 +125,28 @@ def test_deploy_results_write_the_deploy_verdict(tmp_path):
 
 
 @bash_only
-def test_two_modes_at_once_are_refused(tmp_path):
-    """Mutation: drop the two-modes check -> the hold is written and the step passes."""
-    proc, posted = _run_step(tmp_path, deploy_results="success", hold_description="re-plan")
-    assert proc.returncode == 1
-    assert proc.stdout == "::error::set at most one of deploy-results and hold-description\n"
-    assert posted == []
+def test_a_detect_result_alone_writes_the_deploy_verdict(tmp_path):
+    """Mutation: dispatch on `-n "$DEPLOY_RESULTS"` alone -> a refresh greens the head."""
+    proc, posted = _run_step(tmp_path, detect_result="failure")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert posted == [
+        _status_argv("failure", "deploy stopped at detect (failure), nothing applied; see the run")
+    ]
 
 
 @bash_only
-def test_deploy_results_without_a_detect_result_are_refused(tmp_path):
-    """Mutation: drop the empty detect-result check -> a stopped-at-detect verdict is written and
-    the step passes."""
-    proc, posted = _run_step(tmp_path, deploy_results="success")
+@pytest.mark.parametrize(("detect_result", "deploy_results"), [("", "success"), ("success", "")])
+def test_two_modes_at_once_are_refused(tmp_path, detect_result, deploy_results):
+    """Mutations: drop the two-modes check, or test only `-n "$DEPLOY_RESULTS"` in it -> the hold
+    is written and the step passes."""
+    proc, posted = _run_step(
+        tmp_path,
+        detect_result=detect_result,
+        deploy_results=deploy_results,
+        hold_description="re-plan",
+    )
     assert proc.returncode == 1
-    assert proc.stdout == "::error::deploy-results needs detect-result, which is empty\n"
+    assert proc.stdout == (
+        "::error::set at most one of deploy-results or detect-result, and hold-description\n"
+    )
     assert posted == []

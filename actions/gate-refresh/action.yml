@@ -14,14 +14,15 @@ inputs:
     required: true
   deploy-results:
     description: >-
-      A deploy run's comma-separated job results; writes the post-merge verdict instead of a
-      refresh. At most one of deploy-results and hold-description may be set.
+      A deploy run's comma-separated job results. This or detect-result selects the post-merge
+      verdict instead of a refresh; neither may be set with hold-description.
     required: false
     default: ""
   detect-result:
     description: >-
-      The deploy run's `detect` job result, required with deploy-results; any value but `success`
-      writes a stopped-at-detect verdict, since nothing applied.
+      The deploy run's `detect` job result. This or deploy-results selects the post-merge verdict;
+      any value but `success`, empty included, writes a stopped-at-detect verdict, since nothing
+      applied.
     required: false
     default: ""
   hold-description:
@@ -61,17 +62,13 @@ runs:
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
-        if [ -n "$DEPLOY_RESULTS" ] && [ -n "$HOLD_DESCRIPTION" ]; then
-          echo "::error::set at most one of deploy-results and hold-description"
-          exit 1
-        fi
-        if [ -n "$DEPLOY_RESULTS" ] && [ -z "$DETECT_RESULT" ]; then
-          echo "::error::deploy-results needs detect-result, which is empty"
+        if [ -n "$DEPLOY_RESULTS$DETECT_RESULT" ] && [ -n "$HOLD_DESCRIPTION" ]; then
+          echo "::error::set at most one of deploy-results or detect-result, and hold-description"
           exit 1
         fi
         if [ -n "$HOLD_DESCRIPTION" ]; then
           python3 "$gate_status" hold "$HEAD_SHA" "$HOLD_DESCRIPTION"
-        elif [ -n "$DEPLOY_RESULTS" ]; then
+        elif [ -n "$DEPLOY_RESULTS$DETECT_RESULT" ]; then
           python3 "$gate_status" deploy "$HEAD_SHA" "$DETECT_RESULT" "$DEPLOY_RESULTS"
         else
           rc=0
