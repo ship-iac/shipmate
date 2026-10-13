@@ -294,16 +294,24 @@ def _run_url(run):
     return f"https://example.invalid/acme/demo/actions/runs/{run}"
 
 
+def _newer(run):
+    return (
+        f"::error::plan run {run} holds the gate of {SHA} and is newer than this run (999); this "
+        "run writes nothing. Re-plan this pull request (comment shipmate plan or push) if that run "
+        "did not finish.\n"
+    )
+
+
 @bash_only
 @pytest.mark.parametrize(
-    ("page1", "page2", "printed"),
+    ("page1", "page2", "newer"),
     [
         # This run's own hold (999, the retry after a failed read) on top of a newer run's earlier
         # hold on page 2.
         (
             _lines(_status("shipmate / gate", "failure")),
             _lines(_status("shipmate / gate", "failure", _run_url(1000))),
-            "1000\n",
+            1000,
         ),
         # The highest newer hold wins, wherever it sits; a newer `pending` or `success` is no hold.
         (
@@ -314,7 +322,7 @@ def _run_url(run):
                 _status("shipmate / gate", "failure", _run_url(1200)),
             ),
             "",
-            "1200\n",
+            1200,
         ),
         # Run ids of different lengths: 1000 is newer than 999 only as an integer.
         (
@@ -323,7 +331,7 @@ def _run_url(run):
                 _status("shipmate / gate", "failure", _run_url(99)),
             ),
             "",
-            "1000\n",
+            1000,
         ),
         (
             _lines(
@@ -332,29 +340,96 @@ def _run_url(run):
                 _status("shipmate / gate", "pending", _run_url(1000)),
             ),
             "",
-            "",
+            None,
         ),
-        ("", "", ""),
+        ("", "", None),
     ],
     ids=["behind-own-hold", "highest-hold", "integer-compare", "none-newer", "no-statuses"],
 )
-def test_newer_hold_prints_the_newest_hold_written_after_this_run(tmp_path, page1, page2, printed):
-    """Mutations: read only the newest gate (`_gates(sha)[:1]`) -> the first case prints nothing;
-    compare run ids as strings -> the third case prints nothing (`"1000" > "999"` is false); drop
-    the `state == "failure"` filter -> the second case prints 5000; `max` -> `min` -> 1001."""
-    proc, calls = _run(tmp_path, "newer-hold", SHA, page1=page1, page2=page2)
-    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    assert (proc.stdout, calls) == (printed, [STATUSES_ARGV])
+def test_refuse_newer_names_the_newest_hold_written_after_this_run(tmp_path, page1, page2, newer):
+    """A newer hold exits `NEWER` with the whole refusal on stderr; none exits 0 silently.
+
+    Mutations: read only the newest gate (`_gates(sha)[:1]`) -> the first case exits 0; compare
+    run ids as strings -> the third case exits 0 (`"1000" > "999"` is false); drop the
+    `state == "failure"` filter -> the second case names 5000; `max` -> `min` -> 1001; exit 1
+    instead of `NEWER` -> the exit code differs; print the refusal to stdout -> stdout and stderr
+    differ."""
+    proc, calls = _run(tmp_path, "refuse-newer", SHA, page1=page1, page2=page2)
+    expected = (4, "", _newer(newer)) if newer else (0, "", "")
+    assert (proc.returncode, proc.stdout, proc.stderr) == expected
+    assert calls == [STATUSES_ARGV]
 
 
 @bash_only
-def test_newer_hold_fails_when_the_statuses_listing_fails(tmp_path):
-    """Mutation: answer an empty listing on a failed read -> exit 0 and the summary publishes."""
+def test_refuse_newer_fails_when_the_statuses_listing_fails(tmp_path):
+    """Mutation: answer an empty listing on a failed read -> exit 0 and the caller writes."""
     proc, calls = _run(
         tmp_path,
-        "newer-hold",
+        "refuse-newer",
         SHA,
         page1=_lines(_status("shipmate / gate", "failure", _run_url(1000))),
         statuses_rc=1,
     )
     assert (proc.returncode, proc.stdout, calls) == (1, "", [STATUSES_ARGV])
+
+
+def _checks_argv(jq):
+    return [
+        "api",
+        "--paginate",
+        f"repos/acme/demo/commits/{SHA}/check-runs?filter=all&per_page=100",
+        "--jq",
+        jq,
+    ]
+
+
+@bash_only
+def test_checks_writes_the_listing_bytes_as_utf8_with_lf(tmp_path):
+    """Bash sites redirect this stdout into a file they parse, and check names are
+    consumer-controlled, so the bytes must be the listing's own: UTF-8, LF, nothing appended.
+
+    Mutations: write with `print(out, end="")` -> on Windows `\n` becomes `\r\n` and the bytes
+    differ; append a `print()` -> a trailing newline."""
+    listing = _lines(
+        json.dumps({"name": "apply / é / dev — x"}, ensure_ascii=False), json.dumps({"name": "b"})
+    )
+    proc, calls = _run(
+        tmp_path,
+        "checks",
+        SHA,
+        ".check_runs[]",
+        checks=listing,
+        checks_jq=".check_runs[]",
+        text=False,
+    )
+    assert (proc.returncode, proc.stdout) == (0, listing.encode("utf-8")), proc.stderr
+    assert calls == [_checks_argv(".check_runs[]")]
+
+
+@bash_only
+def test_checks_sends_the_projection_it_is_given(tmp_path):
+    """Mutation: ignore the argument and send `CHECK_RUNS_JQ` -> the stub refuses the call."""
+    jq = ".check_runs[] | {name, status}"
+    proc, calls = _run(tmp_path, "checks", SHA, jq, checks="{}\n", checks_jq=jq)
+    assert (proc.returncode, proc.stdout) == (0, "{}\n"), proc.stderr
+    assert calls == [_checks_argv(jq)]
+
+
+@bash_only
+def test_checks_fails_unannotated_when_the_listing_fails(tmp_path):
+    """Degrading sites warn and continue, so the listing's failure must not annotate their green
+    step. Mutations: catch the `SystemExit` and return -> exit 0; call `check_runs` without
+    `run=run` -> the default `_run` prefixes `::error::`."""
+    proc, calls = _run(
+        tmp_path,
+        "checks",
+        SHA,
+        ".check_runs[]",
+        checks="{}\n",
+        checks_rc=1,
+        checks_jq=".check_runs[]",
+    )
+    assert (proc.returncode, proc.stdout) == (1, "")
+    assert proc.stderr.startswith("command failed (1): gh api --paginate ")
+    assert not [ln for ln in proc.stderr.splitlines() if ln.startswith("::error::")]
+    assert calls == [_checks_argv(".check_runs[]")]
