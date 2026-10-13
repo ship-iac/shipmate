@@ -106,7 +106,8 @@ refuses it. See
 [`hardening.md`](hardening.md) §7–9.
 
 **Every sweep is also where a stale table entry surfaces.** The drift path is
-one of the three paths that scan the whole tree, so it is where the engine warns that
+one of the three paths that compute the table warnings, with `unlock` and a
+bare `shipmate apply`; plan, deploy and a targeted apply do not. It warns that
 the environment table declares an environment no stack tags — a leftover entry,
 a typo in a key, or an entry declared ahead of the pull request that tags its
 first stack ([`getting-started.md`](getting-started.md) §Before you start); for
@@ -114,7 +115,7 @@ that last cause the warning is expected until that pull request merges. It repor
 way: it is inert, and the warning names what it therefore fails to do. It also
 names a workload an environment's `workloads` lists and no stack in that
 environment tags. A pull request introducing that typo says nothing about it:
-the plan path sees only the changed set
+the plan path computes none of these warnings
 ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). `scripts/onboard
 --app-id <id> --dry-run` reports the same facts over a checkout, before the pull request
 merges, except that a `needs` predecessor declared as an entry counts as provisioned

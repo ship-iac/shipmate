@@ -778,15 +778,15 @@ no stack tags is unused and warns.
 ### What the diagnostics can and cannot see
 
 The unused-entry warning, and its sibling naming a listed workload that no stack
-in its environment tags, need every stack's environment membership, and they
-never trigger a whole-tree scan of their own. So they fire only where a
-whole-tree scan already happened: every drift sweep, `unlock`, and a bare
-`shipmate apply`. The plan, deploy and targeted-apply paths see a
-changed set or a workset and stay silent.
+in its environment tags, are computed over every stack's environment membership
+on the sweep paths only: every drift sweep, `unlock`, and a bare
+`shipmate apply`. The plan, deploy and targeted-apply paths read every stack's
+tags too, but build membership over a changed set or a workset, compute neither
+warning, and stay silent.
 
 **A `needs` predecessor is checked the same way.** It names an environment
 rather than declaring one, and a predecessor matching no tag warns by name under
-the same whole-tree rule, naming what it therefore fails to do: it is fail-open,
+the same rule, on the same paths, naming what it therefore fails to do: it is fail-open,
 and orders nothing. A predecessor needs no entry of its own, so it warns rather
 than refuses. `explicit` and `gated` sit on the entry itself, so a flag on a
 misspelled entry is named by the unused-entry warning above. The charset refusal
@@ -1557,8 +1557,10 @@ check/status/comment/issue that crosses a workflow-run boundary:
     greened the head, a closed gate over applied work that `shipmate plan`
     reopens;
   - a pending apply `summary`: the later writer refreshes the gate, and the
-    evicted run posts no apply comment, so a failed wave in it shows only on the
-    red run;
+    evicted run posts no apply comment, so its results, waiting cells and their
+    blockers are named nowhere; a failed wave shows only on the red run, and
+    waiting cells keep their checks pending, so the gate stays pending until
+    they apply;
   - a pending deploy `summary`: the merged head keeps its last gate; re-run that
     deploy, as for any superseded deploy.
 

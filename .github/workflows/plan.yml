@@ -113,10 +113,8 @@ jobs:
           expected-head: ${{ needs.facts.outputs.head-sha }}
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
-  # One of the two jobs here that hold the App key, with `gate-hold` below. Neither checks out
-  # anything, so neither runs consumer repository content, which is what makes
-  # `pull_request_target` safe for this file. Its trust decision is on its own `if:`, reading the
-  # one producer above.
+  # Holds the App key, as `gate-hold` does. Neither checks anything out, so neither runs consumer
+  # repository content: that makes `pull_request_target` safe here. Its own `if:` decides trust.
   summary:
     needs: [facts, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
@@ -138,10 +136,9 @@ jobs:
       contents: read
     steps:
       - uses: $/actions/summary
-        # `scripts/doctor`'s pin, `shipmate.yml` and drift-file probes match calls against the
-        # engine slug, and each degrades to a notice without it. `job` is unavailable in a
-        # job-level `env:` (GitHub rejects the file) and `github.action_repository` is empty for
-        # a `$/` action, so the step passes it; composite `run` steps inherit the caller's env.
+        # `scripts/doctor`'s probes need the engine slug. `job` is unavailable in a job-level `env:`
+        # (GitHub rejects the file) and `github.action_repository` is empty for a `$/` action, so
+        # the step passes it; composite `run` steps inherit the caller's env.
         env:
           SHIPMATE_ENGINE_REPO: ${{ job.workflow_repository }}
         with:
@@ -159,10 +156,9 @@ jobs:
           unmanaged-stacks: ${{ needs.detect.outputs.unmanaged }}
           lost-env-tags: ${{ needs.detect.outputs.lost }}
 
-  # The group above cancels a pending `summary` when a later gate writer queues behind it, so this
-  # run's cells would never publish. A hold only closes the gate, so this job writes outside the
-  # group. It holds the App key only after `summary`'s fork `if:` admitted the head: a summary
-  # that refused is `skipped`, not `cancelled`.
+  # Holds the gate when the per-head group evicts a pending `summary`; it writes outside the group,
+  # since a hold only closes the gate. A `summary` whose fork `if:` refused the head is `skipped`,
+  # not `cancelled`, so this job never holds the App key for a head `summary` refused.
   gate-hold:
     needs: [facts, summary]
     if: ${{ !cancelled() && needs.summary.result == 'cancelled' }}

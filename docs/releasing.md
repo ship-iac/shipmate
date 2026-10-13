@@ -70,9 +70,9 @@ extra key named for the tail of the sentence and accepts the file, while
 `GitHub.DistributedTask.ObjectTemplating` refuses it outright. `v0.16.0` shipped
 that and every apply and deploy job died in `Set up job`, before its first step.
 
-The workflow is one job of 20 steps, each `if: false` and each `uses:` one action
-at the remote ref `ship-iac/shipmate/actions/<name>@main`. Both halves are
-load-bearing, measured 2026-08-22:
+The workflow is one job with one step per action, each `if: false` and each
+`uses:` one action at the remote ref `ship-iac/shipmate/actions/<name>@main`.
+Both halves are load-bearing, measured 2026-08-22:
 
 | step form | `if: false` | comma-split manifest |
 | --- | --- | --- |

@@ -33,6 +33,9 @@ section below names the SHA the release tags.
 - **The reply to a malformed `shipmate` comment names the token it refused, in a code span, when the token is non-empty, at most 40 characters and holds no backtick, and describes it otherwise; an unknown verb is quoted under the same rule.**
 - **The plan comment names each stack / environment pair a pull request drops by removing one of a stack's two or more `env/*` tags; a stack that lost its last tag stays on the unmanaged line. An `@` in a stack or environment name anywhere in the plan, apply or doctor comment outside a code span is followed by an empty HTML comment, so a stack path cannot mention a user or team.**
 - **`shipmate doctor` warns when a `pull_request` rule requires code-owner review and the default branch's `CODEOWNERS` owns no path (no file, or no line naming a pattern and an owner), since that review then holds no pull request; `scripts/onboard` reports it as a `todo`.**
+- **An apply run whose gate refresh fails, on a hold found once every apply check is done or on an API error, still posts its apply comment with the run's results; the run stays red.**
+- **The run-graph keys the root stack `.`, as `terramate list` and the tag metadata key it, instead of an empty name.**
+- **A refused deploy writes the merged head's gate `failure` ("deploy incomplete") instead of keeping the pre-merge gate and failing its summary on a missing head SHA: deploy detect names the head before any refusal past head validation.**
 
 ## [0.44.3] — 2026-10-12
 

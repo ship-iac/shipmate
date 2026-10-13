@@ -733,10 +733,9 @@ def _detect():
     tag_map = all_tags()
     tagged, cells, tree, unmanaged = compute_cells(sweep, base, tags, errors, tag_map)
     with ec._gather(errors):
-        # One call serves plan and drift, and only drift scans the whole tree. Outside a
-        # sweep the map covers the CHANGED stacks alone, so passing it would
-        # report every unchanged environment as an unused table entry on every plan. The
-        # table is checked against `tree`, so a `tags` filter cannot hide an uncovered env.
+        # Outside a sweep `tagged` covers the changed stacks alone, so passing it would warn
+        # every unchanged environment unused on every plan. The table is checked against
+        # `tree`, so a `tags` filter cannot hide an uncovered env.
         table = env_config(tree, tagged if sweep else None)
         cells = check_cells(cells, table)
     if errors:
