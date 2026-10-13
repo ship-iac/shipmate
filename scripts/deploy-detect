@@ -143,7 +143,8 @@ def main():
         "the deploy's head SHA (the merged pull request's head from "
         f"commits/{merge_sha}/pulls, else GITHUB_SHA)",
     )
-    # Before any refusal, so a refused deploy's summary can write the gate's failure on the head.
+    # Before any refusal past head validation, so a refused deploy's summary can write the gate's
+    # failure on the head.
     # Hyphen-free: `steps.d.outputs.head-sha` parses the '-' as subtraction.
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"head_sha={head}\n")
