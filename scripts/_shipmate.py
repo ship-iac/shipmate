@@ -224,12 +224,14 @@ def is_head_sha(value):
     return isinstance(value, str) and _HEAD_SHA.fullmatch(value) is not None
 
 
-def validate_head_sha(value, source="SHIPMATE_HEAD_SHA"):
+def validate_head_sha(value, source="SHIPMATE_HEAD_SHA", *, annotate=True):
     """Refuse a head SHA that is not 40 lowercase hex characters, so a malformed value
     cannot retarget the gh api URLs built from it (e.g. `/`, `?`, `..`). `source` names
-    where the value came from in the refusal. Safe to echo — not a secret."""
+    where the value came from in the refusal, prefixed `::error::` unless `annotate` is
+    false. Safe to echo — not a secret."""
     if not is_head_sha(value):
-        raise SystemExit(f"::error::{source} must be a 40-char lowercase hex SHA (got: {value!r})")
+        message = f"{source} must be a 40-char lowercase hex SHA (got: {value!r})"
+        raise SystemExit(f"::error::{message}" if annotate else message)
 
 
 def check_runs(repo, sha, jq=CHECK_RUNS_JQ, run=None):

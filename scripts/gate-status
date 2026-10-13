@@ -33,7 +33,6 @@ from _shipmate import (
     _run,
     check_runs,
     current_run_url,
-    is_head_sha,
     run,
     validate_head_sha,
 )
@@ -211,9 +210,7 @@ def main(argv):
     if cmd == "deploy" and not sha:
         raise SystemExit("::error::detect produced no head SHA; deploy cannot gate")
     # Unannotated for `checks`, whose degrading callers print the only annotation.
-    if cmd == "checks" and not is_head_sha(sha):
-        raise SystemExit(f"head SHA must be a 40-char lowercase hex SHA (got: {sha!r})")
-    validate_head_sha(sha, "head SHA")
+    validate_head_sha(sha, "head SHA", annotate=cmd != "checks")
     _COMMANDS[cmd][1](*args)
 
 
