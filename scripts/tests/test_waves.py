@@ -164,10 +164,55 @@ def test_stack_levels_refuses_a_cycle_naming_it():
     with pytest.raises(SystemExit) as exc:
         w.stack_levels({"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}})
     assert str(exc.value) == (
-        "::error::dependency cycle in the Terramate stack run-graph: ('nodes are in a cycle', "
-        "['stacks/a', 'stacks/b', 'stacks/a']). Two or more stacks order each other through "
-        "`after`/`before`; break the loop in their stack configuration."
+        "::error::stack ordering cycle through stacks/a, stacks/b: a stack ordered after itself, "
+        "directly or through other stacks, has no first wave. Remove one `after` or `before` "
+        "entry on that loop in the stack configuration."
     )
+
+
+_CYCLE = (
+    "::error::stack ordering cycle through {}: a stack ordered after itself, directly or through "
+    "other stacks, has no first wave. Remove one `after` or `before` entry on that loop in the "
+    "stack configuration."
+)
+
+_CYCLE_SHAPES = [
+    ("self", {"a": {"a"}}, "a"),
+    ("two", {"a": {"b"}, "b": {"a"}}, "a, b"),
+    ("three", {"a": {"c"}, "b": {"a"}, "c": {"b"}}, "a, b, c"),
+    ("offcycle", {"a": {"b"}, "b": {"a"}, "c": set()}, "a, b"),
+]
+
+
+def _cycle_fixture(shape):
+    return (_dir / "tests" / "fixtures" / f"run-graph-cycle-{shape}.dot").read_text()
+
+
+@pytest.mark.parametrize(("shape", "deps", "_stacks"), _CYCLE_SHAPES)
+def test_parse_dot_keeps_cycle_edges(shape, deps, _stacks):
+    """Each fixture is `terramate experimental run-graph --label stack.dir` captured raw to a
+    file (not a TTY, exit 0, empty stderr) with Terramate 0.17.1, the `VERSIONS` pin, from
+    scratch stacks holding only `stack { after = [...] }`: self `a` after `/a`; two `a`/`b`
+    after each other; three `a` after `/c`, `b` after `/a`, `c` after `/b`; offcycle the two
+    loop plus `c` after nothing. Terramate marks each cycle edge `[color="red"]`.
+
+    Mutations: skip a `parse_dot` line containing `color="red"` (every shape loses its loop);
+    skip an edge whose two ends are the same node (self loses `a`'s edge)."""
+    assert w.parse_dot(_cycle_fixture(shape)) == deps
+
+
+@pytest.mark.parametrize(("shape", "_deps", "stacks"), _CYCLE_SHAPES)
+def test_stack_levels_refuses_each_cycle_shape(shape, _deps, stacks):
+    """Fixtures and provenance as `test_parse_dot_keeps_cycle_edges`. The self-cycle names its
+    one stack; the stack off the loop (offcycle `c`) is not named.
+
+    Mutations: skip a `parse_dot` line containing `color="red"` (no shape refuses); skip a
+    self-edge in `parse_dot` (self does not refuse); restore the old "Two or more stacks"
+    wording (every shape red); join `e.args[1]` unsorted with duplicates (every shape red, self
+    as `a, a`)."""
+    with pytest.raises(SystemExit) as exc:
+        w.stack_levels(w.parse_dot(_cycle_fixture(shape)))
+    assert str(exc.value) == _CYCLE.format(stacks)
 
 
 def _boom(*args, **kwargs):
@@ -258,7 +303,11 @@ def test_env_level_waves_refuses_a_cyclic_stack_graph():
             {},
             {"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}},
         )
-    assert str(exc.value).startswith("::error::dependency cycle in the Terramate stack run-graph")
+    assert str(exc.value) == (
+        "::error::stack ordering cycle through stacks/a, stacks/b: a stack ordered after itself, "
+        "directly or through other stacks, has no first wave. Remove one `after` or `before` "
+        "entry on that loop in the stack configuration."
+    )
 
 
 def test_env_level_waves_buckets_and_orders():

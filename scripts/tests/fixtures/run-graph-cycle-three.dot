@@ -1,0 +1,10 @@
+digraph  {
+	
+	n1[label="/a"];
+	n3[label="/b"];
+	n2[label="/c"];
+	n1->n3[color="red"];
+	n3->n2[color="red"];
+	n2->n1[color="red"];
+	
+}

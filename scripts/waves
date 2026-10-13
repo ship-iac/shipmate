@@ -78,7 +78,7 @@ def levels(deps):
 
 
 def stack_levels(deps):
-    """`levels` over the stack run-graph, or `SystemExit` naming the cycle.
+    """`levels` over the stack run-graph, or `SystemExit` naming the stacks on a cycle.
 
     Every stack-graph sort goes through here, so no detect reaches a raw
     `CycleError`. The env graph sorts with `levels` directly: `env-config.validate` has
@@ -86,10 +86,11 @@ def stack_levels(deps):
     try:
         return levels(deps)
     except CycleError as e:
+        stacks = ", ".join(sorted(set(e.args[1])))
         raise SystemExit(
-            f"::error::dependency cycle in the Terramate stack run-graph: {e}. Two or more "
-            "stacks order each other through `after`/`before`; break the loop in their stack "
-            "configuration."
+            f"::error::stack ordering cycle through {stacks}: a stack ordered after itself, "
+            "directly or through other stacks, has no first wave. Remove one `after` or "
+            "`before` entry on that loop in the stack configuration."
         ) from e
 
 

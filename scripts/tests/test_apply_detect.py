@@ -418,7 +418,10 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
 
 
 def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path):
-    """Mutation: `levels` for `stack_levels` in both `dag_shape_notice` and
+    """The double stubs `run_graph_deps`, so the cycle reaches the `dag_shape_notice` and
+    `env_level_waves` sorts; in production the real `run_graph_deps` refuses it first.
+
+    Mutation: `levels` for `stack_levels` in both `dag_shape_notice` and
     `waves.env_level_waves` -- a raw `CycleError` escapes instead of this `SystemExit`."""
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(
@@ -429,9 +432,9 @@ def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path)
     with pytest.raises(SystemExit) as exc:
         ad.main()
     assert str(exc.value) == (
-        "::error::dependency cycle in the Terramate stack run-graph: ('nodes are in a cycle', "
-        "['stacks/a', 'stacks/b', 'stacks/a']). Two or more stacks order each other through "
-        "`after`/`before`; break the loop in their stack configuration."
+        "::error::stack ordering cycle through stacks/a, stacks/b: a stack ordered after itself, "
+        "directly or through other stacks, has no first wave. Remove one `after` or `before` "
+        "entry on that loop in the stack configuration."
     )
 
 
