@@ -1558,8 +1558,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
     greened the head, a closed gate over applied work that `shipmate plan`
     reopens;
   - a pending apply `summary`: the evicted run posts no apply comment, so its
-    results and its waiting cells show only in the run itself. The later
-    writer's refresh reads the apply checks and the gate as for any run;
+    results and its waiting cells show only in the run itself. Its waiting
+    cells keep their apply checks pending, so the gate cannot turn green until
+    they apply;
   - a pending deploy `summary`: the merged head keeps its last gate; re-run that
     deploy, as for any superseded deploy.
 
