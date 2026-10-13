@@ -139,6 +139,15 @@ def test_a_deploy_stopped_at_detect_says_so(detect, level):
     )
 
 
+@pytest.mark.parametrize("results", ["", "success,success", "failure,skipped"])
+def test_an_empty_detect_result_names_the_missing_input(results):
+    """Mutation: drop the `not detect` branch -> "deploy stopped at detect ()"."""
+    assert gs.deploy_verdict("", results) == (
+        "failure",
+        "deploy gate got no detect result; see the run",
+    )
+
+
 @bash_only
 def test_refresh_greens_a_pending_gate_once_every_check_is_done(tmp_path):
     """Mutation: post to `GITHUB_SHA` instead of the head -> the POST argv differs."""

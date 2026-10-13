@@ -21,8 +21,8 @@ inputs:
   detect-result:
     description: >-
       The deploy run's `detect` job result. This or deploy-results selects the post-merge verdict;
-      any value but `success`, empty included, writes a stopped-at-detect verdict, since nothing
-      applied.
+      any value but `success` writes a `failure` verdict, since nothing applied, and an empty one
+      names the missing input.
     required: false
     default: ""
   hold-description:
