@@ -379,15 +379,11 @@ def _ext(plan_run):
     return json.dumps({"fingerprint": "f" * 64, "plan_run": plan_run, "pr": PR})
 
 
-def _names(*names):
-    return [{"name": f"apply / {n} / dev"} for n in names]
-
-
-def test_a_cell_this_run_published_is_skipped_and_every_other_is_emitted(monkeypatch):
+def test_only_names_this_run_recorded_count_as_published(monkeypatch):
     """Run 10 against records of runs 10 and 9: as strings `"9" > "10"`, so a string compare reads
     run 9 as newer and refuses. Mutations: compare `plan_run` as a string -> red; drop the App
-    filter (`app_runs` returns `parse_jsonl` unfiltered) -> `other-app` is skipped; skip a cell
-    whatever its record (`return []`) -> red."""
+    filter (`app_runs` returns `parse_jsonl` unfiltered) -> `other-app` counts as published;
+    count every recorded name (`run == this_run` -> `True`) -> `older` counts."""
     monkeypatch.setenv("GITHUB_RUN_ID", "10")
     lines = [
         _record_line(1, "apply / done / dev", _ext("10")),
@@ -397,20 +393,12 @@ def test_a_cell_this_run_published_is_skipped_and_every_other_is_emitted(monkeyp
         _record_line(5, "apply / no-id / dev", None),
         _record_line(6, "apply / not-json / dev", "not json"),
     ]
-    bodies = _names("done", "queued", "older", "other-app", "no-id", "not-json", "unlisted")
-    assert [b["name"] for b in pc.unpublished(bodies, lines, APP_ID)] == [
-        "apply / older / dev",
-        "apply / other-app / dev",
-        "apply / no-id / dev",
-        "apply / not-json / dev",
-        "apply / unlisted / dev",
-    ]
+    assert pc.published(lines, APP_ID) == {"apply / done / dev", "apply / queued / dev"}
 
 
 def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monkeypatch, capsys):
     """A newer run's record on a name this run did not plan still refuses, with exit code 3.
-    Mutations: drop the newer-run refusal -> `unpublished` returns the cells; `NEWER_RUN = 1` ->
-    red."""
+    Mutations: drop the newer-run refusal -> `published` returns `a`; `NEWER_RUN = 1` -> red."""
     monkeypatch.setenv("GITHUB_RUN_ID", "10")
     lines = [
         _record_line(1, "apply / a / dev", _ext("10")),
@@ -418,7 +406,7 @@ def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monk
         _record_line(3, "apply / b / dev", _ext("9")),
     ]
     with pytest.raises(SystemExit) as exc_info:
-        pc.unpublished(_names("a", "b"), lines, APP_ID)
+        pc.published(lines, APP_ID)
     refusal = (
         "::error::plan run 11, newer than this run (10), published apply checks on this head "
         "(apply / gone / dev); this run publishes nothing over them. That run's summary writes "
@@ -429,9 +417,9 @@ def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monk
 
 
 def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monkeypatch, capsys):
-    """The evidence count is every parsed cell, published or not. Mutations: emit `bodies(...)`
-    without `unpublished` -> the published cell is printed; count the unpublished bodies for
-    `cell_count` -> nothing is printed."""
+    """The evidence count is every parsed cell, published or not. Mutations: emit every cell
+    (`done = set()`) -> the published cell is printed; `cell_count=len(todo)` -> nothing is
+    printed."""
     for slug, fingerprint in (("stacks-app", "1"), ("stacks-dns", "2")):
         _write_cell(
             tmp_path,
@@ -463,14 +451,25 @@ PLAN_FAILED = (
 )
 
 
-def _main(tmp_path, monkeypatch, *, cells=2, plan_result="success", planned="2", records=()):
+def _main(
+    tmp_path,
+    monkeypatch,
+    *,
+    cells=2,
+    plan_result="success",
+    planned="2",
+    records=(),
+    plan_text=PLAN_A,
+):
     """Run `main()` over `cells` changed cells and a check-run listing of `records`, with
-    `plan_result` and `planned` as the evidence; `planned=None` leaves the count unset."""
+    `plan_result` and `planned` as the evidence; `planned=None` leaves the count unset and
+    `plan_text=None` writes no plan.txt."""
     for i in range(cells):
         _write_cell(
             tmp_path / "cells",
             "dev",
             f"stacks-c{i}",
+            plan_text=plan_text,
             stack=f"stacks/c{i}",
             environment="dev",
             changed=True,
@@ -501,7 +500,7 @@ def test_a_failed_plan_job_publishes_nothing_and_warns(tmp_path, monkeypatch, ca
 
 def test_an_empty_run_with_no_count_publishes_nothing_silently(tmp_path, monkeypatch, capsys):
     """Nothing is withheld, so nothing is warned. Mutation: print the warning whether or not a
-    body was withheld (drop `if emit:`) -> red."""
+    body was withheld (drop `if todo:`) -> red."""
     _main(tmp_path, monkeypatch, cells=0, planned="")
     assert capsys.readouterr() == ("", "")
 
@@ -509,7 +508,7 @@ def test_an_empty_run_with_no_count_publishes_nothing_silently(tmp_path, monkeyp
 def test_an_unset_planned_count_publishes_nothing(tmp_path, monkeypatch, capsys):
     """No numeric default: a count nobody reported is not the number of cells this job parsed.
     Mutation: default `SHIPMATE_PLANNED_CELLS` to the cell count (`os.environ.get(...,
-    str(len(parsed)))`) -> both bodies are printed."""
+    str(len(cells)))`) -> both bodies are printed."""
     _main(tmp_path, monkeypatch, planned=None)
     not_reported = (
         "the planned cell count was not reported, so this run's evidence is unknown; re-plan "
@@ -523,7 +522,7 @@ def test_an_unset_planned_count_publishes_nothing(tmp_path, monkeypatch, capsys)
 
 def test_a_newer_run_refuses_before_the_evidence_check(tmp_path, monkeypatch, capsys):
     """A run with an evidence gap still refuses over a newer run's checks with `NEWER_RUN`, so the
-    summary step exits without holding over them. Mutation: run the gap check before `unpublished`
+    summary step exits without holding over them. Mutation: run the gap check before `published`
     (return on a gap first) -> `main()` returns, exit code 3 never raised."""
     monkeypatch.setenv("GITHUB_RUN_ID", "10")
     with pytest.raises(SystemExit) as exc_info:
@@ -565,3 +564,29 @@ def test_two_cells_publish_only_over_complete_evidence(
     _main(tmp_path, monkeypatch, plan_result=plan_result, planned=planned)
     printed = [json.loads(line)["name"] for line in capsys.readouterr().out.splitlines()]
     assert printed == ([] if held else ["apply / stacks/c0 / dev", "apply / stacks/c1 / dev"])
+
+
+def test_an_older_run_refuses_before_reading_any_plan_text(tmp_path, monkeypatch):
+    """Its cells could not be published anyway (no plan.txt), but the newer run's checks decide:
+    exit `NEWER_RUN`, so the summary step writes no hold over them. Mutation: build the bodies
+    before `published` in `main` (`bodies(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), head)`
+    first) -> the missing-plan.txt refusal instead of exit 3."""
+    monkeypatch.setenv("GITHUB_RUN_ID", "10")
+    with pytest.raises(SystemExit) as exc_info:
+        _main(
+            tmp_path,
+            monkeypatch,
+            plan_text=None,
+            records=[_record_line(1, "apply / stacks/c0 / dev", _ext("11"))],
+        )
+    assert exc_info.value.code == 3
+
+
+def test_a_run_with_an_evidence_gap_reads_no_plan_text(tmp_path, monkeypatch, capsys):
+    """Mutation: build the bodies before the gap check (`bodies(os.environ.get(
+    "SHIPMATE_CELLS_DIR", "cells"), head)` first in `main`) -> the missing-plan.txt refusal."""
+    _main(tmp_path, monkeypatch, plan_result="failure", plan_text=None)
+    assert capsys.readouterr() == (
+        "",
+        f"::warning::this run publishes no apply check: {PLAN_FAILED}\n",
+    )

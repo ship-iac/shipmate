@@ -19,13 +19,13 @@ refuses over it, and deploy-detect's work queue comes up empty.
 Only cells this run has not published are emitted, judged against the head's check runs in the
 JSONL file `SHIPMATE_CHECK_RUNS` (the App `SHIPMATE_APP_ID`'s, newest per name): a re-run of the
 summary job leaves alone a check an apply has completed, or is completing, since. A record from a
-newer plan run refuses before anything is emitted, so an older run never replaces a newer run's
-checks. That refusal alone exits `NEWER_RUN`: the summary step holds the gate on any other failure.
+newer plan run refuses before any cell summary is read, so an older run never replaces a newer
+run's checks, whatever its cells hold. That refusal alone exits `NEWER_RUN`: the summary step holds
+the gate on any other failure.
 
 A run whose evidence `gate-state.evidence_gap` rejects (a plan job that did not succeed, a missing
 or unparseable `SHIPMATE_PLANNED_CELLS`, or parsed cell summaries that do not match it) emits
-nothing, with a `::warning::` when that withholds a body. The check runs after the newer-run
-refusal, so an older run still exits `NEWER_RUN` rather than falling through to the hold.
+nothing and reads no plan text, with a `::warning::` when that withholds a body.
 """
 
 import hashlib
@@ -42,7 +42,14 @@ gs = _load("gate-state")
 NEWER_RUN = 3
 
 
-def bodies(cells_dir, head_sha):
+_KEYS = ("stack", "environment", "changed", "fingerprint")
+_SKEW = (
+    "-- plan-cell and the summary job must run the same engine revision; re-pin every engine "
+    "reference to one commit, then re-plan (comment shipmate plan or push)"
+)
+
+
+def _plan_run():
     plan_run = os.environ.get("GITHUB_RUN_ID", "")
     if not re.fullmatch(r"[0-9]+", plan_run):
         raise SystemExit(
@@ -50,59 +57,63 @@ def bodies(cells_dir, head_sha):
             "check must record the plan run that produced its cell, or apply can "
             "never find the reviewed plan."
         )
-    pr = ag.env_pr_number()
-    out = []
-    for cj, cell in cell_summaries(
-        cells_dir,
-        ("stack", "environment", "changed", "fingerprint"),
-        "-- plan-cell and the summary job must run the same engine revision; re-pin every engine "
-        "reference to one commit, then re-plan (comment shipmate plan or push)",
-    ):
-        txt = pathlib.Path(cj).with_name("plan.txt")
-        if not txt.is_file():
-            raise SystemExit(
-                f"::error::{cj} has no plan.txt beside it: the plan text a reviewer "
-                "reads cannot be bound to the plan that will be applied. plan-cell and "
-                "summary are from mismatched engine revisions; re-pin every engine reference to "
-                "one commit, then re-plan (comment shipmate plan or push)."
-            )
-        plan_sha256 = hashlib.sha256(txt.read_bytes()).hexdigest()
-        body = {
-            "name": ag.check_name(cell["stack"], cell["environment"]),
-            "head_sha": head_sha,
-            "status": "queued",
-            "external_id": json.dumps(
-                {
-                    "fingerprint": cell["fingerprint"],
-                    "plan_run": plan_run,
-                    "plan_sha256": plan_sha256,
-                    "pr": pr,
-                }
-            ),
-            "output": {
-                "title": "apply pending",
-                "summary": "Waiting to be applied. Merge after apply completes "
-                "for this stack x environment.",
-            },
-        }
-        if not cell["changed"]:
-            body["status"] = "completed"
-            body["conclusion"] = "neutral"
-            body["output"] = {
-                "title": "no changes",
-                "summary": "Plan produced no changes for this stack x environment.",
+    return plan_run
+
+
+def body(cell_json, cell, head_sha, plan_run, pr):
+    """The POST body for one parsed cell summary, hashing the plan.txt beside `cell_json`."""
+    txt = pathlib.Path(cell_json).with_name("plan.txt")
+    if not txt.is_file():
+        raise SystemExit(
+            f"::error::{cell_json} has no plan.txt beside it: the plan text a reviewer "
+            "reads cannot be bound to the plan that will be applied. plan-cell and "
+            "summary are from mismatched engine revisions; re-pin every engine reference to "
+            "one commit, then re-plan (comment shipmate plan or push)."
+        )
+    plan_sha256 = hashlib.sha256(txt.read_bytes()).hexdigest()
+    out = {
+        "name": ag.check_name(cell["stack"], cell["environment"]),
+        "head_sha": head_sha,
+        "status": "queued",
+        "external_id": json.dumps(
+            {
+                "fingerprint": cell["fingerprint"],
+                "plan_run": plan_run,
+                "plan_sha256": plan_sha256,
+                "pr": pr,
             }
-        out.append(body)
+        ),
+        "output": {
+            "title": "apply pending",
+            "summary": "Waiting to be applied. Merge after apply completes "
+            "for this stack x environment.",
+        },
+    }
+    if not cell["changed"]:
+        out["status"] = "completed"
+        out["conclusion"] = "neutral"
+        out["output"] = {
+            "title": "no changes",
+            "summary": "Plan produced no changes for this stack x environment.",
+        }
     return out
 
 
-def unpublished(bodies, check_run_lines, app_id):
-    """The `bodies` whose name's newest App-authored check carries no record from this run.
+def bodies(cells_dir, head_sha):
+    plan_run, pr = _plan_run(), ag.env_pr_number()
+    return [
+        body(cj, cell, head_sha, plan_run, pr)
+        for cj, cell in cell_summaries(cells_dir, _KEYS, _SKEW)
+    ]
+
+
+def published(check_run_lines, app_id):
+    """The names whose newest App-authored check carries a record from this run.
 
     A check with no decodable record (an older engine's, a hand-made one) or an older run's is
-    published again. Any record from a run newer than this one refuses. Run ids compare as
-    integers; `bodies` validated `GITHUB_RUN_ID`."""
-    this_run = int(os.environ["GITHUB_RUN_ID"])
+    not this run's, so it is published again. Any record from a run newer than this one refuses
+    with `NEWER_RUN`. Run ids compare as integers."""
+    this_run = int(_plan_run())
     runs = {
         name: int(run)
         for name, (run, _, _) in ag.plan_records(check_run_lines, app_id).items()
@@ -118,26 +129,27 @@ def unpublished(bodies, check_run_lines, app_id):
             file=sys.stderr,
         )
         raise SystemExit(NEWER_RUN)
-    return [b for b in bodies if runs.get(b["name"]) != this_run]
+    return {name for name, run in runs.items() if run == this_run}
 
 
 def main():
     head = os.environ["SHIPMATE_HEAD_SHA"]
-    cells = os.environ.get("SHIPMATE_CELLS_DIR", "cells")
     lines = pathlib.Path(os.environ["SHIPMATE_CHECK_RUNS"]).read_text(encoding="utf-8").splitlines()
-    parsed = bodies(cells, head)
-    emit = unpublished(parsed, lines, os.environ.get("SHIPMATE_APP_ID", ""))
+    done = published(lines, os.environ.get("SHIPMATE_APP_ID", ""))
+    cells = list(cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW))
+    todo = [c for c in cells if ag.check_name(c[1]["stack"], c[1]["environment"]) not in done]
     gap = gs.evidence_gap(
         plan_result=os.environ.get("SHIPMATE_PLAN_RESULT", ""),
         planned_cells=os.environ.get("SHIPMATE_PLANNED_CELLS", ""),
-        cell_count=len(parsed),
+        cell_count=len(cells),
     )
     if gap:
-        if emit:
+        if todo:
             print(f"::warning::this run publishes no apply check: {gap}", file=sys.stderr)
         return
-    for body in emit:
-        print(json.dumps(body))
+    plan_run, pr = _plan_run(), ag.env_pr_number()
+    for cj, cell in todo:
+        print(json.dumps(body(cj, cell, head, plan_run, pr)))
 
 
 if __name__ == "__main__":
