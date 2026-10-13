@@ -34,7 +34,7 @@ section below names the SHA the release tags.
 - **The plan comment names each stack / environment pair a pull request drops by removing one of a stack's two or more `env/*` tags; a stack that lost its last tag stays on the unmanaged line. An `@` in a stack or environment name anywhere in the plan, apply or doctor comment outside a code span is followed by an empty HTML comment, so a stack path cannot mention a user or team.**
 - **`shipmate doctor` warns when a `pull_request` rule requires code-owner review and the default branch's `CODEOWNERS` owns no path (no file, or no line naming a pattern and an owner), since that review then holds no pull request; `scripts/onboard` reports it as a `todo`.**
 - **An apply run whose gate refresh fails, on a hold found once every apply check is done or on an API error, still posts its apply comment with the run's results; the run stays red.**
-- **A root stack's cells deploy and apply: the run-graph keyed the root stack differently from `terramate list` and the tag metadata, so ordering its cell into a wave refused "stack '.' is not a node in the run-graph".**
+- **A root stack's run-graph entry now matches its tags and checks, so its cells order, deploy and apply: the run-graph keyed the root stack differently from `terramate list` and the tag metadata, so ordering its cell into a wave refused "stack '.' is not a node in the run-graph".**
 - **A refused deploy writes the merged head's gate `failure` ("deploy stopped at detect (failure), nothing applied; see the run") instead of keeping the pre-merge gate and failing its summary on a missing head SHA: deploy detect names the head before any refusal past head validation.**
 
 ## [0.44.3] — 2026-10-12
