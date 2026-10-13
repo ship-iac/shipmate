@@ -1,8 +1,9 @@
 """deploy.yml's `summary` job writes the post-merge gate through `actions/gate-refresh`.
 
 The verdict over the env-level results is `gate-status deploy`, whose cases live in
-`test_gate_status.py`. This guard pins the wiring that feeds it: a dropped `deploy-results` turns
-the step into a refresh, which greens the merged head without reading a single deploy result.
+`test_gate_status.py`. This guard pins the wiring that feeds it: a dropped `deploy-results` writes
+a verdict over no env-level result, and dropping both inputs turns the step into a refresh, which
+greens the merged head without reading a single deploy result.
 """
 
 from _loader import ENGINE_ENVIRONMENT, workflow_jobs

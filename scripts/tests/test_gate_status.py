@@ -125,15 +125,27 @@ def test_deploy_verdict(results, expected):
     )
 
 
+@pytest.mark.parametrize("level", ["skipped", "success", "failure"])
 @pytest.mark.parametrize("detect", ["failure", "cancelled"])
-def test_a_deploy_stopped_at_detect_says_so(detect):
+def test_a_deploy_stopped_at_detect_says_so(detect, level):
     """Any detect result but `success` names itself in the description, whatever the env-level
     results.
 
-    Mutation: drop the `detect != "success"` branch -> "deploy incomplete"."""
-    assert gs.deploy_verdict(detect, f"{detect},skipped,skipped,skipped,skipped") == (
+    Mutations: drop the `detect != "success"` branch -> "deploy incomplete"; add
+    `and "success" not in results.split(",")[1:]` to it -> the `success` rows say "deploy
+    incomplete"."""
+    assert gs.deploy_verdict(detect, f"{detect},{level},{level},{level},{level}") == (
         "failure",
         f"deploy stopped at detect ({detect}), nothing applied; see the run",
+    )
+
+
+@pytest.mark.parametrize("results", ["", "success,success", "failure,skipped"])
+def test_an_empty_detect_result_names_the_missing_input(results):
+    """Mutation: drop the `not detect` branch -> "deploy stopped at detect ()"."""
+    assert gs.deploy_verdict("", results) == (
+        "failure",
+        "deploy gate got no detect result; see the run",
     )
 
 

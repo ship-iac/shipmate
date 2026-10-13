@@ -42,9 +42,12 @@ def deploy_verdict(detect, results):
     """(state, description) over a deploy run's `detect` result and its comma-separated job
     results.
 
-    A `detect` that did not succeed applied nothing: it refused or stopped after writing the head.
+    An empty `detect` is a caller that passed no result. A `detect` that did not succeed applied
+    nothing: it refused or stopped after writing the head.
     Otherwise any result but `success` or `skipped` (failure, cancelled, timed_out) is incomplete,
-    and so is an empty string: no env-level job reported, so nothing was applied."""
+    and so is an empty `results`: no env-level job reported, so nothing was applied."""
+    if not detect:
+        return "failure", "deploy gate got no detect result; see the run"
     if detect != "success":
         return "failure", f"deploy stopped at detect ({detect}), nothing applied; see the run"
     tokens = results.split(",")

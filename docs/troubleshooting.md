@@ -1108,9 +1108,12 @@ A run refused or cancelled in `review` posts no apply comment and leaves the
 gate as it was: the red run is the only signal.
 
 An apply run whose `summary` job was cancelled before it ran, because a later
-gate writer on the same head queued behind it, also posts no apply comment. The
-later writer refreshes the gate. A wave that failed in the cancelled run shows
-only on that run's page.
+gate writer on the same head queued behind it, also posts no apply comment. Its
+results and its waiting cells show only on that run's page. The writer that
+evicted it runs next: a plan `summary` writes the gate from its plan; an apply
+`summary` refreshes it, which greens it once every apply check is done and
+otherwise leaves it as it is, and fails the run over a hold; a deploy `summary` writes its deploy
+verdict.
 
 The same step refuses, also before any wave:
 
@@ -1270,12 +1273,18 @@ never read again; its `summary` turns the merged head's `shipmate / gate` to
 `failure` ("deploy stopped at detect (failure), nothing applied; see the run"). Do
 not re-run the refused deploy: it checks out the same commit and refuses again.
 
-The same gate description appears when `detect` failed for another reason after
-it named the head, such as a GitHub API error while listing the head's check
-runs. Read the `detect` job's `::error::` annotation: this refusal starts with
-`deploy aborted:`, while an API error starts with `command failed` and quotes
-the `gh api` call and its HTTP error. An API error is not a refusal: re-run the
-deploy.
+The same gate description appears for any `detect` failure after it named the
+head. Read the `detect` job's `::error::` annotation. A refusal states its
+cause: search this page for its text. A `command failed` annotation names the
+command that failed (`gh api`, `terramate`, `git`) and carries its stderr; for
+that case only, re-run the deploy once, and if it fails the same way, that
+stderr is the cause. When no annotation but `Process completed with exit code`
+names the cause, read the failed step's log: a traceback or a failed checkout or
+setup step shows there.
+
+A gate reading `deploy gate got no detect result; see the run` means the deploy
+workflow passed no `detect` result to its `summary`; the engine's `deploy.yml`
+always passes one.
 
 ### The post-merge deploy was dropped as superseded
 

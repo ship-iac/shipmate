@@ -30,7 +30,7 @@ def test_parse_dot_keys_the_root_stack_dot():
 
 def test_a_root_stack_cell_gets_a_wave():
     """`terramate list` and the tag metadata name the root stack `.`, so its cell must find that
-    node. Called as deploy-detect and apply-detect call it. Mutation: drop `or "."` from
+    node; this pins a root cell under an empty env order. Mutation: drop `or "."` from
     `parse_dot` -> `env_level_waves` refuses "stack '.' is not a node in the run-graph"."""
     cell = {"stack": ".", "environment": "dev-eu", "workload": ""}
     empty = {f"wave{i}": [] for i in range(8)}
