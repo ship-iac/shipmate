@@ -160,8 +160,8 @@ def decide(
             "one or more stacks are waiting to be applied; merge is blocked until applies complete",
             _POST,
         )
-    # No gap means `cell_count` equals the planned count, so the count is parsed only in
-    # `evidence_gap`.
+    # Safe only below the gap check: a None gap means `cell_count` equals the planned count,
+    # so moving this branch above it would green a run nobody reported a count for.
     if cell_count == 0:
         return "success", "no pending applies for this PR", _NOTHING
     return "success", "no pending applies for this PR", _POST
