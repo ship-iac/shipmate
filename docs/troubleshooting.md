@@ -459,8 +459,9 @@ The failing
 plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
 failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
-That run publishes no apply check, so a `shipmate apply` on the head replies
-"no reviewed plan for the current PR head" until a plan of every cell succeeds.
+That run publishes no apply check. Checks an earlier plan run of the same head
+published stay; on a head with none, a `shipmate apply` replies "no reviewed plan
+for the current PR head".
 
 Engine `plan.yml` supplies both values the checks compare, so no consumer setting
 produces either error; report it, with the run link, through the bug report
@@ -938,9 +939,9 @@ gate"), holds the gate from its `gate-hold` job, reading "its plan summary was
 cancelled before it published". That hold can land after another run's summary
 greened the head, closing a gate over work already applied. Every one of these
 holds clears the same way: comment `shipmate plan` or push.
-A run held for its plan job or its cell count also publishes no apply check, so a
-`shipmate apply` on the head replies "no reviewed plan for the current PR head"
-until a plan of every cell succeeds.
+A run held for its plan job or its cell count also publishes no apply check.
+Checks an earlier plan run of the same head published stay; on a head with none,
+a `shipmate apply` replies "no reviewed plan for the current PR head".
 
 "Re-run failed jobs" on the plan run is safe only when that run is the newest
 plan run of the head. The re-run re-enters the `plan-<pr>` concurrency group,
