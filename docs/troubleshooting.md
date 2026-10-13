@@ -459,6 +459,8 @@ The failing
 plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
 failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
+That run publishes no apply check, so a `shipmate apply` on the head replies
+"no reviewed plan for the current PR head" until a plan of every cell succeeds.
 
 Engine `plan.yml` supplies both values the checks compare, so no consumer setting
 produces either error; report it, with the run link, through the bug report
