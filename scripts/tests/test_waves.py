@@ -22,7 +22,7 @@ ROOT_FIXTURE = (_dir / "tests" / "fixtures" / "run-graph-root-stack.dot").read_t
 
 def test_parse_dot_keys_the_root_stack_dot():
     """The fixture is `terramate experimental run-graph --label stack.dir` captured raw to a file
-    (not a TTY) with Terramate 0.17.3 (`VERSIONS` pins 0.17.1), from a root stack `after =
+    (not a TTY) with Terramate 0.17.1, the `VERSIONS` pin, from a root stack `after =
     ["/child"]`. A stack `after` the root is a Terramate cycle, so the root takes the edge.
     Mutation: drop `or "."` from `parse_dot` (the root keys `""`)."""
     assert w.parse_dot(ROOT_FIXTURE) == {".": {"child"}, "child": set()}
