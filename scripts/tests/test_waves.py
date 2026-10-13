@@ -207,9 +207,9 @@ def test_stack_levels_refuses_each_cycle_shape(shape, _deps, stacks):
     one stack; the stack off the loop (offcycle `c`) is not named.
 
     Mutations: skip a `parse_dot` line containing `color="red"` (no shape refuses); skip a
-    self-edge in `parse_dot` (self does not refuse); restore the old "Two or more stacks"
-    wording (every shape red); join `e.args[1]` unsorted with duplicates (every shape red, self
-    as `a, a`)."""
+    self-edge in `parse_dot` (self does not refuse); restore the previous message, which
+    printed the raw `CycleError` (every shape red); join `e.args[1]` unsorted with duplicates
+    (every shape red, self as `a, a`)."""
     with pytest.raises(SystemExit) as exc:
         w.stack_levels(w.parse_dot(_cycle_fixture(shape)))
     assert str(exc.value) == _CYCLE.format(stacks)
