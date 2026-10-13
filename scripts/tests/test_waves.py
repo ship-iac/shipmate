@@ -30,10 +30,16 @@ def test_parse_dot_keys_the_root_stack_dot():
 
 def test_a_root_stack_cell_gets_a_wave():
     """`terramate list` and the tag metadata name the root stack `.`, so its cell must find that
-    node. Mutation: drop `or "."` from `parse_dot` -> `assign_waves` refuses "stack '.' is not
-    a node in the run-graph"."""
+    node. Called as deploy-detect and apply-detect call it. Mutation: drop `or "."` from
+    `parse_dot` -> `env_level_waves` refuses "stack '.' is not a node in the run-graph"."""
     cell = {"stack": ".", "environment": "dev-eu", "workload": ""}
-    assert w.assign_waves(w.stack_levels(w.parse_dot(ROOT_FIXTURE)), [cell]) == [[], [cell]]
+    empty = {f"wave{i}": [] for i in range(8)}
+    assert w.env_level_waves([cell], {}, w.parse_dot(ROOT_FIXTURE)) == [
+        {**empty, "wave1": [cell]},
+        empty,
+        empty,
+        empty,
+    ]
 
 
 def test_levels_are_topological():
