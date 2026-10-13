@@ -1114,7 +1114,13 @@ dispatch time on that comment-handling run — for every verb alike, since they 
 run is not visible from the pull request, so every refusal in the dispatch step
 — an unwired verb, an unknown one, and a rejected API call alike — also posts a
 `🔴 failed:` reply there whose footer links the run. The run holds the error; the
-reply never carries the API's answer.
+failure reply never carries the API's answer. A dispatch that succeeded gets a
+`⚪` notice reply instead, `started [the <verb> run](<url>)`, linking the run it
+started by a URL the engine builds from the `workflow_run_id` the API returns
+(accepted only as 1 to 20 digits, never the API's `html_url`); without a usable
+id the notice says the run is listed in the repository's Actions tab. The run
+has already started, so a notice that cannot be posted is a warning on the
+comment-handling run, not a failure.
 
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
@@ -1509,10 +1515,11 @@ lock is the same `s3:DeleteObject` on `…/terraform.tfstate.tflock` that taking
 one already requires, so a role that can apply an environment can already
 unlock it.
 
-It reports in the run, not in a comment — a comment would need
-`pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
-reaction confirms acceptance, per-cell detail lands in each job's step summary,
-and a failure reds the run.
+The unlock run itself posts no comment — that would need
+`pull-requests: write`, which consumers do not grant `unlock.yml`. The
+comment-handling run, which holds it, posts the dispatch's notice reply linking
+the unlock run (above); per-cell detail lands in each job's step summary, and a
+failure reds the run.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
 reviewed plan may now be stale and the next apply refuses under the exact-plan

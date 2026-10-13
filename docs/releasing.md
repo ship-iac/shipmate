@@ -207,8 +207,8 @@ the release commit, from `repo-example-stacks-aws`:
    than from a consumer. When it does: add the pattern to `docs/hardening.md`'s
    list — it is a setting the consumer has to change by hand.
 
-2. Drive the consumer's workflow file directly at that ref, with the body
-   `actions/dispatch` would build — exactly those keys, and no others:
+2. Drive the consumer's workflow file directly at that ref, with the inputs
+   `actions/dispatch` would send — exactly those inputs, and no others:
 
    ```bash
    gh workflow run shipmate.yml --repo ship-iac/repo-example-stacks-aws --ref smoke/vX.Y.Z \
@@ -220,7 +220,9 @@ the release commit, from `repo-example-stacks-aws`:
    paragraph below — so `--ref` picks which branch's copy runs, not whether the
    file is dispatchable at all. `shipmate.yml` is on every sample's default
    branch, so `--ref` runs the scratch branch's copy. The command above sends
-   exactly the keys `actions/dispatch` builds for the verb `-f verb=` names.
+   exactly the inputs `actions/dispatch` builds for the verb `-f verb=` names;
+   it does not send `return_run_details`, which only decides whether the API
+   answers with the started run's id.
 
    **Not by commenting the verb.** An `issue_comment` workflow always runs from
    the repository's default branch, and the engine's `actions/dispatch` dispatches

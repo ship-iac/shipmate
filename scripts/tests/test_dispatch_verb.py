@@ -81,9 +81,11 @@ def test_plan_body_is_the_dispatch_ref_the_verb_and_pr_number_alone():
     top-level ref for the head SHA.
     """
     body = _build_dispatch_body("plan", environment="dev-eu")
-    assert body == {"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}}, (
-        f"plan body must carry the verb and the PR number alone, on the dispatch ref: {body}"
-    )
+    assert body == {
+        "ref": "main",
+        "inputs": {"verb": "plan", "pr_number": "42"},
+        "return_run_details": True,
+    }, f"plan body must carry the verb and the PR number alone, on the dispatch ref: {body}"
 
 
 def test_apply_body_omits_the_environment_when_it_is_empty():
@@ -96,6 +98,7 @@ def test_apply_body_omits_the_environment_when_it_is_empty():
     assert _build_dispatch_body("apply") == {
         "ref": "main",
         "inputs": {"verb": "apply", "ref": "abc123def456", "pr_number": "42"},
+        "return_run_details": True,
     }
 
 
@@ -112,6 +115,7 @@ def test_apply_body_carries_the_environment_when_it_is_set():
             "pr_number": "42",
             "environment": "dev-eu",
         },
+        "return_run_details": True,
     }
 
 
@@ -126,10 +130,12 @@ def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
     assert _build_dispatch_body("unlock", environment="dev-eu") == {
         "ref": "main",
         "inputs": {"verb": "unlock", "ref": "abc123def456", "environment": "dev-eu"},
+        "return_run_details": True,
     }
 
 
-RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" > argv.txt\necho '{}'\n"
+#: Appends, so the dispatch call's argv survives the reply call that follows it.
+RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\necho '{}'\n"
 
 
 def _create_stub_commands(tmp_path):
@@ -501,15 +507,107 @@ def test_a_failed_dispatch_posts_the_shared_failure_reply(tmp_path):
     )
 
 
-@bash_only
-def test_a_successful_dispatch_comments_nothing(tmp_path):
-    """`summary` owns the pull request on a run that starts. This comment exists only for the
-    window before it, so a dispatch that succeeded must leave no trace here.
+def _answering_stub(answer, reply_exit=0):
+    """A gh stub that answers the dispatch call with `answer`, records each call's token and
+    argv, saves the reply's body, and exits `reply_exit` on the reply call."""
+    return (
+        "#!/bin/bash\nprintf 'token=%s\n' \"$GH_TOKEN\" >> argv.txt\n"
+        "printf '%s\n' \"$@\" >> argv.txt\n"
+        'if [[ "$*" == *dispatches* ]]; then\n'
+        f"  cat <<'ANSWER'\n{answer}\nANSWER\n"
+        "  exit 0\nfi\n"
+        'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+        "done\n"
+        f"exit {reply_exit}\n"
+    )
 
-    Mutation: move the comment call out of the `if [ "$rc" -ne 0 ]` branch.
+
+#: E1's measured 200 answer, with an `html_url` that is not the engine-built link and would
+#: break out of a markdown link if pasted.
+_STARTED_ANSWER = (
+    '{"workflow_run_id":38481239914,'
+    '"run_url":"https://api.github.com/repos/org/repo/actions/runs/38481239914",'
+    '"html_url":"https://github.com/org/repo/actions/runs/1) [x](https://evil.example"}'
+)
+_STARTED_URL = "https://github.com/org/repo/actions/runs/38481239914"
+
+
+@pytest.mark.parametrize(
+    ("verb", "environment", "header"),
+    [
+        ("apply", "dev-eu", "### shipmate apply dev-eu"),
+        ("unlock", "dev-eu", "### shipmate unlock dev-eu"),
+        ("plan", "", "### shipmate plan"),
+    ],
+)
+@bash_only
+def test_a_started_run_gets_a_reply_linking_it(tmp_path, verb, environment, header):
+    """Every dispatching verb replies on the pull request with the whole notice: the header, a
+    verdict linking the started run by a URL the engine builds from `workflow_run_id`, and the
+    footer linking the comment-handling run. Posted with the workflow token, since the App
+    token is minted `actions: write` and cannot comment.
+
+    Mutations: link `html_url` from the answer instead; drop the link; skip the reply for one
+    verb (`if [ "$VERB" != plan ]`); swap `$COMMENT_TOKEN` for `$GH_TOKEN`.
     """
-    _, argv = _run_dispatch(tmp_path, verb="plan")
-    assert "/issues/42/comments" not in argv, f"a successful dispatch commented: {argv!r}"
+    result, argv = _run_dispatch(
+        tmp_path, verb=verb, environment=environment, gh_stub=_answering_stub(_STARTED_ANSWER)
+    )
+    assert result.returncode == 0, f"{verb} dispatch failed: {result.stdout}{result.stderr}"
+    assert _DISPATCH_PATH in argv, f"the dispatch was never attempted: {argv!r}"
+    assert "token=workflow_token\napi\n-X\nPOST\nrepos/org/repo/issues/42/comments\n" in argv, (
+        f"the reply must be posted with the workflow token, gh saw: {argv!r}"
+    )
+    assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
+        f"{header}\n\n⚪ started [the {verb} run]({_STARTED_URL})\n\n[run]({_RUN_URL})"
+    )
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        "",
+        '{"workflow_run_id":"abc"}',
+        '{"workflow_run_id":123456789012345678901}',
+    ],
+    ids=["204-empty", "non-numeric", "21-digits"],
+)
+@bash_only
+def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path, answer):
+    """A 204 (no body), a non-numeric id and a 21-digit id all yield the no-link notice, and
+    the step exits 0: the run has started whatever the answer says.
+
+    Mutations: remove the `|| run_id=""` parse guard (the 204 case exits non-zero under
+    `set -e`); widen the check to `^[0-9]+` (the 21-digit case links); drop the check (the
+    non-numeric case links).
+    """
+    result, _ = _run_dispatch(
+        tmp_path, verb="apply", environment="dev-eu", gh_stub=_answering_stub(answer)
+    )
+    assert result.returncode == 0, f"dispatch failed: {result.stdout}{result.stderr}"
+    assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
+        "### shipmate apply dev-eu\n\n"
+        "⚪ started the apply run; it is listed in this repository's Actions tab\n\n"
+        f"[run]({_RUN_URL})"
+    )
+
+
+@bash_only
+def test_a_failed_reply_after_a_started_run_warns_and_exits_zero(tmp_path):
+    """The run has started, so a reply that cannot be posted degrades to a warning.
+
+    Mutation: remove the `|| echo "::warning::..."` degrade, and the step exits non-zero.
+    """
+    result, _ = _run_dispatch(
+        tmp_path,
+        verb="apply",
+        environment="dev-eu",
+        gh_stub=_answering_stub(_STARTED_ANSWER, reply_exit=1),
+    )
+    assert result.returncode == 0, f"a failed reply failed the step: {result.stderr}"
+    assert "::warning::could not post the dispatch reply; the run started" in (
+        result.stdout.splitlines()
+    ), f"the warning must print whole: {result.stdout}"
 
 
 @bash_only
