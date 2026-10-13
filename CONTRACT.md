@@ -2240,10 +2240,10 @@ this write), the summary greens the gate itself. A failed refresh, or one
 refused by a hold, warns and leaves the `pending` standing.
 
 A run whose evidence the gate would hold over publishes no apply check at all,
-changed or not: a plan job that failed or was cancelled, a plan job skipped while
-cells were planned, a planned count that was not reported, or a parsed cell count
-that disagrees with it. A plan job skipped with no cell planned is the empty
-matrix and holds nothing. `gate-state` holds the one rule for both decisions. The
+changed or not: a plan job whose result is neither `success` nor `skipped`, or
+`skipped` while cells were planned; a planned count that was not reported; or a
+parsed cell count that disagrees with it. A plan job skipped with no cell planned
+is the empty matrix and holds nothing. `gate-state` holds the one rule for both decisions. The
 newer-run refusal above runs first, before any cell summary is read. Apply checks
 an earlier plan run of the same head published stay, and a pre-merge
 `shipmate apply` applies those; on a head with none it names no plan run and is
