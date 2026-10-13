@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 import pytest
-from _detect_fixtures import spy_env_config
+from _detect_fixtures import RUN_GRAPH_ARGV, run_graph_capture, spy_env_config
 from _loader import action_yaml, github_outputs, load_script, record_calls
 
 bm = load_script("build-matrix")
@@ -494,16 +494,13 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
     assert "fork pull requests are not supported" in bm.fork_pr_error("", "acme/iac", False)
 
 
-_RUN_GRAPH_ARGV = ["terramate", "experimental", "run-graph", "--label", "stack.dir"]
-
-
 def _fake_run(head_sha, diffs, diff_calls, dot=None):
     """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with, per
     `diffs` stack, a `diff --git` header for its `stack.tm.hcl` and its `diffs` text, recording
     the diff argv. `dot`, when given, answers the run-graph argv."""
 
     def fake_run(args):
-        if dot is not None and args == _RUN_GRAPH_ARGV:
+        if dot is not None and args == RUN_GRAPH_ARGV:
             return dot
         if args[:2] != ["git", "diff"]:
             return f"{head_sha}\n"
@@ -856,12 +853,6 @@ _CYCLE = (
     "stack configuration."
 )
 
-_FIXTURES = pathlib.Path(__file__).parent / "fixtures"
-
-
-def _dot(name):
-    return (_FIXTURES / f"run-graph-{name}.dot").read_text(encoding="utf-8")
-
 
 def _assert_cycle_refusal(exc, tmp_path, stacks):
     message = _CYCLE.format(stacks)
@@ -883,14 +874,13 @@ def _assert_cycle_refusal(exc, tmp_path, stacks):
 def test_run_graph_deps_refuses_a_cycle(monkeypatch, shape, stacks):
     """The fixtures are the raw Terramate 0.17.1 captures `test_waves.py` documents
     (`terramate experimental run-graph --label stack.dir` to a file, not a TTY). `offcycle`
-    refuses although `c` is on no loop: the read covers the whole tree. `apply-detect` and
-    `deploy-detect` reach this function through `bm.run_graph_deps`, which
-    `test_apply_detect.py::test_main_reads_the_run_graph_through_build_matrix`,
-    `test_apply_all_detect.py::test_main_refuses_a_cycle_before_an_inversion` and
-    `test_deploy_detect.py::test_main_refuses_a_cycle_before_an_inversion` pin.
+    refuses although `c` is on no loop: the read covers the whole tree. The apply and deploy
+    detect tests pin that those detects reach this function.
 
     Mutation: drop the `stack_levels` call from `run_graph_deps` (every shape returns)."""
-    monkeypatch.setattr(bm, "_run", lambda args: _dot(shape) if args == _RUN_GRAPH_ARGV else "")
+    monkeypatch.setattr(
+        bm, "_run", lambda args: run_graph_capture(shape) if args == RUN_GRAPH_ARGV else ""
+    )
     with pytest.raises(SystemExit) as exc:
         bm.run_graph_deps()
     assert exc.value.code == _CYCLE.format(stacks)
@@ -899,7 +889,9 @@ def test_run_graph_deps_refuses_a_cycle(monkeypatch, shape, stacks):
 def test_run_graph_deps_returns_the_acyclic_graph(monkeypatch):
     """`run-graph-stacks.dot` is the stacks flavor's graph. Mutation: `return
     wv.stack_levels(deps)` from `run_graph_deps` (the levels list comes back)."""
-    monkeypatch.setattr(bm, "_run", lambda args: _dot("stacks") if args == _RUN_GRAPH_ARGV else "")
+    monkeypatch.setattr(
+        bm, "_run", lambda args: run_graph_capture("stacks") if args == RUN_GRAPH_ARGV else ""
+    )
     assert bm.run_graph_deps() == {
         "stacks/app": {"stacks/auth", "stacks/workers"},
         "stacks/auth": {"stacks/platform"},
@@ -935,7 +927,7 @@ def test_a_plan_without_needs_refuses_a_cycle_through_its_cells(
             head_sha="cafe1234",
             table=_ONE_ENV,
             tag_map={s: ["env/dev-eu"] for s in stacks},
-            dot=_dot(shape),
+            dot=run_graph_capture(shape),
         )
     _assert_cycle_refusal(exc, tmp_path, ", ".join(stacks))
 
@@ -954,7 +946,7 @@ def test_a_plan_with_no_cell_refuses_a_cycle(monkeypatch, tmp_path):
             head_sha="cafe1234",
             table=_ONE_ENV,
             tag_map={},
-            dot=_dot("cycle-two"),
+            dot=run_graph_capture("cycle-two"),
         )
     _assert_cycle_refusal(exc, tmp_path, "a, b")
 

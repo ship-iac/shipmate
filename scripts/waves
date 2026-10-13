@@ -26,7 +26,7 @@ Bumping it needs, per new level N:
   actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line.
 
 A module, never a program: the detects, `env-config` and `apply-comment` `_load` it.
-It runs nothing on import -- it only defines functions and constants.
+It runs nothing on import -- it only defines functions, one exception class and constants.
 """
 
 import json
@@ -77,6 +77,10 @@ def levels(deps):
     return out
 
 
+class StackCycle(SystemExit):
+    """`stack_levels`' cycle refusal: a `SystemExit`, typed so a caller can add a remedy."""
+
+
 def stack_levels(deps):
     """`levels` over the stack run-graph, or `SystemExit` naming the stacks on a cycle.
 
@@ -87,7 +91,7 @@ def stack_levels(deps):
         return levels(deps)
     except CycleError as e:
         stacks = ", ".join(sorted(set(e.args[1])))
-        raise SystemExit(
+        raise StackCycle(
             f"::error::stack ordering cycle through {stacks}: a stack ordered after itself, "
             "directly or through other stacks, has no first wave. Remove one `after` or "
             "`before` entry on that loop in the stack configuration."

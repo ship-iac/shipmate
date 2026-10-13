@@ -9,6 +9,8 @@ from _detect_fixtures import (
     PR_NUMBER,
     _apply_check,
     _record,
+    answering_run_graph,
+    run_graph_capture,
 )
 from _detect_fixtures import check_run as _check
 from _loader import github_outputs, load_script
@@ -245,9 +247,6 @@ def _stub_read_table(monkeypatch, table, reads):
     monkeypatch.setattr(ad.bm.ec, "read_table", read_table)
 
 
-_RUN_GRAPH_ARGV = ["terramate", "experimental", "run-graph", "--label", "stack.dir"]
-
-
 def _stub_apply(monkeypatch, deps, checks, dot=None):
     """Stub the apply path's IO: the run-graph, the check-run listing and the per-stack tag
     query. Every terramate call must be stubbed, because CI installs uv alone -- a real
@@ -259,16 +258,17 @@ def _stub_apply(monkeypatch, deps, checks, dot=None):
     urls = []
 
     def _run(args):
-        if dot is not None and args == _RUN_GRAPH_ARGV:
-            return dot
         assert args[0] == "gh", args
         urls.append(args[-1])
         return "\n".join(json.dumps(c) for c in checks)
 
-    graph = ad.bm.run_graph_deps if dot is not None else lambda: deps
-    monkeypatch.setattr(ad.bm, "run_graph_deps", graph)
-    monkeypatch.setattr(ad, "_run", _run)
-    monkeypatch.setattr(ad.bm, "_run", _run)
+    runner = _run
+    if dot is None:
+        monkeypatch.setattr(ad.bm, "run_graph_deps", lambda: deps)
+    else:
+        runner = answering_run_graph(_run, dot)
+    monkeypatch.setattr(ad, "_run", runner)
+    monkeypatch.setattr(ad.bm, "_run", runner)
     monkeypatch.setattr(
         ad.bm, "all_tags", lambda: {s: ["env/dev-eu", "workload/app"] for s in deps}
     )
@@ -445,35 +445,25 @@ def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path)
     )
 
 
-_AB_LOOP = (
-    "digraph  {\n\t\n"
-    '\tn1[label="/stacks/a"];\n'
-    '\tn2[label="/stacks/b"];\n'
-    '\tn1->n2[color="red"];\n'
-    '\tn2->n1[color="red"];\n'
-    "\t\n}\n"
-)
-
-
 def test_main_reads_the_run_graph_through_build_matrix(monkeypatch, tmp_path):
     """The targeted form reads the run-graph through `bm.run_graph_deps`, whose sort refuses a
-    cycle before the check-run listing. The DOT is hand-built for two stacks in the shape of
-    the raw Terramate 0.17.1 captures (tab indent, red cycle edges); `_run` answers the
-    run-graph argv, so `run_graph_deps` is real. A later sort gives the same message, so the
-    empty `gh api` list is what tells the two reads apart.
+    cycle before the check-run listing. `run_graph_capture("cycle-two")` is the raw capture;
+    `_run` answers the run-graph argv, so `run_graph_deps` is real. A later sort gives the
+    same message, so the empty `gh api` list is what tells the two reads apart.
 
-    Mutation: `deps = wv.parse_dot(bm._run([...run-graph argv...]))` for the targeted form's
-    `bm.run_graph_deps()` -- the listing is requested before the refusal."""
+    Mutations: `deps = wv.parse_dot(bm._run([...run-graph argv...]))` for the targeted form's
+    `bm.run_graph_deps()`; move that read after `_check_run_lines` (reddens this test alone).
+    Either way the listing is requested before the refusal."""
     _apply_env(monkeypatch, tmp_path)
     urls = _stub_apply(
-        monkeypatch, {"stacks/a": set(), "stacks/b": set()}, [_apply_check("stacks/a")], _AB_LOOP
+        monkeypatch, {"a": set(), "b": set()}, [_apply_check("a")], run_graph_capture("cycle-two")
     )
     with pytest.raises(SystemExit) as exc:
         ad.main()
     assert str(exc.value) == (
-        "::error::stack ordering cycle through stacks/a, stacks/b: a stack ordered after itself, "
-        "directly or through other stacks, has no first wave. Remove one `after` or `before` "
-        "entry on that loop in the stack configuration."
+        "::error::stack ordering cycle through a, b: a stack ordered after itself, directly or "
+        "through other stacks, has no first wave. Remove one `after` or `before` entry on that "
+        "loop in the stack configuration."
     )
     assert urls == []
 

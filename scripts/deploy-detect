@@ -134,6 +134,32 @@ def refuse_inversions(pending, order, deps, tag_map):
     )
 
 
+def run_graph_deps(pending):
+    """`bm.run_graph_deps()`. A stack ordering cycle refuses with the cycle message first, then
+    every `pending` cell, since the refusal applies nothing, and the remedy: the loop lives in
+    this merged commit, so a re-run refuses again."""
+    # `bm.wv`, not `wv`: `_load` builds a fresh module per call, so only the class
+    # build-matrix raises matches.
+    try:
+        return bm.run_graph_deps()
+    except bm.wv.StackCycle as e:
+        cells = ", ".join(sorted(f"{c['stack']} / {c['environment']}" for c in pending))
+        listed = (
+            f" This deploy applies nothing, so none of these cells of this merge is applied: "
+            f"{cells}."
+            if cells
+            else ""
+        )
+        raise SystemExit(
+            f"{e.code}{listed} The loop lives in this merged commit, so a re-run refuses again, "
+            "and so does every later deploy until a fix merges. Open a new pull request that "
+            "removes one `after` or `before` entry on the loop and changes the stack of every "
+            "listed cell (any edit `terramate list --changed` marks), and apply its cells with "
+            "`shipmate apply` before merging it. This deploy's apply checks are never read "
+            "again and stay open on the merged pull request."
+        ) from e
+
+
 def main():
     repo = os.environ["GITHUB_REPOSITORY"]
     merge_sha = os.environ["GITHUB_SHA"]
@@ -170,7 +196,7 @@ def main():
     # so a completed check that carries none never refuses the deploy.
     pending = ad.with_plan_runs(pending, lines, app_id, pr_number=None)
     bm.refuse_workload_gaps(pending, table)
-    deps = bm.run_graph_deps()
+    deps = run_graph_deps(pending)
     order = bm.ec.env_order(table)
     refuse_inversions(pending, order, deps, tag_map)
     # Before the padding, whose over-depth refusal is where this line helps most.
