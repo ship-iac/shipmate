@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.45.0] — 2026-10-13
 
+Tags `45ed9ae`.
+
 ### Added
 
 - **Applies order cells across environments by `after`. A cell whose upstream cell in another environment is pending and not applying in the run waits: its apply check stays pending, the apply comment names it, its blocker and the blocker's remedy, and the rest of the run applies. A bare `shipmate apply` also skips the `needs` successors of an environment with a waiting cell.**
