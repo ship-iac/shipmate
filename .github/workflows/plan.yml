@@ -114,7 +114,8 @@ jobs:
           plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
 
   # Holds the App key, as `gate-hold` does. Neither checks anything out, so neither runs consumer
-  # repository content: that makes `pull_request_target` safe here. Its own `if:` decides trust.
+  # repository content: that makes `pull_request_target` safe here. Its own `if:` decides trust,
+  # reading only `facts`, the one producer of pull-request facts.
   summary:
     needs: [facts, detect, plan]
     # The fork clause yields to no trigger; it alone guards App-key exposure over fork-authored
