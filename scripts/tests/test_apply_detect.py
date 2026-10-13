@@ -259,7 +259,7 @@ def _stub_apply(monkeypatch, deps, checks):
         urls.append(args[-1])
         return "\n".join(json.dumps(c) for c in checks)
 
-    monkeypatch.setattr(ad, "run_graph_deps", lambda: deps)
+    monkeypatch.setattr(ad.bm, "run_graph_deps", lambda: deps)
     monkeypatch.setattr(ad, "_run", _run)
     monkeypatch.setattr(ad.bm, "_run", _run)
     monkeypatch.setattr(
@@ -688,8 +688,8 @@ def _boom_on_the_workset(monkeypatch):
     def _boom(*a, **kw):
         raise AssertionError("main() built its workset on an unauthorized apply")
 
-    for name in ("run_graph_deps", "_check_run_lines"):
-        monkeypatch.setattr(ad, name, _boom)
+    monkeypatch.setattr(ad.bm, "run_graph_deps", _boom)
+    monkeypatch.setattr(ad, "_check_run_lines", _boom)
 
 
 def test_main_refuses_before_it_reads_any_check(monkeypatch, tmp_path):

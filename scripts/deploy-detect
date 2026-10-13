@@ -165,7 +165,7 @@ def main():
     # so a completed check that carries none never refuses the deploy.
     pending = ad.with_plan_runs(pending, lines, app_id, pr_number=None)
     bm.refuse_workload_gaps(pending, table)
-    deps = ad.run_graph_deps()
+    deps = bm.run_graph_deps()
     order = bm.ec.env_order(table)
     refuse_inversions(pending, order, deps, tag_map)
     # Before the padding, whose over-depth refusal is where this line helps most.

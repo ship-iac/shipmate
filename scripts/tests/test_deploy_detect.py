@@ -193,7 +193,7 @@ def _run_main(
     # module lands in `urls`.
     monkeypatch.setattr(dd.ad, "_run", _run)
     monkeypatch.setattr(dd.bm, "_run", _run)
-    monkeypatch.setattr(dd.ad, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
+    monkeypatch.setattr(dd.bm, "run_graph_deps", lambda: deps or {c["stack"]: set() for c in cells})
     dd.main()
     return github_outputs(out)
 

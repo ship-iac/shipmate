@@ -741,9 +741,11 @@ def _detect():
         cells = check_cells(cells, table)
     if errors:
         raise SystemExit("\n".join(errors))
-    if cells and not sweep:
+    order = ec.env_order(table)
+    # Every env on one level (no entry's `needs` names another) admits no inversion.
+    if cells and not sweep and any(order.values()):
         present = {(c["stack"], c["environment"]) for c in cells}
-        wv.refuse_inversions(cells, present, run_graph_deps(), tag_map, ec.env_order(table))
+        wv.refuse_inversions(cells, present, run_graph_deps(), tag_map, order)
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
