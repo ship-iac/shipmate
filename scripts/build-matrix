@@ -276,8 +276,11 @@ def all_tags():
 def run_graph_deps():
     """The stack dependency graph, parsed. `--label stack.dir` is what makes
     waves.parse_dot's node normalization correct -- its docstring pins the argv
-    as contract."""
-    return wv.parse_dot(_run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
+    as contract. A cycle refuses here, so every detect refuses it before any other
+    ordering check."""
+    deps = wv.parse_dot(_run(["terramate", "experimental", "run-graph", "--label", "stack.dir"]))
+    wv.stack_levels(deps)
+    return deps
 
 
 def tags_of(stacks, tag_map=None):
@@ -741,10 +744,11 @@ def _detect():
     if errors:
         raise SystemExit("\n".join(errors))
     order = ec.env_order(table)
-    # Every env on one level (no entry's `needs` names another) admits no inversion.
-    if cells and not sweep and any(order.values()):
+    # A pull request that plans no cell can still close a loop.
+    if not sweep:
+        deps = run_graph_deps()
         present = {(c["stack"], c["environment"]) for c in cells}
-        wv.refuse_inversions(cells, present, run_graph_deps(), tag_map, order)
+        wv.refuse_inversions(cells, present, deps, tag_map, order)
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")

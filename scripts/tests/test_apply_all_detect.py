@@ -8,7 +8,9 @@ from _detect_fixtures import (
     PR_NUMBER,
     _apply_check,
     _record,
+    answering_run_graph,
     check_run,
+    run_graph_capture,
     spy_env_config,
     stub_read_table,
 )
@@ -223,6 +225,7 @@ def _run_main(
     reads=None,
     membership=None,
     deps=None,
+    dot=None,
 ):
     """main() with an empty SHIPMATE_ENV, which is bare_main(), over the head's apply checks,
     with everything the script reaches from GitHub or Terramate stubbed. Defaults to one
@@ -234,7 +237,8 @@ def _run_main(
     would mask a caller that stopped passing the table. One entry is appended to `reads` per
     `read_table` call. Each `env_membership` call appends its `(args, kwargs)` to `membership`
     when one is given. `deps` replaces the run-graph, which defaults to the tree's stacks with
-    no edges, and `tags` the tag map, which defaults to no tags for each of them."""
+    no edges, and `tags` the tag map, which defaults to no tags for each of them. `dot`,
+    run-graph text, keeps `run_graph_deps` real and answers its Terramate call instead."""
     out = tmp_path / "out"
     for k, v in {
         "GITHUB_REPOSITORY": "o/r",
@@ -259,20 +263,24 @@ def _run_main(
     if checks is None:
         checks = [_apply_check("stacks/app", e) for e in envs]
     jsonl = "\n".join(json.dumps(c) for c in checks)
+    requested = [] if urls is None else urls
 
     def _run(args):
         # Every terramate call must be stubbed, because CI installs uv alone: a real
         # invocation passes on a developer machine and fails there.
         assert args[0] == "gh", args
-        if urls is not None:
-            urls.append(args[-1])
+        requested.append(args[-1])
         return jsonl
 
     tree = tree or {e: ["stacks/app"] for e in envs}
     deps = deps or {p: set() for ps in tree.values() for p in ps}
-    monkeypatch.setattr(aad.bm, "run_graph_deps", lambda: deps)
-    monkeypatch.setattr(aad, "_run", _run)
-    monkeypatch.setattr(aad.bm, "_run", _run)
+    runner = _run
+    if dot is None:
+        monkeypatch.setattr(aad.bm, "run_graph_deps", lambda: deps)
+    else:
+        runner = answering_run_graph(_run, dot)
+    monkeypatch.setattr(aad, "_run", runner)
+    monkeypatch.setattr(aad.bm, "_run", runner)
     monkeypatch.setattr(
         aad.bm,
         "env_membership",
@@ -1022,6 +1030,33 @@ def test_main_refuses_a_cell_after_a_held_upstream_on_a_later_env_level(tmp_path
         "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
         "in that chain on the default branch, or retag the stacks so the edge stays inside "
         "environments that order it."
+    )
+
+
+def test_main_refuses_a_cycle_before_an_inversion(tmp_path, monkeypatch):
+    """`a` and `b` are each `after` the other, and dev-us needs dev-eu, so `a / dev-eu` after
+    `b / dev-us` also inverts. The bare form reads the run-graph through `bm.run_graph_deps`,
+    whose sort refuses before `refuse_inversions`. `run_graph_capture("cycle-two")` is the raw
+    capture; `_run` answers the run-graph argv, so `run_graph_deps` is real.
+
+    Mutation: `deps = wv.parse_dot(bm._run([...run-graph argv...]))` for `bare_main`'s
+    `bm.run_graph_deps()` -- the inversion message appears instead."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            envs=[],
+            tree={"dev-eu": ["a"], "dev-us": ["b"]},
+            tags={"a": ["env/dev-eu"], "b": ["env/dev-us"]},
+            checks=[_apply_check("a", "dev-eu"), _apply_check("b", "dev-us")],
+            order={"dev-us": ["dev-eu"]},
+            decision="APPROVED",
+            dot=run_graph_capture("cycle-two"),
+        )
+    assert str(exc_info.value) == (
+        "::error::stack ordering cycle through a, b: a stack ordered after itself, directly or "
+        "through other stacks, has no first wave. Remove one `after` or `before` entry on that "
+        "loop in the stack configuration."
     )
 
 

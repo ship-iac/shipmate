@@ -4,7 +4,7 @@ import subprocess
 import sys
 
 import pytest
-from _detect_fixtures import spy_env_config
+from _detect_fixtures import answering_run_graph, run_graph_capture, spy_env_config
 from _loader import action_yaml, github_outputs, load_script, record_calls
 
 bm = load_script("build-matrix")
@@ -494,10 +494,10 @@ def test_an_unknown_this_repository_refuses_a_stated_head_repository():
     assert "fork pull requests are not supported" in bm.fork_pr_error("", "acme/iac", False)
 
 
-def _fake_run(head_sha, diffs, diff_calls):
+def _fake_run(head_sha, diffs, diff_calls, dot=None):
     """`_run` answering `git rev-parse HEAD` with `head_sha` and each `git diff` with, per
     `diffs` stack, a `diff --git` header for its `stack.tm.hcl` and its `diffs` text, recording
-    the diff argv."""
+    the diff argv. `dot`, when given, answers the run-graph argv."""
 
     def fake_run(args):
         if args[:2] != ["git", "diff"]:
@@ -507,7 +507,7 @@ def _fake_run(head_sha, diffs, diff_calls):
             f"diff --git a/{s}/stack.tm.hcl b/{s}/stack.tm.hcl\n{text}" for s, text in diffs.items()
         )
 
-    return fake_run
+    return fake_run if dot is None else answering_run_graph(fake_run, dot)
 
 
 def _run_main(
@@ -528,6 +528,7 @@ def _run_main(
     tag_map=None,
     graph=None,
     tag_reads=None,
+    dot=None,
 ):
     """main() with GITHUB_OUTPUT redirected, returning (parsed outputs, calls) where calls
     records compute_cells' arguments, so a rejection is observable as the stack enumeration
@@ -547,8 +548,10 @@ def _run_main(
     refused, so every test that wants to reach the matrix passes one.
 
     The inversion check's two reads are stubbed: `all_tags` answers `tag_map` (or `stacks`),
-    and `run_graph_deps` is `graph`, by default an empty run-graph. Each `all_tags` call appends
-    the map it answers to `tag_reads` when one is given."""
+    and `run_graph_deps` is `graph`, by default an empty run-graph, which replaces both the
+    run-graph read and its cycle sort. `dot`, run-graph text, keeps `run_graph_deps` real
+    instead -- the read and the sort -- and answers its Terramate call; it needs `head_sha`.
+    Each `all_tags` call appends the map it answers to `tag_reads` when one is given."""
     out = tmp_path / "out.txt"
     out.write_text("", encoding="utf-8")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
@@ -573,7 +576,9 @@ def _run_main(
     if head_sha is not None:
         monkeypatch.setenv("SHIPMATE_HEAD_SHA", head_sha)
         monkeypatch.setattr(
-            bm, "_run", _fake_run(head_sha, diffs or {}, [] if diff_calls is None else diff_calls)
+            bm,
+            "_run",
+            _fake_run(head_sha, diffs or {}, [] if diff_calls is None else diff_calls, dot),
         )
     for k, v in env.items():
         monkeypatch.setenv(k, v)
@@ -601,7 +606,8 @@ def _run_main(
         monkeypatch.setattr(bm, "compute_cells", fake_compute)
     else:
         monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(stacks))
-    monkeypatch.setattr(bm, "run_graph_deps", graph or (lambda: {}))
+    fallback = bm.run_graph_deps if dot is not None else lambda: {}
+    monkeypatch.setattr(bm, "run_graph_deps", graph or fallback)
     monkeypatch.setattr(bm.ec, "read_table", read_table or (lambda: dict(table or _MINIMAL_TABLE)))
     bm.main()
     parsed = github_outputs(out)
@@ -839,38 +845,158 @@ def test_a_plan_reads_the_tag_metadata_once(monkeypatch, tmp_path):
     assert reads == [{"stacks/app": ["env/dev-eu"]}]
 
 
-def test_an_empty_plan_reads_no_run_graph(monkeypatch, tmp_path):
-    """Mutation: drop the `cells` guard on the inversion check."""
+_CYCLE = (
+    "::error::stack ordering cycle through {}: a stack ordered after itself, directly or through "
+    "other stacks, has no first wave. Remove one `after` or `before` entry on that loop in the "
+    "stack configuration."
+)
 
-    def boom():
-        raise AssertionError("read the run-graph for an empty matrix")
 
-    outputs, _ = _run_inverted(monkeypatch, tmp_path, _PR_ENV, (), graph=boom)
-    assert outputs["empty"] == "true"
+def _assert_cycle_refusal(exc, tmp_path, stacks):
+    message = _CYCLE.format(stacks)
+    assert exc.value.code == message
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        f"refusal={message.removeprefix('::error::')}\n"
+    )
 
 
 @pytest.mark.parametrize(
-    "environments",
+    ("shape", "stacks"),
     [
-        {"dev-eu": {}, "dev-us": {}},
-        {"dev-eu": {}, "dev-us": {"needs": []}},
+        ("cycle-self", "a"),
+        ("cycle-two", "a, b"),
+        ("cycle-three", "a, b, c"),
+        ("cycle-offcycle", "a, b"),
     ],
-    ids=["no-needs", "empty-needs"],
 )
-def test_a_plan_without_needs_reads_no_run_graph(monkeypatch, tmp_path, environments):
-    """Every env sits on one level, so no `after` edge can invert. Mutations: drop the
-    `any(order.values())` guard (both red); replace it with `order` (`empty-needs` red)."""
+def test_run_graph_deps_refuses_a_cycle(monkeypatch, shape, stacks):
+    """The fixtures are the raw Terramate 0.17.1 captures `test_waves.py` documents
+    (`terramate experimental run-graph --label stack.dir` to a file, not a TTY). `offcycle`
+    refuses although `c` is on no loop: the read covers the whole tree. The apply and deploy
+    detect tests pin that those detects reach this function.
+
+    Mutation: drop the `stack_levels` call from `run_graph_deps` (every shape returns)."""
+    monkeypatch.setattr(bm, "_run", answering_run_graph(lambda args: "", run_graph_capture(shape)))
+    with pytest.raises(SystemExit) as exc:
+        bm.run_graph_deps()
+    assert exc.value.code == _CYCLE.format(stacks)
+
+
+def test_run_graph_deps_returns_the_acyclic_graph(monkeypatch):
+    """`run-graph-stacks.dot` is the stacks flavor's graph. Mutation: `return
+    wv.stack_levels(deps)` from `run_graph_deps` (the levels list comes back)."""
+    monkeypatch.setattr(
+        bm, "_run", answering_run_graph(lambda args: "", run_graph_capture("stacks"))
+    )
+    assert bm.run_graph_deps() == {
+        "stacks/app": {"stacks/auth", "stacks/workers"},
+        "stacks/auth": {"stacks/platform"},
+        "stacks/platform": {"stacks/dns"},
+        "stacks/workers": {"stacks/platform"},
+        "stacks/tenant-a": {"stacks/app"},
+        "stacks/tenant-b": {"stacks/app"},
+        "stacks/dns": set(),
+        "stacks/sandbox/box": set(),
+    }
+
+
+_ONE_ENV = {"layout": "folder", "environments": {"dev-eu": {}}}
+
+
+@pytest.mark.parametrize(
+    ("shape", "stacks"), [("cycle-self", ("a",)), ("cycle-three", ("a", "b", "c"))]
+)
+def test_a_plan_without_needs_refuses_a_cycle_through_its_cells(
+    monkeypatch, tmp_path, shape, stacks
+):
+    """The table orders no environment, and the plan still reads and sorts the run-graph.
+    Fixtures as `test_run_graph_deps_refuses_a_cycle`; `_run` answers the run-graph argv, so
+    `run_graph_deps` is real.
+
+    Mutation: re-gate the read behind `any(order.values())` in `_detect` (both red)."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            _PR_ENV,
+            cells=tuple((s, "dev-eu") for s in stacks),
+            head_sha="cafe1234",
+            table=_ONE_ENV,
+            tag_map={s: ["env/dev-eu"] for s in stacks},
+            dot=run_graph_capture(shape),
+        )
+    _assert_cycle_refusal(exc, tmp_path, ", ".join(stacks))
+
+
+def test_a_plan_with_no_cell_refuses_a_cycle(monkeypatch, tmp_path):
+    """A pull request can close a loop and plan nothing, for example with an `after` on a stack
+    that has no `env/*` tag. Fixture as `test_run_graph_deps_refuses_a_cycle`.
+
+    Mutation: add `cells and` to the read's guard in `_detect`."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            _PR_ENV,
+            cells=(),
+            head_sha="cafe1234",
+            table=_ONE_ENV,
+            tag_map={},
+            dot=run_graph_capture("cycle-two"),
+        )
+    _assert_cycle_refusal(exc, tmp_path, "a, b")
+
+
+_DNS_PLATFORM_LOOP = (
+    "digraph  {\n\t\n"
+    '\tn1[label="/stacks/dns"];\n'
+    '\tn2[label="/stacks/platform"];\n'
+    '\tn1->n2[color="red"];\n'
+    '\tn2->n1[color="red"];\n'
+    "\t\n}\n"
+)
+
+
+def test_a_cycle_refuses_before_an_inversion(monkeypatch, tmp_path):
+    """`stacks/platform` and `stacks/dns` are each `after` the other, and dev-us needs dev-eu,
+    so the pair also inverts. The DOT is hand-built for these two stack names in the shape of
+    the raw 0.17.1 captures (tab indent, red cycle edges).
+
+    Mutation: drop the `stack_levels` call from `run_graph_deps` (the inversion message
+    appears)."""
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            _PR_ENV,
+            cells=(("stacks/platform", "dev-eu"), ("stacks/dns", "dev-us")),
+            head_sha="cafe1234",
+            table=_INVERTED_TABLE,
+            tag_map=_INVERTED_TAGS,
+            dot=_DNS_PLATFORM_LOOP,
+        )
+    _assert_cycle_refusal(exc, tmp_path, "stacks/dns, stacks/platform")
+
+
+def test_a_drift_sweep_reads_no_run_graph(monkeypatch, tmp_path):
+    """A sweep applies nothing, and refusing a cycle there would blank drift for every stack off
+    the loop. Mutation: drop `not sweep` from the read's guard in `_detect`; it also reddens
+    `test_a_drift_sweep_does_not_refuse_an_inverted_edge`, which proves no inversion refuses a
+    sweep, while this one proves a sweep never reads the run-graph at all."""
 
     def boom():
-        raise AssertionError("read the run-graph for a table that orders no environment")
+        raise AssertionError("a drift sweep read the run-graph")
 
     outputs, _ = _run_main(
         monkeypatch,
         tmp_path,
-        _PR_ENV,
+        {
+            "SHIPMATE_SWEEP": "true",
+            "GITHUB_EVENT_NAME": "schedule",
+            "GITHUB_REPOSITORY": "acme/iac",
+        },
         cells=(("stacks/platform", "dev-eu"), ("stacks/dns", "dev-us")),
-        head_sha="cafe1234",
-        table={"layout": "folder", "environments": environments},
+        table=_INVERTED_TABLE,
         tag_map=_INVERTED_TAGS,
         graph=boom,
     )

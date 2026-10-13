@@ -1008,8 +1008,8 @@ pull request, lost that `env/*` tag (or every one) after the pull request was
 planned, so no cell would ever apply its reviewed change. The refusal applies
 nothing, so it also names every other cell of that merge still to apply, as `<stack> / <env>`.
 A new pull request that retags each stranded stack and changes every other
-named stack plans the current default branch, and its deploy applies all of
-them. After a deliberate untag, the stranded change is applied by hand instead,
+named stack plans the current default branch; its cells are applied before
+merge under a required gate, or by its deploy otherwise. After a deliberate untag, the stranded change is applied by hand instead,
 and the pull request still changes every named stack, or is not needed when
 none is named. Re-running the refused deploy checks out the same commit and
 refuses again ([`docs/troubleshooting.md`](docs/troubleshooting.md) §A deploy
@@ -1986,7 +1986,13 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   levels of that DAG — all units at one level must complete before the next
   level's units start. A wave spans every environment of its env-level (§Env
   apply order), so `after` orders cells across environments: a cell waits on
-  every lower wave of its env-level, in any environment.
+  every lower wave of its env-level, in any environment. A cycle in the
+  `after`/`before` graph, a stack ordered after itself included, has no first
+  level. Every plan but a drift sweep refuses it, a plan with no cell
+  included. Both apply forms and the merge deploy refuse it. Each refuses when
+  it reads the run-graph, before any other ordering check and before any cell
+  runs, and the deploy's refusal also lists the merge's pending cells. The read
+  covers the whole tree, so a cycle anywhere refuses every pull request's plan.
 - A cell `(stack, env)` runs after these cells of each stack its stack is
   `after`, directly or transitively. "The same environment" below is the
   environment of the cell each step walks from, not only the starting cell's:

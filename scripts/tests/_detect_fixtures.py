@@ -1,6 +1,7 @@
 """Check-run fixtures shared by the detect-script tests."""
 
 import json
+import pathlib
 from typing import Any
 
 HEAD = "0" * 40
@@ -8,6 +9,24 @@ APP_ID = "999"
 PLAN_SHA = "d" * 64
 #: The pull request every fixture record and every apply-detect run names.
 PR_NUMBER = "8"
+
+
+#: The argv `build-matrix.run_graph_deps` runs.
+RUN_GRAPH_ARGV = ["terramate", "experimental", "run-graph", "--label", "stack.dir"]
+
+
+def run_graph_capture(shape):
+    """`fixtures/run-graph-<shape>.dot`. Each `cycle-*` capture is `terramate experimental
+    run-graph --label stack.dir` written raw to a file (not a TTY, exit 0, empty stderr) by
+    Terramate 0.17.1, the `VERSIONS` pin; `cycle-two` holds stacks `a` and `b`, each `after`
+    the other."""
+    path = pathlib.Path(__file__).parent / "fixtures" / f"run-graph-{shape}.dot"
+    return path.read_text(encoding="utf-8")
+
+
+def answering_run_graph(run, dot):
+    """`run`, except that `RUN_GRAPH_ARGV` answers `dot`."""
+    return lambda args: dot if args == RUN_GRAPH_ARGV else run(args)
 
 
 def check_run(**kw):

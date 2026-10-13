@@ -9,6 +9,8 @@ from _detect_fixtures import (
     PR_NUMBER,
     _apply_check,
     _record,
+    answering_run_graph,
+    run_graph_capture,
 )
 from _detect_fixtures import check_run as _check
 from _loader import github_outputs, load_script
@@ -245,10 +247,11 @@ def _stub_read_table(monkeypatch, table, reads):
     monkeypatch.setattr(ad.bm.ec, "read_table", read_table)
 
 
-def _stub_apply(monkeypatch, deps, checks):
+def _stub_apply(monkeypatch, deps, checks, dot=None):
     """Stub the apply path's IO: the run-graph, the check-run listing and the per-stack tag
     query. Every terramate call must be stubbed, because CI installs uv alone -- a real
-    invocation passes on a developer machine and fails there.
+    invocation passes on a developer machine and fails there. `dot`, run-graph text, keeps
+    `run_graph_deps` real and answers its Terramate call; `deps` then only keys the tag map.
 
     Returns the list of `gh api` paths main() requested, so a re-added run lookup shows up as
     an extra entry rather than as a silent success."""
@@ -259,9 +262,13 @@ def _stub_apply(monkeypatch, deps, checks):
         urls.append(args[-1])
         return "\n".join(json.dumps(c) for c in checks)
 
-    monkeypatch.setattr(ad.bm, "run_graph_deps", lambda: deps)
-    monkeypatch.setattr(ad, "_run", _run)
-    monkeypatch.setattr(ad.bm, "_run", _run)
+    runner = _run
+    if dot is None:
+        monkeypatch.setattr(ad.bm, "run_graph_deps", lambda: deps)
+    else:
+        runner = answering_run_graph(_run, dot)
+    monkeypatch.setattr(ad, "_run", runner)
+    monkeypatch.setattr(ad.bm, "_run", runner)
     monkeypatch.setattr(
         ad.bm, "all_tags", lambda: {s: ["env/dev-eu", "workload/app"] for s in deps}
     )
@@ -418,7 +425,10 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
 
 
 def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path):
-    """Mutation: `levels` for `stack_levels` in both `dag_shape_notice` and
+    """The double stubs `run_graph_deps`, so the cycle reaches the `dag_shape_notice` and
+    `env_level_waves` sorts; in production the real `run_graph_deps` refuses it first.
+
+    Mutation: `levels` for `stack_levels` in both `dag_shape_notice` and
     `waves.env_level_waves` -- a raw `CycleError` escapes instead of this `SystemExit`."""
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(
@@ -429,10 +439,33 @@ def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path)
     with pytest.raises(SystemExit) as exc:
         ad.main()
     assert str(exc.value) == (
-        "::error::dependency cycle in the Terramate stack run-graph: ('nodes are in a cycle', "
-        "['stacks/a', 'stacks/b', 'stacks/a']). Two or more stacks order each other through "
-        "`after`/`before`; break the loop in their stack configuration."
+        "::error::stack ordering cycle through stacks/a, stacks/b: a stack ordered after itself, "
+        "directly or through other stacks, has no first wave. Remove one `after` or `before` "
+        "entry on that loop in the stack configuration."
     )
+
+
+def test_main_reads_the_run_graph_through_build_matrix(monkeypatch, tmp_path):
+    """The targeted form reads the run-graph through `bm.run_graph_deps`, whose sort refuses a
+    cycle before the check-run listing. `run_graph_capture("cycle-two")` is the raw capture;
+    `_run` answers the run-graph argv, so `run_graph_deps` is real. A later sort gives the
+    same message, so the empty `gh api` list is what tells the two reads apart.
+
+    Mutations: `deps = wv.parse_dot(bm._run([...run-graph argv...]))` for the targeted form's
+    `bm.run_graph_deps()`; move that read after `_check_run_lines` (reddens this test alone).
+    Either way the listing is requested before the refusal."""
+    _apply_env(monkeypatch, tmp_path)
+    urls = _stub_apply(
+        monkeypatch, {"a": set(), "b": set()}, [_apply_check("a")], run_graph_capture("cycle-two")
+    )
+    with pytest.raises(SystemExit) as exc:
+        ad.main()
+    assert str(exc.value) == (
+        "::error::stack ordering cycle through a, b: a stack ordered after itself, directly or "
+        "through other stacks, has no first wave. Remove one `after` or `before` entry on that "
+        "loop in the stack configuration."
+    )
+    assert urls == []
 
 
 def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, capsys):
