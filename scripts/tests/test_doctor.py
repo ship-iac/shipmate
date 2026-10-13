@@ -5,6 +5,7 @@ import re
 import sys
 
 import pytest
+from _detect_fixtures import forbid_shared_runner
 from _loader import ENGINE, SCRIPTS, load_script
 from _shipmate import codeowners_rules, first_codeowners, load_workflow_text
 from test_env_config_yaml_fixtures import CANONICAL
@@ -2319,6 +2320,7 @@ def _run_check_ids(monkeypatch, tmp_path, answers):
         return answer(key) if callable(answer) else answer
 
     monkeypatch.setattr(doctor, "run", fake_run)
+    forbid_shared_runner(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "check-ids")
     monkeypatch.setenv("GH_TOKEN", _WORKFLOW_KEY)

@@ -4,6 +4,8 @@ import json
 import pathlib
 from typing import Any
 
+import _shipmate
+
 HEAD = "0" * 40
 APP_ID = "999"
 PLAN_SHA = "d" * 64
@@ -27,6 +29,16 @@ def run_graph_capture(shape):
 def answering_run_graph(run, dot):
     """`run`, except that `RUN_GRAPH_ARGV` answers `dot`."""
     return lambda args: dot if args == RUN_GRAPH_ARGV else run(args)
+
+
+def forbid_shared_runner(monkeypatch):
+    """Make `_shipmate._run` raise, so a site that stops passing its own module's runner to
+    `_shipmate.check_runs` fails offline here instead of reaching the real `gh`."""
+
+    def _bypassed(args):
+        raise AssertionError("listing bypassed the module double")
+
+    monkeypatch.setattr(_shipmate, "_run", _bypassed)
 
 
 def check_run(**kw):

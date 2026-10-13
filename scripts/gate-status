@@ -129,8 +129,8 @@ def refresh(sha):
     consults the gate, so the parsed cells can all complete while stacks whose summaries were
     never read have no apply check at all. Only a fresh plan run exits a hold.
 
-    `filter=all`: a re-created check name keeps its old runs, and `apply-gate` judges the newest
-    per name, so a duplicate created mid-apply stays open until its own plan is applied."""
+    A check re-created mid-apply stays open until its own plan is applied: `apply-gate` judges
+    the newest run per name."""
     out = check_runs(_repo(), sha, _CHECK_RUNS_JQ)
     runs = ag.app_runs(out.splitlines(), os.environ.get("SHIPMATE_APP_ID", ""))
     if ag.verdict(runs) == "pending":

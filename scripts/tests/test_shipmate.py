@@ -163,6 +163,7 @@ def test_is_head_sha_accepts_40_lowercase_hex_only():
     table = {
         "valid": _SHA,
         "upper": _SHA.upper(),
+        "non-hex": "g" * 40,
         "short": _SHA[:39],
         "long": _SHA + "0",
         "none": None,
@@ -170,6 +171,7 @@ def test_is_head_sha_accepts_40_lowercase_hex_only():
     assert {k: is_head_sha(v) for k, v in table.items()} == {
         "valid": True,
         "upper": False,
+        "non-hex": False,
         "short": False,
         "long": False,
         "none": False,
@@ -181,6 +183,17 @@ def test_validate_head_sha_names_its_source_in_the_refusal():
     with pytest.raises(SystemExit) as exc:
         validate_head_sha("../x", "the head")
     assert str(exc.value) == "::error::the head must be a 40-char lowercase hex SHA (got: '../x')"
+
+
+def test_validate_head_sha_names_shipmate_head_sha_by_default():
+    """The default `source` is the variable both apply-detect forms and unlock-detect read.
+
+    Mutation: change `source`'s default -- the whole message differs."""
+    with pytest.raises(SystemExit) as exc:
+        validate_head_sha("abc123")
+    assert str(exc.value) == (
+        "::error::SHIPMATE_HEAD_SHA must be a 40-char lowercase hex SHA (got: 'abc123')"
+    )
 
 
 def _recording():

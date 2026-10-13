@@ -10,6 +10,7 @@ from _detect_fixtures import (
     _apply_check,
     _record,
     answering_run_graph,
+    forbid_shared_runner,
     run_graph_capture,
 )
 from _detect_fixtures import check_run as _check
@@ -162,6 +163,7 @@ def _completed(monkeypatch, checks):
     passes through unparsed, for the malformed-line case."""
     jsonl = "\n".join(json.dumps(c) if isinstance(c, dict) else c for c in checks)
     monkeypatch.setattr(ad, "_run", lambda args: jsonl)
+    forbid_shared_runner(monkeypatch)
     return ad.ag.app_done_names(ad._check_run_lines("acme/repo", HEAD), APP_ID)
 
 
@@ -269,6 +271,7 @@ def _stub_apply(monkeypatch, deps, checks, dot=None):
         runner = answering_run_graph(_run, dot)
     monkeypatch.setattr(ad, "_run", runner)
     monkeypatch.setattr(ad.bm, "_run", runner)
+    forbid_shared_runner(monkeypatch)
     monkeypatch.setattr(
         ad.bm, "all_tags", lambda: {s: ["env/dev-eu", "workload/app"] for s in deps}
     )
@@ -492,37 +495,6 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
     assert capsys.readouterr().out.splitlines() == [
         "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
     ]
-
-
-def test_validate_head_sha_rejects_short():
-    """Without `source` the refusal names SHIPMATE_HEAD_SHA, the variable both apply-detect
-    forms and unlock-detect read.
-
-    Mutation: change `source`'s default -- the whole message differs."""
-    with pytest.raises(SystemExit) as exc_info:
-        ad.validate_head_sha("abc123")
-    assert str(exc_info.value) == (
-        "::error::SHIPMATE_HEAD_SHA must be a 40-char lowercase hex SHA (got: 'abc123')"
-    )
-
-
-def test_validate_head_sha_rejects_uppercase():
-    with pytest.raises(SystemExit):
-        ad.validate_head_sha("A" * 40)
-
-
-def test_validate_head_sha_rejects_non_hex():
-    with pytest.raises(SystemExit):
-        ad.validate_head_sha("g" * 40)
-
-
-def test_validate_head_sha_rejects_path_chars():
-    with pytest.raises(SystemExit):
-        ad.validate_head_sha("../../etc/passwd")
-
-
-def test_validate_head_sha_accepts_valid():
-    ad.validate_head_sha("0123456789abcdef0123456789abcdef01234567")  # This must not raise.
 
 
 _ENV_CHARSET = (

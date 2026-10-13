@@ -10,6 +10,7 @@ from _detect_fixtures import (
     _record,
     answering_run_graph,
     check_run,
+    forbid_shared_runner,
     run_graph_capture,
     spy_env_config,
     stub_read_table,
@@ -281,6 +282,7 @@ def _run_main(
         runner = answering_run_graph(_run, dot)
     monkeypatch.setattr(aad, "_run", runner)
     monkeypatch.setattr(aad.bm, "_run", runner)
+    forbid_shared_runner(monkeypatch)
     monkeypatch.setattr(
         aad.bm,
         "env_membership",
