@@ -45,11 +45,12 @@ def parse_dot(text):
 
     Generated with `terramate experimental run-graph --label stack.dir`: node
     ids (nN) carry `label="/stacks/app"` (absolute-from-root dir). Normalize to
-    `list` form (`stacks/app`) by stripping the leading '/'. An edge `nA -> nB`
+    `list` form (`stacks/app`) by stripping the leading '/'; the root stack's `/`
+    becomes `.`, as `list` and `parse_metadata` key it. An edge `nA -> nB`
     means A runs before B, so B depends on A. Isolated nodes (no edges) are
     included with an empty dependency set.
     """
-    ids = {nid: label.lstrip("/") for nid, label in _NODE.findall(text)}
+    ids = {nid: label.removeprefix("/") or "." for nid, label in _NODE.findall(text)}
     deps = {path: set() for path in ids.values()}
     for line in text.splitlines():
         if "[label=" in line:  # A `[label=` line declares a node, not an edge.
