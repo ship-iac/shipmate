@@ -60,8 +60,9 @@ def _plan_run():
     return plan_run
 
 
-def body(cell_json, cell, head_sha, plan_run, pr):
-    """The POST body for one parsed cell summary, hashing the plan.txt beside `cell_json`."""
+def body(name, cell_json, cell, head_sha, plan_run, pr):
+    """The POST body for the cell summary `cell` at `cell_json`, whose apply check is `name`,
+    hashing the plan.txt beside it."""
     txt = pathlib.Path(cell_json).with_name("plan.txt")
     if not txt.is_file():
         raise SystemExit(
@@ -72,7 +73,7 @@ def body(cell_json, cell, head_sha, plan_run, pr):
         )
     plan_sha256 = hashlib.sha256(txt.read_bytes()).hexdigest()
     out = {
-        "name": ag.check_name(cell["stack"], cell["environment"]),
+        "name": name,
         "head_sha": head_sha,
         "status": "queued",
         "external_id": json.dumps(
@@ -99,21 +100,13 @@ def body(cell_json, cell, head_sha, plan_run, pr):
     return out
 
 
-def bodies(cells_dir, head_sha):
-    plan_run, pr = _plan_run(), ag.env_pr_number()
-    return [
-        body(cj, cell, head_sha, plan_run, pr)
-        for cj, cell in cell_summaries(cells_dir, _KEYS, _SKEW)
-    ]
-
-
-def published(check_run_lines, app_id):
+def published(check_run_lines, app_id, plan_run):
     """The names whose newest App-authored check carries a record from this run.
 
     A check with no decodable record (an older engine's, a hand-made one) or an older run's is
     not this run's, so it is published again. Any record from a run newer than this one refuses
     with `NEWER_RUN`. Run ids compare as integers."""
-    this_run = int(_plan_run())
+    this_run = int(plan_run)
     runs = {
         name: int(run)
         for name, (run, _, _) in ag.plan_records(check_run_lines, app_id).items()
@@ -134,10 +127,15 @@ def published(check_run_lines, app_id):
 
 def main():
     head = os.environ["SHIPMATE_HEAD_SHA"]
+    plan_run = _plan_run()
     lines = pathlib.Path(os.environ["SHIPMATE_CHECK_RUNS"]).read_text(encoding="utf-8").splitlines()
-    done = published(lines, os.environ.get("SHIPMATE_APP_ID", ""))
-    cells = list(cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW))
-    todo = [c for c in cells if ag.check_name(c[1]["stack"], c[1]["environment"]) not in done]
+    done = published(lines, os.environ.get("SHIPMATE_APP_ID", ""), plan_run)
+    pr = ag.env_pr_number()
+    cells = [
+        (ag.check_name(cell["stack"], cell["environment"]), cj, cell)
+        for cj, cell in cell_summaries(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), _KEYS, _SKEW)
+    ]
+    todo = [c for c in cells if c[0] not in done]
     gap = gs.evidence_gap(
         plan_result=os.environ.get("SHIPMATE_PLAN_RESULT", ""),
         planned_cells=os.environ.get("SHIPMATE_PLANNED_CELLS", ""),
@@ -147,9 +145,8 @@ def main():
         if todo:
             print(f"::warning::this run publishes no apply check: {gap}", file=sys.stderr)
         return
-    plan_run, pr = _plan_run(), ag.env_pr_number()
-    for cj, cell in todo:
-        print(json.dumps(body(cj, cell, head, plan_run, pr)))
+    for name, cj, cell in todo:
+        print(json.dumps(body(name, cj, cell, head, plan_run, pr)))
 
 
 if __name__ == "__main__":

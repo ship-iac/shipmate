@@ -1,7 +1,10 @@
 """pending-checks: check-run POST bodies from downloaded cell summaries."""
 
+import contextlib
+import io
 import json
 import os
+import pathlib
 
 import pytest
 from _loader import action_yaml, load_script
@@ -37,6 +40,25 @@ def _write_cell(tmp_path, env, slug, plan_text=PLAN_A, **cell):
         (d / "plan.txt").write_bytes(plan_text)
 
 
+def _emit(cells_dir):
+    """The bodies `main()` prints for the cell summaries under `cells_dir`, as a successful plan
+    run of exactly those cells with no apply check published yet."""
+    cells_dir = pathlib.Path(cells_dir)
+    count = len(list(cells_dir.rglob("cell.json")))
+    listing = cells_dir / "check-runs.jsonl"
+    listing.write_text("", encoding="utf-8")
+    out = io.StringIO()
+    with pytest.MonkeyPatch.context() as mp, contextlib.redirect_stdout(out):
+        mp.setenv("SHIPMATE_HEAD_SHA", HEAD)
+        mp.setenv("SHIPMATE_CELLS_DIR", str(cells_dir))
+        mp.setenv("SHIPMATE_CHECK_RUNS", str(listing))
+        mp.setenv("SHIPMATE_APP_ID", "4242")
+        mp.setenv("SHIPMATE_PLAN_RESULT", "success")
+        mp.setenv("SHIPMATE_PLANNED_CELLS", str(count))
+        pc.main()
+    return [json.loads(line) for line in out.getvalue().splitlines()]
+
+
 def test_changed_cell_yields_queued_body(tmp_path):
     """Mutation: omit `"pr"` from the record -- red."""
     _write_cell(
@@ -48,7 +70,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
         changed=True,
         fingerprint="f" * 64,
     )
-    (body,) = pc.bodies(str(tmp_path), HEAD)
+    (body,) = _emit(tmp_path)
     external_id = body.pop("external_id")
     assert json.loads(external_id) == {
         "fingerprint": "f" * 64,
@@ -79,7 +101,7 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         changed=False,
         fingerprint="0" * 64,
     )
-    (body,) = pc.bodies(str(tmp_path), HEAD)
+    (body,) = _emit(tmp_path)
     assert body["status"] == "completed"
     assert body["conclusion"] == "neutral"
     assert body["output"]["title"] == "no changes"
@@ -92,7 +114,7 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
 
 
 def test_missing_fingerprint_fails_loud(tmp_path):
-    """Mutation: drop `"fingerprint"` from `bodies`' required keys -- a `KeyError` instead of
+    """Mutation: drop `"fingerprint"` from `_KEYS` -- a `KeyError` instead of
     the `SystemExit`."""
     _write_cell(
         tmp_path,
@@ -103,7 +125,7 @@ def test_missing_fingerprint_fails_loud(tmp_path):
         changed=True,
     )
     with pytest.raises(SystemExit) as exc_info:
-        pc.bodies(str(tmp_path), HEAD)
+        _emit(tmp_path)
     cell_json = os.path.join(str(tmp_path), "cell-summary.dev-eu.stacks-app", "cell.json")
     assert str(exc_info.value) == (
         f"::error::cell summary {cell_json} missing keys ['fingerprint'] -- plan-cell and the "
@@ -125,7 +147,7 @@ def test_missing_plan_text_refuses_with_the_re_plan_remedy(tmp_path):
         fingerprint="f" * 64,
     )
     with pytest.raises(SystemExit) as exc_info:
-        pc.bodies(str(tmp_path), HEAD)
+        _emit(tmp_path)
     cell_json = os.path.join(str(tmp_path), "cell-summary.dev-eu.stacks-app", "cell.json")
     assert str(exc_info.value) == (
         f"::error::{cell_json} has no plan.txt beside it: the plan text a reviewer reads cannot "
@@ -149,7 +171,7 @@ def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("GITHUB_RUN_ID", "409181227")
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", "31")
-    (body,) = pc.bodies(str(tmp_path), HEAD)
+    (body,) = _emit(tmp_path)
     assert json.loads(body["external_id"]) == {
         "fingerprint": "f" * 64,
         "plan_run": "409181227",
@@ -170,10 +192,10 @@ def test_unusable_plan_run_id_fails_loud(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("GITHUB_RUN_ID")
     with pytest.raises(SystemExit, match="GITHUB_RUN_ID"):
-        pc.bodies(str(tmp_path), HEAD)
+        _emit(tmp_path)
     monkeypatch.setenv("GITHUB_RUN_ID", "not-a-run-id")
     with pytest.raises(SystemExit, match="GITHUB_RUN_ID"):
-        pc.bodies(str(tmp_path), HEAD)
+        _emit(tmp_path)
 
 
 @pytest.mark.parametrize("value", ["", "12a", "0", "012", " 8", "12345678901"])
@@ -193,7 +215,7 @@ def test_an_unusable_pull_request_number_refuses_naming_the_variable(tmp_path, m
     )
     monkeypatch.setenv("SHIPMATE_PR_NUMBER", value)
     with pytest.raises(SystemExit) as exc_info:
-        pc.bodies(str(tmp_path), HEAD)
+        _emit(tmp_path)
     assert str(exc_info.value) == (
         f"::error::SHIPMATE_PR_NUMBER must be a pull request number (got: {value!r})"
     )
@@ -212,7 +234,7 @@ def test_an_unset_pull_request_number_refuses(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("SHIPMATE_PR_NUMBER")
     with pytest.raises(SystemExit) as exc_info:
-        pc.bodies(str(tmp_path), HEAD)
+        _emit(tmp_path)
     assert (
         str(exc_info.value) == "::error::SHIPMATE_PR_NUMBER must be a pull request number (got: '')"
     )
@@ -238,6 +260,7 @@ def test_the_publishing_step_hands_the_script_exactly_these_names():
 
 
 def test_cells_sorted_and_multiple(tmp_path):
+    """Mutation: publish only the first cell in `main`'s loop (`todo[:1]`) -> red."""
     _write_cell(
         tmp_path,
         "dev-us",
@@ -256,7 +279,7 @@ def test_cells_sorted_and_multiple(tmp_path):
         changed=True,
         fingerprint="2" * 64,
     )
-    names = [b["name"] for b in pc.bodies(str(tmp_path), HEAD)]
+    names = [b["name"] for b in _emit(tmp_path)]
     assert names == ["apply / stacks/app / dev-eu", "apply / stacks/app / dev-us"]
 
 
@@ -279,7 +302,7 @@ def test_single_cell_downloaded_flat_still_yields_a_body(tmp_path):
         encoding="utf-8",
     )
     (tmp_path / "plan.txt").write_bytes(PLAN_A)
-    (body,) = pc.bodies(str(tmp_path), HEAD)
+    (body,) = _emit(tmp_path)
     assert body["name"] == "apply / stacks/auth / dev-eu"
     assert body["status"] == "queued"
 
@@ -306,7 +329,7 @@ def test_each_cell_gets_the_digest_of_its_own_plan_text(tmp_path):
         changed=True,
         fingerprint="2" * 64,
     )
-    eu, us = pc.bodies(str(tmp_path), HEAD)
+    eu, us = _emit(tmp_path)
     assert json.loads(eu["external_id"])["plan_sha256"] == SHA_A
     assert json.loads(us["external_id"])["plan_sha256"] == SHA_B
 
@@ -325,7 +348,7 @@ def test_digest_is_computed_never_copied_from_the_cell(tmp_path):
         fingerprint="f" * 64,
         plan_sha256="b" * 64,
     )
-    (body,) = pc.bodies(str(tmp_path), HEAD)
+    (body,) = _emit(tmp_path)
     assert json.loads(body["external_id"])["plan_sha256"] == SHA_A
 
 
@@ -354,16 +377,14 @@ def test_missing_plan_text_fails_loud_and_emits_nothing(tmp_path):
         changed=True,
         fingerprint="2" * 64,
     )
-    assert [
-        json.loads(b["external_id"])["plan_sha256"] for b in pc.bodies(str(tmp_path), HEAD)
-    ] == [
+    assert [json.loads(b["external_id"])["plan_sha256"] for b in _emit(tmp_path)] == [
         SHA_A,
         SHA_B,
     ]
 
     (tmp_path / "cell-summary.dev-us.stacks-app" / "plan.txt").unlink()
     with pytest.raises(SystemExit, match=r"cell-summary\.dev-us\.stacks-app.*has no plan\.txt"):
-        pc.bodies(str(tmp_path), HEAD)
+        _emit(tmp_path)
 
 
 APP_ID = "4242"
@@ -393,7 +414,7 @@ def test_only_names_this_run_recorded_count_as_published(monkeypatch):
         _record_line(5, "apply / no-id / dev", None),
         _record_line(6, "apply / not-json / dev", "not json"),
     ]
-    assert pc.published(lines, APP_ID) == {"apply / done / dev", "apply / queued / dev"}
+    assert pc.published(lines, APP_ID, "10") == {"apply / done / dev", "apply / queued / dev"}
 
 
 def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monkeypatch, capsys):
@@ -406,7 +427,7 @@ def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monk
         _record_line(3, "apply / b / dev", _ext("9")),
     ]
     with pytest.raises(SystemExit) as exc_info:
-        pc.published(lines, APP_ID)
+        pc.published(lines, APP_ID, "10")
     refusal = (
         "::error::plan run 11, newer than this run (10), published apply checks on this head "
         "(apply / gone / dev); this run publishes nothing over them. That run's summary writes "
@@ -568,9 +589,9 @@ def test_two_cells_publish_only_over_complete_evidence(
 
 def test_an_older_run_refuses_before_reading_any_plan_text(tmp_path, monkeypatch):
     """Its cells could not be published anyway (no plan.txt), but the newer run's checks decide:
-    exit `NEWER_RUN`, so the summary step writes no hold over them. Mutation: build the bodies
-    before `published` in `main` (`bodies(os.environ.get("SHIPMATE_CELLS_DIR", "cells"), head)`
-    first) -> the missing-plan.txt refusal instead of exit 3."""
+    exit `NEWER_RUN`, so the summary step writes no hold over them. Mutation: hash every cell
+    summary's plan.txt (`body(...)` over `cell_summaries`) before `published` in `main` -> the
+    missing-plan.txt refusal instead of exit 3."""
     monkeypatch.setenv("GITHUB_RUN_ID", "10")
     with pytest.raises(SystemExit) as exc_info:
         _main(
@@ -583,10 +604,23 @@ def test_an_older_run_refuses_before_reading_any_plan_text(tmp_path, monkeypatch
 
 
 def test_a_run_with_an_evidence_gap_reads_no_plan_text(tmp_path, monkeypatch, capsys):
-    """Mutation: build the bodies before the gap check (`bodies(os.environ.get(
-    "SHIPMATE_CELLS_DIR", "cells"), head)` first in `main`) -> the missing-plan.txt refusal."""
+    """Mutation: hash every cell summary's plan.txt (`body(...)` over `cell_summaries`) before the
+    gap check in `main` -> the missing-plan.txt refusal."""
     _main(tmp_path, monkeypatch, plan_result="failure", plan_text=None)
     assert capsys.readouterr() == (
         "",
         f"::warning::this run publishes no apply check: {PLAN_FAILED}\n",
+    )
+
+
+def test_a_run_with_an_evidence_gap_still_refuses_a_broken_pull_request_number(
+    tmp_path, monkeypatch
+):
+    """A wiring fault surfaces on every run, not only on one that publishes. Mutation: read
+    `ag.env_pr_number()` after the gap check in `main` -> the run returns with a warning."""
+    monkeypatch.setenv("SHIPMATE_PR_NUMBER", "")
+    with pytest.raises(SystemExit) as exc_info:
+        _main(tmp_path, monkeypatch, plan_result="failure")
+    assert (
+        str(exc_info.value) == "::error::SHIPMATE_PR_NUMBER must be a pull request number (got: '')"
     )
