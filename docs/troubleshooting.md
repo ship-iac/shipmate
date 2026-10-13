@@ -1019,6 +1019,27 @@ ungated. `gated` and `explicit` are independent: the first decides whether a
 review is required, the second only decides that a bare apply will not reach it.
 An environment that must never apply unreviewed must not hold `gated: false`.
 
+### `stack ordering cycle through <stacks>`
+
+```text
+::error::stack ordering cycle through stacks/app, stacks/dns: a stack ordered after itself, directly or through other stacks, has no first wave. Remove one `after` or `before` entry on that loop in the stack configuration.
+```
+
+The `after` and `before` entries of the named stacks form a loop, or one stack
+is `after` itself, so no stack on it can run first. The plan, both apply forms
+and the merge deploy read the whole tree's run-graph and refuse before any cell
+runs, so the loop need not touch the pull request's own stacks, and a plan with
+no cell to plan refuses too.
+
+1. Remove one `after` or `before` entry on the loop.
+2. Re-plan (push, or comment `shipmate plan`).
+
+For a refused deploy, read the paragraphs on the refused deploy's checks and
+gate, on not re-running it, and on reading the `detect` annotation, under
+[A deploy refused an apply check on a stack that lost its env tag](#a-deploy-refused-an-apply-check-on-a-stack-that-lost-its-env-tag).
+
+A drift sweep does not refuse a cycle: its cells on the loop fail at init.
+
 ### `needs orders <stack> / <env> before <stack> / <env>, which it runs after`
 
 ```text

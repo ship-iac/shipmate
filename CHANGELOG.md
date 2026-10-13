@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **The plan, both apply forms and the merge deploy refuse a Terramate stack ordering cycle, a stack ordered after itself included, when they read the run-graph and before any other ordering check, naming the stacks on it. The plan refuses even with no cell to plan, instead of failing each planned cell on the loop.**
+
 ## [0.45.0] — 2026-10-13
 
 Tags `45ed9ae`.
