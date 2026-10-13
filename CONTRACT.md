@@ -1559,9 +1559,11 @@ check/status/comment/issue that crosses a workflow-run boundary:
     reopens;
   - a pending apply `summary`: the evicted run posts no apply comment, so its
     results and its waiting cells show only in the run itself. The writer that
-    evicted it runs next and sets the gate: an apply `summary` refreshes it, a
-    plan `summary` writes it from its plan. Its waiting cells keep their apply
-    checks pending, so the gate cannot turn green until they apply;
+    evicted it runs next: a plan `summary` writes the gate from its plan; an
+    apply `summary` refreshes it, greening it only once every apply check is
+    done and leaving a pending or held gate as it is; a deploy `summary` writes
+    its deploy verdict. Its waiting cells keep their apply checks pending, so no
+    refresh greens the gate until they apply;
   - a pending deploy `summary`: the merged head keeps its last gate; re-run that
     deploy, as for any superseded deploy.
 
