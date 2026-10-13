@@ -15,14 +15,15 @@ inputs:
   deploy-results:
     description: >-
       A deploy run's comma-separated job results. This or detect-result selects the post-merge
-      verdict instead of a refresh; neither may be set with hold-description.
+      verdict instead of a refresh; neither may be set with hold-description. Without
+      detect-result the verdict is always `failure`.
     required: false
     default: ""
   detect-result:
     description: >-
-      The deploy run's `detect` job result. This or deploy-results selects the post-merge verdict;
-      any value but `success` writes a `failure` verdict, since nothing applied, and an empty one
-      names the missing input.
+      The deploy run's `detect` job result. This or deploy-results selects the post-merge verdict.
+      A non-empty value other than `success` writes `failure`: detect stopped, so nothing applied.
+      An empty value also writes `failure`, naming the missing input.
     required: false
     default: ""
   hold-description:
