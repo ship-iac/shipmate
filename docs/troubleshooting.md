@@ -1034,12 +1034,25 @@ no cell to plan refuses too.
 1. Remove one `after` or `before` entry on the loop.
 2. Re-plan (push, or comment `shipmate plan`).
 
-A refused deploy applies nothing and leaves the merged pull request's apply
-checks pending. `after` and `before` live in the merged commit, so a re-run
-refuses again. Open a new pull request that removes the entry and changes every
-stack whose apply check is still pending on the refused merge (any edit
-`terramate list --changed` marks); its plan and deploy apply them. The refused
-deploy's gate and `detect` annotation read as under
+A loop reaches the default branch when two pull requests each add one half of
+it: each head plans without a cycle, and the second merge closes it. The deploy
+of that merge refuses, applies nothing, and names every cell of the merge still
+pending; under a required gate that is usually none, because the merge needed
+its apply checks complete. The loop now lives on the default branch, so a
+re-run refuses again, every later deploy refuses until a fix merges, and every
+plan whose head carries the loop refuses.
+
+1. Open a pull request that removes one `after` or `before` entry on the loop
+   and changes the stack of every cell the refused deploy named, and of every
+   cell a later refused deploy named (any edit `terramate list --changed`
+   marks).
+2. Apply its cells with `shipmate apply` before merging it: a required
+   `shipmate / gate` stays pending while its apply checks are.
+3. Merge it. Its deploy finds those cells applied and applies nothing.
+
+The refused deploys' apply checks stay open on their merged pull requests and
+are never read again. The refused deploy's gate and `detect` annotation read as
+under
 [A deploy refused an apply check on a stack that lost its env tag](#a-deploy-refused-an-apply-check-on-a-stack-that-lost-its-env-tag).
 
 A drift sweep does not refuse a cycle: its cells on the loop fail at init.

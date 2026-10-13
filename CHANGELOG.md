@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
-- **The plan, both apply forms and the merge deploy refuse a Terramate stack ordering cycle, a stack ordered after itself included, when they read the run-graph and before any other ordering check, naming the stacks on it. The plan refuses even with no cell to plan, instead of failing each planned cell on the loop. Every plan but a drift sweep, docs-only ones included, now runs `terramate experimental run-graph` and refuses when it fails.**
+- **The plan, both apply forms and the merge deploy refuse a Terramate stack ordering cycle, a stack ordered after itself included, when they read the run-graph and before any other ordering check, naming the stacks on it. The plan refuses even with no cell to plan, instead of failing each planned cell on the loop, and the deploy's refusal also names every pending cell of the merge. Every plan except a drift sweep, including one with no cell and one in a repository with no `needs`, now runs `terramate experimental run-graph` and refuses when it fails.**
 
 ## [0.45.0] — 2026-10-13
 
