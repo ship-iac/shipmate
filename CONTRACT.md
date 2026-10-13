@@ -1988,7 +1988,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   apply order), so `after` orders cells across environments: a cell waits on
   every lower wave of its env-level, in any environment. A cycle in the
   `after`/`before` graph, a stack ordered after itself included, has no first
-  level: every plan except a drift sweep, one that plans no cell included, both
+  level: every plan but a drift sweep, including one that plans no cell, both
   apply forms and the merge deploy refuse it when they read the run-graph,
   before any other ordering check and before any cell runs. The read covers the
   whole tree, so a cycle anywhere refuses every pull request's plan.

@@ -1034,8 +1034,12 @@ no cell to plan refuses too.
 1. Remove one `after` or `before` entry on the loop.
 2. Re-plan (push, or comment `shipmate plan`).
 
-For a refused deploy, read the paragraphs on the refused deploy's checks and
-gate, on not re-running it, and on reading the `detect` annotation, under
+A refused deploy applies nothing and leaves the merged pull request's apply
+checks pending. `after` and `before` live in the merged commit, so a re-run
+refuses again. Open a new pull request that removes the entry and changes every
+stack whose apply check is still pending on the refused merge (any edit
+`terramate list --changed` marks); its plan and deploy apply them. The refused
+deploy's gate and `detect` annotation read as under
 [A deploy refused an apply check on a stack that lost its env tag](#a-deploy-refused-an-apply-check-on-a-stack-that-lost-its-env-tag).
 
 A drift sweep does not refuse a cycle: its cells on the loop fail at init.
