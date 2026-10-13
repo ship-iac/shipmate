@@ -1034,25 +1034,23 @@ no cell to plan refuses too.
 1. Remove one `after` or `before` entry on the loop.
 2. Re-plan (push, or comment `shipmate plan`).
 
-A loop reaches the default branch when two pull requests each add one half of
-it: each head plans without a cycle, and the second merge closes it. The deploy
-of that merge refuses, applies nothing, and names every cell of the merge still
-pending; under a required gate that is usually none, because the merge needed
-its apply checks complete. The loop now lives on the default branch, so a
-re-run refuses again, every later deploy refuses until a fix merges, and every
-plan whose head carries the loop refuses.
+A loop can still reach the default branch, for example when two pull requests
+each add one half of it (each head plans without a cycle, and the second merge
+closes it), or through a direct push. The deploy of that commit then refuses
+and applies nothing. When the merge left cells pending, the annotation appends
+`; pending on this merge: <stack> / <env>, ...`. The loop now lives on the
+default branch, so a re-run refuses again, every later deploy refuses until a
+fix lands, and every plan whose head carries the loop refuses.
 
 1. Open a pull request that removes one `after` or `before` entry on the loop
-   and changes the stack of every cell the refused deploy named, and of every
-   cell a later refused deploy named (any edit `terramate list --changed`
-   marks).
-2. Apply its cells with `shipmate apply` before merging it: a required
-   `shipmate / gate` stays pending while its apply checks are.
-3. Merge it. Its deploy finds those cells applied and applies nothing.
+   and changes the stack of every cell any refused deploy named after
+   `pending on this merge:` (any edit `terramate list --changed` marks).
+2. Its cells are applied before merge under a required gate (`shipmate apply`,
+   and `shipmate apply <env>` for an `explicit` environment), or by its deploy
+   otherwise. Merge it.
 
-The refused deploys' apply checks stay open on their merged pull requests and
-are never read again. The refused deploy's gate and `detect` annotation read as
-under
+A refused deploy's apply checks are never read again. Its gate and `detect`
+annotation read as under
 [A deploy refused an apply check on a stack that lost its env tag](#a-deploy-refused-an-apply-check-on-a-stack-that-lost-its-env-tag).
 
 A drift sweep does not refuse a cycle: its cells on the loop fail at init.
@@ -1084,9 +1082,10 @@ sets the later level.
 A refused deploy appends the cells of the merge it left pending. After a
 `needs` fix merges, re-run the refused deploy: it reads `needs` from the
 default branch and applies them. For a fix to tags or `after`, open a new pull
-request that makes it and changes every listed stack; its plan and deploy
-apply them. A re-run reads tags and `after` from the merged commit and refuses
-again.
+request that makes it and changes every listed stack; its cells are applied
+before merge under a required gate (`shipmate apply`, and `shipmate apply
+<env>` for an `explicit` environment), or by its deploy otherwise. A re-run
+reads tags and `after` from the merged commit and refuses again.
 
 A targeted `shipmate apply <env>` never refuses this: it does not order by
 `needs`, and a cell whose upstream is pending in another environment waits
@@ -1277,8 +1276,10 @@ after this pull request was planned, so its reviewed change was not applied. Thi
 applies nothing, so these other cells of this merge are not applied either:
 <other stack> / <env>. Open a new pull request that retags each stranded stack and
 changes every other listed stack (any edit that `terramate list --changed` marks, such
-as a comment line); its plan and deploy apply the current default branch for all of
-them, this merged change included. If an untag was deliberate, apply that stranded
+as a comment line). It plans the current default branch for all of them, this merged
+change included, and its cells are applied before merge under a required gate
+(`shipmate apply`, and `shipmate apply <env>` for an `explicit` environment), or by its
+deploy otherwise. If an untag was deliberate, apply that stranded
 change by hand instead of retagging; the pull request still changes every listed stack,
 and with none listed no pull request is needed. Re-running this deploy checks out the
 same commit and refuses again. This deploy's apply checks are never read again and stay
@@ -1298,11 +1299,13 @@ The list names every such cell, with an apply check or without.
    other listed stack, for example with a comment line.
 2. Review its plan: it plans the current default branch, this merged change
    included.
-3. Merge it. Its deploy applies all of them.
+3. Its cells are applied before merge under a required gate (`shipmate apply`,
+   and `shipmate apply <env>` for an `explicit` environment), or by its deploy
+   otherwise. Merge it.
 
 If the untag was deliberate ([`../CONTRACT.md`](../CONTRACT.md) §Taking a stack out
 of CI), do not retag. Apply the stranded change by hand, then open a pull
-request that changes every listed stack and merge it; its deploy applies them.
+request that changes every listed stack; its cells are applied as in step 3.
 When the message lists no other cell and no stranded stack needs a retag, no
 pull request is needed.
 
