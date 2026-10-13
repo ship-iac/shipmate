@@ -1014,7 +1014,8 @@ def test_main_refuses_a_cell_after_a_held_upstream_on_a_later_env_level(tmp_path
     held upstream is in no run, so only the pending half of the refusal sees it.
 
     Mutation: build `bare_main`'s `present` for `wv.refuse_inversions` from `run` instead of
-    `pending` -- no refusal, `platform` waits instead."""
+    `pending` -- no refusal, `platform` waits instead. Mutation: put the pair before the
+    remedy on the first line -- red."""
     with pytest.raises(SystemExit) as exc_info:
         _cross_env(
             tmp_path,
@@ -1025,8 +1026,8 @@ def test_main_refuses_a_cell_after_a_held_upstream_on_a_later_env_level(tmp_path
             decision="REVIEW_REQUIRED",
         )
     assert str(exc_info.value) == (
-        "::error::needs orders stacks/platform / dev-eu before stacks/dns / dev-us, which it "
-        "runs after:\n"
+        "::error::needs order inverted, fix default-branch needs or tags: stacks/platform / "
+        "dev-eu before stacks/dns / dev-us, which it runs after\n"
         "- stacks/platform / dev-eu (env-level 0) after stacks/dns / dev-us (env-level 1); "
         "dev-us's level comes from dev-eu -> dev-us\n"
         "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "

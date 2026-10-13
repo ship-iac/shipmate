@@ -26,7 +26,7 @@ import pathlib
 import re
 import sys
 
-from _shipmate import _load, cell_summaries, current_run_url, named
+from _shipmate import _load, cell_summaries, command_data, current_run_url, named
 
 sc = _load("summary-comment")
 # COUPLING: "what counts as a done apply check" is written once in apply-gate and shared with
@@ -520,9 +520,9 @@ def notices(rows, applied_ungated, review_not_required):
     from `applied_ungated`, so it gets its own text, which states the authorization fact and
     never that nobody reviewed -- a code-owner review can still be required at count 0."""
     ran = {r["environment"] for r in rows if r["status"] in _SECTION_STATUSES}
-    lines = [f"::notice::{sc.command_data(e)}: {_UNGATED}" for e in applied_ungated]
+    lines = [f"::notice::{command_data(e)}: {_UNGATED}" for e in applied_ungated]
     return lines + [
-        f"::notice::{sc.command_data(e)}: {_NO_REVIEW}" for e in review_not_required if e in ran
+        f"::notice::{command_data(e)}: {_NO_REVIEW}" for e in review_not_required if e in ran
     ]
 
 

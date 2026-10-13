@@ -10,11 +10,13 @@ from _shipmate import (
     _run,
     approval_rules,
     check_runs,
+    command_data,
     gate_check,
     is_head_sha,
     is_pr_number,
     named,
     review_count,
+    run_annotated,
     utf8_output,
     validate_head_sha,
 )
@@ -238,3 +240,76 @@ def test_check_runs_refuses_a_bad_sha_before_any_call(sha):
         f"::error::head SHA must be a 40-char lowercase hex SHA (got: {sha!r})",
         [],
     )
+
+
+def test_command_data_escapes_percent_cr_and_lf():
+    """Mutations: drop any one `replace`; or replace `%` last, which double-escapes `%0D`."""
+    assert command_data("a%0Ab\r\nc%") == "a%250Ab%0D%0Ac%25"
+
+
+def _raising(code):
+    def main():
+        raise SystemExit(code)
+
+    return main
+
+
+def _annotated(main, capsys):
+    """(exit code, stderr) of `run_annotated(main)`; exit code None when it returns."""
+    try:
+        run_annotated(main)
+        code = None
+    except SystemExit as exc:
+        code = exc.code
+    return code, capsys.readouterr().err
+
+
+def test_run_annotated_prints_a_refusal_as_one_escaped_command(capsys):
+    """A literal `%0A` or `%25` in a stack path stays verbatim in the annotation, and every line
+    of a multi-line refusal reaches it. Mutation: print `code` unescaped -- red."""
+    main = _raising("::error::needs a%0Ab\n- 100%25 x")
+    assert _annotated(main, capsys) == (1, "::error::needs a%250Ab%0A- 100%2525 x\n")
+
+
+def test_run_annotated_ends_a_line_at_cr_lf_and_crlf(capsys):
+    """`build-matrix`'s `refusal` output takes the first line with `splitlines`, so the
+    annotation splits the same way: its first line is the gate description's. Mutation: split
+    on `"\\n"` only -- `%0D` appears."""
+    main = _raising("::error::first\r\nsecond\rthird")
+    assert _annotated(main, capsys) == (1, "::error::first%0Asecond%0Athird\n")
+
+
+def test_run_annotated_drops_trailing_empty_lines(capsys):
+    """A refusal ending in newlines, alone or before another error, prints no trailing `%0A`.
+    Mutation: drop the `rstrip` -- red."""
+    main = _raising("::error::first\n\n::error::second\n\n")
+    assert _annotated(main, capsys) == (1, "::error::first\n::error::second\n")
+
+
+def test_run_annotated_prints_each_joined_error_as_its_own_command(capsys):
+    """The `"\\n".join(errors)` shape of `build-matrix` and `env-config`: each error stays its
+    own annotation, carrying the lines under it. Mutation: one chunk for the whole code -- red."""
+    main = _raising("::error::first\nmore\n::error::second")
+    assert _annotated(main, capsys) == (1, "::error::first%0Amore\n::error::second\n")
+
+
+def test_run_annotated_puts_a_failed_commands_whole_stderr_in_one_annotation(capsys):
+    """A `_run` failure carries the tool's stderr on the lines under its first. Deliberate: the
+    annotation is where a reader looks, and doctor's harvest bounds the row it renders.
+    Mutation: print `code` unescaped -- red."""
+    main = _raising("::error::command failed (1): gh api x\nHTTP 404\nnot found")
+    assert _annotated(main, capsys) == (
+        1,
+        "::error::command failed (1): gh api x%0AHTTP 404%0Anot found\n",
+    )
+
+
+@pytest.mark.parametrize("code", [0, 3, "plain"])
+def test_run_annotated_passes_any_other_exit_through(capsys, code):
+    """Mutation: treat every `str` code as an annotation -- the `plain` case red."""
+    assert _annotated(_raising(code), capsys) == (code, "")
+
+
+def test_run_annotated_returns_when_main_returns(capsys):
+    """Mutation: `raise SystemExit(1)` after `main()` returns -- red."""
+    assert _annotated(lambda: None, capsys) == (None, "")

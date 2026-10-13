@@ -264,9 +264,16 @@ def inversion_error(pairs, order, level, remedy=""):
     """The `::error::` text for `inversions`' pairs, which must be non-empty; `remedy` is
     appended after one space.
 
-    The first line names one whole pair: a gate description shows only that line."""
+    The first line carries the short form of the last line's remedy, then one whole pair: a gate
+    description shows only that line, cut at 125 characters, so the remedy leads and a long
+    pair loses its tail."""
     (vs, ve), (us, ue) = pairs[0]
-    lines = [f"::error::needs orders {vs} / {ve} before {us} / {ue}, which it runs after:"]
+    lines = [
+        (
+            "::error::needs order inverted, fix default-branch needs or tags: "
+            f"{vs} / {ve} before {us} / {ue}, which it runs after"
+        )
+    ]
     lines += [
         f"- {v[0]} / {v[1]} (env-level {level.get(v[1], 0)}) after {u[0]} / {u[1]} "
         f"(env-level {level.get(u[1], 0)}); {u[1]}'s level comes from "

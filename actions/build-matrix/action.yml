@@ -65,7 +65,7 @@ outputs:
     description: 'JSON {"count": N, "pairs": [...]}: how many `<stack> / <env>` pairs this pull request untagged on stacks that keep another `env/*` tag, and the first ten, sorted; a stack that lost its last tag is in `unmanaged` instead. Empty on a drift sweep or with no pull-request base. Read by the plan summary for its comment line.'
     value: ${{ steps.build.outputs.lost }}
   refusal:
-    description: The first `::error::` line that failed the step (a refusal or a failed tool or API call), without the prefix; empty when the step raised none. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
+    description: The first line of the `::error::` message that failed the step (a refusal or a failed tool or API call), without the prefix; empty when the step raised none. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
     value: ${{ steps.build.outputs.refusal }}
 runs:
   using: composite

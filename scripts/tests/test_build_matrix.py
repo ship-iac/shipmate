@@ -371,6 +371,18 @@ def test_env_membership_skips_untagged_stacks_with_a_whole_tree_notice(monkeypat
     )
 
 
+def test_the_unmanaged_notice_keeps_a_percent_in_a_stack_path(monkeypatch, capsys):
+    """A stack path can hold `%`: escaped as workflow-command data, the notice shows it verbatim.
+    Mutation: drop `command_data` from the unmanaged notice -- red."""
+    tree = {"stacks/app": ["env/dev-eu"], "stacks/c100%": []}
+    monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(tree))
+    monkeypatch.setattr(bm, "all_tags", lambda: tree)
+    bm.env_membership(all_stacks=True)
+    assert capsys.readouterr().out == (
+        "::notice::1 stack(s) carry no env/* tag and are not managed by shipmate: stacks/c100%25\n"
+    )
+
+
 def test_the_changed_set_scan_names_its_scope_in_the_notice(monkeypatch, capsys):
     """Mutation: print the whole-tree wording on both scans."""
     monkeypatch.setattr(bm, "_list_stacks", lambda all_stacks, base: list(_UNMANAGED_TREE))
@@ -773,7 +785,8 @@ def _run_inverted(monkeypatch, tmp_path, env, cells, graph=None, head_sha="cafe1
 
 def test_a_plan_refuses_changed_cells_whose_after_edge_needs_inverts(monkeypatch, tmp_path):
     """Both ends of the inverted edge changed: the plan refuses, and the gate description's
-    `refusal` output names the pair. Mutation: drop the inversion check from `_detect`."""
+    `refusal` output names the pair and the short remedy. Mutation: drop the inversion check
+    from `_detect`. Mutation: put the pair before the remedy on the first line -- red."""
     with pytest.raises(SystemExit) as exc:
         _run_inverted(
             monkeypatch,
@@ -782,8 +795,8 @@ def test_a_plan_refuses_changed_cells_whose_after_edge_needs_inverts(monkeypatch
             (("stacks/platform", "dev-eu"), ("stacks/dns", "dev-us")),
         )
     assert exc.value.code == (
-        "::error::needs orders stacks/platform / dev-eu before stacks/dns / dev-us, which it "
-        "runs after:\n"
+        "::error::needs order inverted, fix default-branch needs or tags: stacks/platform / "
+        "dev-eu before stacks/dns / dev-us, which it runs after\n"
         "- stacks/platform / dev-eu (env-level 0) after stacks/dns / dev-us (env-level 1); "
         "dev-us's level comes from dev-eu -> dev-us\n"
         "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
@@ -791,8 +804,8 @@ def test_a_plan_refuses_changed_cells_whose_after_edge_needs_inverts(monkeypatch
         "environments that order it."
     )
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
-        "refusal=needs orders stacks/platform / dev-eu before stacks/dns / dev-us, which it "
-        "runs after:\n"
+        "refusal=needs order inverted, fix default-branch needs or tags: stacks/platform / "
+        "dev-eu before stacks/dns / dev-us, which it runs after\n"
     )
 
 
@@ -976,6 +989,59 @@ def test_a_cycle_refuses_before_an_inversion(monkeypatch, tmp_path):
             dot=_DNS_PLATFORM_LOOP,
         )
     _assert_cycle_refusal(exc, tmp_path, "stacks/dns, stacks/platform")
+
+
+def test_the_refusal_output_keeps_a_percent_sequence_in_a_stack_path(monkeypatch, tmp_path):
+    """The gate description is JSON, never workflow-command data, so `refusal` carries a literal
+    `%0A` or `%25` in a stack path verbatim. The DOT is hand-built in the shape of the raw 0.17.1
+    captures: none of them holds such a name.
+
+    Mutation: write `refusal=` through `command_data` in `main` -- red."""
+    dot = (
+        "digraph  {\n\t\n"
+        '\tn1[label="/stacks/a%0Ab"];\n'
+        '\tn2[label="/stacks/c100%25"];\n'
+        '\tn1->n2[color="red"];\n'
+        '\tn2->n1[color="red"];\n'
+        "\t\n}\n"
+    )
+    with pytest.raises(SystemExit) as exc:
+        _run_main(
+            monkeypatch,
+            tmp_path,
+            _PR_ENV,
+            cells=(),
+            head_sha="cafe1234",
+            table=_ONE_ENV,
+            tag_map={},
+            dot=dot,
+        )
+    assert exc.value.code == (
+        "::error::stack ordering cycle through stacks/a%0Ab, stacks/c100%25: a stack ordered "
+        "after itself, directly or through other stacks, has no first wave. Remove one `after` "
+        "or `before` entry on that loop in the stack configuration."
+    )
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
+        "refusal=stack ordering cycle through stacks/a%0Ab, stacks/c100%25: a stack ordered "
+        "after itself, directly or through other stacks, has no first wave. Remove one `after` "
+        "or `before` entry on that loop in the stack configuration.\n"
+    )
+
+
+def test_the_refusal_output_ends_its_line_at_a_crlf(monkeypatch, tmp_path):
+    """`refusal` takes the first line with `splitlines`, as `run_annotated` splits the annotation,
+    so the gate description and the annotation's first line agree. Mutation: take the first line
+    with `split("\\n")` in `main` -- a CR ends the value."""
+    out = tmp_path / "out.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+
+    def refuse():
+        raise SystemExit("::error::first\r\nsecond")
+
+    monkeypatch.setattr(bm, "_detect", refuse)
+    with pytest.raises(SystemExit):
+        bm.main()
+    assert out.read_text(encoding="utf-8") == "refusal=first\n"
 
 
 def test_a_drift_sweep_reads_no_run_graph(monkeypatch, tmp_path):
@@ -1910,6 +1976,24 @@ def test_a_term_no_stack_carries_drops_only_its_own_clause(monkeypatch, tmp_path
     ]
 
 
+def test_the_drift_query_notice_keeps_a_percent_sequence_in_the_query(
+    monkeypatch, tmp_path, capsys
+):
+    """The `tags` input is free text: escaped as workflow-command data, a `%0A` in it shows
+    verbatim instead of breaking the notice. Mutation: drop `command_data` from the drift
+    query notice's `print` -- red."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        {**_DRIFT_ENV, "SHIPMATE_TAGS": "env/dev-eu,env/n%0A"},
+        stacks=_MULTI_ENV_TREE,
+    )
+    assert capsys.readouterr().out.splitlines()[0] == (
+        "::notice::the drift tags query 'env/dev-eu,env/n%250A' has clause(s) matching no cell: "
+        "env/n%250A. No stack carries: env/n%250A." + _ON_DISK
+    )
+
+
 def test_conceptual_tag_form_names_both_halves_as_carried_by_no_stack(capsys):
     """`env:dev-eu` is the documentation form; on disk the tag is `env/dev-eu`.
 
@@ -2534,6 +2618,32 @@ def test_detect_warns_about_a_stack_that_lost_its_last_env_tag(monkeypatch, tmp_
         diffs={"stacks/gone": _REMOVED_ENV_LINE, "stacks/app": ""},
     )
     assert _warnings(capsys) == [_LOST_ENV_WARNING]
+
+
+def test_the_lost_tag_warning_keeps_a_percent_in_a_stack_path(monkeypatch, tmp_path, capsys):
+    """A stack path is a directory name and can hold `%`: escaped as workflow-command data, the
+    warning shows it verbatim. `env-config`'s three warnings go through the same escaper but
+    have no such case: `validate_structure` runs first, and its `_check_entries` holds every name
+    they print to the lowercase tag charset (entry names through `check_env_name`, `needs`
+    through `validate_env_name_list`, workloads through `_check_workloads`' `_is_workload`), and
+    any refusal there raises before the warnings print.
+
+    Mutation: drop `command_data` from the last-tag warning's `print` -- red."""
+    _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        head_sha="cafe1234",
+        unmanaged=["stacks/c100%"],
+        diffs={"stacks/c100%": _REMOVED_ENV_LINE, "stacks/app": ""},
+    )
+    assert _warnings(capsys) == [
+        (
+            "::warning::1 stack(s) lost their last env/* tag in this pull request, so shipmate "
+            "no longer plans or deploys them: stacks/c100%25. If that is deliberate (CONTRACT.md "
+            "§Taking a stack out of CI), nothing is wrong; otherwise restore the tag."
+        )
+    ]
 
 
 def test_detect_warns_about_each_env_a_tagged_stack_lost(monkeypatch, tmp_path, capsys):

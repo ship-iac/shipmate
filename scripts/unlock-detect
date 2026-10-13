@@ -43,7 +43,7 @@ because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
 import json
 import os
 
-from _shipmate import _load, validate_head_sha
+from _shipmate import _load, run_annotated, validate_head_sha
 
 ad = _load("apply-detect")
 # Aliases, not loads: unlock-detect and apply-detect share one build-matrix instance.
@@ -86,4 +86,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

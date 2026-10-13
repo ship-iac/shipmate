@@ -14,8 +14,8 @@ any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
 The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `header`, `provenance`,
-`footer`, `footer_hint`, `tally`, `_join`, `command_data`) lives here because apply-comment and
-doctor already load this module.
+`footer`, `footer_hint`, `tally`, `_join`) lives here because apply-comment and doctor already
+load this module.
 
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface,
 and shows only where the reader has something to do: under a refusal or a failure, under an
@@ -30,7 +30,7 @@ import pathlib
 import re
 import sys
 
-from _shipmate import _load, cell_summaries, current_run_url, is_head_sha
+from _shipmate import _load, cell_summaries, command_data, current_run_url, is_head_sha
 
 ag = _load("apply-gate")
 
@@ -206,12 +206,6 @@ def footer_hint(circle):
     """The footer of an apply or doctor comment, whose verdict line carries `provenance`:
     `FOOTER_HINT` unless the verdict's `circle` is 🟢, else empty."""
     return "" if circle == "🟢" else FOOTER_HINT
-
-
-def command_data(s):
-    """`s` escaped as workflow-command data (`%`, CR, LF): a raw newline in an author-controlled
-    name would start a second workflow command."""
-    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
 def check_url(cell, checks, run_url):

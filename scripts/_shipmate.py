@@ -6,14 +6,15 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``bm._run`` cannot leak the patch into every other holder of ``build-matrix``.
 
 Also holds the subprocess runner, its ``::error::`` wrapper and ``gh api`` reader for the CI
-scripts, the secret scrubber and repository-slug check that ``onboard`` and ``register-app``
-share, and the UTF-8 switch for their console output. It also holds the pull-request number
-check that ``pr-facts``, ``reply-comment`` and ``upsert-comment`` share, the head-SHA check
-and the one check-runs listing every reader of a head's checks uses, the ruleset,
-environment and ``CODEOWNERS`` readers and the names ``doctor`` and ``onboard`` share, reads
-the per-cell ``cell.json`` summaries, builds this run's page link and joins a capped list of
-names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both
-importing PyYAML only when first called.
+scripts, the workflow-command escaper and the detect scripts' refusal printer, the secret
+scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
+switch for their console output. It also holds the pull-request number check that ``pr-facts``,
+``reply-comment`` and ``upsert-comment`` share, the head-SHA check and the one check-runs
+listing every reader of a head's checks uses, the ruleset, environment and ``CODEOWNERS``
+readers and the names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json``
+summaries, builds this run's page link and joins a capped list of names. It parses YAML: the
+strings-only config loader and the YAML 1.2 workflow loader, both importing PyYAML only when
+first called.
 """
 
 import functools
@@ -27,6 +28,7 @@ import re
 import subprocess
 import sys
 from importlib.machinery import SourceFileLoader
+from typing import TypeGuard
 
 _D = pathlib.Path(__file__).resolve().parent
 
@@ -173,6 +175,49 @@ def _run(args):
         return run(args)
     except SystemExit as e:
         raise SystemExit(f"::error::{e}") from None
+
+
+def command_data(s):
+    """`s` escaped as workflow-command data (`%`, CR, LF): a raw newline in an author-controlled
+    name would start a second workflow command."""
+    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def is_refusal(code) -> TypeGuard[str]:
+    """True when a `SystemExit` code is an `::error::` refusal: a `str` starting `::error::`.
+    The one test `run_annotated` and `build-matrix`'s `refusal` output share."""
+    return isinstance(code, str) and code.startswith("::error::")
+
+
+def run_annotated(main):
+    """Call `main`; print an `::error::` exit as one escaped workflow command per error.
+
+    The runner parses workflow commands per line, so a raw multi-line refusal annotates only its
+    first line. The code splits into lines with `splitlines`, as `build-matrix`'s `refusal`
+    output takes its first line, so CR, LF and CRLF each end a line on both surfaces. A new
+    error starts at each line starting `::error::` (joined refusals keep one annotation each),
+    every other line stays with the error above it, trailing empty lines are dropped, and each
+    error prints through `command_data`, which also keeps a literal `%0A` or `%25` in a stack
+    path verbatim. Exits 1 after printing. Any other `SystemExit` passes through unchanged.
+    Producers stay raw: this is the one print site of a detect refusal.
+    """
+    try:
+        main()
+    except SystemExit as exc:
+        code = exc.code
+        if not is_refusal(code):
+            raise
+        errors = []
+        for line in code.splitlines():
+            if line.startswith("::error::"):
+                errors.append([line.removeprefix("::error::")])
+            else:
+                errors[-1].append(line)
+        for lines in errors:
+            message = "\n".join(lines).rstrip("\n")
+            sys.stderr.write(f"::error::{command_data(message)}\n")
+        sys.stderr.flush()
+        raise SystemExit(1) from None
 
 
 def gh_json(path, run=None):

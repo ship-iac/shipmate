@@ -925,20 +925,23 @@ all. A run whose cell count is zero for any of those reasons must not claim
 nothing changed: `deploy-detect`'s work queue *is* the pending apply checks, so
 a green gate over cells nobody accounted for merges reviewed stacks that then
 never apply. The summary job also holds the gate while it publishes the apply
-checks, and a plan run that ended before its final gate write (a failed summary
-job, or a cancelled plan job after the summary downloaded a cell summary) leaves
-that hold, reading "its plan run ended before writing a final gate". The summary
-job also holds the gate when it cannot read the head's gate statuses or apply
+checks, reading "plan run <id> holds this gate while it publishes; re-plan
+(comment shipmate plan or push) if that run has ended". That hold stays when the
+run ends before its final gate write (a failed or cancelled summary job, or a
+cancelled plan job after the summary downloaded a cell summary). The summary job
+also holds the gate when it cannot read the head's gate statuses or apply
 checks, or cannot build the checks to publish (a cell summary missing a key),
 whether or not it downloaded a cell summary: a failed download leaves none over
-planned cells. Its final write refuses, writing nothing and keeping that hold,
-when a newer plan run of the same head holds the gate by then. A plan run
-whose `summary` job was cancelled before it ran, because a later gate writer on
-the same head queued behind it (`CONTRACT.md` §Comment-ops, "The aggregate
-gate"), holds the gate from its `gate-hold` job, reading "its plan summary was
-cancelled before it published". That hold can land after another run's summary
-greened the head, closing a gate over work already applied. Every one of these
-holds clears the same way: comment `shipmate plan` or push.
+planned cells. That hold reads "re-plan this pull request (comment shipmate plan
+or push): its plan run ended before writing a final gate". Its final write
+refuses, writing nothing and keeping the gate as it stands, when a newer plan
+run of the same head holds the gate by then. A plan run whose `summary` job was
+cancelled before it ran, because a later gate writer on the same head queued
+behind it (`CONTRACT.md` §Comment-ops, "The aggregate gate"), holds the gate
+from its `gate-hold` job, reading "its plan summary was cancelled before it
+published". That hold can land after another run's summary greened the head,
+closing a gate over work already applied. Every one of these holds clears the
+same way: comment `shipmate plan` or push.
 A run held for its plan job or its cell count also publishes no apply check.
 Checks an earlier plan run of the same head published stay; on a head with none,
 a `shipmate apply` replies "no reviewed plan for the current PR head".
@@ -1027,8 +1030,10 @@ An environment that must never apply unreviewed must not hold `gated: false`.
 
 ### `stack ordering cycle through <stacks>`
 
+The annotation reads:
+
 ```text
-::error::stack ordering cycle through stacks/app, stacks/dns: a stack ordered after itself, directly or through other stacks, has no first wave. Remove one `after` or `before` entry on that loop in the stack configuration.
+stack ordering cycle through stacks/app, stacks/dns: a stack ordered after itself, directly or through other stacks, has no first wave. Remove one `after` or `before` entry on that loop in the stack configuration.
 ```
 
 The `after` and `before` entries of the named stacks form a loop, or one stack
@@ -1061,10 +1066,12 @@ annotation read as under
 
 A drift sweep does not refuse a cycle: its cells on the loop fail at init.
 
-### `needs orders <stack> / <env> before <stack> / <env>, which it runs after`
+### `needs order inverted, fix default-branch needs or tags`
+
+The annotation reads:
 
 ```text
-::error::needs orders platform / dev-eu before dns / dev-us, which it runs after:
+needs order inverted, fix default-branch needs or tags: platform / dev-eu before dns / dev-us, which it runs after
 - platform / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes from dev-eu -> dev-us
 Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry in that chain on the default branch, or retag the stacks so the edge stays inside environments that order it.
 ```
@@ -1072,9 +1079,9 @@ Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` e
 A stack is `after` a stack in another environment, and `needs` puts that other
 environment on a later env-level, so no order meets both. The plan, a bare
 `shipmate apply` or the merge deploy refused before anything applied; a plan
-refusal holds the gate, and a deploy refusal turns the merged head's gate to
-`failure`. Each `- ` line names one inverted pair and the `needs` chain that
-sets the later level.
+refusal holds the gate with the first line as its description, and a deploy
+refusal turns the merged head's gate to `failure`. Each `- ` line names one
+inverted pair and the `needs` chain that sets the later level.
 
 1. Pick the order you want. Remove or reverse the `needs` entry in the named
    chain in `.github/shipmate-config.yml`, or retag the stacks so the `after`
@@ -1276,8 +1283,10 @@ the environment exists and that its policy actually names the default branch.
 
 ### A deploy refused an apply check on a stack that lost its env tag
 
+The annotation reads:
+
 ```text
-::error::deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
+deploy aborted: apply / <stack> / <env>: the stack of each lost its env/* tag
 after this pull request was planned, so its reviewed change was not applied. This deploy
 applies nothing, so these other cells of this merge are not applied either:
 <other stack> / <env>. Open a new pull request that retags each stranded stack and

@@ -12,9 +12,10 @@ inputs:
     required: true
   detect-refusal:
     description: >-
-      build-matrix's `refusal` output: the first `::error::` line from detect (a refusal or a
-      failed tool or API call), empty when detect raised none. When detect-result is not
-      success, gate-state writes it into the gate description; empty keeps the generic text.
+      build-matrix's `refusal` output: the first line of the `::error::` message from detect
+      (a refusal or a failed tool or API call), empty when detect raised none. When
+      detect-result is not success, gate-state writes it into the gate description; empty
+      keeps the generic text.
     required: false
     default: ""
   plan-result:
@@ -117,10 +118,8 @@ runs:
       run: |
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
-        hold() {
-          python3 "$gate_status" hold "$SHIPMATE_HEAD_SHA" \
-            "re-plan this pull request (comment shipmate plan or push): its plan run ended before writing a final gate"
-        }
+        hold() { python3 "$gate_status" hold "$SHIPMATE_HEAD_SHA" "$1"; }
+        ended="re-plan this pull request (comment shipmate plan or push): its plan run ended before writing a final gate"
         # A failed read holds, which is always safe: a failed artifact download leaves `cells/`
         # empty over planned cells, so no cell summary is no proof of no work. A newer run's hold or
         # checks refuse without a write, so an older run never overwrites that run's gate or checks.
@@ -129,14 +128,14 @@ runs:
         # Exit 4 is refuse-newer's newer-run refusal, which writes nothing.
         if [ "$rc" = 4 ]; then exit 1; fi
         if [ "$rc" != 0 ]; then
-          hold
+          hold "$ended"
           exit 1
         fi
         cells=$(find cells -name cell.json -print -quit 2>/dev/null || true)
         if ! python3 "$gate_status" checks "$SHIPMATE_HEAD_SHA" \
           '.check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}, external_id}' \
           > apply-check-runs.jsonl; then
-          hold
+          hold "$ended"
           exit 1
         fi
         rc=0
@@ -145,13 +144,15 @@ runs:
         # Exit 3 is pending-checks' newer-run refusal, which writes nothing.
         if [ "$rc" = 3 ]; then exit 1; fi
         if [ "$rc" != 0 ]; then
-          hold
+          hold "$ended"
           exit 1
         fi
         # Fail-closed, never `|| true`: gate-refresh greens an absent or pending gate, so a job dying
         # mid-publish would let an apply of the published cells merge the unpublished ones. A re-run
         # that publishes nothing still holds. `Create/refresh gate` replaces this hold.
-        if [ -n "$cells" ]; then hold; fi
+        if [ -n "$cells" ]; then
+          hold "plan run $GITHUB_RUN_ID holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended"
+        fi
 
     - name: Create apply checks (pending / no-changes)
       shell: bash

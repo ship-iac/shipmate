@@ -2943,10 +2943,10 @@ truncating.
 environments and decides which instances of an upstream stack a cell runs after
 (§Fan-out). A pending cell that runs after a
 cell `needs` puts on a later env-level cannot be ordered, and the run refuses
-before anything applies:
+before anything applies. The annotation reads:
 
 ```text
-::error::needs orders <stack> / <env> before <stack> / <env>, which it runs after:
+needs order inverted, fix default-branch needs or tags: <stack> / <env> before <stack> / <env>, which it runs after
 - <stack> / <env> (env-level <n>) after <stack> / <env> (env-level <m>); <env>'s level comes from <env> -> ... -> <env>
 Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry in that chain on the default branch, or retag the stacks so the edge stays inside environments that order it.
 ```
