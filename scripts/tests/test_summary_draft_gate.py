@@ -6,7 +6,7 @@ only `failure` as a hold and greens `pending` once every apply check is done, so
 written over a held head -- a re-run of an old draft run, or a draft reopened at the same head --
 would turn the hold into something `gate-refresh` can green. `Create/refresh gate` therefore reads
 the head's gate first with `gate-status newest`, and writes the draft status only when that read
-succeeds and finds none. Every mode then reads `gate-status newer-hold` before its write.
+succeeds and finds none. Every mode then runs `gate-status refuse-newer` before its write.
 
 A non-draft `pending` write is followed by `gate-status refresh`, unless this run published a
 queued apply check: an apply's refresh serialized before this write would otherwise leave applied
@@ -133,7 +133,7 @@ def test_a_draft_run_writes_the_gate_on_a_head_with_none_and_does_not_refresh(tm
     `[ "$MODE" != "draft" ]` from the refresh condition -> a check-runs listing follows."""
     proc, calls = _run_gate(tmp_path, "draft", "")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    # The `newest` read, then the `newer-hold` read before the write.
+    # The `newest` read, then the `refuse-newer` read before the write.
     assert calls == [READ_ARGV, READ_ARGV, _write_argv("pending", "the reason")]
 
 

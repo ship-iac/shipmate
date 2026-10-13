@@ -13,8 +13,8 @@ re-run) never replaces a newer run's gate or checks. A failed read of either, or
 `pending-checks`, holds whether or not a cell summary was downloaded: a hold is always safe, and a
 failed download leaves no cell summary over planned cells.
 
-`Create/refresh gate` reads `newer-hold` again before its final write and refuses, writing
-nothing, over a newer run's hold. It skips its self-refresh when this run published a queued
+`Create/refresh gate` runs `gate-status refuse-newer` again before its final write and refuses,
+writing nothing, over a newer run's hold. It skips its self-refresh when this run published a queued
 check, which cannot be done yet.
 
 The steps run for real, in order, with `_loader.write_python3_shim`'s `python3` running the real
@@ -78,6 +78,12 @@ def _status_post(state, description):
 
 
 HOLD_POST = _status_post("failure", HOLD_DESCRIPTION)
+#: `gate-status refuse-newer`'s whole refusal, the one message of both steps' newer-run check.
+REFUSED = (
+    f"::error::plan run 50 holds the gate of {HEAD_SHA} and is newer than this run ({RUN_ID}); "
+    "this run writes nothing. Re-plan this pull request (comment shipmate plan or push) if that "
+    "run did not finish.\n"
+)
 
 # Records every call's argv one line per argument, then the stdin of an `--input -` call, then a
 # `--` line. FAKE_FAIL_CHECK fails that check-runs POST (1-based); pipeline members run in
@@ -183,6 +189,7 @@ def _run(
     fail_check=0,
     steps=(HOLD, CREATE),
     refresh_checks=None,
+    head=HEAD_SHA,
 ):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -195,7 +202,7 @@ def _run(
         **os.environ,
         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
         "GH_TOKEN": "x",
-        "SHIPMATE_HEAD_SHA": HEAD_SHA,
+        "SHIPMATE_HEAD_SHA": head,
         "SHIPMATE_PR_NUMBER": "7",
         "SHIPMATE_APP_ID": APP_ID,
         "HEAD_SHA": HEAD_SHA,
@@ -234,8 +241,9 @@ def _run(
 
 @bash_only
 def test_the_hold_is_written_before_any_apply_check(tmp_path):
-    """Mutations: move the hold below the publish loop -> the hold follows the checks; drop the
-    `newer-hold` read -> the statuses listing is missing."""
+    """`APPLY_LIST` pins the hold's whole projection. Mutations: move the hold below the publish
+    loop -> the hold follows the checks; drop the `refuse-newer` read -> the statuses listing is
+    missing; drop `external_id` from the projection -> an unexpected listing call."""
     _write_cells(tmp_path, "a", "b")
     codes, calls, _ = _run(tmp_path)
     assert codes == [0, 0]
@@ -303,25 +311,18 @@ def test_the_final_gate_write_replaces_the_hold_and_skips_the_refresh(tmp_path):
     ]
 
 
-NEWER_GATE = (
-    f"::error::plan run 50 holds the gate of {HEAD_SHA} and is newer than this run ({RUN_ID}); "
-    "this run writes no gate. Re-plan this pull request (comment shipmate plan or push) if that "
-    "run did not finish.\n"
-)
-
-
 @bash_only
 def test_a_newer_runs_hold_refuses_the_final_write(tmp_path):
     """A newer same-head run held the gate after this run's publish hold (its summary was
-    evicted). Mutation: drop the `newer-hold` check before the final write -> a `pending` POST
-    buries the hold."""
+    evicted). Mutation: `refuse-newer ... || exit 1` -> `|| true` -> a `pending` POST buries the
+    hold."""
     codes, calls, stderr = _run(tmp_path, statuses=_lines(_gate("failure", 50)), steps=(GATE,))
-    assert (codes, calls, stderr) == ([1], [STATUSES_LIST], NEWER_GATE)
+    assert (codes, calls, stderr) == ([1], [STATUSES_LIST], REFUSED)
 
 
 @bash_only
 def test_a_failed_read_before_the_final_write_writes_nothing(tmp_path):
-    """Mutation: drop the `if !` exit on the read (`|| true`) -> a `pending` POST."""
+    """Mutation: `refuse-newer ... || exit 1` -> `|| true` -> a `pending` POST."""
     codes, calls, _ = _run(tmp_path, statuses_rc=1, steps=(GATE,))
     assert (codes, calls) == ([1], [STATUSES_LIST])
 
@@ -349,13 +350,6 @@ def test_a_newer_runs_apply_check_refuses_before_any_write(tmp_path, newest):
     assert (codes, calls, stderr) == ([1], [STATUSES_LIST, APPLY_LIST], NEWER_CHECK)
 
 
-REFUSED = (
-    f"::error::plan run 50 holds the gate of {HEAD_SHA} and is newer than this run ({RUN_ID}); "
-    "this run publishes nothing. Re-plan this pull request (comment shipmate plan or push) if "
-    "that run did not finish.\n"
-)
-
-
 @bash_only
 @pytest.mark.parametrize(
     "statuses",
@@ -367,8 +361,8 @@ REFUSED = (
     ids=["newer-hold", "behind-own-hold"],
 )
 def test_a_newer_runs_hold_refuses_before_any_write(tmp_path, statuses):
-    """Mutations: read only the newest gate in `newer-hold` -> `behind-own-hold` publishes;
-    drop the `newer-hold` refusal -> both publish."""
+    """Mutations: read only the newest gate in `newer_hold` -> `behind-own-hold` publishes;
+    `[ "$rc" = 4 ]` -> `[ "$rc" = 3 ]` -> both hold (a status POST)."""
     _write_cells(tmp_path, "a")
     codes, calls, stderr = _run(tmp_path, statuses=statuses)
     assert (codes, calls, stderr) == ([1], [STATUSES_LIST], REFUSED)
@@ -389,7 +383,8 @@ def test_a_pending_checks_failure_with_cells_holds(tmp_path):
 
 @bash_only
 def test_a_failed_statuses_read_holds(tmp_path):
-    """Mutation: drop the hold on a failed `newer-hold` -> no POST."""
+    """Mutation: delete the `hold` call in the `rc != 0` branch after `refuse-newer` -> no
+    POST."""
     _write_cells(tmp_path, "a")
     codes, calls, _ = _run(tmp_path, statuses_rc=1)
     assert (codes, calls) == ([1], [STATUSES_LIST, HOLD_POST])
@@ -399,8 +394,8 @@ def test_a_failed_statuses_read_holds(tmp_path):
 @pytest.mark.parametrize("slugs", [("a",), ()], ids=["cells", "no-cells"])
 def test_a_failed_check_listing_holds(tmp_path, slugs):
     """No cell summary is no proof of no work: a failed download leaves `cells/` empty over
-    planned cells. Mutations: drop the hold on a failed listing -> no POST in either case; restore
-    the `[ -n "$cells" ]` condition on it -> `no-cells` posts nothing."""
+    planned cells. Mutations: replace the failed listing's `hold; exit 1` with `true` -> no POST
+    in either case; restore the `[ -n "$cells" ]` condition on it -> `no-cells` posts nothing."""
     _write_cells(tmp_path, *slugs)
     codes, calls, _ = _run(tmp_path, apply_rc=1)
     assert (codes, calls) == ([1], [STATUSES_LIST, APPLY_LIST, HOLD_POST])
@@ -412,3 +407,13 @@ def test_a_pending_checks_failure_without_cells_holds(tmp_path):
     Mutation: guard that hold with `[ -n "$cells" ]` -> no POST."""
     codes, calls, _ = _run(tmp_path, apply_checks="not json\n")
     assert (codes, calls) == ([1], [STATUSES_LIST, APPLY_LIST, HOLD_POST])
+
+
+@bash_only
+def test_a_malformed_head_fails_the_hold_step_before_any_call(tmp_path):
+    """The later steps run only after this one, so it is the head check for all of them.
+    Mutation: skip `validate_head_sha` in `gate-status`'s `main` -> the stub records a statuses
+    call."""
+    _write_cells(tmp_path, "a")
+    codes, calls, _ = _run(tmp_path, head="A" * 40)
+    assert (codes, calls) == ([1], [])

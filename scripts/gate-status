@@ -3,24 +3,23 @@
 `checks` subcommand serves `_shipmate.check_runs` to the bash sites.
 
     gate-status newest <sha>                     print `<state> <run id>` of the newest gate
-    gate-status newer-hold <sha>                 print the run id of a newer run's hold
     gate-status refuse-newer <sha>               exit `NEWER` when a newer run holds the gate
     gate-status post <sha> <state> <description> write the gate
     gate-status hold <sha> <description>         write a `failure` gate
     gate-status refresh <sha>                    green the gate once every apply check is done
     gate-status deploy <sha> <detect> <results>  write the post-merge verdict over job results
-    gate-status checks <sha> <jq>                print the head's check-runs, one `jq` per line
+    gate-status checks <sha> <jq>                print one `jq` projection per line of check runs
 
 The gate is a commit status, not a check-run: a check-run binds to a check-suite and can land in
 a stale one when a commit carries two plan runs, which blocks the merge forever. Every write sets
 `target_url` to this run. Env: `GH_TOKEN`, `GITHUB_REPOSITORY`, `GITHUB_SERVER_URL`,
 `GITHUB_RUN_ID`, and `SHIPMATE_APP_ID` for `refresh`. A `<sha>` that is not 40 lowercase hex
-characters is refused before any API call. A failed API call exits 1 with an `::error::` line.
-`refresh` over a hold prints why, unannotated, and exits `HELD`: each caller decides whether a hold
-fails its step. `refuse-newer` prints its refusal as an `::error::` line and exits `NEWER`, so a
-caller tells a newer run from a failed read (exit 1). `checks` serves `_shipmate.check_runs` to
-the bash sites: UTF-8 with LF line ends on any host, and a failed listing exits 1 unannotated, so a
-caller that degrades prints the only annotation.
+characters is refused before any API call. A failed API call exits 1 with an `::error::` line,
+except in `checks`. `refresh` over a hold prints why, unannotated, and exits `HELD`: each caller
+decides whether a hold fails its step. `refuse-newer` prints its refusal as an `::error::` line
+and exits `NEWER`, so a caller tells a newer run from a failed read (exit 1). `checks` serves
+`_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends on any host, and a failed
+listing exits 1 unannotated, so a caller that degrades prints the only annotation.
 """
 
 import os
@@ -170,12 +169,6 @@ def _newest(sha):
         print(*newest)
 
 
-def _newer_hold(sha):
-    run = newer_hold(sha)
-    if run is not None:
-        print(run)
-
-
 def _refuse_newer(sha):
     newer = newer_hold(sha)
     if newer is not None:
@@ -196,7 +189,6 @@ def _checks(sha, jq):
 #: command -> (argument count after the sha, handler)
 _COMMANDS = {
     "newest": (0, _newest),
-    "newer-hold": (0, _newer_hold),
     "refuse-newer": (0, _refuse_newer),
     "checks": (1, _checks),
     "post": (2, post),

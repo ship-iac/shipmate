@@ -296,8 +296,8 @@ def write_python3_shim(bin_dir):
     stub alone cannot reach a ``gh`` that Python spawns on Windows: the spawn resolves the real
     ``gh.EXE`` past it, and an extensionless stub run by full path raises FileNotFoundError.
     ``sys.argv`` and ``sys.path[0]`` are set as ``python3 script`` sets them, so the script reads
-    only its own arguments and imports its siblings with no PYTHONPATH. Only that
-    ``python3 <script> args...`` form runs; ``python3 -c`` and ``python3 -`` do not.
+    only its own arguments and imports its siblings with no PYTHONPATH. ``python3 -c <code>
+    args...`` runs on the real interpreter, unshimmed; ``python3 -`` does not run.
     """
     bash = usable_bash()
     assert bash is not None, "callers are bash_only-gated"
@@ -307,7 +307,10 @@ def write_python3_shim(bin_dir):
     )
     python3 = bin_dir / "python3"
     python3.write_text(
-        f'#!/bin/bash\nexec "{sys.executable}" "{shim}" "$@"\n', encoding="utf-8", newline="\n"
+        f'#!/bin/bash\nif [ "$1" = -c ]; then exec "{sys.executable}" "$@"; fi\n'
+        f'exec "{sys.executable}" "{shim}" "$@"\n',
+        encoding="utf-8",
+        newline="\n",
     )
     python3.chmod(0o755)
 
@@ -375,6 +378,7 @@ def run_step(tmp_path, body, env, *, cwd=None, timeout=30, text=True):
     ``tmp_path`` when that is not given. Output is decoded as UTF-8, not the locale default: the
     shipped messages carry em dashes, and a cp1252 decode mangles them into a mismatch that looks
     like a real diff. With ``text=False`` the output stays bytes, for a test that pins line ends.
+    Stdin is ``/dev/null``, so a body that reads it ends rather than waiting out ``timeout``.
     """
     bash = usable_bash()
     assert bash is not None, "callers are bash_only-gated"
@@ -385,6 +389,7 @@ def run_step(tmp_path, body, env, *, cwd=None, timeout=30, text=True):
         cwd=cwd or tmp_path,
         env=env,
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         encoding="utf-8" if text else None,
         timeout=timeout,
     )

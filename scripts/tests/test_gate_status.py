@@ -362,7 +362,8 @@ def test_refuse_newer_names_the_newest_hold_written_after_this_run(tmp_path, pag
 
 @bash_only
 def test_refuse_newer_fails_when_the_statuses_listing_fails(tmp_path):
-    """Mutation: answer an empty listing on a failed read -> exit 0 and the caller writes."""
+    """Mutations: answer an empty listing on a failed read -> exit 0 and the caller writes; read
+    the statuses through the unprefixed `run` -> stderr loses its `::error::`."""
     proc, calls = _run(
         tmp_path,
         "refuse-newer",
@@ -370,7 +371,12 @@ def test_refuse_newer_fails_when_the_statuses_listing_fails(tmp_path):
         page1=_lines(_status("shipmate / gate", "failure", _run_url(1000))),
         statuses_rc=1,
     )
-    assert (proc.returncode, proc.stdout, calls) == (1, "", [STATUSES_ARGV])
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        1,
+        "",
+        f"::error::command failed (1): gh {' '.join(STATUSES_ARGV)}\n",
+        [STATUSES_ARGV],
+    )
 
 
 def _checks_argv(jq):

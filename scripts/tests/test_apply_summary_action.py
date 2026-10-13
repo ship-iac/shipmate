@@ -20,9 +20,20 @@ assertion, but still required to come out of `_read_names()`, so a rename in the
 (GITHUB_RUN_ID to RUN_ID, say) surfaces as a clear diff instead of vanishing from this guard.
 """
 
+import os
 import re
 
-from _loader import ENGINE, action_steps, action_yaml, load_script, workflow_yaml
+from _loader import (
+    ACTIONS,
+    ENGINE,
+    action_steps,
+    action_yaml,
+    bash_only,
+    load_script,
+    run_with_gate_gh,
+    step_by,
+    workflow_yaml,
+)
 
 SCRIPT = ENGINE / "scripts" / "apply-comment"
 _APPLY_COMMENT = load_script("apply-comment")
@@ -225,6 +236,13 @@ def _steps():
     return action_yaml("apply-summary")["runs"]["steps"]
 
 
+_SCAN = "Scan apply checks (degrade to no data on failure)"
+
+
+def _scan_step():
+    return step_by("apply-summary", name=_SCAN)
+
+
 def test_head_sha_is_a_required_input():
     inputs = action_yaml("apply-summary")["inputs"]
     assert "head-sha" in inputs, "apply-summary needs the head SHA to read the apply checks"
@@ -247,7 +265,7 @@ def test_token_mint_precedes_the_scan_render_and_post_steps():
     error."""
     steps = _steps()
     mint = _find_step(steps, uses_contains="create-github-app-token")
-    scan = _find_step(steps, run_contains="check-runs")
+    scan = _scan_step()
     render = _find_step(steps, run_contains="scripts/apply-comment")
     post = _find_step(steps, run_contains="issues/$PR_NUMBER/comments")
     assert steps.index(mint) < steps.index(scan) < steps.index(render) < steps.index(post)
@@ -256,43 +274,77 @@ def test_token_mint_precedes_the_scan_render_and_post_steps():
     )
 
 
-def test_scan_step_validates_head_sha():
-    scan = _find_step(_steps(), run_contains="check-runs")
-    assert "^[0-9a-f]{40}$" in scan["run"]
+#: The scan step's check-runs projection, hand-written.
+_SCAN_JQ = ".check_runs[] | {name, status, conclusion, id, app: {id: .app.id}}"
+_SCAN_LISTING = (
+    '{"name": "apply / a / dev", "status": "completed", "conclusion": "success", "id": 1, '
+    '"app": {"id": 7}}\n'
+)
+_HEAD = "c" * 40
 
 
-def test_scan_step_uses_filter_all_like_the_gate():
-    # A re-created check name keeps its historical runs, and apply-gate judges the newest run
-    # per name, which only works if every run is fetched.
-    scan = _find_step(_steps(), run_contains="check-runs")
-    assert "filter=all" in scan["run"]
+def _run_scan(tmp_path, checks_rc=0):
+    """Run the shipped scan step; return (process, gh calls, the file the render step reads).
 
-
-def test_scan_step_degrades_to_an_empty_file_with_a_warning():
-    # For comment-ops the comment is the feedback channel, so a checks-API blip must cost the
-    # check-state axis only, never the comment.
-    scan = _find_step(_steps(), run_contains="check-runs")
-    assert ": > checks.jsonl" in scan["run"]
-    assert "::warning::" in scan["run"]
-
-
-def test_scan_step_writes_the_file_the_render_step_reads():
-    """The coupling between the filename the scan step redirects to and the path the renderer
-    reads, SHIPMATE_CHECKS, is otherwise untested: a rename of either side would silently blank
-    the whole check-state axis with no local test failing. The expected filename is derived from
-    the render step's env: block, never hardcoded here, so a rename on that side reds this
-    test too."""
-    steps = _steps()
-    scan = _find_step(steps, run_contains="check-runs")
-    render = _find_step(steps, run_contains="scripts/apply-comment")
+    The file is the one the render step's `SHIPMATE_CHECKS` names, so a rename on either side
+    of that coupling reads an absent file here."""
+    render = _find_step(_steps(), run_contains="scripts/apply-comment")
     checks_file = (render.get("env") or {}).get("SHIPMATE_CHECKS")
     assert checks_file, "render step's env: block has no SHIPMATE_CHECKS key"
-    assert f"> {checks_file}" in scan["run"]
-    assert f": > {checks_file}" in scan["run"]
+    env = {
+        **os.environ,
+        "GH_TOKEN": "x",
+        "HEAD_SHA": _HEAD,
+        "GITHUB_ACTION_PATH": str(ACTIONS / "apply-summary"),
+        "GITHUB_REPOSITORY": "acme/demo",
+    }
+    proc, calls = run_with_gate_gh(
+        tmp_path,
+        _scan_step()["run"],
+        env,
+        sha=_HEAD,
+        checks=_SCAN_LISTING,
+        checks_rc=checks_rc,
+        checks_jq=_SCAN_JQ,
+    )
+    path = tmp_path / checks_file
+    return proc, calls, path.read_text(encoding="utf-8") if path.exists() else None
+
+
+@bash_only
+def test_scan_step_writes_the_listing_to_the_file_the_render_step_reads(tmp_path):
+    """Mutations: redirect to `check.jsonl` -> the render step's file is absent; drop
+    `app: {id: .app.id}` from the projection -> the stub refuses the call and the argv differs."""
+    proc, calls, checks = _run_scan(tmp_path)
+    assert proc.returncode == 0, proc.stderr
+    assert calls == [
+        [
+            "api",
+            "--paginate",
+            f"repos/acme/demo/commits/{_HEAD}/check-runs?filter=all&per_page=100",
+            "--jq",
+            _SCAN_JQ,
+        ]
+    ]
+    assert checks == _SCAN_LISTING
+
+
+@bash_only
+def test_a_failed_scan_degrades_to_an_empty_file_with_a_warning(tmp_path):
+    """For comment-ops the comment is the feedback channel, so a checks-API blip must cost the
+    check-state axis only, never the comment. Mutations: delete the `::warning::` echo -> stdout
+    loses the line; replace the `if ! ...; fi` with the bare listing -> `set -e` fails the
+    step."""
+    proc, _, checks = _run_scan(tmp_path, checks_rc=1)
+    assert (proc.returncode, proc.stdout, checks) == (
+        0,
+        "::warning::apply-check scan failed; the comment falls back to artifact-only status\n",
+        "",
+    )
 
 
 def test_scan_step_never_interpolates_expr_directly():
-    scan = _find_step(_steps(), run_contains="check-runs")
+    scan = _scan_step()
     assert "${{" not in scan["run"]
 
 
@@ -300,7 +352,7 @@ def test_scan_step_uses_the_app_token_not_the_workflow_token():
     """App permissions come from the installation, so no consumer's calling job has to grant
     checks: read. A called workflow's job permissions cannot exceed its caller's, so the
     workflow-token route would be a breaking change for every consumer wrapper."""
-    scan = _find_step(_steps(), run_contains="check-runs")
+    scan = _scan_step()
     mint = _find_step(_steps(), uses_contains="create-github-app-token")
     assert (scan.get("env") or {}).get("GH_TOKEN") == (
         "${{ steps." + mint["id"] + ".outputs.token }}"
