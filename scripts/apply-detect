@@ -29,7 +29,7 @@ the run refuses.
 import json
 import os
 
-from _shipmate import _load, _run, check_runs, validate_head_sha
+from _shipmate import _load, _run, check_runs, run_annotated, validate_head_sha
 
 bm = _load("build-matrix")
 wv = _load("waves")
@@ -443,4 +443,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

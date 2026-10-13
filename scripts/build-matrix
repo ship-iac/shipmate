@@ -15,7 +15,7 @@ import os
 import posixpath
 import re
 
-from _shipmate import _load, _run, named
+from _shipmate import _load, _run, command_data, named, run_annotated
 
 ec = _load("env-config")
 wv = _load("waves")
@@ -385,18 +385,24 @@ def warn_lost_env_tags(all_stacks, base, unmanaged, tree):
     untagged = set(unmanaged)
     if gone:
         print(
-            f"::warning::{len(gone)} stack(s) lost their last env/* tag in this pull request, "
-            f"so shipmate no longer plans or deploys them: {named(gone, UNMANAGED_NAMES)}"
-            ". If that is deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; "
-            "otherwise restore the tag."
+            "::warning::"
+            + command_data(
+                f"{len(gone)} stack(s) lost their last env/* tag in this pull request, so "
+                f"shipmate no longer plans or deploys them: {named(gone, UNMANAGED_NAMES)}. If "
+                "that is deliberate (CONTRACT.md §Taking a stack out of CI), nothing is wrong; "
+                "otherwise restore the tag."
+            )
         )
     pairs = [f"{s} / {e}" for s, envs in lost.items() if s not in untagged for e in envs]
     if pairs:
         print(
-            f"::warning::{len(pairs)} stack / environment pair(s) lost their env/* tag in this "
-            "pull request, so shipmate no longer plans or deploys them: "
-            f"{named(pairs, UNMANAGED_NAMES)}. If that is deliberate (CONTRACT.md §Taking a "
-            "stack out of CI), nothing is wrong; otherwise restore the tag."
+            "::warning::"
+            + command_data(
+                f"{len(pairs)} stack / environment pair(s) lost their env/* tag in this pull "
+                "request, so shipmate no longer plans or deploys them: "
+                f"{named(pairs, UNMANAGED_NAMES)}. If that is deliberate (CONTRACT.md §Taking a "
+                "stack out of CI), nothing is wrong; otherwise restore the tag."
+            )
         )
     return pairs
 
@@ -766,4 +772,4 @@ def _detect():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

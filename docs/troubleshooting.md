@@ -1061,10 +1061,12 @@ annotation read as under
 
 A drift sweep does not refuse a cycle: its cells on the loop fail at init.
 
-### `needs orders <stack> / <env> before <stack> / <env>, which it runs after`
+### `needs orders <stack> / <env> before <stack> / <env>`
+
+The annotation reads:
 
 ```text
-::error::needs orders platform / dev-eu before dns / dev-us, which it runs after:
+needs orders platform / dev-eu before dns / dev-us but it runs after; fix default-branch needs or tags
 - platform / dev-eu (env-level 0) after dns / dev-us (env-level 1); dev-us's level comes from dev-eu -> dev-us
 Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry in that chain on the default branch, or retag the stacks so the edge stays inside environments that order it.
 ```
@@ -1072,9 +1074,9 @@ Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` e
 A stack is `after` a stack in another environment, and `needs` puts that other
 environment on a later env-level, so no order meets both. The plan, a bare
 `shipmate apply` or the merge deploy refused before anything applied; a plan
-refusal holds the gate, and a deploy refusal turns the merged head's gate to
-`failure`. Each `- ` line names one inverted pair and the `needs` chain that
-sets the later level.
+refusal holds the gate with the first line as its description, and a deploy
+refusal turns the merged head's gate to `failure`. Each `- ` line names one
+inverted pair and the `needs` chain that sets the later level.
 
 1. Pick the order you want. Remove or reverse the `needs` entry in the named
    chain in `.github/shipmate-config.yml`, or retag the stacks so the `after`

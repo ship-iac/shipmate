@@ -17,7 +17,7 @@ pending cell `needs` puts on a later env-level refuses the whole run.
 import os
 import time
 
-from _shipmate import StackCycle, _load, validate_head_sha
+from _shipmate import StackCycle, _load, run_annotated, validate_head_sha
 from _shipmate import gh_json as _gh_json
 
 bm = _load("build-matrix")
@@ -206,4 +206,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

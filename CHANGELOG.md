@@ -15,6 +15,7 @@ section below names the SHA the release tags.
 - **The plan, both apply forms and the merge deploy refuse a Terramate stack ordering cycle, a stack ordered after itself included, when they read the run-graph and before any other ordering check, naming the stacks on it. The plan refuses even with no cell to plan, instead of failing each planned cell on the loop, and the deploy's refusal also lists the merge's pending cells. Every plan but a drift sweep now runs `terramate experimental run-graph` and refuses when it fails, a plan with no cell and one in a repository with no `needs` included.**
 - **The merge deploy's stranded-check and `needs` inversion refusals say the fix pull request's cells are applied before merge under a required gate (`shipmate apply`, and `shipmate apply <env>` for an `explicit` environment), or by its deploy otherwise, instead of by its deploy alone.**
 - **A plan run whose plan job did not succeed (a skipped plan job with no cell planned is not held), whose planned cell count was not reported, or whose cell summaries do not match that count publishes no apply check, so a pre-merge `shipmate apply` cannot apply its cells. Apply checks an earlier plan run of the same head published stay.**
+- **A detect refusal's annotation carries every line of its message, and a literal `%0A` or `%25` in a stack path shows verbatim. The `needs` inversion refusal's first line, the one the gate description shows, ends with its remedy: `fix default-branch needs or tags`.**
 
 ## [0.45.0] — 2026-10-13
 
