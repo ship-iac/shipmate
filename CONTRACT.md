@@ -794,9 +794,10 @@ catches only names no environment name could take; a plain misspelling reaches
 these warnings instead.
 
 **A typo'd table key therefore does not surface on the pull request that
-introduces it.** It surfaces on the next run of any drift sweep. Refusals are
-unaffected — they need only the environments already in the matrix, so a tagged
-environment missing from the table still refuses on every path.
+introduces it.** It surfaces on the next drift sweep, `unlock` or bare
+`shipmate apply`. Refusals are unaffected — they need only the environments
+already in the matrix, so a tagged environment missing from the table still
+refuses on every path.
 
 ## State backend
 
@@ -1547,8 +1548,8 @@ check/status/comment/issue that crosses a workflow-run boundary:
   gate. An empty head SHA (a failed plan `facts`, or a deploy `detect` that
   failed before it validated the merged head) keys the group on the run id
   instead, so that job shares no group. A deploy `detect` writes the head before
-  any refusal, so a refused deploy's `summary` writes `failure` on the merged
-  head. GitHub keeps one pending job per
+  any refusal past head validation, so a refused deploy's `summary` writes
+  `failure` on the merged head. GitHub keeps one pending job per
   group, so a third arrival cancels the pending one. What each eviction costs:
   - a pending plan `summary`: its run publishes nothing, and `gate-hold` writes
     a hold naming the recovery, `shipmate plan`. `gate-hold` writes outside the
@@ -1556,11 +1557,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
     `summary` that evicted its own: its hold can land after that `summary`
     greened the head, a closed gate over applied work that `shipmate plan`
     reopens;
-  - a pending apply `summary`: the later writer refreshes the gate, and the
-    evicted run posts no apply comment, so its results, waiting cells and their
-    blockers are named nowhere; a failed wave shows only on the red run, and
-    waiting cells keep their checks pending, so the gate stays pending until
-    they apply;
+  - a pending apply `summary`: the evicted run posts no apply comment, so its
+    results and its waiting cells show only in the run itself. The later
+    writer's refresh reads the apply checks and the gate as for any run;
   - a pending deploy `summary`: the merged head keeps its last gate; re-run that
     deploy, as for any superseded deploy.
 
