@@ -458,9 +458,10 @@ enforcement.
 
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
-`shared`, `explicit` and `gated` hold `true` or `false` and refuse a reference, so
-which environments share one binding, which a bare apply skips and which apply
-unreviewed stay merged commits. Where this page says editing
+`shared`, `explicit` and `gated` hold `true` or `false`, `max_parallel` holds a
+number, and all four refuse a reference, so which environments share one
+binding, which a bare apply skips, which apply unreviewed and how many cell jobs
+run at once stay merged commits. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes
 out ([`../CONTRACT.md`](../CONTRACT.md) §Variable references).
 

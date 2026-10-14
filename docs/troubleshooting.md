@@ -148,9 +148,9 @@ live probes.
   on by itself run here — the top-level keys, `layout`, `max_parallel` and the
   environment entries; `tf_vars`-layout coverage and unused entries need a plan
   matrix or a whole-tree environment scan, and the verdict names them as
-  unchecked. A valid file also gets its `needs`, `explicit` and `max_parallel` values read
-  back, absent ones included: `explicit` set on no entry
-  is legitimate configuration that no validator can question, and it means a bare
+  unchecked. A valid file also gets its `needs`, `explicit` and `max_parallel`
+  values read back, absent ones included: `explicit` set on no entry is
+  legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Each variable reference is resolved
   and listed as `<key> from variable <NAME>`; an unset one is the invalid-file
   finding, which is how a pull request adding it learns before the merge.
@@ -392,9 +392,8 @@ The fix is a re-plan and an apply of the fresh plan. On an open pull request,
 comment `shipmate plan` or push; re-running the old run's plan jobs does not
 re-plan, because their artifact uploads 409. After the merge, open a new pull
 request touching the stack. There is no force: an apply that silently
-re-planned would apply
-something nobody reviewed, and the check left pending is exactly what stops the
-gate greening over an unapplied stack.
+re-planned would apply something nobody reviewed, and the check left pending is
+exactly what stops the gate greening over an unapplied stack.
 
 **A retry is not a re-plan, and the pending check makes the retry look
 available.** A failed apply leaves its `apply / <stack> / <env>` check *pending*
@@ -660,16 +659,16 @@ The fix in every case is the same: write the top-level settings at column 1.
 
 **Three settings refuse nothing when they are absent.** `needs`, `explicit`
 and `max_parallel` are optional and take tolerant defaults — no ordering, no
-exclusions, and at most 10 cell jobs at once per matrix. A file
-that sets `explicit` on no entry is structurally valid, and a bare
-`shipmate apply` then applies every environment, production included. Nothing
-warns. `shipmate doctor` echoes all three on every report for exactly this reason;
+exclusions, and at most 10 cell jobs at once per matrix. A file that sets
+`explicit` on no entry is structurally valid, and a bare `shipmate apply` then
+applies every environment, production included. Nothing warns.
+`shipmate doctor` echoes all three on every report for exactly this reason;
 read them before merging.
 
-**Editing them on a branch does not change what that branch applies.** `needs`,
-`explicit` and `max_parallel` are read from the default branch with the rest of the file.
-Validate the change with `shipmate doctor` on the pull request, then merge it —
-that is what makes it take effect.
+**Editing them on a branch does not change what that branch applies.**
+`needs`, `explicit` and `max_parallel` are read from the default branch with
+the rest of the file. Validate the change with `shipmate doctor` on the pull
+request, then merge it — that is what makes it take effect.
 
 ### A cell fails with no AWS credential
 

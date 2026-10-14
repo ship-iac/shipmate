@@ -506,15 +506,16 @@ per account. GitHub runs a matrix with `max-parallel: 0` unbounded, so 0
 refuses, and so does anything that is not a whole number from 1 to 256.
 
 **The cap costs repeated approvals on a protected environment.** A matrix with
-more cells than `max_parallel` reaches its environment in batches, and the
-environment's required reviewers and wait timer apply to each batch (probed on a
-public repository). Each wave is already its own job, so those rules already
-fire once per wave; the cap multiplies that by ⌈cells in the wave ÷
-`max_parallel`⌉. Apply waves and unlock bind `<env>-apply`; plans and drift
-sweeps bind `<env>-plan`, which carries no reviewers (§Env model); a shared
-environment binds its bare `<env>` on every path. A repository whose apply
-environments use reviewers or a wait timer raises `max_parallel` above its
-widest wave to approve each wave once.
+more cells than `max_parallel` runs in batches, and each environment's required
+reviewers and wait timer apply again to every batch that holds one of its cells
+(probed on a public repository). Each wave is already its own job, so those
+rules already fire at least once per wave for every environment in it. Apply
+waves and unlock bind `<env>-apply`; plans and drift sweeps bind `<env>-plan`,
+which carries no reviewers (§Env model); a shared environment binds its bare
+`<env>` on every path. A repository whose apply environments use reviewers or a
+wait timer raises `max_parallel` to at least the number of cells in its largest
+wave: the stacks of the widest wave level times the environments that share its
+env-level. The detect notice's widest-level figure counts stacks, not cells.
 
 One quoting rule: a string value starting with `{`, `[`, `*`, `&`, `!` or `#`
 is quoted (`"{workload}-plan"`). Unquoted, YAML reads the character as syntax:
