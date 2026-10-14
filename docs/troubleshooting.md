@@ -815,11 +815,24 @@ render step.
 
 ### `plan artifact ... could not be decrypted: openssl or the disk failed on the runner`
 
-openssl or the disk failed on the runner, not the artifact; any openssl error is
-printed above the refusal. Nothing was applied, and a re-plan fails the same
-way. Re-run the job, which clears a transient
-hosted-runner disk failure, or fix a self-hosted runner's openssl or disk, for
-example an openssl without `-pbkdf2` or `-iter`, or a full disk.
+openssl or the disk failed on the apply runner, not the artifact; any openssl
+error is printed above the refusal. Nothing was applied. A re-plan does not
+help, because the decrypt runs on the apply runner: the apply fails again until
+that runner is fixed or a re-run of the job lands on a working one. Re-run the
+job, which clears a transient hosted-runner disk failure, or fix a self-hosted
+runner's openssl or disk, for example an openssl without `-pbkdf2` or `-iter`,
+or a full disk.
+
+### `... could not be encrypted: openssl or the disk failed on the runner`, or `... cannot be encrypted: the file does not exist`
+
+A plan cell encrypting its plan before upload, or an apply cell saving state,
+refused; nothing was uploaded or saved.
+
+- **`the file does not exist`.** The step that writes the file did not, and its
+  own error is earlier in the job log. Fix that step's failure first.
+- **`openssl or the disk failed on the runner`.** Any openssl error is printed
+  above the refusal. Re-run the job, which clears a transient hosted-runner disk
+  failure, or fix a self-hosted runner's openssl or disk.
 
 ### `state cache entry ... is plaintext`
 

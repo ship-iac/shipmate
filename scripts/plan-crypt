@@ -17,6 +17,7 @@ plan must be a zip archive or OpenTofu's encrypted-plan envelope, state must par
 as OpenTofu state (CONTRACT.md §Plan artifact encryption).
 """
 
+import contextlib
 import json
 import os
 import subprocess
@@ -44,12 +45,13 @@ def _starts_with(path, magic):
         return fh.read(len(magic)) == magic
 
 
-def _is_encrypted(path):
-    return _starts_with(path, MAGIC)
-
-
-def _is_short(path):
-    return os.path.getsize(path) < HEADER_LEN
+def _header(path):
+    """`truncated` below HEADER_LEN bytes whatever they hold, else `plaintext` or `salted`."""
+    with open(path, "rb") as fh:
+        head = fh.read(HEADER_LEN)
+    if len(head) < HEADER_LEN:
+        return "truncated"
+    return "salted" if head.startswith(MAGIC) else "plaintext"
 
 
 def _openssl(path, *, decrypt, failure, accept=None):
@@ -85,9 +87,9 @@ def _openssl(path, *, decrypt, failure, accept=None):
     except subprocess.CalledProcessError:
         raise SystemExit(failure) from None
     except OSError as exc:  # no openssl on PATH, or the temp file could not be read or moved
-        raise SystemExit(f"{failure} ({exc})") from None
+        raise SystemExit(f"{failure} Error: {exc}") from None
     finally:
-        if os.path.exists(tmp):
+        with contextlib.suppress(OSError):
             os.remove(tmp)
 
 
@@ -114,8 +116,13 @@ def _purge_command(prefix):
 
 
 def encrypt(path):
-    """Encrypt in place, or refuse without a passphrase."""
+    """Encrypt in place, or refuse without a passphrase or without the file."""
     _require_passphrase()
+    if not os.path.isfile(path):
+        raise SystemExit(
+            f"::error::`{path}` cannot be encrypted: the file does not exist. The step that "
+            "writes it did not; its error is earlier in the job log."
+        )
     failure = (
         f"::error::`{path}` could not be encrypted: openssl or the disk failed on the runner. "
         + _RUNNER
@@ -133,15 +140,16 @@ def decrypt(path):
     prints the file.
     """
     _require_passphrase()
-    if not _is_encrypted(path):
+    header = _header(path)
+    if header == "truncated":
+        raise SystemExit(
+            f"::error::plan artifact `{path}` is truncated: it is shorter than its {HEADER_LEN}-"
+            f"byte salted header. Nothing was applied. Re-plan: {_REPLAN}"
+        )
+    if header == "plaintext":
         raise SystemExit(
             "::error::plan artifact is plaintext; refusing to apply an unencrypted plan. "
             f"Re-plan to produce an encrypted plan: {_REPLAN}"
-        )
-    if _is_short(path):
-        raise SystemExit(
-            f"::error::plan artifact `{path}` is truncated: it is shorter than its 16-byte "
-            f"salted header. Nothing was applied. Re-plan: {_REPLAN}"
         )
     failure = (
         f"::error::plan artifact `{path}` could not be decrypted: openssl or the disk failed on "
@@ -189,7 +197,15 @@ def decrypt_state(path, cache_key):
     """
     _require_passphrase()
     prefix = cache_key.rpartition("/")[0] + "/"
-    if not _is_encrypted(path):
+    delete = f"gh cache delete {cache_key}{_repo_flag()}"
+    header = _header(path)
+    if header == "truncated":
+        raise SystemExit(
+            f"::error::state cache entry `{cache_key}` is truncated: it is shorter than its "
+            f"{HEADER_LEN}-byte salted header. tofu was not run. `{delete}` deletes it, and the "
+            "next restore uses the previous one."
+        )
+    if header == "plaintext":
         raise SystemExit(
             f"::error::state cache entry `{cache_key}` is plaintext. Delete every entry under "
             f"its prefix, then re-run: `{_purge_command(prefix)}` (the restore matches by "
@@ -197,13 +213,6 @@ def decrypt_state(path, cache_key):
             "Deleting discards that state: OpenTofu no longer tracks the resources it recorded. "
             "A sample stack's null and random resources re-create; a real resource can "
             "collide with or be duplicated by its re-creation."
-        )
-    delete = f"gh cache delete {cache_key}{_repo_flag()}"
-    if _is_short(path):
-        raise SystemExit(
-            f"::error::state cache entry `{cache_key}` is truncated: it is shorter than its "
-            f"16-byte salted header. tofu was not run. `{delete}` deletes it, and the next "
-            "restore uses the previous one."
         )
     failure = (
         f"::error::state cache entry `{cache_key}` could not be decrypted: openssl or the disk "
