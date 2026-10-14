@@ -762,6 +762,7 @@ def _detect():
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
         fh.write(f"count={len(cells)}\n")
+        fh.write(f"max_parallel={ec.max_parallel(table)}\n")
         fh.write(f"cells={json.dumps(tree)}\n")
         named = {"count": len(unmanaged), "paths": unmanaged[:UNMANAGED_NAMES]}
         fh.write(f"unmanaged={json.dumps(named)}\n")

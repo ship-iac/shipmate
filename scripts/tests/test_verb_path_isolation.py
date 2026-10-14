@@ -108,7 +108,10 @@ UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
 #: The whole `outputs:` mapping of unlock's `detect`. `UNLOCK_STRATEGY` pins the consumer end
 #: of this wire, and without this one the producer end can be re-aimed at `waves`, the empty
 #: string here, which fans the job out and dies at fromJSON.
-DETECT_OUTPUTS = {"cells": "${{ steps.d.outputs.cells }}"}
+DETECT_OUTPUTS = {
+    "cells": "${{ steps.d.outputs.cells }}",
+    "max_parallel": "${{ steps.d.outputs.max_parallel }}",
+}
 
 #: Named so a failure says which one leaked in.
 APPLY_FAMILY = ("apply-cell", "apply-complete", "gate-refresh", "apply-summary")
@@ -143,6 +146,7 @@ UNLOCK_IF = "${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]
 #: The whole `strategy:` mapping of the unlock job.
 UNLOCK_STRATEGY = {
     "fail-fast": False,
+    "max-parallel": "${{ fromJSON(needs.detect.outputs.max_parallel) }}",
     "matrix": {"include": "${{ fromJSON(needs.detect.outputs.cells) }}"},
 }
 

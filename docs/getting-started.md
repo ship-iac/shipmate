@@ -78,9 +78,10 @@ migration that audited the OpenTofu code instead of porting the config went from
 6 declared edges to 105, and from 2 wave levels to 6.
 
 Three detect jobs report the shape as a `::notice::` line — stack count, `after`
-edge count, wave levels, and how many stacks would apply concurrently. A reader
+edge count, wave levels, and how many stacks the widest level holds. A reader
 who knows the repository can judge that last number immediately; nobody else
-can. Exactly three print it: the detect jobs of a dispatched `shipmate apply <env>`,
+can. It is the graph's width, not a concurrency figure: at most `max_parallel`
+cells of one wave run at once. Exactly three print it: the detect jobs of a dispatched `shipmate apply <env>`,
 of a bare `shipmate apply`, and of the post-merge deploy, so it arrives after the
 plan review that would have been the place to fix the graph. A plan run does not
 print it — seeing no such line there says nothing about the graph. Before that

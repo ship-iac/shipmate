@@ -117,6 +117,7 @@ jobs:
       envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
       envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
       head_sha: ${{ steps.d.outputs.head_sha }}
+      max_parallel: ${{ steps.d.outputs.max_parallel }}
       excluded_envs: ${{ steps.d.outputs.excluded_envs }}
       skipped_envs: ${{ steps.d.outputs.skipped_envs }}
       review_held_envs: ${{ steps.d.outputs.review_held_envs }}
@@ -155,6 +156,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      max_parallel: ${{ needs.detect.outputs.max_parallel }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
     # consumer's `complete` job would hold no key, its applies would execute, and their apply
     # checks would strand pending forever.
@@ -175,6 +177,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      max_parallel: ${{ needs.detect.outputs.max_parallel }}
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -186,6 +189,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      max_parallel: ${{ needs.detect.outputs.max_parallel }}
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -197,6 +201,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      max_parallel: ${{ needs.detect.outputs.max_parallel }}
     secrets: *envlevel-secrets
 
   summary:

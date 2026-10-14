@@ -148,8 +148,8 @@ live probes.
   on by itself run here — the top-level keys, `layout` and the
   environment entries; `tf_vars`-layout coverage and unused entries need a plan
   matrix or a whole-tree environment scan, and the verdict names them as
-  unchecked. A valid file also gets its `needs` and `explicit` values read back,
-  absent ones included: `explicit` set on no entry
+  unchecked. A valid file also gets its `needs`, `explicit` and `max_parallel` values read
+  back, absent ones included: `explicit` set on no entry
   is legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Each variable reference is resolved
   and listed as `<key> from variable <NAME>`; an unset one is the invalid-file
@@ -620,7 +620,9 @@ branch's** copy of the file — that is the only copy execution reads.
 | `the engine needs Python 3.12 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `the engine needs PyYAML for python3 and this runner has none` | the runner's `python3` cannot import PyYAML; see §`could not install python3-yaml`, or `the engine needs PyYAML` below |
 | `declares no layout` | either the key is genuinely absent, or it is indented under another key — see the indentation trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities` and `environments` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities`, `environments` and `max_parallel` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
+| `max_parallel is …; it must be a whole number from 1 to 256` | `max_parallel` takes a bare whole number, quoted or not: no sign, space, decimal point or leading zero. GitHub runs a matrix with `max-parallel: 0` unbounded, so 0 is refused; remove the key for the default of 10 |
+| `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds every matrix stays a merged commit. Write the number |
 | `environments.<env>.<key> must be true or false, got …` | `shared`, `explicit` and `gated` hold `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise resolve to the default |
 | `environments.<env>.<key> holds a variable reference; a flag accepts no variable reference` | `shared`, `explicit` and `gated` are written into the file, so which environments are shared, held back or ungated stays a merged commit. Write `true` or `false` |
 | `environment <env>: region is empty` | `region:` with nothing after it, or `region: #eu-west-1`, which YAML reads as a comment. Write the region, or remove the key |
@@ -656,15 +658,16 @@ the entry the key fell under. The second line is the diagnosis:
 
 The fix in every case is the same: write the top-level settings at column 1.
 
-**Two settings refuse nothing when they are absent.** `needs` and `explicit`
-are optional and take tolerant defaults — no ordering and no exclusions. A file
+**Three settings refuse nothing when they are absent.** `needs`, `explicit`
+and `max_parallel` are optional and take tolerant defaults — no ordering, no
+exclusions, and at most 10 cell jobs at once per matrix. A file
 that sets `explicit` on no entry is structurally valid, and a bare
 `shipmate apply` then applies every environment, production included. Nothing
-warns. `shipmate doctor` echoes both on every report for exactly this reason;
+warns. `shipmate doctor` echoes all three on every report for exactly this reason;
 read them before merging.
 
-**Editing them on a branch does not change what that branch applies.** `needs`
-and `explicit` are read from the default branch with the rest of the file.
+**Editing them on a branch does not change what that branch applies.** `needs`,
+`explicit` and `max_parallel` are read from the default branch with the rest of the file.
 Validate the change with `shipmate doctor` on the pull request, then merge it —
 that is what makes it take effect.
 

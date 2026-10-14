@@ -33,6 +33,7 @@ jobs:
     permissions: { contents: read, checks: read, actions: read }
     outputs:
       cells: ${{ steps.d.outputs.cells }}
+      max_parallel: ${{ steps.d.outputs.max_parallel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.ref }}" }
@@ -74,6 +75,7 @@ jobs:
       # One cell that cannot determine its lock state must not stop its siblings from releasing
       # theirs.
       fail-fast: false
+      max-parallel: ${{ fromJSON(needs.detect.outputs.max_parallel) }}
       # Nothing here is wave-ordered -- releasing a lock has no dependencies -- so the matrix is
       # flat.
       matrix:

@@ -127,7 +127,7 @@ def test_unlock_empty_queue_warns_that_nothing_was_probed(monkeypatch, tmp_path,
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, [_check(name="apply / stacks/app / dev-eu")])
     ud.main()
     # Whole file: unlock.yml reads `cells` alone, so nothing else is written.
-    assert out.read_text(encoding="utf-8") == "cells=[]\n"
+    assert out.read_text(encoding="utf-8") == "cells=[]\nmax_parallel=10\n"
     assert (
         "::warning::no cell in dev-eu has a pending apply check, so no lock was "
         "probed; a lock on a cell whose check already completed, or on a stack "
@@ -420,3 +420,21 @@ def test_unlock_ignores_two_workload_tags_on_a_stack_outside_the_queue(monkeypat
             "env_binding": "dev-eu-apply",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [(None, "10"), ({"layout": "folder", "max_parallel": "3"}, "3")],
+    ids=["default", "set"],
+)
+def test_unlock_writes_the_tables_max_parallel(monkeypatch, tmp_path, table, expected):
+    """The unlock matrix's `max-parallel` reads this output, and an unwritten one fails the run.
+
+    Mutations: delete the `max_parallel` write -- both rows lose the key; write
+    `DEFAULT_MAX_PARALLEL` instead of `max_parallel(table)` -- "set" reads 10."""
+    out = _unlock_env(monkeypatch, tmp_path, table=table)
+    _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS)
+    ud.main()
+    parsed = github_outputs(out)
+    assert len(json.loads(parsed["cells"])) == 3  # Not vacuous: there is a queue.
+    assert parsed["max_parallel"] == expected

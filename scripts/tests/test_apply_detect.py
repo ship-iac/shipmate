@@ -198,7 +198,7 @@ def test_dag_shape_notice_reports_a_flat_graph():
     # repository notices.
     deps = {"stacks/a": set(), "stacks/b": set(), "stacks/c": set()}
     assert ad.dag_shape_notice(deps) == (
-        "::notice::3 stacks, 0 after edges, 1 wave levels; 3 stacks would apply concurrently"
+        "::notice::3 stacks, 0 after edges, 1 wave levels; the widest level holds 3 stacks"
     )
 
 
@@ -213,7 +213,7 @@ def test_dag_shape_notice_reports_a_layered_graph():
         "stacks/d": {"stacks/b", "stacks/c"},
     }
     assert ad.dag_shape_notice(deps) == (
-        "::notice::4 stacks, 4 after edges, 3 wave levels; 2 stacks would apply concurrently"
+        "::notice::4 stacks, 4 after edges, 3 wave levels; the widest level holds 2 stacks"
     )
 
 
@@ -422,7 +422,7 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
     )
     ad.main()
     assert (
-        "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
+        "::notice::2 stacks, 1 after edges, 2 wave levels; the widest level holds 1 stacks"
         in capsys.readouterr().out.splitlines()
     )
 
@@ -493,7 +493,7 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
 
     assert "envlevel0_waves=" not in out.read_text(encoding="utf-8")
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
+        "::notice::9 stacks, 8 after edges, 9 wave levels; the widest level holds 1 stacks"
     ]
 
 
@@ -814,7 +814,8 @@ def test_main_names_a_gated_env_applied_with_no_review_required(
 def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     """Whole-file comparison against a hand-written constant, so an added, dropped or reordered
     key on the apply path is caught. apply.yml reads the four `envlevelN_waves`, the four
-    `envlevelN_empty`, `head_sha`, `review_not_required_envs` and `waiting_cells`; a targeted
+    `envlevelN_empty`, `max_parallel`, `head_sha`, `review_not_required_envs` and
+    `waiting_cells`; a targeted
     apply is env-level 0 alone, so levels 1-3 must say `true` or apply.yml runs them into
     `fromJSON('')`.
 
@@ -843,6 +844,7 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
         "envlevel2_empty=true\n"
         f"envlevel3_waves={empty}\n"
         "envlevel3_empty=true\n"
+        "max_parallel=10\n"
         "head_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
         "review_not_required_envs=[]\n"
         "waiting_cells=[]\n"
@@ -1046,3 +1048,16 @@ def test_main_notice_counts_a_waiting_cell_as_pending(monkeypatch, tmp_path, cap
         "cells=1 completed=0 pending=1 waiting=1 waves=[0, 0, 0, 0, 0, 0, 0, 0] empty=True"
         in capsys.readouterr().out.splitlines()
     )
+
+
+def test_main_writes_a_set_max_parallel(monkeypatch, tmp_path):
+    """`test_main_writes_the_whole_output_file_verbatim` pins the default; this pins the read.
+
+    Mutation: pass `DEFAULT_MAX_PARALLEL` instead of `max_parallel(table)` in the targeted
+    `main` -- it reads 10."""
+    out = _apply_env(monkeypatch, tmp_path, table={"layout": "folder", "max_parallel": "3"})
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    ad.main()
+    parsed = github_outputs(out)
+    assert parsed["envlevel0_empty"] == "false"  # Not vacuous: a cell exists.
+    assert parsed["max_parallel"] == "3"

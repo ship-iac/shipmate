@@ -132,6 +132,10 @@ how many environments you tag stacks into, and how you split the tree across
 drift files. A sweep is one matrix, held to the same 256-cell limit as a plan
 run, counted after its `tags` query: above it `detect` refuses the sweep before
 any cell starts and names the remedy, splitting it across more drift files.
+A sweep runs at most `max_parallel` cells at once (10 unless the environment
+table sets it, [`../CONTRACT.md`](../CONTRACT.md) §Environment table), so a large
+sweep takes longer rather than holding the organization's runner pool, and a
+pull request's plan running beside it gets its own `max_parallel`.
 
 Splitting does not lift the tree's own ceiling. Every sweep hands drift-issues
 the full tree's cell list in one environment variable. Past about 2,000 cells

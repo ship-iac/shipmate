@@ -41,6 +41,9 @@ outputs:
   head_sha:
     description: PR head SHA for the merged commit.
     value: "${{ steps.detect.outputs.head_sha }}"
+  max_parallel:
+    description: Every wave matrix's `max-parallel`, a whole number from 1 to 256 -- the table's `max_parallel` (10 when unset), the most cell jobs one wave runs at once.
+    value: "${{ steps.detect.outputs.max_parallel }}"
 runs:
   using: composite
   steps:

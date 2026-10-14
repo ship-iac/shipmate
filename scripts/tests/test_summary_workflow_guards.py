@@ -52,6 +52,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "matrix": "${{ steps.matrix.outputs.matrix }}",
     "empty": "${{ steps.matrix.outputs.empty }}",
     "count": "${{ steps.matrix.outputs.count }}",
+    "max_parallel": "${{ steps.matrix.outputs.max_parallel }}",
     "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
     "lost": "${{ steps.matrix.outputs.lost }}",
     "refusal": "${{ steps.matrix.outputs.refusal }}",

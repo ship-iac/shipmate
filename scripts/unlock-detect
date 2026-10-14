@@ -83,6 +83,7 @@ def main():
         )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"cells={json.dumps(pending)}\n")
+        fh.write(f"max_parallel={bm.ec.max_parallel(table)}\n")
 
 
 if __name__ == "__main__":

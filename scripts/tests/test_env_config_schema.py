@@ -408,23 +408,97 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate-config.yml holds layout, identities, environments."
+        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel."
     )
 
 
 def test_every_allowed_top_level_key_is_accepted():
-    """The other half of the strict-key rule: the three names are the whole allowed set, so a
-    table using all three must validate. Compared against a hand-written table, never against
+    """The other half of the strict-key rule: the four names are the whole allowed set, so a
+    table using all four must validate. Compared against a hand-written table, never against
     the module's own constant.
 
-    Mutation: remove a name from the allowed set -- one of these three then refuses.
+    Mutation: remove a name from the allowed set -- one of these four then refuses.
     """
     table = {
         "layout": "folder",
         "identities": {},
         "environments": {},
+        "max_parallel": "5",
     }
     assert env_config.validate(table, ()) == table
+
+
+# --- max_parallel -----------------------------------------------------------------------------
+
+
+def test_max_parallel_defaults_to_10():
+    """Mutation: `DEFAULT_MAX_PARALLEL = 11` -- it reads 11."""
+    assert env_config.max_parallel({}) == 10
+
+
+@pytest.mark.parametrize(("written", "value"), [("1", 1), ("5", 5), ("256", 256)])
+def test_max_parallel_reads_the_table(written, value):
+    """Mutations: return `DEFAULT_MAX_PARALLEL` unconditionally -- 5 reads 10; refuse above 255
+    (`<= 255`) -- 256 refuses in `validate_structure`."""
+    table = {"layout": "folder", "max_parallel": written}
+    env_config.validate_structure(table)
+    assert env_config.max_parallel(table) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["0", "-1", "257", "20.5", " 20", "20 ", "+5", "0x10", "1e2", "05", "٣", "", {"a": "1"}, ["5"]],
+    ids=[
+        "zero",
+        "negative",
+        "over-256",
+        "decimal",
+        "leading-space",
+        "trailing-space",
+        "plus",
+        "hex",
+        "exponent",
+        "leading-zero",
+        "arabic-indic-digit",
+        "empty",
+        "mapping",
+        "list",
+    ],
+)
+def test_a_malformed_max_parallel_refuses(value):
+    """GitHub runs a matrix with `max-parallel: 0` unbounded, and fails the run on an empty or
+    non-numeric one, so only a whole number from 1 to 256 passes.
+
+    Mutations: lower bound `[0-9]` instead of `[1-9]` -- "0" and "05" pass; upper bound 257 --
+    "257" passes; `int(value)` with no digits-only check -- " 20", "+5" and the Arabic-Indic
+    digit pass; drop `_check_max_parallel` from `validate_structure` -- every row passes.
+    """
+    assert _refusal({"layout": "folder", "max_parallel": value}) == (
+        f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the most "
+        "cell jobs one matrix runs at once)."
+    )
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["{vars: CAP}", "[{vars: CAP}]", "{a: {vars: CAP}}"],
+    ids=["direct", "in-a-list", "in-a-mapping"],
+)
+def test_a_referenced_max_parallel_refuses_before_the_variable_is_read(written):
+    """`max_parallel` is written into the file, and the malformed-value refusal quotes what it
+    found, so a reference anywhere in it refuses before it resolves.
+
+    Mutations: delete the reference refusal in `load_config` -- "direct" validates as 7 and the
+    nested rows quote `'7'`; test only the value itself with `_is_reference` -- the nested rows
+    quote the resolved value.
+    """
+    text = f"layout: folder\nmax_parallel: {written}\n"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(text, {"CAP": "7"}))
+    assert str(excinfo.value) == (
+        "::error::max_parallel holds a variable reference, and it accepts none. Write the "
+        "number into the file."
+    )
 
 
 def _needs(value):
@@ -818,9 +892,11 @@ def test_the_lines_come_in_check_order():
     table = {"colour": 1, "lyout": "folder", "environments": {"dev": {"regoin": "eu-west-1"}}}
     assert _structural(table) == (
         "::error::colour is not a setting this engine implements. "
-        ".github/shipmate-config.yml holds layout, identities, environments.\n"
+        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel.\n"
         "::error::lyout is not a setting this engine implements. "
-        ".github/shipmate-config.yml holds layout, identities, environments.\n" + NO_LAYOUT + "\n"
+        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel.\n"
+        + NO_LAYOUT
+        + "\n"
         "::error::environment dev: regoin is not a key this engine implements. An environment "
         "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )

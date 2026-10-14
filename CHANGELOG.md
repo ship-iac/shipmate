@@ -13,6 +13,7 @@ section below names the SHA the release tags.
 ### Added
 
 - **A `shipmate plan`, `shipmate apply` or `shipmate unlock` whose dispatch succeeded posts a notice reply on the pull request: `started [the <verb> run](<url>)` when the dispatch answer carries a usable run id, otherwise one naming the Actions tab. A reply that cannot be posted is a warning.**
+- **`max_parallel` in `.github/shipmate-config.yml` caps every cell matrix — each plan, drift sweep, apply wave and unlock — at that many jobs at once, 10 when absent. It takes a whole number from 1 to 256 and no variable reference; anything else refuses at detect. `shipmate doctor` reads it back. The apply-path detect notice reports how many stacks the widest wave level holds, instead of how many would apply concurrently.**
 
 ### Changed
 

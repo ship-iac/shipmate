@@ -24,6 +24,7 @@ jobs:
       envlevel2_empty: ${{ steps.d.outputs.envlevel2_empty }}
       envlevel3_empty: ${{ steps.d.outputs.envlevel3_empty }}
       head_sha: ${{ steps.d.outputs.head_sha }}
+      max_parallel: ${{ steps.d.outputs.max_parallel }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         # Full history to diff against the previous default-branch tip; file contents are fetched
@@ -50,6 +51,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      max_parallel: ${{ needs.detect.outputs.max_parallel }}
     # Named, never inherit: see the envlevel0 job in apply.yml.
     secrets: &envlevel-secrets
       # Declare a new secret in apply-env-level.yml first: see the envlevel0 job in apply.yml.
@@ -66,6 +68,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      max_parallel: ${{ needs.detect.outputs.max_parallel }}
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -77,6 +80,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      max_parallel: ${{ needs.detect.outputs.max_parallel }}
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -88,6 +92,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      max_parallel: ${{ needs.detect.outputs.max_parallel }}
     secrets: *envlevel-secrets
 
   summary:

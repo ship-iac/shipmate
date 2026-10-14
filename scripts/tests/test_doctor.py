@@ -2787,7 +2787,7 @@ def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
 
     Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;env&gt;` shows.
     Mutation: drop the `_md_escape` around the env names -- `a<b` renders raw."""
-    [_, (level, text)] = doctor._config_defaults({"environments": {"a<b": {"explicit": True}}})
+    [_, (level, text), _] = doctor._config_defaults({"environments": {"a<b": {"explicit": True}}})
     assert doctor._finding_row(level, text) == (
         f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `explicit: true` on a&lt;b: a bare "
         "`shipmate apply` skips those, and each needs its own `shipmate apply <env>`."
@@ -5703,7 +5703,7 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     unknown = (
         "{} is not a setting this engine implements. .github/shipmate-config.yml holds "
-        "layout, identities, environments."
+        "layout, identities, environments, max_parallel."
     )
     shown = " ".join(unknown.format(f"k{n:02}") for n in range(1, 11))
     assert doctor._config_warnings(_ctx()) == [
@@ -5887,6 +5887,7 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
                 "needs its own `shipmate apply <env>`."
             ),
         ),
+        _MAX_PARALLEL_UNSET,
     ]
 
 
@@ -5974,6 +5975,7 @@ def test_a_valid_file_holding_references_lists_each_one(monkeypatch):
                 "needs its own `shipmate apply <env>`."
             ),
         ),
+        _MAX_PARALLEL_UNSET,
     ]
 
 
@@ -6019,6 +6021,7 @@ def test_a_long_needs_or_explicit_list_is_cut_between_env_names():
                 "`shipmate apply <env>`."
             ),
         ),
+        _MAX_PARALLEL_UNSET,
     ]
 
 
@@ -6206,6 +6209,7 @@ def test_each_environment_prints_the_role_every_path_and_workload_resolves(monke
                 "`shipmate apply`, production included."
             ),
         ),
+        _MAX_PARALLEL_UNSET,
     ]
 
 
@@ -6526,12 +6530,25 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
     assert doctor.config_status(_ctx()) == []
 
 
-def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
-    """A table omitting `needs` and `explicit` is valid and takes the empty default for
-    each: a bare `shipmate apply` applies every environment -- including the one a consumer
-    meant to exclude. Nothing refuses and no validator can, so the report says it.
+#: The `max_parallel` line of a table that sets none. Hand-written: 10 is the default the
+#: contract states.
+_MAX_PARALLEL_UNSET = (
+    doctor.NOTICE,
+    (
+        "`max_parallel`: not set, so each plan, apply wave, drift sweep and unlock runs at most 10 "
+        "cell jobs at once."
+    ),
+)
 
-    Mutation: drop `_config_defaults` from `config_status`.
+
+def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
+    """A table omitting `needs`, `explicit` and `max_parallel` is valid and takes the default for
+    each: a bare `shipmate apply` applies every environment -- including the one a consumer
+    meant to exclude -- and each matrix runs at most 10 cell jobs at once. Nothing refuses and
+    no validator can, so the report says it.
+
+    Mutations: drop `_config_defaults` from `config_status`; set `DEFAULT_MAX_PARALLEL` to 11 --
+    the line says 11; drop the `max_parallel` notice -- the line is missing.
     """
     responses = {_CONFIG_READ: _wf_file("layout: folder\n")}
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
@@ -6550,7 +6567,20 @@ def test_the_tolerant_defaults_are_read_back_when_absent(monkeypatch):
                 "`shipmate apply`, production included."
             ),
         ),
+        _MAX_PARALLEL_UNSET,
     ]
+
+
+def test_a_set_max_parallel_is_read_back():
+    """Mutations: `cap = ec.DEFAULT_MAX_PARALLEL` in `_config_defaults` -- the line says 10; test
+    `"max_parallel" not in table` -- the not-set line shows."""
+    assert doctor._config_defaults({"layout": "folder", "max_parallel": "5"})[2] == (
+        doctor.NOTICE,
+        (
+            "`max_parallel: 5`: each plan, apply wave, drift sweep and unlock runs at most 5 cell "
+            "jobs at once."
+        ),
+    )
 
 
 def test_the_config_probe_feeds_nothing_a_run_reads(monkeypatch):

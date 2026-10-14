@@ -394,7 +394,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
 
 
 def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
-    # The post-merge path is where a flat DAG applies the whole repository at once, so this is
+    # The post-merge path is where a flat DAG applies the whole repository in one wave, so this is
     # the run that most needs the line. deploy-detect has its own main(), and importing
     # apply-detect emits nothing on its own.
     _run_main(
@@ -405,7 +405,7 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
         deps={"stacks/a": set(), "stacks/b": {"stacks/a"}},
     )
     assert (
-        "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
+        "::notice::2 stacks, 1 after edges, 2 wave levels; the widest level holds 1 stacks"
         in capsys.readouterr().out.splitlines()
     )
 
@@ -428,7 +428,7 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
             deps={s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)},
         )
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
+        "::notice::9 stacks, 8 after edges, 9 wave levels; the widest level holds 1 stacks"
     ]
 
 
@@ -854,3 +854,24 @@ def test_main_deploys_the_probe_with_no_needs(tmp_path, monkeypatch):
         ("dns", "dev-us"),
         ("workers", "dev-eu"),
     ]
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [({"layout": "folder"}, "10"), ({"layout": "folder", "max_parallel": "3"}, "3")],
+    ids=["default", "set"],
+)
+def test_main_writes_the_tables_max_parallel(tmp_path, monkeypatch, table, expected):
+    """Every wave's `max-parallel` reads this output, and an unwritten one fails the run.
+
+    Mutations: delete the `max_parallel` write in `write_env_level_waves` -- both rows lose
+    the key; pass `DEFAULT_MAX_PARALLEL` instead of `max_parallel(table)` -- "set" reads 10."""
+    parsed = _run_main(
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app")],
+        checks=[_apply_check("stacks/app")],
+        table=table,
+    )
+    assert len(_wave_cells(parsed)) == 1  # Not vacuous: a cell exists.
+    assert parsed["max_parallel"] == expected

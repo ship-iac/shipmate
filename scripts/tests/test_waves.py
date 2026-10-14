@@ -353,9 +353,11 @@ def test_env_level_waves_empty_order_is_a_single_level():
 
 
 def test_write_env_level_waves_emits_waves_and_empty_flags(tmp_path):
-    # The shared GITHUB_OUTPUT writer must emit envlevelN_waves as JSON plus an envlevelN_empty
-    # flag per level: 'false' for a level with any cell, 'true' for an empty one. Single-sourced,
-    # so the three detects cannot drift apart on apply-env-level.yml's contract.
+    """The shared GITHUB_OUTPUT writer emits envlevelN_waves as JSON plus an envlevelN_empty
+    flag per level, 'false' for a level with any cell, then `max_parallel` as given.
+    Single-sourced, so the three detects cannot drift apart on apply-env-level.yml's contract.
+
+    Mutation: delete the `max_parallel` write -- the last line is missing."""
     cell = {"stack": "s", "environment": "dev-eu"}
     per_level = [
         {f"wave{i}": ([cell] if i == 0 else []) for i in range(8)},
@@ -363,11 +365,16 @@ def test_write_env_level_waves_emits_waves_and_empty_flags(tmp_path):
     ]
     out = tmp_path / "gh_output"
     with out.open("a", encoding="utf-8") as fh:
-        w.write_env_level_waves(fh, per_level)
-    lines = out.read_text(encoding="utf-8").splitlines()
-    assert 'envlevel0_waves={"wave0": [{"stack": "s", "environment": "dev-eu"}]' in lines[0]
-    assert "envlevel0_empty=false" in lines
-    assert "envlevel1_empty=true" in lines
+        w.write_env_level_waves(fh, per_level, 7)
+    empty = '"wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], "wave6": [], '
+    assert out.read_text(encoding="utf-8") == (
+        'envlevel0_waves={"wave0": [{"stack": "s", "environment": "dev-eu"}], '
+        f'{empty}"wave7": []}}\n'
+        "envlevel0_empty=false\n"
+        f'envlevel1_waves={{"wave0": [], {empty}"wave7": []}}\n'
+        "envlevel1_empty=true\n"
+        "max_parallel=7\n"
+    )
 
 
 def test_blocked_envs_direct_predecessor():
