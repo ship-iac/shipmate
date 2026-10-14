@@ -1114,22 +1114,25 @@ dispatch time on that comment-handling run — for every verb alike, since they 
 run is not visible from the pull request, so every refusal in the dispatch step
 — an unwired verb, an unknown one, and a rejected API call alike — also posts a
 `🔴 failed:` reply there whose footer links the run. The run holds the error; the
-failure reply never carries the API's answer. A dispatch that succeeded gets a
-`⚪` notice reply instead, `started [the <verb> run](<url>)`, linking the run it
-started by a URL the engine builds from the `workflow_run_id` the API returns
-(accepted only as 1 to 20 digits, never the API's `html_url`); without a usable
-id the notice says the run is listed in the repository's Actions tab. The run
-has already started, so a notice that cannot be posted is a warning on the
-comment-handling run, not a failure.
+failure reply never carries the API's answer. A dispatch that succeeded instead
+posts the started-run reply, a `⚪` notice:
+
+- With a usable run id it reads `started [the <verb> run](<url>)`, linking the
+  run it started by a URL the engine builds from the `workflow_run_id` the API
+  returns (accepted only as 1 to 20 digits, never the API's `html_url`).
+- Without one it reads `started the <verb> run; it is listed in this
+  repository's Actions tab` and links no started run.
+- It may not be posted at all: the run has already started, so a reply that
+  fails is a warning on the comment-handling run, not a failure, and the pull
+  request gets nothing.
 
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
 header `### shipmate <verb>` (with `<env>` when the command named one, and
 `### shipmate` alone when the comment did not parse or named no known verb), a
 blank line, one verdict line, a blank line, and a footer linking the
-comment-handling run that posted the reply. A dispatch's started-run reply
-therefore carries two links: its verdict links the started run, its footer the
-comment-handling run. A refusal or a failure asks the commenter to act, so its
+comment-handling run that posted the reply, never the run a dispatch started.
+A refusal or a failure asks the commenter to act, so its
 footer carries the help hint:
 
 ``[run](<run url>). Comment `shipmate help` for the available commands.``
@@ -1521,9 +1524,9 @@ unlock it.
 The unlock run itself posts no comment — that would need
 `pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
 reaction confirms acceptance, the comment-handling run, which holds that
-permission, posts the dispatch's notice reply, which links the unlock run when the
-dispatch answer carried a usable run id (above),
-per-cell detail lands in each job's step summary, and a failure reds the run.
+permission, is the one that may post the started-run reply (§Comment-ops says
+when it is posted and when it links the unlock run), per-cell detail lands in
+each job's step summary, and a failure reds the run.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
 reviewed plan may now be stale and the next apply refuses under the exact-plan
@@ -2272,9 +2275,7 @@ failure-then-retry sequence stays visible as separate comments rather than
 overwriting the evidence of the failure — an audit trail. A run refused or
 cancelled at `apply.yml`'s `review` job (the pull request closed, re-pushed or
 turned draft since the comment) posts no comment and writes no gate: the red run
-is the signal. The dispatch's notice reply links it when the dispatch answer
-carried a usable run id; otherwise the reply names the Actions tab, and a reply
-that could not be posted leaves only a warning on the comment-handling run.
+is the signal. The started-run reply may link it (§Comment-ops says when).
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, one line or fold-out per row, the

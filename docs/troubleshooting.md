@@ -1155,10 +1155,9 @@ landed between the `shipmate apply` comment and the run. Wait for the new head's
 plan, then comment `shipmate apply` again.
 
 A run refused or cancelled in `review` posts no apply comment and leaves the
-gate as it was: the red run is the signal. The dispatch reply on the pull
-request links it when the dispatch answer carried a usable run id; otherwise the
-reply points to the Actions tab, and a reply that could not be posted leaves only
-a warning on the comment-handling run.
+gate as it was: the red run is the signal. Find it from the dispatch reply on
+the pull request when that reply links it, otherwise in the Actions tab
+(`CONTRACT.md` §Comment-ops says when the reply links the run).
 
 An apply run whose `summary` job was cancelled before it ran, because a later
 gate writer on the same head queued behind it, also posts no apply comment. Its
@@ -1230,7 +1229,7 @@ The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
 do not cover. `shipmate doctor`'s `shipmate.yml` probe reports that job on every plan
 run — with the expression to write, unless what it found was a job count other
-than one — and the dispatch comment on the pull request already links the run. Reconcile the job against the fence in
+than one — and the run is in the Actions tab, linked from the dispatch reply on the pull request when that reply carries a link. Reconcile the job against the fence in
 [`getting-started.md`](getting-started.md) §The workflow file.
 
 ### Fork pull request refused

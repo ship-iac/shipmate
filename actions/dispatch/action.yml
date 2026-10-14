@@ -1,5 +1,5 @@
 name: shipmate dispatch
-description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs. A started run gets a notice reply on the pull request linking it; a failed dispatch gets a failure reply.
+description: Mint a short-lived GitHub App installation token and workflow_dispatch the consumer's .github/workflows/shipmate.yml, one file for every verb. Passes IDs only (dispatch inputs are size-limited); the body carries the verb, which selects the job that runs, plus exactly the other inputs that verb needs. A dispatch that started a run posts a notice reply on the pull request, linking that run when the API answer carries a usable run id, and only warns when the reply fails; a failed dispatch posts a failure reply.
 inputs:
   app-id:
     description: GitHub App id (a repo/org variable, not a secret).
@@ -58,8 +58,6 @@ runs:
       run: |
         set -euo pipefail
         # reply <outcome> [text] [run id]: one reply on the pull request, with the workflow token.
-        # Of the API's answer, which has no bounded length, only the raw run id reaches it, and
-        # `reply-comment` links that id only once it checks it.
         reply() {
           GH_TOKEN="$COMMENT_TOKEN" SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME="$1" \
             SHIPMATE_REPLY_TEXT="${2-}" SHIPMATE_REPLY_RUN_ID="${3-}" python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
@@ -88,9 +86,9 @@ runs:
         rc=0
         # stdout alone is the API's answer, parsed below; gh writes its own messages to stderr.
         errfile=$(mktemp)
+        trap 'rm -f "$errfile"' EXIT
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>"$errfile") || rc=$?
         err=$(<"$errfile")
-        rm -f "$errfile"
         printf '%s\n' "$out" "$err"
         if [ "$rc" -ne 0 ]; then
           # Measured, in order: an absent file answers 404, one with no such trigger `Workflow
@@ -106,6 +104,7 @@ runs:
           echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF)"
         fi
         # The run has started, so nothing below may fail the step: the reply is reviewer-facing and
-        # degrades to a warning. `reply-comment` checks the raw id before it links the run.
+        # degrades to a warning. Of the API's answer, which has no bounded length, only the run id
+        # is passed on, raw and unchecked; `reply-comment` links it only if it is 1-20 digits.
         run_id=$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin)["workflow_run_id"])' 2>/dev/null) || run_id=""
         reply started "" "$run_id" || echo "::warning::could not post the dispatch reply; the run started"
