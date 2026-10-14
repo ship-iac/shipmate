@@ -908,8 +908,7 @@ secret, never by deleting. Check the causes in this order:
 Deleting has a cost. The restore then uses the next-older entry under the
 prefix if one survives (entries unused for 7 days are evicted), or none, so the
 stack is in the state §`The apply step ran and its state was not saved`
-describes, for the run whose id the deleted key ends with
-(`<run_id>-<run_attempt>`); that run's log may have expired.
+describes.
 
 ### `could not install python3-yaml`, or `the engine needs PyYAML`
 

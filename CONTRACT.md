@@ -856,9 +856,10 @@ the repository root, or none:
   by an earlier engine release), one that fails authentication, and an openssl
   or disk failure on the runner each fail the restore naming the matched cache
   key, so tofu never reads it and the cell skips its save. A passphrase
-  rotation and different values on `<env>-plan` and `<env>-apply` each make
-  entries fail authentication; `docs/troubleshooting.md` §`state cache entry
-  ... failed authentication` tells them apart from a corrupt entry.
+  rotation, different values on `<env>-plan` and `<env>-apply`, a corrupt,
+  truncated or altered entry, and one copied under another stack's or
+  environment's key each fail authentication; `docs/troubleshooting.md`
+  §`state cache entry ... failed authentication` tells them apart.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.

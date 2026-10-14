@@ -144,8 +144,9 @@ def _purge_command(prefix):
     )
 
 
-def encrypt(path, kind="plan", scope=""):
-    """Encrypt a plan artifact in place as shipmate-crypt-v1, or refuse without a passphrase."""
+def _encrypt(path, kind, scope):
+    """The encrypt both artifact kinds share; `_tag` binds `kind` and `scope` as `_decrypt` reads
+    them."""
     _require_passphrase()
     # No remedy here: a plan cell re-plans, and whether an apply cell's state save may be
     # re-run depends on whether its apply ran. docs/troubleshooting.md splits the cases.
@@ -167,9 +168,14 @@ def encrypt(path, kind="plan", scope=""):
     _replace(path, sealed, failure)
 
 
+def encrypt(path):
+    """Encrypt a plan artifact in place as shipmate-crypt-v1, or refuse without a passphrase."""
+    _encrypt(path, "plan", "")
+
+
 def encrypt_state(path, cache_key):
     """Encrypt a state file in place, bound to the prefix of the cache key it is saved under."""
-    encrypt(path, "state", _state_scope(cache_key))
+    _encrypt(path, "state", _state_scope(cache_key))
 
 
 def _is_pre_v1(data):
@@ -268,7 +274,8 @@ def decrypt_state(path, cache_key):
         unauthenticated=(
             f"::error::state cache entry `{cache_key}` failed authentication: it was saved with "
             "another passphrase (a rotated one, or different values on <env>-plan and "
-            "<env>-apply), or it is corrupt, truncated or altered. tofu was not run. "
+            "<env>-apply), or it is corrupt, truncated, altered or copied under another stack's "
+            "or environment's key. tofu was not run. "
             "docs/troubleshooting.md section `state cache entry ... failed authentication` tells "
             "the causes apart. Fix a passphrase with the secret: deleting an intact entry loses "
             "the state it holds."

@@ -72,10 +72,10 @@ def _unauthenticated(kind, path):
     return (
         "::error::state cache entry `state/app-net/dev-eu/123-1` failed authentication: it was "
         "saved with another passphrase (a rotated one, or different values on <env>-plan and "
-        "<env>-apply), or it is corrupt, truncated or altered. tofu was not run. "
-        "docs/troubleshooting.md section `state cache entry ... failed authentication` tells the "
-        "causes apart. Fix a passphrase with the secret: deleting an intact entry loses the state "
-        "it holds."
+        "<env>-apply), or it is corrupt, truncated, altered or copied under another stack's or "
+        "environment's key. tofu was not run. docs/troubleshooting.md section `state cache entry "
+        "... failed authentication` tells the causes apart. Fix a passphrase with the secret: "
+        "deleting an intact entry loses the state it holds."
     )
 
 
@@ -155,10 +155,13 @@ def test_encrypt_without_passphrase_refuses(tmp_path, monkeypatch):
     assert f.read_bytes() == PLAIN
 
 
-@pytest.mark.parametrize(("kind", "data"), [("plan", PLAIN), ("state", STATE)])
+@pytest.mark.parametrize(
+    ("kind", "data"), [("plan", PLAIN), ("state", STATE), ("plan", b""), ("state", b"")]
+)
 def test_round_trip_with_a_non_ascii_passphrase(tmp_path, monkeypatch, kind, data):
     """Mutations: `decrypt=False` in `_decrypt`'s openssl call, and the body is encrypted twice;
-    `return` before encrypt's `_replace`, and the file stays plaintext."""
+    `return` before `_encrypt`'s `_replace`, and the file stays plaintext; `MIN_LEN` one higher,
+    and an empty plaintext's file refuses."""
     f = _encrypted(tmp_path, monkeypatch, data, kind)
     assert f.read_bytes() != data
     _decrypt(kind, f)
@@ -375,6 +378,7 @@ def _damaged(kind, whole):
         "cut-in-salt": whole[:30],
         "cut-at-body": whole[:34],
         "cut-in-body": whole[:60],
+        "one-below-minimum": whole[:65],
         "cut-tag-byte": whole[:-1],
     }[kind]
 
@@ -391,6 +395,7 @@ def _damaged(kind, whole):
         "cut-in-salt",
         "cut-at-body",
         "cut-in-body",
+        "one-below-minimum",
         "cut-tag-byte",
     ],
 )
@@ -400,16 +405,30 @@ def test_a_cut_or_damaged_v1_file_fails_authentication_not_the_purge(
     """Anything that is not a whole, verified v1 file is an authentication failure, never the
     pre-v1 purge.
 
-    Mutation: `if not data.startswith(MAGIC): raise SystemExit(no_header)` in place of
-    `_is_pre_v1` in `_decrypt` (reddens empty, cut-in-magic, magic-byte and magic-brace).
+    A file shorter than a v1 file with an empty body, or one without the v1 header, refuses
+    before the key derivation; only the whole-length cut-tag-byte case derives a key.
+
+    Mutations: `if not data.startswith(MAGIC): raise SystemExit(no_header)` in place of
+    `_is_pre_v1` in `_decrypt` (reddens empty, cut-in-magic, magic-byte and magic-brace); drop
+    `len(data) < MIN_LEN or` (reddens the cuts below the minimum); drop `or not
+    data.startswith(MAGIC)` (reddens magic-byte).
     """
     f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
     data = _damaged(damage, f.read_bytes())
     f.write_bytes(data)
     calls = _record_openssl(monkeypatch)
+    derivations = []
+    real_pbkdf2 = hashlib.pbkdf2_hmac
+
+    def pbkdf2(*args):
+        derivations.append(args[2])
+        return real_pbkdf2(*args)
+
+    monkeypatch.setattr(pcx.hashlib, "pbkdf2_hmac", pbkdf2)
     with pytest.raises(SystemExit) as exc:
         _decrypt(kind, f)
     assert (exc.value.code, calls) == (_unauthenticated(kind, f), [])
+    assert len(derivations) == (1 if damage == "cut-tag-byte" else 0)
     assert f.read_bytes() == data
 
 
@@ -449,7 +468,7 @@ def test_openssl_argv_is_exactly_this(tmp_path, monkeypatch):
 
     def fake_run(args, **kwargs):
         calls.append(args)
-        out = PLAIN if "-d" in args else b"Salted__01234567" + kwargs["input"]
+        out = PLAIN if "-d" in args else bytes(b ^ 0x5A for b in kwargs["input"])
         return subprocess.CompletedProcess(args, 0, stdout=out)
 
     monkeypatch.setattr(pcx.subprocess, "run", fake_run)
