@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Changed — BREAKING
 
-- **Plan artifacts and cached local state use the authenticated shipmate-crypt-v1 format: a header, a random salt, the AES-256-CTR ciphertext and an HMAC-SHA256 tag, keyed by one 600,000-iteration PBKDF2-SHA256 derivation per operation and bound to the file's kind and, for state, its cache prefix, and each decrypt verifies the tag before openssl reads the file. A plan artifact or state entry written by an earlier release refuses as not shipmate-crypt-v1: re-plan open pull requests, and on a local backend delete the `state/` entries with the command the refusal names, which discards that state (OpenTofu stops tracking those resources).**
+- **Plan artifacts and cached local state use the authenticated shipmate-crypt-v1 format: a header, a random salt, the AES-256-CTR ciphertext and an HMAC-SHA256 tag, keyed by one 600,000-iteration PBKDF2-SHA256 derivation per operation and bound to the file's kind and, for state, its cache prefix, and each decrypt verifies the tag before openssl reads the file. A plan artifact or state entry written by an earlier release refuses as not shipmate-crypt-v1: re-plan open pull requests, and on a local backend delete the `state/` entries with the command the refusal names, which discards that state (OpenTofu stops tracking those resources); `docs/troubleshooting.md` §`state cache entry ... is not a shipmate-crypt-v1 entry` says what to do before applying a stack with real resources.**
 
 ### Added
 

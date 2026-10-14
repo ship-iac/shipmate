@@ -965,7 +965,7 @@ other case, re-plan and reconcile against the provider:
 7. A resource whose provider does not implement import cannot be adopted:
    `random_pet`, which the sample stacks use, refuses with
    `Error: Resource Import Not Implemented`. Applying the re-plan re-creates
-   it. That is harmless for a null or random resource, and a duplicate or a
+   it. That is harmless for a sample's `random_pet`, and a duplicate or a
    collision for a real one.
 8. Review each plan that imports. A provider can import fewer attributes than
    it wrote and then plan a replace: `terraform_data` does not import
@@ -984,11 +984,22 @@ earlier engine release, and refused before tofu read it. Every older entry
 under its prefix was saved the same way, and no secret change helps. The
 message gives the command that deletes every entry under the prefix; the
 restore matches by prefix, so deleting only the named entry restores the
-next-older one. Run the command, then re-run the cell.
+next-older one.
 
 Deleting discards that state: OpenTofu no longer tracks the resources it
-recorded. A sample stack's null and random resources re-create; a real
-resource can collide with or be duplicated by its re-creation.
+recorded, and a plan of the stack in that environment re-creates them. A
+plan or drift cell can be re-run; never re-run a refused apply cell or deploy.
+For the local-backend samples' resources the re-creation is harmless.
+
+For a stack with real resources, applying such a plan duplicates or collides
+with each existing object, and the engine documents no recovery beyond
+adopting them. List the stack's resources from earlier `Apply the stored plan`
+logs (`Creation complete` or `Import complete` lines, less later
+`Destruction complete` lines) or at the provider. On a pull request touching
+the stack, add an `import` block for each instance whose provider implements
+import (step 7 of §`The apply step ran and its state was not saved` covers the
+rest), with the id step 8 of that section describes, and apply that plan only
+under its step 4.
 
 ### `state cache entry ... cannot be read`
 
