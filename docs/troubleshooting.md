@@ -1034,7 +1034,8 @@ secret, never by deleting. Check the causes in this order:
   `gh cache delete <key> --repo <owner>/<repo>`.
 
 Deleting has a cost. The restore then uses the next-older entry under the
-prefix if one survives (entries unused for 7 days are evicted), or none, so the
+prefix if one survives (entries unused for the repository's cache retention
+period, 7 days by default, are evicted), or none, so the
 stack is in the state §`The apply step ran and its state was not saved`
 describes: its step 3 lists every apply since the entry the restore then uses.
 
