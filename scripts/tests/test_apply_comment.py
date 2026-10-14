@@ -28,6 +28,7 @@ def _cell(**kw):
         "environment": "dev-eu",
         "result": "applied",
         "reason": "",
+        "state_lost": False,
     }
     base.update(kw)
     return base
@@ -46,6 +47,7 @@ def _row(**kw):
         "stack": "stacks/app",
         "status": "applied",
         "reason": "",
+        "state_lost": False,
         "apply_text": "Apply complete! Resources: 1 added, 0 changed, 0 destroyed.",
     }
     base.update(kw)
@@ -108,12 +110,9 @@ def test_build_rows_sorted_by_environment_then_stack():
 SHA = "0123456789abcdef0123456789abcdef01234567"
 HINT = "Comment `shipmate help` for the available commands."
 
-#: The `not recorded:` note's last sentence: cause-agnostic, and never an unconditional
-#: re-apply, which repeats an apply whose state was not saved.
-_UNRECORDED_REMEDY = (
-    "Re-plan; if the cell's job log shows `The apply step ran and its state was not saved`, "
-    "follow docs/troubleshooting.md section of that name before applying the re-plan."
-)
+#: The `not recorded:` note's last sentence: cause-agnostic, and never a re-apply, which
+#: repeats an apply whose state was not saved.
+_UNRECORDED_REMEDY = "Re-plan."
 #: `provenance(SHA)` under `_run_context`, hand-written.
 AT = (
     "at [0123456](https://gh/o/r/commit/0123456789abcdef0123456789abcdef01234567) "
@@ -474,6 +473,44 @@ def test_the_not_attempted_note_names_the_targeted_env_escaped():
         "`shipmate apply x&lt;/summary&gt;`."
     )
     assert ac._not_attempted_note([_row()], "prod") == ""
+
+
+def test_a_lost_state_names_its_cells_and_drops_the_retry_command():
+    """A cell whose state was not saved gets its own note, and the not-attempted note names no
+    retry, because any apply covering that cell applies its reviewed plan again.
+
+    Mutations: return "" from `_state_lost_note`; drop the state-lost branch from
+    `_not_attempted_note`; name the cell `**<stack> / <env>**` -- red."""
+    rows = [
+        _row(stack="@acme/db", status="failed", apply_text="Error: x", state_lost=True),
+        _row(environment="prod", stack="stacks/dns", status="not_attempted", apply_text=None),
+    ]
+    sections = _comment(rows, env="").split("\n\n")
+    assert sections[-2] == (
+        "state not saved: **@<!-- -->acme/db (dev-eu)**. The apply ran and its state was not "
+        "saved. Do not re-run these cells' jobs or re-comment `shipmate apply` for them: either "
+        "applies the reviewed plan again against the state from before the apply. Follow "
+        "docs/troubleshooting.md section `The apply step ran and its state was not saved`.\n"
+        "not attempted: the apply checks stay pending; recover the cells under "
+        "`state not saved:` first, because any apply that covers them applies them again."
+    )
+
+
+def test_the_state_lost_note_is_capped_and_absent_without_a_lost_cell():
+    """Mutation: name every cell in `named` from `_state_lost_note` -- red."""
+    rows = [_row(status="failed", stack=f"s{i}", state_lost=True) for i in range(6)]
+    assert ac._state_lost_note(rows).startswith(
+        "state not saved: **s0 (dev-eu)**, **s1 (dev-eu)**, **s2 (dev-eu)**, **s3 (dev-eu)**, "
+        "**s4 (dev-eu)**, and 1 more. "
+    )
+    assert ac._state_lost_note([_row()]) == ""
+
+
+def test_load_cells_refuses_a_non_boolean_state_lost(tmp_path):
+    """Mutation: drop the `state_lost` type check -- red."""
+    _write_cell(tmp_path, "dev-eu", "stacks-app", _cell(state_lost="false"))
+    with pytest.raises(SystemExit, match="key 'state_lost' must be a boolean"):
+        ac.load_cells(str(tmp_path))
 
 
 def test_the_unrecorded_note_is_capped_and_summarizes_the_rest():

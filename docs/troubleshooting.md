@@ -849,12 +849,13 @@ An apply cell on a local backend ran its `Apply the stored plan` step (status
 that step left: the save failed or was cancelled, the exact-key lookup after it
 found no entry, or there was no state file to save. The warning step fails the
 cell's job, so its apply check stays pending. An apply run that was not
-cancelled posts an apply comment showing the cell as not recorded when its
-apply succeeded, otherwise as failed. A cancelled run and the merge deploy post
-none: the job log and the pending check are the signal.
+cancelled posts an apply comment whose `state not saved:` note names the cell;
+its row reads not recorded when its apply succeeded, otherwise failed. A
+cancelled run and the merge deploy post none: the job log and the pending check
+are the signal.
 
-The cache still holds the stack's entry from before the apply, or none on its
-first apply. What the apply did exists, and OpenTofu does not track it. A first
+Unless step 1 finds the entry, the cache still holds the stack's entry from
+before the apply, or none on its first apply. What the apply did exists, and OpenTofu does not track it. A first
 apply that OpenTofu refused before writing anything warns too, and this page
 does not tell it apart: a log without completion lines does not prove nothing
 changed, because an interrupted apply can create a resource before OpenTofu
@@ -864,23 +865,36 @@ When the same job's `Apply the stored plan` step is `skipped`, nothing was
 applied, this warning is not printed, and a re-run of the job is safe. In every
 other case, re-plan and reconcile against the provider:
 
-1. While the cell's apply check is pending, do not re-run the job or the
-   deploy, and do not comment `shipmate apply`, bare or for its environment.
-   The reviewed plan was made against the state the cache
-   restores, so OpenTofu applies it again with no stale-plan refusal and
-   creates a second set of what the lost apply created.
-2. List what the lost apply did from its `Apply the stored plan` step log:
+1. Check whether the save stored the entry after all:
+   `gh cache list --key <key> --repo <owner>/<repo>`, with the exact `key` the
+   `Save state` step log shows. When it is listed, the save worked and only the
+   lookup failed: re-plan (step 4). The plan reads the saved state, shows no
+   changes, and its apply check completes. Never re-run the job. When it is not
+   listed, continue.
+2. Do not apply the reviewed plan again: do not re-run the job or the deploy,
+   and do not comment `shipmate apply`, bare or for its environment, while the
+   cell's apply check still holds that plan. It was made against the state the
+   cache restores, so OpenTofu applies it again with no stale-plan refusal and
+   creates a second set of what the lost apply created. A re-plan that still
+   repeats the lost apply is the same (step 4). The import and forget plans of
+   steps 5 and 6 are applied the ordinary way, with `shipmate apply` or by the
+   merge deploy.
+3. List what the lost apply did from its `Apply the stored plan` step log:
    `Creation complete ... [id=...]` and `Destruction complete` lines. The
    cell's fold-out in the apply comment shows the same output when a comment
-   was posted. When the lost state was a deleted cache entry, the run and its
-   attempt are the `<run_id>-<run_attempt>` that ends the entry's key.
-3. Re-plan on a pull request touching the stack: on an open pull request,
+   was posted. When the lost state was a deleted cache entry, list every apply
+   of the stack and environment since the run that saved the entry the restore
+   now uses, not only the deleted entry's run: each key ends with the
+   `<run_id>-<run_attempt>` of the run that saved it, and
+   `gh cache list --key state/<stack-slug>/<env>/ --repo <owner>/<repo>` lists
+   the entries that survive.
+4. Re-plan on a pull request touching the stack: on an open pull request,
    comment `shipmate plan` or push; after the merge, open a new pull request.
    The plan repeats the lost apply. Do not apply it as it stands: apply a plan
    from this procedure only when each resource the lost apply touched shows
-   `to import` or `to forget`, or a create, replace or destroy that steps 5 to 7
+   `to import` or `to forget`, or a create, replace or destroy that steps 6 to 8
    leave no way around and you accept. Any other plan repeats the lost apply.
-4. For a resource the lost apply created at an address the restored state
+5. For a resource the lost apply created at an address the restored state
    lacks, add an `import` block with the id from its `Creation complete` line
    to that pull request. Its plan shows `1 to import`.
 
@@ -891,7 +905,7 @@ other case, re-plan and reconcile against the provider:
    }
    ```
 
-5. For a resource the lost apply replaced or destroyed, the restored state
+6. For a resource the lost apply replaced or destroyed, the restored state
    still holds the old instance, and an `import` to an address the state holds
    is ignored without an error: the plan still replaces it. Use two pull
    requests, each planned and applied through shipmate like any change:
@@ -920,19 +934,19 @@ other case, re-plan and reconcile against the provider:
    destroy again. Whether a real provider's refresh drops the deleted object
    from that plan is unprobed; where it does not, a `removed` block with
    `destroy = false` forgets it.
-6. A resource whose provider does not implement import cannot be adopted:
+7. A resource whose provider does not implement import cannot be adopted:
    `random_pet`, which the sample stacks use, refuses with
    `Error: Resource Import Not Implemented`. Applying the re-plan re-creates
    it. That is harmless for a null or random resource, and a duplicate or a
    collision for a real one.
-7. Review each plan that imports. A provider can import fewer attributes than
+8. Review each plan that imports. A provider can import fewer attributes than
    it wrote and then plan a replace: `terraform_data` does not import
    `triggers_replace`, and `random_id` does not import `keepers`. Two points
    are unprobed: the import ID a resource type takes is the one its provider's
    documentation names, which may differ from the `id` in the log; and with a
    provider whose refresh notices a deleted object, the re-plan may show a
    replaced resource as a create rather than a replace.
-8. Once applied, delete the `import` and `removed` blocks in a later pull
+9. Once applied, delete the `import` and `removed` blocks in a later pull
    request.
 
 ### `state cache entry ... is not a shipmate-crypt-v1 entry`
@@ -992,7 +1006,7 @@ secret, never by deleting. Check the causes in this order:
 Deleting has a cost. The restore then uses the next-older entry under the
 prefix if one survives (entries unused for 7 days are evicted), or none, so the
 stack is in the state §`The apply step ran and its state was not saved`
-describes.
+describes: its step 3 lists every apply since the entry the restore then uses.
 
 ### `could not install python3-yaml`, or `the engine needs PyYAML`
 

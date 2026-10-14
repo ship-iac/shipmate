@@ -2372,10 +2372,12 @@ footer lines and, under any verdict but 🟢, the hint.
   apply check is already done (see the derivation rules below).
 - **Notes**, each on its own line when it has content: `state lock held:`,
   naming each cell whose apply could not acquire the lock, the lock id, when it
-  was taken, and the `shipmate unlock` command; `not recorded:`, naming the
+  was taken, and the `shipmate unlock` command; `state not saved:`, naming
+  the cells whose state was not saved; `not recorded:`, naming the
   not-recorded cells; and ``not attempted: the apply checks stay pending;
   retry with `shipmate apply <env>`.`` (the bare `shipmate apply` when the run
-  covered all environments).
+  covered all environments), which names no retry while a `state not saved:`
+  note is present.
 - **Footer lines**, one per line: the bare-apply form's environment
   dispositions, then, in both forms, one line per waiting cell. The comment
   states no gate line: the `shipmate / gate` status shows the gate's state.
@@ -2463,14 +2465,10 @@ job believed before its check was completed:
   pending, because the check was not completed after the apply: the cell's
   job did not succeed (its state was not saved, or it was cancelled), the
   `complete` job failed, or a newer plan re-created the check.
-  `shipmate / gate` stays pending, and the stack needs a re-plan. When the
-  cell's job log shows `The apply step ran and its state was not saved`, the
-  reviewed `.otplan` still matches the state the cache restores and applies
-  again unrefused, so follow `docs/troubleshooting.md`
-  §`The apply step ran and its state was not saved` before applying the
-  re-plan. The note's last
-  sentence says so without naming a cause, because the comment cannot tell the
-  causes apart. The `not recorded:` note names the affected cells — capped, with
+  `shipmate / gate` stays pending, and the stack needs a re-plan. The
+  `not recorded:` note ends `Re-plan.` and never says re-apply: a cell whose
+  state was not saved is also named by the `state not saved:` note below. The
+  `not recorded:` note names the affected cells — capped, with
   any remainder summarized as a count, since notes are part of the comment the
   size fallback cannot shed and the usual cause strands a whole matrix at once;
   the row lines always name every one of them. Each such cell keeps its full
@@ -2483,17 +2481,29 @@ job believed before its check was completed:
   failed row against a completed check means some other run applied that cell:
   the row over-reports, nothing is stranded, and downgrading it would let an
   unrelated run's completed check hide a real failure in this one. A failed
-  apply can still have changed resources: when the cell's job log shows
-  `The apply step ran and its state was not saved`, follow
-  `docs/troubleshooting.md` §`The apply step ran and its state was not saved`
-  before applying it again.
+  apply can still have changed resources, and a failed cell whose state was
+  not saved is named by the `state not saved:` note.
+- **state not saved** is a note, not a status: `apply-cell-summary` writes
+  `state_lost: true` into `cell.json` exactly when the cell's
+  `Warn that the applied state was not saved` step fires (the apply step ran,
+  the state was restored, and `actions/state` did not report `saved`). The
+  `state not saved:` note names those cells, capped like the `not recorded:`
+  note, says not to re-run their jobs or re-comment `shipmate apply` for them,
+  and points at `docs/troubleshooting.md`
+  §`The apply step ran and its state was not saved`. While it is present, the
+  `not attempted:` note names no retry command, because any apply covering
+  those cells applies their reviewed plan again. The note renders only what the
+  artifact says; nothing refuses a later apply of the cell. The warning step's
+  `exit 1`, not the artifact, keeps the cell's apply check pending.
 
 If the check scan is unavailable — an API failure (warned, degraded to no
 data) or an empty `SHIPMATE_APP_ID` (warned) — every name reads as *absent*,
 which means *unknown*, and the comment falls back to artifact-only status.
 Absence never manufactures a not-recorded row.
 
-`cell.json`'s `result` grammar is `applied | failed | blocked`. Not recorded
+`cell.json` holds the strings `stack`, `environment`, `result` and `reason`,
+and the boolean `state_lost`; the validator refuses a cell missing any of them
+or carrying another type. Its `result` grammar is `applied | failed | blocked`. Not recorded
 is a display status derived at render time, never a value `apply-cell` writes,
 so the validator still rejects an out-of-enum `result`.
 

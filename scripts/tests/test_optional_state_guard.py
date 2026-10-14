@@ -113,9 +113,11 @@ fi
 python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt-state "$STATE_PATH" "$KEY"
 """
 
-_KEY = (
-    "state/${{ inputs.stack-slug }}/${{ inputs.env }}/"
-    "${{ github.run_id }}-${{ github.run_attempt }}"
+_KEY = "${{ steps.key.outputs.key }}"
+
+_KEY_RUN = (
+    'echo "prefix=state/$SLUG/$ENV_NAME/" >> "$GITHUB_OUTPUT"\n'
+    'echo "key=state/$SLUG/$ENV_NAME/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"\n'
 )
 
 #: The whole step list, `uses:` refs cut. No step carries `continue-on-error` or a status
@@ -129,6 +131,13 @@ _STATE_STEPS = [
         "run": _VALIDATE_RUN,
     },
     {
+        "name": "State cache key",
+        "id": "key",
+        "shell": "bash",
+        "env": {"SLUG": "${{ inputs.stack-slug }}", "ENV_NAME": "${{ inputs.env }}"},
+        "run": _KEY_RUN,
+    },
+    {
         "name": "Restore state",
         "id": "restore",
         "if": "${{ inputs.mode == 'restore' }}",
@@ -136,7 +145,7 @@ _STATE_STEPS = [
         "with": {
             "path": "${{ inputs.path }}",
             "key": _KEY,
-            "restore-keys": "state/${{ inputs.stack-slug }}/${{ inputs.env }}/\n",
+            "restore-keys": "${{ steps.key.outputs.prefix }}",
         },
     },
     {

@@ -60,10 +60,10 @@ _LOST_SAVE_WARNING = {
     ),
     "shell": "bash",
     "run": (
-        'echo "::error::The apply step ran and its state was not saved. Do not re-run this job or '
-        "re-comment 'shipmate apply': either applies the reviewed plan again against the state "
-        "from before the apply. Follow docs/troubleshooting.md section The apply step ran and its "
-        'state was not saved before applying this stack again."\n'
+        'echo "::error::The apply step ran and its state was not saved or not verified. Do not '
+        "re-run this job or re-comment 'shipmate apply': either applies the reviewed plan again "
+        "against the state from before the apply. Follow docs/troubleshooting.md section The "
+        'apply step ran and its state was not saved before applying this stack again."\n'
         "exit 1\n"
     ),
 }
@@ -85,10 +85,7 @@ def test_an_unsaved_state_after_an_apply_fails_the_cell_and_warns_against_a_re_r
     assert steps[names.index("Save state")]["id"] == "save-state"
 
 
-_STATE_KEY = (
-    "state/${{ inputs.stack-slug }}/${{ inputs.env }}/"
-    "${{ github.run_id }}-${{ github.run_attempt }}"
-)
+_STATE_KEY = "${{ steps.key.outputs.key }}"
 
 _LOOKUP_STEP = {
     "name": "Look up the saved entry",
@@ -125,3 +122,13 @@ def test_saved_is_true_only_on_the_lookups_exact_hit():
             "value": "${{ steps.verify.outputs.cache-hit }}",
         }
     }
+
+
+def test_the_cell_summary_reads_the_same_save_result_the_warning_does():
+    """`state_lost` in cell.json must come from the output the warning step reads.
+
+    Mutations: drop `STATE_SAVED` from `Compose cell summary`'s env; map it to
+    `steps.save-state.outcome`."""
+    env = step_by("apply-cell", name="Compose cell summary")["env"]
+    assert env.get("STATE_SAVED") == "${{ steps.save-state.outputs.saved }}"
+    assert env["APPLY_OUTCOME"] == "${{ steps.apply.outcome }}"

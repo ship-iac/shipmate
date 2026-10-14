@@ -222,7 +222,7 @@ runs:
       if: ${{ always() && steps.apply.outcome != 'skipped' && steps.init.outputs.restore-outcome == 'success' && steps.save-state.outputs.saved != 'true' }}
       shell: bash
       run: |
-        echo "::error::The apply step ran and its state was not saved. Do not re-run this job or re-comment 'shipmate apply': either applies the reviewed plan again against the state from before the apply. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying this stack again."
+        echo "::error::The apply step ran and its state was not saved or not verified. Do not re-run this job or re-comment 'shipmate apply': either applies the reviewed plan again against the state from before the apply. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying this stack again."
         exit 1
 
     - name: Check the provider cache
@@ -247,9 +247,9 @@ runs:
         key: ${{ steps.init.outputs.cache-primary-key }}
 
     - name: Compose cell summary
-      # always(): the aggregator needs a result for every attempted or blocked cell. Env vars only:
-      # stack, env and reason text is author-controlled, never shell- or JSON-spliced.
-      # Reviewer-facing only (continue-on-error): failing after `Save state` strands a stale plan.
+      # always(): every attempted or blocked cell needs a result. Env vars only: author text is never
+      # shell- or JSON-spliced. Reviewer-facing (continue-on-error); the warning step's exit 1, not
+      # STATE_SAVED here, is what keeps a lost save's apply check pending.
       if: always()
       continue-on-error: true
       shell: bash
@@ -266,6 +266,7 @@ runs:
         RESTORE_OUTCOME: ${{ steps.init.outputs.restore-outcome }}
         PLAN_DIGEST_OUTCOME: ${{ steps.plan-digest.outcome }}
         APPLY_OUTCOME: ${{ steps.apply.outcome }}
+        STATE_SAVED: ${{ steps.save-state.outputs.saved }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"

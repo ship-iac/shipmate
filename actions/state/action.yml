@@ -44,18 +44,25 @@ runs:
           echo "::error::shipmate/actions/state: SHIPMATE_PLAN_PASSPHRASE is empty. Cached local state is encrypted with it, so every restore and save needs it. Set the secret and forward it to the shipmate workflows."
           exit 1
         fi
+    - name: State cache key
+      id: key
+      shell: bash
+      env:
+        SLUG: ${{ inputs.stack-slug }}
+        ENV_NAME: ${{ inputs.env }}
+      # '/'-delimited so one env name cannot prefix-match another (state/app/dev/ never matches
+      # state/app/dev-eu/...). run_attempt makes each GitHub "re-run" a fresh, writable save key.
+      run: |
+        echo "prefix=state/$SLUG/$ENV_NAME/" >> "$GITHUB_OUTPUT"
+        echo "key=state/$SLUG/$ENV_NAME/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
     - name: Restore state
       id: restore
       if: ${{ inputs.mode == 'restore' }}
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.path }}
-        # '/'-delimited so one env name cannot prefix-match another
-        # (state/app/dev/ never matches state/app/dev-eu/...). run_attempt
-        # makes each GitHub "re-run" a fresh, writable save key.
-        key: state/${{ inputs.stack-slug }}/${{ inputs.env }}/${{ github.run_id }}-${{ github.run_attempt }}
-        restore-keys: |
-          state/${{ inputs.stack-slug }}/${{ inputs.env }}/
+        key: ${{ steps.key.outputs.key }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
     - name: Decrypt state
       # A refusal must fail this action: cell-init's restore-outcome is then not `success`, so
       # apply-cell never saves the undecrypted file over the entry. No continue-on-error.
@@ -74,8 +81,8 @@ runs:
       env:
         PLAN_PASSPHRASE: ${{ inputs.passphrase }}
         STATE_PATH: ${{ inputs.path }}
-        # Save state's key: plan-crypt binds the entry to its prefix, as decrypt-state reads it.
-        KEY: state/${{ inputs.stack-slug }}/${{ inputs.env }}/${{ github.run_id }}-${{ github.run_attempt }}
+        # plan-crypt binds the entry to its key's prefix, as decrypt-state reads it.
+        KEY: ${{ steps.key.outputs.key }}
       # A 0-byte file is not saved: its restore would hand tofu an empty file, which it reads
       # as no state. Encrypts in place: nothing after the save may read the file.
       run: |
@@ -90,7 +97,7 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.path }}
-        key: state/${{ inputs.stack-slug }}/${{ inputs.env }}/${{ github.run_id }}-${{ github.run_attempt }}
+        key: ${{ steps.key.outputs.key }}
     - name: Look up the saved entry
       id: verify
       # actions/cache/save warns and succeeds when it stores nothing, so only this exact-key lookup
@@ -100,5 +107,5 @@ runs:
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ inputs.path }}
-        key: state/${{ inputs.stack-slug }}/${{ inputs.env }}/${{ github.run_id }}-${{ github.run_attempt }}
+        key: ${{ steps.key.outputs.key }}
         lookup-only: 'true'
