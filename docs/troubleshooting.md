@@ -995,16 +995,20 @@ re-creation is harmless. For a stack with real resources:
   against the empty state.
 - Do not apply or merge any plan of the stack in that environment, by any
   route (a `shipmate apply` comment, a re-run or a merge), until each managed
-  resource the deleted state recorded shows `to import` in it.
-- Add an `import` block, as in step 5 of §`The apply step ran and its state
-  was not saved`, for each such resource whose provider implements import,
-  with the import ID its provider's documentation names. The latest retained
-  `Apply the stored plan` log for that address (`Creation complete` or
-  `Import complete`) helps find the object; when that log has expired, find it
-  at the provider.
+  resource the deleted state recorded, other than one whose provider does not
+  implement import, shows `to import` in it, and no imported resource also
+  shows a replace (step 8 of §`The apply step ran and its state was not
+  saved`).
+- Add an `import` block, as in step 5 of that section, for each resource whose
+  provider implements import, with the import ID its provider's documentation
+  names. The latest retained `Apply the stored plan` log for that address
+  (`Creation complete` or `Import complete`) helps find the object; when that
+  log has expired, find it at the provider.
 - A resource whose provider does not implement import (step 7 of that
-  section) cannot be adopted: delete it at the provider before applying, or
-  accept that the apply creates a duplicate or fails on a collision.
+  section) is re-created with a new value, and anything that depends on that
+  value then plans a replace. One with a remote object duplicates it or
+  collides unless you delete the original at the provider first; one with
+  none, such as `random_pet`, has nothing to delete.
 
 ### `state cache entry ... cannot be read`
 

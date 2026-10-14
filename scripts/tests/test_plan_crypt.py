@@ -96,8 +96,8 @@ def _no_header(kind, path, repo=" --repo ship-iac/sample"):
         "longer tracks the resources it recorded, and every plan of the stack in this environment "
         "re-creates them. A plan or drift cell can then be re-run. Never re-run a refused "
         "apply or deploy, and do not apply or merge any plan of this stack in this "
-        "environment before reading docs/troubleshooting.md section `state cache entry ... "
-        "is not a shipmate-crypt-v1 entry`."
+        "environment until it meets the conditions in docs/troubleshooting.md section "
+        "`state cache entry ... is not a shipmate-crypt-v1 entry`."
     )
 
 
