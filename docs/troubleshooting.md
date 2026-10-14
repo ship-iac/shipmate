@@ -965,7 +965,7 @@ other case, re-plan and reconcile against the provider:
 7. A resource whose provider does not implement import cannot be adopted:
    `random_pet`, which the sample stacks use, refuses with
    `Error: Resource Import Not Implemented`. Applying the re-plan re-creates
-   it. That is harmless for a sample's `random_pet` or `terraform_data`, and a duplicate or a
+   it. That is harmless for a sample's `random_pet`, and a duplicate or a
    collision for a real one.
 8. Review each plan that imports. A provider can import fewer attributes than
    it wrote and then plan a replace: `terraform_data` does not import
@@ -987,16 +987,18 @@ restore matches by prefix, so deleting only the named entry restores the
 next-older one.
 
 Deleting discards that state: OpenTofu no longer tracks the resources it
-recorded, and every plan of the stack in that environment re-creates them.
-The local-backend samples' `random_pet` and `terraform_data` resources
-re-create harmlessly; a real resource collides or is duplicated. After
-deleting:
+recorded, and every plan of the stack in that environment re-creates them. A
+plan or drift cell can be re-run. For the local-backend samples' resources the
+re-creation is harmless. For a stack with real resources:
 
-- A plan or drift cell can be re-run.
-- Before re-running an apply cell or a deploy, or applying any plan of a stack
-  with real resources in that environment, follow §`The apply step ran and
-  its state was not saved` from step 2. No apply log lists the resources, so
-  find each one at the provider and use the import ID its documentation names.
+- Never re-run a refused apply cell or deploy: it applies its stored plan
+  against the empty state.
+- Do not apply or merge any plan of the stack in that environment until every
+  resource the deleted state recorded shows `to import` in it. Add an
+  `import` block for each, as in step 5 of §`The apply step ran and its state
+  was not saved`. Take each id from an earlier `Apply the stored plan` log's
+  `Creation complete ... [id=...]` line while that log is retained, or from
+  the provider, using the import ID its documentation names.
 
 ### `state cache entry ... cannot be read`
 
