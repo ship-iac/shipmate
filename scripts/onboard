@@ -237,8 +237,9 @@ def _variables():
 
 
 #: An apply environment -- and `shipmate-engine`, which is one -- is scoped to the
-#: default branch alone. A PUT naming only this key is additive: an environment
-#: carrying reviewers, `prevent_self_review` or a `wait_timer` keeps all three.
+#: default branch alone. A PUT naming only this key keeps reviewers, `prevent_self_review`
+#: and a `wait_timer`: probed 2026-10-13 on a public repository (GitHub documents no such
+#: contract).
 _APPLY_BODY = {
     "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}
 }

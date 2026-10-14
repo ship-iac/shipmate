@@ -931,8 +931,8 @@ checks, reading "plan run <id> holds this gate while it publishes; re-plan
 run ends before its final gate write (a failed or cancelled summary job, or a
 cancelled plan job after the summary downloaded a cell summary). A sticky plan
 comment that could not be listed or written fails the summary job before that
-write too; gh's error is in the job's annotation for a failed write and in the
-step log for a failed listing. A publish hold the run wrote stays, and a run
+write too; the error is in the job's annotation for a failed write and in the
+step log for a failed listing. Then a publish hold the run wrote stays, and a run
 that planned no cell wrote none, so the head keeps the gate it had, or no
 `shipmate / gate` status, which a required gate also blocks. The summary job
 also holds the gate when it cannot read the head's gate statuses or apply

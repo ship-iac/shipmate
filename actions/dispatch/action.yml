@@ -83,14 +83,17 @@ runs:
           plan|apply|unlock) WORKFLOW=shipmate.yml ;;
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
         esac
-        python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json
+        body='' errfile=''
+        trap 'rm -f -- ${body:+"$body"} ${errfile:+"$errfile"}' EXIT
+        body=$(mktemp)
+        errfile=$(mktemp)
+        python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > "$body"
         rc=0
         # stdout alone is the API's answer, parsed below; gh writes its own messages to stderr.
-        errfile=$(mktemp)
-        trap 'rm -f "$errfile"' EXIT
-        out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>"$errfile") || rc=$?
+        out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input "$body" 2>"$errfile") || rc=$?
         err=$(<"$errfile")
-        printf '%s\n' "$out" "$err"
+        [ -z "$out" ] || printf '%s\n' "$out"
+        [ -z "$err" ] || printf '%s\n' "$err"
         if [ "$rc" -ne 0 ]; then
           # Measured, in order: an absent file answers 404, one with no such trigger `Workflow
           # does not have 'workflow_dispatch' trigger (HTTP 422)`, one declaring fewer inputs

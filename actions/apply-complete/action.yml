@@ -105,14 +105,15 @@ runs:
       # cannot recover it: the applied state has already advanced past the reviewed plan.
       run: |
         set -euo pipefail
-        cat > body.json <<'JSON'
+        body="$RUNNER_TEMP/complete-body.json"
+        cat > "$body" <<'JSON'
         {"status": "completed", "conclusion": "success", "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}}
         JSON
         while read -r id; do
           [ -z "$id" ] && continue
           ok=""
           for _ in 1 2 3 4 5; do
-            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input body.json >/dev/null; then ok=1; break; fi
+            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input "$body" >/dev/null; then ok=1; break; fi
             sleep 3
           done
           [ -n "$ok" ] || { echo "::error::failed to complete apply check $id after retries"; exit 1; }

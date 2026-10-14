@@ -28,10 +28,10 @@ CONSUMER_WORKFLOW = "shipmate.yml"
 
 
 def test_the_dispatch_step_runs_the_body_builder_this_file_exercises():
-    # A whole run line, not a substring: the recording `gh` stub never opens body.json, so a
-    # commented-out builder would leave every body assertion here exercising a script nothing
+    # A whole run line, not a substring: the recording `gh` stub never opens the body file, so
+    # a commented-out builder would leave every body assertion here exercising a script nothing
     # runs, and production would POST an empty --input.
-    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json' in run_lines(
+    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > "$body"' in run_lines(
         step_by(DISPATCH_ACTION, name="workflow_dispatch apply")
     )
 
@@ -152,12 +152,16 @@ def _create_stub_commands(tmp_path):
     return str(tmp_path), str(python3_path), str(gh_path)
 
 
-def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB):
+def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB, stubs=None, unset=()):
     """Run the shipped step with a gh stub that records its argv; returns the
-    CompletedProcess and the recorded argv text."""
+    CompletedProcess and the recorded argv text. `stubs` maps further command names to stub
+    text in the same PATH directory; `unset` names variables removed from the step's env."""
     path_dir, _, gh_path = _create_stub_commands(tmp_path)
     Path(gh_path).write_text(gh_stub)
     Path(gh_path).chmod(0o755)
+    for name, text in (stubs or {}).items():
+        (tmp_path / name).write_text(text, newline="\n")
+        (tmp_path / name).chmod(0o755)
 
     env = os.environ.copy()
     env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
@@ -177,6 +181,8 @@ def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB):
     # `mktemp` honours TMPDIR, so a temporary file the step leaves behind is visible here.
     (tmp_path / "tmp").mkdir()
     env["TMPDIR"] = str(tmp_path / "tmp")
+    for name in unset:
+        del env[name]
 
     result = run_step(tmp_path, _extract_dispatch_run_block(), env)
     argv_file = tmp_path / "argv.txt"
@@ -334,16 +340,18 @@ def test_every_route_comment_ops_can_dispatch_is_accepted_here(tmp_path):
 
 @bash_only
 def test_dispatch_success_exits_zero(tmp_path):
-    """When gh succeeds, the script exits 0, and the file holding gh's stderr is removed.
+    """When gh succeeds, the script exits 0, both temporary files are removed, and no request
+    body is left in the job workspace.
 
-    Mutations: make the wrapper return non-zero on success; drop the `trap` that removes
-    `$errfile`.
+    Mutations: make the wrapper return non-zero on success; drop `$body` (or `$errfile`) from
+    the `trap`; redirect `dispatch-body` to `body.json` again.
     """
     result, _ = _run_dispatch(tmp_path, verb="unlock", environment="dev-eu")
     assert result.returncode == 0, (
         f"success should exit 0, got {result.returncode}: {result.stderr}"
     )
     assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
+    assert not (tmp_path / "body.json").exists(), "the request body was left in the workspace"
 
 
 #: Fails the dispatch as gh does on an HTTP error, here a 500: the API's JSON error body on
@@ -361,9 +369,10 @@ _BODY_ON_STDOUT_STUB = (
 def test_a_failed_dispatch_prints_the_api_answer_to_the_log(tmp_path):
     """gh writes an HTTP error's JSON body to stdout, and the log is where the failure reply
     sends the reader, so that body must print beside gh's stderr. The failure exit still
-    removes the file holding gh's stderr.
+    removes both temporary files and leaves no request body in the job workspace.
 
-    Mutations: drop `"$out"` from the `printf`; drop the `trap` that removes `$errfile`.
+    Mutations: delete the `$out` `printf` line; drop `$body` (or `$errfile`) from the `trap`;
+    redirect `dispatch-body` to `body.json` again.
     """
     result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_BODY_ON_STDOUT_STUB)
     assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
@@ -371,6 +380,67 @@ def test_a_failed_dispatch_prints_the_api_answer_to_the_log(tmp_path):
         f"the API's answer must reach the log: {result.stdout}"
     )
     assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
+    assert not (tmp_path / "body.json").exists(), "the request body was left in the workspace"
+
+
+@bash_only
+def test_a_failed_body_build_ends_the_step_and_leaves_no_temporary_file(tmp_path):
+    """`dispatch-body` fails here because `DISPATCH_REF` is unset. The step ends before any
+    `gh` call, the dispatch and the reply alike, and the trap still removes both files.
+
+    Mutation: set the `trap` after the `dispatch-body` line.
+    """
+    result, argv = _run_dispatch(tmp_path, verb="apply", unset=("DISPATCH_REF",))
+    assert result.returncode != 0, f"a failed body build must fail the step: {result.stdout}"
+    assert argv == "", f"no gh call may follow a failed body build: {argv!r}"
+    assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
+    assert not (tmp_path / "body.json").exists(), "the request body was left in the workspace"
+
+
+@bash_only
+def test_a_failed_second_mktemp_leaves_no_temporary_file(tmp_path):
+    """A `mktemp` that succeeds once and then fails: the step ends before any `gh` call, and
+    the first file is removed.
+
+    Mutation: move the `trap` after the second `mktemp`.
+    """
+    marker = (tmp_path / "mktemp-ran").as_posix()
+    mktemp_stub = (
+        f'#!/bin/bash\nif [ -e "{marker}" ]; then exit 1; fi\n: > "{marker}"\n'
+        'exec /usr/bin/mktemp "$@"\n'
+    )
+    result, argv = _run_dispatch(tmp_path, verb="apply", stubs={"mktemp": mktemp_stub})
+    assert result.returncode != 0, f"a failed mktemp must fail the step: {result.stdout}"
+    assert (tmp_path / "mktemp-ran").exists(), "the mktemp stub never ran"
+    assert argv == "", f"no gh call may follow a failed mktemp: {argv!r}"
+    assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
+
+
+def _silent_answer_stub(out, rc):
+    """A gh stub answering the dispatch call with `out` on stdout, nothing on stderr, and exit
+    `rc`; every other call succeeds and prints nothing."""
+    return (
+        "#!/bin/bash\n"
+        'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
+        f"  printf '%s' '{out}'\n  exit {rc}\nfi; done\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("out", "rc"),
+    [("", 0), ('{"workflow_run_id":38481239914}', 0), ('{"message":"Server Error"}', 1)],
+    ids=["204-empty", "200-answer", "failure-empty-stderr"],
+)
+@bash_only
+def test_the_log_prints_no_empty_line_for_a_missing_answer_or_error(tmp_path, out, rc):
+    """An empty answer (a 204) or an empty gh stderr (most successes, and a failure gh explains
+    on stdout alone) prints no line at all.
+
+    Mutation: print both with one `printf '%s\\n' "$out" "$err"` again.
+    """
+    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_silent_answer_stub(out, rc))
+    assert result.returncode == rc, f"unexpected exit: {result.stdout}{result.stderr}"
+    assert "" not in result.stdout.splitlines(), f"the log has an empty line: {result.stdout!r}"
 
 
 # Only a failure that matches the skew shape gets the skew explanation: a 403 or a rate limit
@@ -415,7 +485,7 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
     Mutations: scope the condition to one verb again and the other two stop being explained;
     drop any one of the three message-text halves and its shape stops being explained; point
     the remedy at `docs/releasing.md`, or reword any other part of the message, and the
-    whole-value comparison reddens; drop `$err` from the `printf` and the hint prints without
+    whole-value comparison reddens; delete the `$err` `printf` line and the hint prints without
     the answer it explains (gh writes it to stderr); match on `$out` alone and no shape is
     explained.
     """
