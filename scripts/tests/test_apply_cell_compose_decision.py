@@ -43,7 +43,7 @@ def _run_compose(
     restore="skipped",
     plan_digest="skipped",
     apply="skipped",
-    lost_save="",
+    lost_save="skipped",
     stack="stacks/app",
     env="dev-eu",
 ):

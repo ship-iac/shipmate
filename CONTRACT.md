@@ -2485,23 +2485,23 @@ job believed before its check was completed:
   apply can still have changed resources, and a failed cell whose state was
   not saved is named by the `state not saved:` note.
 - **state not saved** is a note, not a status: `apply-cell-summary` writes
-  `state_lost: true` into `cell.json` when the cell's
-  `Warn that the applied state was not saved` step failed, which it does
-  exactly when it fires (the apply step ran, the state was restored, and
-  `actions/state` did not report `saved`). The `state not saved:` note names
-  those cells, capped like the `not recorded:` note, says never to re-run
-  their jobs or their workflow run (a re-run applies the run's reviewed plan
-  again whatever the check says), not to re-comment `shipmate apply` for them
-  until the recovery has moved their state, and to apply no plan of those
-  stacks but the recovery's import and forget plans, and points at
-  `docs/troubleshooting.md` §`The apply step ran and its state was not saved`.
+  `state_lost` into `cell.json`, true unless the cell's
+  `Warn that the applied state was not saved` step's outcome is `success` or
+  `skipped`, so a cancelled or unknown outcome counts as lost. That step fires
+  when the apply step ran, the state was restored, and `actions/state` did not
+  report `saved`. The `state not saved:` note names those cells, capped like
+  the `not recorded:` note, and states what the job's `::error::` states: the
+  apply step ran and its state was not saved or not verified; never re-run the
+  job or its workflow run, which applies the reviewed plan again against the
+  state from before the apply; before applying any plan of that stack in that
+  environment, follow `docs/troubleshooting.md`
+  §`The apply step ran and its state was not saved`, which holds the procedure.
   While it is present, the `not attempted:` note's retry command is to run
   once those cells are recovered, because any apply covering them applies
   their reviewed plans again. Every `not attempted:` note also carries a
   cause-agnostic pointer to that section, because the upload is best-effort: a
   lost cell whose artifact did not upload renders as not attempted and no note
-  names it. `state_lost` is true unless the warning step's outcome is `success`
-  or `skipped`, so a cancelled or unknown outcome counts as lost. The marker reaches only the
+  names it. The marker reaches only the
   comment of the run that lost the state; a later run's comment, and the
   remedies it renders, do not know. Nothing refuses a later apply of the cell.
   The warning step's `exit 1`, not the artifact, keeps the cell's apply check

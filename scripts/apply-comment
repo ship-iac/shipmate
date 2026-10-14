@@ -104,13 +104,11 @@ def _state_lost_note(rows):
     if not cells:
         return ""
     return (
-        f"state not saved: {named(cells, _STATE_LOST_NAMED)}. The apply ran and its state was "
-        "not saved. Never re-run their jobs or their workflow run, and do not re-comment "
-        "`shipmate apply` for them until the recovery has moved their state: either applies the "
-        "reviewed plan again against the state from before the apply. Until then every plan of "
-        "these stacks, on any pull request, repeats the lost apply: apply none but the "
-        "recovery's import and forget plans. Follow docs/troubleshooting.md section `The apply "
-        "step ran and its state was not saved`."
+        f"state not saved: {named(cells, _STATE_LOST_NAMED)}. The apply step ran and its state "
+        "was not saved or not verified. Never re-run these cells' jobs or their workflow run: it "
+        "applies the reviewed plan again against the state from before the apply. Before "
+        "applying any plan of these stacks in these environments, follow docs/troubleshooting.md "
+        "section `The apply step ran and its state was not saved`."
     )
 
 

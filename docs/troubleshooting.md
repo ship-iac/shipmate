@@ -872,25 +872,28 @@ other case, re-plan and reconcile against the provider:
    with the exact `key` the `Save state` step log shows (`--key` alone matches
    by prefix). When it is printed, the save worked and only the lookup failed:
    re-plan (step 4) and never re-run the job; the re-plan reads the saved
-   state. After a successful apply it shows no changes. After a failed or
-   cancelled apply the entry holds a partial apply, and the re-plan shows the
-   changes still to make: they are legitimate, so review and apply it as any
-   plan. On the open pull request, the re-plan completes or replaces the cell's
+   state. After a successful apply it shows no changes. After a failed apply
+   OpenTofu recorded what it created, so the re-plan's remaining changes are
+   legitimate: review and apply it as any plan. After a cancelled apply
+   OpenTofu may have created a resource it did not record, so compare the
+   re-plan's creates against the `Apply the stored plan` step log (step 3)
+   before applying it, and adopt any such resource as in steps 5 to 9. On the open pull request, the re-plan completes or replaces the cell's
    apply check. After the merge, a new pull request's plan completes only its
    own head's check. The merged head's check stays pending, and nothing reads
    it again: a later deploy takes only the pending checks of its own merge's
    pull request. Never re-run that deploy, which reads it. When nothing is
    printed, continue.
 2. Never re-run the job or its workflow run, the deploy included: a re-run
-   applies the run's reviewed plan again whatever the check says. Do not
-   comment `shipmate apply`, bare or for its environment, until the recovery
-   has moved the stack's state. The reviewed plan was made against the state
-   the cache restores, so OpenTofu applies it again with no stale-plan refusal
-   and creates a second set of what the lost apply created. Until the recovery,
-   every plan of this stack, on any pull request, repeats the lost apply
-   (step 4): apply none of them except the import and forget plans of steps 5
-   and 6, which are applied the ordinary way, with `shipmate apply` or by the
-   merge deploy.
+   applies the run's reviewed plan again whatever the check says. A
+   `shipmate apply`, bare or for the cell's environment, applies it again too
+   while the cell's apply check is pending. The reviewed plan was made against
+   the state the cache restores, so OpenTofu applies it with no stale-plan
+   refusal and creates a second set of what the lost apply created. Every
+   other plan of this stack in this environment, on any pull request, repeats
+   the lost apply as well (step 4): apply none of them except the import and
+   forget plans of steps 5 and 6, which are applied the ordinary way, with
+   `shipmate apply` or by the merge deploy. The stack's plans in other
+   environments are unaffected.
 3. List what the lost apply did from its `Apply the stored plan` step log:
    `Creation complete ... [id=...]` and `Destruction complete` lines. The
    cell's fold-out in the apply comment shows the same output when a comment

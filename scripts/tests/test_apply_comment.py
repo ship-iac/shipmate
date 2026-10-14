@@ -504,13 +504,11 @@ def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recover
     ]
     sections = _comment(rows, env="").split("\n\n")
     assert sections[-2] == (
-        "state not saved: **@<!-- -->acme/db (dev-eu)**. The apply ran and its state was not "
-        "saved. Never re-run their jobs or their workflow run, and do not re-comment "
-        "`shipmate apply` for them until the recovery has moved their state: either applies the "
-        "reviewed plan again against the state from before the apply. Until then every plan of "
-        "these stacks, on any pull request, repeats the lost apply: apply none but the "
-        "recovery's import and forget plans. Follow docs/troubleshooting.md section `The apply "
-        "step ran and its state was not saved`.\n"
+        "state not saved: **@<!-- -->acme/db (dev-eu)**. The apply step ran and its state was "
+        "not saved or not verified. Never re-run these cells' jobs or their workflow run: it "
+        "applies the reviewed plan again against the state from before the apply. Before "
+        "applying any plan of these stacks in these environments, follow docs/troubleshooting.md "
+        "section `The apply step ran and its state was not saved`.\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply` once the "
         "cells under `state not saved:` are recovered, because it applies their reviewed plans "
         "again." + _LOST_POINTER
