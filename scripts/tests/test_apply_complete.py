@@ -259,7 +259,7 @@ def test_the_retry_arm_sleeps_and_only_the_fallthrough_arm_leaves_the_loop():
 
 
 def test_diagnostics_are_echoed_after_the_retry_loop():
-    # Inside the loop it would repeat the same warning up to 12 times, and the file is
+    # Inside the loop it would repeat the same warning once per attempt, and the file is
     # rewritten every attempt, so only the last one describes the outcome.
     lines = [ln.strip() for ln in _loop_body().splitlines()]
     done = max(i for i, ln in enumerate(lines) if ln == "done")
@@ -268,8 +268,8 @@ def test_diagnostics_are_echoed_after_the_retry_loop():
 
 
 # `gh`, `sleep` and `python3` are bash functions, which bash resolves before PATH, so nothing
-# is installed. `python3` forwards to the interpreter running the suite, so the real
-# scripts/apply-complete decides every cell.
+# is installed and `sleep` only records its argument. `python3` forwards to the interpreter
+# running the suite, so the real scripts/apply-complete decides every cell.
 
 GH_STUB = r"""
 gh() {
@@ -280,7 +280,7 @@ gh() {
   if [ "$(head -n 1 "$f")" = FAIL ]; then tail -n +2 "$f"; return 1; fi
   cat "$f"
 }
-sleep() { :; }
+sleep() { echo "$1" >> "$SLEEPS"; }
 python3() { "$PYEXE" "$@"; }
 """
 
@@ -324,6 +324,7 @@ def _select(tmp_path, listings, snapshot=None):
         "FIXTURES": str(fixtures).replace("\\", "/"),
         "LAST_FIXTURE": str(len(listings)),
         "ATTEMPT": str(tmp_path / "attempt").replace("\\", "/"),
+        "SLEEPS": str(tmp_path / "sleeps").replace("\\", "/"),
         "PYEXE": sys.executable.replace("\\", "/"),
     }
     proc = run_step(tmp_path, GH_STUB + _loop_body(), env, timeout=120)
@@ -339,7 +340,7 @@ def _all_success(*cells):
 @bash_only
 def test_the_listing_is_refetched_on_every_attempt(tmp_path):
     # The property that makes this a retry at all: hoisting the fetch above the `for` re-reads
-    # one frozen snapshot twelve times and sleeps 110s over it.
+    # one frozen snapshot on every attempt and sleeps the whole budget over it.
     lagging = _jsonl(
         [
             job("L0 / apply / dns / dev-eu", "success"),
@@ -405,7 +406,11 @@ def test_an_id_earned_by_one_attempt_survives_a_staler_later_listing(tmp_path):
 def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_stranded(tmp_path):
     """One cell resolves, one is unmatched by skip-propagation, one never resolves. The earned
     id must still reach the PATCH step, the unmatched cell must be a warning rather than the
-    reason for the failure, and the stranded cell must be named in the `::error::`."""
+    reason for the failure, and the stranded cell must be named in the `::error::`.
+
+    The waits back off from 2 s to a 110 s total, and the last attempt does not sleep.
+    Mutations: the first delay 2 -> 10; one later delay 10 -> 20; the last attempt sleeps
+    (`set -u` aborts on the missing delay); `attempts` drops its `+ 1`."""
     lagging = _jsonl(
         [
             job("L0 / apply / dns / dev-eu", "success"),
@@ -414,7 +419,9 @@ def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_
     )
     proc, ids, attempts, env = _select(tmp_path, [lagging])
     assert proc.returncode == 0, proc.stderr
-    assert attempts == 12
+    assert attempts == 14
+    sleeps = (tmp_path / "sleeps").read_text(encoding="utf-8").splitlines()
+    assert sleeps == ["2", "3", "5", "10", "10", "10", "10", "10", "10", "10", "10", "10", "10"]
     assert ids == ["11"]
     assert proc.stderr.count("::warning::") == 1
     assert "app / dev-eu" in proc.stderr

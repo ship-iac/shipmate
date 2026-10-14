@@ -34,10 +34,11 @@ runs:
         # ~2 minutes, not the ~30s a lag needs: exhausting it fails the env-level, and
         # deploy.yml's `!failure()` guards then skip every successor env-level, halting a
         # multi-region deploy over infrastructure that already applied.
-        attempts=12
+        delays=(2 3 5 10 10 10 10 10 10 10 10 10 10)
+        attempts=$(( ${#delays[@]} + 1 ))
         # The listing lags behind a finished wave job, and an undecided cell is not one that did
         # not run. Re-reading the listing IS the retry: hoisting the fetch out of the loop turns
-        # twelve attempts into one plus 110 seconds of sleep over a fixed snapshot.
+        # the loop into one read plus the whole sleep budget over a fixed snapshot.
         for n in $(seq "$attempts"); do
           rc=0
           : > "$RUNNER_TEMP/attempt-ids.txt"
@@ -65,13 +66,13 @@ runs:
           # two minutes and then misreported as a stale listing.
           case "$rc" in
             0) ok=1; break ;;
-            75) if [ "$n" -lt "$attempts" ]; then sleep 10; fi ;;
+            75) if [ "$n" -lt "$attempts" ]; then sleep "${delays[n-1]}"; fi ;;
             *) cat "$RUNNER_TEMP/diagnostics.txt" >&2; exit "$rc" ;;
           esac
         done
         sort -u "$RUNNER_TEMP/earned-ids.txt" > "$RUNNER_TEMP/complete-ids.txt"
-        # Echoed once after the loop, not per attempt: the file is rewritten each time, so a
-        # 12-attempt run would otherwise log the same warning 12 times.
+        # Echoed once after the loop, not per attempt: the file is rewritten each time, so an
+        # exhausted run would otherwise log the same warning once per attempt.
         cat "$RUNNER_TEMP/diagnostics.txt" >&2
         if [ -z "$ok" ]; then
           # Only the script's `retry:` lines: the file also holds warnings naming cells no
