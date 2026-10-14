@@ -2830,3 +2830,21 @@ def test_detect_writes_the_tables_max_parallel(
     outputs, _ = _run_main(monkeypatch, tmp_path, env, head_sha=head_sha, table=table)
     assert outputs["count"] == "1"  # Not vacuous: a cell exists.
     assert outputs["max_parallel"] == expected
+
+
+def test_a_refused_max_parallel_writes_no_matrix(monkeypatch, tmp_path):
+    """A refusal after `matrix=` and `empty=false` were written leaves a matrix job reading an
+    empty cap, which fails the run with an expression error instead of the refusal.
+
+    Mutation: call `ec.max_parallel(table)` inside the `GITHUB_OUTPUT` block again -- `matrix=`,
+    `empty=` and `count=` are written before the refusal."""
+
+    def refuse(table):
+        raise SystemExit("::error::max_parallel is '0'; refused")
+
+    monkeypatch.setattr(bm.ec, "max_parallel", refuse)
+    with pytest.raises(SystemExit):
+        _run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40)
+    assert github_outputs(tmp_path / "out.txt") == {
+        "refusal": "max_parallel is '0'; refused",
+    }

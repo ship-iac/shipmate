@@ -1230,10 +1230,10 @@ for exactly the exposure control 1 exists to limit.
   understood it.
 - **Branch-controlled configuration.** Stack tags come from the pull request
   branch. They shape what the engine does; they do not constrain what it is
-  allowed to do. `needs`, `explicit` and `max_parallel` are not on this list:
+  allowed to do. `needs`, `explicit`, `gated` and `max_parallel` are not on this list:
   they live in `.github/shipmate-config.yml`, read from the default branch with the
   rest of it, so a branch can neither reorder its own apply waves,
-  drop its own exclusion nor raise its own fan-out.
+  drop its own exclusion, exempt itself from review nor raise its own fan-out.
 - **The gate is an assertion, not a proof.** The App identity and pull request
   approvals are out of a push-capable developer's reach only because control 16
   keeps the App private key on the `shipmate-engine` environment, unreadable

@@ -127,9 +127,9 @@ ahead rather than stale.
 sweep without a `tags` query plans every stack × environment in the repository,
 on every run — runner minutes scale with the whole tree, not the changed set. Each cell is a
 `tofu init` plus a `tofu plan` against real state, which also means real backend
-and provider API traffic on that schedule. The knobs are the cron expression and
-how many environments you tag stacks into, and how you split the tree across
-drift files. A sweep is one matrix, held to the same 256-cell limit as a plan
+and provider API traffic on that schedule. The knobs are the cron expression,
+how many environments you tag stacks into, how you split the tree across drift
+files, and `max_parallel`. A sweep is one matrix, held to the same 256-cell limit as a plan
 run, counted after its `tags` query: above it `detect` refuses the sweep before
 any cell starts and names the remedy, splitting it across more drift files.
 Each sweep runs at most `max_parallel` cells at once (10 unless the environment

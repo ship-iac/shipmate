@@ -499,9 +499,10 @@ Pro, 60 on Team, 500 on Enterprise;
 [Actions limits](https://docs.github.com/en/actions/reference/limits)), so one
 plan or sweep leaves room for other jobs, but a plan and a drift sweep running
 together can fill a Free account's pool: stagger the drift files' crons. The
-cap also bounds how many stacks call one cloud account's APIs at once: each
-cell's `tofu` runs up to 10 operations in parallel, and some provider APIs
-throttle per account. GitHub runs a matrix with `max-parallel: 0` unbounded, so
+default is sized for GitHub-hosted runner limits; a repository whose `runs_on`
+names a larger self-hosted pool raises it. The cap also bounds how many stacks
+call one cloud account's APIs at once: each cell's `tofu` runs up to 10
+operations in parallel, and some provider APIs throttle per account. GitHub runs a matrix with `max-parallel: 0` unbounded, so
 0 refuses, and so does anything that is not a whole number from 1 to 256.
 
 **Apply waves and unlock are not capped.** Both bind `<env>-apply`, and GitHub
