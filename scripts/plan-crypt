@@ -10,11 +10,14 @@ Format shipmate-crypt-v1: MAGIC || salt || body || tag.
 - MAGIC is `shipmate-crypt-v1\\n` (18 bytes); a later format bumps the digit.
 - salt is 16 random bytes. master = PBKDF2-HMAC-SHA256(passphrase, salt, 600,000
   iterations, 32 bytes); enc_key and mac_key are HMAC-SHA256(master, "shipmate-crypt-v1
-  enc") and HMAC-SHA256(master, "shipmate-crypt-v1 mac").
-- body is the output of `openssl enc -aes-256-ctr -pbkdf2 -iter 1 -md sha256 -salt`
-  (`Salted__`, openssl's 8-byte salt, the ciphertext), with enc_key's hex as openssl's
-  passphrase, passed in the child's environment, never argv.
-- tag is HMAC-SHA256(mac_key, MAGIC || salt || body), 32 bytes.
+  <kind> enc") and HMAC-SHA256(master, "shipmate-crypt-v1 <kind> mac"), where <kind> is
+  `plan` or `state`, so a file of one kind never authenticates as the other.
+- body is the output of `openssl enc -aes-256-ctr -pbkdf2 -iter 1 -md sha256 -nosalt`, the
+  bare ciphertext, with enc_key's hex as openssl's passphrase, passed in the child's
+  environment, never argv. The salt above already makes enc_key unique per file.
+- tag is HMAC-SHA256(mac_key, len(scope) as 4 bytes || scope || MAGIC || salt || body), 32
+  bytes. scope is empty for a plan and the cache prefix (`state/<stack>/<env>/`) for a
+  state entry, so an entry copied under another stack's or environment's key refuses.
 
 The passphrase comes from the PLAN_PASSPHRASE env var and is required: every operation
 refuses when it is empty or unset.
@@ -37,8 +40,7 @@ import sys
 MAGIC = b"shipmate-crypt-v1\n"
 SALT_LEN = 16
 TAG_LEN = 32
-# MAGIC, salt, openssl's `Salted__` and its own 8-byte salt, then the tag.
-MIN_LEN = len(MAGIC) + SALT_LEN + 16 + TAG_LEN
+MIN_LEN = len(MAGIC) + SALT_LEN + TAG_LEN  # an empty plaintext has an empty body
 ITERATIONS = 600000
 KEY_VAR = "SHIPMATE_CRYPT_KEY"
 _REPLAN = (
@@ -55,15 +57,23 @@ def _passphrase():
     return os.environ.get(ENV_VAR, "")
 
 
-def _keys(salt):
+def _keys(salt, kind):
     master = hashlib.pbkdf2_hmac("sha256", os.fsencode(_passphrase()), salt, ITERATIONS)
-    enc_key = hmac.new(master, b"shipmate-crypt-v1 enc", "sha256").digest()
-    mac_key = hmac.new(master, b"shipmate-crypt-v1 mac", "sha256").digest()
+    label = f"shipmate-crypt-v1 {kind} ".encode()
+    enc_key = hmac.new(master, label + b"enc", "sha256").digest()
+    mac_key = hmac.new(master, label + b"mac", "sha256").digest()
     return enc_key, mac_key
 
 
-def _tag(mac_key, data):
-    return hmac.new(mac_key, data, "sha256").digest()
+def _tag(mac_key, scope, data):
+    # The one tagged input, for encrypt and decrypt alike. The length prefix keeps scope and
+    # data from trading bytes.
+    s = scope.encode()
+    return hmac.new(mac_key, len(s).to_bytes(4, "big") + s + data, "sha256").digest()
+
+
+def _state_scope(cache_key):
+    return cache_key.rpartition("/")[0] + "/"
 
 
 def _openssl(data, enc_key, *, decrypt):
@@ -78,7 +88,7 @@ def _openssl(data, enc_key, *, decrypt):
         "1",
         "-md",
         "sha256",
-        "-salt",
+        "-nosalt",
         "-pass",
         f"env:{KEY_VAR}",
     ]
@@ -134,8 +144,8 @@ def _purge_command(prefix):
     )
 
 
-def encrypt(path):
-    """Encrypt in place as shipmate-crypt-v1, or refuse without a passphrase."""
+def encrypt(path, kind="plan", scope=""):
+    """Encrypt a plan artifact in place as shipmate-crypt-v1, or refuse without a passphrase."""
     _require_passphrase()
     # No remedy here: a plan cell re-plans, and whether an apply cell's state save may be
     # re-run depends on whether its apply ran. docs/troubleshooting.md splits the cases.
@@ -150,11 +160,16 @@ def encrypt(path):
         with open(path, "rb") as fh:
             plaintext = fh.read()
         salt = secrets.token_bytes(SALT_LEN)
-        enc_key, mac_key = _keys(salt)
+        enc_key, mac_key = _keys(salt, kind)
         head = MAGIC + salt + _openssl(plaintext, enc_key, decrypt=False)
-        return head + _tag(mac_key, head)
+        return head + _tag(mac_key, scope, head)
 
     _replace(path, sealed, failure)
+
+
+def encrypt_state(path, cache_key):
+    """Encrypt a state file in place, bound to the prefix of the cache key it is saved under."""
+    encrypt(path, "state", _state_scope(cache_key))
 
 
 def _is_pre_v1(data):
@@ -167,7 +182,7 @@ def _is_pre_v1(data):
         return False
 
 
-def _decrypt(path, *, unreadable, no_header, unauthenticated, failure):
+def _decrypt(path, kind, scope, *, unreadable, no_header, unauthenticated, failure):
     """The decrypt both artifact kinds share; each caller supplies its refusals."""
     _require_passphrase()
     try:
@@ -179,8 +194,8 @@ def _decrypt(path, *, unreadable, no_header, unauthenticated, failure):
         raise SystemExit(no_header)
     if len(data) < MIN_LEN or not data.startswith(MAGIC):
         raise SystemExit(unauthenticated)
-    enc_key, mac_key = _keys(data[len(MAGIC) : len(MAGIC) + SALT_LEN])
-    if not hmac.compare_digest(_tag(mac_key, data[:-TAG_LEN]), data[-TAG_LEN:]):
+    enc_key, mac_key = _keys(data[len(MAGIC) : len(MAGIC) + SALT_LEN], kind)
+    if not hmac.compare_digest(_tag(mac_key, scope, data[:-TAG_LEN]), data[-TAG_LEN:]):
         raise SystemExit(unauthenticated)
     body = data[len(MAGIC) + SALT_LEN : -TAG_LEN]
     _replace(path, lambda: _openssl(body, enc_key, decrypt=True), failure)
@@ -197,6 +212,8 @@ def decrypt(path):
     """
     _decrypt(
         path,
+        "plan",
+        "",
         unreadable=(
             f"::error::plan artifact `{path}` cannot be read. Nothing was applied. An artifact "
             f"downloaded without stack.otplan needs a re-plan: {_REPLAN} For a disk failure on "
@@ -229,9 +246,11 @@ def decrypt_state(path, cache_key):
     authentication names no delete command, because the refusal cannot tell corruption from a
     wrong passphrase. Never prints the file's contents.
     """
-    prefix = cache_key.rpartition("/")[0] + "/"
+    prefix = _state_scope(cache_key)
     _decrypt(
         path,
+        "state",
+        prefix,
         unreadable=(
             f"::error::state cache entry `{cache_key}` cannot be read: the restore may not have "
             "written the file, or the runner's disk failed. tofu was not run. The refusal comes "
@@ -263,15 +282,15 @@ def decrypt_state(path, cache_key):
 
 USAGE = (
     "usage: plan-crypt require | plan-crypt {encrypt|decrypt} <file> | "
-    "plan-crypt decrypt-state <file> <cache-key>"
+    "plan-crypt {encrypt-state|decrypt-state} <file> <cache-key>"
 )
 
 
 def main(argv):
     if argv[1:] == ["require"]:
         _require_passphrase()
-    elif len(argv) == 4 and argv[1] == "decrypt-state":
-        decrypt_state(argv[2], argv[3])
+    elif len(argv) == 4 and argv[1] in ("encrypt-state", "decrypt-state"):
+        (encrypt_state if argv[1] == "encrypt-state" else decrypt_state)(argv[2], argv[3])
     elif len(argv) == 3 and argv[1] in ("encrypt", "decrypt"):
         (encrypt if argv[1] == "encrypt" else decrypt)(argv[2])
     else:

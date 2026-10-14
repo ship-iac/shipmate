@@ -1190,9 +1190,11 @@ for exactly the exposure control 1 exists to limit.
   request. Nothing verifies a restored provider archive: the lock file verifies
   provider packages, not the archive around them. A restored state entry
   carries an HMAC tag (`CONTRACT.md` §Plan artifact encryption), which detects
-  corruption and any entry written without the passphrase, not who wrote it:
-  code in an apply cell holds the passphrase, so an entry it saves verifies
-  like any other.
+  corruption, an entry written without the passphrase, and an entry moved under
+  another stack's or environment's key. It does not detect an older entry of
+  the same stack and environment saved again under a newer key (a rollback),
+  nor anything code that runs with the passphrase writes: code in an apply cell
+  holds it, so an entry it saves verifies like any other.
   Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval

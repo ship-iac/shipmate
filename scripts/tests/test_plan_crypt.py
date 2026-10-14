@@ -39,7 +39,7 @@ _OPENSSL_ARGV = [
     "1",
     "-md",
     "sha256",
-    "-salt",
+    "-nosalt",
     "-pass",
     "env:SHIPMATE_CRYPT_KEY",
 ]
@@ -51,10 +51,13 @@ def _write(tmp_path, data=PLAIN):
     return f
 
 
-def _encrypted(tmp_path, monkeypatch, data, passphrase=NON_ASCII):
+def _encrypted(tmp_path, monkeypatch, data, kind="plan", passphrase=NON_ASCII):
     monkeypatch.setenv("PLAN_PASSPHRASE", passphrase)
     f = _write(tmp_path, data)
-    pcx.encrypt(str(f))
+    if kind == "plan":
+        pcx.encrypt(str(f))
+    else:
+        pcx.encrypt_state(str(f), KEY)
     return f
 
 
@@ -156,7 +159,7 @@ def test_encrypt_without_passphrase_refuses(tmp_path, monkeypatch):
 def test_round_trip_with_a_non_ascii_passphrase(tmp_path, monkeypatch, kind, data):
     """Mutations: `decrypt=False` in `_decrypt`'s openssl call, and the body is encrypted twice;
     `return` before encrypt's `_replace`, and the file stays plaintext."""
-    f = _encrypted(tmp_path, monkeypatch, data)
+    f = _encrypted(tmp_path, monkeypatch, data, kind)
     assert f.read_bytes() != data
     _decrypt(kind, f)
     assert f.read_bytes() == data
@@ -175,17 +178,20 @@ def test_two_encrypts_draw_different_salts(tmp_path, monkeypatch):
     assert first[18:34] != second[18:34]
 
 
-def test_decrypt_accepts_a_hand_built_v1_file(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("kind", "scope"), [("plan", b""), ("state", b"state/app-net/dev-eu/")])
+def test_decrypt_accepts_a_hand_built_v1_file(tmp_path, monkeypatch, kind, scope):
     """The derivation is PBKDF2-HMAC-SHA256, 600,000 iterations, 32 bytes, over the file's salt,
-    then the two labelled HMACs; every constant here is hand-written.
+    then the two labelled HMACs per kind; the tag covers the length-prefixed scope (a state
+    entry's cache prefix) and the file. Every constant here is hand-written.
 
-    Mutations: `ITERATIONS = 600001`; `"sha512"` in `_keys`' pbkdf2_hmac; `b"shipmate-crypt-v1
-    enx"` as the enc label; `b"shipmate-crypt-v1 max"` as the mac label.
+    Mutations: `ITERATIONS = 600001`; `"sha512"` in `_keys`' pbkdf2_hmac; `+ b"enx"` as the enc
+    label; `+ b"max"` as the mac label; `len(s).to_bytes(8, "big")` in `_tag`.
     """
     salt = bytes(range(16))
     master = hashlib.pbkdf2_hmac("sha256", NON_ASCII.encode("utf-8"), salt, 600000)
-    enc_key = hmac.new(master, b"shipmate-crypt-v1 enc", "sha256").digest()
-    mac_key = hmac.new(master, b"shipmate-crypt-v1 mac", "sha256").digest()
+    label = b"shipmate-crypt-v1 " + kind.encode() + b" "
+    enc_key = hmac.new(master, label + b"enc", "sha256").digest()
+    mac_key = hmac.new(master, label + b"mac", "sha256").digest()
     body = subprocess.run(
         [*_OPENSSL_ARGV[:-1], "env:HAND_BUILT_KEY"],
         input=PLAIN,
@@ -194,10 +200,61 @@ def test_decrypt_accepts_a_hand_built_v1_file(tmp_path, monkeypatch):
         check=True,
     ).stdout
     head = b"shipmate-crypt-v1\n" + salt + body
-    f = _write(tmp_path, head + hmac.new(mac_key, head, "sha256").digest())
+    tagged = len(scope).to_bytes(4, "big") + scope + head
+    f = _write(tmp_path, head + hmac.new(mac_key, tagged, "sha256").digest())
     monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
-    pcx.decrypt(str(f))
+    _decrypt(kind, f)
     assert f.read_bytes() == PLAIN
+
+
+@pytest.mark.parametrize(("written", "read"), [("plan", "state"), ("state", "plan")])
+def test_a_file_of_one_kind_fails_authentication_as_the_other(tmp_path, monkeypatch, written, read):
+    """A state entry placed as a plan artifact, or the reverse, never reaches tofu.
+
+    The kind is bound twice, by the labels and by the state scope, so it takes both mutations
+    together: one label for both kinds (`label = b"shipmate-crypt-v1 "` in `_keys`) and an empty
+    scope (`s = b""` in `_tag`). The hand-built test pins each label alone.
+    """
+    f = _encrypted(tmp_path, monkeypatch, STATE, written)
+    data = f.read_bytes()
+    with pytest.raises(SystemExit) as exc:
+        _decrypt(read, f)
+    assert exc.value.code == _unauthenticated(read, f)
+    assert f.read_bytes() == data
+
+
+@pytest.mark.parametrize(
+    "other", ["state/app-net/prod-eu/123-1", "state/app-dns/dev-eu/123-1", "state/app-net/123-1"]
+)
+def test_a_state_entry_under_another_prefix_fails_authentication(tmp_path, monkeypatch, other):
+    """An entry copied under another stack's or environment's key refuses.
+
+    Mutation: `s = b""` in `_tag`, and the prefix leaves the tagged input.
+    """
+    f = _encrypted(tmp_path, monkeypatch, STATE, "state")
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt_state(str(f), other)
+    assert exc.value.code == _unauthenticated("state", f).replace(KEY, other)
+
+
+def test_a_state_entry_restored_under_a_newer_key_of_its_prefix_decrypts(tmp_path, monkeypatch):
+    """The restore matches by prefix, so an older entry arrives under its own, older run id.
+
+    Mutation: bind the whole cache key (`_state_scope` returns `cache_key`).
+    """
+    f = _encrypted(tmp_path, monkeypatch, STATE, "state")
+    pcx.decrypt_state(str(f), "state/app-net/dev-eu/999-2")
+    assert f.read_bytes() == STATE
+
+
+def test_cli_encrypt_state_round_trips_through_decrypt_state(tmp_path, monkeypatch):
+    """Mutation: route main's `encrypt-state` to `encrypt`, and the entry carries the plan
+    label."""
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    f = _write(tmp_path, STATE)
+    pcx.main(["plan-crypt", "encrypt-state", str(f), KEY])
+    pcx.main(["plan-crypt", "decrypt-state", str(f), KEY])
+    assert f.read_bytes() == STATE
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -205,7 +262,7 @@ def test_decrypt_accepts_a_hand_built_v1_file(tmp_path, monkeypatch):
 def test_a_flipped_byte_fails_authentication_before_openssl(tmp_path, monkeypatch, kind, offset):
     """Mutation: call `_openssl(body, enc_key, decrypt=True)` before the tag compare in
     `_decrypt`."""
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
     data = bytearray(f.read_bytes())
     data[offset] ^= 0x01
     f.write_bytes(data)
@@ -222,7 +279,7 @@ def test_a_wrong_passphrase_fails_authentication_and_keeps_the_ciphertext(
 ):
     """Mutation: drop the tag compare in `_decrypt`, and openssl's garbage replaces the
     ciphertext."""
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
     ciphertext = f.read_bytes()
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
     with pytest.raises(SystemExit) as exc:
@@ -346,7 +403,7 @@ def test_a_cut_or_damaged_v1_file_fails_authentication_not_the_purge(
     Mutation: `if not data.startswith(MAGIC): raise SystemExit(no_header)` in place of
     `_is_pre_v1` in `_decrypt` (reddens empty, cut-in-magic, magic-byte and magic-brace).
     """
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
     data = _damaged(damage, f.read_bytes())
     f.write_bytes(data)
     calls = _record_openssl(monkeypatch)
@@ -360,7 +417,7 @@ def test_a_cut_or_damaged_v1_file_fails_authentication_not_the_purge(
 def test_an_openssl_failure_after_a_good_tag_names_the_runner(tmp_path, monkeypatch, kind):
     """Mutation: drop `_replace`'s `CalledProcessError` handler, and a traceback replaces the
     `::error::` line."""
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
     ciphertext = f.read_bytes()
     _failing_openssl(monkeypatch, subprocess.CalledProcessError(1, ["openssl"]))
     with pytest.raises(SystemExit) as exc:
@@ -373,7 +430,7 @@ def test_an_openssl_failure_after_a_good_tag_names_the_runner(tmp_path, monkeypa
 @pytest.mark.parametrize("kind", KINDS)
 def test_a_missing_openssl_prints_an_error_not_a_traceback(tmp_path, monkeypatch, kind):
     """Mutation: delete `_replace`'s `except OSError` clause, and FileNotFoundError escapes."""
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
     _failing_openssl(monkeypatch, FileNotFoundError(2, "No such file or directory", "openssl"))
     with pytest.raises(SystemExit) as exc:
         _decrypt(kind, f)
@@ -459,7 +516,7 @@ def test_decrypt_plan_without_passphrase_refuses(tmp_path, monkeypatch):
 
 def test_decrypt_state_without_passphrase_refuses(tmp_path, monkeypatch):
     """Mutation: delete `_decrypt`'s `_require_passphrase` call."""
-    f = _encrypted(tmp_path, monkeypatch, STATE)
+    f = _encrypted(tmp_path, monkeypatch, STATE, "state")
     monkeypatch.delenv("PLAN_PASSPHRASE", raising=False)
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt_state(str(f), KEY)

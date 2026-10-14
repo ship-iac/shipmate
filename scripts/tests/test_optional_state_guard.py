@@ -110,7 +110,7 @@ if [ ! -s "$STATE_PATH" ]; then
   echo "skip=true" >> "$GITHUB_OUTPUT"
   exit 0
 fi
-python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt "$STATE_PATH"
+python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt-state "$STATE_PATH" "$KEY"
 """
 
 _KEY = (
@@ -158,7 +158,11 @@ _STATE_STEPS = [
         "id": "encrypt",
         "if": "${{ inputs.mode == 'save' }}",
         "shell": "bash",
-        "env": {"PLAN_PASSPHRASE": "${{ inputs.passphrase }}", "STATE_PATH": "${{ inputs.path }}"},
+        "env": {
+            "PLAN_PASSPHRASE": "${{ inputs.passphrase }}",
+            "STATE_PATH": "${{ inputs.path }}",
+            "KEY": _KEY,
+        },
         "run": _ENCRYPT_RUN,
     },
     {
@@ -220,6 +224,7 @@ def _encrypt(tmp_path, content):
         "GITHUB_OUTPUT": str(out),
         "GITHUB_ACTION_PATH": "/action",
         "CALLS": str(calls),
+        "KEY": "state/app-net/dev-eu/123-1",
     }
     r = run_step(tmp_path, harness, env)
     argv = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else None
@@ -239,10 +244,16 @@ def test_an_empty_or_absent_state_file_is_skipped_not_encrypted(tmp_path):
 
 @bash_only
 def test_a_state_file_is_encrypted_in_place(tmp_path):
-    """Mutation: `exit 0` before the `plan-crypt` line, and the save stores plaintext."""
+    """Mutations: `exit 0` before the `plan-crypt` line, and the save stores plaintext; `encrypt`
+    in place of `encrypt-state`; drop `"$KEY"`."""
     r, outputs, argv = _encrypt(tmp_path, b'{"version": 4}')
     assert (r.returncode, outputs, argv) == (
         0,
         {},
-        ["/action/../../scripts/plan-crypt", "encrypt", str(tmp_path / "terraform.tfstate")],
+        [
+            "/action/../../scripts/plan-crypt",
+            "encrypt-state",
+            str(tmp_path / "terraform.tfstate"),
+            "state/app-net/dev-eu/123-1",
+        ],
     )

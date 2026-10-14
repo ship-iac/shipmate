@@ -2756,15 +2756,19 @@ uploaded artifact. `plan-cell` (in `plan.yml`) encrypts the plan with its
 required `plan-passphrase` input before upload, in the shipmate-crypt-v1 format
 `scripts/plan-crypt` defines: the 18-byte header `shipmate-crypt-v1` and a
 newline, a 16-byte random salt, the output of `openssl enc -aes-256-ctr -pbkdf2
--iter 1 -md sha256 -salt`, and an HMAC-SHA256 tag over the three. One
+-iter 1 -md sha256 -nosalt`, and an HMAC-SHA256 tag over the three. One
 PBKDF2-HMAC-SHA256 derivation of 600,000 iterations over the passphrase and the
-salt yields both the cipher key, which reaches openssl in its environment and
-never on the command line, and the tag key. AES-256-CTR is unauthenticated: a
-wrong key or a damaged byte decrypts to garbage without an error. So each
+salt yields the cipher key, which reaches openssl in its environment and never
+on the command line, and the tag key, each labelled with the file's kind, plan
+or state, so neither authenticates as the other. A state entry's tag also
+covers its cache prefix, `state/<stack>/<env>/`, so an entry copied under
+another stack's or environment's key refuses. AES-256-CTR is unauthenticated:
+a wrong key or a damaged byte decrypts to garbage without an error. So each
 decrypt verifies the tag before openssl reads the file, and a plan artifact
 that fails refuses at `Decrypt reviewed plan artifact`, before any apply step,
-and a cached state entry at the state restore (§State backend). `apply-cell` decrypts the plan after download on every apply
-path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
+and a cached state entry at the state restore (§State backend). `apply-cell`
+decrypts the plan after download on every apply path: both paths pass it as
+the `SHIPMATE_PLAN_PASSPHRASE` secret into the
 reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
 forms. The same cipher and secret encrypt a local backend's cached state

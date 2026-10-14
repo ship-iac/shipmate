@@ -806,7 +806,7 @@ merge, open a new pull request touching the stack.
 
 ### `plan artifact ... cannot be read`
 
-The apply cell could not open or size its reviewed plan artifact; the error at
+The apply cell could not open its reviewed plan artifact; the error at
 the end of the message says why. Nothing was applied.
 
 - **The artifact downloaded without `stack.otplan`.** No earlier step reports
@@ -899,16 +899,17 @@ secret, never by deleting. Check the causes in this order:
   cell saved the entry and a plan or drift cell restores it. Set
   `<env>-plan`'s value to `<env>-apply`'s, never the reverse, then re-plan or
   re-run the drift sweep.
-- **The entry is corrupt, truncated or altered.** Neither of the above holds.
+- **The entry is corrupt, truncated or altered**, or was copied under
+  another stack's or environment's key. Neither of the above holds.
   Another cell restoring its own entry proves nothing, because entries are per
   stack and environment. Delete the named entry, last:
   `gh cache delete <key> --repo <owner>/<repo>`.
 
 Deleting has a cost. The restore then uses the next-older entry under the
 prefix if one survives (entries unused for 7 days are evicted), or none, so the
-stack is in the state of a lost save. Recover it with §`The apply step ran and
-its state was not saved` from its step (2), using the run id the deleted key
-ends with (`<run_id>-<run_attempt>`); that run's log may have expired.
+stack is in the state §`The apply step ran and its state was not saved`
+describes, for the run whose id the deleted key ends with
+(`<run_id>-<run_attempt>`); that run's log may have expired.
 
 ### `could not install python3-yaml`, or `the engine needs PyYAML`
 
