@@ -101,8 +101,10 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "decrypt",
-            "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
-            "artifact, another passphrase or key derivation, or an openssl error); re-plan",
+            "plan artifact could not be decrypted: with no passphrase, forward "
+            "SHIPMATE_PLAN_PASSPHRASE to the apply job; a plaintext or corrupt artifact, or one "
+            "encrypted with another passphrase or key derivation, needs a re-plan; an openssl "
+            "error is in the job log",
             id="decrypt",
         ),
         pytest.param(
@@ -127,7 +129,7 @@ _ALL_SUCCESS = {
         pytest.param(
             "plan_digest",
             "the stored plan does not render to the plan text that was reviewed, or tofu cannot "
-            "read it (the tofu version changed); re-plan",
+            "read it (a tofu or provider version changed); re-plan",
             id="plan_digest",
         ),
     ],
@@ -201,8 +203,10 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
     cell = _run_compose(monkeypatch, tmp_path, decrypt="failure", restore="failure")
     assert cell["result"] == "blocked"
     assert cell["reason"] == (
-        "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
-        "artifact, another passphrase or key derivation, or an openssl error); re-plan"
+        "plan artifact could not be decrypted: with no passphrase, forward "
+        "SHIPMATE_PLAN_PASSPHRASE to the apply job; a plaintext or corrupt artifact, or one "
+        "encrypted with another passphrase or key derivation, needs a re-plan; an openssl "
+        "error is in the job log"
     )
 
 

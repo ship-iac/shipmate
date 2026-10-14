@@ -28,8 +28,10 @@ FAILSAFES = [
     (
         "DECRYPT_OUTCOME",
         (
-            "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
-            "artifact, another passphrase or key derivation, or an openssl error); re-plan"
+            "plan artifact could not be decrypted: with no passphrase, forward "
+            "SHIPMATE_PLAN_PASSPHRASE to the apply job; a plaintext or corrupt artifact, or one "
+            "encrypted with another passphrase or key derivation, needs a re-plan; an openssl "
+            "error is in the job log"
         ),
     ),
     (
@@ -50,7 +52,7 @@ FAILSAFES = [
         "PLAN_DIGEST_OUTCOME",
         (
             "the stored plan does not render to the plan text that was reviewed, or tofu cannot "
-            "read it (the tofu version changed); re-plan"
+            "read it (a tofu or provider version changed); re-plan"
         ),
     ),
 ]

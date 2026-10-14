@@ -12,9 +12,9 @@ refuses an unsalted (plaintext) file.
 
 AES-256-CTR is an unauthenticated stream cipher: a WRONG passphrase, or a file
 written with another key derivation, decrypts to garbage WITH EXIT 0 -- it does
-NOT error. So each decrypt checks its own result: a plan must start with the zip
-header, state must parse as OpenTofu state (CONTRACT.md §Plan artifact
-encryption).
+NOT error. So each decrypt checks its result before it replaces the ciphertext: a
+plan must be a zip archive or OpenTofu's encrypted-plan envelope, state must parse
+as OpenTofu state (CONTRACT.md §Plan artifact encryption).
 """
 
 import json
@@ -23,7 +23,7 @@ import subprocess
 import sys
 
 MAGIC = b"Salted__"  # openssl salted-header prefix (first 8 bytes)
-PLAN_MAGIC = b"PK\x03\x04"  # zip local-file header: an OpenTofu plan file is a zip archive
+PLAN_MAGIC = b"PK\x03\x04"  # zip local-file header: a plaintext OpenTofu plan is a zip archive
 _REPLAN = (
     "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
 )
@@ -43,10 +43,10 @@ def _is_encrypted(path):
     return _starts_with(path, MAGIC)
 
 
-def _openssl(path, *, decrypt):
+def _openssl(path, *, decrypt, accept=None):
     # The ONLY place the openssl flags live (coupling: plan-cell <-> apply-cell).
-    # openssl enc cannot read and write the same file, so go via a temp sibling
-    # then atomic-replace. -pass env: keeps the secret out of argv.
+    # openssl enc cannot read and write the same file, so go via a temp sibling, checked
+    # by `accept` before the atomic replace. -pass env: keeps the secret out of argv.
     tmp = path + ".crypt.tmp"
     args = [
         "openssl",
@@ -68,7 +68,11 @@ def _openssl(path, *, decrypt):
     if decrypt:
         args.insert(2, "-d")
     subprocess.run(args, check=True)  # noqa: S603, S607 - fixed argv, no shell; secret via env, openssl is a runner prereq
+    if accept and not accept(tmp):
+        os.remove(tmp)
+        return False
     os.replace(tmp, path)
+    return True
 
 
 def _require_passphrase():
@@ -102,8 +106,9 @@ def encrypt(path):
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on plaintext, and on a result that is not a zip archive
-    (another passphrase or key derivation, or a corrupt artifact). Never prints the file.
+    Refuses without a passphrase, on plaintext, and on a result that is neither a zip
+    archive nor OpenTofu's encrypted-plan envelope (another passphrase or key derivation,
+    or a corrupt artifact), leaving the ciphertext in place. Never prints the file.
     """
     _require_passphrase()
     if not _is_encrypted(path):
@@ -111,8 +116,7 @@ def decrypt(path):
             "::error::plan artifact is plaintext; refusing to apply an unencrypted plan. "
             f"Re-plan to produce an encrypted plan: {_REPLAN}"
         )
-    _openssl(path, decrypt=True)
-    if not _starts_with(path, PLAN_MAGIC):
+    if not _openssl(path, decrypt=True, accept=_is_plan):
         raise SystemExit(
             "::error::plan artifact does not decrypt to an OpenTofu plan: "
             "SHIPMATE_PLAN_PASSPHRASE or the key derivation differs from the one that encrypted "
@@ -121,14 +125,23 @@ def decrypt(path):
         )
 
 
-def _is_state(path):
+def _json_keys(path):
     with open(path, "rb") as fh:
         try:
             doc = json.loads(fh.read())
         except ValueError:
-            return False
+            return set()
+    return set(doc) if isinstance(doc, dict) else set()
+
+
+def _is_plan(path):
+    # OpenTofu's own plan encryption writes a JSON envelope holding `encryption_version`.
+    return _starts_with(path, PLAN_MAGIC) or "encryption_version" in _json_keys(path)
+
+
+def _is_state(path):
     # OpenTofu's own state encryption writes `encryption_version` in place of `version`.
-    return isinstance(doc, dict) and ("version" in doc or "encryption_version" in doc)
+    return bool(_json_keys(path) & {"version", "encryption_version"})
 
 
 def decrypt_state(path, cache_key):
@@ -136,7 +149,8 @@ def decrypt_state(path, cache_key):
 
     Refuses without a passphrase, on a plaintext entry, and on a result that is not a
     JSON object with `version` or `encryption_version` (saved with another passphrase or
-    key derivation, or a corrupt entry). Never prints the file's contents.
+    key derivation, or a corrupt entry), leaving the ciphertext in place. Never prints the
+    file's contents.
     """
     _require_passphrase()
     prefix = cache_key.rpartition("/")[0] + "/"
@@ -149,8 +163,7 @@ def decrypt_state(path, cache_key):
             "A sample stack's null and random resources re-create; a real resource can "
             "collide with or be duplicated by its re-creation."
         )
-    _openssl(path, decrypt=True)
-    if not _is_state(path):
+    if not _openssl(path, decrypt=True, accept=_is_state):
         raise SystemExit(
             f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state: it "
             "was saved with another SHIPMATE_PLAN_PASSPHRASE or another key derivation, or it is "

@@ -782,7 +782,8 @@ before any apply step, and its `apply / <stack> / <env>` check stays pending.
 - **`plan artifact is plaintext`.** The artifact carries no `Salted__` header:
   it was uploaded unencrypted.
 - **`plan artifact does not decrypt to an OpenTofu plan`.** The decrypted file
-  is not a zip archive, which every OpenTofu plan file is. AES-256-CTR decrypts
+  is neither a zip archive, which an OpenTofu plan file is, nor the JSON
+  envelope OpenTofu's own plan encryption writes. AES-256-CTR decrypts
   with any key, so the cause is a `SHIPMATE_PLAN_PASSPHRASE` that differs from
   the one that encrypted the plan, a plan encrypted with another key derivation
   (by an earlier engine release, [`../CONTRACT.md`](../CONTRACT.md) §Plan

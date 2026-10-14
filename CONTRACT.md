@@ -2754,9 +2754,10 @@ required `plan-passphrase` input before upload, using a single symmetric cipher:
 supplied via `-pass env:` (never on the command line). The key derives with
 600,000 PBKDF2-SHA256 iterations, so a plan artifact or cached state entry
 written with another passphrase or any other count or digest decrypts to
-garbage, without an error. Each decrypt therefore checks its result: a plan
-that does not start with the zip header an OpenTofu plan file carries refuses
-at `Decrypt reviewed plan artifact`, before any apply step, and a cached state
+garbage, without an error. Each decrypt therefore checks its result before it
+replaces the ciphertext: a plan that is neither a zip archive (an OpenTofu plan
+file) nor, under OpenTofu's own plan encryption, its JSON envelope refuses at
+`Decrypt reviewed plan artifact`, before any apply step, and a cached state
 entry that does not parse as OpenTofu state refuses at the state restore
 (§State backend). `apply-cell` decrypts the plan after download on every apply
 path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the

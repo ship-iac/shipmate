@@ -4,9 +4,14 @@ import pytest
 from _loader import load_script, step_by
 
 pcx = load_script("plan-crypt")
-
-# An OpenTofu plan file is a zip archive; decrypt refuses a result without its header.
+# A plaintext OpenTofu plan is a zip archive, so the payload carries the zip local-file header.
+# A plaintext OpenTofu plan is a zip archive; decrypt refuses a result without its header.
 PLAIN = b"PK\x03\x04SECRET_PLAN_BODY\nresource null_resource.x {}\n"
+# The top-level keys, in order, of a plan OpenTofu v1.12.4 writes under an
+# `encryption { plan { ... } }` block (pbkdf2 key provider, aes_gcm method); values shortened.
+ENVELOPE = (
+    b'{"meta":{"key_provider.pbkdf2.k":"e30="},"encrypted_data":"AAAA","encryption_version":"v0"}'
+)
 STATE = b'{"version":4,"serial":1}'
 KEY = "state/app-net/dev-eu/123-1"
 UNSET = (
@@ -47,7 +52,8 @@ def test_encrypt_with_passphrase_writes_salted_header(tmp_path, monkeypatch):
 
 
 def test_round_trip_with_correct_passphrase(tmp_path, monkeypatch):
-    """Mutation: `decrypt=False` in decrypt's `_openssl` call, and the plan is encrypted twice."""
+    """Mutations: `decrypt=False` in decrypt's `_openssl` call, and the plan is encrypted twice;
+    drop the zip branch from `_is_plan`."""
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
     pcx.decrypt(str(f))
     assert f.read_bytes() == PLAIN
@@ -69,20 +75,75 @@ _NOT_A_PLAN = (
 )
 
 
-def test_decrypt_refuses_a_default_iteration_ciphertext(tmp_path, monkeypatch):
-    """The bytes left behind show decrypt derived the 600,000-iteration key, not 10,000.
-
-    Mutations: `return` before decrypt's `_openssl` call; drop `-iter`/`600000` from `_openssl`,
-    and OpenSSL's default 10,000 recovers the plan; delete decrypt's zip-header check.
-    """
+def test_decrypt_refuses_a_default_iteration_ciphertext_and_keeps_it(tmp_path, monkeypatch):
+    """Mutations: drop `-iter`/`600000` from `_openssl`, and OpenSSL's default 10,000 recovers
+    the plan; pass no `accept` from decrypt; `os.replace` before the `accept` check, and the
+    garbage replaces the ciphertext."""
     monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    plain, f, expected = _write(tmp_path), tmp_path / "old.otplan", tmp_path / "expected"
+    plain, f = _write(tmp_path), tmp_path / "old.otplan"
     _raw_openssl(plain, f, "-iter", "10000")
-    _raw_openssl(f, expected, "-d", "-iter", "600000")
+    ciphertext = f.read_bytes()
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(f))
     assert exc.value.code == _NOT_A_PLAN
-    assert f.read_bytes() == expected.read_bytes() != PLAIN
+    assert f.read_bytes() == ciphertext
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["old.otplan", "stack.otplan"]
+
+
+def test_decrypt_accepts_a_600000_iteration_sha256_ciphertext(tmp_path, monkeypatch):
+    """Mutations: `-iter 600001` or `-md sha512` in `_openssl`, and the plan no longer decrypts."""
+    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    plain, f = _write(tmp_path), tmp_path / "new.otplan"
+    _raw_openssl(plain, f, "-iter", "600000")
+    pcx.decrypt(str(f))
+    assert f.read_bytes() == PLAIN
+
+
+def test_decrypt_accepts_an_opentofu_encrypted_plan(tmp_path, monkeypatch):
+    """Mutation: drop the `encryption_version` branch from `_is_plan`."""
+    f = _encrypted(tmp_path, monkeypatch, ENVELOPE)
+    pcx.decrypt(str(f))
+    assert f.read_bytes() == ENVELOPE
+
+
+_ARGV = [
+    "openssl",
+    "enc",
+    "-aes-256-ctr",
+    "-pbkdf2",
+    "-iter",
+    "600000",
+    "-md",
+    "sha256",
+    "-salt",
+    "-in",
+    "{path}",
+    "-out",
+    "{path}.crypt.tmp",
+    "-pass",
+    "env:PLAN_PASSPHRASE",
+]
+
+
+def test_openssl_argv_is_exactly_this(tmp_path, monkeypatch):
+    """OpenSSL's defaults equal some of these flags, so only the recorded argv pins them.
+
+    Mutations: drop `-md sha256` from `_openssl`; drop `-iter 600000`; move decrypt's `-d`.
+    """
+    calls = []
+
+    def fake_run(args, check):
+        calls.append(args)
+        with open(args[args.index("-out") + 1], "wb") as fh:
+            fh.write(b"Salted__" if "-d" not in args else PLAIN)
+
+    monkeypatch.setattr(pcx.subprocess, "run", fake_run)
+    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    path = str(_write(tmp_path))
+    pcx.encrypt(path)
+    pcx.decrypt(path)
+    argv = [a.replace("{path}", path) for a in _ARGV]
+    assert calls == [argv, argv[:2] + ["-d"] + argv[2:]]
 
 
 def test_encrypt_derives_the_key_with_600000_iterations(tmp_path, monkeypatch):
@@ -95,15 +156,16 @@ def test_encrypt_derives_the_key_with_600000_iterations(tmp_path, monkeypatch):
 
 
 def test_decrypt_wrong_passphrase_refuses(tmp_path, monkeypatch):
-    """CTR decrypts a wrong key to garbage with exit 0; the zip-header check refuses it.
+    """CTR decrypts a wrong key to garbage with exit 0; `_is_plan` refuses it.
 
-    Mutation: delete decrypt's zip-header check.
+    Mutation: pass no `accept` from decrypt.
     """
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(f))
     assert exc.value.code == _NOT_A_PLAN
+    assert f.read_bytes()[:8] == pcx.MAGIC
 
 
 def test_decrypt_refuses_a_zip_payload_that_is_not_a_plan(tmp_path, monkeypatch):
@@ -192,11 +254,13 @@ def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypa
 
 
 def test_decrypt_state_wrong_passphrase_refuses(tmp_path, monkeypatch):
-    """Mutation: delete decrypt_state's shape check."""
+    """Mutations: delete decrypt_state's shape check; `os.replace` before the `accept` check in
+    `_openssl`, and the garbage replaces the ciphertext."""
     f = _encrypted(tmp_path, monkeypatch, STATE)
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
     with pytest.raises(SystemExit, match=r"^::error::state cache entry .* does not decrypt"):
         pcx.decrypt_state(str(f), KEY)
+    assert f.read_bytes()[:8] == pcx.MAGIC
 
 
 def test_decrypt_state_of_encrypted_empty_file_refuses(tmp_path, monkeypatch):
