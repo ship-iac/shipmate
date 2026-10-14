@@ -34,8 +34,8 @@ call.
   one saved with another passphrase or key derivation, or a corrupt entry fails
   the restore, naming the matched cache key and the `gh cache` commands that
   recover. An openssl or disk failure on the runner fails it too; re-run the
-  job instead. A failed restore makes the cell skip its state save, so the entry is
-  never overwritten.
+  job instead. A failed restore makes the cell skip its state save, so the
+  entry is never overwritten.
 - The save leaves ciphertext in the workspace, so no step after it reads the
   state file.
 

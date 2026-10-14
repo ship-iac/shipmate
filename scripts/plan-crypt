@@ -17,14 +17,13 @@ plan must be a zip archive or OpenTofu's encrypted-plan envelope, state must par
 as OpenTofu state (CONTRACT.md §Plan artifact encryption).
 """
 
-import contextlib
 import json
 import os
 import subprocess
 import sys
 
 MAGIC = b"Salted__"  # openssl salted-header prefix (first 8 bytes)
-HEADER_LEN = 16  # `Salted__` + the 8-byte salt; openssl refuses a shorter input
+HEADER_LEN = 16  # openssl cannot decrypt an input shorter than `Salted__` plus its 8-byte salt.
 PLAN_MAGIC = b"PK\x03\x04"  # zip local-file header: a plaintext OpenTofu plan is a zip archive
 _REPLAN = (
     "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
@@ -43,15 +42,6 @@ def _passphrase():
 def _starts_with(path, magic):
     with open(path, "rb") as fh:
         return fh.read(len(magic)) == magic
-
-
-def _header(path):
-    """`truncated` below HEADER_LEN bytes whatever they hold, else `plaintext` or `salted`."""
-    with open(path, "rb") as fh:
-        head = fh.read(HEADER_LEN)
-    if len(head) < HEADER_LEN:
-        return "truncated"
-    return "salted" if head.startswith(MAGIC) else "plaintext"
 
 
 def _openssl(path, *, decrypt, failure, accept=None):
@@ -86,11 +76,18 @@ def _openssl(path, *, decrypt, failure, accept=None):
         return True
     except subprocess.CalledProcessError:
         raise SystemExit(failure) from None
-    except OSError as exc:  # no openssl on PATH, or the temp file could not be read or moved
+    # A missing openssl, or a temp file that cannot be read or moved, still prints ::error::.
+    except OSError as exc:
         raise SystemExit(f"{failure} Error: {exc}") from None
     finally:
-        with contextlib.suppress(OSError):
-            os.remove(tmp)
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                print(
+                    f"::error::could not remove the temporary file `{tmp}`; delete it, because "
+                    "after a decrypt it can hold the plaintext."
+                )
 
 
 def _require_passphrase():
@@ -116,16 +113,14 @@ def _purge_command(prefix):
 
 
 def encrypt(path):
-    """Encrypt in place, or refuse without a passphrase or without the file."""
+    """Encrypt in place, or refuse without a passphrase."""
     _require_passphrase()
-    if not os.path.isfile(path):
-        raise SystemExit(
-            f"::error::`{path}` cannot be encrypted: the file does not exist. The step that "
-            "writes it did not; its error is earlier in the job log."
-        )
+    # No remedy here: a plan cell re-plans, while an apply cell's state save must never be
+    # re-run, because the apply already ran. docs/troubleshooting.md splits the two.
     failure = (
-        f"::error::`{path}` could not be encrypted: openssl or the disk failed on the runner. "
-        + _RUNNER
+        f"::error::`{path}` could not be encrypted: openssl or the disk failed on the runner, "
+        "so it was not uploaded or saved. docs/troubleshooting.md says what to do for a plan "
+        "cell and for an apply cell's state save."
     )
     _openssl(path, decrypt=False, failure=failure)
 
@@ -140,13 +135,19 @@ def decrypt(path):
     prints the file.
     """
     _require_passphrase()
-    header = _header(path)
-    if header == "truncated":
+    try:
+        truncated = os.path.getsize(path) < HEADER_LEN
+        salted = _starts_with(path, MAGIC)
+    except OSError as exc:
+        raise SystemExit(
+            f"::error::plan artifact `{path}` cannot be read. Nothing was applied. Error: {exc}"
+        ) from None
+    if truncated:
         raise SystemExit(
             f"::error::plan artifact `{path}` is truncated: it is shorter than its {HEADER_LEN}-"
             f"byte salted header. Nothing was applied. Re-plan: {_REPLAN}"
         )
-    if header == "plaintext":
+    if not salted:
         raise SystemExit(
             "::error::plan artifact is plaintext; refusing to apply an unencrypted plan. "
             f"Re-plan to produce an encrypted plan: {_REPLAN}"
@@ -198,14 +199,21 @@ def decrypt_state(path, cache_key):
     _require_passphrase()
     prefix = cache_key.rpartition("/")[0] + "/"
     delete = f"gh cache delete {cache_key}{_repo_flag()}"
-    header = _header(path)
-    if header == "truncated":
+    try:
+        truncated = os.path.getsize(path) < HEADER_LEN
+        salted = _starts_with(path, MAGIC)
+    except OSError as exc:
+        raise SystemExit(
+            f"::error::state cache entry `{cache_key}` cannot be read. tofu was not run. "
+            f"Error: {exc}"
+        ) from None
+    if truncated:
         raise SystemExit(
             f"::error::state cache entry `{cache_key}` is truncated: it is shorter than its "
             f"{HEADER_LEN}-byte salted header. tofu was not run. `{delete}` deletes it, and the "
             "next restore uses the previous one."
         )
-    if header == "plaintext":
+    if not salted:
         raise SystemExit(
             f"::error::state cache entry `{cache_key}` is plaintext. Delete every entry under "
             f"its prefix, then re-run: `{_purge_command(prefix)}` (the restore matches by "

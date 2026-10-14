@@ -333,8 +333,8 @@ creates all of them, including `shipmate-engine` and its branch policy:
   yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
   then `shipmate doctor` reports that no active ruleset requires the gate.
 
-`max_parallel` in the environment table (default 10) caps how many cells one
-plan or drift sweep runs at once ([`../CONTRACT.md`](../CONTRACT.md)
+The top-level `max_parallel` key (default 10), beside `layout`, `identities`
+and `environments`, caps how many cells one plan or drift sweep runs at once ([`../CONTRACT.md`](../CONTRACT.md)
 §Environment table). Each plan and drift sweep running at the same time takes
 up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
 §"What it costs").

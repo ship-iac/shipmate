@@ -823,16 +823,20 @@ job, which clears a transient hosted-runner disk failure, or fix a self-hosted
 runner's openssl or disk, for example an openssl without `-pbkdf2` or `-iter`,
 or a full disk.
 
-### `... could not be encrypted: openssl or the disk failed on the runner`, or `... cannot be encrypted: the file does not exist`
+### `... could not be encrypted: openssl or the disk failed on the runner`
 
-A plan cell encrypting its plan before upload, or an apply cell saving state,
-refused; nothing was uploaded or saved.
+openssl or the disk failed on the runner; any openssl error is printed above
+the refusal. What to do depends on the step that refused:
 
-- **`the file does not exist`.** The step that writes the file did not, and its
-  own error is earlier in the job log. Fix that step's failure first.
-- **`openssl or the disk failed on the runner`.** Any openssl error is printed
-  above the refusal. Re-run the job, which clears a transient hosted-runner disk
-  failure, or fix a self-hosted runner's openssl or disk.
+- **A plan cell, encrypting its plan before upload.** Nothing was uploaded or
+  applied. Re-plan once the runner works; a transient hosted-runner disk
+  failure clears on its own, and a self-hosted runner needs its openssl or disk
+  fixed.
+- **An apply cell's `Save state`.** The apply already ran, and its advanced
+  state was not saved. Do not re-run the job: a re-run restores the pre-apply
+  cache entry and applies the stored plan again. The cell's apply check stays
+  pending and the apply comment shows it as not recorded
+  ([`../CONTRACT.md`](../CONTRACT.md) §Apply result comment).
 
 ### `state cache entry ... is plaintext`
 
@@ -857,9 +861,10 @@ cut off after its header decrypts and refuses as
 ### `state cache entry ... could not be decrypted: openssl or the disk failed on the runner`
 
 openssl or the disk failed on the runner, not the entry; any openssl error is
-printed above the refusal. Deleting the entry does not help. Re-run the job, which clears a transient
-hosted-runner disk failure, or fix a self-hosted runner's openssl or disk, for
-example an openssl without `-pbkdf2` or `-iter`, or a full disk.
+printed above the refusal. Deleting the entry does not help. Re-run the job,
+which clears a transient hosted-runner disk failure, or fix a self-hosted
+runner's openssl or disk, for example an openssl without `-pbkdf2` or `-iter`,
+or a full disk.
 
 ### `state cache entry ... does not decrypt to OpenTofu state`
 
