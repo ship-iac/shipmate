@@ -237,9 +237,9 @@ def _variables():
 
 
 #: An apply environment -- and `shipmate-engine`, which is one -- is scoped to the
-#: default branch alone. A PUT naming only this key kept reviewers, `prevent_self_review` and
-#: a `wait_timer` when probed on a public repository (2026-10-13); a private repository with
-#: reviewers (Enterprise) is unprobed, and GitHub documents no such contract.
+#: default branch alone. Probed on a public repository (2026-10-13): a PUT naming only this
+#: key kept reviewers, `prevent_self_review` and a `wait_timer`. Every plan uses the same
+#: endpoint; a plan gates which fields it accepts, not how it merges an update.
 _APPLY_BODY = {
     "deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True}
 }

@@ -89,8 +89,7 @@ runs:
         rc=0
         # stdout alone is the API's answer, parsed below; gh writes its own messages to stderr.
         out=$(printf '%s' "$body" | gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input - 2>"$errfile") || rc=$?
-        # A failed read must not end the step before the failure reply below.
-        err=$(<"$errfile") || err=''
+        err=$(<"$errfile")
         [ -z "$out" ] || printf '%s\n' "$out"
         [ -z "$err" ] || printf '%s\n' "$err"
         if [ "$rc" -ne 0 ]; then

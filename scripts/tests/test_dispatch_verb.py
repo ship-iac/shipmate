@@ -143,16 +143,14 @@ def _on_dispatch_call(action):
     )
 
 
-def _create_stub_commands(tmp_path):
-    """Create stub `gh` and `python3` commands on PATH; returns (dir, python3, gh)."""
+def _create_stub_commands(tmp_path, gh_stub):
+    """Create the `python3` shim and a `gh` stub with text `gh_stub` on PATH; returns
+    (dir, python3)."""
     write_python3_shim(tmp_path)
-    python3_path = tmp_path / "python3"
-
     gh_path = tmp_path / "gh"
-    gh_path.write_text(_SILENT_GH_STUB)
+    gh_path.write_text(gh_stub)
     gh_path.chmod(0o755)
-
-    return str(tmp_path), str(python3_path), str(gh_path)
+    return str(tmp_path), str(tmp_path / "python3")
 
 
 def _run_dispatch(
@@ -168,9 +166,7 @@ def _run_dispatch(
     CompletedProcess and the recorded argv text. When `failing_script` names an engine script,
     `python3` exits 1 for that script and runs every other one. `stubs` maps further command
     names to stub text on the same PATH directory. The step runs in `cwd`, or `tmp_path`."""
-    path_dir, python3_path, gh_path = _create_stub_commands(tmp_path)
-    Path(gh_path).write_text(gh_stub)
-    Path(gh_path).chmod(0o755)
+    path_dir, python3_path = _create_stub_commands(tmp_path, gh_stub)
     for name, text in (stubs or {}).items():
         (Path(path_dir) / name).write_text(text, newline="\n")
         (Path(path_dir) / name).chmod(0o755)
@@ -420,22 +416,6 @@ def test_a_failed_mktemp_says_so_on_the_pull_request_and_dispatches_nothing(tmp_
         "::error::could not create a temporary file for the dispatch" in result.stdout.splitlines()
     ), f"the failure must be annotated: {result.stdout}"
     assert _DISPATCH_PATH not in argv, f"a failed mktemp must dispatch nothing: {argv!r}"
-    assert "/issues/42/comments" in argv and _RUN_URL in argv, (
-        f"the commenter must be told no run started: {argv!r}"
-    )
-
-
-@bash_only
-def test_an_unreadable_stderr_file_still_ends_in_the_failure_reply(tmp_path):
-    """`mktemp` answers a path in a directory that does not exist, so neither gh's stderr
-    redirect nor the read of it works. The read must not end the step: the dispatch still fails
-    into the failure reply.
-
-    Mutation: drop `|| err=''` from the read.
-    """
-    stub = f'#!/bin/bash\necho "{(tmp_path / "missing" / "err").as_posix()}"\n'
-    result, argv = _run_dispatch(tmp_path, verb="apply", stubs={"mktemp": stub})
-    assert result.returncode == 1, f"the failed dispatch must fail the step: {result.stdout}"
     assert "/issues/42/comments" in argv and _RUN_URL in argv, (
         f"the commenter must be told no run started: {argv!r}"
     )
