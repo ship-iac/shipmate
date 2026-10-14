@@ -147,8 +147,8 @@ def test_decrypt_without_openssl_prints_an_error_not_a_traceback(tmp_path, monke
 
 
 def test_encrypt_openssl_failure_names_no_re_run(tmp_path, monkeypatch):
-    """An apply cell's state save calls encrypt after the apply ran, where a re-run would apply
-    the stored plan again; the message names the cause and points at troubleshooting only.
+    """An apply cell's state save can call encrypt after its apply ran, where a re-run would
+    apply the stored plan again; the message names the cause and points at troubleshooting only.
 
     Mutation: append `_RUNNER` to encrypt's message.
     """
@@ -159,8 +159,9 @@ def test_encrypt_openssl_failure_names_no_re_run(tmp_path, monkeypatch):
         pcx.encrypt(str(f))
     assert exc.value.code == (
         f"::error::`{f}` could not be encrypted: openssl or the disk failed on the runner, so it "
-        "was not uploaded or saved. docs/troubleshooting.md says what to do for a plan cell and "
-        "for an apply cell's state save."
+        "was not uploaded or saved. docs/troubleshooting.md section `... could not be encrypted: "
+        "openssl or the disk failed on the runner` says what to do for a plan cell and for an "
+        "apply cell's state save."
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
 

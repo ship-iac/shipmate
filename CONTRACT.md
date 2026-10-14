@@ -2810,8 +2810,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   `docs/troubleshooting.md` for each remedy. For a zip plan that check reads
   only the decrypted file's first bytes: corruption further in, a plan cut off
   after its zip header included, fails later at the render step, on
-  `tofu show`. An OpenTofu-encrypted plan's JSON envelope is parsed whole. The
-  apply check stays pending in each case.
+  `tofu show`. For an OpenTofu-encrypted plan it only verifies that the file
+  parses as JSON holding `encryption_version`, so damage inside the encrypted
+  payload usually fails later at `tofu show` too. The apply check stays pending
+  in each case.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and

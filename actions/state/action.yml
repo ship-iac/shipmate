@@ -69,17 +69,13 @@ runs:
         STATE_PATH: ${{ inputs.path }}
       # AES-CTR keeps the length, so a saved 0-byte file would restore as empty, which
       # decrypt-state refuses. Encrypts in place: nothing after the save may read the file.
-      # Only apply-cell saves, after its apply ran, so a failed encrypt must forbid a re-run.
       run: |
         if [ ! -s "$STATE_PATH" ]; then
           echo "::notice::shipmate/actions/state: no state to save at $STATE_PATH (absent or empty)."
           echo "skip=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt "$STATE_PATH" || {
-          echo "::error::shipmate/actions/state: the apply already ran and its state was not saved. Do not re-run the job: a re-run applies the stored plan again against the pre-apply cache entry. See docs/troubleshooting.md."
-          exit 1
-        }
+        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt "$STATE_PATH"
     - name: Save state
       if: ${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

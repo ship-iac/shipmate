@@ -799,8 +799,10 @@ one of:
 - **The artifact is corrupt.** Re-plan. For a zip plan only damage that
   changes the decrypted file's first bytes refuses here: damage further in, a
   plan cut off after its zip header included, passes this check and fails
-  later at the render step, on `tofu show`. An OpenTofu-encrypted plan's JSON
-  envelope is parsed whole, so damage anywhere in it refuses here.
+  later at the render step, on `tofu show`. For an OpenTofu-encrypted plan the
+  check only verifies that the file parses as JSON holding
+  `encryption_version`: damage inside its encrypted payload usually passes and
+  fails later at `tofu show`.
 
 To re-plan on an open pull request, comment `shipmate plan` or push; after the
 merge, open a new pull request touching the stack.
@@ -808,10 +810,13 @@ merge, open a new pull request touching the stack.
 ### `plan artifact ... cannot be read`
 
 The apply cell could not open or size its reviewed plan artifact; the error at
-the end of the message says why. Nothing was applied. Either the download step
-did not write the file, and its own error is earlier in the job log, or the
-runner's disk failed: re-run the job, which runs before any apply step, or fix
-a self-hosted runner's disk.
+the end of the message says why. Nothing was applied.
+
+- **The artifact downloaded without `stack.otplan`.** No earlier step reports
+  it. Re-plan, as in §`plan artifact does not decrypt to an OpenTofu plan`; a
+  re-run downloads the same artifact.
+- **The runner's disk failed.** The refusal comes before any apply step, so a
+  re-run of the job is safe; a self-hosted runner needs its disk fixed.
 
 ### `plan artifact ... is truncated`
 
@@ -841,11 +846,15 @@ the refusal. What to do depends on the step that refused:
   applied. Re-plan once the runner works; a transient hosted-runner disk
   failure clears on its own, and a self-hosted runner needs its openssl or disk
   fixed.
-- **An apply cell's `Save state`.** The apply already ran, and its advanced
-  state was not saved. Do not re-run the job: a re-run restores the pre-apply
-  cache entry and applies the stored plan again. The cell's apply check stays
-  pending and the apply comment shows it as not recorded
-  ([`../CONTRACT.md`](../CONTRACT.md) §Apply result comment).
+- **An apply cell's `Save state`.** `Save state` runs even when the apply did
+  not, so look at the same job's `Apply the stored plan` step:
+  - **It ran**, whether it succeeded or failed after starting. Its advanced
+    state was not saved. Do not re-run the job: a re-run applies the stored
+    plan again against the cache entry from before the apply, or against no
+    state on a stack's first apply. The cell's apply check stays pending and
+    the apply comment shows it as not recorded
+    ([`../CONTRACT.md`](../CONTRACT.md) §Apply result comment).
+  - **It did not run.** Nothing was applied, so a re-run of the job is safe.
 
 ### `state cache entry ... is plaintext`
 
@@ -864,8 +873,8 @@ resource can collide with or be duplicated by its re-creation.
 The restore could not open or size the matched entry; the error at the end of
 the message says why. tofu was not run. Either the cache restore did not write
 the file, and its own error is earlier in the job log, or the runner's disk
-failed: re-run the job, since the restore runs before any apply step, or fix a
-self-hosted runner's disk.
+failed. The refusal comes before any apply step, so a re-run of the job is
+safe; a self-hosted runner needs its disk fixed.
 
 ### `state cache entry ... is truncated`
 

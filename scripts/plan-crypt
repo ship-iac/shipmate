@@ -115,12 +115,13 @@ def _purge_command(prefix):
 def encrypt(path):
     """Encrypt in place, or refuse without a passphrase."""
     _require_passphrase()
-    # No remedy here: a plan cell re-plans, while an apply cell's state save must never be
-    # re-run, because the apply already ran. docs/troubleshooting.md splits the two.
+    # No remedy here: a plan cell re-plans, and whether an apply cell's state save may be
+    # re-run depends on whether its apply ran. docs/troubleshooting.md splits the cases.
     failure = (
         f"::error::`{path}` could not be encrypted: openssl or the disk failed on the runner, "
-        "so it was not uploaded or saved. docs/troubleshooting.md says what to do for a plan "
-        "cell and for an apply cell's state save."
+        "so it was not uploaded or saved. docs/troubleshooting.md section `... could not be "
+        "encrypted: openssl or the disk failed on the runner` says what to do for a plan cell and "
+        "for an apply cell's state save."
     )
     _openssl(path, decrypt=False, failure=failure)
 
