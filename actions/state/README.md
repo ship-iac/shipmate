@@ -48,7 +48,7 @@ call.
 
 **State loss is acceptable**: this is a cache, not a source of truth, and
 GitHub cache entries can be evicted at any time. Sample-repo stacks use
-`null_resource`/`random_pet`, which re-create on a cache miss. For state lost
+`random_pet` and `terraform_data`, which re-create on a cache miss. For state lost
 after an apply, follow `docs/troubleshooting.md`
 §`The apply step ran and its state was not saved`. The small window
 for concurrent read/modify/write races is closed by the per-stack x environment

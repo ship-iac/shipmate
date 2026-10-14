@@ -987,8 +987,12 @@ restore matches by prefix, so deleting only the named entry restores the
 next-older one. Run the command, then re-run the cell.
 
 Deleting discards that state: OpenTofu no longer tracks the resources it
-recorded. A sample stack's null and random resources re-create; a real
-resource can collide with or be duplicated by its re-creation.
+recorded. A sample stack's `random_pet` and `terraform_data` resources
+re-create; a real resource can collide with or be duplicated by its
+re-creation. To keep a real resource, adopt it with an `import` block before
+applying the re-plan, as in steps 5 to 8 of §`The apply step ran and its state
+was not saved`; the deleted entries hold no apply log, so take each id from
+the provider.
 
 ### `state cache entry ... cannot be read`
 
