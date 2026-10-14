@@ -311,8 +311,12 @@ creates all of them, including `shipmate-engine` and its branch policy:
   on its own `environments.<name>` entry (§"Applying chosen environments
   without an approving review").
 
+  `max_parallel` (default 10) caps how many plan and drift cells run at once
+  ([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
+
   **A value can come from a GitHub variable.** Write `{vars: NAME}` in
-  place of any string, list items included
+  place of any string except `shared`, `explicit`, `gated` and `max_parallel`,
+  list items included
   (`apply: {vars: PROD_APPLY_ROLE}`), and define the name as a
   repository or organization variable. A resolved value is printed in job
   outputs and logs, so reference variables only, never secrets. Never define it

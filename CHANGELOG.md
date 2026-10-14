@@ -21,6 +21,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
+- **An apply cell refuses a plan artifact that does not decrypt to a plan file at its decrypt step with `plan artifact does not decrypt to an OpenTofu plan`, where tofu used to reject such a plan later, and a state cache entry openssl cannot decrypt refuses at the state restore, naming its cache key. `docs/troubleshooting.md` holds the remedies.**
 - **Every plan and drift sweep now runs at most 10 cell jobs at once, the `max_parallel` default, so one over 10 cells runs in batches; apply waves and unlock stay uncapped. A `shared: true` environment's reviewers or wait timer apply again to each batch of a plan or sweep over the cap.**
 - **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**
 - **`apply-complete` re-reads a lagging jobs listing after 2, 3 and 5 seconds and then every 10 seconds, instead of every 10 seconds from the first retry; the total sleep stays 110 seconds.**

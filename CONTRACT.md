@@ -2800,10 +2800,11 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Required.** An empty or unset passphrase refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
-- **Fail-safe on mismatch.** apply-cell refuses, with a re-plan instruction,
-  an artifact without the `Salted__` magic header and one that does not decrypt
-  to a plan file (a plan/apply value mismatch, a rotated passphrase, another key
-  derivation or a corrupt artifact; see above). The apply check stays pending.
+- **Fail-safe on mismatch.** apply-cell refuses an artifact without the
+  `Salted__` magic header, with a re-plan instruction, and one that does not
+  decrypt to a plan file, naming the causes (a plan/apply value mismatch, a
+  rotated passphrase, another key derivation or a corrupt artifact) and pointing
+  to `docs/troubleshooting.md` for each remedy. The apply check stays pending.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and
