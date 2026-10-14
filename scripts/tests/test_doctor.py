@@ -3827,16 +3827,17 @@ _NO_TRIGGER_TEXT = (
     "`shipmate.yml` declares no `workflow_dispatch` trigger, so every commented verb is "
     "authorized, reacted to with a rocket, and then dispatches nothing: GitHub answers the "
     "dispatch with `Workflow does not have 'workflow_dispatch' trigger`, no run is created, "
-    "and the pull request gets a comment saying the dispatch failed and linking the "
-    "comment-handling run that holds the error. Add the trigger, with its `verb`, "
+    "and the pull request gets a comment, when one can be posted, saying the dispatch failed "
+    "and linking the comment-handling run that holds the error. Add the trigger, with its `verb`, "
     "`environment`, `ref` and `pr_number` inputs (docs/getting-started.md)."
 )
 _NO_PR_NUMBER_TEXT = (
     "`shipmate.yml`'s `workflow_dispatch` trigger declares no `pr_number` input. "
     "`actions/dispatch` sends one body per verb, and GitHub refuses a body naming an input "
     "the workflow does not declare: `Unexpected inputs provided`, no run created, and the "
-    "pull request pointed at the comment-handling run by a comment saying the dispatch "
-    "failed. Declare `verb`, `environment`, `ref` and `pr_number` under the trigger's "
+    "pull request pointed at the comment-handling run by a comment, when one can be posted, "
+    "saying the dispatch failed. Declare `verb`, `environment`, `ref` and `pr_number` under "
+    "the trigger's "
     "`inputs:` (docs/getting-started.md)."
 )
 _REQUIRED_REF_TEXT = (

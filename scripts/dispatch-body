@@ -33,7 +33,10 @@ def main():
         # `shipmate apply`, which `apply.yml` runs across every pending environment.
         if os.environ.get("ENVIRONMENT"):
             inputs["environment"] = os.environ["ENVIRONMENT"]
-    print(json.dumps({"ref": os.environ["DISPATCH_REF"], "inputs": inputs}))
+    # `return_run_details` makes the API answer 200 with the started run's id, which the success
+    # reply links when it is a usable id; without it the answer is an empty 204.
+    body = {"ref": os.environ["DISPATCH_REF"], "inputs": inputs, "return_run_details": True}
+    print(json.dumps(body))
 
 
 if __name__ == "__main__":

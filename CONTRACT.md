@@ -1112,17 +1112,30 @@ repository with no `.github/workflows/shipmate.yml`, or one that declares no
 `workflow_dispatch` trigger or not the inputs a verb's dispatch sends, fails at
 dispatch time on that comment-handling run — for every verb alike, since they share the file. That
 run is not visible from the pull request, so every refusal in the dispatch step
-— an unwired verb, an unknown one, and a rejected API call alike — also posts a
-`🔴 failed:` reply there whose footer links the run. The run holds the error; the
-reply never carries the API's answer.
+— an unwired verb, an unknown one, and a rejected API call alike — also tries to
+post a `🔴 failed:` reply there whose footer links the run. The run holds the
+error; the failure reply never carries the API's answer. A failure reply that
+cannot be posted is a warning on the comment-handling run, and the step still
+fails with its own status. A dispatch that succeeded then tries to post the
+started-run reply, a `⚪` notice:
+
+- With a usable run id it reads `started [the <verb> run](<url>)`, linking the
+  run it started by a URL the engine builds from the `workflow_run_id` the API
+  returns (accepted only as 1 to 20 digits, never the API's `html_url`).
+- Without one it reads `started the <verb> run; it is listed in this
+  repository's Actions tab` and links no started run.
+- It may not be posted at all: the run has already started, so a reply that
+  fails is a warning on the comment-handling run, not a failure, and the pull
+  request gets nothing.
 
 Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
 header `### shipmate <verb>` (with `<env>` when the command named one, and
 `### shipmate` alone when the comment did not parse or named no known verb), a
-blank line, one verdict line, a blank line, and a footer linking the run. A
-refusal or a failure asks the commenter to act, so its footer carries the help
-hint:
+blank line, one verdict line, a blank line, and a footer linking the
+comment-handling run that posted the reply, never the run a dispatch started.
+A refusal or a failure asks the commenter to act, so its
+footer carries the help hint:
 
 ``[run](<run url>). Comment `shipmate help` for the available commands.``
 
@@ -1132,7 +1145,8 @@ The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
 `🔴 failed: <reason>` when it could not (an App token mint, a workflow
 dispatch, an errored read or decision of the commenter's permission), and
-`⚪ <text>` for a notice. `scripts/reply-comment` renders and posts all three.
+`⚪ <text>` for a notice, the dispatch's started-run reply included.
+`scripts/reply-comment` renders and posts all of them.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -1509,10 +1523,12 @@ lock is the same `s3:DeleteObject` on `…/terraform.tfstate.tflock` that taking
 one already requires, so a role that can apply an environment can already
 unlock it.
 
-It reports in the run, not in a comment — a comment would need
+The unlock run itself posts no comment — that would need
 `pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
-reaction confirms acceptance, per-cell detail lands in each job's step summary,
-and a failure reds the run.
+reaction confirms acceptance. The comment-handling run, which holds that
+permission, is the one that may post the started-run reply; §Comment-ops says
+when it is posted and when it links the unlock run. Per-cell detail lands in
+each job's step summary, and a failure reds the run.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
 reviewed plan may now be stale and the next apply refuses under the exact-plan
@@ -1818,9 +1834,9 @@ The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
 `.github/workflows/shipmate.yml`; `actions/dispatch` sends every commented verb
 to that literal filename, naming the verb in the dispatch body, so a renamed
-file is dispatched nowhere, and the pull request is told only that the dispatch
-failed, with the API's refusal left in the comment-handling run that comment
-links; and doctor keys on the exact name for its `pull_request_target`
+file is dispatched nowhere, and the pull request is at most told that the
+dispatch failed (§Comment-ops), with the API's refusal left in the
+comment-handling run; and doctor keys on the exact name for its `pull_request_target`
 exemption and for its `shipmate.yml` probe, which reads that one path.
 Rename the file and planning is refused from that commit on, the `shipmate.yml`
 probe reports it could not read `.github/workflows/shipmate.yml`, and the
@@ -2261,7 +2277,7 @@ failure-then-retry sequence stays visible as separate comments rather than
 overwriting the evidence of the failure — an audit trail. A run refused or
 cancelled at `apply.yml`'s `review` job (the pull request closed, re-pushed or
 turned draft since the comment) posts no comment and writes no gate: the red run
-is the only signal.
+is the signal. The started-run reply may link it (§Comment-ops says when).
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, one line or fold-out per row, the

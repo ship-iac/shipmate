@@ -78,7 +78,7 @@ def test_an_unknown_outcome_exits_non_zero_and_prints_nothing():
     assert result.returncode == 1
     assert result.stdout == ""
     assert result.stderr == (
-        "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed or notice (got: refuse)\n"
+        "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed, notice or started (got: refuse)\n"
     )
 
 
@@ -150,3 +150,64 @@ def test_any_argument_is_refused_before_any_work(monkeypatch, capsys, argv):
     case then posts, exit 0)."""
     assert _post(monkeypatch, *argv) == ("::error::usage: reply-comment", [])
     assert capsys.readouterr().out == ""
+
+
+_STARTED_RUN = "https://github.com/org/repo/actions/runs/38481239914"
+_NOT_LISTED = "started the apply run; it is listed in this repository's Actions tab"
+
+
+def _run_env(monkeypatch):
+    for key, value in {
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_REPOSITORY": "org/repo",
+        "GITHUB_RUN_ID": "7777",
+    }.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_a_started_run_is_linked_by_a_url_built_from_its_id(monkeypatch):
+    """The link is built from the id, on this repository.
+
+    Mutations: link `current_run_url()` (this run) instead of the id's run; drop the link.
+    """
+    _run_env(monkeypatch)
+    assert rc.started_text("apply", "38481239914") == (f"started [the apply run]({_STARTED_RUN})")
+
+
+@pytest.mark.parametrize(
+    "run_id",
+    ["", "abc", "123456789012345678901", "12\n", "-1", "1) [x](https://evil.example"],
+)
+def test_a_started_run_without_a_run_id_names_no_link(monkeypatch, run_id):
+    """Only 1 to 20 digits link: an id is bound into a markdown link.
+
+    Mutations: widen `_RUN_ID` to `[0-9]+` (the 21-digit case links); match with `match`
+    instead of `fullmatch` (the trailing-newline, 21-digit and breakout cases link); drop the
+    `is_run_id` check (every case links).
+    """
+    _run_env(monkeypatch)
+    assert rc.started_text("apply", run_id) == _NOT_LISTED
+
+
+def test_a_started_run_carries_the_white_circle_and_no_hint():
+    """Mutation: give `started` the help hint (`hint=outcome != "notice"`)."""
+    assert rc.body("plan", "", "started", "started x", _RUN_URL) == (
+        f"### shipmate plan\n\n⚪ started x\n\n[run]({_RUN_URL})"
+    )
+
+
+def test_main_posts_the_started_text_and_ignores_the_reply_text(monkeypatch):
+    """`started` reads the run id, not `SHIPMATE_REPLY_TEXT`.
+
+    Mutations: read `SHIPMATE_REPLY_TEXT` for `started` too; read the id from another variable.
+    """
+    monkeypatch.setenv("SHIPMATE_REPLY_RUN_ID", "38481239914")
+    code, calls = _post(monkeypatch, outcome="started")
+    body = (
+        f"### shipmate apply dev-eu\n\n⚪ started [the apply run]({_STARTED_RUN})"
+        f"\n\n[run]({_RUN_URL})"
+    )
+    assert code == 0
+    assert calls == [
+        ["gh", "api", "-X", "POST", "repos/org/repo/issues/42/comments", "-f", f"body={body}"]
+    ]

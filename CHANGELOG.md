@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Added
+
+- **A `shipmate plan`, `shipmate apply` or `shipmate unlock` whose dispatch succeeded posts a notice reply on the pull request: `started [the <verb> run](<url>)` when the dispatch answer carries a usable run id, otherwise one naming the Actions tab. A reply that cannot be posted is a warning.**
+
 ### Changed
 
 - **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**

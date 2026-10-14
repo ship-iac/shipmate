@@ -49,6 +49,7 @@ APP_KEY_NAME = "SHIPMATE_APP_PRIVATE_KEY"
 APP_ID_VAR = "SHIPMATE_APP_ID"
 _PR_NUMBER = re.compile(r"[1-9][0-9]{0,9}")
 _HEAD_SHA = re.compile(r"[0-9a-f]{40}")
+_RUN_ID = re.compile(r"[0-9]{1,20}")
 #: The default projection of `check_runs`: each check-run object whole.
 CHECK_RUNS_JQ = ".check_runs[]"
 
@@ -264,6 +265,12 @@ def is_pr_number(value):
     return _PR_NUMBER.fullmatch(value) is not None
 
 
+def is_run_id(value):
+    """Whether `value` is a workflow run id: 1 to 20 digits, bounded because it is bound into a
+    link."""
+    return _RUN_ID.fullmatch(value) is not None
+
+
 def is_head_sha(value):
     """Whether `value` is a str of exactly 40 lowercase hex characters."""
     return isinstance(value, str) and _HEAD_SHA.fullmatch(value) is not None
@@ -308,11 +315,12 @@ def named(items, cap):
     return listed
 
 
-def current_run_url():
-    """This workflow run's page, from the runner's default environment variables."""
+def current_run_url(run_id=None):
+    """The page of run `run_id` of this repository, or of this workflow run when it is None, from
+    the runner's default environment variables. `run_id` must already be checked (`is_run_id`)."""
+    run_id = os.environ["GITHUB_RUN_ID"] if run_id is None else run_id
     return (
-        f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
-        f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+        f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run_id}"
     )
 
 
