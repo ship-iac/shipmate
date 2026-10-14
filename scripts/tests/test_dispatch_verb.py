@@ -174,6 +174,9 @@ def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB):
     env["GITHUB_REPOSITORY"] = "org/repo"
     env["GITHUB_SERVER_URL"] = "https://github.com"
     env["GITHUB_RUN_ID"] = "7777"
+    # `mktemp` honours TMPDIR, so a temporary file the step leaves behind is visible here.
+    (tmp_path / "tmp").mkdir()
+    env["TMPDIR"] = str(tmp_path / "tmp")
 
     result = run_step(tmp_path, _extract_dispatch_run_block(), env)
     argv_file = tmp_path / "argv.txt"
@@ -331,13 +334,39 @@ def test_every_route_comment_ops_can_dispatch_is_accepted_here(tmp_path):
 
 @bash_only
 def test_dispatch_success_exits_zero(tmp_path):
-    """When gh succeeds, the script exits 0.
+    """When gh succeeds, the script exits 0, and the file holding gh's stderr is removed.
 
-    Mutation: make the wrapper return non-zero on success.
+    Mutations: make the wrapper return non-zero on success; drop the `rm -f "$errfile"`.
     """
     result, _ = _run_dispatch(tmp_path, verb="unlock", environment="dev-eu")
     assert result.returncode == 0, (
         f"success should exit 0, got {result.returncode}: {result.stderr}"
+    )
+    assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
+
+
+#: Fails the dispatch as gh does on a 4xx: the API's JSON error body on stdout, gh's own
+#: message on stderr. The reply call succeeds.
+_BODY_ON_STDOUT_STUB = (
+    "#!/bin/bash\n"
+    'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
+    """  echo '{"message":"Server Error","status":"500"}'\n"""
+    "  echo 'gh: Server Error (HTTP 500)' >&2\n"
+    "  exit 1\nfi; done\n"
+)
+
+
+@bash_only
+def test_a_failed_dispatch_prints_the_api_answer_to_the_log(tmp_path):
+    """gh writes a 4xx/5xx JSON error body to stdout, and the log is where the failure reply
+    sends the reader, so that body must print beside gh's stderr.
+
+    Mutation: drop `"$out"` from the `printf`.
+    """
+    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_BODY_ON_STDOUT_STUB)
+    assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
+    assert '{"message":"Server Error","status":"500"}' in result.stdout.splitlines(), (
+        f"the API's answer must reach the log: {result.stdout}"
     )
 
 

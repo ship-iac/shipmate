@@ -58,7 +58,8 @@ runs:
       run: |
         set -euo pipefail
         # reply <outcome> [text] [run id]: one reply on the pull request, with the workflow token.
-        # It never carries the API's answer, which has no bounded length.
+        # Of the API's answer, which has no bounded length, only the raw run id reaches it, and
+        # `reply-comment` links that id only once it checks it.
         reply() {
           GH_TOKEN="$COMMENT_TOKEN" SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME="$1" \
             SHIPMATE_REPLY_TEXT="${2-}" SHIPMATE_REPLY_RUN_ID="${3-}" python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
@@ -89,6 +90,7 @@ runs:
         errfile=$(mktemp)
         out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>"$errfile") || rc=$?
         err=$(<"$errfile")
+        rm -f "$errfile"
         printf '%s\n' "$out" "$err"
         if [ "$rc" -ne 0 ]; then
           # Measured, in order: an absent file answers 404, one with no such trigger `Workflow

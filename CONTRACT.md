@@ -1126,9 +1126,11 @@ Every reply comment-ops posts (a refusal or failure in place of running a
 command, or a notice posted alongside the dispatch it reports) has one shape: the
 header `### shipmate <verb>` (with `<env>` when the command named one, and
 `### shipmate` alone when the comment did not parse or named no known verb), a
-blank line, one verdict line, a blank line, and a footer linking the run. A
-refusal or a failure asks the commenter to act, so its footer carries the help
-hint:
+blank line, one verdict line, a blank line, and a footer linking the
+comment-handling run that posted the reply. A dispatch's started-run reply
+therefore carries two links: its verdict links the started run, its footer the
+comment-handling run. A refusal or a failure asks the commenter to act, so its
+footer carries the help hint:
 
 ``[run](<run url>). Comment `shipmate help` for the available commands.``
 
@@ -1519,7 +1521,8 @@ unlock it.
 The unlock run itself posts no comment — that would need
 `pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
 reaction confirms acceptance, the comment-handling run, which holds that
-permission, posts the dispatch's notice reply linking the unlock run (above),
+permission, posts the dispatch's notice reply, which links the unlock run when the
+dispatch answer carried a usable run id (above),
 per-cell detail lands in each job's step summary, and a failure reds the run.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
@@ -2268,8 +2271,10 @@ not upserted against a marker: every run's comment is new, so a
 failure-then-retry sequence stays visible as separate comments rather than
 overwriting the evidence of the failure — an audit trail. A run refused or
 cancelled at `apply.yml`'s `review` job (the pull request closed, re-pushed or
-turned draft since the comment) posts no comment and writes no gate: the red run,
-which the dispatch's notice reply links, is the signal.
+turned draft since the comment) posts no comment and writes no gate: the red run
+is the signal. The dispatch's notice reply links it when the dispatch answer
+carried a usable run id; otherwise the reply names the Actions tab, and a reply
+that could not be posted leaves only a warning on the comment-handling run.
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, one line or fold-out per row, the
