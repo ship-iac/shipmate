@@ -145,7 +145,7 @@ live probes.
   substituted by it, so a malformed or misplaced setting is reported on the pull
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
-  on by itself run here — the top-level keys, `layout` and the
+  on by itself run here — the top-level keys, `layout`, `max_parallel` and the
   environment entries; `tf_vars`-layout coverage and unused entries need a plan
   matrix or a whole-tree environment scan, and the verdict names them as
   unchecked. A valid file also gets its `needs`, `explicit` and `max_parallel` values read

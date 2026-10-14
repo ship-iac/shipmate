@@ -505,6 +505,17 @@ bounds how many stacks call one cloud account's APIs at once: each cell's
 per account. GitHub runs a matrix with `max-parallel: 0` unbounded, so 0
 refuses, and so does anything that is not a whole number from 1 to 256.
 
+**The cap costs repeated approvals on a protected environment.** A matrix with
+more cells than `max_parallel` reaches its environment in batches, and the
+environment's required reviewers and wait timer apply to each batch (probed on a
+public repository). Each wave is already its own job, so those rules already
+fire once per wave; the cap multiplies that by ⌈cells in the wave ÷
+`max_parallel`⌉. Apply waves and unlock bind `<env>-apply`; plans and drift
+sweeps bind `<env>-plan`, which carries no reviewers (§Env model); a shared
+environment binds its bare `<env>` on every path. A repository whose apply
+environments use reviewers or a wait timer raises `max_parallel` above its
+widest wave to approve each wave once.
+
 One quoting rule: a string value starting with `{`, `[`, `*`, `&`, `!` or `#`
 is quoted (`"{workload}-plan"`). Unquoted, YAML reads the character as syntax:
 `{` and `[` open a mapping or list, which is meant only in a reference
@@ -1659,6 +1670,8 @@ ever runs against a given stack × environment at a time, regardless of whether
 it was triggered by a pre-merge comment or a post-merge push. A second apply for
 the same cell queues behind the first rather than racing or cancelling it, and
 is then refused by the exact-plan fail-safe if the first advanced the state.
+A cell waiting on its group holds one of its wave's `max_parallel` slots, so
+other cells of that wave can wait behind it (probed on a public repository).
 
 ## Post-plan topology
 

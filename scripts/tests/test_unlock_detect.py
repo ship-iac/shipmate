@@ -126,7 +126,7 @@ def test_unlock_empty_queue_warns_that_nothing_was_probed(monkeypatch, tmp_path,
     out = _unlock_env(monkeypatch, tmp_path)
     _stub_unlock_tree(monkeypatch, _DEV_EU_CELLS, [_check(name="apply / stacks/app / dev-eu")])
     ud.main()
-    # Whole file: unlock.yml reads `cells` alone, so nothing else is written.
+    # Whole file: unlock.yml reads `cells` and `max_parallel`, so nothing else is written.
     assert out.read_text(encoding="utf-8") == "cells=[]\nmax_parallel=10\n"
     assert (
         "::warning::no cell in dev-eu has a pending apply check, so no lock was "

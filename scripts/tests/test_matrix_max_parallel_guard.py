@@ -15,6 +15,9 @@ _FROM_DETECT = "${{ fromJSON(needs.detect.outputs.max_parallel) }}"
 _FROM_INPUT = "${{ fromJSON(inputs.max_parallel) }}"
 
 #: The whole `strategy:` of every job in every engine workflow whose strategy holds a matrix.
+#: `fail-fast: false` everywhere: on unlock, one cell that cannot determine its lock state must
+#: not strand its siblings' locks. Unlock's matrix reads `cells`, the only list its detect
+#: writes; any other `needs.detect.outputs.*` reads '' and `fromJSON('')` fails.
 EXPECTED_STRATEGIES = {
     ("plan.yml", "plan"): {
         "fail-fast": False,

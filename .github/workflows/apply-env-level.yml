@@ -4,8 +4,8 @@ on:
     inputs:
       waves_json: { required: true, type: string }
       head_sha: { required: true, type: string }
-      # Every wave's `max-parallel`, a decimal 1..256 from the detect. GitHub runs a matrix with
-      # `max-parallel: 0` unbounded and fails the run on an empty one.
+      # Every wave's `max-parallel`: the detect's decimal from 1 to 256. GitHub runs a matrix
+      # with `max-parallel: 0` unbounded and fails the run on an empty value.
       max_parallel: { required: true, type: string }
     secrets:
       SHIPMATE_PLAN_PASSPHRASE:

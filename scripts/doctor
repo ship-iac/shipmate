@@ -1736,7 +1736,7 @@ CONFIG_NO_COMMIT = (
 # bill over the rest of the rules.
 CONFIG_VALID = _Rendered(
     f"`{CONFIG_PATH}` at the commit under examination parses, and passes every check a "
-    "file can be judged on by itself: its top-level keys, `layout`, the "
+    "file can be judged on by itself: its top-level keys, `layout`, `max_parallel`, the "
     "identities and the environment entries. Not checked here, for want of a plan matrix "
     "and a whole-tree environment scan: `tf_vars`-layout coverage of the planned "
     "environments, entries that no stack tags, workload tags outside an environment's "
@@ -1834,7 +1834,9 @@ def _config_defaults(table):
     order = ec.env_order(table)
     envs = ec.explicit_envs(table)
     cap = ec.max_parallel(table)
-    capped = "plan, apply wave, drift sweep and unlock"
+    cap_head = (
+        f"`max_parallel: {cap}`:" if "max_parallel" in table else "`max_parallel`: not set, so"
+    )
     shown = _fit_items(
         [f"{env} after {', '.join(preds) or 'nothing'}" for env, preds in sorted(order.items())],
         "; ",
@@ -1861,9 +1863,10 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            f"`max_parallel: {cap}`: each {capped} runs at most {cap} cell jobs at once."
-            if "max_parallel" in table
-            else f"`max_parallel`: not set, so each {capped} runs at most {cap} cell jobs at once.",
+            (
+                f"{cap_head} each plan, apply wave, drift sweep and unlock runs at most {cap} "
+                "cell jobs at once."
+            ),
         ),
     ]
 

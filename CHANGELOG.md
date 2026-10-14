@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
+- **Every plan, apply wave, drift sweep and unlock now runs at most 10 cell jobs at once, the `max_parallel` default. A wave wider than the cap reaches its environment in batches, and the environment's required reviewers and wait timer apply to each batch; a repository using them raises `max_parallel` above its widest wave.**
 - **The apply-path detect notice on the DAG shape reports how many stacks the widest wave level holds (`the widest level holds N stacks`), instead of how many would apply concurrently: at most `max_parallel` of them do.**
 - **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**
 - **`apply-complete` re-reads a lagging jobs listing after 2, 3 and 5 seconds and then every 10 seconds, instead of every 10 seconds from the first retry; the total sleep stays 110 seconds.**

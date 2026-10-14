@@ -489,8 +489,8 @@ def test_a_referenced_max_parallel_refuses_before_the_variable_is_read(written):
     found, so a reference anywhere in it refuses before it resolves.
 
     Mutations: delete the reference refusal in `load_config` -- "direct" validates as 7 and the
-    nested rows quote `'7'`; test only the value itself with `_is_reference` -- the nested rows
-    quote the resolved value.
+    nested rows quote the resolved value; test only the value itself with `_is_reference` -- the
+    nested rows quote the resolved value.
     """
     text = f"layout: folder\nmax_parallel: {written}\n"
     with pytest.raises(SystemExit) as excinfo:
