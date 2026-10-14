@@ -1187,12 +1187,12 @@ for exactly the exposure control 1 exists to limit.
   review (`gated: false`, or a gated environment under a ruleset that requires
   none), code in that apply can save a provider or state entry that other plan,
   drift and apply cells restore, in every environment and on every later pull
-  request. Nothing verifies a restored archive: the lock file verifies provider
-  packages, not the archive around them, and nothing verifies restored state.
-  Its encryption gives confidentiality, not integrity: AES-256-CTR is
-  unauthenticated, and the check that the entry decrypts to OpenTofu state
-  catches an entry saved with another passphrase or key derivation, or a
-  corrupt one, not who saved it.
+  request. Nothing verifies a restored provider archive: the lock file verifies
+  provider packages, not the archive around them. A restored state entry
+  carries an HMAC tag (`CONTRACT.md` §Plan artifact encryption), which detects
+  corruption and any entry written without the passphrase, not who wrote it:
+  code in an apply cell holds the passphrase, so an entry it saves verifies
+  like any other.
   Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
   write access and such an environment, or the App private key, which can
   approve a pull request and so opens any environment gated only by an approval

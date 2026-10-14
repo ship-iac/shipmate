@@ -1,30 +1,46 @@
 #!/usr/bin/env python3
 """Shared cipher for the plan artifact and the cached local state file.
 
-Single definition of the openssl invocation so plan-cell (require first, encrypt
-before upload), apply-cell (decrypt after download) and actions/state (encrypt before
-save, decrypt after restore) can never drift. The openssl flags live ONLY here.
+Single definition of the cipher so plan-cell (require first, encrypt before upload),
+apply-cell (decrypt after download) and actions/state (encrypt before save, decrypt after
+restore) can never drift. The openssl flags and the key derivation live ONLY here.
 
-Cipher: openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -md sha256 -salt,
-passphrase from the PLAN_PASSPHRASE env var (never argv). The passphrase is
-required: every operation refuses when it is empty or unset, and every decrypt
-refuses an unsalted (plaintext) file.
+Format shipmate-crypt-v1: MAGIC || salt || body || tag.
 
-AES-256-CTR is an unauthenticated stream cipher: a WRONG passphrase, or a file
-written with another key derivation, decrypts to garbage WITH EXIT 0 -- it does
-NOT error. So each decrypt checks its result before it replaces the ciphertext: a
-plan must be a zip archive or OpenTofu's encrypted-plan envelope, state must parse
-as OpenTofu state (CONTRACT.md §Plan artifact encryption).
+- MAGIC is `shipmate-crypt-v1\\n` (18 bytes); a later format bumps the digit.
+- salt is 16 random bytes. master = PBKDF2-HMAC-SHA256(passphrase, salt, 600,000
+  iterations, 32 bytes); enc_key and mac_key are HMAC-SHA256(master, "shipmate-crypt-v1
+  enc") and HMAC-SHA256(master, "shipmate-crypt-v1 mac").
+- body is the output of `openssl enc -aes-256-ctr -pbkdf2 -iter 1 -md sha256 -salt`
+  (`Salted__`, openssl's 8-byte salt, the ciphertext), with enc_key's hex as openssl's
+  passphrase, passed in the child's environment, never argv.
+- tag is HMAC-SHA256(mac_key, MAGIC || salt || body), 32 bytes.
+
+The passphrase comes from the PLAN_PASSPHRASE env var and is required: every operation
+refuses when it is empty or unset.
+
+AES-256-CTR is unauthenticated: a wrong key or a damaged byte decrypts to garbage WITH
+EXIT 0. So a decrypt checks, in this order, before openssl sees any byte: a file that
+starts with `Salted__` (every earlier release's ciphertext) or is plaintext (a zip, or a
+whole JSON object) refuses as not shipmate-crypt-v1; anything else that is not a whole v1
+file whose tag verifies refuses as failing authentication. Only then does openssl run.
 """
 
+import hashlib
+import hmac
 import json
 import os
+import secrets
 import subprocess
 import sys
 
-MAGIC = b"Salted__"  # openssl salted-header prefix (first 8 bytes)
-HEADER_LEN = 16  # openssl cannot decrypt an input shorter than `Salted__` plus its 8-byte salt.
-PLAN_MAGIC = b"PK\x03\x04"  # zip local-file header: a plaintext OpenTofu plan is a zip archive
+MAGIC = b"shipmate-crypt-v1\n"
+SALT_LEN = 16
+TAG_LEN = 32
+# MAGIC, salt, openssl's `Salted__` and its own 8-byte salt, then the tag.
+MIN_LEN = len(MAGIC) + SALT_LEN + 16 + TAG_LEN
+ITERATIONS = 600000
+KEY_VAR = "SHIPMATE_CRYPT_KEY"
 _REPLAN = (
     "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
 )
@@ -39,44 +55,50 @@ def _passphrase():
     return os.environ.get(ENV_VAR, "")
 
 
-def _starts_with(path, magic):
-    with open(path, "rb") as fh:
-        return fh.read(len(magic)) == magic
+def _keys(salt):
+    master = hashlib.pbkdf2_hmac("sha256", os.fsencode(_passphrase()), salt, ITERATIONS)
+    enc_key = hmac.new(master, b"shipmate-crypt-v1 enc", "sha256").digest()
+    mac_key = hmac.new(master, b"shipmate-crypt-v1 mac", "sha256").digest()
+    return enc_key, mac_key
 
 
-def _openssl(path, *, decrypt, failure, accept=None):
+def _tag(mac_key, data):
+    return hmac.new(mac_key, data, "sha256").digest()
+
+
+def _openssl(data, enc_key, *, decrypt):
     # The ONLY place the openssl flags live (coupling: plan-cell, apply-cell, actions/state).
-    # openssl enc cannot read and write the same file, so go via a temp sibling, checked
-    # by `accept` before the atomic replace. -pass env: keeps the secret out of argv.
-    tmp = path + ".crypt.tmp"
+    # The key travels in the child's environment alone: never argv, never this process's env.
     args = [
         "openssl",
         "enc",
         "-aes-256-ctr",
         "-pbkdf2",
         "-iter",
-        "600000",
+        "1",
         "-md",
         "sha256",
         "-salt",
-        "-in",
-        path,
-        "-out",
-        tmp,
         "-pass",
-        f"env:{ENV_VAR}",
+        f"env:{KEY_VAR}",
     ]
     if decrypt:
         args.insert(2, "-d")
+    env = {**os.environ, KEY_VAR: enc_key.hex()}
+    return subprocess.run(args, input=data, stdout=subprocess.PIPE, env=env, check=True).stdout  # noqa: S603, S607 - fixed argv, no shell; key via env, openssl is a runner prereq
+
+
+def _replace(path, transform, failure):
+    """Write `transform()` over `path` through a temp sibling and an atomic replace."""
+    tmp = path + ".crypt.tmp"
     try:
-        subprocess.run(args, check=True)  # noqa: S603, S607 - fixed argv, no shell; secret via env, openssl is a runner prereq
-        if accept and not accept(tmp):
-            return False
+        data = transform()
+        with open(tmp, "wb") as fh:
+            fh.write(data)
         os.replace(tmp, path)
-        return True
     except subprocess.CalledProcessError:
         raise SystemExit(failure) from None
-    # A missing openssl, or a temp file that cannot be read or moved, still prints ::error::.
+    # A missing openssl, or a temp file that cannot be written or moved, still prints ::error::.
     except OSError as exc:
         raise SystemExit(f"{failure} Error: {exc}") from None
     finally:
@@ -113,7 +135,7 @@ def _purge_command(prefix):
 
 
 def encrypt(path):
-    """Encrypt in place, or refuse without a passphrase."""
+    """Encrypt in place as shipmate-crypt-v1, or refuse without a passphrase."""
     _require_passphrase()
     # No remedy here: a plan cell re-plans, and whether an apply cell's state save may be
     # re-run depends on whether its apply ran. docs/troubleshooting.md splits the cases.
@@ -123,125 +145,120 @@ def encrypt(path):
         "encrypted: openssl or the disk failed on the runner` says what to do for a plan cell and "
         "for an apply cell's state save."
     )
-    _openssl(path, decrypt=False, failure=failure)
+
+    def sealed():
+        with open(path, "rb") as fh:
+            plaintext = fh.read()
+        salt = secrets.token_bytes(SALT_LEN)
+        enc_key, mac_key = _keys(salt)
+        head = MAGIC + salt + _openssl(plaintext, enc_key, decrypt=False)
+        return head + _tag(mac_key, head)
+
+    _replace(path, sealed, failure)
+
+
+def _is_pre_v1(data):
+    # A one-bit flip turns MAGIC's `s` into `{`, so only a whole JSON object reads as plaintext.
+    if data.startswith((b"Salted__", b"PK\x03\x04")):
+        return True
+    try:
+        return isinstance(json.loads(data), dict)
+    except ValueError:
+        return False
+
+
+def _decrypt(path, *, unreadable, no_header, unauthenticated, failure):
+    """The decrypt both artifact kinds share; each caller supplies its refusals."""
+    _require_passphrase()
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError as exc:
+        raise SystemExit(f"{unreadable} Error: {exc}") from None
+    if _is_pre_v1(data):
+        raise SystemExit(no_header)
+    if len(data) < MIN_LEN or not data.startswith(MAGIC):
+        raise SystemExit(unauthenticated)
+    enc_key, mac_key = _keys(data[len(MAGIC) : len(MAGIC) + SALT_LEN])
+    if not hmac.compare_digest(_tag(mac_key, data[:-TAG_LEN]), data[-TAG_LEN:]):
+        raise SystemExit(unauthenticated)
+    body = data[len(MAGIC) + SALT_LEN : -TAG_LEN]
+    _replace(path, lambda: _openssl(body, enc_key, decrypt=True), failure)
 
 
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on plaintext, on an artifact shorter than its salted
-    header, when openssl or the disk fails on the runner, and on a result that is neither a
-    zip archive nor OpenTofu's encrypted-plan envelope (another passphrase or key
-    derivation, or, for a zip plan, damage to its first bytes), leaving the ciphertext in
-    place. Never
-    prints the file.
+    Refuses without a passphrase, on an artifact that cannot be read, on one that is not
+    shipmate-crypt-v1 (plaintext, or an earlier release's ciphertext), on one that fails
+    authentication (another passphrase, corruption, truncation or alteration), and when
+    openssl or the disk fails on the runner, leaving the ciphertext in place. Never prints
+    the file.
     """
-    _require_passphrase()
-    try:
-        truncated = os.path.getsize(path) < HEADER_LEN
-        salted = _starts_with(path, MAGIC)
-    except OSError as exc:
-        raise SystemExit(
+    _decrypt(
+        path,
+        unreadable=(
             f"::error::plan artifact `{path}` cannot be read. Nothing was applied. An artifact "
             f"downloaded without stack.otplan needs a re-plan: {_REPLAN} For a disk failure on "
-            "the runner, the refusal comes before any apply step, so a re-run of the job is safe. "
-            f"Error: {exc}"
-        ) from None
-    if truncated:
-        raise SystemExit(
-            f"::error::plan artifact `{path}` is truncated: it is shorter than its {HEADER_LEN}-"
-            f"byte salted header. Nothing was applied. Re-plan: {_REPLAN}"
-        )
-    if not salted:
-        raise SystemExit(
-            "::error::plan artifact is plaintext; refusing to apply an unencrypted plan. "
-            f"Re-plan to produce an encrypted plan: {_REPLAN}"
-        )
-    failure = (
-        f"::error::plan artifact `{path}` could not be decrypted: openssl or the disk failed on "
-        f"the runner. Nothing was applied. {_RUNNER}"
+            "the runner, the refusal comes before any apply step, so a re-run of the job is safe."
+        ),
+        no_header=(
+            f"::error::plan artifact `{path}` is not a shipmate-crypt-v1 artifact: it was "
+            "uploaded unencrypted or encrypted by an earlier engine release. Nothing was "
+            f"applied. Re-plan: {_REPLAN}"
+        ),
+        unauthenticated=(
+            f"::error::plan artifact `{path}` failed authentication: it was encrypted with "
+            "another passphrase (a rotated one, or different values on <env>-plan and "
+            "<env>-apply), or it is corrupt, truncated or altered. Nothing was applied. "
+            "docs/troubleshooting.md section `plan artifact ... failed authentication` gives "
+            "each remedy."
+        ),
+        failure=(
+            f"::error::plan artifact `{path}` could not be decrypted: openssl or the disk failed "
+            f"on the runner. Nothing was applied. {_RUNNER}"
+        ),
     )
-    if not _openssl(path, decrypt=True, accept=_is_plan, failure=failure):
-        raise SystemExit(
-            "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with "
-            "another key derivation or a rotated passphrase, the plan and apply sides read "
-            "different SHIPMATE_PLAN_PASSPHRASE values, or it is corrupt. Nothing was applied. "
-            "docs/troubleshooting.md section `plan artifact does not decrypt to an OpenTofu "
-            "plan` gives each remedy."
-        )
-
-
-def _json_keys(path):
-    with open(path, "rb") as fh:
-        try:
-            doc = json.loads(fh.read())
-        except ValueError:
-            return set()
-    return set(doc) if isinstance(doc, dict) else set()
-
-
-def _is_plan(path):
-    # OpenTofu's own plan encryption writes a JSON envelope holding `encryption_version`.
-    if _starts_with(path, PLAN_MAGIC):
-        return True
-    return _starts_with(path, b"{") and "encryption_version" in _json_keys(path)
-
-
-def _is_state(path):
-    # OpenTofu's own state encryption writes `encryption_version` in place of `version`.
-    return bool(_json_keys(path) & {"version", "encryption_version"})
 
 
 def decrypt_state(path, cache_key):
     """Decrypt a restored state cache entry in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on a plaintext entry, on an entry shorter than its salted
-    header, when openssl or the disk fails on the runner, and on a result that is not a JSON
-    object with `version` or `encryption_version` (saved with another passphrase or key
-    derivation, or a corrupt entry), leaving the ciphertext in place. Never prints the
-    file's contents.
+    Refuses as `decrypt` does, naming the cache key. An entry that is not shipmate-crypt-v1
+    names the command that deletes every entry under its prefix; one that fails
+    authentication names no delete command, because the refusal cannot tell corruption from a
+    wrong passphrase. Never prints the file's contents.
     """
-    _require_passphrase()
     prefix = cache_key.rpartition("/")[0] + "/"
-    delete = f"gh cache delete {cache_key}{_repo_flag()}"
-    try:
-        truncated = os.path.getsize(path) < HEADER_LEN
-        salted = _starts_with(path, MAGIC)
-    except OSError as exc:
-        raise SystemExit(
-            f"::error::state cache entry `{cache_key}` cannot be read. tofu was not run. The "
-            "refusal comes before any apply step, so a re-run of the job is safe. "
-            f"Error: {exc}"
-        ) from None
-    if truncated:
-        raise SystemExit(
-            f"::error::state cache entry `{cache_key}` is truncated: it is shorter than its "
-            f"{HEADER_LEN}-byte salted header. tofu was not run. `{delete}` deletes it, and the "
-            "next restore uses the previous one."
-        )
-    if not salted:
-        raise SystemExit(
-            f"::error::state cache entry `{cache_key}` is plaintext. Delete every entry under "
-            f"its prefix, then re-run: `{_purge_command(prefix)}` (the restore matches by "
-            f"prefix, so deleting only `{cache_key}` restores the next-older plaintext entry). "
-            "Deleting discards that state: OpenTofu no longer tracks the resources it recorded. "
-            "A sample stack's null and random resources re-create; a real resource can "
-            "collide with or be duplicated by its re-creation."
-        )
-    failure = (
-        f"::error::state cache entry `{cache_key}` could not be decrypted: openssl or the disk "
-        f"failed on the runner. tofu was not run. {_RUNNER}"
+    _decrypt(
+        path,
+        unreadable=(
+            f"::error::state cache entry `{cache_key}` cannot be read: the restore may not have "
+            "written the file, or the runner's disk failed. tofu was not run. The refusal comes "
+            "before any apply step, so a re-run of the job is safe."
+        ),
+        no_header=(
+            f"::error::state cache entry `{cache_key}` is not a shipmate-crypt-v1 entry: it was "
+            "saved unencrypted or by an earlier engine release. Delete every entry under its "
+            f"prefix, then re-run: `{_purge_command(prefix)}` (the restore matches by prefix, "
+            f"so deleting only `{cache_key}` restores the next-older entry, which is no "
+            "shipmate-crypt-v1 entry either). Deleting discards that state: OpenTofu no longer "
+            "tracks the resources it recorded. A sample stack's null and random resources "
+            "re-create; a real resource can collide with or be duplicated by its re-creation."
+        ),
+        unauthenticated=(
+            f"::error::state cache entry `{cache_key}` failed authentication: it was saved with "
+            "another passphrase (a rotated one, or different values on <env>-plan and "
+            "<env>-apply), or it is corrupt, truncated or altered. tofu was not run. "
+            "docs/troubleshooting.md section `state cache entry ... failed authentication` tells "
+            "the causes apart. Fix a passphrase with the secret: deleting an intact entry loses "
+            "the state it holds."
+        ),
+        failure=(
+            f"::error::state cache entry `{cache_key}` could not be decrypted: openssl or the "
+            f"disk failed on the runner. tofu was not run. {_RUNNER}"
+        ),
     )
-    if not _openssl(path, decrypt=True, accept=_is_state, failure=failure):
-        raise SystemExit(
-            f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state: it "
-            "was saved with another key derivation or a rotated passphrase, the plan and apply "
-            "sides read different SHIPMATE_PLAN_PASSPHRASE values, or it is corrupt. tofu was "
-            "not run. docs/troubleshooting.md section `state cache entry ... does not decrypt to "
-            "OpenTofu state` says which command fits which cause. Delete this entry: "
-            f"`{delete}`. Delete every entry under its prefix, which discards that state: "
-            f"`{_purge_command(prefix)}`."
-        )
 
 
 USAGE = (

@@ -67,8 +67,8 @@ runs:
       env:
         PLAN_PASSPHRASE: ${{ inputs.passphrase }}
         STATE_PATH: ${{ inputs.path }}
-      # AES-CTR keeps the length, so a saved 0-byte file would restore as empty, which
-      # decrypt-state refuses. Encrypts in place: nothing after the save may read the file.
+      # A 0-byte file is not saved: its restore would hand tofu an empty file, which it reads
+      # as no state. Encrypts in place: nothing after the save may read the file.
       run: |
         if [ ! -s "$STATE_PATH" ]; then
           echo "::notice::shipmate/actions/state: no state to save at $STATE_PATH (absent or empty)."

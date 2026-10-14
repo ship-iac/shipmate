@@ -774,21 +774,23 @@ each drift file's `drift` job. A secret on `shipmate-engine` or on one half of a
 split environment alone reaches the wrong cells
 ([`getting-started.md`](getting-started.md) lists each placement).
 
-### `plan artifact does not decrypt to an OpenTofu plan`, or `plan artifact is plaintext`
+### `plan artifact ... is not a shipmate-crypt-v1 artifact`
 
 An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
 before any apply step, and its `apply / <stack> / <env>` check stays pending.
-`plan artifact is plaintext` means the artifact carries no `Salted__` header:
-it was uploaded unencrypted. Re-plan.
+The artifact does not start with the shipmate-crypt-v1 header
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption): it was uploaded
+unencrypted, or encrypted by an earlier engine release. Re-plan: comment
+`shipmate plan` or push on an open pull request; after the merge, open a new
+pull request touching the stack.
 
-`plan artifact does not decrypt to an OpenTofu plan` means the decrypted file is
-neither a zip archive, which an OpenTofu plan file is, nor the JSON envelope
-OpenTofu's own plan encryption writes. AES-256-CTR decrypts with any key
-([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), so the cause is
-one of:
+### `plan artifact ... failed authentication`
 
-- **The plan was encrypted by an earlier engine release's key derivation.**
-  Re-plan.
+An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
+before openssl or any apply step read it, and its `apply / <stack> / <env>`
+check stays pending. The tag the plan cell wrote does not verify under the
+apply side's passphrase. The engine cannot tell the causes apart:
+
 - **The passphrase was rotated after the plan.** Re-plan.
 - **The plan and apply sides read different values**, for example different
   `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A
@@ -796,13 +798,8 @@ one of:
   local backend, set `<env>-plan`'s value to `<env>-apply`'s and never the
   reverse, because apply cells saved the cached state; on a remote backend
   either direction works.
-- **The artifact is corrupt.** Re-plan. For a zip plan only damage that
-  changes the decrypted file's first bytes refuses here: damage further in, a
-  plan cut off after its zip header included, passes this check and fails
-  later at the render step, on `tofu show`. For an OpenTofu-encrypted plan the
-  check only verifies that the file parses as JSON holding
-  `encryption_version`: damage inside its encrypted payload usually passes and
-  fails later at `tofu show`.
+- **The artifact is corrupt, truncated or altered.** Re-plan; a re-run
+  downloads the same artifact.
 
 To re-plan on an open pull request, comment `shipmate plan` or push; after the
 merge, open a new pull request touching the stack.
@@ -813,19 +810,10 @@ The apply cell could not open or size its reviewed plan artifact; the error at
 the end of the message says why. Nothing was applied.
 
 - **The artifact downloaded without `stack.otplan`.** No earlier step reports
-  it. Re-plan, as in §`plan artifact does not decrypt to an OpenTofu plan`; a
-  re-run downloads the same artifact.
+  it. Re-plan, as in §`plan artifact ... is not a shipmate-crypt-v1 artifact`;
+  a re-run downloads the same artifact.
 - **The runner's disk failed.** The refusal comes before any apply step, so a
   re-run of the job is safe; a self-hosted runner needs its disk fixed.
-
-### `plan artifact ... is truncated`
-
-The artifact is shorter than its 16-byte salted header, so it was refused
-before openssl ran. Nothing was applied, and the cell's
-`apply / <stack> / <env>` check stays pending. Re-plan, as in the section
-above. An artifact cut off after its header decrypts and refuses as
-`plan artifact does not decrypt to an OpenTofu plan`, or fails later at the
-render step.
 
 ### `plan artifact ... could not be decrypted: openssl or the disk failed on the runner`
 
@@ -863,13 +851,14 @@ comment shows it as not recorded, or failed when the apply itself failed.
 The engine has no recovery for local-backend state lost this way. The
 resources the apply created exist, and OpenTofu does not track them.
 
-### `state cache entry ... is plaintext`
+### `state cache entry ... is not a shipmate-crypt-v1 entry`
 
-A local backend's restore matched a cache entry that was saved unencrypted, and
-refused before tofu read it. The message names the entry and gives the command
-that deletes every entry under its prefix; the restore matches by prefix, so
-deleting only the named entry restores the next-older plaintext one. Run the
-command, then re-run the cell.
+A local backend's restore matched a cache entry saved unencrypted or by an
+earlier engine release, and refused before tofu read it. Every older entry
+under its prefix was saved the same way, and no secret change helps. The
+message gives the command that deletes every entry under the prefix; the
+restore matches by prefix, so deleting only the named entry restores the
+next-older one. Run the command, then re-run the cell.
 
 Deleting discards that state: OpenTofu no longer tracks the resources it
 recorded. A sample stack's null and random resources re-create; a real
@@ -877,18 +866,10 @@ resource can collide with or be duplicated by its re-creation.
 
 ### `state cache entry ... cannot be read`
 
-The restore could not open or size the matched entry; the error at the end of
-the message says why. tofu was not run. The refusal comes before any apply
-step, so a re-run of the job is safe; a self-hosted runner needs its disk
-fixed.
-
-### `state cache entry ... is truncated`
-
-The entry is shorter than its 16-byte salted header, so it was refused before
-openssl ran. `gh cache delete <key> --repo <owner>/<repo>`, with the key from
-the message, deletes it, and the next restore uses the previous entry. An entry
-cut off after its header decrypts and refuses as
-`state cache entry ... does not decrypt to OpenTofu state`.
+The restore could not open the matched entry: the restore may not have written
+the file, or the runner's disk failed. The error at the end of the message
+says which. tofu was not run. The refusal comes before any apply step, so a
+re-run of the job is safe; a self-hosted runner needs its disk fixed.
 
 ### `state cache entry ... could not be decrypted: openssl or the disk failed on the runner`
 
@@ -898,29 +879,36 @@ which clears a transient hosted-runner disk failure, or fix a self-hosted
 runner's openssl or disk, for example an openssl without `-pbkdf2` or `-iter`,
 or a full disk.
 
-### `state cache entry ... does not decrypt to OpenTofu state`
+### `state cache entry ... failed authentication`
 
-A local backend's restore decrypted the matched entry to something that is not
-OpenTofu state, and refused before tofu read it. AES-256-CTR decrypts with any
-key ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), so the
-cause is one of the following. The message gives both delete commands: one for
-the named entry, one for every entry under its prefix. Deleting every entry
-under the prefix discards that state, as in §`state cache entry ... is
-plaintext`.
+A local backend's restore matched a cache entry whose tag does not verify, and
+refused before openssl or tofu read it. The refusal names no delete command:
+the engine cannot tell a wrong passphrase from a damaged entry, and deleting an
+intact entry loses the state it holds. A wrong passphrase is fixed by the
+secret, never by deleting. Check the causes in this order:
 
-- **The entry was saved by an earlier engine release's key derivation.** Every
-  older entry under the prefix was saved the same way, and no secret change
-  helps. Delete every entry under the prefix.
-- **The passphrase was rotated.** Every older entry under the prefix was saved
-  with the old passphrase too. Set the old passphrase back, or delete every
-  entry under the prefix.
-- **The plan and apply sides read different values**, for example different
-  `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. An apply
+- **The passphrase changed after the entry was saved.** Evidence: a
+  `SHIPMATE_PLAN_PASSPHRASE` placement (organization, repository, `<env>-plan`
+  or `<env>-apply`) updated after the entry's `createdAt` in
+  `gh cache list --key <key> --json key,createdAt`. `gh secret list`, with
+  `--org <org>` or `--env <environment>`, shows each placement's update time.
+  Every older entry under the prefix was saved with the old value too. Set the
+  old value back.
+- **The plan and apply sides read different values.** Evidence: `<env>-plan`
+  and `<env>-apply` each hold their own `SHIPMATE_PLAN_PASSPHRASE`. An apply
   cell saved the entry and a plan or drift cell restores it. Set
   `<env>-plan`'s value to `<env>-apply`'s, never the reverse, then re-plan or
-  re-run the drift sweep. Deleting entries does not fix this.
-- **The entry is corrupt.** Delete the named entry; the next restore uses the
-  previous one.
+  re-run the drift sweep.
+- **The entry is corrupt, truncated or altered.** Neither of the above holds.
+  Another cell restoring its own entry proves nothing, because entries are per
+  stack and environment. Delete the named entry, last:
+  `gh cache delete <key> --repo <owner>/<repo>`.
+
+Deleting has a cost. The restore then uses the next-older entry under the
+prefix if one survives (entries unused for 7 days are evicted), or none, so the
+stack is in the state of a lost save. Recover it with §`The apply step ran and
+its state was not saved` from its step (2), using the run id the deleted key
+ends with (`<run_id>-<run_attempt>`); that run's log may have expired.
 
 ### `could not install python3-yaml`, or `the engine needs PyYAML`
 
