@@ -994,21 +994,23 @@ re-creation is harmless. For a stack with real resources:
 - Never re-run a refused apply cell or deploy: it can apply its stored plan
   against the empty state.
 - Do not apply or merge any plan of the stack in that environment, by any
-  route (a `shipmate apply` comment, a re-run or a merge), until each managed
-  resource the deleted state recorded, other than one whose provider does not
-  implement import, shows `to import` in it, and no imported resource also
-  shows a replace (step 8 of §`The apply step ran and its state was not
-  saved`).
-- Add an `import` block, as in step 5 of that section, for each resource whose
-  provider implements import, with the import ID its provider's documentation
-  names. The latest retained `Apply the stored plan` log for that address
-  (`Creation complete` or `Import complete`) helps find the object; when that
-  log has expired, find it at the provider.
+  route (a `shipmate apply` comment, a re-run or a merge), until every managed
+  resource the deleted state recorded is accounted for: each one whose
+  provider implements import shows `to import` in that plan, and each one
+  whose provider does not, and that has a remote object, has been deleted at
+  the provider.
+- Add an `import` block, as in step 5 of §`The apply step ran and its state
+  was not saved`, for each resource whose provider implements import, with
+  the import ID its provider's documentation names. The latest retained
+  `Apply the stored plan` log for that address (`Creation complete` or
+  `Import complete`) helps find the object; when that log has expired, find
+  it at the provider. Review the plan for an imported resource that also
+  plans a replace (step 8 of that section) before applying it.
 - A resource whose provider does not implement import (step 7 of that
-  section) is re-created with a new value, and anything that depends on that
-  value then plans a replace. One with a remote object duplicates it or
-  collides unless you delete the original at the provider first; one with
-  none, such as `random_pet`, has nothing to delete.
+  section) is re-created. If it has a remote object, delete the original at
+  the provider first, or the apply duplicates it or collides. One without,
+  such as `random_pet`, can get a new value, and a resource that uses that
+  value then plans an update or a replace.
 
 ### `state cache entry ... cannot be read`
 
