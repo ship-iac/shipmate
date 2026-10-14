@@ -540,8 +540,14 @@ cell re-renders the stored plan with the command that wrote it and compares.
   moved fails at the apply with `Inconsistent dependency lock file`. Neither
   produces this message. There is no force. Re-plan the stack on its pull request
   and review the fresh plan.
+- **`tofu show` cannot read the stored plan.** The step fails on OpenTofu's own
+  `Failed to read the given file as a state or plan file`, before any digest is
+  compared: the plan was encrypted with another passphrase or key derivation
+  (an earlier engine release), and decrypting it with the current key yields
+  garbage ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption).
+  Re-plan the stack on its pull request.
 
-Nothing has been applied in either case: the comparison runs before
+Nothing has been applied in any case: the render and comparison run before
 `tofu apply`, and the pending check is what keeps the gate from greening over
 an unapplied stack.
 
@@ -791,9 +797,9 @@ resource can collide with or be duplicated by its re-creation.
 A local backend's restore decrypted the matched entry to something that is not
 OpenTofu state, and refused before tofu read it. AES-256-CTR decrypts with any
 key, so the cause is an entry saved with a passphrase that differs from the
-current one, an entry saved with another key derivation (the engine derives
-the key with 600,000 PBKDF2 iterations, [`../CONTRACT.md`](../CONTRACT.md)
-§Plan artifact encryption), or a corrupt entry:
+current one, an entry saved with another key derivation
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), or a corrupt
+entry:
 
 - **The entry is corrupt.** `gh cache delete <key> --repo <owner>/<repo>`, with
   the key from the message, deletes it; the next restore uses the previous

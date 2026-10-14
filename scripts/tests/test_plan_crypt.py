@@ -54,26 +54,29 @@ def test_round_trip_with_correct_passphrase(tmp_path, monkeypatch):
 
 def _raw_openssl(src, dst, *flags):
     subprocess.run(
-        ["openssl", "enc", *flags, "-aes-256-ctr", "-pbkdf2", "-salt"]
+        ["openssl", "enc", *flags, "-aes-256-ctr", "-pbkdf2", "-md", "sha256", "-salt"]
         + ["-in", str(src), "-out", str(dst), "-pass", "env:PLAN_PASSPHRASE"],
         check=True,
     )
 
 
-def test_decrypt_does_not_accept_a_default_iteration_ciphertext(tmp_path, monkeypatch):
+def test_decrypt_derives_the_600000_iteration_key(tmp_path, monkeypatch):
     """CTR decrypts any key with exit 0, so only the bytes show which key decrypt derived.
 
-    Mutation: drop `-iter`/`600000` from `_openssl`, and OpenSSL's default 10,000 matches.
+    Mutations: `return` before decrypt's `_openssl` call, and the file stays ciphertext; drop
+    `-iter`/`600000` from `_openssl`, and OpenSSL's default 10,000 recovers the plan.
     """
     monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    plain, f = _write(tmp_path), tmp_path / "old.otplan"
+    plain, f, expected = _write(tmp_path), tmp_path / "old.otplan", tmp_path / "expected"
     _raw_openssl(plain, f, "-iter", "10000")
+    _raw_openssl(f, expected, "-d", "-iter", "600000")
     pcx.decrypt(str(f))
-    assert f.read_bytes() != PLAIN
+    assert f.read_bytes() == expected.read_bytes() != PLAIN
 
 
 def test_encrypt_derives_the_key_with_600000_iterations(tmp_path, monkeypatch):
-    """Mutation: `-iter 600001` in `_openssl`, and the bytes no longer decrypt to the plan."""
+    """Mutations: `-iter 600001` or `-md sha512` in `_openssl`, and the bytes no longer decrypt
+    to the plan."""
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
     out = tmp_path / "plain.otplan"
     _raw_openssl(f, out, "-d", "-iter", "600000")
@@ -82,7 +85,7 @@ def test_encrypt_derives_the_key_with_600000_iterations(tmp_path, monkeypatch):
 
 def test_wrong_passphrase_yields_garbage_not_an_error(tmp_path, monkeypatch):
     # Documents the CTR fact: wrong pass decrypts to garbage WITHOUT raising.
-    # The fail-safe is downstream: cell-init's state restore or apply-cell's `tofu show`.
+    # The fail-safe is downstream: apply-cell's `tofu show`, or an older cached state entry.
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
     pcx.decrypt(str(f))

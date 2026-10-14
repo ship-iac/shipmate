@@ -25,7 +25,13 @@ FAILSAFES = [
         "PLANNED_HEAD_OUTCOME",
         "reviewed plan records no commit or was produced from a different one; re-plan",
     ),
-    ("DECRYPT_OUTCOME", "plan artifact could not be decrypted (passphrase/config mismatch)"),
+    (
+        "DECRYPT_OUTCOME",
+        (
+            "plan artifact could not be decrypted (no passphrase, a plaintext artifact or an "
+            "openssl error)"
+        ),
+    ),
     (
         "FINGERPRINT_OUTCOME",
         "environment does not match the reviewed plan's fingerprint; re-plan",
@@ -42,7 +48,10 @@ FAILSAFES = [
     ("RESTORE_OUTCOME", "state restore failed"),
     (
         "PLAN_DIGEST_OUTCOME",
-        "the stored plan does not render to the plan text that was reviewed; re-plan",
+        (
+            "the stored plan does not render to the plan text that was reviewed, or tofu cannot "
+            "read it (encrypted with another passphrase or key derivation); re-plan"
+        ),
     ),
 ]
 

@@ -5,17 +5,19 @@ Single definition of the openssl invocation so plan-cell (require first, encrypt
 before upload), apply-cell (decrypt after download) and actions/state (encrypt before
 save, decrypt after restore) can never drift. The openssl flags live ONLY here.
 
-Cipher: openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -salt, passphrase from the
+Cipher: openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -md sha256 -salt, passphrase from the
 PLAN_PASSPHRASE env var (never argv). The passphrase is required: every
 operation refuses when it is empty or unset, and every decrypt refuses an
 unsalted (plaintext) file.
 
 AES-256-CTR is an unauthenticated stream cipher: a WRONG passphrase, or a file
-written with another iteration count, decrypts to garbage WITH EXIT 0 -- it does
+written with another key derivation, decrypts to garbage WITH EXIT 0 -- it does
 NOT error. For a plan, the fail-safe is downstream and before any apply step: at
-the state restore (cell-init's decrypt_state) when a local-backend cell has a
-cached entry, otherwise at apply-cell's render step, on OpenTofu's own plan-file
-error from `tofu show`. The apply check stays pending. For state, decrypt-state
+the state restore (cell-init's decrypt_state) only when the cell's cached entry
+was also saved with another key derivation or passphrase; otherwise (no cached
+entry, a remote backend, or an entry saved with the current key) at apply-cell's
+render step, on OpenTofu's own plan-file error from `tofu show`. The apply check
+stays pending. For state, decrypt-state
 checks the result itself, because tofu reads an empty state file as no state.
 """
 
@@ -49,6 +51,8 @@ def _openssl(path, *, decrypt):
         "-pbkdf2",
         "-iter",
         "600000",
+        "-md",
+        "sha256",
         "-salt",
         "-in",
         path,
@@ -95,9 +99,10 @@ def decrypt(path):
     """Decrypt a plan artifact in place, or refuse without a passphrase or on plaintext.
 
     A wrong passphrase or another key derivation is not detected here. The cell fails
-    before any apply step: at the state restore (cell-init's decrypt_state) when a
-    local-backend cell has a cached entry, otherwise at apply-cell's render step, on
-    OpenTofu's own plan-file error from `tofu show`.
+    before any apply step: at the state restore (cell-init's decrypt_state) only when
+    the cell's cached entry was also saved with another key derivation or passphrase;
+    otherwise (no cached entry, a remote backend, or an entry saved with the current
+    key) at apply-cell's render step, on OpenTofu's own plan-file error from `tofu show`.
     """
     _require_passphrase()
     if not _is_encrypted(path):

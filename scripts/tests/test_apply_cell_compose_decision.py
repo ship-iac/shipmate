@@ -101,7 +101,8 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "decrypt",
-            "plan artifact could not be decrypted (passphrase/config mismatch)",
+            "plan artifact could not be decrypted (no passphrase, a plaintext artifact or an "
+            "openssl error)",
             id="decrypt",
         ),
         pytest.param(
@@ -125,7 +126,8 @@ _ALL_SUCCESS = {
         pytest.param("restore", "state restore failed", id="restore_state"),
         pytest.param(
             "plan_digest",
-            "the stored plan does not render to the plan text that was reviewed; re-plan",
+            "the stored plan does not render to the plan text that was reviewed, or tofu cannot "
+            "read it (encrypted with another passphrase or key derivation); re-plan",
             id="plan_digest",
         ),
     ],
@@ -198,7 +200,10 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
     # reason, never restore-state's: precedence is pipeline order, not severity or alphabetical.
     cell = _run_compose(monkeypatch, tmp_path, decrypt="failure", restore="failure")
     assert cell["result"] == "blocked"
-    assert cell["reason"] == "plan artifact could not be decrypted (passphrase/config mismatch)"
+    assert cell["reason"] == (
+        "plan artifact could not be decrypted (no passphrase, a plaintext artifact or an "
+        "openssl error)"
+    )
 
 
 @pytest.mark.parametrize(
