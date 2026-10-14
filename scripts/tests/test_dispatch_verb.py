@@ -383,8 +383,9 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
     Mutations: scope the condition to one verb again and the other two stop being explained;
     drop any one of the three message-text halves and its shape stops being explained; point
     the remedy at `docs/releasing.md`, or reword any other part of the message, and the
-    whole-value comparison reddens; drop the `printf` that echoes `$out` and the hint prints
-    without the answer it explains.
+    whole-value comparison reddens; drop `$err` from the `printf` and the hint prints without
+    the answer it explains (gh writes it to stderr); match on `$out` alone and no shape is
+    explained.
     """
     result, _ = _run_dispatch(tmp_path, verb=verb, environment="dev-eu", gh_stub=stub)
     output = result.stdout + result.stderr
