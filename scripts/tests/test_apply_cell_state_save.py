@@ -61,10 +61,10 @@ _LOST_SAVE_WARNING = {
     ),
     "shell": "bash",
     "run": (
-        'echo "::error::The apply step ran and its state was not saved or not verified. A '
-        "re-run of this job or its workflow run, a shipmate apply comment, or a merge of its "
-        "pull request (its deploy takes the pending check) can apply this cell's reviewed plan "
-        "again against the state from before the apply. Before applying or merging any plan of "
+        'echo "::error::The apply step ran and its state was not saved or not verified. Never '
+        "re-run this job or its workflow run. A re-run, a shipmate apply comment, or a merge can "
+        "apply this cell's reviewed plan again against the state from before the apply. Before "
+        "applying or merging any plan of "
         "this stack in this environment, on any pull request, follow docs/troubleshooting.md "
         "section The apply step ran and its state "
         'was not saved."\n'
@@ -77,12 +77,13 @@ def test_an_unsaved_state_after_an_apply_fails_the_cell_and_warns_against_a_re_r
     """The warning fires whenever an apply step ran over restored state and the save is not
     verified (failed, cancelled, not found, or skipped for an absent file), a cancelled run
     included, where failure() is false; it fails the job so the apply check stays pending. Its
-    text names a re-run, a `shipmate apply` comment and a merge as able to apply the reviewed
-    plan again, with no condition, and points every plan of the stack and environment at the
-    troubleshooting section.
+    text bans a re-run, names a re-run, a `shipmate apply` comment and a merge as able to
+    apply the reviewed plan again, with no condition, and points every plan of the stack and
+    environment at the troubleshooting section.
 
     Mutations: `steps.save-state.outputs.saved != 'true'` to `steps.save-state.outcome ==
-    'failure'`; drop the `exit 1`; drop the merge from the vectors; drop "or merging".
+    'failure'`; drop the `exit 1`; drop the re-run ban; drop the merge from the vectors; drop
+    "or merging".
     """
     steps = action_steps("apply-cell")
     names = [s.get("name") for s in steps]

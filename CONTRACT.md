@@ -2491,9 +2491,9 @@ job believed before its check was completed:
   when the apply step ran, the state was restored, and `actions/state` did not
   report `saved`. The `state not saved:` note names those cells, capped like
   the `not recorded:` note, and says: the apply step ran and its state was not
-  saved or not verified; a re-run of the cells' jobs or their workflow run, a
-  `shipmate apply` comment, or a merge of their pull request (its deploy takes
-  the pending checks) can apply their reviewed plans again against the state
+  saved or not verified; never re-run the cells' jobs or their workflow run; a
+  re-run, a `shipmate apply` comment, or a merge of their pull request (its
+  deploy takes the pending checks) can apply their reviewed plans again against the state
   from before the apply; before applying or merging any plan of a named stack
   in the environment named beside it, on any pull request, follow
   `docs/troubleshooting.md`

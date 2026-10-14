@@ -105,11 +105,11 @@ def _state_lost_note(rows):
         return ""
     return (
         f"state not saved: {named(cells, _STATE_LOST_NAMED)}. The apply step ran and its state "
-        "was not saved or not verified. A re-run of these cells' jobs or their workflow run, a "
-        "`shipmate apply` comment, or a merge of their pull request (its deploy takes the "
-        "pending checks) can apply their reviewed plans again against the state from before the "
-        "apply. Before applying or merging any plan of a named stack in the environment named "
-        "beside it, on any pull request, follow docs/troubleshooting.md section "
+        "was not saved or not verified. Never re-run these cells' jobs or their workflow run. A "
+        "re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans again "
+        "against the state from before the apply. Before applying or merging any plan of a "
+        "named stack in the environment named beside it, on any pull request, follow "
+        "docs/troubleshooting.md section "
         "`The apply step ran and its state was not saved`."
     )
 

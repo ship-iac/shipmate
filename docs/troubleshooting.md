@@ -877,14 +877,17 @@ other case, re-plan and reconcile against the provider:
    show, a resource the provider created: a create that timed out after the
    object existed, or a cancel mid-create. Neither the entry nor the log proves
    the re-plan's creates are new. Before applying the re-plan, check each
-   create it shows against the provider (the cloud console or API), the create
-   half of a replace (`-/+` or `+/-`) included. Adopt a create that exists with
-   an `import` block, as in step 5. A replace is at an address the state holds,
-   where `import` is ignored: forget it, then import it, as in step 6. On the
-   open pull request, the re-plan completes or replaces the cell's apply check.
-   After the merge, a new pull request's plan completes only its own head's
-   check. The merged head's check stays pending, and nothing reads it again: a
-   later deploy takes only the pending checks of its own merge's pull request. Never re-run that deploy, which reads it. When nothing is
+   create it shows against the provider (the cloud console or API), the new
+   object of a `+/-` (`create_before_destroy`) replace included. Adopt a plain
+   create that already exists with an `import` block (step 5). For a `+/-`
+   replace whose new object already exists, delete that object at the provider
+   or adopt it by hand: forgetting and importing the address would leave the
+   old object untracked. This case is not probed. On the open pull request,
+   the re-plan completes or replaces the cell's apply check. After the merge,
+   a new pull request's plan completes only its own head's check. The merged
+   head's check stays pending, and nothing reads it again: a later deploy
+   takes only the pending checks of its own merge's pull request. Never re-run
+   that deploy, which reads it. When nothing is
    printed, continue.
 2. Never re-run the job or its workflow run, the deploy included: a re-run
    applies the run's reviewed plan again whatever the check says. A
