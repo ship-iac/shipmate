@@ -67,15 +67,17 @@ runs:
       env:
         PLAN_PASSPHRASE: ${{ inputs.passphrase }}
         STATE_PATH: ${{ inputs.path }}
-      # AES-CTR keeps the length, so a saved 0-byte file would restore as empty, which
-      # decrypt-state refuses. Encrypts in place: nothing after the save may read the file.
+        # Save state's key: plan-crypt binds the entry to its prefix, as decrypt-state reads it.
+        KEY: state/${{ inputs.stack-slug }}/${{ inputs.env }}/${{ github.run_id }}-${{ github.run_attempt }}
+      # A 0-byte file is not saved: its restore would hand tofu an empty file, which it reads
+      # as no state. Encrypts in place: nothing after the save may read the file.
       run: |
         if [ ! -s "$STATE_PATH" ]; then
           echo "::notice::shipmate/actions/state: no state to save at $STATE_PATH (absent or empty)."
           echo "skip=true" >> "$GITHUB_OUTPUT"
           exit 0
         fi
-        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt "$STATE_PATH"
+        python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt-state "$STATE_PATH" "$KEY"
     - name: Save state
       if: ${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

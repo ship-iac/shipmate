@@ -29,13 +29,16 @@ call.
 
 - Save: the file is encrypted in place, then saved. An absent or 0-byte file is
   not saved; the step prints a notice instead.
-- Restore: a matched entry is decrypted in place before tofu reads it. A cache
-  miss restores nothing and runs no decrypt. An unencrypted or truncated entry,
-  one saved with another passphrase or key derivation, or a corrupt entry fails
-  the restore, naming the matched cache key and the `gh cache` commands that
-  recover. An openssl or disk failure on the runner fails it too; re-run the
-  job instead. A failed restore makes the cell skip its state save, so the
-  entry is never overwritten.
+- Restore: a matched entry is authenticated, then decrypted in place, before
+  tofu reads it. A cache miss restores nothing and runs no decrypt. An entry
+  saved unencrypted or by an earlier engine release fails the restore with the
+  `gh cache` command that deletes every entry under its prefix. An entry that
+  fails authentication (another passphrase, a corrupt, truncated or altered
+  entry, or one copied under another stack's or environment's key) fails it
+  naming the matched cache key and no command: `docs/troubleshooting.md` tells
+  the causes apart. An openssl or disk failure on the runner fails it too;
+  re-run the job instead. A failed restore makes the cell skip its state save,
+  so the entry is never overwritten.
 - The save leaves ciphertext in the workspace, so no step after it reads the
   state file.
 

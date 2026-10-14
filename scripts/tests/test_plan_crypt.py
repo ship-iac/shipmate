@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import subprocess
 
@@ -6,7 +8,6 @@ from _loader import load_script, step_by
 
 pcx = load_script("plan-crypt")
 
-# A plaintext OpenTofu plan is a zip archive, so the payload carries the zip local-file header.
 PLAIN = b"PK\x03\x04SECRET_PLAN_BODY\nresource null_resource.x {}\n"
 # The top-level keys, in order, of a plan OpenTofu v1.12.4 writes under an
 # `encryption { plan { ... } }` block (pbkdf2 key provider, aes_gcm method); values shortened.
@@ -15,10 +16,33 @@ ENVELOPE = (
 )
 STATE = b'{"version":4,"serial":1}'
 KEY = "state/app-net/dev-eu/123-1"
+NON_ASCII = "korrekt hæst ✓"
 UNSET = (
     "::error::SHIPMATE_PLAN_PASSPHRASE is not set; it is required to encrypt and decrypt plan "
     "artifacts and local state. Set the secret and forward it to the shipmate workflows."
 )
+_RUNNER = (
+    "Re-run the job, which clears a transient hosted-runner disk failure, or fix a self-hosted "
+    "runner's openssl or disk."
+)
+_REPLAN = (
+    "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
+)
+#: Hand-written, never read from the module.
+_HEADER = b"shipmate-crypt-v1\n"
+_OPENSSL_ARGV = [
+    "openssl",
+    "enc",
+    "-aes-256-ctr",
+    "-pbkdf2",
+    "-iter",
+    "1",
+    "-md",
+    "sha256",
+    "-nosalt",
+    "-pass",
+    "env:SHIPMATE_CRYPT_KEY",
+]
 
 
 def _write(tmp_path, data=PLAIN):
@@ -27,11 +51,97 @@ def _write(tmp_path, data=PLAIN):
     return f
 
 
-def _encrypted(tmp_path, monkeypatch, data):
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+def _encrypted(tmp_path, monkeypatch, data, kind="plan", passphrase=NON_ASCII):
+    monkeypatch.setenv("PLAN_PASSPHRASE", passphrase)
     f = _write(tmp_path, data)
-    pcx.encrypt(str(f))
+    if kind == "plan":
+        pcx.encrypt(str(f))
+    else:
+        pcx.encrypt_state(str(f), KEY)
     return f
+
+
+def _unauthenticated(kind, path):
+    if kind == "plan":
+        return (
+            f"::error::plan artifact `{path}` failed authentication: it was encrypted with another "
+            "passphrase (a rotated one, or different values on <env>-plan and <env>-apply), or it "
+            "is corrupt, truncated or altered. Nothing was applied. docs/troubleshooting.md "
+            "section `plan artifact ... failed authentication` gives each remedy."
+        )
+    return (
+        "::error::state cache entry `state/app-net/dev-eu/123-1` failed authentication: it was "
+        "saved with another passphrase (a rotated one, or different values on <env>-plan and "
+        "<env>-apply), or it is corrupt, truncated, altered or copied under another stack's or "
+        "environment's key. tofu was not run. docs/troubleshooting.md section `state cache entry "
+        "... failed authentication` tells the causes apart. Fix a passphrase with the secret: "
+        "deleting an intact entry loses the state it holds."
+    )
+
+
+def _no_header(kind, path, repo=" --repo ship-iac/sample"):
+    if kind == "plan":
+        return (
+            f"::error::plan artifact `{path}` is not a shipmate-crypt-v1 artifact: it was uploaded "
+            "unencrypted or encrypted by an earlier engine release. Nothing was applied. "
+            f"Re-plan: {_REPLAN}"
+        )
+    return (
+        "::error::state cache entry `state/app-net/dev-eu/123-1` is not a shipmate-crypt-v1 "
+        "entry: it was saved unencrypted or by an earlier engine release. Delete every entry "
+        f"under its prefix, then re-run: `gh cache list{repo} --key state/app-net/dev-eu/ --limit "
+        f"1000 --json id --jq '.[].id' | xargs -n1 gh cache delete{repo}` (the restore matches by "
+        "prefix, so deleting only `state/app-net/dev-eu/123-1` restores the next-older entry, "
+        "which is no shipmate-crypt-v1 entry either). Deleting discards that state: OpenTofu no "
+        "longer tracks the resources it recorded. A sample stack's null and random resources "
+        "re-create; a real resource can collide with or be duplicated by its re-creation."
+    )
+
+
+def _runner_failure(kind, path):
+    if kind == "plan":
+        return (
+            f"::error::plan artifact `{path}` could not be decrypted: openssl or the disk failed "
+            f"on the runner. Nothing was applied. {_RUNNER}"
+        )
+    return (
+        "::error::state cache entry `state/app-net/dev-eu/123-1` could not be decrypted: openssl "
+        f"or the disk failed on the runner. tofu was not run. {_RUNNER}"
+    )
+
+
+def _decrypt(kind, path):
+    if kind == "plan":
+        pcx.decrypt(str(path))
+    else:
+        pcx.decrypt_state(str(path), KEY)
+
+
+def _record_openssl(monkeypatch):
+    """Replace openssl with a recorder that fails the test's expectation by being called."""
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        raise AssertionError("openssl ran")
+
+    monkeypatch.setattr(pcx.subprocess, "run", fake_run)
+    return calls
+
+
+def _failing_openssl(monkeypatch, error):
+    def fake_run(args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(pcx.subprocess, "run", fake_run)
+
+
+KINDS = ["plan", "state"]
+
+
+@pytest.fixture(autouse=True)
+def _repository(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", "ship-iac/sample")
 
 
 def test_encrypt_without_passphrase_refuses(tmp_path, monkeypatch):
@@ -45,105 +155,331 @@ def test_encrypt_without_passphrase_refuses(tmp_path, monkeypatch):
     assert f.read_bytes() == PLAIN
 
 
-def test_encrypt_with_passphrase_writes_salted_header(tmp_path, monkeypatch):
-    """Mutation: `return` before encrypt's `_openssl` call, and the file stays plaintext."""
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
-    data = f.read_bytes()
-    assert data[:8] == pcx.MAGIC and data != PLAIN
+@pytest.mark.parametrize(
+    ("kind", "data"), [("plan", PLAIN), ("state", STATE), ("plan", b""), ("state", b"")]
+)
+def test_round_trip_with_a_non_ascii_passphrase(tmp_path, monkeypatch, kind, data):
+    """Mutations: `decrypt=False` in `_decrypt`'s openssl call, and the body is encrypted twice;
+    `return` before `_encrypt`'s `_replace`, and the file stays plaintext; `MIN_LEN` one higher,
+    and an empty plaintext's file refuses."""
+    f = _encrypted(tmp_path, monkeypatch, data, kind)
+    assert f.read_bytes() != data
+    _decrypt(kind, f)
+    assert f.read_bytes() == data
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
 
 
-def test_round_trip_with_correct_passphrase(tmp_path, monkeypatch):
-    """Mutations: `decrypt=False` in decrypt's `_openssl` call, and the plan is encrypted twice;
-    drop the zip branch from `_is_plan`."""
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
-    pcx.decrypt(str(f))
+def test_encrypt_writes_the_v1_header(tmp_path, monkeypatch):
+    """Mutation: change one byte of `MAGIC`."""
+    assert _encrypted(tmp_path, monkeypatch, PLAIN).read_bytes()[:18] == _HEADER
+
+
+def test_two_encrypts_draw_different_salts(tmp_path, monkeypatch):
+    """Mutation: `salt = bytes(SALT_LEN)` in encrypt."""
+    first = _encrypted(tmp_path, monkeypatch, PLAIN).read_bytes()
+    second = _encrypted(tmp_path, monkeypatch, PLAIN).read_bytes()
+    assert first[18:34] != second[18:34]
+
+
+@pytest.mark.parametrize(("kind", "scope"), [("plan", b""), ("state", b"state/app-net/dev-eu/")])
+def test_decrypt_accepts_a_hand_built_v1_file(tmp_path, monkeypatch, kind, scope):
+    """The derivation is PBKDF2-HMAC-SHA256, 600,000 iterations, 32 bytes, over the file's salt,
+    then the two labelled HMACs per kind; the tag covers the length-prefixed scope (a state
+    entry's cache prefix) and the file. Every constant here is hand-written.
+
+    Mutations: `ITERATIONS = 600001`; `"sha512"` in `_keys`' pbkdf2_hmac; `+ b"enx"` as the enc
+    label; `+ b"max"` as the mac label; `len(s).to_bytes(8, "big")` in `_tag`.
+    """
+    salt = bytes(range(16))
+    master = hashlib.pbkdf2_hmac("sha256", NON_ASCII.encode("utf-8"), salt, 600000)
+    label = b"shipmate-crypt-v1 " + kind.encode() + b" "
+    enc_key = hmac.new(master, label + b"enc", "sha256").digest()
+    mac_key = hmac.new(master, label + b"mac", "sha256").digest()
+    body = subprocess.run(
+        [*_OPENSSL_ARGV[:-1], "env:HAND_BUILT_KEY"],
+        input=PLAIN,
+        stdout=subprocess.PIPE,
+        env={**os.environ, "HAND_BUILT_KEY": enc_key.hex()},
+        check=True,
+    ).stdout
+    head = b"shipmate-crypt-v1\n" + salt + body
+    tagged = len(scope).to_bytes(4, "big") + scope + head
+    f = _write(tmp_path, head + hmac.new(mac_key, tagged, "sha256").digest())
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    _decrypt(kind, f)
     assert f.read_bytes() == PLAIN
 
 
-def _raw_openssl(src, dst, *flags):
-    subprocess.run(
-        ["openssl", "enc", *flags, "-aes-256-ctr", "-pbkdf2", "-md", "sha256", "-salt"]
-        + ["-in", str(src), "-out", str(dst), "-pass", "env:PLAN_PASSPHRASE"],
+@pytest.mark.parametrize(("written", "read"), [("plan", "state"), ("state", "plan")])
+def test_a_file_of_one_kind_fails_authentication_as_the_other(tmp_path, monkeypatch, written, read):
+    """A state entry placed as a plan artifact, or the reverse, never reaches tofu.
+
+    The kind is bound twice, by the labels and by the state scope, so it takes both mutations
+    together: one label for both kinds (`label = b"shipmate-crypt-v1 "` in `_keys`) and an empty
+    scope (`s = b""` in `_tag`). The hand-built test pins each label alone.
+    """
+    f = _encrypted(tmp_path, monkeypatch, STATE, written)
+    data = f.read_bytes()
+    with pytest.raises(SystemExit) as exc:
+        _decrypt(read, f)
+    assert exc.value.code == _unauthenticated(read, f)
+    assert f.read_bytes() == data
+
+
+@pytest.mark.parametrize(
+    "other", ["state/app-net/prod-eu/123-1", "state/app-dns/dev-eu/123-1", "state/app-net/123-1"]
+)
+def test_a_state_entry_under_another_prefix_fails_authentication(tmp_path, monkeypatch, other):
+    """An entry copied under another stack's or environment's key refuses.
+
+    Mutation: `s = b""` in `_tag`, and the prefix leaves the tagged input.
+    """
+    f = _encrypted(tmp_path, monkeypatch, STATE, "state")
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt_state(str(f), other)
+    assert exc.value.code == _unauthenticated("state", f).replace(KEY, other)
+
+
+def test_a_state_entry_restored_under_a_newer_key_of_its_prefix_decrypts(tmp_path, monkeypatch):
+    """The restore matches by prefix, so an older entry arrives under its own, older run id.
+
+    Mutation: bind the whole cache key (`_state_scope` returns `cache_key`).
+    """
+    f = _encrypted(tmp_path, monkeypatch, STATE, "state")
+    pcx.decrypt_state(str(f), "state/app-net/dev-eu/999-2")
+    assert f.read_bytes() == STATE
+
+
+def test_cli_encrypt_state_round_trips_through_decrypt_state(tmp_path, monkeypatch):
+    """Mutation: route main's `encrypt-state` to `encrypt`, and the entry carries the plan
+    label."""
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    f = _write(tmp_path, STATE)
+    pcx.main(["plan-crypt", "encrypt-state", str(f), KEY])
+    pcx.main(["plan-crypt", "decrypt-state", str(f), KEY])
+    assert f.read_bytes() == STATE
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("offset", [21, 54, -1], ids=["salt", "body", "tag"])
+def test_a_flipped_byte_fails_authentication_before_openssl(tmp_path, monkeypatch, kind, offset):
+    """Mutation: call `_openssl(body, enc_key, decrypt=True)` before the tag compare in
+    `_decrypt`."""
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
+    data = bytearray(f.read_bytes())
+    data[offset] ^= 0x01
+    f.write_bytes(data)
+    calls = _record_openssl(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _decrypt(kind, f)
+    assert (exc.value.code, calls) == (_unauthenticated(kind, f), [])
+    assert f.read_bytes() == data
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_wrong_passphrase_fails_authentication_and_keeps_the_ciphertext(
+    tmp_path, monkeypatch, kind
+):
+    """Mutation: drop the tag compare in `_decrypt`, and openssl's garbage replaces the
+    ciphertext."""
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
+    ciphertext = f.read_bytes()
+    monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
+    with pytest.raises(SystemExit) as exc:
+        _decrypt(kind, f)
+    assert exc.value.code == _unauthenticated(kind, f)
+    assert f.read_bytes() == ciphertext
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
+
+
+def test_the_openssl_key_reaches_only_the_child_environment(tmp_path, monkeypatch):
+    """Mutations: `os.environ[KEY_VAR] = enc_key.hex()` in `_openssl`; `-pass pass:<key>` in
+    place of `env:`."""
+    monkeypatch.delenv("SHIPMATE_CRYPT_KEY", raising=False)
+    seen = []
+    real_run = subprocess.run
+
+    def spy(args, **kwargs):
+        seen.append((list(args), dict(kwargs.get("env") or os.environ)))
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(pcx.subprocess, "run", spy)
+    f = _encrypted(tmp_path, monkeypatch, PLAIN)
+    pcx.decrypt(str(f))
+    assert "SHIPMATE_CRYPT_KEY" not in os.environ
+    assert len(seen) == 2
+    for args, env in seen:
+        key = env["SHIPMATE_CRYPT_KEY"]
+        assert len(key) == 64
+        assert not any(key in a for a in args)
+
+
+def _pre_v1_ciphertext(tmp_path):
+    """An earlier release's artifact: openssl's own output, with no shipmate header."""
+    src = tmp_path / "plain.bin"
+    src.write_bytes(PLAIN)
+    return subprocess.run(
+        ["openssl", "enc", "-aes-256-ctr", "-pbkdf2", "-iter", "600000", "-md", "sha256", "-salt"]
+        + ["-in", str(src), "-pass", "env:PLAN_PASSPHRASE"],
+        stdout=subprocess.PIPE,
+        env={**os.environ, "PLAN_PASSPHRASE": NON_ASCII},
         check=True,
+    ).stdout
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize("case", ["zip", "state", "envelope", "salted", "earlier-release"])
+def test_a_file_without_the_v1_header_refuses_as_pre_v1(tmp_path, monkeypatch, kind, case):
+    """Mutations: drop the `Salted__` prefix from `_is_pre_v1`; drop its zip prefix; make its
+    JSON branch `return False`."""
+    data = {
+        "zip": PLAIN,
+        "state": STATE,
+        "envelope": ENVELOPE,
+        "salted": b"Salted__\x01\x02",
+        "earlier-release": _pre_v1_ciphertext(tmp_path),
+    }[case]
+    f = _write(tmp_path, data)
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    calls = _record_openssl(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        _decrypt(kind, f)
+    assert (exc.value.code, calls) == (_no_header(kind, f), [])
+    assert f.read_bytes() == data
+
+
+@pytest.mark.parametrize(("repository", "flag"), [("ship-iac/sample", None), (None, "")])
+def test_the_state_purge_command_names_the_repository_when_known(
+    tmp_path, monkeypatch, repository, flag
+):
+    """Mutations: always emit `--repo` (reddens the unset case); drop `--repo` from the `gh cache
+    delete` half of the command."""
+    if repository is None:
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    f = _write(tmp_path, STATE)
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt_state(str(f), KEY)
+    expected = _no_header("state", f) if flag is None else _no_header("state", f, repo=flag)
+    assert exc.value.code == expected
+
+
+def _damaged(kind, whole):
+    first = bytearray(whole)
+    first[0] ^= 0x08  # `s` becomes `{`
+    inner = bytearray(whole)
+    inner[5] ^= 0x01
+    return {
+        "empty": b"",
+        "cut-in-magic": whole[:11],
+        "magic-byte": bytes(inner),
+        "magic-brace": bytes(first),
+        "cut-at-salt": whole[:18],
+        "cut-in-salt": whole[:30],
+        "cut-at-body": whole[:34],
+        "cut-in-body": whole[:60],
+        "one-below-minimum": whole[:65],
+        "cut-tag-byte": whole[:-1],
+    }[kind]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "empty",
+        "cut-in-magic",
+        "magic-byte",
+        "magic-brace",
+        "cut-at-salt",
+        "cut-in-salt",
+        "cut-at-body",
+        "cut-in-body",
+        "one-below-minimum",
+        "cut-tag-byte",
+    ],
+)
+def test_a_cut_or_damaged_v1_file_fails_authentication_not_the_purge(
+    tmp_path, monkeypatch, kind, damage
+):
+    """Anything that is not a whole, verified v1 file is an authentication failure, never the
+    pre-v1 purge.
+
+    A file shorter than a v1 file with an empty body, or one without the v1 header, refuses
+    before the key derivation. Only cut-tag-byte, whose header is intact and whose length is at
+    least the minimum, derives a key; magic-byte and magic-brace keep the whole length and derive
+    none.
+
+    Mutations: `if not data.startswith(MAGIC): raise SystemExit(no_header)` in place of
+    `_is_pre_v1` in `_decrypt` (reddens empty, cut-in-magic, magic-byte and magic-brace); drop
+    `len(data) < MIN_LEN or` (reddens cut-at-salt, cut-in-salt, cut-at-body, cut-in-body and
+    one-below-minimum); drop `or not data.startswith(MAGIC)` (reddens magic-byte and
+    magic-brace).
+    """
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
+    data = _damaged(damage, f.read_bytes())
+    f.write_bytes(data)
+    calls = _record_openssl(monkeypatch)
+    derivations = 0
+    real_pbkdf2 = hashlib.pbkdf2_hmac
+
+    def pbkdf2(*args):
+        nonlocal derivations
+        derivations += 1
+        return real_pbkdf2(*args)
+
+    monkeypatch.setattr(pcx.hashlib, "pbkdf2_hmac", pbkdf2)
+    with pytest.raises(SystemExit) as exc:
+        _decrypt(kind, f)
+    assert (exc.value.code, calls) == (_unauthenticated(kind, f), [])
+    assert derivations == (1 if damage == "cut-tag-byte" else 0)
+    assert f.read_bytes() == data
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_an_openssl_failure_after_a_good_tag_names_the_runner(tmp_path, monkeypatch, kind):
+    """Mutation: drop `_replace`'s `CalledProcessError` handler, and a traceback replaces the
+    `::error::` line."""
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
+    ciphertext = f.read_bytes()
+    _failing_openssl(monkeypatch, subprocess.CalledProcessError(1, ["openssl"]))
+    with pytest.raises(SystemExit) as exc:
+        _decrypt(kind, f)
+    assert exc.value.code == _runner_failure(kind, f)
+    assert f.read_bytes() == ciphertext
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_missing_openssl_prints_an_error_not_a_traceback(tmp_path, monkeypatch, kind):
+    """Mutation: delete `_replace`'s `except OSError` clause, and FileNotFoundError escapes."""
+    f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
+    _failing_openssl(monkeypatch, FileNotFoundError(2, "No such file or directory", "openssl"))
+    with pytest.raises(SystemExit) as exc:
+        _decrypt(kind, f)
+    assert exc.value.code == (
+        f"{_runner_failure(kind, f)} Error: [Errno 2] No such file or directory: 'openssl'"
     )
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
 
 
-_NOT_A_PLAN = (
-    "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with another "
-    "key derivation or a rotated passphrase, the plan and apply sides read different "
-    "SHIPMATE_PLAN_PASSPHRASE values, or it is corrupt. Nothing was applied. "
-    "docs/troubleshooting.md section `plan artifact does not decrypt to an OpenTofu plan` gives "
-    "each remedy."
-)
+def test_openssl_argv_is_exactly_this(tmp_path, monkeypatch):
+    """OpenSSL's defaults equal some of these flags, so only the recorded argv pins them.
 
+    Mutations: drop `-md sha256` from `_openssl`; `-iter 2`; move decrypt's `-d`.
+    """
+    calls = []
 
-_RUNNER = (
-    "Re-run the job, which clears a transient hosted-runner disk failure, or fix a self-hosted "
-    "runner's openssl or disk."
-)
-_LONG_ENOUGH = b"Salted__01234567" + b"x" * 8
-
-
-def _failing_openssl(monkeypatch, error):
-    """Replace openssl with one that creates its output file, as openssl does, then fails."""
-
-    def fake_run(args, check):
-        with open(args[args.index("-out") + 1], "wb") as fh:
-            fh.write(b"partial")
-        raise error
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        out = PLAIN if "-d" in args else bytes(b ^ 0x5A for b in kwargs["input"])
+        return subprocess.CompletedProcess(args, 0, stdout=out)
 
     monkeypatch.setattr(pcx.subprocess, "run", fake_run)
-
-
-@pytest.mark.parametrize("data", [b"", b"Salte", b"Salted__0123456"], ids=["0", "5", "15"])
-def test_decrypt_refuses_a_truncated_artifact_before_openssl(tmp_path, monkeypatch, data):
-    """Below the 16-byte header the artifact is truncated whatever it holds.
-
-    Mutations: drop decrypt's truncated branch, and openssl's own failure takes the runner
-    message; check `salted` before `truncated`, and 0 and 5 bytes read as plaintext.
-    """
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    f = _write(tmp_path, data)
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt(str(f))
-    assert exc.value.code == (
-        f"::error::plan artifact `{f}` is truncated: it is shorter than its 16-byte salted "
-        "header. Nothing was applied. Re-plan: comment shipmate plan or push, or after the merge "
-        "open a new pull request touching the stack."
-    )
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
-
-
-def test_decrypt_openssl_failure_names_the_runner_and_leaves_no_temp(tmp_path, monkeypatch):
-    """Mutations: drop `_openssl`'s `finally` cleanup, and `.crypt.tmp` stays; drop the
-    `CalledProcessError` handler, and a traceback replaces the `::error::` line; pass
-    `failure=None` from decrypt."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    _failing_openssl(monkeypatch, subprocess.CalledProcessError(1, ["openssl"]))
-    f = _write(tmp_path, _LONG_ENOUGH)
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt(str(f))
-    assert exc.value.code == (
-        f"::error::plan artifact `{f}` could not be decrypted: openssl or the disk failed on the "
-        f"runner. Nothing was applied. {_RUNNER}"
-    )
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
-    assert f.read_bytes() == _LONG_ENOUGH
-
-
-def test_decrypt_without_openssl_prints_an_error_not_a_traceback(tmp_path, monkeypatch):
-    """Mutation: delete `_openssl`'s `except OSError` clause, and FileNotFoundError escapes."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    _failing_openssl(monkeypatch, FileNotFoundError(2, "No such file or directory", "openssl"))
-    f = _write(tmp_path, _LONG_ENOUGH)
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt(str(f))
-    assert exc.value.code == (
-        f"::error::plan artifact `{f}` could not be decrypted: openssl or the disk failed on the "
-        f"runner. Nothing was applied. {_RUNNER} Error: [Errno 2] No such file or directory: "
-        "'openssl'"
-    )
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
+    f = _encrypted(tmp_path, monkeypatch, PLAIN)
+    pcx.decrypt(str(f))
+    assert calls == [_OPENSSL_ARGV, [*_OPENSSL_ARGV[:2], "-d", *_OPENSSL_ARGV[2:]]]
+    assert f.read_bytes() == PLAIN
 
 
 def test_encrypt_openssl_failure_names_no_re_run(tmp_path, monkeypatch):
@@ -152,7 +488,7 @@ def test_encrypt_openssl_failure_names_no_re_run(tmp_path, monkeypatch):
 
     Mutation: append `_RUNNER` to encrypt's message.
     """
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
     _failing_openssl(monkeypatch, subprocess.CalledProcessError(1, ["openssl"]))
     f = _write(tmp_path)
     with pytest.raises(SystemExit) as exc:
@@ -163,284 +499,51 @@ def test_encrypt_openssl_failure_names_no_re_run(tmp_path, monkeypatch):
         "openssl or the disk failed on the runner` says what to do for a plan cell and for an "
         "apply cell's state save."
     )
+    assert f.read_bytes() == PLAIN
     assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
 
 
-def test_decrypt_refuses_a_default_iteration_ciphertext_and_keeps_it(tmp_path, monkeypatch):
-    """Mutations: drop `-iter`/`600000` from `_openssl`, and OpenSSL's default 10,000 recovers
-    the plan; pass no `accept` from decrypt; `os.replace` before the `accept` check, and the
-    garbage replaces the ciphertext."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    plain, f = _write(tmp_path), tmp_path / "old.otplan"
-    _raw_openssl(plain, f, "-iter", "10000")
-    ciphertext = f.read_bytes()
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt(str(f))
-    assert exc.value.code == _NOT_A_PLAN
-    assert f.read_bytes() == ciphertext
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["old.otplan", "stack.otplan"]
+def test_a_temp_file_that_cannot_be_removed_is_named(tmp_path, monkeypatch, capsys):
+    """A decrypt whose replace fails leaves the plaintext in `.crypt.tmp`; a failed removal must
+    not go quiet.
 
-
-def test_decrypt_accepts_a_600000_iteration_sha256_ciphertext(tmp_path, monkeypatch):
-    """Mutations: `-iter 600001` or `-md sha512` in `_openssl`, and the plan no longer decrypts."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    plain, f = _write(tmp_path), tmp_path / "new.otplan"
-    _raw_openssl(plain, f, "-iter", "600000")
-    pcx.decrypt(str(f))
-    assert f.read_bytes() == PLAIN
-
-
-def test_decrypt_accepts_an_opentofu_encrypted_plan(tmp_path, monkeypatch):
-    """Mutation: drop the `encryption_version` branch from `_is_plan`."""
-    f = _encrypted(tmp_path, monkeypatch, ENVELOPE)
-    pcx.decrypt(str(f))
-    assert f.read_bytes() == ENVELOPE
-
-
-_ARGV = [
-    "openssl",
-    "enc",
-    "-aes-256-ctr",
-    "-pbkdf2",
-    "-iter",
-    "600000",
-    "-md",
-    "sha256",
-    "-salt",
-    "-in",
-    "{path}",
-    "-out",
-    "{path}.crypt.tmp",
-    "-pass",
-    "env:PLAN_PASSPHRASE",
-]
-
-
-def test_openssl_argv_is_exactly_this(tmp_path, monkeypatch):
-    """OpenSSL's defaults equal some of these flags, so only the recorded argv pins them.
-
-    Mutations: drop `-md sha256` from `_openssl`; drop `-iter 600000`; move decrypt's `-d`.
-    """
-    calls = []
-
-    def fake_run(args, check):
-        calls.append(args)
-        with open(args[args.index("-out") + 1], "wb") as fh:
-            fh.write(b"Salted__01234567" if "-d" not in args else PLAIN)
-
-    monkeypatch.setattr(pcx.subprocess, "run", fake_run)
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    path = str(_write(tmp_path))
-    pcx.encrypt(path)
-    pcx.decrypt(path)
-    argv = [a.replace("{path}", path) for a in _ARGV]
-    assert calls == [argv, argv[:2] + ["-d"] + argv[2:]]
-
-
-def test_encrypt_derives_the_key_with_600000_iterations(tmp_path, monkeypatch):
-    """Mutations: `-iter 600001` or `-md sha512` in `_openssl`, and the bytes no longer decrypt
-    to the plan."""
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
-    out = tmp_path / "plain.otplan"
-    _raw_openssl(f, out, "-d", "-iter", "600000")
-    assert out.read_bytes() == PLAIN
-
-
-def test_decrypt_wrong_passphrase_refuses(tmp_path, monkeypatch):
-    """CTR decrypts a wrong key to garbage with exit 0; `_is_plan` refuses it.
-
-    Mutation: pass no `accept` from decrypt.
+    Mutation: swallow the `os.remove` failure in `_replace`'s `finally` without printing.
     """
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
-    monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
+
+    def deny(*args):
+        raise PermissionError(13, "Permission denied", args[0])
+
+    monkeypatch.setattr(pcx.os, "replace", deny)
+    monkeypatch.setattr(pcx.os, "remove", deny)
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(f))
-    assert exc.value.code == _NOT_A_PLAN
-    assert f.read_bytes()[:8] == pcx.MAGIC
-
-
-def test_decrypt_refuses_a_zip_payload_that_is_not_a_plan(tmp_path, monkeypatch):
-    """A zip end-of-archive record shares the `PK` prefix with the plan's local-file header.
-
-    Mutation: compare decrypt's result against `b"PK"` alone.
-    """
-    f = _encrypted(tmp_path, monkeypatch, b"PK\x05\x06" + bytes(18))
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt(str(f))
-    assert exc.value.code == _NOT_A_PLAN
-
-
-def test_decrypt_plaintext_plan_refuses(tmp_path, monkeypatch):
-    """Mutation: delete decrypt's unsalted branch."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    f = _write(tmp_path)
-    with pytest.raises(SystemExit, match=r"^::error::plan artifact is plaintext"):
-        pcx.decrypt(str(f))
+    assert exc.value.code == (
+        f"{_runner_failure('plan', f)} Error: "
+        f"{PermissionError(13, 'Permission denied', f'{f}.crypt.tmp')}"
+    )
+    assert capsys.readouterr().out == (
+        f"::error::could not remove the temporary file `{f}.crypt.tmp`; delete it, because after "
+        "a decrypt it can hold the plaintext.\n"
+    )
 
 
 def test_decrypt_plan_without_passphrase_refuses(tmp_path, monkeypatch):
-    """Mutation: delete decrypt's empty-passphrase branch."""
+    """Mutation: delete `_decrypt`'s `_require_passphrase` call."""
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
     monkeypatch.delenv("PLAN_PASSPHRASE", raising=False)
-    with pytest.raises(SystemExit, match=r"^::error::SHIPMATE_PLAN_PASSPHRASE is not set"):
+    with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(f))
+    assert exc.value.code == UNSET
 
 
 def test_decrypt_state_without_passphrase_refuses(tmp_path, monkeypatch):
-    """Mutation: delete decrypt_state's empty-passphrase branch."""
-    f = _encrypted(tmp_path, monkeypatch, STATE)
+    """Mutation: delete `_decrypt`'s `_require_passphrase` call."""
+    f = _encrypted(tmp_path, monkeypatch, STATE, "state")
     monkeypatch.delenv("PLAN_PASSPHRASE", raising=False)
-    with pytest.raises(SystemExit, match=r"^::error::SHIPMATE_PLAN_PASSPHRASE is not set"):
-        pcx.decrypt_state(str(f), KEY)
-
-
-_PLAINTEXT = (
-    "::error::state cache entry `state/app-net/dev-eu/123-1` is plaintext. Delete every entry "
-    "under its prefix, then re-run: `gh cache list{repo} --key state/app-net/dev-eu/ --limit 1000 "
-    "--json id --jq '.[].id' | xargs -n1 gh cache delete{repo}` (the restore matches by prefix, "
-    "so deleting only `state/app-net/dev-eu/123-1` restores the next-older plaintext entry). "
-    "Deleting discards that state: OpenTofu no longer tracks the resources it recorded. A sample "
-    "stack's null and random resources re-create; a real resource can collide with or be "
-    "duplicated by its re-creation."
-)
-
-
-@pytest.mark.parametrize(
-    ("repository", "flag"), [("ship-iac/sample", " --repo ship-iac/sample"), (None, "")]
-)
-def test_decrypt_state_plaintext_refuses_naming_the_key(tmp_path, monkeypatch, repository, flag):
-    """Mutations: drop decrypt_state's salt check; always emit `--repo` (reddens the unset
-    case); drop `--repo` from the `gh cache delete` half of the command."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    if repository is None:
-        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
-    else:
-        monkeypatch.setenv("GITHUB_REPOSITORY", repository)
-    f = _write(tmp_path, STATE)
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt_state(str(f), KEY)
-    assert exc.value.code == _PLAINTEXT.format(repo=flag)
-    assert f.read_bytes() == STATE
-
-
-def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypatch):
-    """Mutations: drop the `gh cache delete` command; drop `--repo` from it; drop the plan/apply
-    mismatch cause."""
-    monkeypatch.setenv("GITHUB_REPOSITORY", "ship-iac/sample")
-    f = _encrypted(tmp_path, monkeypatch, STATE)
-    monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt_state(str(f), KEY)
-    assert exc.value.code == (
-        "::error::state cache entry `state/app-net/dev-eu/123-1` does not decrypt to OpenTofu "
-        "state: it was saved with another key derivation or a rotated passphrase, the plan and "
-        "apply sides read different SHIPMATE_PLAN_PASSPHRASE values, or it is corrupt. tofu was "
-        "not run. docs/troubleshooting.md section `state cache entry ... does not decrypt to "
-        "OpenTofu state` says which command fits which cause. Delete this entry: `gh cache delete "
-        "state/app-net/dev-eu/123-1 --repo ship-iac/sample`. Delete every entry under its prefix, "
-        "which discards that state: `gh cache list --repo ship-iac/sample --key "
-        "state/app-net/dev-eu/ --limit 1000 --json id --jq '.[].id' | xargs -n1 gh cache delete "
-        "--repo ship-iac/sample`."
-    )
-
-
-@pytest.mark.parametrize("data", [b"", b"Salte", b"Salted__0123456"], ids=["0", "5", "15"])
-def test_decrypt_state_refuses_a_truncated_entry_before_openssl(tmp_path, monkeypatch, data):
-    """Below the 16-byte header the entry is truncated whatever it holds, so the remedy is to
-    delete that one entry, not the purge-all a plaintext entry gets.
-
-    Mutations: drop decrypt_state's truncated branch; check `salted` before `truncated`, and 0
-    and 5 bytes take the plaintext purge-all remedy.
-    """
-    monkeypatch.setenv("GITHUB_REPOSITORY", "ship-iac/sample")
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    f = _write(tmp_path, data)
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt_state(str(f), KEY)
-    assert exc.value.code == (
-        "::error::state cache entry `state/app-net/dev-eu/123-1` is truncated: it is shorter "
-        "than its 16-byte salted header. tofu was not run. `gh cache delete "
-        "state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes it, and the next restore uses "
-        "the previous one."
-    )
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
-
-
-def test_decrypt_state_without_openssl_prints_an_error_not_a_traceback(tmp_path, monkeypatch):
-    """Mutation: delete `_openssl`'s `except OSError` clause."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    _failing_openssl(monkeypatch, FileNotFoundError(2, "No such file or directory", "openssl"))
-    f = _write(tmp_path, _LONG_ENOUGH)
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt_state(str(f), KEY)
-    assert exc.value.code == (
-        "::error::state cache entry `state/app-net/dev-eu/123-1` could not be decrypted: openssl "
-        f"or the disk failed on the runner. tofu was not run. {_RUNNER} Error: [Errno 2] No such "
-        "file or directory: 'openssl'"
-    )
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
-
-
-def test_decrypt_state_openssl_failure_names_the_runner(tmp_path, monkeypatch):
-    """Mutation: pass `failure=None` from decrypt_state."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    _failing_openssl(monkeypatch, subprocess.CalledProcessError(1, ["openssl"]))
-    f = _write(tmp_path, _LONG_ENOUGH)
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt_state(str(f), KEY)
-    assert exc.value.code == (
-        "::error::state cache entry `state/app-net/dev-eu/123-1` could not be decrypted: openssl "
-        f"or the disk failed on the runner. tofu was not run. {_RUNNER}"
-    )
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
-
-
-def test_decrypt_state_wrong_passphrase_refuses(tmp_path, monkeypatch):
-    """Mutations: delete decrypt_state's shape check; `os.replace` before the `accept` check in
-    `_openssl`, and the garbage replaces the ciphertext."""
-    f = _encrypted(tmp_path, monkeypatch, STATE)
-    monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
-    with pytest.raises(SystemExit, match=r"^::error::state cache entry .* does not decrypt"):
-        pcx.decrypt_state(str(f), KEY)
-    assert f.read_bytes()[:8] == pcx.MAGIC
-
-
-def test_decrypt_state_of_encrypted_empty_file_refuses(tmp_path, monkeypatch):
-    """tofu reads an empty state file as no state.
-
-    Mutation: delete decrypt_state's shape check.
-    """
-    f = _encrypted(tmp_path, monkeypatch, b"")
-    with pytest.raises(SystemExit, match=r"^::error::state cache entry .* does not decrypt"):
-        pcx.decrypt_state(str(f), KEY)
-
-
-def test_decrypt_state_of_json_without_version_refuses(tmp_path, monkeypatch):
-    """Mutation: drop the `version` condition from decrypt_state's shape check."""
-    f = _encrypted(tmp_path, monkeypatch, b'{"a":1}')
-    with pytest.raises(SystemExit, match=r"^::error::state cache entry .* does not decrypt"):
-        pcx.decrypt_state(str(f), KEY)
-
-
-def test_decrypt_state_round_trip_restores_exact_bytes(tmp_path, monkeypatch):
-    """Mutation: `decrypt=False` in decrypt_state's `_openssl` call; the result is ciphertext,
-    which the shape check refuses."""
-    f = _encrypted(tmp_path, monkeypatch, STATE)
-    pcx.decrypt_state(str(f), KEY)
-    assert f.read_bytes() == STATE
-
-
-def test_decrypt_state_accepts_opentofu_encrypted_state(tmp_path, monkeypatch):
-    """The top-level keys OpenTofu v1.12.4 writes with an `encryption { state { ... } }` block.
-
-    Mutation: drop the `encryption_version` alternative from decrypt_state's shape check.
-    """
-    envelope = (
-        b'{"serial":1,"lineage":"x","meta":{},"encrypted_data":"AAAA","encryption_version":"v0"}'
-    )
-    f = _encrypted(tmp_path, monkeypatch, envelope)
-    pcx.decrypt_state(str(f), KEY)
-    assert f.read_bytes() == envelope
+    assert exc.value.code == UNSET
 
 
 def test_cli_require_without_passphrase_refuses(monkeypatch):
@@ -453,7 +556,7 @@ def test_cli_require_without_passphrase_refuses(monkeypatch):
 
 def test_cli_require_with_passphrase_passes(monkeypatch):
     """Mutation: `if _passphrase():` in `_require_passphrase`, which refuses every caller."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
     assert pcx.main(["plan-crypt", "require"]) is None
 
 
@@ -474,30 +577,18 @@ def test_cli_decrypt_state_without_cache_key_prints_usage(tmp_path):
         pcx.main(["plan-crypt", "decrypt-state", str(_write(tmp_path))])
 
 
-def test_decrypt_a_16_byte_header_only_artifact_reaches_the_plan_check(tmp_path, monkeypatch):
-    """openssl decrypts a bare salted header to an empty file with exit 0.
-
-    Mutation: let `_is_plan` accept an empty file.
-    """
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    f = _write(tmp_path, b"Salted__01234567")
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt(str(f))
-    assert exc.value.code == _NOT_A_PLAN
-
-
 def _os_error(path):
     """The platform's own text for a missing file, which differs between Windows and Linux."""
     try:
-        os.path.getsize(path)
+        open(path, "rb").close()
     except OSError as exc:
         return str(exc)
     raise AssertionError(f"{path} exists")
 
 
 def test_decrypt_a_missing_artifact_prints_an_error_not_a_traceback(tmp_path, monkeypatch):
-    """Mutation: drop the `except OSError` around decrypt's header reads."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    """Mutation: drop the `except OSError` around `_decrypt`'s read."""
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
     missing = tmp_path / "absent.otplan"
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(missing))
@@ -511,34 +602,15 @@ def test_decrypt_a_missing_artifact_prints_an_error_not_a_traceback(tmp_path, mo
 
 
 def test_decrypt_state_a_missing_entry_prints_an_error_not_a_traceback(tmp_path, monkeypatch):
-    """Mutation: drop the `except OSError` around decrypt_state's header reads."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    """Mutations: drop the `except OSError` around `_decrypt`'s read; drop `the restore may not
+    have written the file` from decrypt_state's refusal."""
+    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
     missing = tmp_path / "absent.tfstate"
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt_state(str(missing), KEY)
     assert exc.value.code == (
-        "::error::state cache entry `state/app-net/dev-eu/123-1` cannot be read. tofu was not "
-        "run. The refusal comes before any apply step, so a re-run of the job is safe. Error: "
+        "::error::state cache entry `state/app-net/dev-eu/123-1` cannot be read: the restore may "
+        "not have written the file, or the runner's disk failed. tofu was not run. The refusal "
+        "comes before any apply step, so a re-run of the job is safe. Error: "
         f"{_os_error(missing)}"
-    )
-
-
-def test_a_temp_file_that_cannot_be_removed_is_named(tmp_path, monkeypatch, capsys):
-    """A refused decrypt leaves its result in `.crypt.tmp`; a failed removal must not go quiet.
-
-    Mutation: swallow the `os.remove` failure in `_openssl`'s `finally` without printing.
-    """
-    f = _encrypted(tmp_path, monkeypatch, PLAIN)
-    monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
-
-    def deny(path):
-        raise PermissionError(13, "Permission denied", path)
-
-    monkeypatch.setattr(pcx.os, "remove", deny)
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt(str(f))
-    assert exc.value.code == _NOT_A_PLAN
-    assert capsys.readouterr().out == (
-        f"::error::could not remove the temporary file `{f}.crypt.tmp`; delete it, because after "
-        "a decrypt it can hold the plaintext.\n"
     )

@@ -852,13 +852,14 @@ the repository root, or none:
   cached file is encrypted with `SHIPMATE_PLAN_PASSPHRASE` (§Plan artifact
   encryption), because any workflow run, a fork's pull request included, can
   restore a default-branch cache entry. An empty passphrase refuses the restore
-  and the save. A plaintext entry, one shorter than its salted header, one
-  that does not decrypt to OpenTofu state, and an openssl or disk failure on
-  the runner each fail the restore naming the matched cache key, so tofu never
-  reads it and the cell skips its save. A key-derivation change, a passphrase
-  rotation and different values on `<env>-plan` and `<env>-apply` each make
-  entries fail to decrypt to state; `docs/troubleshooting.md` §`state cache
-  entry ... does not decrypt to OpenTofu state` gives each remedy.
+  and the save. An entry that is not shipmate-crypt-v1 (saved unencrypted or
+  by an earlier engine release), one that fails authentication, and an openssl
+  or disk failure on the runner each fail the restore naming the matched cache
+  key, so tofu never reads it and the cell skips its save. A passphrase
+  rotation, different values on `<env>-plan` and `<env>-apply`, a corrupt,
+  truncated or altered entry, and one copied under another stack's or
+  environment's key each fail authentication; `docs/troubleshooting.md`
+  §`state cache entry ... failed authentication` tells them apart.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -2753,18 +2754,22 @@ engine, and both are equally visible in the plan artifact — the machine plan
 
 The reviewed machine plan file (`stack.otplan`) is encrypted at rest in the
 uploaded artifact. `plan-cell` (in `plan.yml`) encrypts the plan with its
-required `plan-passphrase` input before upload, using a single symmetric cipher:
-`openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -md sha256 -salt`, passphrase
-supplied via `-pass env:` (never on the command line). The key derives with
-600,000 PBKDF2-SHA256 iterations, so a plan artifact or cached state entry
-written with another passphrase or any other count or digest decrypts to
-garbage, without an error. Each decrypt therefore checks its result before it
-replaces the ciphertext: a plan that is neither a zip archive (an OpenTofu plan
-file) nor, under OpenTofu's own plan encryption, its JSON envelope refuses at
-`Decrypt reviewed plan artifact`, before any apply step, and a cached state
-entry that does not parse as OpenTofu state refuses at the state restore
-(§State backend). `apply-cell` decrypts the plan after download on every apply
-path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
+required `plan-passphrase` input before upload, in the shipmate-crypt-v1 format
+`scripts/plan-crypt` defines: the 18-byte header `shipmate-crypt-v1` and a
+newline, a 16-byte random salt, the output of `openssl enc -aes-256-ctr -pbkdf2
+-iter 1 -md sha256 -nosalt`, and an HMAC-SHA256 tag over the three. One
+PBKDF2-HMAC-SHA256 derivation of 600,000 iterations over the passphrase and the
+salt yields the cipher key, which reaches openssl in its environment and never
+on the command line, and the tag key, each labelled with the file's kind, plan
+or state, so neither authenticates as the other. A state entry's tag also
+covers its cache prefix, `state/<stack>/<env>/`, so an entry copied under
+another stack's or environment's key refuses. AES-256-CTR is unauthenticated:
+a wrong key or a damaged byte decrypts to garbage without an error. So each
+decrypt verifies the tag before openssl reads the file, and a plan artifact
+that fails refuses at `Decrypt reviewed plan artifact`, before any apply step,
+and a cached state entry at the state restore (§State backend). `apply-cell`
+decrypts the plan after download on every apply path: both paths pass it as
+the `SHIPMATE_PLAN_PASSPHRASE` secret into the
 reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
 forms. The same cipher and secret encrypt a local backend's cached state
@@ -2791,8 +2796,8 @@ environment, and a plan cell names its own plan environment. The same value on b
 - **As different values on `<env>-plan` and `<env>-apply`**, every apply in
   that environment refuses at `Decrypt reviewed plan artifact`, and on a local
   backend a plan cell refuses the state an apply cell saved
-  (`docs/troubleshooting.md` §`plan artifact does not decrypt to an OpenTofu
-  plan` has the remedy).
+  (`docs/troubleshooting.md` §`plan artifact ... failed authentication` has
+  the remedy).
 
 Scoping it to a plan environment buys nothing either — those must have no
 branch policy at all (`docs/hardening.md` §6), so any branch's workflow can
@@ -2803,23 +2808,18 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Required.** An empty or unset passphrase refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
-- **Fail-safe on mismatch.** An artifact without the `Salted__` magic header,
-  or shorter than its 16-byte salted header, refuses and tells you to re-plan.
-  An openssl or disk failure on the runner refuses and tells you to re-run the
-  job or fix the runner. An artifact that cannot be read names a re-plan for an
-  artifact downloaded without `stack.otplan`, and a re-run for a disk failure,
-  which is safe because the refusal comes before any apply step. An encrypt
-  failure, in a plan cell or a state save, names no re-run. An artifact that
-  does not decrypt to a plan file
-  refuses by naming the causes (a plan/apply value mismatch, a rotated
-  passphrase, another key derivation or a corrupt artifact) and pointing to
-  `docs/troubleshooting.md` for each remedy. For a zip plan that check reads
-  only the decrypted file's first bytes: corruption further in, a plan cut off
-  after its zip header included, fails later at the render step, on
-  `tofu show`. For an OpenTofu-encrypted plan it only verifies that the file
-  parses as JSON holding `encryption_version`, so damage inside the encrypted
-  payload usually fails later at `tofu show` too. The apply check stays pending
-  in each case.
+- **Fail-safe on mismatch.** An artifact that is not shipmate-crypt-v1
+  (uploaded unencrypted, or encrypted by an earlier engine release) refuses and
+  tells you to re-plan. An artifact that fails authentication refuses naming
+  the causes (another passphrase, a rotated one or different values on
+  `<env>-plan` and `<env>-apply`, or a corrupt, truncated or altered artifact)
+  and points to `docs/troubleshooting.md` for each remedy; the engine cannot
+  tell them apart. An openssl or disk failure on the runner refuses and tells
+  you to re-run the job or fix the runner. An artifact that cannot be read
+  names a re-plan for an artifact downloaded without `stack.otplan`, and a
+  re-run for a disk failure, which is safe because the refusal comes before any
+  apply step. An encrypt failure, in a plan cell or a state save, names no
+  re-run. The apply check stays pending in each case.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and
