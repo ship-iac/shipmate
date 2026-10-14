@@ -63,7 +63,9 @@ _LOST_SAVE_WARNING = {
     "run": (
         'echo "::error::The apply step ran and its state was not saved or not verified. Never '
         "re-run this job or its workflow run: it applies the reviewed plan again against the "
-        "state from before the apply. Before applying any plan of this stack in this "
+        "state from before the apply. Until a re-plan replaces this cell's pending apply check, "
+        "a shipmate apply comment on its open pull request, bare or naming this environment, "
+        "also applies the reviewed plan again. Before applying any plan of this stack in this "
         "environment, follow docs/troubleshooting.md section The apply step ran and its state "
         'was not saved."\n'
         "exit 1\n"
@@ -74,11 +76,13 @@ _LOST_SAVE_WARNING = {
 def test_an_unsaved_state_after_an_apply_fails_the_cell_and_warns_against_a_re_run():
     """The warning fires whenever an apply step ran over restored state and the save is not
     verified (failed, cancelled, not found, or skipped for an absent file), a cancelled run
-    included, where failure() is false; it fails the job so the apply check stays pending; its
-    text forbids a re-run and a re-comment and calls no re-plan unsafe.
+    included, where failure() is false; it fails the job so the apply check stays pending. Its
+    text says a re-run of the job or its workflow run applies the reviewed plan again, that a
+    `shipmate apply` comment on the open pull request does too until a re-plan replaces the
+    cell's check, and points at the troubleshooting section.
 
     Mutations: `steps.save-state.outputs.saved != 'true'` to `steps.save-state.outcome ==
-    'failure'`; drop the `exit 1`; restore the old "or re-plan against the cache" text.
+    'failure'`; drop the `exit 1`; drop the re-run sentence; drop the re-comment sentence.
     """
     steps = action_steps("apply-cell")
     names = [s.get("name") for s in steps]

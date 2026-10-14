@@ -223,7 +223,7 @@ runs:
       if: ${{ always() && steps.apply.outcome != 'skipped' && steps.init.outputs.restore-outcome == 'success' && steps.save-state.outputs.saved != 'true' }}
       shell: bash
       run: |
-        echo "::error::The apply step ran and its state was not saved or not verified. Never re-run this job or its workflow run: it applies the reviewed plan again against the state from before the apply. Before applying any plan of this stack in this environment, follow docs/troubleshooting.md section The apply step ran and its state was not saved."
+        echo "::error::The apply step ran and its state was not saved or not verified. Never re-run this job or its workflow run: it applies the reviewed plan again against the state from before the apply. Until a re-plan replaces this cell's pending apply check, a shipmate apply comment on its open pull request, bare or naming this environment, also applies the reviewed plan again. Before applying any plan of this stack in this environment, follow docs/troubleshooting.md section The apply step ran and its state was not saved."
         exit 1
 
     - name: Check the provider cache
