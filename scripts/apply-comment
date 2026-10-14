@@ -38,7 +38,8 @@ ag = _load("apply-gate")
 li = _load("lock-info")
 wv = _load("waves")
 
-CELL_KEYS = ("stack", "environment", "result", "reason")
+_STR_KEYS = ("stack", "environment", "result", "reason")
+CELL_KEYS = (*_STR_KEYS, "state_lost")
 _RESULTS = frozenset({"applied", "failed", "blocked"})
 # (circle, verdict word) per display status, in verdict token order. A SUPERSET of cell.json's
 # `result` enum: `unrecorded` is derived at render time (apply_check_state), never written,
@@ -59,6 +60,10 @@ _SECTION_STATUSES = ("applied", "failed", "unrecorded")
 # How many cells the unrecorded note names before it summarizes the rest.
 _UNRECORDED_NAMED = 5
 
+# Same, for the state-not-saved note; same reasoning (see `_unrecorded_note`).
+_STATE_LOST_NAMED = 5
+_LOST_LOG = "`The apply step ran and its state was not saved`"
+
 # Same, for the state-lock note; same reasoning (see `_lock_note`).
 _LOCK_NAMED = 5
 
@@ -67,11 +72,50 @@ def _not_attempted_note(rows, env_name):
     """The 'apply checks stay pending' note when a row is not attempted, parameterized on the
     targeted environment: a bare `shipmate apply` excludes explicit envs
     (`explicit: true` in `.github/shipmate-config.yml`), so it cannot retry one — the note must
-    name the targeted form. env_name is author-controlled and escaped."""
+    name the targeted form. env_name is author-controlled and escaped.
+
+    The retry applies every pending cell it covers, a cell whose state was not saved
+    included. With a `state not saved:` note the retry waits for those cells' recovery. The
+    job-log pointer stays in both forms: a lost cell whose artifact did not upload (the upload
+    is best-effort) reads not attempted and is in no note."""
     if not any(r["status"] == "not_attempted" for r in rows):
         return ""
     cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
-    return f"not attempted: the apply checks stay pending; retry with `{cmd}`."
+    retry = f"retry with `{cmd}`."
+    if any(r["state_lost"] for r in rows):
+        retry = (
+            f"retry with `{cmd}` once the cells under `state not saved:` are recovered, because "
+            "it applies their reviewed plans again."
+        )
+    return (
+        f"not attempted: the apply checks stay pending; {retry} If a cell's job log shows "
+        "`The apply step ran and its state was not saved`, follow docs/troubleshooting.md "
+        "section of that name first."
+    )
+
+
+def _state_lost_note(rows):
+    """The 'state not saved' note: every cell whose apply ran and whose state was not saved,
+    named in **bold** + `_md_name` like `_unrecorded_note`, capped for its reason."""
+    cells = [
+        f"**{sc._md_name(r['stack'])} ({sc._md_name(r['environment'])})**"
+        for r in rows
+        if r["state_lost"]
+    ]
+    if not cells:
+        return ""
+    listed = named(cells, _STATE_LOST_NAMED)
+    if len(cells) > _STATE_LOST_NAMED:
+        listed += f", whose job logs show {_LOST_LOG}"
+    return (
+        f"state not saved: {listed}. The apply step ran and its state "
+        "was not saved or not verified. Never re-run these cells' jobs or their workflow run. A "
+        "re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans again "
+        "against the state from before the apply. Before applying or merging any plan of a "
+        "named stack in the environment named beside it, on any pull request, follow "
+        "docs/troubleshooting.md section "
+        "`The apply step ran and its state was not saved`."
+    )
 
 
 def _unrecorded_note(rows):
@@ -96,7 +140,7 @@ def _unrecorded_note(rows):
     return (
         f"not recorded: {named(cells, _UNRECORDED_NAMED)}. The apply succeeded but its apply "
         "check is not recorded as complete (it failed, was cancelled, or a newer plan "
-        "re-created it), so `shipmate / gate` stays pending. Re-plan and re-apply."
+        "re-created it), so `shipmate / gate` stays pending. Re-plan."
     )
 
 
@@ -169,9 +213,11 @@ def _validate_cell(cell, path):
     summary-comment's `_validate_cell`. A pin-skewed or crafted cell.json with
     the right keys but wrong types would otherwise land unescaped in the
     comment, and an out-of-enum result would fall through the status dispatch."""
-    for k in CELL_KEYS:
+    for k in _STR_KEYS:
         if type(cell[k]) is not str:
             raise SystemExit(f"::error::cell summary {path} key {k!r} must be a string")
+    if type(cell["state_lost"]) is not bool:
+        raise SystemExit(f"::error::cell summary {path} key 'state_lost' must be a boolean")
     if cell["result"] not in _RESULTS:
         raise SystemExit(
             f"::error::cell summary {path} key 'result' must be one of "
@@ -275,6 +321,7 @@ def build_rows(expected, downloaded):
             "stack": cell["stack"],
             "status": cell["result"],
             "reason": cell["reason"],
+            "state_lost": cell["state_lost"],
             "apply_text": text,
         }
     for env, stack in expected:
@@ -285,6 +332,7 @@ def build_rows(expected, downloaded):
                 "stack": stack,
                 "status": "not_attempted",
                 "reason": "",
+                "state_lost": False,
                 "apply_text": None,
             }
     rows = list(by_key.values())
@@ -331,14 +379,16 @@ def apply_check_state(rows, present, done):
     artifact -- are the authority on whether a unit is done. `Compose cell
     summary` runs `if: always()`, and the trailing `complete` job completes the
     check only for a cell whose job succeeded, so an `applied` artifact can
-    coexist with a pending check (`Save state` failed, the job was cancelled, or
-    the `complete` job failed); and the continue-on-error upload can drop,
+    coexist with a pending check (the state was not saved, the job was cancelled,
+    or the `complete` job failed); and the continue-on-error upload can drop,
     leaving an applied cell with no artifact.
     Two directions, therefore:
 
     - applied + pending check -> `unrecorded`: the apply succeeded but was not
-      recorded, the gate stays pending, and the stack needs a re-plan (state
-      has advanced past the reviewed .otplan).
+      recorded, the gate stays pending, and the stack needs a re-plan. A cell
+      whose state was not saved is also named by the `state not saved:` note,
+      because its reviewed .otplan still matches the restored state and would
+      apply again; so neither note says re-apply.
     - not_attempted + done check -> `applied`: the check proves the apply
       landed; apply_text stays None so the row renders its bare line.
 
@@ -713,6 +763,7 @@ def build_comment(
     hint = sc.footer_hint(circle)
     notes = (
         _lock_note(rows, env_name),
+        _state_lost_note(rows),
         _unrecorded_note(rows),
         _not_attempted_note(rows, env_name),
     )

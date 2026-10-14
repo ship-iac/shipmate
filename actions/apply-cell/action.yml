@@ -216,12 +216,15 @@ runs:
         passphrase: ${{ inputs.plan-passphrase }}
 
     - name: Warn that the applied state was not saved
-      # `Save state` also runs when the apply was skipped; only an apply that ran can have
-      # advanced state that a re-run or a re-plan against the cache would act on again.
-      if: ${{ always() && steps.apply.outcome != 'skipped' && steps.save-state.outcome == 'failure' }}
+      id: lost-save
+      # always(): failure() is false in a cancelled run. A failed, cancelled, unverified or skipped
+      # save after an apply that ran fails the job, so its apply check stays pending; the exit also
+      # skips the provider-cache steps below through their implied success().
+      if: ${{ always() && steps.apply.outcome != 'skipped' && steps.init.outputs.restore-outcome == 'success' && steps.save-state.outputs.saved != 'true' }}
       shell: bash
       run: |
-        echo "::error::The apply step ran and its state was not saved. Do not re-run this job or re-plan against the cache: both act on the state from before the apply. See docs/troubleshooting.md section The apply step ran and its state was not saved."
+        echo "::error::The apply step ran and its state was not saved or not verified. Never re-run this job or its workflow run. A re-run, a shipmate apply comment, or a merge can apply this cell's reviewed plan again against the state from before the apply. Before applying or merging any plan of this stack in this environment, on any pull request, follow docs/troubleshooting.md section The apply step ran and its state was not saved."
+        exit 1
 
     - name: Check the provider cache
       id: provider-cache-files
@@ -245,9 +248,9 @@ runs:
         key: ${{ steps.init.outputs.cache-primary-key }}
 
     - name: Compose cell summary
-      # always(): the aggregator needs a result for every attempted or blocked cell. Env vars only:
-      # stack, env and reason text is author-controlled, never shell- or JSON-spliced.
-      # Reviewer-facing only (continue-on-error): failing after `Save state` strands a stale plan.
+      # always(): every attempted or blocked cell needs a result. Env vars only: author text is never
+      # shell- or JSON-spliced. Reviewer-facing (continue-on-error); the warning step's exit 1, not
+      # LOST_SAVE_OUTCOME here, is what keeps a lost save's apply check pending.
       if: always()
       continue-on-error: true
       shell: bash
@@ -264,6 +267,8 @@ runs:
         RESTORE_OUTCOME: ${{ steps.init.outputs.restore-outcome }}
         PLAN_DIGEST_OUTCOME: ${{ steps.plan-digest.outcome }}
         APPLY_OUTCOME: ${{ steps.apply.outcome }}
+        # `failure` when the warning fired (it ends exit 1); anything but success or skipped is lost.
+        LOST_SAVE_OUTCOME: ${{ steps.lost-save.outcome }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"
@@ -271,7 +276,7 @@ runs:
     - name: Upload apply summary
       # Reviewer-facing only (continue-on-error): a failed upload drops the cell's output from the
       # comment rather than stranding its check pending. `overwrite: true` keeps a same-run job
-      # re-run, the documented recovery path, from failing 409 on the existing artifact name.
+      # re-run from failing 409 on the existing artifact name.
       if: always()
       continue-on-error: true
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -860,6 +860,15 @@ the repository root, or none:
   truncated or altered entry, and one copied under another stack's or
   environment's key each fail authentication; `docs/troubleshooting.md`
   §`state cache entry ... failed authentication` tells them apart.
+  The save is verified: `actions/state` looks its entry up by the exact save
+  key, with no `restore-keys`, and its `saved` output is `true` only on that
+  hit, because `actions/cache/save` warns and succeeds when the cache stores
+  nothing. `Save state` does not fail on a miss. `apply-cell`'s
+  `Warn that the applied state was not saved` step fails the cell's job, so its
+  apply check stays pending, whenever an apply step that ran over a restored
+  state is followed by a save that failed, was cancelled, was not found, or was
+  skipped for an absent or empty state file; `docs/troubleshooting.md`
+  §`The apply step ran and its state was not saved` has the recovery.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -1617,7 +1626,9 @@ check/status/comment/issue that crosses a workflow-run boundary:
     its deploy verdict. Its waiting cells keep their apply checks pending, so no
     refresh greens the gate until they apply;
   - a pending deploy `summary`: the merged head keeps its last gate; re-run that
-    deploy, as for any superseded deploy.
+    deploy, as for any superseded deploy, unless a cell's job log shows
+    `The apply step ran and its state was not saved` (`docs/troubleshooting.md`
+    has the section of that name).
 
   One race stays open. A refresh already past its status read and before its
   `success` write, one API round trip, can overwrite a `gate-hold` hold. It
@@ -2361,10 +2372,13 @@ footer lines and, under any verdict but 🟢, the hint.
   apply check is already done (see the derivation rules below).
 - **Notes**, each on its own line when it has content: `state lock held:`,
   naming each cell whose apply could not acquire the lock, the lock id, when it
-  was taken, and the `shipmate unlock` command; `not recorded:`, naming the
+  was taken, and the `shipmate unlock` command; `state not saved:`, naming
+  the cells whose state was not saved; `not recorded:`, naming the
   not-recorded cells; and ``not attempted: the apply checks stay pending;
   retry with `shipmate apply <env>`.`` (the bare `shipmate apply` when the run
-  covered all environments).
+  covered all environments), qualified to run after the `state not saved:`
+  cells are recovered when that note is present, and always followed by a
+  pointer to the lost-save section.
 - **Footer lines**, one per line: the bare-apply form's environment
   dispositions, then, in both forms, one line per waiting cell. The comment
   states no gate line: the `shipmate / gate` status shows the gate's state.
@@ -2450,12 +2464,12 @@ job believed before its check was completed:
 - 🟢 **applied** — the apply succeeded and its check is recorded.
 - 🟠 **not recorded** — the apply succeeded but its check is still
   pending, because the check was not completed after the apply: the cell's
-  job did not succeed (`Save state` failed, or it was cancelled), the
+  job did not succeed (its state was not saved, or it was cancelled), the
   `complete` job failed, or a newer plan re-created the check.
-  `shipmate / gate` stays pending, and the stack needs a re-plan: state has
-  advanced past the reviewed `.otplan`, so the saved plan is stale. When
-  `Save state` failed on a local backend, see `docs/troubleshooting.md`
-  §`The apply step ran and its state was not saved`. The `not recorded:` note names the affected cells — capped, with
+  `shipmate / gate` stays pending, and the stack needs a re-plan. The
+  `not recorded:` note ends `Re-plan.` and never says re-apply: a cell whose
+  state was not saved is also named by the `state not saved:` note below. The
+  `not recorded:` note names the affected cells — capped, with
   any remainder summarized as a count, since notes are part of the comment the
   size fallback cannot shed and the usual cause strands a whole matrix at once;
   the row lines always name every one of them. Each such cell keeps its full
@@ -2467,14 +2481,43 @@ job believed before its check was completed:
 - 🔴 **failed** / ⚪ **blocked** rows are never re-derived from check state. A
   failed row against a completed check means some other run applied that cell:
   the row over-reports, nothing is stranded, and downgrading it would let an
-  unrelated run's completed check hide a real failure in this one.
+  unrelated run's completed check hide a real failure in this one. A failed
+  apply can still have changed resources, and a failed cell whose state was
+  not saved is named by the `state not saved:` note.
+- **state not saved** is a note, not a status: `apply-cell-summary` writes
+  `state_lost` into `cell.json`, true unless the cell's
+  `Warn that the applied state was not saved` step's outcome is `success` or
+  `skipped`, so a cancelled or unknown outcome counts as lost. That step fires
+  when the apply step ran, the state was restored, and `actions/state` did not
+  report `saved`. The `state not saved:` note names up to 5 of those cells
+  and counts the rest, whose job logs show
+  `The apply step ran and its state was not saved`, and says: the apply step
+  ran and its state was not saved or not verified; never re-run the cells'
+  jobs or their workflow run; a re-run, a `shipmate apply` comment, or a merge
+  can apply their reviewed plans again against the state from before the
+  apply; before applying or merging any plan of a named stack in the
+  environment named beside it, on any pull request, follow
+  `docs/troubleshooting.md`
+  §`The apply step ran and its state was not saved`, which holds the procedure.
+  While it is present, the `not attempted:` note's retry command is to run
+  once those cells are recovered, because any apply covering them applies
+  their reviewed plans again. Every `not attempted:` note also carries a
+  cause-agnostic pointer to that section, because the upload is best-effort: a
+  lost cell whose artifact did not upload renders as not attempted and no note
+  names it. The marker reaches only the
+  comment of the run that lost the state; a later run's comment, and the
+  remedies it renders, do not know. Nothing refuses a later apply of the cell.
+  The warning step's `exit 1`, not the artifact, keeps the cell's apply check
+  pending.
 
 If the check scan is unavailable — an API failure (warned, degraded to no
 data) or an empty `SHIPMATE_APP_ID` (warned) — every name reads as *absent*,
 which means *unknown*, and the comment falls back to artifact-only status.
 Absence never manufactures a not-recorded row.
 
-`cell.json`'s `result` grammar is `applied | failed | blocked`. Not recorded
+`cell.json` holds the strings `stack`, `environment`, `result` and `reason`,
+and the boolean `state_lost`; the validator refuses a cell missing any of them
+or carrying another type. Its `result` grammar is `applied | failed | blocked`. Not recorded
 is a display status derived at render time, never a value `apply-cell` writes,
 so the validator still rejects an out-of-enum `result`.
 
@@ -3007,7 +3050,10 @@ environment falls in level 0 run to completion, in stack waves that span every
 environment of that level (§Fan-out), before any env-level-1 apply starts, and so
 on. A failure anywhere in an env-level skips every successor level's applies
 for that deploy run — the failed environment's stacks stay pending, and
-downstream environments are not touched until it is fixed and re-run.
+downstream environments are not touched until it is fixed and re-run. A cell
+whose job log shows `The apply step ran and its state was not saved` is fixed
+by `docs/troubleshooting.md` §`The apply step ran and its state was not saved`,
+never by a re-run, which applies it again.
 `MAX_ENV_LEVELS` is `4`; an env-order graph that would span more levels than
 that fails validation of the table, naming one longest chain, rather than silently
 truncating.
@@ -3068,7 +3114,10 @@ other cells still apply. An environment with a waiting cell is not fully
 applying, so its `needs` successors are skipped, and each new skip can make
 more cells wait; the bare form computes both to one fixpoint.
 Completed cells skip idempotently, so re-commenting `shipmate apply` resumes
-where the previous run stopped.
+where the previous run stopped, except for a cell whose job log shows
+`The apply step ran and its state was not saved`: its check is pending, so a
+re-comment applies it again (`docs/troubleshooting.md`
+§`The apply step ran and its state was not saved`).
 
 The engine ships this as a reusable, parameterized workflow
 (`.github/workflows/apply-env-level.yml`) that the engine's own `deploy.yml`

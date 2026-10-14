@@ -43,6 +43,7 @@ def _run_compose(
     restore="skipped",
     plan_digest="skipped",
     apply="skipped",
+    lost_save="skipped",
     stack="stacks/app",
     env="dev-eu",
 ):
@@ -60,6 +61,7 @@ def _run_compose(
     monkeypatch.setenv("RESTORE_OUTCOME", restore)
     monkeypatch.setenv("PLAN_DIGEST_OUTCOME", plan_digest)
     monkeypatch.setenv("APPLY_OUTCOME", apply)
+    monkeypatch.setenv("LOST_SAVE_OUTCOME", lost_save)
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
 
     load_script("apply-cell-summary").main()
@@ -220,16 +222,36 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
         {},
     ],
 )
-def test_cell_json_carries_exactly_the_four_contract_keys_all_strings(
-    monkeypatch, tmp_path, kwargs
-):
-    """The renderer's contract: `scripts/apply-comment`'s CELL_KEYS is this same four-key set.
+def test_cell_json_carries_exactly_the_contract_keys(monkeypatch, tmp_path, kwargs):
+    """The renderer's contract: `scripts/apply-comment`'s CELL_KEYS is this same key set, four
+    strings and the boolean `state_lost`.
     Mutation: write `"path": os.environ["STACK"]` beside `stack` in apply-cell-summary."""
     cell = _run_compose(monkeypatch, tmp_path, **kwargs)
-    assert set(cell.keys()) == {"stack", "environment", "result", "reason"}
-    for key, value in cell.items():
-        assert isinstance(value, str), f"{key} is {type(value).__name__}, not str: {value!r}"
+    assert set(cell.keys()) == {"stack", "environment", "result", "reason", "state_lost"}
+    for key in ("stack", "environment", "result", "reason"):
+        assert isinstance(cell[key], str), f"{key} is not str: {cell[key]!r}"
+    assert type(cell["state_lost"]) is bool
     assert cell["result"] in ("applied", "failed", "blocked")
+
+
+@pytest.mark.parametrize(
+    ("outcome", "lost"),
+    [
+        ("failure", True),
+        ("cancelled", True),
+        ("", True),
+        ("success", False),
+        ("skipped", False),
+    ],
+)
+def test_state_lost_is_the_lost_save_warning_having_fired(monkeypatch, tmp_path, outcome, lost):
+    """The warning step ends `exit 1` whenever it runs, so `failure` is "it fired"; a cancelled or
+    unknown outcome counts as lost too (fail-closed).
+
+    Mutations: `== "failure"` (cancelled reddens); `not in ("skipped",)` (success reddens);
+    `not in ("success",)` (skipped reddens)."""
+    cell = _run_compose(monkeypatch, tmp_path, apply="success", lost_save=outcome)
+    assert cell["state_lost"] is lost
 
 
 def test_the_decrypt_reason_renders_without_escaped_entities_in_a_code_span(monkeypatch, tmp_path):
