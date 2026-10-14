@@ -126,11 +126,21 @@ def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
     }
 
 
-#: Succeeds and writes nothing, for a test that lists the step's working directory.
+#: Succeeds and writes nothing, so a test can list the step's working directory.
 _SILENT_GH_STUB = "#!/bin/bash\necho '{}'\n"
 
 #: Appends, so the dispatch call's argv survives the reply call that follows it.
 RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\necho '{}'\n"
+
+
+def _on_dispatch_call(action):
+    """A gh stub that runs the bash lines `action` on the dispatch call, the one whose
+    argument is a dispatches path, and succeeds silently on every other call."""
+    return (
+        "#!/bin/bash\n"
+        'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
+        f"{action}\nfi; done\n"
+    )
 
 
 def _create_stub_commands(tmp_path):
@@ -139,7 +149,7 @@ def _create_stub_commands(tmp_path):
     python3_path = tmp_path / "python3"
 
     gh_path = tmp_path / "gh"
-    gh_path.write_text("#!/bin/bash\necho '{}'\n")  # The default stub succeeds.
+    gh_path.write_text(_SILENT_GH_STUB)
     gh_path.chmod(0o755)
 
     return str(tmp_path), str(python3_path), str(gh_path)
@@ -162,8 +172,8 @@ def _run_dispatch(
     Path(gh_path).write_text(gh_stub)
     Path(gh_path).chmod(0o755)
     for name, text in (stubs or {}).items():
-        (tmp_path / name).write_text(text, newline="\n")
-        (tmp_path / name).chmod(0o755)
+        (Path(path_dir) / name).write_text(text, newline="\n")
+        (Path(path_dir) / name).chmod(0o755)
     if failing_script:
         real = tmp_path / "python3-real"
         Path(python3_path).rename(real)
@@ -369,12 +379,10 @@ def test_dispatch_success_exits_zero(tmp_path):
 
 #: Fails the dispatch as gh does on an HTTP error, here a 500: the API's JSON error body on
 #: stdout, gh's own message on stderr. The reply call succeeds.
-_BODY_ON_STDOUT_STUB = (
-    "#!/bin/bash\n"
-    'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
+_BODY_ON_STDOUT_STUB = _on_dispatch_call(
     """  echo '{"message":"Server Error","status":"500"}'\n"""
     "  echo 'gh: Server Error (HTTP 500)' >&2\n"
-    "  exit 1\nfi; done\n"
+    "  exit 1"
 )
 
 
@@ -418,6 +426,22 @@ def test_a_failed_mktemp_says_so_on_the_pull_request_and_dispatches_nothing(tmp_
 
 
 @bash_only
+def test_an_unreadable_stderr_file_still_ends_in_the_failure_reply(tmp_path):
+    """`mktemp` answers a path in a directory that does not exist, so neither gh's stderr
+    redirect nor the read of it works. The read must not end the step: the dispatch still fails
+    into the failure reply.
+
+    Mutation: drop `|| err=''` from the read.
+    """
+    stub = f'#!/bin/bash\necho "{(tmp_path / "missing" / "err").as_posix()}"\n'
+    result, argv = _run_dispatch(tmp_path, verb="apply", stubs={"mktemp": stub})
+    assert result.returncode == 1, f"the failed dispatch must fail the step: {result.stdout}"
+    assert "/issues/42/comments" in argv and _RUN_URL in argv, (
+        f"the commenter must be told no run started: {argv!r}"
+    )
+
+
+@bash_only
 def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(tmp_path):
     """`python3` exits 1 for `dispatch-body` here. The step exits 1 without the dispatch call,
     annotates the failure, and posts the failure reply carrying the run link.
@@ -437,38 +461,68 @@ def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(
 
 
 #: Saves the dispatch call's stdin to `sent.txt`; every other call succeeds silently.
-_STDIN_SAVING_STUB = (
-    "#!/bin/bash\n"
-    'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
-    "  cat > sent.txt\n  exit 0\nfi; done\n"
+_STDIN_SAVING_STUB = _on_dispatch_call("  cat > sent.txt\n  exit 0")
+
+
+@pytest.mark.parametrize(
+    ("verb", "environment", "expected"),
+    [
+        (
+            "plan",
+            "dev-eu",
+            (
+                '{"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}, '
+                '"return_run_details": true}'
+            ),
+        ),
+        (
+            "apply",
+            "",
+            (
+                '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42"}, '
+                '"return_run_details": true}'
+            ),
+        ),
+        (
+            "apply",
+            "dev-eu",
+            (
+                '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
+                '"environment": "dev-eu"}, "return_run_details": true}'
+            ),
+        ),
+        (
+            "unlock",
+            "dev-eu",
+            (
+                '{"ref": "main", "inputs": {"verb": "unlock", "ref": "abc123", '
+                '"environment": "dev-eu"}, "return_run_details": true}'
+            ),
+        ),
+    ],
+    ids=["plan", "apply-bare", "apply-env", "unlock"],
 )
-
-
 @bash_only
-def test_the_built_body_reaches_the_dispatch_call_on_stdin_whole(tmp_path):
-    """gh reads the request body from stdin (`--input -`), and it is the builder's output
-    byte for byte.
+def test_the_built_body_reaches_the_dispatch_call_on_stdin_whole(
+    tmp_path, verb, environment, expected
+):
+    """For every verb, gh reads the request body from stdin (`--input -`), and it is the
+    hand-written body for that verb byte for byte.
 
-    Mutation: pass `"${body:0:5}"` to gh instead of `"$body"`.
+    Mutations: pass `"${body:0:5}"` to gh instead of `"$body"`; run `dispatch-body` with a
+    different `ENVIRONMENT` when the verb is `unlock`.
     """
     result, _ = _run_dispatch(
-        tmp_path, verb="apply", environment="dev-eu", gh_stub=_STDIN_SAVING_STUB
+        tmp_path, verb=verb, environment=environment, gh_stub=_STDIN_SAVING_STUB
     )
     assert result.returncode == 0, f"dispatch failed: {result.stdout}{result.stderr}"
-    assert (tmp_path / "sent.txt").read_text(encoding="utf-8") == (
-        '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
-        '"environment": "dev-eu"}, "return_run_details": true}'
-    )
+    assert (tmp_path / "sent.txt").read_text(encoding="utf-8") == expected
 
 
 def _silent_answer_stub(out, rc):
     """A gh stub answering the dispatch call with `out` on stdout, nothing on stderr, and exit
     `rc`; every other call succeeds and prints nothing."""
-    return (
-        "#!/bin/bash\n"
-        'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
-        f"  printf '%s' '{out}'\n  exit {rc}\nfi; done\n"
-    )
+    return _on_dispatch_call(f"  printf '%s' '{out}'\n  exit {rc}")
 
 
 @pytest.mark.parametrize(
