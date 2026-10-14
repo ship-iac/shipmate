@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Changed — BREAKING
 
-- **The plan and state encryption key derives with 600,000 PBKDF2 iterations instead of OpenSSL's default 10,000, so plan artifacts and cached local state written by an earlier release no longer decrypt: such a plan's apply refuses at decrypt, and on a local backend the re-plan and every drift sweep refuse at the state restore until the old `state/` entries are deleted, which discards that state (OpenTofu stops tracking those resources).**
+- **The plan and state encryption key derives with 600,000 PBKDF2 iterations instead of OpenSSL's default 10,000, so plan artifacts and cached local state written by an earlier release no longer decrypt: such a plan's apply refuses at its decrypt step with `plan artifact does not decrypt to an OpenTofu plan`, where `tofu show` used to fail on it at the render step, and on a local backend the re-plan and every drift sweep refuse at the state restore until the old `state/` entries are deleted, which discards that state (OpenTofu stops tracking those resources).**
 
 ### Added
 
@@ -21,7 +21,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **An apply cell refuses a plan artifact that does not decrypt to a plan file at its decrypt step with `plan artifact does not decrypt to an OpenTofu plan`, where tofu used to reject such a plan later, and a state cache entry openssl cannot decrypt refuses at the state restore, naming its cache key. `docs/troubleshooting.md` holds the remedies.**
+- **A state cache entry openssl cannot decrypt refuses at the state restore, naming its cache key and the command that deletes it. `docs/troubleshooting.md` holds the remedies for every decrypt refusal.**
 - **Every plan and drift sweep now runs at most 10 cell jobs at once, the `max_parallel` default, so one over 10 cells runs in batches; apply waves and unlock stay uncapped. A `shared: true` environment's reviewers or wait timer apply again to each batch of a plan or sweep over the cap.**
 - **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**
 - **`apply-complete` re-reads a lagging jobs listing after 2, 3 and 5 seconds and then every 10 seconds, instead of every 10 seconds from the first retry; the total sleep stays 110 seconds.**
