@@ -311,15 +311,9 @@ creates all of them, including `shipmate-engine` and its branch policy:
   on its own `environments.<name>` entry (§"Applying chosen environments
   without an approving review").
 
-  `max_parallel` (default 10) caps each plan and each drift sweep at that many
-  cells at once ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). Runs
-  at the same time each take up to it, so stagger drift crons
-  ([`drift.md`](drift.md) §"What it costs").
-
   **A value can come from a GitHub variable.** Write `{vars: NAME}` in
-  place of any string except the keys
-  [`../CONTRACT.md`](../CONTRACT.md) §Variable references names, list items
-  included
+  place of any string, list items included, except the keys
+  [`../CONTRACT.md`](../CONTRACT.md) §Variable references names
   (`apply: {vars: PROD_APPLY_ROLE}`), and define the name as a
   repository or organization variable. A resolved value is printed in job
   outputs and logs, so reference variables only, never secrets. Never define it
@@ -338,6 +332,12 @@ creates all of them, including `shipmate-engine` and its branch policy:
   merges normally, because no ruleset requires `shipmate / gate`
   yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
   then `shipmate doctor` reports that no active ruleset requires the gate.
+
+`max_parallel` in the environment table (default 10) caps how many cells one
+plan or drift sweep runs at once ([`../CONTRACT.md`](../CONTRACT.md)
+§Environment table). Each plan and drift sweep running at the same time takes
+up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
+§"What it costs").
 
 ### The workflow file
 

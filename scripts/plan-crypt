@@ -114,9 +114,10 @@ def encrypt(path):
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on plaintext, and on a result that is neither a zip
-    archive nor OpenTofu's encrypted-plan envelope (another passphrase or key derivation,
-    or a corrupt artifact), leaving the ciphertext in place. Never prints the file.
+    Refuses without a passphrase, on plaintext, when openssl fails (a truncated or corrupt
+    artifact), and on a result that is neither a zip archive nor OpenTofu's encrypted-plan
+    envelope (another passphrase or key derivation, or a corrupt artifact), leaving the
+    ciphertext in place. Never prints the file.
     """
     _require_passphrase()
     if not _is_encrypted(path):
@@ -124,7 +125,12 @@ def decrypt(path):
             "::error::plan artifact is plaintext; refusing to apply an unencrypted plan. "
             f"Re-plan to produce an encrypted plan: {_REPLAN}"
         )
-    if not _openssl(path, decrypt=True, accept=_is_plan):
+    failure = (
+        f"::error::plan artifact `{path}` could not be decrypted: openssl failed (its error is "
+        "printed above). The artifact is truncated or corrupt. Nothing was applied. "
+        f"Re-plan: {_REPLAN}"
+    )
+    if not _openssl(path, decrypt=True, accept=_is_plan, failure=failure):
         raise SystemExit(
             "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with "
             "another key derivation or a rotated passphrase, the plan and apply sides read "

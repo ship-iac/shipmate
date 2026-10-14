@@ -76,21 +76,38 @@ _NOT_A_PLAN = (
 )
 
 
-def test_decrypt_openssl_failure_names_the_file_and_leaves_no_temp(tmp_path, monkeypatch):
+def test_decrypt_openssl_failure_names_the_artifact_and_leaves_no_temp(tmp_path, monkeypatch):
     """A truncated ciphertext fails openssl itself, after it has created the output file.
 
     Mutations: drop `_openssl`'s `finally` cleanup, and `.crypt.tmp` stays; drop the
-    `CalledProcessError` handler, and a traceback replaces the `::error::` line.
+    `CalledProcessError` handler, and a traceback replaces the `::error::` line; drop
+    `failure=failure` from decrypt's `_openssl` call, and the generic line names no remedy.
     """
     monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    f = _write(tmp_path, b"Salted__ab")
+    f = _write(tmp_path, b"Salted__abcd")
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(f))
-    assert (
-        exc.value.code == f"::error::openssl failed to decrypt `{f}`; its error is printed above."
+    assert exc.value.code == (
+        f"::error::plan artifact `{f}` could not be decrypted: openssl failed (its error is "
+        "printed above). The artifact is truncated or corrupt. Nothing was applied. Re-plan: "
+        "comment shipmate plan or push, or after the merge open a new pull request touching the "
+        "stack."
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
-    assert f.read_bytes() == b"Salted__ab"
+    assert f.read_bytes() == b"Salted__abcd"
+
+
+def test_encrypt_openssl_failure_names_the_file(tmp_path, monkeypatch):
+    """Mutation: drop the `failure or` fallback's generic message, and encrypt reports `None`."""
+    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    missing = str(tmp_path / "absent.otplan")
+    with pytest.raises(SystemExit) as exc:
+        pcx.encrypt(missing)
+    assert (
+        exc.value.code
+        == f"::error::openssl failed to encrypt `{missing}`; its error is printed above."
+    )
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_decrypt_refuses_a_default_iteration_ciphertext_and_keeps_it(tmp_path, monkeypatch):

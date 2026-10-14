@@ -801,6 +801,14 @@ one of:
 To re-plan on an open pull request, comment `shipmate plan` or push; after the
 merge, open a new pull request touching the stack.
 
+### `plan artifact ... could not be decrypted: openssl failed`
+
+openssl itself failed on the reviewed plan artifact, after printing its own
+error: the artifact is truncated or corrupt. Nothing was applied, and the
+cell's `apply / <stack> / <env>` check stays pending. Re-plan: on an open pull
+request, comment `shipmate plan` or push; after the merge, open a new pull
+request touching the stack.
+
 ### `state cache entry ... is plaintext`
 
 A local backend's restore matched a cache entry that was saved unencrypted, and
