@@ -145,8 +145,8 @@ def _purge_command(prefix):
 
 
 def _encrypt(path, kind, scope):
-    """The encrypt both artifact kinds share; `_tag` binds `kind` and `scope` as `_decrypt` reads
-    them."""
+    """The encrypt both artifact kinds share. `_keys` binds `kind` through the HMAC labels and
+    `_tag` binds `scope`, as `_decrypt` reads them."""
     _require_passphrase()
     # No remedy here: a plan cell re-plans, and whether an apply cell's state save may be
     # re-run depends on whether its apply ran. docs/troubleshooting.md splits the cases.

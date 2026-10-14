@@ -406,29 +406,33 @@ def test_a_cut_or_damaged_v1_file_fails_authentication_not_the_purge(
     pre-v1 purge.
 
     A file shorter than a v1 file with an empty body, or one without the v1 header, refuses
-    before the key derivation; only the whole-length cut-tag-byte case derives a key.
+    before the key derivation. Only cut-tag-byte, whose header is intact and whose length is at
+    least the minimum, derives a key; magic-byte and magic-brace keep the whole length and derive
+    none.
 
     Mutations: `if not data.startswith(MAGIC): raise SystemExit(no_header)` in place of
     `_is_pre_v1` in `_decrypt` (reddens empty, cut-in-magic, magic-byte and magic-brace); drop
-    `len(data) < MIN_LEN or` (reddens the cuts below the minimum); drop `or not
-    data.startswith(MAGIC)` (reddens magic-byte).
+    `len(data) < MIN_LEN or` (reddens cut-at-salt, cut-in-salt, cut-at-body, cut-in-body and
+    one-below-minimum); drop `or not data.startswith(MAGIC)` (reddens magic-byte and
+    magic-brace).
     """
     f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
     data = _damaged(damage, f.read_bytes())
     f.write_bytes(data)
     calls = _record_openssl(monkeypatch)
-    derivations = []
+    derivations = 0
     real_pbkdf2 = hashlib.pbkdf2_hmac
 
     def pbkdf2(*args):
-        derivations.append(args[2])
+        nonlocal derivations
+        derivations += 1
         return real_pbkdf2(*args)
 
     monkeypatch.setattr(pcx.hashlib, "pbkdf2_hmac", pbkdf2)
     with pytest.raises(SystemExit) as exc:
         _decrypt(kind, f)
     assert (exc.value.code, calls) == (_unauthenticated(kind, f), [])
-    assert len(derivations) == (1 if damage == "cut-tag-byte" else 0)
+    assert derivations == (1 if damage == "cut-tag-byte" else 0)
     assert f.read_bytes() == data
 
 
