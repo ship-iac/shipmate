@@ -100,20 +100,17 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
-      # The body is static (no author input), so a plain heredoc is safe. Each completion is
-      # retried because a transient API blip would strand the check pending, and a re-run
-      # cannot recover it: the applied state has already advanced past the reviewed plan.
+      # The body is static (no author input), so a single-quoted literal is safe. Each
+      # completion is retried because a transient API blip would strand the check pending, and
+      # a re-run cannot recover it: the applied state has already advanced past the reviewed plan.
       run: |
         set -euo pipefail
-        body="$RUNNER_TEMP/complete-body.json"
-        cat > "$body" <<'JSON'
-        {"status": "completed", "conclusion": "success", "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}}
-        JSON
+        body='{"status": "completed", "conclusion": "success", "output": {"title": "applied", "summary": "Applied the reviewed plan for this stack x environment."}}'
         while read -r id; do
           [ -z "$id" ] && continue
           ok=""
           for _ in 1 2 3 4 5; do
-            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input "$body" >/dev/null; then ok=1; break; fi
+            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input - <<<"$body" >/dev/null; then ok=1; break; fi
             sleep 3
           done
           [ -n "$ok" ] || { echo "::error::failed to complete apply check $id after retries"; exit 1; }

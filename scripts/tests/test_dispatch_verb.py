@@ -28,12 +28,13 @@ CONSUMER_WORKFLOW = "shipmate.yml"
 
 
 def test_the_dispatch_step_runs_the_body_builder_this_file_exercises():
-    # A whole run line, not a substring: the recording `gh` stub never opens the body file, so
-    # a commented-out builder would leave every body assertion here exercising a script nothing
+    # A whole run line, not a substring: the recording `gh` stub never reads the body, so a
+    # commented-out builder would leave every body assertion here exercising a script nothing
     # runs, and production would POST an empty --input.
-    assert 'python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > "$body"' in run_lines(
-        step_by(DISPATCH_ACTION, name="workflow_dispatch apply")
-    )
+    assert (
+        'body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body") '
+        "|| { say_no_run_started; exit 1; }"
+    ) in run_lines(step_by(DISPATCH_ACTION, name="workflow_dispatch apply"))
 
 
 def _extract_dispatch_run_block():
@@ -152,16 +153,13 @@ def _create_stub_commands(tmp_path):
     return str(tmp_path), str(python3_path), str(gh_path)
 
 
-def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB, stubs=None, unset=()):
+def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB, unset=()):
     """Run the shipped step with a gh stub that records its argv; returns the
-    CompletedProcess and the recorded argv text. `stubs` maps further command names to stub
-    text in the same PATH directory; `unset` names variables removed from the step's env."""
+    CompletedProcess and the recorded argv text. `unset` names variables removed from the
+    step's env."""
     path_dir, _, gh_path = _create_stub_commands(tmp_path)
     Path(gh_path).write_text(gh_stub)
     Path(gh_path).chmod(0o755)
-    for name, text in (stubs or {}).items():
-        (tmp_path / name).write_text(text, newline="\n")
-        (tmp_path / name).chmod(0o755)
 
     env = os.environ.copy()
     env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
@@ -340,11 +338,11 @@ def test_every_route_comment_ops_can_dispatch_is_accepted_here(tmp_path):
 
 @bash_only
 def test_dispatch_success_exits_zero(tmp_path):
-    """When gh succeeds, the script exits 0, both temporary files are removed, and no request
-    body is left in the job workspace.
+    """When gh succeeds, the script exits 0, the file holding gh's stderr is removed, and no
+    request body is left in the job workspace.
 
-    Mutations: make the wrapper return non-zero on success; drop `$body` (or `$errfile`) from
-    the `trap`; redirect `dispatch-body` to `body.json` again.
+    Mutations: make the wrapper return non-zero on success; drop the `trap` that removes
+    `$errfile`; write the body to `body.json` and pass `--input body.json`.
     """
     result, _ = _run_dispatch(tmp_path, verb="unlock", environment="dev-eu")
     assert result.returncode == 0, (
@@ -369,10 +367,10 @@ _BODY_ON_STDOUT_STUB = (
 def test_a_failed_dispatch_prints_the_api_answer_to_the_log(tmp_path):
     """gh writes an HTTP error's JSON body to stdout, and the log is where the failure reply
     sends the reader, so that body must print beside gh's stderr. The failure exit still
-    removes both temporary files and leaves no request body in the job workspace.
+    removes the file holding gh's stderr and leaves no request body in the job workspace.
 
-    Mutations: delete the `$out` `printf` line; drop `$body` (or `$errfile`) from the `trap`;
-    redirect `dispatch-body` to `body.json` again.
+    Mutations: delete the `$out` `printf` line; drop the `trap` that removes `$errfile`;
+    write the body to `body.json` and pass `--input body.json`.
     """
     result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_BODY_ON_STDOUT_STUB)
     assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
@@ -384,36 +382,18 @@ def test_a_failed_dispatch_prints_the_api_answer_to_the_log(tmp_path):
 
 
 @bash_only
-def test_a_failed_body_build_ends_the_step_and_leaves_no_temporary_file(tmp_path):
-    """`dispatch-body` fails here because `DISPATCH_REF` is unset. The step ends before any
-    `gh` call, the dispatch and the reply alike, and the trap still removes both files.
+def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(tmp_path):
+    """`dispatch-body` fails here because `DISPATCH_REF` is unset. The step exits 1 without
+    the dispatch call, and the failure reply carrying the run link is posted.
 
-    Mutation: set the `trap` after the `dispatch-body` line.
+    Mutation: drop the `|| { say_no_run_started; exit 1; }` handler from the body build.
     """
     result, argv = _run_dispatch(tmp_path, verb="apply", unset=("DISPATCH_REF",))
-    assert result.returncode != 0, f"a failed body build must fail the step: {result.stdout}"
-    assert argv == "", f"no gh call may follow a failed body build: {argv!r}"
-    assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
-    assert not (tmp_path / "body.json").exists(), "the request body was left in the workspace"
-
-
-@bash_only
-def test_a_failed_second_mktemp_leaves_no_temporary_file(tmp_path):
-    """A `mktemp` that succeeds once and then fails: the step ends before any `gh` call, and
-    the first file is removed.
-
-    Mutation: move the `trap` after the second `mktemp`.
-    """
-    marker = (tmp_path / "mktemp-ran").as_posix()
-    mktemp_stub = (
-        f'#!/bin/bash\nif [ -e "{marker}" ]; then exit 1; fi\n: > "{marker}"\n'
-        'exec /usr/bin/mktemp "$@"\n'
+    assert result.returncode == 1, f"a failed body build must fail the step: {result.stdout}"
+    assert _DISPATCH_PATH not in argv, f"a failed body build must dispatch nothing: {argv!r}"
+    assert "/issues/42/comments" in argv and _RUN_URL in argv, (
+        f"the commenter must be told no run started: {argv!r}"
     )
-    result, argv = _run_dispatch(tmp_path, verb="apply", stubs={"mktemp": mktemp_stub})
-    assert result.returncode != 0, f"a failed mktemp must fail the step: {result.stdout}"
-    assert (tmp_path / "mktemp-ran").exists(), "the mktemp stub never ran"
-    assert argv == "", f"no gh call may follow a failed mktemp: {argv!r}"
-    assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
 
 
 def _silent_answer_stub(out, rc):
@@ -436,7 +416,7 @@ def test_the_log_prints_no_empty_line_for_a_missing_answer_or_error(tmp_path, ou
     """An empty answer (a 204) or an empty gh stderr (most successes, and a failure gh explains
     on stdout alone) prints no line at all.
 
-    Mutation: print both with one `printf '%s\\n' "$out" "$err"` again.
+    Mutation: print both with one `printf '%s\\n' "$out" "$err"`.
     """
     result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_silent_answer_stub(out, rc))
     assert result.returncode == rc, f"unexpected exit: {result.stdout}{result.stderr}"

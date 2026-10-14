@@ -443,7 +443,7 @@ def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tm
     assert run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120).returncode == 0
 
 
-#: The PATCH body, hand-written.
+#: The PATCH body as gh receives it, hand-written; the here-string adds the trailing newline.
 COMPLETE_BODY = (
     '{"status": "completed", "conclusion": "success", "output": {"title": "applied", '
     '"summary": "Applied the reviewed plan for this stack x environment."}}\n'
@@ -451,11 +451,11 @@ COMPLETE_BODY = (
 
 
 @bash_only
-def test_the_completion_body_is_written_under_runner_temp_not_the_workspace(tmp_path):
-    """The PATCH reads its body from `$RUNNER_TEMP`, and the job workspace (the step's working
-    directory) gets no `body.json`.
+def test_the_completion_body_reaches_gh_without_a_file(tmp_path):
+    """The PATCH body reaches gh whole, and the step writes no file, neither in the job
+    workspace (its working directory) nor in `$RUNNER_TEMP`.
 
-    Mutation: write the heredoc to `body.json` again (`cat > body.json`).
+    Mutation: write the body to `body.json` and pass `--input body.json`.
     """
     runner_temp = tmp_path / "runner"
     runner_temp.mkdir()
@@ -463,7 +463,11 @@ def test_the_completion_body_is_written_under_runner_temp_not_the_workspace(tmp_
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     sent = (tmp_path / "sent").as_posix()
-    gh = 'gh() { while [ "$1" != --input ]; do shift; done; cat "$2" > "' + sent + '"; }\n'
+    # `sleep` is a no-op so a failing PATCH reaches red without the retry loop's real waits.
+    stubs = (
+        'gh() { while [ "$1" != --input ]; do shift; done; cat "$2" > "' + sent + '"; }\n'
+        "sleep() { :; }\n"
+    )
     body = next(
         s["run"]
         for s in action_steps("apply-complete")
@@ -474,7 +478,10 @@ def test_the_completion_body_is_written_under_runner_temp_not_the_workspace(tmp_
         "GITHUB_REPOSITORY": "acme/demo",
         "RUNNER_TEMP": runner_temp.as_posix(),
     }
-    proc = run_step(tmp_path, gh + body, env, cwd=workspace)
+    proc = run_step(tmp_path, stubs + body, env, cwd=workspace)
     assert list(workspace.iterdir()) == [], "the step left a file in the workspace"
+    assert sorted(p.name for p in runner_temp.iterdir()) == ["complete-ids.txt"], (
+        "the step left a file in RUNNER_TEMP"
+    )
     assert proc.returncode == 0, proc.stderr
     assert (tmp_path / "sent").read_text(encoding="utf-8") == COMPLETE_BODY
