@@ -502,7 +502,10 @@ def test_decrypt_a_missing_artifact_prints_an_error_not_a_traceback(tmp_path, mo
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(missing))
     assert exc.value.code == (
-        f"::error::plan artifact `{missing}` cannot be read. Nothing was applied. Error: "
+        f"::error::plan artifact `{missing}` cannot be read. Nothing was applied. An artifact "
+        "downloaded without stack.otplan needs a re-plan: comment shipmate plan or push, or after "
+        "the merge open a new pull request touching the stack. For a disk failure on the runner, "
+        "the refusal comes before any apply step, so a re-run of the job is safe. Error: "
         f"{_os_error(missing)}"
     )
 
@@ -515,7 +518,8 @@ def test_decrypt_state_a_missing_entry_prints_an_error_not_a_traceback(tmp_path,
         pcx.decrypt_state(str(missing), KEY)
     assert exc.value.code == (
         "::error::state cache entry `state/app-net/dev-eu/123-1` cannot be read. tofu was not "
-        f"run. Error: {_os_error(missing)}"
+        "run. The refusal comes before any apply step, so a re-run of the job is safe. Error: "
+        f"{_os_error(missing)}"
     )
 
 

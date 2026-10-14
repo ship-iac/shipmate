@@ -132,7 +132,8 @@ def decrypt(path):
     Refuses without a passphrase, on plaintext, on an artifact shorter than its salted
     header, when openssl or the disk fails on the runner, and on a result that is neither a
     zip archive nor OpenTofu's encrypted-plan envelope (another passphrase or key
-    derivation, or damage to its first bytes), leaving the ciphertext in place. Never
+    derivation, or, for a zip plan, damage to its first bytes), leaving the ciphertext in
+    place. Never
     prints the file.
     """
     _require_passphrase()
@@ -141,7 +142,10 @@ def decrypt(path):
         salted = _starts_with(path, MAGIC)
     except OSError as exc:
         raise SystemExit(
-            f"::error::plan artifact `{path}` cannot be read. Nothing was applied. Error: {exc}"
+            f"::error::plan artifact `{path}` cannot be read. Nothing was applied. An artifact "
+            f"downloaded without stack.otplan needs a re-plan: {_REPLAN} For a disk failure on "
+            "the runner, the refusal comes before any apply step, so a re-run of the job is safe. "
+            f"Error: {exc}"
         ) from None
     if truncated:
         raise SystemExit(
@@ -205,7 +209,8 @@ def decrypt_state(path, cache_key):
         salted = _starts_with(path, MAGIC)
     except OSError as exc:
         raise SystemExit(
-            f"::error::state cache entry `{cache_key}` cannot be read. tofu was not run. "
+            f"::error::state cache entry `{cache_key}` cannot be read. tofu was not run. The "
+            "refusal comes before any apply step, so a re-run of the job is safe. "
             f"Error: {exc}"
         ) from None
     if truncated:

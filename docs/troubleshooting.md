@@ -847,14 +847,25 @@ the refusal. What to do depends on the step that refused:
   failure clears on its own, and a self-hosted runner needs its openssl or disk
   fixed.
 - **An apply cell's `Save state`.** `Save state` runs even when the apply did
-  not, so look at the same job's `Apply the stored plan` step:
-  - **It ran**, whether it succeeded or failed after starting. Its advanced
-    state was not saved. Do not re-run the job: a re-run applies the stored
-    plan again against the cache entry from before the apply, or against no
-    state on a stack's first apply. The cell's apply check stays pending and
-    the apply comment shows it as not recorded
-    ([`../CONTRACT.md`](../CONTRACT.md) §Apply result comment).
-  - **It did not run.** Nothing was applied, so a re-run of the job is safe.
+  not. If the same job's `Apply the stored plan` step is `skipped`, nothing was
+  applied and a re-run of the job is safe. Any other status is
+  §`The apply step ran and its state was not saved`.
+
+### `The apply step ran and its state was not saved`
+
+An apply cell's `Save state` failed after its `Apply the stored plan` step ran.
+The step's status is the discriminator:
+
+- **`skipped`.** Nothing was applied, and a re-run of the job is safe. The
+  warning does not print in this case.
+- **`success`, `failure` or `cancelled`.** The apply may have advanced state,
+  and that state was not saved. Do not re-run the job or re-plan against the
+  cached entry: both act on the state from before the apply, or on no state on
+  a stack's first apply. The cell's apply check stays pending, and the apply
+  comment shows it as not recorded.
+
+The engine has no recovery for local-backend state lost this way. The
+resources the apply created exist, and OpenTofu does not track them.
 
 ### `state cache entry ... is plaintext`
 
@@ -871,10 +882,9 @@ resource can collide with or be duplicated by its re-creation.
 ### `state cache entry ... cannot be read`
 
 The restore could not open or size the matched entry; the error at the end of
-the message says why. tofu was not run. Either the cache restore did not write
-the file, and its own error is earlier in the job log, or the runner's disk
-failed. The refusal comes before any apply step, so a re-run of the job is
-safe; a self-hosted runner needs its disk fixed.
+the message says why. tofu was not run. The refusal comes before any apply
+step, so a re-run of the job is safe; a self-hosted runner needs its disk
+fixed.
 
 ### `state cache entry ... is truncated`
 

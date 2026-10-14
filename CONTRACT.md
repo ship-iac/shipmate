@@ -2451,8 +2451,10 @@ job believed before its check was completed:
   pending, because the check was not completed after the apply: the cell's
   job did not succeed (`Save state` failed, or it was cancelled), the
   `complete` job failed, or a newer plan re-created the check.
-  `shipmate / gate` stays pending, and the stack needs a re-plan: state has
-  advanced past the reviewed `.otplan`, so the saved plan is stale. The `not recorded:` note names the affected cells — capped, with
+  `shipmate / gate` stays pending. With a remote backend, or when `Save state`
+  succeeded, the stack needs a re-plan: state has advanced past the reviewed
+  `.otplan`, so the saved plan is stale. When `Save state` failed on a local
+  backend, see `docs/troubleshooting.md` §`The apply step ran and its state was not saved`. The `not recorded:` note names the affected cells — capped, with
   any remainder summarized as a count, since notes are part of the comment the
   size fallback cannot shed and the usual cause strands a whole matrix at once;
   the row lines always name every one of them. Each such cell keeps its full
@@ -2804,7 +2806,11 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Fail-safe on mismatch.** An artifact without the `Salted__` magic header,
   or shorter than its 16-byte salted header, refuses and tells you to re-plan.
   An openssl or disk failure on the runner refuses and tells you to re-run the
-  job or fix the runner. An artifact that does not decrypt to a plan file
+  job or fix the runner. An artifact that cannot be read names a re-plan for an
+  artifact downloaded without `stack.otplan`, and a re-run for a disk failure,
+  which is safe because the refusal comes before any apply step. An encrypt
+  failure, in a plan cell or a state save, names no re-run. An artifact that
+  does not decrypt to a plan file
   refuses by naming the causes (a plan/apply value mismatch, a rotated
   passphrase, another key derivation or a corrupt artifact) and pointing to
   `docs/troubleshooting.md` for each remedy. For a zip plan that check reads

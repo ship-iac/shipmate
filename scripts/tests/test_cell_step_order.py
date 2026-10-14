@@ -63,6 +63,7 @@ _EXPECTED = {
         "Verify the stored plan renders as the reviewed plan text",
         "Apply the stored plan (exact-plan; stale -> fail-safe)",
         "Save state",
+        "Warn that the applied state was not saved",
         "Check the provider cache",
         "Save provider cache",
         "Compose cell summary",
