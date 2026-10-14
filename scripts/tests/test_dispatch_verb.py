@@ -14,7 +14,6 @@ from _loader import (
     action_yaml,
     bash_only,
     load_script,
-    run_lines,
     run_step,
     step_by,
     write_python3_shim,
@@ -25,17 +24,6 @@ DISPATCH_ACTION = "dispatch"
 #: Every verb reaches the same consumer file; the verb rides in the body and selects a job
 #: there. Hand-written; never derived from the action, which is the file under test.
 CONSUMER_WORKFLOW = "shipmate.yml"
-
-
-def test_the_dispatch_step_runs_the_body_builder_this_file_exercises():
-    # A whole run line, not a substring: a substring also matches a commented-out builder. The
-    # body tests in this file run `scripts/dispatch-body` directly, so this line is what ties
-    # them to the script the step runs.
-    assert (
-        'body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body") '
-        '|| { echo "::error::could not build the dispatch request body"; '
-        "say_no_run_started; exit 1; }"
-    ) in run_lines(step_by(DISPATCH_ACTION, name="workflow_dispatch apply"))
 
 
 def _extract_dispatch_run_block():
@@ -138,6 +126,9 @@ def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
     }
 
 
+#: Succeeds and writes nothing, for a test that lists the step's working directory.
+_SILENT_GH_STUB = "#!/bin/bash\necho '{}'\n"
+
 #: Appends, so the dispatch call's argv survives the reply call that follows it.
 RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\necho '{}'\n"
 
@@ -154,13 +145,25 @@ def _create_stub_commands(tmp_path):
     return str(tmp_path), str(python3_path), str(gh_path)
 
 
-def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB, failing_script=""):
+def _run_dispatch(
+    tmp_path,
+    verb,
+    environment="",
+    gh_stub=RECORDING_GH_STUB,
+    failing_script="",
+    stubs=None,
+    cwd=None,
+):
     """Run the shipped step with a gh stub that records its argv; returns the
     CompletedProcess and the recorded argv text. When `failing_script` names an engine script,
-    `python3` exits 1 for that script and runs every other one."""
+    `python3` exits 1 for that script and runs every other one. `stubs` maps further command
+    names to stub text on the same PATH directory. The step runs in `cwd`, or `tmp_path`."""
     path_dir, python3_path, gh_path = _create_stub_commands(tmp_path)
     Path(gh_path).write_text(gh_stub)
     Path(gh_path).chmod(0o755)
+    for name, text in (stubs or {}).items():
+        (tmp_path / name).write_text(text, newline="\n")
+        (tmp_path / name).chmod(0o755)
     if failing_script:
         real = tmp_path / "python3-real"
         Path(python3_path).rename(real)
@@ -190,7 +193,7 @@ def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB, fai
     (tmp_path / "tmp").mkdir()
     env["TMPDIR"] = str(tmp_path / "tmp")
 
-    result = run_step(tmp_path, _extract_dispatch_run_block(), env)
+    result = run_step(tmp_path, _extract_dispatch_run_block(), env, cwd=cwd)
     argv_file = tmp_path / "argv.txt"
     return result, (argv_file.read_text() if argv_file.exists() else "")
 
@@ -346,18 +349,22 @@ def test_every_route_comment_ops_can_dispatch_is_accepted_here(tmp_path):
 
 @bash_only
 def test_dispatch_success_exits_zero(tmp_path):
-    """When gh succeeds, the script exits 0, the file holding gh's stderr is removed, and no
-    request body is left in the job workspace.
+    """When gh succeeds, the script exits 0, the file holding gh's stderr is removed, and the
+    job workspace (the step's working directory) stays empty.
 
     Mutations: make the wrapper return non-zero on success; drop the `trap` that removes
-    `$errfile`; write the body to `body.json` and pass `--input body.json`.
+    `$errfile`; write the body to `req.json` and pass `--input req.json`.
     """
-    result, _ = _run_dispatch(tmp_path, verb="unlock", environment="dev-eu")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    result, _ = _run_dispatch(
+        tmp_path, verb="unlock", environment="dev-eu", gh_stub=_SILENT_GH_STUB, cwd=workspace
+    )
     assert result.returncode == 0, (
         f"success should exit 0, got {result.returncode}: {result.stderr}"
     )
     assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
-    assert not (tmp_path / "body.json").exists(), "the request body was left in the workspace"
+    assert list(workspace.iterdir()) == [], "the step left a file in the workspace"
 
 
 #: Fails the dispatch as gh does on an HTTP error, here a 500: the API's JSON error body on
@@ -375,18 +382,39 @@ _BODY_ON_STDOUT_STUB = (
 def test_a_failed_dispatch_prints_the_api_answer_to_the_log(tmp_path):
     """gh writes an HTTP error's JSON body to stdout, and the log is where the failure reply
     sends the reader, so that body must print beside gh's stderr. The failure exit still
-    removes the file holding gh's stderr and leaves no request body in the job workspace.
+    removes the file holding gh's stderr and leaves the job workspace (the step's working
+    directory) empty.
 
     Mutations: delete the `$out` `printf` line; drop the `trap` that removes `$errfile`;
-    write the body to `body.json` and pass `--input body.json`.
+    write the body to `req.json` and pass `--input req.json`.
     """
-    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_BODY_ON_STDOUT_STUB)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    result, _ = _run_dispatch(tmp_path, verb="apply", gh_stub=_BODY_ON_STDOUT_STUB, cwd=workspace)
     assert result.returncode == 1, f"gh's exit status must survive: {result.returncode}"
     assert '{"message":"Server Error","status":"500"}' in result.stdout.splitlines(), (
         f"the API's answer must reach the log: {result.stdout}"
     )
     assert list((tmp_path / "tmp").iterdir()) == [], "the step left a temporary file behind"
-    assert not (tmp_path / "body.json").exists(), "the request body was left in the workspace"
+    assert list(workspace.iterdir()) == [], "the step left a file in the workspace"
+
+
+@bash_only
+def test_a_failed_mktemp_says_so_on_the_pull_request_and_dispatches_nothing(tmp_path):
+    """`mktemp` fails here. The step exits 1 without the dispatch call, annotates the failure,
+    and posts the failure reply carrying the run link.
+
+    Mutations: delete the `mktemp` handler; drop the handler's `say_no_run_started`.
+    """
+    result, argv = _run_dispatch(tmp_path, verb="apply", stubs={"mktemp": "#!/bin/bash\nexit 1\n"})
+    assert result.returncode == 1, f"a failed mktemp must fail the step: {result.stdout}"
+    assert (
+        "::error::could not create a temporary file for the dispatch" in result.stdout.splitlines()
+    ), f"the failure must be annotated: {result.stdout}"
+    assert _DISPATCH_PATH not in argv, f"a failed mktemp must dispatch nothing: {argv!r}"
+    assert "/issues/42/comments" in argv and _RUN_URL in argv, (
+        f"the commenter must be told no run started: {argv!r}"
+    )
 
 
 @bash_only

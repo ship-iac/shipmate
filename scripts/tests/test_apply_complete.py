@@ -455,7 +455,8 @@ def test_the_completion_body_reaches_gh_without_a_file(tmp_path):
     """The PATCH body reaches gh whole, and the step writes no file, neither in the job
     workspace (its working directory) nor in `$RUNNER_TEMP`.
 
-    Mutation: write the body to `body.json` and pass `--input body.json`.
+    Mutations: write the body to `body.json` and pass `--input body.json`; drop `--input -`
+    from the PATCH.
     """
     runner_temp = tmp_path / "runner"
     runner_temp.mkdir()
@@ -465,7 +466,8 @@ def test_the_completion_body_reaches_gh_without_a_file(tmp_path):
     sent = (tmp_path / "sent").as_posix()
     # `sleep` is a no-op so a failing PATCH reaches red without the retry loop's real waits.
     stubs = (
-        'gh() { while [ "$1" != --input ]; do shift; done; cat "$2" > "' + sent + '"; }\n'
+        'gh() { while [ $# -gt 0 ] && [ "$1" != --input ]; do shift; done; '
+        '[ $# -gt 0 ] || return 1; cat "$2" > "' + sent + '"; }\n'
         "sleep() { :; }\n"
     )
     body = next(
