@@ -71,10 +71,11 @@ def _run_compose(
 
 #: Hand-written, never read from FAILSAFES; shared by the parametrized row and the precedence test.
 _DECRYPT_REASON = (
-    "plan artifact could not be decrypted: with no passphrase, forward "
-    "SHIPMATE_PLAN_PASSPHRASE from the calling `apply` or `deploy` job; with different values "
-    "on `<env>-plan` and `<env>-apply`, make the two equal, then re-plan; a plaintext or "
-    "corrupt artifact, or one encrypted with a rotated passphrase or another key derivation, "
+    "plan artifact could not be decrypted: with no passphrase, forward SHIPMATE_PLAN_PASSPHRASE "
+    "from the calling `apply` or `deploy` job, and set it as a repository or organization secret "
+    "or on `<env>-apply` too, not on `<env>-plan` alone; with different values on `<env>-plan` "
+    "and `<env>-apply`, set `<env>-plan`'s to `<env>-apply`'s value, then re-plan; a plaintext "
+    "or corrupt artifact, or one encrypted with a rotated passphrase or another key derivation, "
     "needs a re-plan; an openssl error is in the job log"
 )
 

@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Changed — BREAKING
 
-- **The plan and state encryption key derives with 600,000 PBKDF2 iterations instead of OpenSSL's default 10,000, so plan artifacts and cached local state written by an earlier release no longer decrypt: such a plan's apply refuses at decrypt, and deleting the old state entries discards that state (OpenTofu stops tracking those resources).**
+- **The plan and state encryption key derives with 600,000 PBKDF2 iterations instead of OpenSSL's default 10,000, so plan artifacts and cached local state written by an earlier release no longer decrypt: such a plan's apply refuses at decrypt, and on a local backend the re-plan and every drift sweep refuse at the state restore until the old `state/` entries are deleted, which discards that state (OpenTofu stops tracking those resources).**
 
 ### Added
 

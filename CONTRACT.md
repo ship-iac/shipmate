@@ -857,8 +857,9 @@ the repository root, or none:
   and the cell skips its save. Rotating the passphrase makes every cached entry
   fail that way: set the old passphrase back, or delete the `state/` entries,
   which discards that state (§Plan artifact encryption, "Rotation"). Different
-  values on `<env>-plan` and `<env>-apply` fail a plan cell's restore of the
-  state an apply cell saved: make them equal; deleting entries does not help.
+  values on `<env>-plan` and `<env>-apply` fail a plan or drift cell's restore
+  of the state an apply cell saved: set `<env>-plan`'s value to
+  `<env>-apply`'s; deleting entries does not help.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -2788,8 +2789,9 @@ environment, and a plan cell names its own plan environment. The same value on b
   in that environment refuses at `Decrypt reviewed plan artifact`.
 - **As different values on `<env>-plan` and `<env>-apply`**, every apply in
   that environment refuses at `Decrypt reviewed plan artifact`, and on a local
-  backend a plan cell refuses the state an apply cell saved. Make the two values
-  equal, then re-plan; a re-plan alone fails the same way.
+  backend a plan cell refuses the state an apply cell saved. Set `<env>-plan`'s
+  value to `<env>-apply`'s, never the reverse (apply cells saved the cached
+  state), then re-plan; a re-plan alone fails the same way.
 
 Scoping it to a plan environment buys nothing either — those must have no
 branch policy at all (`docs/hardening.md` §6), so any branch's workflow can

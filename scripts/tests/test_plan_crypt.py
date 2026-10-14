@@ -70,8 +70,9 @@ def _raw_openssl(src, dst, *flags):
 _NOT_A_PLAN = (
     "::error::plan artifact does not decrypt to an OpenTofu plan. Nothing was applied. If the "
     "plan and apply sides read different SHIPMATE_PLAN_PASSPHRASE values (different secrets on "
-    "`<env>-plan` and `<env>-apply`), make the two equal, then re-plan; a re-plan alone fails "
-    "the same way. If the plan was encrypted with a passphrase since rotated or another key "
+    "`<env>-plan` and `<env>-apply`), set `<env>-plan`'s secret to `<env>-apply`'s value, never "
+    "the reverse (apply cells saved the cached state), then re-plan; a re-plan alone fails the "
+    "same way. If the plan was encrypted with a passphrase since rotated or another key "
     "derivation, or the artifact is corrupt, re-plan: comment shipmate plan or push, or after "
     "the merge open a new pull request touching the stack."
 )
@@ -264,8 +265,9 @@ def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypa
         "::error::state cache entry `state/app-net/dev-eu/123-1` does not decrypt to OpenTofu "
         "state. tofu was not run. If the plan and apply sides read different "
         "SHIPMATE_PLAN_PASSPHRASE values (different secrets on `<env>-plan` and `<env>-apply`; "
-        "a plan cell restores the state an apply cell saved), make the two equal and re-run; "
-        "deleting entries does not fix that. If the entry is corrupt, `gh cache delete "
+        "an apply cell saved the entry, a plan or drift cell restores it), set `<env>-plan`'s "
+        "secret to `<env>-apply`'s value, then re-plan or re-run the drift sweep; deleting "
+        "entries does not fix that. If the entry is corrupt, `gh cache delete "
         "state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes it and the next restore uses "
         "the previous one. If the passphrase was rotated, set the old secret back. After a "
         "rotation or with another key derivation, every entry under the prefix was saved the "
@@ -273,6 +275,26 @@ def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypa
         "ship-iac/sample --key state/app-net/dev-eu/ --limit 1000 --json id --jq '.[].id' | "
         "xargs -n1 gh cache delete --repo ship-iac/sample`."
     )
+
+
+def test_decrypt_state_openssl_failure_names_the_entry_and_its_remedy(tmp_path, monkeypatch):
+    """A truncated entry fails openssl itself, not the shape check.
+
+    Mutation: drop `failure=failure` from decrypt_state's `_openssl` call, and the generic
+    openssl line loses the cache key and the delete command.
+    """
+    monkeypatch.setenv("GITHUB_REPOSITORY", "ship-iac/sample")
+    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    f = _write(tmp_path, b"Salted__ab")
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt_state(str(f), KEY)
+    assert exc.value.code == (
+        "::error::state cache entry `state/app-net/dev-eu/123-1` could not be decrypted: openssl "
+        "failed (its error is printed above), so the entry is truncated or corrupt. tofu was not "
+        "run. `gh cache delete state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes it and "
+        "the next restore uses the previous one."
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
 
 
 def test_decrypt_state_wrong_passphrase_refuses(tmp_path, monkeypatch):

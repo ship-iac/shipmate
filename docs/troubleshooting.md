@@ -788,7 +788,9 @@ before any apply step, and its `apply / <stack> / <env>` check stays pending.
   so the cause is one of:
   - **The plan and apply sides read different values**, for example different
     `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A
-    re-plan alone fails the same way: make the two values equal, then re-plan.
+    re-plan alone fails the same way: set `<env>-plan`'s value to
+    `<env>-apply`'s, never the reverse (apply cells saved the cached state),
+    then re-plan.
   - **The plan was encrypted with a passphrase since rotated, or with another
     key derivation, or the artifact is corrupt.** Re-plan.
 
@@ -808,6 +810,13 @@ Deleting discards that state: OpenTofu no longer tracks the resources it
 recorded. A sample stack's null and random resources re-create; a real
 resource can collide with or be duplicated by its re-creation.
 
+### `state cache entry ... could not be decrypted: openssl failed`
+
+openssl itself failed on the matched entry, after printing its own error: the
+entry is truncated or corrupt. `gh cache delete <key> --repo <owner>/<repo>`,
+with the key from the message, deletes it; the next restore uses the previous
+entry.
+
 ### `state cache entry ... does not decrypt to OpenTofu state`
 
 A local backend's restore decrypted the matched entry to something that is not
@@ -819,8 +828,9 @@ entry:
 
 - **The plan and apply sides read different values**, for example different
   `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A plan
-  cell restores the state an apply cell saved, so its restore refuses. Make the
-  two values equal and re-run the cell; deleting entries does not fix this.
+  or drift cell restores the state an apply cell saved, so its restore refuses.
+  Set `<env>-plan`'s value to `<env>-apply`'s, then re-plan or re-run the drift
+  sweep; deleting entries does not fix this.
 - **The entry is corrupt.** `gh cache delete <key> --repo <owner>/<repo>`, with
   the key from the message, deletes it; the next restore uses the previous
   entry.
