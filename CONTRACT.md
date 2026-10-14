@@ -2807,9 +2807,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   job or fix the runner. An artifact that does not decrypt to a plan file
   refuses by naming the causes (a plan/apply value mismatch, a rotated
   passphrase, another key derivation or a corrupt artifact) and pointing to
-  `docs/troubleshooting.md` for each remedy. That check reads only the
-  decrypted file's first bytes: corruption further in, a plan cut off after its
-  zip header included, fails later at the render step, on `tofu show`. The
+  `docs/troubleshooting.md` for each remedy. For a zip plan that check reads
+  only the decrypted file's first bytes: corruption further in, a plan cut off
+  after its zip header included, fails later at the render step, on
+  `tofu show`. An OpenTofu-encrypted plan's JSON envelope is parsed whole. The
   apply check stays pending in each case.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered

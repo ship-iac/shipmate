@@ -796,13 +796,22 @@ one of:
   local backend, set `<env>-plan`'s value to `<env>-apply`'s and never the
   reverse, because apply cells saved the cached state; on a remote backend
   either direction works.
-- **The artifact is corrupt.** Re-plan. Only damage that changes the
-  decrypted file's first bytes refuses here: damage further in, a plan cut off
-  after its zip header included, passes this check and fails later at the
-  render step, on `tofu show`.
+- **The artifact is corrupt.** Re-plan. For a zip plan only damage that
+  changes the decrypted file's first bytes refuses here: damage further in, a
+  plan cut off after its zip header included, passes this check and fails
+  later at the render step, on `tofu show`. An OpenTofu-encrypted plan's JSON
+  envelope is parsed whole, so damage anywhere in it refuses here.
 
 To re-plan on an open pull request, comment `shipmate plan` or push; after the
 merge, open a new pull request touching the stack.
+
+### `plan artifact ... cannot be read`
+
+The apply cell could not open or size its reviewed plan artifact; the error at
+the end of the message says why. Nothing was applied. Either the download step
+did not write the file, and its own error is earlier in the job log, or the
+runner's disk failed: re-run the job, which runs before any apply step, or fix
+a self-hosted runner's disk.
 
 ### `plan artifact ... is truncated`
 
@@ -849,6 +858,14 @@ command, then re-run the cell.
 Deleting discards that state: OpenTofu no longer tracks the resources it
 recorded. A sample stack's null and random resources re-create; a real
 resource can collide with or be duplicated by its re-creation.
+
+### `state cache entry ... cannot be read`
+
+The restore could not open or size the matched entry; the error at the end of
+the message says why. tofu was not run. Either the cache restore did not write
+the file, and its own error is earlier in the job log, or the runner's disk
+failed: re-run the job, since the restore runs before any apply step, or fix a
+self-hosted runner's disk.
 
 ### `state cache entry ... is truncated`
 

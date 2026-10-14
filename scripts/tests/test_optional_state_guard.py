@@ -103,14 +103,25 @@ _VALIDATE_RUN = (
     "fi\n"
 )
 
-_ENCRYPT_RUN = """\
-if [ ! -s "$STATE_PATH" ]; then
-  echo "::notice::shipmate/actions/state: no state to save at $STATE_PATH (absent or empty)."
-  echo "skip=true" >> "$GITHUB_OUTPUT"
-  exit 0
-fi
-python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt "$STATE_PATH"
-"""
+#: What a failed state encrypt prints: only apply-cell saves, after its apply ran.
+_SAVE_WARNING = (
+    "::error::shipmate/actions/state: the apply already ran and its state was not saved. Do not "
+    "re-run the job: a re-run applies the stored plan again against the pre-apply cache entry. "
+    "See docs/troubleshooting.md."
+)
+
+_ENCRYPT_RUN = (
+    'if [ ! -s "$STATE_PATH" ]; then\n'
+    '  echo "::notice::shipmate/actions/state: no state to save at $STATE_PATH '
+    '(absent or empty)."\n'
+    '  echo "skip=true" >> "$GITHUB_OUTPUT"\n'
+    "  exit 0\n"
+    "fi\n"
+    'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" encrypt "$STATE_PATH" || {\n'
+    f'  echo "{_SAVE_WARNING}"\n'
+    "  exit 1\n"
+    "}\n"
+)
 
 _KEY = (
     "state/${{ inputs.stack-slug }}/${{ inputs.env }}/"
@@ -200,9 +211,10 @@ def test_a_set_passphrase_passes_validation(tmp_path):
     assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
 
 
-def _encrypt(tmp_path, content):
-    """Run `Encrypt state` with `python3` replaced by a bash function recording its argv;
-    `content` None leaves the state file absent. Returns (process, outputs, recorded argv)."""
+def _encrypt(tmp_path, content, status=0):
+    """Run `Encrypt state` with `python3` replaced by a bash function recording its argv and
+    returning `status`; `content` None leaves the state file absent. Returns (process, outputs,
+    recorded argv)."""
     state = tmp_path / "terraform.tfstate"
     if content is not None:
         state.write_bytes(content)
@@ -210,7 +222,7 @@ def _encrypt(tmp_path, content):
     out.write_text("", encoding="utf-8")
     calls = tmp_path / "calls"
     harness = (
-        'python3() { printf "%s\\n" "$@" > "$CALLS" ; return 0 ; }\n'
+        f'python3() {{ printf "%s\\n" "$@" > "$CALLS" ; return {status} ; }}\n'
         + step_by("state", id="encrypt")["run"]
     )
     env = {
@@ -234,6 +246,21 @@ def test_an_empty_or_absent_state_file_is_skipped_not_encrypted(tmp_path):
         case.mkdir()
         r, outputs, argv = _encrypt(case, content)
         assert (r.returncode, outputs, argv) == (0, {"skip": "true"}, None), name
+
+
+@bash_only
+def test_a_failed_state_encrypt_forbids_a_re_run(tmp_path):
+    """The save runs only in apply-cell, after the apply: a re-run would apply the stored plan
+    again against the pre-apply entry.
+
+    Mutation: drop the `||` warning, and the step fails on plan-crypt's line alone.
+    """
+    r, outputs, _ = _encrypt(tmp_path, b'{"version": 4}', status=1)
+    assert (r.returncode, r.stdout, outputs) == (
+        1,
+        _SAVE_WARNING + "\n",
+        {},
+    )
 
 
 @bash_only
