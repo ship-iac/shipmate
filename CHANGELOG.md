@@ -13,9 +13,11 @@ section below names the SHA the release tags.
 ### Added
 
 - **A `shipmate plan`, `shipmate apply` or `shipmate unlock` whose dispatch succeeded posts a notice reply on the pull request: `started [the <verb> run](<url>)` when the dispatch answer carries a usable run id, otherwise one naming the Actions tab. A reply that cannot be posted is a warning.**
+- **`max_parallel` in `.github/shipmate-config.yml` caps each plan and drift sweep matrix at that many jobs at once, 10 when absent. It takes a whole number from 1 to 256 and no variable reference; anything else refuses at detect. `shipmate doctor` reads it back.**
 
 ### Changed
 
+- **Every plan and drift sweep now runs at most 10 cell jobs at once, the `max_parallel` default, so one over 10 cells runs in batches; apply waves and unlock stay uncapped. A `shared: true` environment's reviewers or wait timer apply again to each batch of a plan or sweep over the cap.**
 - **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**
 - **`apply-complete` re-reads a lagging jobs listing after 2, 3 and 5 seconds and then every 10 seconds, instead of every 10 seconds from the first retry; the total sleep stays 110 seconds.**
 

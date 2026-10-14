@@ -48,6 +48,7 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       empty: ${{ steps.matrix.outputs.empty }}
       count: ${{ steps.matrix.outputs.count }}
+      max_parallel: ${{ steps.matrix.outputs.max_parallel }}
       unmanaged: ${{ steps.matrix.outputs.unmanaged }}
       lost: ${{ steps.matrix.outputs.lost }}
       refusal: ${{ steps.matrix.outputs.refusal }}
@@ -87,6 +88,7 @@ jobs:
       id-token: write
     strategy:
       fail-fast: false
+      max-parallel: ${{ fromJSON(needs.detect.outputs.max_parallel) }}
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     # Resolved by `scripts/env-config`'s `resolve` from the default branch's table, so branch
     # content cannot choose it. Do not compute a binding here.

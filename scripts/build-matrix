@@ -758,10 +758,13 @@ def _detect():
         present = {(c["stack"], c["environment"]) for c in cells}
         wv.refuse_inversions(cells, present, deps, tag_map, order)
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
+    # Before the write: a refusal after `matrix=` would leave a matrix with no cap.
+    cap = ec.max_parallel(table)
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"matrix={json.dumps({'include': cells})}\n")
         fh.write(f"empty={'true' if not cells else 'false'}\n")
         fh.write(f"count={len(cells)}\n")
+        fh.write(f"max_parallel={cap}\n")
         fh.write(f"cells={json.dumps(tree)}\n")
         named = {"count": len(unmanaged), "paths": unmanaged[:UNMANAGED_NAMES]}
         fh.write(f"unmanaged={json.dumps(named)}\n")

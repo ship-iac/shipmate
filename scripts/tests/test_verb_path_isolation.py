@@ -25,9 +25,6 @@ Pinned on the unlock side:
 - the unlock job's `if:`. Its skip-propagation form over `guard` and `detect` is what stops a
   rejected dispatch from fanning out, since a skipped `detect` reads its outputs as empty
   strings and `'' != '[]'` is true;
-- its `strategy`: `fail-fast: false`, so one cell that cannot determine its lock state does not
-  strand its siblings' locks, and the matrix source is `cells` (the unlock detect job declares
-  only `cells`, so any other `needs.detect.outputs.*` reads '' and `fromJSON('')` fails);
 - `detect`'s `unlock-detect` inputs, whole;
 - `detect`'s environment pre-flight. The unlock job binds `<env>-apply`, and GitHub creates a
   missing environment on demand with no reviewers and no branch policy, then keeps it, so an
@@ -36,7 +33,8 @@ Pinned on the unlock side:
 
 Not re-pinned here, to keep one selector per property: the bot-actor `guard` job
 (`test_apply_dispatch_actor_guard.py` covers both files), the `<env>-apply` environment binding
-(`test_apply_env_binding_guard.py`), the concurrency group shared with the wave jobs
+(`test_apply_env_binding_guard.py`), the unlock job's whole `strategy`
+(`test_matrix_max_parallel_guard.py`), the concurrency group shared with the wave jobs
 (`test_apply_cell_concurrency_guard.py`), and each job's `needs` list (the actor guard's
 whole-list-per-job map).
 
@@ -105,9 +103,9 @@ UNLOCK_STEP_ACTIONS = {
 #: blind spot rather than a second selector here.
 UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
 
-#: The whole `outputs:` mapping of unlock's `detect`. `UNLOCK_STRATEGY` pins the consumer end
-#: of this wire, and without this one the producer end can be re-aimed at `waves`, the empty
-#: string here, which fans the job out and dies at fromJSON.
+#: The whole `outputs:` mapping of unlock's `detect`. `test_matrix_max_parallel_guard.py` pins
+#: the consumer end of this wire, and without this one the producer end can be re-aimed at
+#: `waves`, the empty string here, which fans the job out and dies at fromJSON.
 DETECT_OUTPUTS = {"cells": "${{ steps.d.outputs.cells }}"}
 
 #: Named so a failure says which one leaked in.
@@ -139,12 +137,6 @@ ENVLEVEL_IF = {
 #: reaches `!failure()` here instead of leaving `detect` skipped, whose outputs read as empty
 #: strings, and `'' != '[]'` is true.
 UNLOCK_IF = "${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}"
-
-#: The whole `strategy:` mapping of the unlock job.
-UNLOCK_STRATEGY = {
-    "fail-fast": False,
-    "matrix": {"include": "${{ fromJSON(needs.detect.outputs.cells) }}"},
-}
 
 #: The whole `with:` of unlock's `unlock-detect` step. GitHub only warns on an undeclared
 #: composite input, so this compare is what catches a stray key.
@@ -297,16 +289,6 @@ def test_the_unlock_job_runs_only_with_a_non_empty_queue():
         f"unlock's `if:` is {got!r}, not {UNLOCK_IF!r} -- without `!failure()` a rejected "
         "dispatch leaves `detect` skipped, whose outputs read as empty strings, and "
         "`'' != '[]'` fans out over a queue nobody computed"
-    )
-
-
-def test_the_unlock_matrix_reads_cells_and_never_fails_fast():
-    got = _job(UNLOCK, "unlock").get("strategy")
-    assert got == UNLOCK_STRATEGY, (
-        f"unlock's strategy is {got!r}, not {UNLOCK_STRATEGY!r} -- `fail-fast: true` lets "
-        "one cell that cannot read its lock state strand every sibling's lock, and the "
-        "`waves` output is the empty string on this path, so a matrix over it dies at "
-        "fromJSON"
     )
 
 

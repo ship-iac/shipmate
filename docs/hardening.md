@@ -458,9 +458,10 @@ enforcement.
 
 **A key holding a variable reference is governed by whoever GitHub permits to
 edit the repository's or the organization's variable it names, not by a merge.**
-`shared`, `explicit` and `gated` hold `true` or `false` and refuse a reference, so
-which environments share one binding, which a bare apply skips and which apply
-unreviewed stay merged commits. Where this page says editing
+`shared`, `explicit` and `gated` hold `true` or `false`, `max_parallel` holds a
+number, and all four refuse a reference, so which environments share one
+binding, which a bare apply skips, which apply unreviewed and how many plan
+and drift cell jobs run at once stay merged commits. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes
 out ([`../CONTRACT.md`](../CONTRACT.md) §Variable references).
 
@@ -1229,10 +1230,10 @@ for exactly the exposure control 1 exists to limit.
   understood it.
 - **Branch-controlled configuration.** Stack tags come from the pull request
   branch. They shape what the engine does; they do not constrain what it is
-  allowed to do. `needs` and `explicit` are not on this list:
+  allowed to do. `needs`, `explicit`, `gated` and `max_parallel` are not on this list:
   they live in `.github/shipmate-config.yml`, read from the default branch with the
-  rest of it, so a branch can neither reorder its own apply waves nor
-  drop its own exclusion.
+  rest of it, so a branch can neither reorder its own apply waves,
+  drop its own exclusion, exempt itself from review nor raise its own fan-out.
 - **The gate is an assertion, not a proof.** The App identity and pull request
   approvals are out of a push-capable developer's reach only because control 16
   keeps the App private key on the `shipmate-engine` environment, unreadable

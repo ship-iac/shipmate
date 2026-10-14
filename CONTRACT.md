@@ -405,9 +405,9 @@ nothing for its cells to run as. The two absences refuse at the same site,
 `scripts/env-config` (§Refusals) — a file absent from the default branch, and a
 file that parses but declares no `layout`.
 
-The file holds three top-level settings and no others: `layout`,
-`identities`, `environments`. Any other top-level key refuses, naming the
-offending key and the three that are allowed. An engine refuses a key
+The file holds four top-level settings and no others: `layout`,
+`identities`, `environments`, `max_parallel`. Any other top-level key refuses,
+naming the offending key and the four that are allowed. An engine refuses a key
 it does not implement, so a repository moves its pin before it adds a key a newer
 release introduces.
 
@@ -425,10 +425,10 @@ it plans; changing any of those takes a merge to the default branch. The read
 names `GITHUB_REPOSITORY`, which is the base repository under both pull-request
 events, and a fork pull request is still refused in `detect` before it plans.
 
-**`needs`, `explicit` and `gated` come from the default branch too.**
-They are read from the same parsed mapping as the environment table, and a branch
-therefore cannot reorder its own apply waves, drop its own production exclusion
-or exempt itself from the review requirement.
+**`needs`, `explicit`, `gated` and `max_parallel` come from the default branch
+too.** They are read from the same parsed mapping as the environment table, and a
+branch therefore cannot reorder its own apply waves, drop its own production
+exclusion, exempt itself from the review requirement or raise its own fan-out.
 
 **The file must reach the default branch before the first plan run.** A pull
 request that only *adds* it is refused, because the branch its plan is compared
@@ -451,6 +451,7 @@ keeps a leading `0`. Indentation is the one structure rule.
 ```yaml
 # .github/shipmate-config.yml
 layout: tf_vars                    # tf_vars | workspace | folder
+max_parallel: 10                   # cell jobs one plan or drift matrix runs at once
 
 identities:
   dev:
@@ -488,6 +489,31 @@ as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pa
 `shipmate apply`, and `gated: false` exempts it from the review requirement
 (§Comment-ops). The three hold `true` or `false`, bare or quoted; `shared` and
 `explicit` default to `false`, `gated` to `true`.
+
+**`max_parallel` caps the plan and drift matrices.** It is a whole number from
+1 to 256, and 10 when absent: each plan matrix and drift sweep runs at most that
+many cell jobs at once, and the rest queue, so a plan or sweep over the cap
+takes longer, in batches. The cap is per matrix per run. 10 is half of the 20
+concurrent jobs GitHub allows standard GitHub-hosted runners on Free (40 on
+Pro, 60 on Team, 500 on Enterprise;
+[Actions limits](https://docs.github.com/en/actions/reference/limits)), so one
+plan or sweep leaves room for other jobs, but a plan and a drift sweep running
+together can fill a Free account's pool: stagger the drift files' crons. The
+default is sized for GitHub-hosted runner limits; a repository whose `runs_on`
+names a larger self-hosted pool raises it. The cap also bounds how many stacks
+call one cloud account's APIs at once: each cell's `tofu` runs up to 10
+operations in parallel, and some provider APIs throttle per account. GitHub runs a matrix with `max-parallel: 0` unbounded, so
+0 refuses, and so does anything that is not a whole number from 1 to 256.
+
+**Apply waves and unlock are not capped.** Both bind `<env>-apply`, and GitHub
+applies a bound environment's required reviewers and wait timer again to every
+batch of a capped matrix (probed on a public repository), and a capped cell
+queued behind a live apply's concurrency group would hold a slot the others
+need. Plans and drift
+sweeps bind `<env>-plan`, which carries no reviewers (§Env model). The one
+exception is a `shared: true` environment: it binds its bare `<env>` on plans
+and drift too, so its reviewers or wait timer apply again to each batch of a
+plan or sweep over the cap.
 
 One quoting rule: a string value starting with `{`, `[`, `*`, `&`, `!` or `#`
 is quoted (`"{workload}-plan"`). Unquoted, YAML reads the character as syntax:
@@ -588,7 +614,8 @@ would stop describing environment identity.
 
 ### Variable references
 
-Any string value in the file may instead name a GitHub variable:
+Any string value in the file except `shared`, `explicit`, `gated` and
+`max_parallel` may instead name a GitHub variable:
 
 ```yaml
 # .github/shipmate-config.yml
@@ -610,7 +637,8 @@ environments:
 
 - **Shape.** Exactly `{vars: NAME}`, in flow or block form: a mapping with one
   key, `vars`, holding a string, named after GitHub's `vars` context. It is valid at every
-  string position, list items and an identity map's values included,
+  string position, list items and an identity map's values included, except
+  `shared`, `explicit`, `gated` and `max_parallel` (see Values),
   and it replaces the whole string before `{workload}` is filled. Any other
   mapping is ordinary data for the checks in §Refusals.
 - **Resolution.** Every reader of the file replaces each reference with the
@@ -624,10 +652,11 @@ environments:
   job that reads the file binds one. comment-ops and the plan `summary` job
   bind `shipmate-engine`, so a variable of the same name on that Environment
   shadows the repository value in those two jobs, and nowhere else.
-- **Values.** A resolved value is always a string. `shared`, `explicit` and
-  `gated` accept no reference: one refuses before it resolves, so the refusal
-  never quotes the variable's value. A referenced `layout` whose value is not a
-  layout refuses naming the variable, not the value. The name is
+- **Values.** A resolved value is always a string. `shared`, `explicit`,
+  `gated` and `max_parallel` accept no reference: one refuses before it
+  resolves, so the refusal never quotes the variable's value. A referenced
+  `layout` whose value is not a layout refuses naming the variable, not the
+  value. The name is
   uppercase (`[A-Z_][A-Z0-9_]*`), as GitHub stores it.
 - **Variables only, never secrets.** A resolved value is not hidden: it lands in
   job outputs, the detect `matrix` among them, and in step logs, and
@@ -692,7 +721,8 @@ variable rows depend on the run as well as the file, so they are not structural.
 | An empty string or an empty map in an identity field | that resolves to a skipped credentials step, not to a credential |
 | `aws.account` that is not 12 digits | an AWS account id is exactly 12 digits, a leading `0` included |
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
-| A top-level key other than `layout`, `identities`, `environments` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
+| `max_parallel` that is not a whole number from 1 to 256, or holds a variable reference | GitHub runs a matrix with `max-parallel: 0` unbounded and fails the run on an empty or non-numeric value; the cap is written into the file, like the flags |
+| A top-level key other than `layout`, `identities`, `environments`, `max_parallel` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 | A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
@@ -1998,8 +2028,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   with narrower queries (§Tag grammar). A targeted `shipmate apply <env>`
   is not a way past it: the ceiling is enforced in the plan fan-out, so a run
   that trips it produces no reviewed plan artifact for any apply path to use.
-- Plans fan out flat: all applicable plan units for a pull request run
-  concurrently, with no ordering dependency between them.
+- Plans fan out flat: all applicable plan units for a pull request run with no
+  ordering dependency between them, up to `max_parallel` at a time
+  (§Environment table).
 - Applies run in waves: the `after` relationships between Terramate stacks
   form a DAG over the full run-graph, and applies execute in topological
   levels of that DAG — all units at one level must complete before the next

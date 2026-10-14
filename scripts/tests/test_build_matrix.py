@@ -1353,6 +1353,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "matrix": "${{ steps.build.outputs.matrix }}",
         "empty": "${{ steps.build.outputs.empty }}",
         "count": "${{ steps.build.outputs.count }}",
+        "max_parallel": "${{ steps.build.outputs.max_parallel }}",
         "cells": "${{ steps.build.outputs.cells }}",
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
         "lost": "${{ steps.build.outputs.lost }}",
@@ -2381,6 +2382,7 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
     assert outputs == {
         "empty": "false",
         "count": "1",
+        "max_parallel": "10",
         "cells": '[{"environment": "dev-eu", "stack": "stacks/app"}]',
         "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
         "lost": "",
@@ -2807,3 +2809,42 @@ def test_detect_names_the_first_ten_lost_pairs(monkeypatch, tmp_path, capsys):
             "(CONTRACT.md §Taking a stack out of CI), nothing is wrong; otherwise restore the tag."
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("env", "head_sha"), [(_PLAN_ENV, "a" * 40), (_DRIFT_ENV, None)], ids=["plan", "sweep"]
+)
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [({"layout": "folder"}, "10"), ({"layout": "folder", "max_parallel": "3"}, "3")],
+    ids=["default", "set"],
+)
+def test_detect_writes_the_tables_max_parallel(
+    monkeypatch, tmp_path, env, head_sha, table, expected
+):
+    """The plan and drift matrices' `max-parallel` read this output, and an unwritten one fails
+    the run.
+
+    Mutations: delete the `max_parallel` write -- every row loses the key; write
+    `DEFAULT_MAX_PARALLEL` instead of `max_parallel(table)` -- the "set" rows read 10."""
+    outputs, _ = _run_main(monkeypatch, tmp_path, env, head_sha=head_sha, table=table)
+    assert outputs["count"] == "1"  # Not vacuous: a cell exists.
+    assert outputs["max_parallel"] == expected
+
+
+def test_a_refused_max_parallel_writes_no_matrix(monkeypatch, tmp_path):
+    """A refusal after `matrix=` and `empty=false` were written leaves a matrix job reading an
+    empty cap, which fails the run with an expression error instead of the refusal.
+
+    Mutation: call `ec.max_parallel(table)` inside the `GITHUB_OUTPUT` block again -- `matrix=`,
+    `empty=` and `count=` are written before the refusal."""
+
+    def refuse(table):
+        raise SystemExit("::error::max_parallel is '0'; refused")
+
+    monkeypatch.setattr(bm.ec, "max_parallel", refuse)
+    with pytest.raises(SystemExit):
+        _run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40)
+    assert github_outputs(tmp_path / "out.txt") == {
+        "refusal": "max_parallel is '0'; refused",
+    }
