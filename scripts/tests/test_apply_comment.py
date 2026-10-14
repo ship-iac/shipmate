@@ -107,6 +107,13 @@ def test_build_rows_sorted_by_environment_then_stack():
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 HINT = "Comment `shipmate help` for the available commands."
+
+#: The `not recorded:` note's last sentence: cause-agnostic, and never an unconditional
+#: re-apply, which repeats an apply whose state was not saved.
+_UNRECORDED_REMEDY = (
+    "Re-plan; if the cell's job log shows `The apply step ran and its state was not saved`, "
+    "follow docs/troubleshooting.md section of that name before applying the re-plan."
+)
 #: `provenance(SHA)` under `_run_context`, hand-written.
 AT = (
     "at [0123456](https://gh/o/r/commit/0123456789abcdef0123456789abcdef01234567) "
@@ -203,7 +210,7 @@ def test_a_stack_name_mentions_nobody_in_the_apply_comment():
     assert ac._unrecorded_note(rows) == (
         "not recorded: **@<!-- -->acme/ops/y (dev-eu)**. The apply succeeded but its apply "
         "check is not recorded as complete (it failed, was cancelled, or a newer plan "
-        "re-created it), so `shipmate / gate` stays pending. Re-plan and re-apply."
+        "re-created it), so `shipmate / gate` stays pending. " + _UNRECORDED_REMEDY
     )
     assert ac._lock_cell(rows[0], {"id": "0f866bdc", "created": ""}) == (
         "**@<!-- -->acme/ops/y (dev-eu)** (lock **0f866bdc**)"
@@ -261,7 +268,7 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
         '🟡 stacks/dns (prod): not attempted <a href="https://gh/run/1">logs</a>\n\n'
         "not recorded: **stacks/app (prod)**. The apply succeeded but its apply check is not "
         "recorded as complete (it failed, was cancelled, or a newer plan re-created it), so "
-        "`shipmate / gate` stays pending. Re-plan and re-apply.\n"
+        "`shipmate / gate` stays pending. " + _UNRECORDED_REMEDY + "\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply`.\n\n" + HINT
     )
 
@@ -475,13 +482,15 @@ def test_the_unrecorded_note_is_capped_and_summarizes_the_rest():
     `unrecorded` rows (an expired App key, a checks-API outage) strands a wide matrix.
 
     Mutation: name every cell in `named` -- red.
-    Mutation: name a cell `**<stack> / <env>**` in `_unrecorded_note` -- red."""
+    Mutation: name a cell `**<stack> / <env>**` in `_unrecorded_note` -- red.
+    Mutation: end the note with `Re-plan and re-apply.`, which repeats an apply whose state was
+    not saved -- red."""
     rows = [_row(status="unrecorded", stack=f"s{i}") for i in range(7)]
     assert ac._unrecorded_note(rows) == (
         "not recorded: **s0 (dev-eu)**, **s1 (dev-eu)**, **s2 (dev-eu)**, **s3 (dev-eu)**, "
         "**s4 (dev-eu)**, and 2 more. The apply succeeded but its apply check is not recorded "
         "as complete (it failed, was cancelled, or a newer plan re-created it), so "
-        "`shipmate / gate` stays pending. Re-plan and re-apply."
+        "`shipmate / gate` stays pending. " + _UNRECORDED_REMEDY
     )
 
 
@@ -526,7 +535,7 @@ def test_the_notes_read_lock_then_unrecorded_then_not_attempted():
         "recovery: if the reviewed plan is now stale, re-plan.\n"
         "not recorded: **db (prod)**. The apply succeeded but its apply check is not recorded "
         "as complete (it failed, was cancelled, or a newer plan re-created it), so "
-        "`shipmate / gate` stays pending. Re-plan and re-apply.\n"
+        "`shipmate / gate` stays pending. " + _UNRECORDED_REMEDY + "\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply`."
     )
     assert sections[-1] == HINT
@@ -1632,7 +1641,7 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
         f'🟠 stacks/app (dev-eu): applied, not recorded <a href="{_MAIN_RUN}">logs</a>\n\n'
         "not recorded: **stacks/app (dev-eu)**. The apply succeeded but its apply check is not "
         "recorded as complete (it failed, was cancelled, or a newer plan re-created it), so "
-        "`shipmate / gate` stays pending. Re-plan and re-apply.\n\n" + HINT
+        "`shipmate / gate` stays pending. " + _UNRECORDED_REMEDY + "\n\n" + HINT
     )
 
 

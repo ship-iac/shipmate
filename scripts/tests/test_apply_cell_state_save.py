@@ -14,7 +14,7 @@ state which was never restored is never saved. Mutation: regress that guard to `
 
 import re
 
-from _loader import action_steps
+from _loader import action_steps, action_yaml, step_by
 
 
 def _save_state_step():
@@ -55,26 +55,73 @@ _LOST_SAVE_WARNING = {
     "name": "Warn that the applied state was not saved",
     "if": (
         "${{ always() && steps.apply.outcome != 'skipped' "
-        "&& steps.save-state.outcome == 'failure' }}"
+        "&& steps.init.outputs.restore-outcome == 'success' "
+        "&& steps.save-state.outputs.saved != 'true' }}"
     ),
     "shell": "bash",
     "run": (
         'echo "::error::The apply step ran and its state was not saved. Do not re-run this job or '
-        "re-plan against the cache: both act on the state from before the apply. See "
-        'docs/troubleshooting.md section The apply step ran and its state was not saved."\n'
+        "re-comment 'shipmate apply': either applies the reviewed plan again against the state "
+        "from before the apply. Follow docs/troubleshooting.md section The apply step ran and its "
+        'state was not saved before applying this stack again."\n'
+        "exit 1\n"
     ),
 }
 
 
-def test_a_lost_state_save_after_an_apply_warns_against_a_re_run():
-    """`Save state` runs under always(), also when the apply was skipped; the warning must fire
-    only when the apply step ran, a cancelled run included, where failure() is false.
+def test_an_unsaved_state_after_an_apply_fails_the_cell_and_warns_against_a_re_run():
+    """The warning fires whenever an apply step ran over restored state and the save is not
+    verified (failed, cancelled, not found, or skipped for an absent file), a cancelled run
+    included, where failure() is false; it fails the job so the apply check stays pending; its
+    text forbids a re-run and a re-comment and calls no re-plan unsafe.
 
-    Mutations: drop `steps.apply.outcome != 'skipped'` from the warning's `if:`; `failure()` in
-    place of `always()`.
+    Mutations: `steps.save-state.outputs.saved != 'true'` to `steps.save-state.outcome ==
+    'failure'`; drop the `exit 1`; restore the old "or re-plan against the cache" text.
     """
     steps = action_steps("apply-cell")
     names = [s.get("name") for s in steps]
     warning = steps[names.index("Warn that the applied state was not saved")]
     assert warning == _LOST_SAVE_WARNING
     assert steps[names.index("Save state")]["id"] == "save-state"
+
+
+_STATE_KEY = (
+    "state/${{ inputs.stack-slug }}/${{ inputs.env }}/"
+    "${{ github.run_id }}-${{ github.run_attempt }}"
+)
+
+_LOOKUP_STEP = {
+    "name": "Look up the saved entry",
+    "id": "verify",
+    "if": "${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}",
+    "uses": "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9",
+    "with": {"path": "${{ inputs.path }}", "key": _STATE_KEY, "lookup-only": "true"},
+}
+
+
+def test_the_state_save_is_verified_by_an_exact_key_lookup():
+    """`actions/cache/save` warns and succeeds on a cache-service error, so only a lookup of the
+    exact key proves the entry exists; a `restore-keys` would let an older entry answer for it.
+
+    Mutations: add `restore-keys` to the lookup; change the lookup's key; give the lookup an
+    `if:` other than the save's.
+    """
+    lookup = step_by("state", id="verify")
+    assert lookup == _LOOKUP_STEP
+    save = step_by("state", name="Save state")
+    assert save["with"]["key"] == _STATE_KEY
+    assert save["if"] == _LOOKUP_STEP["if"]
+
+
+def test_saved_is_true_only_on_the_lookups_exact_hit():
+    """Mutations: `value: 'true'`; `value: ${{ steps.encrypt.outputs.skip }}`."""
+    assert action_yaml("state")["outputs"] == {
+        "saved": {
+            "description": (
+                "`true` only when the save mode's lookup found the entry this run saved under its "
+                "exact key. Anything else, empty included, means the state was not saved: the "
+                "save failed, was cancelled or skipped, or the cache stored nothing."
+            ),
+            "value": "${{ steps.verify.outputs.cache-hit }}",
+        }
+    }

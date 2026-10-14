@@ -18,6 +18,13 @@ inputs:
   passphrase:
     description: SHIPMATE_PLAN_PASSPHRASE, which encrypts the cached state. Required; empty refuses both modes before any cache call.
     required: true
+outputs:
+  saved:
+    description: >-
+      `true` only when the save mode's lookup found the entry this run saved under its exact key.
+      Anything else, empty included, means the state was not saved: the save failed, was cancelled
+      or skipped, or the cache stored nothing.
+    value: ${{ steps.verify.outputs.cache-hit }}
 runs:
   using: composite
   steps:
@@ -84,3 +91,14 @@ runs:
       with:
         path: ${{ inputs.path }}
         key: state/${{ inputs.stack-slug }}/${{ inputs.env }}/${{ github.run_id }}-${{ github.run_attempt }}
+    - name: Look up the saved entry
+      id: verify
+      # actions/cache/save warns and succeeds when it stores nothing; only this exact key, with no
+      # restore-keys, proves the entry. One save per key: a second stores nothing and this finds the
+      # first. The key's run_id-run_attempt holds that, one cell per stack and env per attempt.
+      if: ${{ inputs.mode == 'save' && steps.encrypt.outputs.skip != 'true' }}
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: state/${{ inputs.stack-slug }}/${{ inputs.env }}/${{ github.run_id }}-${{ github.run_attempt }}
+        lookup-only: 'true'

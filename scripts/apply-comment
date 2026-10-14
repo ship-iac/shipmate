@@ -96,7 +96,9 @@ def _unrecorded_note(rows):
     return (
         f"not recorded: {named(cells, _UNRECORDED_NAMED)}. The apply succeeded but its apply "
         "check is not recorded as complete (it failed, was cancelled, or a newer plan "
-        "re-created it), so `shipmate / gate` stays pending. Re-plan and re-apply."
+        "re-created it), so `shipmate / gate` stays pending. Re-plan; if the cell's job log shows "
+        "`The apply step ran and its state was not saved`, follow docs/troubleshooting.md section "
+        "of that name before applying the re-plan."
     )
 
 
@@ -331,14 +333,15 @@ def apply_check_state(rows, present, done):
     artifact -- are the authority on whether a unit is done. `Compose cell
     summary` runs `if: always()`, and the trailing `complete` job completes the
     check only for a cell whose job succeeded, so an `applied` artifact can
-    coexist with a pending check (`Save state` failed, the job was cancelled, or
+    coexist with a pending check (the state was not saved, the job was cancelled, or
     the `complete` job failed); and the continue-on-error upload can drop,
     leaving an applied cell with no artifact.
     Two directions, therefore:
 
     - applied + pending check -> `unrecorded`: the apply succeeded but was not
-      recorded, the gate stays pending, and the stack needs a re-plan (state
-      has advanced past the reviewed .otplan).
+      recorded, the gate stays pending, and the stack needs a re-plan. When its
+      state was not saved, the reviewed .otplan still matches the restored state
+      and would apply again, which is why the note never says re-apply.
     - not_attempted + done check -> `applied`: the check proves the apply
       landed; apply_text stays None so the row renders its bare line.
 

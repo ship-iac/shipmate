@@ -402,7 +402,11 @@ rather than failed, so `snapshot` accepts a fresh `shipmate apply <env>` for tha
 cell — the right recovery when nothing moved (a credentials failure, a rate limit,
 a cancelled run). If the apply partially succeeded, the state serial advanced
 and the stored plan no longer matches it, so that retry is refused here instead.
-Re-plan first; the two recoveries are not interchangeable.
+Re-plan first; the two recoveries are not interchangeable. On a local backend,
+a cell whose job log shows `The apply step ran and its state was not saved` is
+the exception: the cache restores the state from before the apply, so a retry
+applies the plan again unrefused. Follow
+§`The apply step ran and its state was not saved` instead.
 
 A cancelled run has one further failure mode a bare retry cannot clear: it can
 die holding the state lock, and every later apply of that cell then fails
@@ -834,22 +838,99 @@ the refusal. What to do depends on the step that refused:
   applied. Re-plan once the runner works; a transient hosted-runner disk
   failure clears on its own, and a self-hosted runner needs its openssl or disk
   fixed.
-- **An apply cell's `Save state`.** `Save state` runs even when the apply did
-  not. If the same job's `Apply the stored plan` step is `skipped`, nothing was
-  applied and a re-run of the job is safe. Any other status is
-  §`The apply step ran and its state was not saved`.
+- **An apply cell's `Save state`.** See
+  §`The apply step ran and its state was not saved`, which says when a re-run
+  of the job is safe.
 
 ### `The apply step ran and its state was not saved`
 
-An apply cell's `Save state` failed, and its `Apply the stored plan` step ran:
-its status is `success`, `failure` or `cancelled`. The apply may have advanced
-state, and that state was not saved. Do not re-run the job or re-plan against
-the cached entry: both act on the state from before the apply, or on no state
-on a stack's first apply. The cell's apply check stays pending, and the apply
-comment shows it as not recorded, or failed when the apply itself failed.
+An apply cell on a local backend ran its `Apply the stored plan` step (status
+`success`, `failure` or `cancelled`), and `Save state` did not store the state
+that step left: the save failed or was cancelled, the exact-key lookup after it
+found no entry, or there was no state file to save. The warning step fails the
+cell's job, so its apply check stays pending. An apply run that was not
+cancelled posts an apply comment showing the cell as not recorded when its
+apply succeeded, otherwise as failed. A cancelled run and the merge deploy post
+none: the job log and the pending check are the signal.
 
-The engine has no recovery for local-backend state lost this way. The
-resources the apply created exist, and OpenTofu does not track them.
+The cache still holds the stack's entry from before the apply, or none on its
+first apply. What the apply did exists, and OpenTofu does not track it. A first
+apply that OpenTofu refused before writing anything warns too, and this page
+does not tell it apart: a log without completion lines does not prove nothing
+changed, because an interrupted apply can create a resource before OpenTofu
+logs or records it.
+
+When the same job's `Apply the stored plan` step is `skipped`, nothing was
+applied, this warning is not printed, and a re-run of the job is safe. In every
+other case, re-plan and reconcile against the provider:
+
+1. While the cell's apply check is pending, do not re-run the job or the
+   deploy, and do not comment `shipmate apply`, bare or for its environment.
+   The reviewed plan was made against the state the cache
+   restores, so OpenTofu applies it again with no stale-plan refusal and
+   creates a second set of what the lost apply created.
+2. List what the lost apply did from its `Apply the stored plan` step log:
+   `Creation complete ... [id=...]` and `Destruction complete` lines. The
+   cell's fold-out in the apply comment shows the same output when a comment
+   was posted. When the lost state was a deleted cache entry, the run and its
+   attempt are the `<run_id>-<run_attempt>` that ends the entry's key.
+3. Re-plan on a pull request touching the stack: on an open pull request,
+   comment `shipmate plan` or push; after the merge, open a new pull request.
+   The plan repeats the lost apply. Do not apply it as it stands.
+4. For a resource the lost apply created at an address the restored state
+   lacks, add an `import` block with the id from its `Creation complete` line
+   to that pull request. Its plan shows `1 to import`.
+
+   ```hcl
+   import {
+     to = random_id.new[0]
+     id = "<id>"
+   }
+   ```
+
+5. For a resource the lost apply replaced or destroyed, the restored state
+   still holds the old instance, and an `import` to an address the state holds
+   is ignored without an error: the plan still replaces it. Use two pull
+   requests, each planned and applied through shipmate like any change:
+   - The first deletes the resource block and adds a `removed` block. Its plan
+     shows the resource as `to forget`.
+
+     ```hcl
+     removed {
+       from = random_id.x
+       lifecycle {
+         destroy = false
+       }
+     }
+     ```
+
+   - The second restores the resource block and adds an `import` block for
+     every instance of that resource: `removed` forgets every instance of a
+     `count` or `for_each` resource, and OpenTofu 1.12 accepts no instance key
+     in `removed.from`. The surviving instances' ids are on the re-plan's
+     `Refreshing state... [id=...]` lines, the lost apply's on its
+     `Creation complete` lines.
+
+   One plan cannot do both: a `moved` block to another address plus `removed`
+   and `import` refuses with `Error: Moved object still exists`. A resource the
+   lost apply only destroyed has nothing to import, and the re-plan plans its
+   destroy again. Whether a real provider's refresh drops the deleted object
+   from that plan is unprobed; where it does not, a `removed` block with
+   `destroy = false` forgets it.
+6. A resource whose provider does not implement import cannot be adopted:
+   `random_pet`, which the sample stacks use, refuses with
+   `Error: Resource Import Not Implemented`. Applying the re-plan re-creates
+   it. That is harmless for a null or random resource, and a duplicate or a
+   collision for a real one.
+7. Review each plan that imports. A provider can import fewer attributes than
+   it wrote and then plan a replace: `terraform_data` does not import
+   `triggers_replace`, and `random_id` does not import `keepers`. Two points
+   are unprobed: the import ID a resource type takes is the one its provider's
+   documentation names, which may differ from the `id` in the log; and with a
+   provider whose refresh notices a deleted object, the re-plan may show a
+   replaced resource as a create rather than a replace.
+8. Once applied, delete the `import` and `removed` blocks in a later pull
+   request.
 
 ### `state cache entry ... is not a shipmate-crypt-v1 entry`
 
@@ -1247,6 +1328,11 @@ stays pending and the rest of the run applied. Follow the remedy:
   for, apply an explicit one with `shipmate apply <env>`, then comment
   `shipmate apply`.
 
+Before any of these, check the run for a cell whose job log shows
+`The apply step ran and its state was not saved`: an apply that names its
+environment applies that cell again. Follow
+§`The apply step ran and its state was not saved` for it first.
+
 A targeted apply always names `shipmate apply <env>`, even when the blocker's
 environment is held or ordered by `needs`, because the targeted form's comment
 receives no held or skipped environments. A run in which every cell waits applies nothing, succeeds, and its
@@ -1478,4 +1564,6 @@ already applied is skipped.
 
 A deploy whose `summary` job alone was cancelled, because a later gate writer
 on the same head queued behind it, leaves the merged head's gate as it was.
-Re-run that deploy the same way.
+Re-run that deploy the same way, unless one of its cells' job logs shows
+`The apply step ran and its state was not saved`: the re-run applies that cell
+again. Follow §`The apply step ran and its state was not saved` first.

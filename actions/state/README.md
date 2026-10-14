@@ -28,7 +28,11 @@ the plan artifact). An empty `passphrase` refuses both modes before any cache
 call.
 
 - Save: the file is encrypted in place, then saved. An absent or 0-byte file is
-  not saved; the step prints a notice instead.
+  not saved; the step prints a notice instead. `actions/cache/save` warns and
+  succeeds when the cache stores nothing, so a lookup of the exact save key, with
+  no `restore-keys`, verifies the save: the `saved` output is `true` only when it
+  finds the entry, and empty or `false` otherwise. The action does not fail on a
+  miss; `apply-cell` reads `saved` and fails the cell when an apply ran.
 - Restore: a matched entry is authenticated, then decrypted in place, before
   tofu reads it. A cache miss restores nothing and runs no decrypt. An entry
   saved unencrypted or by an earlier engine release fails the restore with the
@@ -44,7 +48,9 @@ call.
 
 **State loss is acceptable**: this is a cache, not a source of truth, and
 GitHub cache entries can be evicted at any time. Sample-repo stacks use
-`null_resource`/`random_pet`, which re-create on a cache miss. The small window
+`null_resource`/`random_pet`, which re-create on a cache miss. For state lost
+after an apply, follow `docs/troubleshooting.md`
+§`The apply step ran and its state was not saved`. The small window
 for concurrent read/modify/write races is closed by the per-stack x environment
 `concurrency` group that serializes applies and unlocks; `actions/state` itself makes no
 locking guarantees.
