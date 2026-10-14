@@ -441,3 +441,50 @@ def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tm
     assert proc.returncode == 0, proc.stderr
     assert sorted(ids) == ["11", "22", "33"]
     assert run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120).returncode == 0
+
+
+#: The PATCH body gh receives, written by hand rather than read from the action. It ends in
+#: the one newline the here-string appends.
+COMPLETE_BODY = (
+    '{"status": "completed", "conclusion": "success", "output": {"title": "applied", '
+    '"summary": "Applied the reviewed plan for this stack x environment."}}\n'
+)
+
+
+@bash_only
+def test_the_completion_body_reaches_gh_without_a_file(tmp_path):
+    """The PATCH body reaches gh whole, and the step writes no file, neither in the job
+    workspace (its working directory) nor in `$RUNNER_TEMP`.
+
+    Mutations: write the body to `body.json` and pass `--input body.json`; drop `--input -`
+    from the PATCH.
+    """
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    (runner_temp / "complete-ids.txt").write_text("11\n", encoding="utf-8", newline="\n")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sent = (tmp_path / "sent").as_posix()
+    # `sleep` is a no-op so a failing PATCH reaches red without the retry loop's real waits.
+    stubs = (
+        'gh() { while [ $# -gt 0 ] && [ "$1" != --input ]; do shift; done; '
+        '[ $# -gt 0 ] || return 1; cat "$2" > "' + sent + '"; }\n'
+        "sleep() { :; }\n"
+    )
+    body = next(
+        s["run"]
+        for s in action_steps("apply-complete")
+        if s.get("name") == "Complete the apply checks"
+    )
+    env = {
+        **os.environ,
+        "GITHUB_REPOSITORY": "acme/demo",
+        "RUNNER_TEMP": runner_temp.as_posix(),
+    }
+    proc = run_step(tmp_path, stubs + body, env, cwd=workspace)
+    assert list(workspace.iterdir()) == [], "the step left a file in the workspace"
+    assert sorted(p.name for p in runner_temp.iterdir()) == ["complete-ids.txt"], (
+        "the step left a file in RUNNER_TEMP"
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert (tmp_path / "sent").read_text(encoding="utf-8") == COMPLETE_BODY

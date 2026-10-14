@@ -1111,12 +1111,13 @@ commented verb reaches, and the other three (`pull_request_target`,
 repository with no `.github/workflows/shipmate.yml`, or one that declares no
 `workflow_dispatch` trigger or not the inputs a verb's dispatch sends, fails at
 dispatch time on that comment-handling run — for every verb alike, since they share the file. That
-run is not visible from the pull request, so every refusal in the dispatch step
-— an unwired verb, an unknown one, and a rejected API call alike — also tries to
-post a `🔴 failed:` reply there whose footer links the run. The run holds the
-error; the failure reply never carries the API's answer. A failure reply that
-cannot be posted is a warning on the comment-handling run, and the step still
-fails with its own status. A dispatch that succeeded then tries to post the
+run is not visible from the pull request, so the refusal of an unwired verb or
+an unknown one, a failure building the request or creating the temporary file
+for gh's error output, and a rejected API call each try to post a `🔴 failed:`
+reply there whose footer links the run. The run holds the error; the failure
+reply never carries the API's answer. A failure reply that cannot be posted is a
+warning on the comment-handling run, and the step still fails with its own
+status. A dispatch that succeeded then tries to post the
 started-run reply, a `⚪` notice:
 
 - With a usable run id it reads `started [the <verb> run](<url>)`, linking the
