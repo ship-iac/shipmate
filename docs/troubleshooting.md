@@ -876,7 +876,10 @@ other case, re-plan and reconcile against the provider:
    attempt are the `<run_id>-<run_attempt>` that ends the entry's key.
 3. Re-plan on a pull request touching the stack: on an open pull request,
    comment `shipmate plan` or push; after the merge, open a new pull request.
-   The plan repeats the lost apply. Do not apply it as it stands.
+   The plan repeats the lost apply. Do not apply it as it stands: apply a plan
+   from this procedure only when each resource the lost apply touched shows
+   `to import` or `to forget`, or a create, replace or destroy that steps 5 to 7
+   leave no way around and you accept. Any other plan repeats the lost apply.
 4. For a resource the lost apply created at an address the restored state
    lacks, add an `import` block with the id from its `Creation complete` line
    to that pull request. Its plan shows `1 to import`.
@@ -1329,7 +1332,7 @@ stays pending and the rest of the run applied. Follow the remedy:
   `shipmate apply`.
 
 Before any of these, check the run for a cell whose job log shows
-`The apply step ran and its state was not saved`: an apply that names its
+`The apply step ran and its state was not saved`: any apply that covers its
 environment applies that cell again. Follow
 §`The apply step ran and its state was not saved` for it first.
 
