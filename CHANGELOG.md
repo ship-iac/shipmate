@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Added
 
-- **A `shipmate plan`, `shipmate apply` or `shipmate unlock` whose dispatch succeeded gets a notice reply on the pull request linking the run it started: `started [the <verb> run](<url>)`.**
+- **A `shipmate plan`, `shipmate apply` or `shipmate unlock` whose dispatch succeeded gets a notice reply on the pull request linking the run it started, `started [the <verb> run](<url>)`, or naming the Actions tab when the dispatch answer carries no usable run id.**
 
 ### Changed
 
