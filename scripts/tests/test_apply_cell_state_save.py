@@ -53,6 +53,7 @@ def test_save_state_still_requires_successful_restore():
 
 _LOST_SAVE_WARNING = {
     "name": "Warn that the applied state was not saved",
+    "id": "lost-save",
     "if": (
         "${{ always() && steps.apply.outcome != 'skipped' "
         "&& steps.init.outputs.restore-outcome == 'success' "
@@ -60,10 +61,11 @@ _LOST_SAVE_WARNING = {
     ),
     "shell": "bash",
     "run": (
-        'echo "::error::The apply step ran and its state was not saved or not verified. Do not '
-        "re-run this job or re-comment 'shipmate apply': either applies the reviewed plan again "
-        "against the state from before the apply. Follow docs/troubleshooting.md section The "
-        'apply step ran and its state was not saved before applying this stack again."\n'
+        'echo "::error::The apply step ran and its state was not saved or not verified. While '
+        "this cell's apply check holds the reviewed plan, do not re-run this job or re-comment "
+        "'shipmate apply': either applies that plan again against the state from before the "
+        "apply. Follow docs/troubleshooting.md section The apply step ran and its state was not "
+        'saved; the import and forget plans it leads to apply as usual."\n'
         "exit 1\n"
     ),
 }
@@ -127,8 +129,8 @@ def test_saved_is_true_only_on_the_lookups_exact_hit():
 def test_the_cell_summary_reads_the_same_save_result_the_warning_does():
     """`state_lost` in cell.json must come from the output the warning step reads.
 
-    Mutations: drop `STATE_SAVED` from `Compose cell summary`'s env; map it to
+    Mutations: drop `LOST_SAVE_OUTCOME` from `Compose cell summary`'s env; map it to
     `steps.save-state.outcome`."""
     env = step_by("apply-cell", name="Compose cell summary")["env"]
-    assert env.get("STATE_SAVED") == "${{ steps.save-state.outputs.saved }}"
+    assert env.get("LOST_SAVE_OUTCOME") == "${{ steps.lost-save.outcome }}"
     assert env["APPLY_OUTCOME"] == "${{ steps.apply.outcome }}"

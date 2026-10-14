@@ -43,7 +43,7 @@ def _run_compose(
     restore="skipped",
     plan_digest="skipped",
     apply="skipped",
-    saved="",
+    lost_save="",
     stack="stacks/app",
     env="dev-eu",
 ):
@@ -61,7 +61,7 @@ def _run_compose(
     monkeypatch.setenv("RESTORE_OUTCOME", restore)
     monkeypatch.setenv("PLAN_DIGEST_OUTCOME", plan_digest)
     monkeypatch.setenv("APPLY_OUTCOME", apply)
-    monkeypatch.setenv("STATE_SAVED", saved)
+    monkeypatch.setenv("LOST_SAVE_OUTCOME", lost_save)
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
 
     load_script("apply-cell-summary").main()
@@ -235,27 +235,14 @@ def test_cell_json_carries_exactly_the_contract_keys(monkeypatch, tmp_path, kwar
 
 
 @pytest.mark.parametrize(
-    ("apply", "restore", "saved", "lost"),
-    [
-        pytest.param("success", "success", "", True, id="applied-unsaved"),
-        pytest.param("failure", "success", "false", True, id="failed-unverified"),
-        pytest.param("cancelled", "success", "", True, id="cancelled-unsaved"),
-        pytest.param("success", "success", "true", False, id="saved"),
-        pytest.param("skipped", "success", "", False, id="apply-skipped"),
-        pytest.param("success", "skipped", "", False, id="remote-backend"),
-        pytest.param("failure", "", "", False, id="restore-not-reached"),
-    ],
+    ("outcome", "lost"),
+    [("failure", True), ("success", False), ("skipped", False), ("", False)],
 )
-def test_state_lost_is_set_exactly_when_the_lost_save_warning_fires(
-    monkeypatch, tmp_path, apply, restore, saved, lost
-):
-    """`state_lost` mirrors the warning step's `if:`: the apply step ran, the state was
-    restored, and the save is not `saved`.
+def test_state_lost_is_the_lost_save_warning_having_fired(monkeypatch, tmp_path, outcome, lost):
+    """The warning step ends `exit 1` whenever it runs, so `failure` is exactly "it fired".
 
-    Mutations: drop the `APPLY_OUTCOME != "skipped"` term (apply-skipped reddens); drop the
-    `RESTORE_OUTCOME == "success"` term (remote-backend reddens); compare `STATE_SAVED` with
-    `"false"` instead of `!= "true"` (applied-unsaved reddens)."""
-    cell = _run_compose(monkeypatch, tmp_path, apply=apply, restore=restore, saved=saved)
+    Mutation: `!= "skipped"` in place of `== "failure"` (success reddens)."""
+    cell = _run_compose(monkeypatch, tmp_path, apply="success", lost_save=outcome)
     assert cell["state_lost"] is lost
 
 

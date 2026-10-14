@@ -5,9 +5,9 @@ Used by actions/apply-cell's `Compose cell summary` step, which runs even when a
 the apply itself failed or was cancelled: the aggregator needs a result for every
 attempted-or-blocked cell.
 
-`state_lost` is true exactly when the step `Warn that the applied state was not saved` fires: the
-apply step ran, the state was restored, and `actions/state` did not report the save as `saved`.
-The apply comment names those cells so it never prescribes a re-apply for them.
+`state_lost` is true when this job's `Warn that the applied state was not saved` step failed,
+which it does exactly when it fires. It reaches only this run's apply comment, and only when the
+artifact uploads: a later run, and its comment, do not know the state was lost.
 """
 
 import json
@@ -86,11 +86,7 @@ def main():
     # apply.txt needs no copy: `Apply the stored plan` already tee'd it to
     # $RUNNER_TEMP/apply.txt, so a blocked cell that never reached the apply never wrote
     # it, and an attempted cell's copy already sits where `Upload apply summary` reads.
-    state_lost = (
-        os.environ["APPLY_OUTCOME"] != "skipped"
-        and os.environ["RESTORE_OUTCOME"] == "success"
-        and os.environ["STATE_SAVED"] != "true"
-    )
+    state_lost = os.environ["LOST_SAVE_OUTCOME"] == "failure"
     cell_path = os.path.join(os.environ["RUNNER_TEMP"], "cell.json")
     with open(cell_path, "w") as fh:
         json.dump(

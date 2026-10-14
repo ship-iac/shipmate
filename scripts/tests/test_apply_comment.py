@@ -113,6 +113,13 @@ HINT = "Comment `shipmate help` for the available commands."
 #: The `not recorded:` note's last sentence: cause-agnostic, and never a re-apply, which
 #: repeats an apply whose state was not saved.
 _UNRECORDED_REMEDY = "Re-plan."
+
+#: What the `not attempted:` note appends when no row carries the lost-save marker: the lost cell's
+#: artifact can be missing, so the retry is never prescribed without the pointer.
+_LOST_POINTER = (
+    " If a cell's job log shows `The apply step ran and its state was not saved`, follow "
+    "docs/troubleshooting.md section of that name first."
+)
 #: `provenance(SHA)` under `_run_context`, hand-written.
 AT = (
     "at [0123456](https://gh/o/r/commit/0123456789abcdef0123456789abcdef01234567) "
@@ -268,7 +275,10 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
         "not recorded: **stacks/app (prod)**. The apply succeeded but its apply check is not "
         "recorded as complete (it failed, was cancelled, or a newer plan re-created it), so "
         "`shipmate / gate` stays pending. " + _UNRECORDED_REMEDY + "\n"
-        "not attempted: the apply checks stay pending; retry with `shipmate apply`.\n\n" + HINT
+        "not attempted: the apply checks stay pending; retry with `shipmate apply`."
+        + _LOST_POINTER
+        + "\n\n"
+        + HINT
     )
 
 
@@ -341,7 +351,10 @@ def test_a_run_that_died_before_any_cell_reported_renders_failed():
         f"### shipmate apply prod\n\n🔴 failed, 2 not attempted {AT}\n\n"
         '🟡 stacks/app (prod): not attempted <a href="https://gh/run/1">logs</a>\n'
         '🟡 stacks/db (prod): not attempted <a href="https://gh/run/1">logs</a>\n\n'
-        "not attempted: the apply checks stay pending; retry with `shipmate apply prod`.\n\n" + HINT
+        "not attempted: the apply checks stay pending; retry with `shipmate apply prod`."
+        + _LOST_POINTER
+        + "\n\n"
+        + HINT
     )
 
 
@@ -466,18 +479,21 @@ def test_no_review_notice_names_an_env_whose_apply_ran(status):
 def test_the_not_attempted_note_names_the_targeted_env_escaped():
     """A bare `shipmate apply` cannot retry an explicit env, so a targeted run names its env.
 
-    Mutation: build the command without `_md_escape` -- red."""
+    Mutation: build the command without `_md_escape` -- red.
+    Mutation: drop the lost-save pointer the note appends without a `state not saved:` note, which a
+    lost cell whose artifact did not upload needs -- red."""
     rows = [_row(status="not_attempted", apply_text=None)]
     assert ac._not_attempted_note(rows, "x</summary>") == (
         "not attempted: the apply checks stay pending; retry with "
-        "`shipmate apply x&lt;/summary&gt;`."
+        "`shipmate apply x&lt;/summary&gt;`." + _LOST_POINTER
     )
     assert ac._not_attempted_note([_row()], "prod") == ""
 
 
-def test_a_lost_state_names_its_cells_and_drops_the_retry_command():
-    """A cell whose state was not saved gets its own note, and the not-attempted note names no
-    retry, because any apply covering that cell applies its reviewed plan again.
+def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recovered():
+    """A cell whose state was not saved gets its own note, and the not-attempted note keeps its
+    retry command but runs it only after those cells are recovered, because any apply covering
+    them applies their reviewed plans again.
 
     Mutations: return "" from `_state_lost_note`; drop the state-lost branch from
     `_not_attempted_note`; name the cell `**<stack> / <env>**` -- red."""
@@ -488,11 +504,13 @@ def test_a_lost_state_names_its_cells_and_drops_the_retry_command():
     sections = _comment(rows, env="").split("\n\n")
     assert sections[-2] == (
         "state not saved: **@<!-- -->acme/db (dev-eu)**. The apply ran and its state was not "
-        "saved. Do not re-run these cells' jobs or re-comment `shipmate apply` for them: either "
-        "applies the reviewed plan again against the state from before the apply. Follow "
-        "docs/troubleshooting.md section `The apply step ran and its state was not saved`.\n"
-        "not attempted: the apply checks stay pending; recover the cells under "
-        "`state not saved:` first, because any apply that covers them applies them again."
+        "saved. While a cell's apply check holds its reviewed plan, do not re-run its job or "
+        "re-comment `shipmate apply` for it: either applies that plan again against the state "
+        "from before the apply. Follow docs/troubleshooting.md section `The apply step ran and "
+        "its state was not saved`; the import and forget plans it leads to apply as usual.\n"
+        "not attempted: the apply checks stay pending; retry with `shipmate apply` once the "
+        "cells under `state not saved:` are recovered, because it applies their reviewed plans "
+        "again."
     )
 
 
@@ -573,7 +591,7 @@ def test_the_notes_read_lock_then_unrecorded_then_not_attempted():
         "not recorded: **db (prod)**. The apply succeeded but its apply check is not recorded "
         "as complete (it failed, was cancelled, or a newer plan re-created it), so "
         "`shipmate / gate` stays pending. " + _UNRECORDED_REMEDY + "\n"
-        "not attempted: the apply checks stay pending; retry with `shipmate apply`."
+        "not attempted: the apply checks stay pending; retry with `shipmate apply`." + _LOST_POINTER
     )
     assert sections[-1] == HINT
 
@@ -1733,7 +1751,9 @@ def test_main_renders_the_targeted_form_from_env_level_0(monkeypatch, tmp_path):
         f"### shipmate apply dev-eu\n\n🟡 1 not attempted, 1 applied {_MAIN_AT}\n\n"
         f'🟢 stacks/app (dev-eu): applied <a href="{_MAIN_RUN}">logs</a>\n'
         f'🟡 stacks/db (dev-eu): not attempted <a href="{_MAIN_RUN}">logs</a>\n\n'
-        "not attempted: the apply checks stay pending; retry with `shipmate apply dev-eu`.\n\n"
+        "not attempted: the apply checks stay pending; retry with `shipmate apply dev-eu`."
+        + _LOST_POINTER
+        + "\n\n"
         + HINT
     )
 

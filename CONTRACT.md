@@ -2376,8 +2376,9 @@ footer lines and, under any verdict but 🟢, the hint.
   the cells whose state was not saved; `not recorded:`, naming the
   not-recorded cells; and ``not attempted: the apply checks stay pending;
   retry with `shipmate apply <env>`.`` (the bare `shipmate apply` when the run
-  covered all environments), which names no retry while a `state not saved:`
-  note is present.
+  covered all environments), followed by a pointer to the lost-save section
+  when no `state not saved:` note is present, and qualified to run after those
+  cells are recovered when one is.
 - **Footer lines**, one per line: the bare-apply form's environment
   dispositions, then, in both forms, one line per waiting cell. The comment
   states no gate line: the `shipmate / gate` status shows the gate's state.
@@ -2484,17 +2485,24 @@ job believed before its check was completed:
   apply can still have changed resources, and a failed cell whose state was
   not saved is named by the `state not saved:` note.
 - **state not saved** is a note, not a status: `apply-cell-summary` writes
-  `state_lost: true` into `cell.json` exactly when the cell's
-  `Warn that the applied state was not saved` step fires (the apply step ran,
-  the state was restored, and `actions/state` did not report `saved`). The
-  `state not saved:` note names those cells, capped like the `not recorded:`
-  note, says not to re-run their jobs or re-comment `shipmate apply` for them,
-  and points at `docs/troubleshooting.md`
-  §`The apply step ran and its state was not saved`. While it is present, the
-  `not attempted:` note names no retry command, because any apply covering
-  those cells applies their reviewed plan again. The note renders only what the
-  artifact says; nothing refuses a later apply of the cell. The warning step's
-  `exit 1`, not the artifact, keeps the cell's apply check pending.
+  `state_lost: true` into `cell.json` when the cell's
+  `Warn that the applied state was not saved` step failed, which it does
+  exactly when it fires (the apply step ran, the state was restored, and
+  `actions/state` did not report `saved`). The `state not saved:` note names
+  those cells, capped like the `not recorded:` note, says not to re-run their
+  jobs or re-comment `shipmate apply` for them while their apply checks hold
+  the reviewed plans, and points at `docs/troubleshooting.md`
+  §`The apply step ran and its state was not saved`, whose import and forget
+  plans apply as usual. While it is present, the `not attempted:` note's retry
+  command is to run once those cells are recovered, because any apply covering
+  them applies their reviewed plans again. Without it, the `not attempted:`
+  note keeps its command and adds a cause-agnostic pointer to that section,
+  because the upload is best-effort: a lost cell whose artifact did not upload
+  renders as not attempted and no note names it. The marker reaches only the
+  comment of the run that lost the state; a later run's comment, and the
+  remedies it renders, do not know. Nothing refuses a later apply of the cell.
+  The warning step's `exit 1`, not the artifact, keeps the cell's apply check
+  pending.
 
 If the check scan is unavailable — an API failure (warned, degraded to no
 data) or an empty `SHIPMATE_APP_ID` (warned) — every name reads as *absent*,

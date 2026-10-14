@@ -849,10 +849,12 @@ An apply cell on a local backend ran its `Apply the stored plan` step (status
 that step left: the save failed or was cancelled, the exact-key lookup after it
 found no entry, or there was no state file to save. The warning step fails the
 cell's job, so its apply check stays pending. An apply run that was not
-cancelled posts an apply comment whose `state not saved:` note names the cell;
-its row reads not recorded when its apply succeeded, otherwise failed. A
-cancelled run and the merge deploy post none: the job log and the pending check
-are the signal.
+cancelled posts an apply comment; its row reads not recorded when its apply
+succeeded, otherwise failed, and its `state not saved:` note names the cell when
+the cell's summary artifact uploaded. Without that artifact the row reads not
+attempted and only the `not attempted:` note's pointer leads here. A cancelled
+run and the merge deploy post no comment, and a later run's comment does not
+know the state was lost: the job log and the pending check are the signal.
 
 Unless step 1 finds the entry, the cache still holds the stack's entry from
 before the apply, or none on its first apply. What the apply did exists, and OpenTofu does not track it. A first
@@ -866,11 +868,14 @@ applied, this warning is not printed, and a re-run of the job is safe. In every
 other case, re-plan and reconcile against the provider:
 
 1. Check whether the save stored the entry after all:
-   `gh cache list --key <key> --repo <owner>/<repo>`, with the exact `key` the
-   `Save state` step log shows. When it is listed, the save worked and only the
-   lookup failed: re-plan (step 4). The plan reads the saved state, shows no
-   changes, and its apply check completes. Never re-run the job. When it is not
-   listed, continue.
+   `gh cache list --key <key> --json key --jq '.[] | select(.key == "<key>")' --repo <owner>/<repo>`,
+   with the exact `key` the `Save state` step log shows (`--key` alone matches
+   by prefix). When it is printed, the save worked and only the lookup failed:
+   re-plan (step 4), and never re-run the job. On the open pull request, the
+   re-plan reads the saved state, shows no changes, and completes the cell's
+   apply check. After the merge, a new pull request's plan completes only its
+   own head's apply check; the merged head's pending check stays pending. When
+   nothing is printed, continue.
 2. Do not apply the reviewed plan again: do not re-run the job or the deploy,
    and do not comment `shipmate apply`, bare or for its environment, while the
    cell's apply check still holds that plan. It was made against the state the
@@ -886,11 +891,12 @@ other case, re-plan and reconcile against the provider:
    of the stack and environment since the run that saved the entry the restore
    now uses, not only the deleted entry's run: each key ends with the
    `<run_id>-<run_attempt>` of the run that saved it, and
-   `gh cache list --key state/<stack-slug>/<env>/ --repo <owner>/<repo>` lists
-   the entries that survive.
+   `gh cache list --key state/<stack-slug>/<env>/ -L 100 --sort created_at --repo <owner>/<repo>`
+   lists the entries that survive, newest first.
 4. Re-plan on a pull request touching the stack: on an open pull request,
    comment `shipmate plan` or push; after the merge, open a new pull request.
-   The plan repeats the lost apply. Do not apply it as it stands: apply a plan
+   Unless step 1 found the entry, the plan repeats the lost apply. Do not apply
+   it as it stands: apply a plan
    from this procedure only when each resource the lost apply touched shows
    `to import` or `to forget`, or a create, replace or destroy that steps 6 to 8
    leave no way around and you accept. Any other plan repeats the lost apply.

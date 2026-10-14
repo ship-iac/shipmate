@@ -216,13 +216,14 @@ runs:
         passphrase: ${{ inputs.plan-passphrase }}
 
     - name: Warn that the applied state was not saved
+      id: lost-save
       # always(): failure() is false in a cancelled run. A failed, cancelled, unverified or skipped
       # save after an apply that ran fails the job, so its apply check stays pending; the exit also
       # skips the provider-cache steps below through their implied success().
       if: ${{ always() && steps.apply.outcome != 'skipped' && steps.init.outputs.restore-outcome == 'success' && steps.save-state.outputs.saved != 'true' }}
       shell: bash
       run: |
-        echo "::error::The apply step ran and its state was not saved or not verified. Do not re-run this job or re-comment 'shipmate apply': either applies the reviewed plan again against the state from before the apply. Follow docs/troubleshooting.md section The apply step ran and its state was not saved before applying this stack again."
+        echo "::error::The apply step ran and its state was not saved or not verified. While this cell's apply check holds the reviewed plan, do not re-run this job or re-comment 'shipmate apply': either applies that plan again against the state from before the apply. Follow docs/troubleshooting.md section The apply step ran and its state was not saved; the import and forget plans it leads to apply as usual."
         exit 1
 
     - name: Check the provider cache
@@ -249,7 +250,7 @@ runs:
     - name: Compose cell summary
       # always(): every attempted or blocked cell needs a result. Env vars only: author text is never
       # shell- or JSON-spliced. Reviewer-facing (continue-on-error); the warning step's exit 1, not
-      # STATE_SAVED here, is what keeps a lost save's apply check pending.
+      # LOST_SAVE_OUTCOME here, is what keeps a lost save's apply check pending.
       if: always()
       continue-on-error: true
       shell: bash
@@ -266,7 +267,8 @@ runs:
         RESTORE_OUTCOME: ${{ steps.init.outputs.restore-outcome }}
         PLAN_DIGEST_OUTCOME: ${{ steps.plan-digest.outcome }}
         APPLY_OUTCOME: ${{ steps.apply.outcome }}
-        STATE_SAVED: ${{ steps.save-state.outputs.saved }}
+        # `failure` exactly when the warning fired: it always ends exit 1.
+        LOST_SAVE_OUTCOME: ${{ steps.lost-save.outcome }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"

@@ -73,17 +73,23 @@ def _not_attempted_note(rows, env_name):
     (`explicit: true` in `.github/shipmate-config.yml`), so it cannot retry one — the note must
     name the targeted form. env_name is author-controlled and escaped.
 
-    No retry command when a cell lost its state: a retry applies that cell's reviewed plan
-    again against the state from before its apply."""
+    The retry applies every pending cell it covers, a cell whose state was not saved
+    included. With a `state not saved:` note the retry waits for those cells' recovery;
+    without one the note still points at the recovery, because a lost cell's artifact can
+    be missing (its upload is best-effort) and the row then reads not attempted."""
     if not any(r["status"] == "not_attempted" for r in rows):
         return ""
+    cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
     if any(r["state_lost"] for r in rows):
         return (
-            "not attempted: the apply checks stay pending; recover the cells under "
-            "`state not saved:` first, because any apply that covers them applies them again."
+            f"not attempted: the apply checks stay pending; retry with `{cmd}` once the cells "
+            "under `state not saved:` are recovered, because it applies their reviewed plans again."
         )
-    cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
-    return f"not attempted: the apply checks stay pending; retry with `{cmd}`."
+    return (
+        f"not attempted: the apply checks stay pending; retry with `{cmd}`. If a cell's job log "
+        "shows `The apply step ran and its state was not saved`, follow docs/troubleshooting.md "
+        "section of that name first."
+    )
 
 
 def _state_lost_note(rows):
@@ -98,9 +104,10 @@ def _state_lost_note(rows):
         return ""
     return (
         f"state not saved: {named(cells, _STATE_LOST_NAMED)}. The apply ran and its state was "
-        "not saved. Do not re-run these cells' jobs or re-comment `shipmate apply` for them: "
-        "either applies the reviewed plan again against the state from before the apply. Follow "
-        "docs/troubleshooting.md section `The apply step ran and its state was not saved`."
+        "not saved. While a cell's apply check holds its reviewed plan, do not re-run its job or "
+        "re-comment `shipmate apply` for it: either applies that plan again against the state "
+        "from before the apply. Follow docs/troubleshooting.md section `The apply step ran and "
+        "its state was not saved`; the import and forget plans it leads to apply as usual."
     )
 
 
