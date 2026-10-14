@@ -302,10 +302,13 @@ runs:
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ]; then
           args+=(--update-only)
         fi
+        # A failed listing or write fails the job before `Create/refresh gate`: a gate written over
+        # a stale comment shows reviewers the previous head's plan. A publish hold this run wrote
+        # stays; a run that planned no cell wrote none, so the head keeps the gate it had, if any.
         result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "${args[@]}")
         if [ "$result" = "list-failed" ]; then
-          # The next run recovers. `Create/refresh gate` is a later step, so the gate is still written.
-          echo "::warning::could not list this pull request's comments; the sticky plan comment was not updated this run"
+          echo "::error::could not list this pull request's comments, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
+          exit 1
         elif [ "$result" = "skipped" ]; then
           echo "nothing changed, no existing plan comment, no doctor findings; nothing to post"
         fi

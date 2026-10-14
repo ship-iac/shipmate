@@ -1037,8 +1037,10 @@ def test_main_reports_zero_count_when_no_cell_summaries_arrived(tmp_path, monkey
 
 
 def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():
-    """A comment listing failure degrades the upsert step green without writing, so the gate must
-    be written by a later step, `Create/refresh gate`, rather than by code in the upsert step."""
+    """A failed comment listing or write fails the upsert step, so `Create/refresh gate`, a later
+    step, does not write a gate over a comment that still shows the previous head's plan.
+
+    Mutation: move `Create/refresh gate` above `Upsert sticky comment` -- red."""
     src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
     names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("- name:")]
     upsert = next(i for i, n in enumerate(names) if "Upsert sticky comment" in n)
