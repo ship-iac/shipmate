@@ -497,7 +497,7 @@ def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recover
 
     Mutations: return "" from `_state_lost_note`; drop the state-lost branch from
     `_not_attempted_note`; drop the job-log pointer from that branch; name the cell
-    `**<stack> / <env>**`; drop the re-comment sentence from `_state_lost_note` -- red."""
+    `**<stack> / <env>**`; drop the merge from `_state_lost_note`'s vectors -- red."""
     rows = [
         _row(stack="@acme/db", status="failed", apply_text="Error: x", state_lost=True),
         _row(environment="prod", stack="stacks/dns", status="not_attempted", apply_text=None),
@@ -505,12 +505,12 @@ def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recover
     sections = _comment(rows, env="").split("\n\n")
     assert sections[-2] == (
         "state not saved: **@<!-- -->acme/db (dev-eu)**. The apply step ran and its state was "
-        "not saved or not verified. Never re-run these cells' jobs or their workflow run: it "
-        "applies the reviewed plan again against the state from before the apply. Until a "
-        "re-plan replaces a named cell's pending apply check, a `shipmate apply` comment on its "
-        "open pull request, bare or naming its environment, also applies the reviewed plan "
-        "again. Before applying any plan of a named stack in the environment named beside it, "
-        "follow docs/troubleshooting.md section `The apply step ran and its state was not saved`.\n"
+        "not saved or not verified. A re-run of these cells' jobs or their workflow run, a "
+        "`shipmate apply` comment, or a merge of their pull request (its deploy takes the "
+        "pending checks) can apply their reviewed plans again against the state from before the "
+        "apply. Before applying or merging any plan of a named stack in the environment named "
+        "beside it, on any pull request, follow docs/troubleshooting.md section "
+        "`The apply step ran and its state was not saved`.\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply` once the "
         "cells under `state not saved:` are recovered, because it applies their reviewed plans "
         "again." + _LOST_POINTER

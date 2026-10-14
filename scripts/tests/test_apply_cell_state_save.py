@@ -61,12 +61,12 @@ _LOST_SAVE_WARNING = {
     ),
     "shell": "bash",
     "run": (
-        'echo "::error::The apply step ran and its state was not saved or not verified. Never '
-        "re-run this job or its workflow run: it applies the reviewed plan again against the "
-        "state from before the apply. Until a re-plan replaces this cell's pending apply check, "
-        "a shipmate apply comment on its open pull request, bare or naming this environment, "
-        "also applies the reviewed plan again. Before applying any plan of this stack in this "
-        "environment, follow docs/troubleshooting.md section The apply step ran and its state "
+        'echo "::error::The apply step ran and its state was not saved or not verified. A '
+        "re-run of this job or its workflow run, a shipmate apply comment, or a merge of its "
+        "pull request (its deploy takes the pending check) can apply this cell's reviewed plan "
+        "again against the state from before the apply. Before applying or merging any plan of "
+        "this stack in this environment, on any pull request, follow docs/troubleshooting.md "
+        "section The apply step ran and its state "
         'was not saved."\n'
         "exit 1\n"
     ),
@@ -77,12 +77,12 @@ def test_an_unsaved_state_after_an_apply_fails_the_cell_and_warns_against_a_re_r
     """The warning fires whenever an apply step ran over restored state and the save is not
     verified (failed, cancelled, not found, or skipped for an absent file), a cancelled run
     included, where failure() is false; it fails the job so the apply check stays pending. Its
-    text says a re-run of the job or its workflow run applies the reviewed plan again, that a
-    `shipmate apply` comment on the open pull request does too until a re-plan replaces the
-    cell's check, and points at the troubleshooting section.
+    text names a re-run, a `shipmate apply` comment and a merge as able to apply the reviewed
+    plan again, with no condition, and points every plan of the stack and environment at the
+    troubleshooting section.
 
     Mutations: `steps.save-state.outputs.saved != 'true'` to `steps.save-state.outcome ==
-    'failure'`; drop the `exit 1`; drop the re-run sentence; drop the re-comment sentence.
+    'failure'`; drop the `exit 1`; drop the merge from the vectors; drop "or merging".
     """
     steps = action_steps("apply-cell")
     names = [s.get("name") for s in steps]

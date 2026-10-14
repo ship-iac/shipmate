@@ -877,26 +877,28 @@ other case, re-plan and reconcile against the provider:
    show, a resource the provider created: a create that timed out after the
    object existed, or a cancel mid-create. Neither the entry nor the log proves
    the re-plan's creates are new. Before applying the re-plan, check each
-   create it shows against the provider (the cloud console or API), and adopt
-   any that exists with an `import` block, as in steps 5 to 9. On the open
-   pull request, the re-plan completes or replaces the cell's
-   apply check. After the merge, a new pull request's plan completes only its
-   own head's check. The merged head's check stays pending, and nothing reads
-   it again: a later deploy takes only the pending checks of its own merge's
-   pull request. Never re-run that deploy, which reads it. When nothing is
+   create it shows against the provider (the cloud console or API), the create
+   half of a replace (`-/+` or `+/-`) included. Adopt a create that exists with
+   an `import` block, as in step 5. A replace is at an address the state holds,
+   where `import` is ignored: forget it, then import it, as in step 6. On the
+   open pull request, the re-plan completes or replaces the cell's apply check.
+   After the merge, a new pull request's plan completes only its own head's
+   check. The merged head's check stays pending, and nothing reads it again: a
+   later deploy takes only the pending checks of its own merge's pull request. Never re-run that deploy, which reads it. When nothing is
    printed, continue.
 2. Never re-run the job or its workflow run, the deploy included: a re-run
-   applies the run's reviewed plan again whatever the check says. Until a
-   re-plan replaces it, the cell's pending apply check holds the reviewed plan,
-   and `shipmate apply` on the open pull request, bare or for the cell's
-   environment, applies whatever plan the check holds; steps 1 and 4 decide
-   whether a re-plan is safe to apply. After the merge, the merged head's check
-   stays pending (step 1) and its deploy is never re-run. The reviewed plan was
-   made against the state the cache restores, so OpenTofu applies it with no
-   stale-plan refusal and creates a second set of what the lost apply created.
-   Every other plan of this stack in this environment, on any pull request,
-   repeats the lost apply as well (step 4): apply none of them except the import and
-   forget plans of steps 5 and 6, which are applied the ordinary way, with
+   applies the run's reviewed plan again whatever the check says. A
+   `shipmate apply` comment, bare or for the cell's environment, and a merge of
+   the pull request, whose deploy takes the pending check, apply the plan the
+   cell's pending apply check holds, which is the reviewed plan until a re-plan
+   replaces it. Steps 1 and 4 decide whether a re-plan is safe to apply or
+   merge. After the merge, the merged head's check stays pending (step 1) and
+   its deploy is never re-run. The reviewed plan was made against the state
+   the cache restores, so OpenTofu applies it with no stale-plan refusal and
+   creates a second set of what the lost apply created. Every other plan of
+   this stack in this environment, on any pull request, repeats the lost apply
+   as well (step 4): apply or merge none of them except the import and forget
+   plans of steps 5 and 6, which are applied the ordinary way, with
    `shipmate apply` or by the merge deploy. The stack's plans in other
    environments are unaffected.
 3. List what the lost apply did from its `Apply the stored plan` step log:
