@@ -995,25 +995,24 @@ re-creation is harmless. For a stack with real resources:
   against the empty state.
 - Do not apply or merge any plan of the stack in that environment, by any
   route (a `shipmate apply` comment, a re-run or a merge), until every managed
-  resource the deleted state recorded is accounted for: each one whose
-  provider implements import shows `to import` and no replace in that plan,
-  and each one whose provider does not, and that has a remote object, has been
-  deleted at the provider.
-- Add an `import` block, as in step 5 of §`The apply step ran and its state
-  was not saved`, for each resource whose provider implements import, with
-  the import ID its provider's documentation names. The latest retained
-  `Apply the stored plan` log for that address (`Creation complete` or
-  `Import complete`) helps find the object; when that log has expired, find
-  it at the provider. Step 8 of that section says why an imported resource
-  can also plan a replace.
+  resource the deleted state recorded shows `to import` in it, or a create,
+  replace or destroy you accept, as in step 4 of §`The apply step ran and its
+  state was not saved`.
+- Add an `import` block, as in step 5 of that section, for each resource whose
+  provider implements import, with the import ID its provider's documentation
+  names. The latest retained `Apply the stored plan` log for that address
+  (`Creation complete` or `Import complete`) helps find the object; when that
+  log has expired, find it at the provider. Step 8 of that section says why
+  an imported resource can also plan a replace.
 - A resource whose provider does not implement import (step 7 of that
-  section) is re-created. If it has a remote object, delete the original at
-  the provider first, or the apply duplicates it or collides. One without,
-  such as `random_pet`, gets a new value, and a resource that uses that value
-  plans an update or a replace.
-- When that replace falls on an imported resource, or deleting a
-  non-importable original would remove or block resources that depend on it,
-  the engine documents no recovery, and this case is not probed: do not apply.
+  section) is re-created, and a resource that uses one of its values can then
+  plan an update, a replace or, if it cannot be imported either, a create.
+  Before deleting a non-importable original that has a remote object, check
+  what depends on it: if the delete would remove or block resources the plan
+  imports, the engine documents no recovery, and this case is not probed.
+  Otherwise delete the original at the provider before applying, or the apply
+  duplicates it or collides. One without a remote object, such as
+  `random_pet`, has nothing to delete.
 
 ### `state cache entry ... cannot be read`
 
