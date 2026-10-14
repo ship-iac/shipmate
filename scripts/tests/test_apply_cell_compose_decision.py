@@ -69,6 +69,13 @@ def _run_compose(
     return json.loads(cell_path.read_text(encoding="utf-8"))
 
 
+#: Hand-written, never read from FAILSAFES.
+_DECRYPT_REASON = (
+    "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt artifact, "
+    "another key derivation, a rotated passphrase, or different values on <env>-plan and "
+    "<env>-apply); docs/troubleshooting.md gives each remedy"
+)
+
 #: Every outcome an all-green cell reads: each fail-safe and the apply succeeded. Hand-written, as
 #: is the table below, never derived from FAILSAFES: a derived row passes whatever that list says.
 _ALL_SUCCESS = {
@@ -101,7 +108,7 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "decrypt",
-            "plan artifact could not be decrypted (passphrase/config mismatch)",
+            _DECRYPT_REASON,
             id="decrypt",
         ),
         pytest.param(
@@ -125,7 +132,8 @@ _ALL_SUCCESS = {
         pytest.param("restore", "state restore failed", id="restore_state"),
         pytest.param(
             "plan_digest",
-            "the stored plan does not render to the plan text that was reviewed; re-plan",
+            "the stored plan cannot be rendered, or does not render to the plan text that was "
+            "reviewed; re-plan",
             id="plan_digest",
         ),
     ],
@@ -198,7 +206,7 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
     # reason, never restore-state's: precedence is pipeline order, not severity or alphabetical.
     cell = _run_compose(monkeypatch, tmp_path, decrypt="failure", restore="failure")
     assert cell["result"] == "blocked"
-    assert cell["reason"] == "plan artifact could not be decrypted (passphrase/config mismatch)"
+    assert cell["reason"] == _DECRYPT_REASON
 
 
 @pytest.mark.parametrize(
@@ -220,3 +228,18 @@ def test_cell_json_carries_exactly_the_four_contract_keys_all_strings(
     for key, value in cell.items():
         assert isinstance(value, str), f"{key} is {type(value).__name__}, not str: {value!r}"
     assert cell["result"] in ("applied", "failed", "blocked")
+
+
+def test_the_decrypt_reason_renders_without_escaped_entities_in_a_code_span(monkeypatch, tmp_path):
+    """The apply comment escapes `<`/`>` in a reason; outside a code span the entity renders as
+    the character, inside one it shows as `&lt;`.
+
+    Mutation: backtick `<env>-plan` in the DECRYPT reason.
+    """
+    cell = _run_compose(monkeypatch, tmp_path, **{**_ALL_SUCCESS, "decrypt": "failure"})
+    row = {"status": "blocked", "reason": cell["reason"]}
+    assert load_script("apply-comment")._state(row) == (
+        "blocked: plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
+        "artifact, another key derivation, a rotated passphrase, or different values on "
+        "&lt;env&gt;-plan and &lt;env&gt;-apply); docs/troubleshooting.md gives each remedy"
+    )

@@ -854,9 +854,10 @@ the repository root, or none:
   restore a default-branch cache entry. An empty passphrase refuses the restore
   and the save. A plaintext entry, or one that does not decrypt to OpenTofu
   state, fails the restore naming the matched cache key, so tofu never reads it
-  and the cell skips its save. Rotating the passphrase makes every cached entry
-  fail that way: set the old passphrase back, or delete the `state/` entries,
-  which discards that state (§Plan artifact encryption, "Rotation").
+  and the cell skips its save. A key-derivation change, a passphrase rotation
+  and different values on `<env>-plan` and `<env>-apply` each make entries fail
+  that way; `docs/troubleshooting.md` §`state cache entry ... does not decrypt
+  to OpenTofu state` gives each remedy.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -2750,18 +2751,25 @@ engine, and both are equally visible in the plan artifact — the machine plan
 The reviewed machine plan file (`stack.otplan`) is encrypted at rest in the
 uploaded artifact. `plan-cell` (in `plan.yml`) encrypts the plan with its
 required `plan-passphrase` input before upload, using a single symmetric cipher:
-`openssl enc -aes-256-ctr -pbkdf2 -salt`, passphrase supplied via `-pass env:`
-(never on the command line). `apply-cell` decrypts it after download on every
-apply path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
+`openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -md sha256 -salt`, passphrase
+supplied via `-pass env:` (never on the command line). The key derives with
+600,000 PBKDF2-SHA256 iterations, so a plan artifact or cached state entry
+written with another passphrase or any other count or digest decrypts to
+garbage, without an error. Each decrypt therefore checks its result before it
+replaces the ciphertext: a plan that is neither a zip archive (an OpenTofu plan
+file) nor, under OpenTofu's own plan encryption, its JSON envelope refuses at
+`Decrypt reviewed plan artifact`, before any apply step, and a cached state
+entry that does not parse as OpenTofu state refuses at the state restore
+(§State backend). `apply-cell` decrypts the plan after download on every apply
+path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
 reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
 forms. The same cipher and secret encrypt a local backend's cached state
-(§State backend). Consumers set
-`SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret and forward it
-by name in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`
-and `apply` jobs and of each drift file's `drift` job. Never `secrets: inherit`:
-it hands the engine the caller's whole secret set, and across an organization
-boundary it delivers nothing at all.
+(§State backend). Consumers set `SHIPMATE_PLAN_PASSPHRASE` as a repository or
+organization secret and forward it by name in the `secrets:` block of their
+`shipmate.yml`'s `plan`, `deploy` and `apply` jobs and of each drift file's
+`drift` job. Never `secrets: inherit`: it hands the engine the caller's whole
+secret set, and across an organization boundary it delivers nothing at all.
 
 Not a variable, and not a secret on one half of a split environment alone: a
 secret on one environment is released only to a job that *names* that
@@ -2777,6 +2785,11 @@ environment, and a plan cell names its own plan environment. The same value on b
   refuses the same way, so no apply ever has a plan.
 - **As a secret on `<env>-plan` alone**, plans upload encrypted and every apply
   in that environment refuses at `Decrypt reviewed plan artifact`.
+- **As different values on `<env>-plan` and `<env>-apply`**, every apply in
+  that environment refuses at `Decrypt reviewed plan artifact`, and on a local
+  backend a plan cell refuses the state an apply cell saved
+  (`docs/troubleshooting.md` §`plan artifact does not decrypt to an OpenTofu
+  plan` has the remedy).
 
 Scoping it to a plan environment buys nothing either — those must have no
 branch policy at all (`docs/hardening.md` §6), so any branch's workflow can
@@ -2787,12 +2800,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Required.** An empty or unset passphrase refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
-- **Fail-safe on mismatch.** apply-cell refuses an artifact without the
-  `Salted__` magic header, with a re-plan instruction, rather than apply it. A
-  wrong passphrase is not detected
-  at decrypt (AES-CTR is unauthenticated and decrypts to garbage without error);
-  the exact-plan invariant catches it — `tofu apply` rejects the garbage plan and
-  the apply check stays pending.
+- **Fail-safe on mismatch.** apply-cell refuses, with a re-plan instruction,
+  an artifact without the `Salted__` magic header and one that does not decrypt
+  to a plan file (a plan/apply value mismatch, a rotated passphrase, another key
+  derivation or a corrupt artifact; see above). The apply check stays pending.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and
@@ -2805,12 +2816,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   §Consumption's one-change rule keeps the same on both paths; the passphrase
   must match on both too. A mismatch surfaces as the fail-safe above, not a
   silent wrong apply.
-- **Rotation.** A new passphrase cannot decrypt anything the old one encrypted.
-  Outstanding plans fail at apply; re-plan them. Every cached local-state entry
-  fails its restore with `does not decrypt to OpenTofu state`, and older entries
-  under the same prefix were saved with the old passphrase too. Either set the
-  old passphrase back, or delete the `state/` entries, which discards that
-  state: OpenTofu no longer tracks the resources it recorded.
+- **Rotation.** A new passphrase cannot decrypt anything the old one encrypted:
+  outstanding plans refuse in the apply cell (the fail-safe above), and every
+  cached local-state entry refuses its restore. `docs/troubleshooting.md` gives
+  the remedies under each refusal's heading.
 
 ## Engine-owned tofu invocation
 

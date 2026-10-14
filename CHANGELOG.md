@@ -10,10 +10,14 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed — BREAKING
+
+- **The plan and state encryption key derives with 600,000 PBKDF2 iterations instead of OpenSSL's default 10,000, so plan artifacts and cached local state written by an earlier release no longer decrypt: such a plan's apply refuses at decrypt, and on a local backend the re-plan and every drift sweep refuse at the state restore until the old `state/` entries are deleted, which discards that state (OpenTofu stops tracking those resources).**
+
 ### Added
 
 - **A `shipmate plan`, `shipmate apply` or `shipmate unlock` whose dispatch succeeded posts a notice reply on the pull request: `started [the <verb> run](<url>)` when the dispatch answer carries a usable run id, otherwise one naming the Actions tab. A reply that cannot be posted is a warning.**
-- **`max_parallel` in `.github/shipmate-config.yml` caps each plan and drift sweep matrix at that many jobs at once, 10 when absent. It takes a whole number from 1 to 256 and no variable reference; anything else refuses at detect. `shipmate doctor` reads it back.**
+- **`max_parallel` in `.github/shipmate-config.yml` caps each plan and drift sweep matrix at that many jobs at once, 10 when absent. It takes a whole number from 1 to 256 and no variable reference; anything else refuses every operation that reads the table. `shipmate doctor` reads it back.**
 
 ### Changed
 

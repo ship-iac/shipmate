@@ -172,7 +172,7 @@ _STATE_STEPS = [
 def test_the_state_action_is_exactly_these_steps():
     """Mutations: delete `Encrypt state`; delete `Decrypt state`; invert the decrypt `if:`'s
     `!=` to `==`; move `Encrypt state` after `Save state`; add `continue-on-error: true` to
-    `Decrypt state`, and a refused decrypt hands tofu the garbage and lets apply-cell save it;
+    `Decrypt state`, and a refused decrypt hands tofu the ciphertext and lets apply-cell save it;
     drop the skip clause from `Save state`'s `if:`, and a 0-byte file is saved."""
     steps = [
         {**s, "uses": s["uses"].split("@")[0]} if "uses" in s else s for s in action_steps("state")
