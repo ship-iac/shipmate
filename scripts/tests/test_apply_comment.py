@@ -519,12 +519,18 @@ def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recover
 
 
 def test_the_state_lost_note_is_capped_and_absent_without_a_lost_cell():
-    """Mutation: name every cell in `named` from `_state_lost_note` -- red."""
+    """The unnamed cells are counted and pointed at their job logs.
+
+    Mutation: name every cell in `named` from `_state_lost_note` -- red.
+    Mutation: drop the job-log clause after the count -- red.
+    Mutation: add the clause at the cap (`>=`) -- red."""
     rows = [_row(status="failed", stack=f"s{i}", state_lost=True) for i in range(6)]
     assert ac._state_lost_note(rows).startswith(
         "state not saved: **s0 (dev-eu)**, **s1 (dev-eu)**, **s2 (dev-eu)**, **s3 (dev-eu)**, "
-        "**s4 (dev-eu)**, and 1 more. "
+        "**s4 (dev-eu)**, and 1 more, whose job logs show `The apply step ran and its state "
+        "was not saved`. The apply step ran"
     )
+    assert "whose job logs" not in ac._state_lost_note(rows[:5])
     assert ac._state_lost_note([_row()]) == ""
 
 

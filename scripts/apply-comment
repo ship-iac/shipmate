@@ -62,6 +62,7 @@ _UNRECORDED_NAMED = 5
 
 # Same, for the state-not-saved note; same reasoning (see `_unrecorded_note`).
 _STATE_LOST_NAMED = 5
+_LOST_LOG = "`The apply step ran and its state was not saved`"
 
 # Same, for the state-lock note; same reasoning (see `_lock_note`).
 _LOCK_NAMED = 5
@@ -103,8 +104,11 @@ def _state_lost_note(rows):
     ]
     if not cells:
         return ""
+    listed = named(cells, _STATE_LOST_NAMED)
+    if len(cells) > _STATE_LOST_NAMED:
+        listed += f", whose job logs show {_LOST_LOG}"
     return (
-        f"state not saved: {named(cells, _STATE_LOST_NAMED)}. The apply step ran and its state "
+        f"state not saved: {listed}. The apply step ran and its state "
         "was not saved or not verified. Never re-run these cells' jobs or their workflow run. A "
         "re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans again "
         "against the state from before the apply. Before applying or merging any plan of a "

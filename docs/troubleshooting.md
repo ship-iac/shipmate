@@ -850,10 +850,10 @@ that step left: the save failed or was cancelled, the exact-key lookup after it
 found no entry, or there was no state file to save. The warning step fails the
 cell's job, so its apply check stays pending. An apply run that was not
 cancelled posts an apply comment; its row reads not recorded when its apply
-succeeded, otherwise failed, and its `state not saved:` note names the cell when
-the cell's summary artifact uploaded. Without that artifact the row reads not
-attempted, and the pointer every `not attempted:` note carries leads here. A cancelled
-run and the merge deploy post no comment, and a later run's comment does not
+succeeded, otherwise failed, and its `state not saved:` note names up to 5
+lost cells whose summary artifact uploaded and counts the rest. Without that
+artifact the row reads not attempted, and the pointer every `not attempted:`
+note carries leads here. A cancelled run and the merge deploy post no comment, and a later run's comment does not
 know the state was lost: the job log and the pending check are the signal.
 
 Unless step 1 finds the entry, the cache still holds the stack's entry from
@@ -880,18 +880,17 @@ other case, re-plan and reconcile against the provider:
    create it shows against the provider (the cloud console or API), the new
    object of a `+/-` (`create_before_destroy`) replace included. Adopt a plain
    create that already exists with an `import` block (step 5). For a `+/-`
-   (create_before_destroy) replace whose new object already exists at the
-   provider, the engine documents no recovery, and this case is not probed:
-   the plan does not identify the object the lost apply created. Do not apply
-   the re-plan or forget the address; reconcile the two objects at the
-   provider first, so that only the one the state tracks remains. On the open
+   (create_before_destroy) replace whose new object may already exist at the
+   provider, the engine documents no recovery, and this case is not probed.
+   Do not apply the re-plan or forget the address. The plan does not identify
+   the object the lost apply created; the `Apply the stored plan` log names it
+   only if it shows `Creation complete … [id=…]` for that address. On the open
    pull request, the re-plan completes or replaces the cell's apply check.
    After the merge, a new pull request's plan completes only its own head's
-   check. The merged
-   head's check stays pending, and nothing reads it again: a later deploy
-   takes only the pending checks of its own merge's pull request. Never re-run
-   that deploy, which reads it. When nothing is
-   printed, continue.
+   check. The merged head's check stays pending, and nothing reads it again:
+   a later deploy takes only the pending checks of its own merge's pull
+   request. Never re-run that deploy, which reads it. When nothing is printed,
+   continue.
 2. Never re-run the job or its workflow run, the deploy included: a re-run
    applies the run's reviewed plan again whatever the check says. A
    `shipmate apply` comment, bare or for the cell's environment, and a merge of

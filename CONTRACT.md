@@ -2489,12 +2489,14 @@ job believed before its check was completed:
   `Warn that the applied state was not saved` step's outcome is `success` or
   `skipped`, so a cancelled or unknown outcome counts as lost. That step fires
   when the apply step ran, the state was restored, and `actions/state` did not
-  report `saved`. The `state not saved:` note names those cells, capped like
-  the `not recorded:` note, and says: the apply step ran and its state was not
-  saved or not verified; never re-run the cells' jobs or their workflow run; a
-  re-run, a `shipmate apply` comment, or a merge can apply their reviewed plans
-  again against the state from before the apply; before applying or merging any plan of a named stack
-  in the environment named beside it, on any pull request, follow
+  report `saved`. The `state not saved:` note names up to 5 of those cells
+  and counts the rest, whose job logs show
+  `The apply step ran and its state was not saved`, and says: the apply step
+  ran and its state was not saved or not verified; never re-run the cells'
+  jobs or their workflow run; a re-run, a `shipmate apply` comment, or a merge
+  can apply their reviewed plans again against the state from before the
+  apply; before applying or merging any plan of a named stack in the
+  environment named beside it, on any pull request, follow
   `docs/troubleshooting.md`
   §`The apply step ran and its state was not saved`, which holds the procedure.
   While it is present, the `not attempted:` note's retry command is to run
