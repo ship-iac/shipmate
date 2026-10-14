@@ -38,7 +38,7 @@ runs:
         attempts=$(( ${#delays[@]} + 1 ))
         # The listing lags behind a finished wave job, and an undecided cell is not one that did
         # not run. Re-reading the listing IS the retry: hoisting the fetch out of the loop turns
-        # every attempt into one read plus the whole sleep budget over a fixed snapshot.
+        # the loop into one read plus the whole sleep budget over a fixed snapshot.
         for n in $(seq "$attempts"); do
           rc=0
           : > "$RUNNER_TEMP/attempt-ids.txt"
