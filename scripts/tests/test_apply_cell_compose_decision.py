@@ -71,9 +71,10 @@ def _run_compose(
 
 #: Hand-written, never read from FAILSAFES.
 _DECRYPT_REASON = (
-    "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt artifact, "
-    "another key derivation, a rotated passphrase, or different values on <env>-plan and "
-    "<env>-apply); docs/troubleshooting.md gives each remedy"
+    "plan artifact could not be decrypted (no passphrase, a plaintext, truncated or corrupt "
+    "artifact, another key derivation, a rotated passphrase, different values on <env>-plan and "
+    "<env>-apply, or an openssl or disk failure on the runner, which a re-run of the job clears "
+    "when transient); docs/troubleshooting.md gives each remedy"
 )
 
 #: Every outcome an all-green cell reads: each fail-safe and the apply succeeded. Hand-written, as
@@ -239,7 +240,9 @@ def test_the_decrypt_reason_renders_without_escaped_entities_in_a_code_span(monk
     cell = _run_compose(monkeypatch, tmp_path, **{**_ALL_SUCCESS, "decrypt": "failure"})
     row = {"status": "blocked", "reason": cell["reason"]}
     assert load_script("apply-comment")._state(row) == (
-        "blocked: plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
-        "artifact, another key derivation, a rotated passphrase, or different values on "
-        "&lt;env&gt;-plan and &lt;env&gt;-apply); docs/troubleshooting.md gives each remedy"
+        "blocked: plan artifact could not be decrypted (no passphrase, a plaintext, truncated or "
+        "corrupt artifact, another key derivation, a rotated passphrase, different values on "
+        "&lt;env&gt;-plan and &lt;env&gt;-apply, or an openssl or disk failure on the runner, "
+        "which a re-run of the job clears when transient); docs/troubleshooting.md gives each "
+        "remedy"
     )

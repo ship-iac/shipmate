@@ -796,23 +796,30 @@ one of:
   local backend, set `<env>-plan`'s value to `<env>-apply`'s and never the
   reverse, because apply cells saved the cached state; on a remote backend
   either direction works.
-- **The artifact is corrupt.** Re-plan.
+- **The artifact is corrupt.** Re-plan. Only damage that changes the
+  decrypted file's first bytes refuses here: damage further in, a plan cut off
+  after its zip header included, passes this check and fails later at the
+  render step, on `tofu show`.
 
 To re-plan on an open pull request, comment `shipmate plan` or push; after the
 merge, open a new pull request touching the stack.
 
-### `plan artifact ... could not be decrypted: openssl failed`
+### `plan artifact ... is truncated`
 
-openssl itself failed on the reviewed plan artifact, and its error above the
-refusal says why. Nothing was applied, and the cell's
-`apply / <stack> / <env>` check stays pending.
+The artifact is shorter than its 16-byte salted header, so it was refused
+before openssl ran. Nothing was applied, and the cell's
+`apply / <stack> / <env>` check stays pending. Re-plan, as in the section
+above. An artifact cut off after its header decrypts and refuses as
+`plan artifact does not decrypt to an OpenTofu plan`, or fails later at the
+render step.
 
-- **The artifact is shorter than its 16-byte salted header.** Re-plan, as in
-  the section above. A longer truncated artifact decrypts without an openssl
-  error and refuses as `plan artifact does not decrypt to an OpenTofu plan`.
-- **openssl or the disk failed on the runner**, for example an openssl without
-  `-pbkdf2` or `-iter`, or no space for the temporary file. Fix the runner; a
-  re-plan fails the same way.
+### `plan artifact ... could not be decrypted: openssl or the disk failed on the runner`
+
+openssl or the disk failed on the runner, not the artifact; any openssl error is
+printed above the refusal. Nothing was applied, and a re-plan fails the same
+way. Re-run the job, which clears a transient
+hosted-runner disk failure, or fix a self-hosted runner's openssl or disk, for
+example an openssl without `-pbkdf2` or `-iter`, or a full disk.
 
 ### `state cache entry ... is plaintext`
 
@@ -826,19 +833,20 @@ Deleting discards that state: OpenTofu no longer tracks the resources it
 recorded. A sample stack's null and random resources re-create; a real
 resource can collide with or be duplicated by its re-creation.
 
-### `state cache entry ... could not be decrypted: openssl failed`
+### `state cache entry ... is truncated`
 
-openssl itself failed on the matched entry, and its error above the refusal
-says why.
+The entry is shorter than its 16-byte salted header, so it was refused before
+openssl ran. `gh cache delete <key> --repo <owner>/<repo>`, with the key from
+the message, deletes it, and the next restore uses the previous entry. An entry
+cut off after its header decrypts and refuses as
+`state cache entry ... does not decrypt to OpenTofu state`.
 
-- **The entry is shorter than its 16-byte salted header.** It is truncated:
-  `gh cache delete <key> --repo <owner>/<repo>`, with the key from the message,
-  deletes it, and the next restore uses the previous entry. A longer truncated
-  entry decrypts without an openssl error and refuses as
-  `state cache entry ... does not decrypt to OpenTofu state`.
-- **openssl or the disk failed on the runner**, for example an openssl without
-  `-pbkdf2` or `-iter`, or no space for the temporary file. Fix the runner;
-  deleting the entry does not help.
+### `state cache entry ... could not be decrypted: openssl or the disk failed on the runner`
+
+openssl or the disk failed on the runner, not the entry; any openssl error is
+printed above the refusal. Deleting the entry does not help. Re-run the job, which clears a transient
+hosted-runner disk failure, or fix a self-hosted runner's openssl or disk, for
+example an openssl without `-pbkdf2` or `-iter`, or a full disk.
 
 ### `state cache entry ... does not decrypt to OpenTofu state`
 

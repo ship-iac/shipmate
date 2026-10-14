@@ -313,9 +313,9 @@ creates all of them, including `shipmate-engine` and its branch policy:
 
   **A value can come from a GitHub variable.** Write `{vars: NAME}` in
   place of any string, list items included (`apply: {vars: PROD_APPLY_ROLE}`),
-  except the keys [`../CONTRACT.md`](../CONTRACT.md) §Variable references
-  names, and define the name as a
-  repository or organization variable. A resolved value is printed in job
+  except `shared`, `explicit`, `gated` and `max_parallel`
+  ([`../CONTRACT.md`](../CONTRACT.md) §Variable references), and define the
+  name as a repository or organization variable. A resolved value is printed in job
   outputs and logs, so reference variables only, never secrets. Never define it
   on `shipmate-engine`: comment-ops and the plan summary bind that Environment,
   so a variable of the same name there shadows the repository value in those
