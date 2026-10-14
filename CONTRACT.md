@@ -1112,10 +1112,12 @@ repository with no `.github/workflows/shipmate.yml`, or one that declares no
 `workflow_dispatch` trigger or not the inputs a verb's dispatch sends, fails at
 dispatch time on that comment-handling run — for every verb alike, since they share the file. That
 run is not visible from the pull request, so every refusal in the dispatch step
-— an unwired verb, an unknown one, and a rejected API call alike — also posts a
-`🔴 failed:` reply there whose footer links the run. The run holds the error; the
-failure reply never carries the API's answer. A dispatch that succeeded instead
-posts the started-run reply, a `⚪` notice:
+— an unwired verb, an unknown one, and a rejected API call alike — also tries to
+post a `🔴 failed:` reply there whose footer links the run. The run holds the
+error; the failure reply never carries the API's answer. A failure reply that
+cannot be posted is a warning on the comment-handling run, and the step still
+fails with the dispatch's status. A dispatch that succeeded then replies in one
+of these ways, as a `⚪` notice, the started-run reply:
 
 - With a usable run id it reads `started [the <verb> run](<url>)`, linking the
   run it started by a URL the engine builds from the `workflow_run_id` the API
@@ -1523,9 +1525,9 @@ unlock it.
 
 The unlock run itself posts no comment — that would need
 `pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
-reaction confirms acceptance, the comment-handling run, which holds that
-permission, is the one that may post the started-run reply (§Comment-ops says
-when it is posted and when it links the unlock run), per-cell detail lands in
+reaction confirms acceptance. The comment-handling run, which holds that
+permission, is the one that may post the started-run reply; §Comment-ops says
+when it is posted and when it links the unlock run. Per-cell detail lands in
 each job's step summary, and a failure reds the run.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
@@ -1832,9 +1834,9 @@ The file path is still load-bearing, and nothing diagnoses a rename as the
 cause: `actions/build-matrix` refuses a checkout that has no
 `.github/workflows/shipmate.yml`; `actions/dispatch` sends every commented verb
 to that literal filename, naming the verb in the dispatch body, so a renamed
-file is dispatched nowhere, and the pull request is told only that the dispatch
-failed, with the API's refusal left in the comment-handling run that comment
-links; and doctor keys on the exact name for its `pull_request_target`
+file is dispatched nowhere, and the pull request is at most told that the
+dispatch failed (§Comment-ops), with the API's refusal left in the
+comment-handling run; and doctor keys on the exact name for its `pull_request_target`
 exemption and for its `shipmate.yml` probe, which reads that one path.
 Rename the file and planning is refused from that commit on, the `shipmate.yml`
 probe reports it could not read `.github/workflows/shipmate.yml`, and the

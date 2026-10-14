@@ -119,9 +119,9 @@ live probes.
     no job selects; and no input but `verb` declared `required: true`, because a
     body that leaves one empty is refused whole — so a required input of your
     own refuses every verb, not just the one it was added for. Each is refused
-    at dispatch time with an HTTP 422 and no run created; the pull request gets
-    a comment saying the dispatch failed and linking the comment-handling run
-    that carries the error.
+    at dispatch time with an HTTP 422 and no run created; the comment-handling
+    run carries the error, and the dispatch failure reply on the pull request
+    links it when it can be posted (`CONTRACT.md` §Comment-ops).
   - Whether each of its jobs is selected by the `if:` its event needs. The file
     gates five jobs, one per engine reusable workflow other than `drift.yml`, and the probe compares
     each job's whole `if:` against the expression that file's published fence
@@ -721,8 +721,9 @@ form. It dispatches your repository's own `.github/workflows/shipmate.yml` with
 `verb: unlock`, which that file's `unlock` job selects
 ([`getting-started.md`](getting-started.md) publishes the file). A repository
 carrying no such file gets no run at all — the dispatch is refused with a 404,
-the comment-handling run carries an error saying so, and the pull request gets a
-comment saying the dispatch failed and linking that run. A file GitHub does
+the comment-handling run carries an error saying so, and the dispatch failure
+reply on the pull request links that run when it can be posted (`CONTRACT.md`
+§Comment-ops). A file GitHub does
 dispatch but whose jobs do not select `unlock` produces a run in which every job
 skips (§A dispatched verb produced a run in which every job was skipped). It
 authorizes on the commenter's write or admin permission on the repository and
@@ -1229,8 +1230,9 @@ The job that serves that verb is not selected by its `if:` in
 `.github/workflows/shipmate.yml`, or the file declares a `verb` option its jobs
 do not cover. `shipmate doctor`'s `shipmate.yml` probe reports that job on every plan
 run — with the expression to write, unless what it found was a job count other
-than one — and the run is in the Actions tab, linked from the dispatch reply on the pull request when that reply carries a link. Reconcile the job against the fence in
-[`getting-started.md`](getting-started.md) §The workflow file.
+than one — and the run is in the Actions tab, linked from the dispatch reply on
+the pull request when that reply carries a link. Reconcile the job against the
+fence in [`getting-started.md`](getting-started.md) §The workflow file.
 
 ### Fork pull request refused
 

@@ -610,16 +610,19 @@ def test_a_started_run_gets_a_reply_linking_it(tmp_path, verb, environment, head
         "",
         '{"workflow_run_id":"abc"}',
         '{"workflow_run_id":123456789012345678901}',
+        # Over Linux's 128 KiB per-variable exec limit and Windows' 32 KiB environment block.
+        '{"workflow_run_id":"' + "9" * 200_000 + '"}',
     ],
-    ids=["204-empty", "non-numeric", "21-digits"],
+    ids=["204-empty", "non-numeric", "21-digits", "oversized"],
 )
 @bash_only
 def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path, answer):
-    """A 204 (no body), a non-numeric id and a 21-digit id all yield the no-link notice, and
-    the step exits 0: the run has started whatever the answer says.
+    """A 204 (no body), a non-numeric id, a 21-digit id and an oversized one all yield the
+    no-link notice, and the step exits 0: the run has started whatever the answer says.
 
-    Mutation: remove the `|| run_id=""` parse guard (the 204 case exits non-zero under
-    `set -e`). The id check itself is `_shipmate.is_run_id`, pinned in `test_reply_comment.py`.
+    Mutations: remove the `|| run_id=""` parse guard (the 204 case exits non-zero under
+    `set -e`); pass `"$run_id"` uncut (the oversized value cannot be exec'd, so no reply is
+    posted). The id check itself is `_shipmate.is_run_id`, pinned in `test_reply_comment.py`.
     """
     result, _ = _run_dispatch(
         tmp_path, verb="apply", environment="dev-eu", gh_stub=_answering_stub(answer)
@@ -653,10 +656,11 @@ def test_a_failed_reply_after_a_started_run_warns_and_exits_zero(tmp_path):
 @bash_only
 def test_a_failed_comment_does_not_mask_the_dispatch_failure(tmp_path):
     """The comment is cosmetic -- a repository whose workflow token cannot write pull requests
-    still has to see the dispatch fail. `|| true` is what keeps `$rc` the exit status under
-    `set -e`.
+    still has to see the dispatch fail. The degrade is what keeps `$rc` the exit status under
+    `set -e`, and its warning says the reply is missing.
 
-    Mutation: drop the `|| true` and this exits 1 (the comment's status) instead of 22.
+    Mutations: drop the `|| echo "::warning::..."` and this exits 1 (the comment's status)
+    instead of 22; revert it to `|| true` and the warning is missing.
     """
     # Succeeds at the dispatch, then refuses the comment: exactly a job without
     # `pull-requests: write`.
@@ -669,6 +673,9 @@ def test_a_failed_comment_does_not_mask_the_dispatch_failure(tmp_path):
     result, _ = _run_dispatch(tmp_path, verb="plan", gh_stub=stub)
     assert result.returncode == 22, (
         f"the dispatch's own status must survive a failed comment: {result.returncode}"
+    )
+    assert "::warning::could not post the dispatch failure reply" in result.stdout.splitlines(), (
+        f"a missing failure reply must be stated: {result.stdout}"
     )
 
 
