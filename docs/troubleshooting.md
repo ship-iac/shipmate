@@ -796,10 +796,72 @@ one of:
   local backend, set `<env>-plan`'s value to `<env>-apply`'s and never the
   reverse, because apply cells saved the cached state; on a remote backend
   either direction works.
-- **The artifact is corrupt.** Re-plan.
+- **The artifact is corrupt.** Re-plan. For a zip plan only damage that
+  changes the decrypted file's first bytes refuses here: damage further in, a
+  plan cut off after its zip header included, passes this check and fails
+  later at the render step, on `tofu show`. For an OpenTofu-encrypted plan the
+  check only verifies that the file parses as JSON holding
+  `encryption_version`: damage inside its encrypted payload usually passes and
+  fails later at `tofu show`.
 
 To re-plan on an open pull request, comment `shipmate plan` or push; after the
 merge, open a new pull request touching the stack.
+
+### `plan artifact ... cannot be read`
+
+The apply cell could not open or size its reviewed plan artifact; the error at
+the end of the message says why. Nothing was applied.
+
+- **The artifact downloaded without `stack.otplan`.** No earlier step reports
+  it. Re-plan, as in §`plan artifact does not decrypt to an OpenTofu plan`; a
+  re-run downloads the same artifact.
+- **The runner's disk failed.** The refusal comes before any apply step, so a
+  re-run of the job is safe; a self-hosted runner needs its disk fixed.
+
+### `plan artifact ... is truncated`
+
+The artifact is shorter than its 16-byte salted header, so it was refused
+before openssl ran. Nothing was applied, and the cell's
+`apply / <stack> / <env>` check stays pending. Re-plan, as in the section
+above. An artifact cut off after its header decrypts and refuses as
+`plan artifact does not decrypt to an OpenTofu plan`, or fails later at the
+render step.
+
+### `plan artifact ... could not be decrypted: openssl or the disk failed on the runner`
+
+openssl or the disk failed on the apply runner, not the artifact; any openssl
+error is printed above the refusal. Nothing was applied. A re-plan does not
+help, because the decrypt runs on the apply runner: the apply fails again until
+that runner is fixed or a re-run of the job lands on a working one. Re-run the
+job, which clears a transient hosted-runner disk failure, or fix a self-hosted
+runner's openssl or disk, for example an openssl without `-pbkdf2` or `-iter`,
+or a full disk.
+
+### `... could not be encrypted: openssl or the disk failed on the runner`
+
+openssl or the disk failed on the runner; any openssl error is printed above
+the refusal. What to do depends on the step that refused:
+
+- **A plan cell, encrypting its plan before upload.** Nothing was uploaded or
+  applied. Re-plan once the runner works; a transient hosted-runner disk
+  failure clears on its own, and a self-hosted runner needs its openssl or disk
+  fixed.
+- **An apply cell's `Save state`.** `Save state` runs even when the apply did
+  not. If the same job's `Apply the stored plan` step is `skipped`, nothing was
+  applied and a re-run of the job is safe. Any other status is
+  §`The apply step ran and its state was not saved`.
+
+### `The apply step ran and its state was not saved`
+
+An apply cell's `Save state` failed, and its `Apply the stored plan` step ran:
+its status is `success`, `failure` or `cancelled`. The apply may have advanced
+state, and that state was not saved. Do not re-run the job or re-plan against
+the cached entry: both act on the state from before the apply, or on no state
+on a stack's first apply. The cell's apply check stays pending, and the apply
+comment shows it as not recorded, or failed when the apply itself failed.
+
+The engine has no recovery for local-backend state lost this way. The
+resources the apply created exist, and OpenTofu does not track them.
 
 ### `state cache entry ... is plaintext`
 
@@ -813,12 +875,28 @@ Deleting discards that state: OpenTofu no longer tracks the resources it
 recorded. A sample stack's null and random resources re-create; a real
 resource can collide with or be duplicated by its re-creation.
 
-### `state cache entry ... could not be decrypted: openssl failed`
+### `state cache entry ... cannot be read`
 
-openssl itself failed on the matched entry, after printing its own error: the
-entry is truncated or corrupt. `gh cache delete <key> --repo <owner>/<repo>`,
-with the key from the message, deletes it; the next restore uses the previous
-entry.
+The restore could not open or size the matched entry; the error at the end of
+the message says why. tofu was not run. The refusal comes before any apply
+step, so a re-run of the job is safe; a self-hosted runner needs its disk
+fixed.
+
+### `state cache entry ... is truncated`
+
+The entry is shorter than its 16-byte salted header, so it was refused before
+openssl ran. `gh cache delete <key> --repo <owner>/<repo>`, with the key from
+the message, deletes it, and the next restore uses the previous entry. An entry
+cut off after its header decrypts and refuses as
+`state cache entry ... does not decrypt to OpenTofu state`.
+
+### `state cache entry ... could not be decrypted: openssl or the disk failed on the runner`
+
+openssl or the disk failed on the runner, not the entry; any openssl error is
+printed above the refusal. Deleting the entry does not help. Re-run the job,
+which clears a transient hosted-runner disk failure, or fix a self-hosted
+runner's openssl or disk, for example an openssl without `-pbkdf2` or `-iter`,
+or a full disk.
 
 ### `state cache entry ... does not decrypt to OpenTofu state`
 

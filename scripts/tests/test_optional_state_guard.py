@@ -54,6 +54,7 @@ _RESTORE = {
 #: the save too.
 _SAVE = {
     "name": "Save state",
+    "id": "save-state",
     "if": "${{ always() && steps.init.outputs.restore-outcome == 'success' }}",
     "uses": local_action("state"),
     "with": {

@@ -49,3 +49,32 @@ def test_save_state_not_gated_by_not_cancelled():
 def test_save_state_still_requires_successful_restore():
     # Never save a state that was never restored, the restore itself having failed.
     assert "steps.init.outputs.restore-outcome == 'success'" in _guard(_save_state_step())
+
+
+_LOST_SAVE_WARNING = {
+    "name": "Warn that the applied state was not saved",
+    "if": (
+        "${{ always() && steps.apply.outcome != 'skipped' "
+        "&& steps.save-state.outcome == 'failure' }}"
+    ),
+    "shell": "bash",
+    "run": (
+        'echo "::error::The apply step ran and its state was not saved. Do not re-run this job or '
+        "re-plan against the cache: both act on the state from before the apply. See "
+        'docs/troubleshooting.md section The apply step ran and its state was not saved."\n'
+    ),
+}
+
+
+def test_a_lost_state_save_after_an_apply_warns_against_a_re_run():
+    """`Save state` runs under always(), also when the apply was skipped; the warning must fire
+    only when the apply step ran, a cancelled run included, where failure() is false.
+
+    Mutations: drop `steps.apply.outcome != 'skipped'` from the warning's `if:`; `failure()` in
+    place of `always()`.
+    """
+    steps = action_steps("apply-cell")
+    names = [s.get("name") for s in steps]
+    warning = steps[names.index("Warn that the applied state was not saved")]
+    assert warning == _LOST_SAVE_WARNING
+    assert steps[names.index("Save state")]["id"] == "save-state"

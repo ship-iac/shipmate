@@ -23,9 +23,14 @@ import subprocess
 import sys
 
 MAGIC = b"Salted__"  # openssl salted-header prefix (first 8 bytes)
+HEADER_LEN = 16  # openssl cannot decrypt an input shorter than `Salted__` plus its 8-byte salt.
 PLAN_MAGIC = b"PK\x03\x04"  # zip local-file header: a plaintext OpenTofu plan is a zip archive
 _REPLAN = (
     "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
+)
+_RUNNER = (
+    "Re-run the job, which clears a transient hosted-runner disk failure, or fix a self-hosted "
+    "runner's openssl or disk."
 )
 ENV_VAR = "PLAN_PASSPHRASE"  # name of the env var carrying the secret (not the secret itself)
 
@@ -39,11 +44,7 @@ def _starts_with(path, magic):
         return fh.read(len(magic)) == magic
 
 
-def _is_encrypted(path):
-    return _starts_with(path, MAGIC)
-
-
-def _openssl(path, *, decrypt, accept=None, failure=None):
+def _openssl(path, *, decrypt, failure, accept=None):
     # The ONLY place the openssl flags live (coupling: plan-cell, apply-cell, actions/state).
     # openssl enc cannot read and write the same file, so go via a temp sibling, checked
     # by `accept` before the atomic replace. -pass env: keeps the secret out of argv.
@@ -74,13 +75,19 @@ def _openssl(path, *, decrypt, accept=None, failure=None):
         os.replace(tmp, path)
         return True
     except subprocess.CalledProcessError:
-        verb = "decrypt" if decrypt else "encrypt"
-        raise SystemExit(
-            failure or f"::error::openssl failed to {verb} `{path}`; its error is printed above."
-        ) from None
+        raise SystemExit(failure) from None
+    # A missing openssl, or a temp file that cannot be read or moved, still prints ::error::.
+    except OSError as exc:
+        raise SystemExit(f"{failure} Error: {exc}") from None
     finally:
         if os.path.exists(tmp):
-            os.remove(tmp)
+            try:
+                os.remove(tmp)
+            except OSError:
+                print(
+                    f"::error::could not remove the temporary file `{tmp}`; delete it, because "
+                    "after a decrypt it can hold the plaintext."
+                )
 
 
 def _require_passphrase():
@@ -108,23 +115,53 @@ def _purge_command(prefix):
 def encrypt(path):
     """Encrypt in place, or refuse without a passphrase."""
     _require_passphrase()
-    _openssl(path, decrypt=False)
+    # No remedy here: a plan cell re-plans, and whether an apply cell's state save may be
+    # re-run depends on whether its apply ran. docs/troubleshooting.md splits the cases.
+    failure = (
+        f"::error::`{path}` could not be encrypted: openssl or the disk failed on the runner, "
+        "so it was not uploaded or saved. docs/troubleshooting.md section `... could not be "
+        "encrypted: openssl or the disk failed on the runner` says what to do for a plan cell and "
+        "for an apply cell's state save."
+    )
+    _openssl(path, decrypt=False, failure=failure)
 
 
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on plaintext, and on a result that is neither a zip
-    archive nor OpenTofu's encrypted-plan envelope (another passphrase or key derivation,
-    or a corrupt artifact), leaving the ciphertext in place. Never prints the file.
+    Refuses without a passphrase, on plaintext, on an artifact shorter than its salted
+    header, when openssl or the disk fails on the runner, and on a result that is neither a
+    zip archive nor OpenTofu's encrypted-plan envelope (another passphrase or key
+    derivation, or, for a zip plan, damage to its first bytes), leaving the ciphertext in
+    place. Never
+    prints the file.
     """
     _require_passphrase()
-    if not _is_encrypted(path):
+    try:
+        truncated = os.path.getsize(path) < HEADER_LEN
+        salted = _starts_with(path, MAGIC)
+    except OSError as exc:
+        raise SystemExit(
+            f"::error::plan artifact `{path}` cannot be read. Nothing was applied. An artifact "
+            f"downloaded without stack.otplan needs a re-plan: {_REPLAN} For a disk failure on "
+            "the runner, the refusal comes before any apply step, so a re-run of the job is safe. "
+            f"Error: {exc}"
+        ) from None
+    if truncated:
+        raise SystemExit(
+            f"::error::plan artifact `{path}` is truncated: it is shorter than its {HEADER_LEN}-"
+            f"byte salted header. Nothing was applied. Re-plan: {_REPLAN}"
+        )
+    if not salted:
         raise SystemExit(
             "::error::plan artifact is plaintext; refusing to apply an unencrypted plan. "
             f"Re-plan to produce an encrypted plan: {_REPLAN}"
         )
-    if not _openssl(path, decrypt=True, accept=_is_plan):
+    failure = (
+        f"::error::plan artifact `{path}` could not be decrypted: openssl or the disk failed on "
+        f"the runner. Nothing was applied. {_RUNNER}"
+    )
+    if not _openssl(path, decrypt=True, accept=_is_plan, failure=failure):
         raise SystemExit(
             "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with "
             "another key derivation or a rotated passphrase, the plan and apply sides read "
@@ -158,14 +195,31 @@ def _is_state(path):
 def decrypt_state(path, cache_key):
     """Decrypt a restored state cache entry in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on a plaintext entry, and on a result that is not a
-    JSON object with `version` or `encryption_version` (saved with another passphrase or
-    key derivation, or a corrupt entry), leaving the ciphertext in place. Never prints the
+    Refuses without a passphrase, on a plaintext entry, on an entry shorter than its salted
+    header, when openssl or the disk fails on the runner, and on a result that is not a JSON
+    object with `version` or `encryption_version` (saved with another passphrase or key
+    derivation, or a corrupt entry), leaving the ciphertext in place. Never prints the
     file's contents.
     """
     _require_passphrase()
     prefix = cache_key.rpartition("/")[0] + "/"
-    if not _is_encrypted(path):
+    delete = f"gh cache delete {cache_key}{_repo_flag()}"
+    try:
+        truncated = os.path.getsize(path) < HEADER_LEN
+        salted = _starts_with(path, MAGIC)
+    except OSError as exc:
+        raise SystemExit(
+            f"::error::state cache entry `{cache_key}` cannot be read. tofu was not run. The "
+            "refusal comes before any apply step, so a re-run of the job is safe. "
+            f"Error: {exc}"
+        ) from None
+    if truncated:
+        raise SystemExit(
+            f"::error::state cache entry `{cache_key}` is truncated: it is shorter than its "
+            f"{HEADER_LEN}-byte salted header. tofu was not run. `{delete}` deletes it, and the "
+            "next restore uses the previous one."
+        )
+    if not salted:
         raise SystemExit(
             f"::error::state cache entry `{cache_key}` is plaintext. Delete every entry under "
             f"its prefix, then re-run: `{_purge_command(prefix)}` (the restore matches by "
@@ -174,11 +228,9 @@ def decrypt_state(path, cache_key):
             "A sample stack's null and random resources re-create; a real resource can "
             "collide with or be duplicated by its re-creation."
         )
-    delete = f"gh cache delete {cache_key}{_repo_flag()}"
     failure = (
-        f"::error::state cache entry `{cache_key}` could not be decrypted: openssl failed (its "
-        "error is printed above), so the entry is truncated or corrupt. tofu was not run. "
-        f"`{delete}` deletes the entry, and the next restore uses the previous one."
+        f"::error::state cache entry `{cache_key}` could not be decrypted: openssl or the disk "
+        f"failed on the runner. tofu was not run. {_RUNNER}"
     )
     if not _openssl(path, decrypt=True, accept=_is_state, failure=failure):
         raise SystemExit(

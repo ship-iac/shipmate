@@ -852,12 +852,13 @@ the repository root, or none:
   cached file is encrypted with `SHIPMATE_PLAN_PASSPHRASE` (§Plan artifact
   encryption), because any workflow run, a fork's pull request included, can
   restore a default-branch cache entry. An empty passphrase refuses the restore
-  and the save. A plaintext entry, or one that does not decrypt to OpenTofu
-  state, fails the restore naming the matched cache key, so tofu never reads it
-  and the cell skips its save. A key-derivation change, a passphrase rotation
-  and different values on `<env>-plan` and `<env>-apply` each make entries fail
-  that way; `docs/troubleshooting.md` §`state cache entry ... does not decrypt
-  to OpenTofu state` gives each remedy.
+  and the save. A plaintext entry, one shorter than its salted header, one
+  that does not decrypt to OpenTofu state, and an openssl or disk failure on
+  the runner each fail the restore naming the matched cache key, so tofu never
+  reads it and the cell skips its save. A key-derivation change, a passphrase
+  rotation and different values on `<env>-plan` and `<env>-apply` each make
+  entries fail to decrypt to state; `docs/troubleshooting.md` §`state cache
+  entry ... does not decrypt to OpenTofu state` gives each remedy.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -2451,7 +2452,9 @@ job believed before its check was completed:
   job did not succeed (`Save state` failed, or it was cancelled), the
   `complete` job failed, or a newer plan re-created the check.
   `shipmate / gate` stays pending, and the stack needs a re-plan: state has
-  advanced past the reviewed `.otplan`, so the saved plan is stale. The `not recorded:` note names the affected cells — capped, with
+  advanced past the reviewed `.otplan`, so the saved plan is stale. When
+  `Save state` failed on a local backend, see `docs/troubleshooting.md`
+  §`The apply step ran and its state was not saved`. The `not recorded:` note names the affected cells — capped, with
   any remainder summarized as a count, since notes are part of the comment the
   size fallback cannot shed and the usual cause strands a whole matrix at once;
   the row lines always name every one of them. Each such cell keeps its full
@@ -2800,10 +2803,23 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Required.** An empty or unset passphrase refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
-- **Fail-safe on mismatch.** apply-cell refuses, with a re-plan instruction,
-  an artifact without the `Salted__` magic header and one that does not decrypt
-  to a plan file (a plan/apply value mismatch, a rotated passphrase, another key
-  derivation or a corrupt artifact; see above). The apply check stays pending.
+- **Fail-safe on mismatch.** An artifact without the `Salted__` magic header,
+  or shorter than its 16-byte salted header, refuses and tells you to re-plan.
+  An openssl or disk failure on the runner refuses and tells you to re-run the
+  job or fix the runner. An artifact that cannot be read names a re-plan for an
+  artifact downloaded without `stack.otplan`, and a re-run for a disk failure,
+  which is safe because the refusal comes before any apply step. An encrypt
+  failure, in a plan cell or a state save, names no re-run. An artifact that
+  does not decrypt to a plan file
+  refuses by naming the causes (a plan/apply value mismatch, a rotated
+  passphrase, another key derivation or a corrupt artifact) and pointing to
+  `docs/troubleshooting.md` for each remedy. For a zip plan that check reads
+  only the decrypted file's first bytes: corruption further in, a plan cut off
+  after its zip header included, fails later at the render step, on
+  `tofu show`. For an OpenTofu-encrypted plan it only verifies that the file
+  parses as JSON holding `encryption_version`, so damage inside the encrypted
+  payload usually fails later at `tofu show` too. The apply check stays pending
+  in each case.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and

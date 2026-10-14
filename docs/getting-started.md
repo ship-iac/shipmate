@@ -312,9 +312,10 @@ creates all of them, including `shipmate-engine` and its branch policy:
   without an approving review").
 
   **A value can come from a GitHub variable.** Write `{vars: NAME}` in
-  place of any string, list items included
-  (`apply: {vars: PROD_APPLY_ROLE}`), and define the name as a
-  repository or organization variable. A resolved value is printed in job
+  place of any string, list items included (`apply: {vars: PROD_APPLY_ROLE}`),
+  except `shared`, `explicit`, `gated` and `max_parallel`
+  ([`../CONTRACT.md`](../CONTRACT.md) §Variable references), and define the
+  name as a repository or organization variable. A resolved value is printed in job
   outputs and logs, so reference variables only, never secrets. Never define it
   on `shipmate-engine`: comment-ops and the plan summary bind that Environment,
   so a variable of the same name there shadows the repository value in those
@@ -331,6 +332,12 @@ creates all of them, including `shipmate-engine` and its branch policy:
   merges normally, because no ruleset requires `shipmate / gate`
   yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
   then `shipmate doctor` reports that no active ruleset requires the gate.
+
+The top-level `max_parallel` key (default 10), beside `layout`, `identities`
+and `environments`, caps how many cells one plan or drift sweep runs at once ([`../CONTRACT.md`](../CONTRACT.md)
+§Environment table). Each plan and drift sweep running at the same time takes
+up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
+§"What it costs").
 
 ### The workflow file
 

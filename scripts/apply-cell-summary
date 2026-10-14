@@ -28,9 +28,10 @@ FAILSAFES = [
     (
         "DECRYPT_OUTCOME",
         (
-            "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
-            "artifact, another key derivation, a rotated passphrase, or different values on "
-            "<env>-plan and <env>-apply); docs/troubleshooting.md gives each remedy"
+            "plan artifact could not be decrypted (no passphrase, a plaintext, truncated or "
+            "corrupt artifact, another key derivation, a rotated passphrase, different values on "
+            "<env>-plan and <env>-apply, or an openssl or disk failure on the runner, which a "
+            "re-run of the job clears when transient); docs/troubleshooting.md gives each remedy"
         ),
     ),
     (
