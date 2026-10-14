@@ -6,7 +6,7 @@ suffix-less file, so the ``SourceFileLoader`` is passed explicitly. Nothing is c
 ``bm._run`` cannot leak the patch into every other holder of ``build-matrix``.
 
 Also holds the subprocess runner, its ``::error::`` wrapper and ``gh api`` reader for the CI
-scripts, the workflow-command escaper and the detect scripts' refusal printer, the secret
+scripts, the workflow-command escaper and the annotated scripts' refusal printer, the secret
 scrubber and repository-slug check that ``onboard`` and ``register-app`` share, and the UTF-8
 switch for their console output. It also holds the pull-request number check that ``pr-facts``,
 ``reply-comment`` and ``upsert-comment`` share, the head-SHA check and the one check-runs
@@ -200,7 +200,7 @@ def run_annotated(main):
     every other line stays with the error above it, trailing empty lines are dropped, and each
     error prints through `command_data`, which also keeps a literal `%0A` or `%25` in a stack
     path verbatim. Exits 1 after printing. Any other `SystemExit` passes through unchanged.
-    Producers stay raw: this is the one print site of a detect refusal.
+    Producers stay raw: this is the one print site of an annotated script's refusal.
     """
     try:
         main()

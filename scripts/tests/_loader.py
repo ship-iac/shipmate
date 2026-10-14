@@ -318,7 +318,7 @@ def write_python3_shim(bin_dir):
 #: A bash ``gh`` for ``run_with_gh_recorder``: it appends each call's argv to ``$CALLS``, one line
 #: per argument and ``--`` after each call, answers a ``--paginate`` listing with
 #: ``$FAKE_LISTING`` and exit ``$FAKE_LIST_RC``, and any other call with JSON and
-#: ``$FAKE_WRITE_RC``.
+#: ``$FAKE_WRITE_RC``, after printing ``$FAKE_WRITE_STDERR`` (empty when unset) to stderr.
 _GH_RECORDER = """\
 #!/bin/bash
 printf '%s\\n' "$@" -- >> "$CALLS"
@@ -327,6 +327,7 @@ if [ "$2" = "--paginate" ]; then
   exit "${FAKE_LIST_RC:-0}"
 fi
 echo '{"id": 99}'
+printf '%s' "${FAKE_WRITE_STDERR:-}" >&2
 exit "${FAKE_WRITE_RC:-0}"
 """
 
@@ -344,12 +345,15 @@ def read_calls(path):
     return recorded
 
 
-def run_with_gh_recorder(tmp_path, body, env, *, listing="", list_rc=0, write_rc=0):
+def run_with_gh_recorder(
+    tmp_path, body, env, *, listing="", list_rc=0, write_rc=0, write_stderr=""
+):
     """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and a recording ``gh`` first
     on PATH; return (process, the argv after ``gh`` of each call, in order).
 
     ``listing`` is what a ``--paginate`` call prints before exiting ``list_rc``; every other call
-    exits ``write_rc``. ``env`` is extended, not replaced, with PATH and the stub's variables.
+    prints ``write_stderr`` to stderr and exits ``write_rc``. ``env`` is extended, not replaced,
+    with PATH and the stub's variables.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -364,6 +368,7 @@ def run_with_gh_recorder(tmp_path, body, env, *, listing="", list_rc=0, write_rc
         "FAKE_LISTING": listing,
         "FAKE_LIST_RC": str(list_rc),
         "FAKE_WRITE_RC": str(write_rc),
+        "FAKE_WRITE_STDERR": write_stderr,
     }
     proc = run_step(tmp_path, body, env)
     return proc, read_calls(calls)

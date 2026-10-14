@@ -406,12 +406,30 @@ def test_summary_list_failure_warns_and_writes_nothing(tmp_path):
     assert (proc.returncode, proc.stdout, calls) == (0, _SUMMARY_LIST_FAILED, [_LIST])
 
 
+#: A failed write's two-line gh stderr; the `%` shows `command_data` escaping it.
+_WRITE_STDERR = "unexpected end of JSON input\nHTTP 502 (50% of retries)\n"
+
+
+def _write_annotation(body):
+    """The whole stderr of a step whose write of `body` failed with `_WRITE_STDERR`."""
+    return (
+        "::error::could not write the sticky comment: command failed (1): gh api "
+        f"repos/o/r/issues/7/comments -F body=@{body}"
+        "%0Aunexpected end of JSON input%0AHTTP 502 (50%25 of retries)\n"
+    )
+
+
 @bash_only
 def test_summary_write_failure_fails_the_step(tmp_path):
-    """Mutation: add `|| true` to the `upsert-comment` call."""
-    proc, calls = _run_summary(tmp_path, "post", write_rc=1)
+    """The step fails, so `Create/refresh gate` does not run, and its one annotation carries gh's
+    whole stderr.
+
+    Mutations: add `|| true` to the `upsert-comment` call; revert `upsert-comment`'s `__main__`
+    block to `main()` (the raw multi-line text reaches stderr)."""
+    proc, calls = _run_summary(tmp_path, "post", write_rc=1, write_stderr=_WRITE_STDERR)
     assert proc.returncode != 0
     assert calls == [_LIST, _post_of("comment.md")]
+    assert proc.stderr == _write_annotation("comment.md")
 
 
 _DOCTOR_LINE = 'python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.md\n'
@@ -461,7 +479,9 @@ def test_doctor_list_failure_warns_with_the_retry_hint_and_writes_nothing(tmp_pa
 
 @bash_only
 def test_doctor_write_failure_fails_the_step(tmp_path):
-    """Mutation: add `|| true` to the `upsert-comment` call."""
-    proc, calls = _run_doctor(tmp_path, write_rc=1)
+    """Mutations: add `|| true` to the `upsert-comment` call; revert `upsert-comment`'s
+    `__main__` block to `main()` (the raw multi-line text reaches stderr)."""
+    proc, calls = _run_doctor(tmp_path, write_rc=1, write_stderr=_WRITE_STDERR)
     assert proc.returncode != 0
     assert calls == [_LIST, _post_of("doctor.md")]
+    assert proc.stderr == _write_annotation("doctor.md")

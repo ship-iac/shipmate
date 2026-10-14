@@ -302,6 +302,9 @@ runs:
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ]; then
           args+=(--update-only)
         fi
+        # A failed write fails the job before `Create/refresh gate`, so a publish hold this run
+        # wrote stays: a gate written over an unwritten comment shows reviewers the previous
+        # head's plan. Fail-closed; do not degrade it to a warning or move it below the gate.
         result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "${args[@]}")
         if [ "$result" = "list-failed" ]; then
           # The next run recovers. `Create/refresh gate` is a later step, so the gate is still written.

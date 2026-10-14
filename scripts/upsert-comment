@@ -26,7 +26,8 @@ Prints exactly one word and exits 0:
   caller degrades on it. A POST here would create a second sticky that later runs could PATCH
   instead of this one.
 
-A failed PATCH or POST exits 1 with `::error::`. gh's response to a write never reaches stdout.
+A failed PATCH or POST exits 1 with one `::error::` annotation that carries gh's stderr. gh's
+response to a write never reaches stdout.
 """
 
 import json
@@ -34,7 +35,7 @@ import os
 import re
 import sys
 
-from _shipmate import is_pr_number, run
+from _shipmate import is_pr_number, run, run_annotated
 
 MARKER = re.compile(r"<!-- shipmate:[a-z]{1,40} -->")
 JQ = '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}'
@@ -96,4 +97,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)
