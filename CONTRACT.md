@@ -1516,10 +1516,10 @@ one already requires, so a role that can apply an environment can already
 unlock it.
 
 The unlock run itself posts no comment — that would need
-`pull-requests: write`, which consumers do not grant `unlock.yml`. The
-comment-handling run, which holds it, posts the dispatch's notice reply linking
-the unlock run (above); per-cell detail lands in each job's step summary, and a
-failure reds the run.
+`pull-requests: write`, which consumers do not grant `unlock.yml`. The `rocket`
+reaction confirms acceptance, the comment-handling run, which holds that
+permission, posts the dispatch's notice reply linking the unlock run (above),
+per-cell detail lands in each job's step summary, and a failure reds the run.
 
 **Unlocking is not recovery.** A cancelled apply usually advanced state, so the
 reviewed plan may now be stale and the next apply refuses under the exact-plan
