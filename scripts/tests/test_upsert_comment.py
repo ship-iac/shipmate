@@ -141,7 +141,7 @@ def test_update_only_with_a_match_still_patches(monkeypatch, tmp_path, capsys):
 
 
 def test_a_listing_failure_prints_list_failed_and_writes_nothing(monkeypatch, tmp_path, capsys):
-    """`_shipmate.run` raises SystemExit on a failed `gh`; the caller degrades on `list-failed`.
+    """`_shipmate.run` raises SystemExit on a failed `gh`; the caller decides on `list-failed`.
 
     Mutation: drop the `except SystemExit` around the listing.
     """
@@ -222,7 +222,7 @@ def test_the_pull_request_number_is_checked_before_the_body_file_is_read(monkeyp
 def test_an_unparseable_listing_line_prints_list_failed_and_writes_nothing(
     monkeypatch, tmp_path, capsys, line
 ):
-    """The caller degrades on `list-failed`; a traceback would fail its step instead.
+    """The doctor step degrades on `list-failed`; a traceback would fail it instead.
 
     Mutation: drop the `try`/`except` around the line's parse.
     """
@@ -306,8 +306,8 @@ def _patch_of(body):
 
 
 _SUMMARY_LIST_FAILED = (
-    "::warning::could not list this pull request's comments; the sticky plan comment was not "
-    "updated this run\n"
+    "::error::could not list this pull request's comments, so the sticky plan comment was not "
+    "updated; re-plan this pull request (comment shipmate plan or push)\n"
 )
 _SUMMARY_SKIPPED = (
     "nothing changed, no existing plan comment, no doctor findings; nothing to post\n"
@@ -397,13 +397,19 @@ def test_summary_posts_unless_quiet_and_keeps_an_existing_comment_current(
 
 
 @bash_only
-def test_summary_list_failure_warns_and_writes_nothing(tmp_path):
-    """The gate is written by a later step, so the degrade keeps this step green.
+def test_summary_list_failure_fails_the_step_and_writes_nothing(tmp_path):
+    """The step fails, so `Create/refresh gate` does not write a gate over a comment that still
+    shows the previous head's plan.
 
-    Mutation: misspell `list-failed` in the step.
+    Mutations: misspell `list-failed` in the step; restore the `::warning::` and continue.
     """
     proc, calls = _run_summary(tmp_path, "post", list_rc=1)
-    assert (proc.returncode, proc.stdout, calls) == (0, _SUMMARY_LIST_FAILED, [_LIST])
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        1,
+        _SUMMARY_LIST_FAILED,
+        f"command failed (1): {' '.join(LIST_ARGV)}\n",
+        [_LIST],
+    )
 
 
 #: A failed write's two-line gh stderr; the `%` shows `command_data` escaping it.
