@@ -69,6 +69,15 @@ def _run_compose(
     return json.loads(cell_path.read_text(encoding="utf-8"))
 
 
+#: Hand-written, never read from FAILSAFES; shared by the parametrized row and the precedence test.
+_DECRYPT_REASON = (
+    "plan artifact could not be decrypted: with no passphrase, forward "
+    "SHIPMATE_PLAN_PASSPHRASE from the calling `apply` or `deploy` job; with different values "
+    "on `<env>-plan` and `<env>-apply`, make the two equal, then re-plan; a plaintext or "
+    "corrupt artifact, or one encrypted with a rotated passphrase or another key derivation, "
+    "needs a re-plan; an openssl error is in the job log"
+)
+
 #: Every outcome an all-green cell reads: each fail-safe and the apply succeeded. Hand-written, as
 #: is the table below, never derived from FAILSAFES: a derived row passes whatever that list says.
 _ALL_SUCCESS = {
@@ -101,10 +110,7 @@ _ALL_SUCCESS = {
         ),
         pytest.param(
             "decrypt",
-            "plan artifact could not be decrypted: with no passphrase, forward "
-            "SHIPMATE_PLAN_PASSPHRASE to the apply job; a plaintext or corrupt artifact, or one "
-            "encrypted with another passphrase or key derivation, needs a re-plan; an openssl "
-            "error is in the job log",
+            _DECRYPT_REASON,
             id="decrypt",
         ),
         pytest.param(
@@ -202,12 +208,7 @@ def test_two_failsafes_failing_together_the_earlier_in_pipeline_order_wins(monke
     # reason, never restore-state's: precedence is pipeline order, not severity or alphabetical.
     cell = _run_compose(monkeypatch, tmp_path, decrypt="failure", restore="failure")
     assert cell["result"] == "blocked"
-    assert cell["reason"] == (
-        "plan artifact could not be decrypted: with no passphrase, forward "
-        "SHIPMATE_PLAN_PASSPHRASE to the apply job; a plaintext or corrupt artifact, or one "
-        "encrypted with another passphrase or key derivation, needs a re-plan; an openssl "
-        "error is in the job log"
-    )
+    assert cell["reason"] == _DECRYPT_REASON
 
 
 @pytest.mark.parametrize(

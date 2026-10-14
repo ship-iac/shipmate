@@ -856,7 +856,9 @@ the repository root, or none:
   state, fails the restore naming the matched cache key, so tofu never reads it
   and the cell skips its save. Rotating the passphrase makes every cached entry
   fail that way: set the old passphrase back, or delete the `state/` entries,
-  which discards that state (§Plan artifact encryption, "Rotation").
+  which discards that state (§Plan artifact encryption, "Rotation"). Different
+  values on `<env>-plan` and `<env>-apply` fail a plan cell's restore of the
+  state an apply cell saved: make them equal; deleting entries does not help.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -2784,6 +2786,10 @@ environment, and a plan cell names its own plan environment. The same value on b
   refuses the same way, so no apply ever has a plan.
 - **As a secret on `<env>-plan` alone**, plans upload encrypted and every apply
   in that environment refuses at `Decrypt reviewed plan artifact`.
+- **As different values on `<env>-plan` and `<env>-apply`**, every apply in
+  that environment refuses at `Decrypt reviewed plan artifact`, and on a local
+  backend a plan cell refuses the state an apply cell saved. Make the two values
+  equal, then re-plan; a re-plan alone fails the same way.
 
 Scoping it to a plan environment buys nothing either — those must have no
 branch policy at all (`docs/hardening.md` §6), so any branch's workflow can
@@ -2796,8 +2802,8 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   before any cache call. No plan artifact uploads unencrypted.
 - **Fail-safe on mismatch.** apply-cell refuses, with a re-plan instruction,
   an artifact without the `Salted__` magic header and one that does not decrypt
-  to a plan file (a wrong passphrase, another key derivation or a corrupt
-  artifact; see above). The apply check stays pending.
+  to a plan file (a plan/apply value mismatch, a rotated passphrase, another key
+  derivation or a corrupt artifact; see above). The apply check stays pending.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and

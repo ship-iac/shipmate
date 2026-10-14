@@ -29,9 +29,10 @@ FAILSAFES = [
         "DECRYPT_OUTCOME",
         (
             "plan artifact could not be decrypted: with no passphrase, forward "
-            "SHIPMATE_PLAN_PASSPHRASE to the apply job; a plaintext or corrupt artifact, or one "
-            "encrypted with another passphrase or key derivation, needs a re-plan; an openssl "
-            "error is in the job log"
+            "SHIPMATE_PLAN_PASSPHRASE from the calling `apply` or `deploy` job; with different "
+            "values on `<env>-plan` and `<env>-apply`, make the two equal, then re-plan; a "
+            "plaintext or corrupt artifact, or one encrypted with a rotated passphrase or another "
+            "key derivation, needs a re-plan; an openssl error is in the job log"
         ),
     ),
     (

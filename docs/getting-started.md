@@ -616,6 +616,9 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
   refuses the same way.
 - As a secret on `<env>-plan` alone, every apply in that environment refuses at
   `Decrypt reviewed plan artifact`.
+- As different values on `<env>-plan` and `<env>-apply`, every apply in that
+  environment refuses at `Decrypt reviewed plan artifact`, and a re-plan alone
+  fails the same way: make the two values equal.
 
 ## Required — apply
 

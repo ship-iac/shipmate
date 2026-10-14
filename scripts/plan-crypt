@@ -126,9 +126,12 @@ def decrypt(path):
         )
     if not _openssl(path, decrypt=True, accept=_is_plan):
         raise SystemExit(
-            "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with "
-            "another passphrase or key derivation, or it is corrupt. Nothing was applied. "
-            f"Re-plan: {_REPLAN}"
+            "::error::plan artifact does not decrypt to an OpenTofu plan. Nothing was applied. "
+            "If the plan and apply sides read different SHIPMATE_PLAN_PASSPHRASE values "
+            "(different secrets on `<env>-plan` and `<env>-apply`), make the two equal, then "
+            "re-plan; a re-plan alone fails the same way. If the plan was encrypted with a "
+            "passphrase since rotated or another key derivation, or the artifact is corrupt, "
+            f"re-plan: {_REPLAN}"
         )
 
 
@@ -172,13 +175,15 @@ def decrypt_state(path, cache_key):
         )
     if not _openssl(path, decrypt=True, accept=_is_state):
         raise SystemExit(
-            f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state: it "
-            "was saved with another SHIPMATE_PLAN_PASSPHRASE or another key derivation, or it is "
-            f"corrupt. tofu was not run. If the entry is corrupt, `gh cache delete {cache_key}"
-            f"{_repo_flag()}` deletes it and the next restore uses the previous one. Otherwise "
-            "every entry under the prefix was saved the same way: set the old secret back, which "
-            "helps only after a passphrase rotation, or delete them all, which discards the "
-            f"state: `{_purge_command(prefix)}`."
+            f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state. tofu "
+            "was not run. If the plan and apply sides read different SHIPMATE_PLAN_PASSPHRASE "
+            "values (different secrets on `<env>-plan` and `<env>-apply`; a plan cell restores "
+            "the state an apply cell saved), make the two equal and re-run; deleting entries "
+            "does not fix that. If the entry is corrupt, `gh cache delete "
+            f"{cache_key}{_repo_flag()}` deletes it and the next restore uses the previous one. "
+            "If the passphrase was rotated, set the old secret back. After a rotation or with "
+            "another key derivation, every entry under the prefix was saved the same way, and "
+            f"deleting them all discards the state: `{_purge_command(prefix)}`."
         )
 
 

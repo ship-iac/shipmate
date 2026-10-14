@@ -68,9 +68,12 @@ def _raw_openssl(src, dst, *flags):
 
 
 _NOT_A_PLAN = (
-    "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with another "
-    "passphrase or key derivation, or it is corrupt. Nothing was applied. Re-plan: comment "
-    "shipmate plan or push, or after the merge open a new pull request touching the stack."
+    "::error::plan artifact does not decrypt to an OpenTofu plan. Nothing was applied. If the "
+    "plan and apply sides read different SHIPMATE_PLAN_PASSPHRASE values (different secrets on "
+    "`<env>-plan` and `<env>-apply`), make the two equal, then re-plan; a re-plan alone fails "
+    "the same way. If the plan was encrypted with a passphrase since rotated or another key "
+    "derivation, or the artifact is corrupt, re-plan: comment shipmate plan or push, or after "
+    "the merge open a new pull request touching the stack."
 )
 
 
@@ -259,13 +262,16 @@ def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypa
         pcx.decrypt_state(str(f), KEY)
     assert exc.value.code == (
         "::error::state cache entry `state/app-net/dev-eu/123-1` does not decrypt to OpenTofu "
-        "state: it was saved with another SHIPMATE_PLAN_PASSPHRASE or another key derivation, or "
-        "it is corrupt. tofu was not run. If the entry is corrupt, `gh cache delete "
+        "state. tofu was not run. If the plan and apply sides read different "
+        "SHIPMATE_PLAN_PASSPHRASE values (different secrets on `<env>-plan` and `<env>-apply`; "
+        "a plan cell restores the state an apply cell saved), make the two equal and re-run; "
+        "deleting entries does not fix that. If the entry is corrupt, `gh cache delete "
         "state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes it and the next restore uses "
-        "the previous one. Otherwise every entry under the prefix was saved the same way: set the "
-        "old secret back, which helps only after a passphrase rotation, or delete them all, which "
-        "discards the state: `gh cache list --repo ship-iac/sample --key state/app-net/dev-eu/ "
-        "--limit 1000 --json id --jq '.[].id' | xargs -n1 gh cache delete --repo ship-iac/sample`."
+        "the previous one. If the passphrase was rotated, set the old secret back. After a "
+        "rotation or with another key derivation, every entry under the prefix was saved the "
+        "same way, and deleting them all discards the state: `gh cache list --repo "
+        "ship-iac/sample --key state/app-net/dev-eu/ --limit 1000 --json id --jq '.[].id' | "
+        "xargs -n1 gh cache delete --repo ship-iac/sample`."
     )
 
 

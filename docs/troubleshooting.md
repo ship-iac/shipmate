@@ -784,13 +784,17 @@ before any apply step, and its `apply / <stack> / <env>` check stays pending.
 - **`plan artifact does not decrypt to an OpenTofu plan`.** The decrypted file
   is neither a zip archive, which an OpenTofu plan file is, nor the JSON
   envelope OpenTofu's own plan encryption writes. AES-256-CTR decrypts
-  with any key, so the plan was encrypted with another passphrase or key
-  derivation ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), or
-  the artifact is corrupt.
+  with any key ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption),
+  so the cause is one of:
+  - **The plan and apply sides read different values**, for example different
+    `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A
+    re-plan alone fails the same way: make the two values equal, then re-plan.
+  - **The plan was encrypted with a passphrase since rotated, or with another
+    key derivation, or the artifact is corrupt.** Re-plan.
 
-The fix is a re-plan with the current passphrase and engine: on an open pull
-request, comment `shipmate plan` or push; after the merge, open a new pull
-request touching the stack.
+A plaintext artifact needs a re-plan too. To re-plan on an open pull request,
+comment `shipmate plan` or push; after the merge, open a new pull request
+touching the stack.
 
 ### `state cache entry ... is plaintext`
 
@@ -808,11 +812,15 @@ resource can collide with or be duplicated by its re-creation.
 
 A local backend's restore decrypted the matched entry to something that is not
 OpenTofu state, and refused before tofu read it. AES-256-CTR decrypts with any
-key, so the cause is an entry saved with a passphrase that differs from the
-current one, an entry saved with another key derivation
+key, so the cause is a passphrase that differs from the one that saved the
+entry, an entry saved with another key derivation
 ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), or a corrupt
 entry:
 
+- **The plan and apply sides read different values**, for example different
+  `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A plan
+  cell restores the state an apply cell saved, so its restore refuses. Make the
+  two values equal and re-run the cell; deleting entries does not fix this.
 - **The entry is corrupt.** `gh cache delete <key> --repo <owner>/<repo>`, with
   the key from the message, deletes it; the next restore uses the previous
   entry.
