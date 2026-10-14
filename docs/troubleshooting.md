@@ -989,30 +989,15 @@ next-older one.
 Deleting discards that state: OpenTofu no longer tracks the resources it
 recorded, and every plan of the stack in that environment re-creates them. A
 plan or drift cell can be re-run. For the local-backend samples' resources the
-re-creation is harmless. For a stack with real resources:
+re-creation is harmless.
 
-- Never re-run a refused apply cell or deploy: it can apply its stored plan
-  against the empty state.
-- Do not apply or merge any plan of the stack in that environment, by any
-  route (a `shipmate apply` comment, a re-run or a merge), until, for every
-  managed resource the deleted state recorded, the plan shows `to import`, or
-  the resource has no remote object (such as `random_pet`), or its original
-  has been deleted at the provider. A replace or destroy in that plan is
-  applied only when you accept it, as in step 4 of §`The apply step ran and
-  its state was not saved`.
-- Add an `import` block, as in step 5 of that section, for each resource whose
-  provider implements import, with the import ID its provider's documentation
-  names. The latest retained `Apply the stored plan` log for that address
-  (`Creation complete` or `Import complete`) helps find the object; when that
-  log has expired, find it at the provider. Step 8 of that section says why
-  an imported resource can also plan a replace.
-- A resource whose provider does not implement import (step 7 of that
-  section) is re-created, and a resource that uses one of its values can then
-  plan an update, a replace or, if it cannot be imported either, a create.
-  Before deleting such an original at the provider, check what depends on it,
-  in this stack or anywhere else. If the delete would remove, detach or block
-  any of them, the engine documents no recovery, this case is not probed, and
-  the stack cannot meet the condition above: do not apply.
+For a stack with real resources, every instance the deleted state recorded is
+in the condition §`The apply step ran and its state was not saved` describes
+for a lost apply's resources. Never re-run a refused apply cell or deploy, and
+do not apply or merge any plan of the stack in that environment by any route,
+until that section's steps 4 to 9 have adopted every such instance. No entry
+remains to restore, so take each id from the latest retained `Apply the stored
+plan` log for its address or from the provider.
 
 ### `state cache entry ... cannot be read`
 
