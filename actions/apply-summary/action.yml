@@ -110,7 +110,7 @@ runs:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         HEAD_SHA: ${{ inputs.head-sha }}
       # The pending apply checks are the work queue, so the comment reads them rather than trusting
-      # the artifact alone: a failed `Save state` or a failed completion leaves an `applied`
+      # the artifact alone: an unsaved state or a failed completion leaves an `applied`
       # artifact against a still-pending check (CONTRACT.md, the apply result comment).
       run: |
         set -euo pipefail
