@@ -997,7 +997,8 @@ re-creation is harmless. For a stack with real resources:
   route (a `shipmate apply` comment, a re-run or a merge), until every managed
   resource the deleted state recorded shows `to import` in it, or a create,
   replace or destroy you accept, as in step 4 of §`The apply step ran and its
-  state was not saved`.
+  state was not saved`, and each non-importable original that has a remote
+  object has been deleted at the provider.
 - Add an `import` block, as in step 5 of that section, for each resource whose
   provider implements import, with the import ID its provider's documentation
   names. The latest retained `Apply the stored plan` log for that address
@@ -1008,8 +1009,9 @@ re-creation is harmless. For a stack with real resources:
   section) is re-created, and a resource that uses one of its values can then
   plan an update, a replace or, if it cannot be imported either, a create.
   Before deleting a non-importable original that has a remote object, check
-  what depends on it: if the delete would remove or block resources the plan
-  imports, the engine documents no recovery, and this case is not probed.
+  what depends on it, in this stack or anywhere else: if the delete would
+  remove, detach or block any of them, the engine documents no recovery, and
+  this case is not probed.
   Otherwise delete the original at the provider before applying, or the apply
   duplicates it or collides. One without a remote object, such as
   `random_pet`, has nothing to delete.
