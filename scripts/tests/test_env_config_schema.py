@@ -445,6 +445,21 @@ def test_max_parallel_reads_the_table(written, value):
     assert env_config.max_parallel(table) == value
 
 
+@pytest.mark.parametrize("value", ["0", "x", {"a": "1"}], ids=["zero", "text", "mapping"])
+def test_max_parallel_refuses_an_unvalidated_bad_value(value):
+    """A reader that skips `validate_structure` must still never get 0, which GitHub runs
+    unbounded, or a crash.
+
+    Mutation: drop the `_check_max_parallel` call in `max_parallel` -- "zero" returns 0 and the
+    others raise `ValueError`/`TypeError` instead of the refusal."""
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.max_parallel({"max_parallel": value})
+    assert str(excinfo.value) == (
+        f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the most "
+        "cell jobs a plan, drift or unlock matrix runs at once)."
+    )
+
+
 @pytest.mark.parametrize(
     "value",
     ["0", "-1", "257", "20.5", " 20", "20 ", "+5", "0x10", "1e2", "05", "٣", "", {"a": "1"}, ["5"]],
@@ -475,7 +490,7 @@ def test_a_malformed_max_parallel_refuses(value):
     """
     assert _refusal({"layout": "folder", "max_parallel": value}) == (
         f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the most "
-        "cell jobs one matrix runs at once)."
+        "cell jobs a plan, drift or unlock matrix runs at once)."
     )
 
 

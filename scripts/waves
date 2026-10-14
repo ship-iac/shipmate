@@ -339,14 +339,12 @@ def waiting_cells(run, pending, deps, tags, level):
     ]
 
 
-def write_env_level_waves(fh, per_level, max_parallel):
+def write_env_level_waves(fh, per_level):
     """Emit envlevel{0..N}_waves (JSON) + envlevel{0..N}_empty flags for a list
-    of per-env-level wave dicts, and `max_parallel`, every wave matrix's cap, to a
-    GITHUB_OUTPUT file handle. Shared by
+    of per-env-level wave dicts, to a GITHUB_OUTPUT file handle. Shared by
     deploy-detect and both apply-detect forms so the env-level output contract
     that the reusable apply-env-level.yml consumes stays single-sourced -- a format
     drift between the detect paths would silently break that shared consumer."""
     for lvl, w in enumerate(per_level):
         fh.write(f"envlevel{lvl}_waves={json.dumps(w)}\n")
         fh.write(f"envlevel{lvl}_empty={'false' if any(w.values()) else 'true'}\n")
-    fh.write(f"max_parallel={max_parallel}\n")

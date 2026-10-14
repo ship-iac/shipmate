@@ -202,7 +202,7 @@ def main():
         f"envlevels={level_counts} empty={not any(level_counts)}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        wv.write_env_level_waves(fh, per_level, bm.ec.max_parallel(table))
+        wv.write_env_level_waves(fh, per_level)
 
 
 if __name__ == "__main__":

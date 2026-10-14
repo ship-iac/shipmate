@@ -1823,7 +1823,8 @@ def _config_defaults(table):
     """The three tolerant defaults, echoed whether they are set or not.
 
     No absence here is invalid, so no validator can report any of them. `needs` and `explicit`
-    decide what a comment can do, and `max_parallel` how many cell jobs a run holds at once.
+    decide what a comment can do, and `max_parallel` how many plan, drift and unlock cell jobs
+    run at once.
     An `explicit` set on no entry applies every environment, including the one a consumer
     meant to hold back. This is the last moment before the merge at which
     reading them costs nothing.
@@ -1863,10 +1864,7 @@ def _config_defaults(table):
         ),
         (
             NOTICE,
-            (
-                f"{cap_head} each plan, apply wave, drift sweep and unlock runs at most {cap} "
-                "cell jobs at once."
-            ),
+            (f"{cap_head} each plan, drift sweep and unlock runs at most {cap} cell jobs at once."),
         ),
     ]
 

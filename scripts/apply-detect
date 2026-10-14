@@ -214,13 +214,13 @@ def dag_shape_notice(deps):
     detect a MISSING edge — a repository migrating from another tool leaves its
     ordering behind in that tool's config with nothing to say so. What this line
     buys is a reader who knows the repository seeing the widest level's width and
-    knowing at once whether it is true. At most `max_parallel` of a level's cells run
-    at once, so the width is the graph's, not a concurrency figure."""
+    knowing at once whether it is true."""
     lv = wv.stack_levels(deps)
+    widest = max((len(x) for x in lv), default=0)
     return (
         f"::notice::{len(deps)} stacks, {sum(len(d) for d in deps.values())} after edges, "
-        f"{len(lv)} wave levels; the widest level holds "
-        f"{max((len(x) for x in lv), default=0)} stacks"
+        f"{len(lv)} wave levels; the widest level holds {widest} "
+        f"stack{'' if widest == 1 else 's'}"
     )
 
 
@@ -368,7 +368,7 @@ def bare_main():
         f"review_decision={decision!r}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        wv.write_env_level_waves(fh, per_level, bm.ec.max_parallel(table))
+        wv.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
         fh.write(f"excluded_envs={json.dumps(excluded)}\n")
         fh.write(f"skipped_envs={json.dumps(skipped)}\n")
@@ -437,7 +437,7 @@ def main():
         f"waiting={len(waiting)} waves={[len(w) for w in w0.values()]} empty={not any(w0.values())}"
     )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        wv.write_env_level_waves(fh, per_level, bm.ec.max_parallel(table))
+        wv.write_env_level_waves(fh, per_level)
         fh.write(f"head_sha={head}\n")
         fh.write(f"review_not_required_envs={json.dumps(no_review_required)}\n")
         fh.write(f"waiting_cells={json.dumps(waiting)}\n")

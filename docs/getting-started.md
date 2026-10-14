@@ -81,13 +81,12 @@ Three detect jobs report the shape as a `::notice::` line — stack count, `afte
 edge count, wave levels, and how many stacks the widest level holds. A reader
 who knows the repository can judge that last number immediately; nobody else
 can. It counts stacks in one graph level, not cells: a wave holds those stacks
-in every environment of its env-level, and at most `max_parallel` of its cells
-run at once. Exactly three print it: the detect jobs of a dispatched
-`shipmate apply <env>`, of a bare `shipmate apply`, and of the post-merge
-deploy, so it arrives after the plan review that would have been the place to
-fix the graph. A plan run does not print it — seeing no such line there says nothing about the graph. Before that
-point the equivalent is `terramate experimental run-graph --label stack.dir` run
-locally.
+in every environment of its env-level. Exactly three print it: the detect jobs
+of a dispatched `shipmate apply <env>`, of a bare `shipmate apply`, and of the
+post-merge deploy, so it arrives after the plan review that would have been the
+place to fix the graph. A plan run does not print it — seeing no such line
+there says nothing about the graph. Before that point the equivalent is
+`terramate experimental run-graph --label stack.dir` run locally.
 
 **Tags.** Environment membership is derived from `env/<name>` tags and nothing
 else; [Before you start](#before-you-start) covers adopting a repository whose
@@ -677,10 +676,9 @@ rules from Settings → Environments → `<name>` (or the API):
   production and leave dev self-service; the maximally-hardened position gates
   every apply environment where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
-  does not make it for you. A wave holding more cells than `max_parallel` runs
-  in batches, and each batch holding a cell of the environment asks for its
-  approval again, so raise `max_parallel` to at least the cells of your largest
-  wave ([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
+  does not make it for you. An unlock over more locked cells than
+  `max_parallel` asks for the approval again for each batch; apply waves are
+  not capped ([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
 - **Pair a reviewer-gated environment with `explicit: true` in
   `.github/shipmate-config.yml`.**
   Set it on the bare env's entry (`environments.prod` — neither `prod-plan`

@@ -94,7 +94,6 @@ _APPLY_DETECT_OUTPUTS = {
     "envlevel2_empty": "${{ steps.d.outputs.envlevel2_empty }}",
     "envlevel3_empty": "${{ steps.d.outputs.envlevel3_empty }}",
     "head_sha": "${{ steps.d.outputs.head_sha }}",
-    "max_parallel": "${{ steps.d.outputs.max_parallel }}",
     "excluded_envs": "${{ steps.d.outputs.excluded_envs }}",
     "skipped_envs": "${{ steps.d.outputs.skipped_envs }}",
     "review_held_envs": "${{ steps.d.outputs.review_held_envs }}",
@@ -240,13 +239,6 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
     "head_sha": {
         "description": "The echoed head SHA.",
         "value": "${{ steps.d.outputs.head_sha }}",
-    },
-    "max_parallel": {
-        "description": (
-            "Every wave matrix's `max-parallel`, a whole number from 1 to 256 -- the table's "
-            "`max_parallel` (10 when unset), the most cell jobs one wave runs at once; both forms."
-        ),
-        "value": "${{ steps.d.outputs.max_parallel }}",
     },
     "excluded_envs": {
         "description": (
