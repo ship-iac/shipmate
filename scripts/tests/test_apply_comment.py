@@ -496,7 +496,8 @@ def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recover
     them applies their reviewed plans again.
 
     Mutations: return "" from `_state_lost_note`; drop the state-lost branch from
-    `_not_attempted_note`; name the cell `**<stack> / <env>**` -- red."""
+    `_not_attempted_note`; drop the job-log pointer from that branch; name the cell
+    `**<stack> / <env>**` -- red."""
     rows = [
         _row(stack="@acme/db", status="failed", apply_text="Error: x", state_lost=True),
         _row(environment="prod", stack="stacks/dns", status="not_attempted", apply_text=None),
@@ -504,13 +505,15 @@ def test_a_lost_state_names_its_cells_and_holds_the_retry_until_they_are_recover
     sections = _comment(rows, env="").split("\n\n")
     assert sections[-2] == (
         "state not saved: **@<!-- -->acme/db (dev-eu)**. The apply ran and its state was not "
-        "saved. While a cell's apply check holds its reviewed plan, do not re-run its job or "
-        "re-comment `shipmate apply` for it: either applies that plan again against the state "
-        "from before the apply. Follow docs/troubleshooting.md section `The apply step ran and "
-        "its state was not saved`; the import and forget plans it leads to apply as usual.\n"
+        "saved. Never re-run their jobs or their workflow run, and do not re-comment "
+        "`shipmate apply` for them until the recovery has moved their state: either applies the "
+        "reviewed plan again against the state from before the apply. Until then every plan of "
+        "these stacks, on any pull request, repeats the lost apply: apply none but the "
+        "recovery's import and forget plans. Follow docs/troubleshooting.md section `The apply "
+        "step ran and its state was not saved`.\n"
         "not attempted: the apply checks stay pending; retry with `shipmate apply` once the "
         "cells under `state not saved:` are recovered, because it applies their reviewed plans "
-        "again."
+        "again." + _LOST_POINTER
     )
 
 

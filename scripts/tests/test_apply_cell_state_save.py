@@ -61,11 +61,13 @@ _LOST_SAVE_WARNING = {
     ),
     "shell": "bash",
     "run": (
-        'echo "::error::The apply step ran and its state was not saved or not verified. While '
-        "this cell's apply check holds the reviewed plan, do not re-run this job or re-comment "
-        "'shipmate apply': either applies that plan again against the state from before the "
-        "apply. Follow docs/troubleshooting.md section The apply step ran and its state was not "
-        'saved; the import and forget plans it leads to apply as usual."\n'
+        'echo "::error::The apply step ran and its state was not saved or not verified. Never '
+        "re-run this job or its workflow run, and do not re-comment 'shipmate apply' for this "
+        "cell until the recovery has moved its state: either applies the reviewed plan again "
+        "against the state from before the apply. Until then every plan of this stack, on any "
+        "pull request, repeats the lost apply: apply none but the recovery's import and forget "
+        "plans. Follow docs/troubleshooting.md section The apply step ran and its state was not "
+        'saved."\n'
         "exit 1\n"
     ),
 }
@@ -126,11 +128,11 @@ def test_saved_is_true_only_on_the_lookups_exact_hit():
     }
 
 
-def test_the_cell_summary_reads_the_same_save_result_the_warning_does():
-    """`state_lost` in cell.json must come from the output the warning step reads.
+def test_the_cell_summary_reads_the_lost_save_warnings_outcome():
+    """`state_lost` in cell.json comes from the outcome of the warning step itself, so the
+    comment names exactly the cells whose job printed the lost-save error.
 
     Mutations: drop `LOST_SAVE_OUTCOME` from `Compose cell summary`'s env; map it to
     `steps.save-state.outcome`."""
     env = step_by("apply-cell", name="Compose cell summary")["env"]
     assert env.get("LOST_SAVE_OUTCOME") == "${{ steps.lost-save.outcome }}"
-    assert env["APPLY_OUTCOME"] == "${{ steps.apply.outcome }}"

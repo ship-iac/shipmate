@@ -74,20 +74,21 @@ def _not_attempted_note(rows, env_name):
     name the targeted form. env_name is author-controlled and escaped.
 
     The retry applies every pending cell it covers, a cell whose state was not saved
-    included. With a `state not saved:` note the retry waits for those cells' recovery;
-    without one the note still points at the recovery, because a lost cell's artifact can
-    be missing (its upload is best-effort) and the row then reads not attempted."""
+    included. With a `state not saved:` note the retry waits for those cells' recovery. The
+    job-log pointer stays in both forms: a lost cell whose artifact did not upload (the upload
+    is best-effort) reads not attempted and is in no note."""
     if not any(r["status"] == "not_attempted" for r in rows):
         return ""
     cmd = f"shipmate apply {sc._md_escape(env_name)}" if env_name else "shipmate apply"
+    retry = f"retry with `{cmd}`."
     if any(r["state_lost"] for r in rows):
-        return (
-            f"not attempted: the apply checks stay pending; retry with `{cmd}` once the cells "
-            "under `state not saved:` are recovered, because it applies their reviewed plans again."
+        retry = (
+            f"retry with `{cmd}` once the cells under `state not saved:` are recovered, because "
+            "it applies their reviewed plans again."
         )
     return (
-        f"not attempted: the apply checks stay pending; retry with `{cmd}`. If a cell's job log "
-        "shows `The apply step ran and its state was not saved`, follow docs/troubleshooting.md "
+        f"not attempted: the apply checks stay pending; {retry} If a cell's job log shows "
+        "`The apply step ran and its state was not saved`, follow docs/troubleshooting.md "
         "section of that name first."
     )
 
@@ -104,10 +105,12 @@ def _state_lost_note(rows):
         return ""
     return (
         f"state not saved: {named(cells, _STATE_LOST_NAMED)}. The apply ran and its state was "
-        "not saved. While a cell's apply check holds its reviewed plan, do not re-run its job or "
-        "re-comment `shipmate apply` for it: either applies that plan again against the state "
-        "from before the apply. Follow docs/troubleshooting.md section `The apply step ran and "
-        "its state was not saved`; the import and forget plans it leads to apply as usual."
+        "not saved. Never re-run their jobs or their workflow run, and do not re-comment "
+        "`shipmate apply` for them until the recovery has moved their state: either applies the "
+        "reviewed plan again against the state from before the apply. Until then every plan of "
+        "these stacks, on any pull request, repeats the lost apply: apply none but the "
+        "recovery's import and forget plans. Follow docs/troubleshooting.md section `The apply "
+        "step ran and its state was not saved`."
     )
 
 

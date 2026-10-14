@@ -852,7 +852,7 @@ cell's job, so its apply check stays pending. An apply run that was not
 cancelled posts an apply comment; its row reads not recorded when its apply
 succeeded, otherwise failed, and its `state not saved:` note names the cell when
 the cell's summary artifact uploaded. Without that artifact the row reads not
-attempted and only the `not attempted:` note's pointer leads here. A cancelled
+attempted, and the pointer every `not attempted:` note carries leads here. A cancelled
 run and the merge deploy post no comment, and a later run's comment does not
 know the state was lost: the job log and the pending check are the signal.
 
@@ -871,18 +871,25 @@ other case, re-plan and reconcile against the provider:
    `gh cache list --key <key> --json key --jq '.[] | select(.key == "<key>")' --repo <owner>/<repo>`,
    with the exact `key` the `Save state` step log shows (`--key` alone matches
    by prefix). When it is printed, the save worked and only the lookup failed:
-   re-plan (step 4), and never re-run the job. On the open pull request, the
-   re-plan reads the saved state, shows no changes, and completes the cell's
+   re-plan (step 4) and never re-run the job; the re-plan reads the saved
+   state. After a successful apply it shows no changes. After a failed or
+   cancelled apply the entry holds a partial apply, and the re-plan shows the
+   changes still to make: they are legitimate, so review and apply it as any
+   plan. On the open pull request, the re-plan completes or replaces the cell's
    apply check. After the merge, a new pull request's plan completes only its
-   own head's apply check; the merged head's pending check stays pending. When
-   nothing is printed, continue.
-2. Do not apply the reviewed plan again: do not re-run the job or the deploy,
-   and do not comment `shipmate apply`, bare or for its environment, while the
-   cell's apply check still holds that plan. It was made against the state the
-   cache restores, so OpenTofu applies it again with no stale-plan refusal and
-   creates a second set of what the lost apply created. A re-plan that still
-   repeats the lost apply is the same (step 4). The import and forget plans of
-   steps 5 and 6 are applied the ordinary way, with `shipmate apply` or by the
+   own head's check. The merged head's check stays pending, and nothing reads
+   it again: a later deploy takes only the pending checks of its own merge's
+   pull request. Never re-run that deploy, which reads it. When nothing is
+   printed, continue.
+2. Never re-run the job or its workflow run, the deploy included: a re-run
+   applies the run's reviewed plan again whatever the check says. Do not
+   comment `shipmate apply`, bare or for its environment, until the recovery
+   has moved the stack's state. The reviewed plan was made against the state
+   the cache restores, so OpenTofu applies it again with no stale-plan refusal
+   and creates a second set of what the lost apply created. Until the recovery,
+   every plan of this stack, on any pull request, repeats the lost apply
+   (step 4): apply none of them except the import and forget plans of steps 5
+   and 6, which are applied the ordinary way, with `shipmate apply` or by the
    merge deploy.
 3. List what the lost apply did from its `Apply the stored plan` step log:
    `Creation complete ... [id=...]` and `Destruction complete` lines. The
@@ -895,7 +902,7 @@ other case, re-plan and reconcile against the provider:
    lists the entries that survive, newest first.
 4. Re-plan on a pull request touching the stack: on an open pull request,
    comment `shipmate plan` or push; after the merge, open a new pull request.
-   Unless step 1 found the entry, the plan repeats the lost apply. Do not apply
+   When step 1 found no entry, the plan repeats the lost apply. Do not apply
    it as it stands: apply a plan
    from this procedure only when each resource the lost apply touched shows
    `to import` or `to forget`, or a create, replace or destroy that steps 6 to 8

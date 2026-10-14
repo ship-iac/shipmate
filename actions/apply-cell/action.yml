@@ -223,7 +223,7 @@ runs:
       if: ${{ always() && steps.apply.outcome != 'skipped' && steps.init.outputs.restore-outcome == 'success' && steps.save-state.outputs.saved != 'true' }}
       shell: bash
       run: |
-        echo "::error::The apply step ran and its state was not saved or not verified. While this cell's apply check holds the reviewed plan, do not re-run this job or re-comment 'shipmate apply': either applies that plan again against the state from before the apply. Follow docs/troubleshooting.md section The apply step ran and its state was not saved; the import and forget plans it leads to apply as usual."
+        echo "::error::The apply step ran and its state was not saved or not verified. Never re-run this job or its workflow run, and do not re-comment 'shipmate apply' for this cell until the recovery has moved its state: either applies the reviewed plan again against the state from before the apply. Until then every plan of this stack, on any pull request, repeats the lost apply: apply none but the recovery's import and forget plans. Follow docs/troubleshooting.md section The apply step ran and its state was not saved."
         exit 1
 
     - name: Check the provider cache
@@ -267,7 +267,7 @@ runs:
         RESTORE_OUTCOME: ${{ steps.init.outputs.restore-outcome }}
         PLAN_DIGEST_OUTCOME: ${{ steps.plan-digest.outcome }}
         APPLY_OUTCOME: ${{ steps.apply.outcome }}
-        # `failure` exactly when the warning fired: it always ends exit 1.
+        # `failure` when the warning fired (it ends exit 1); anything but success or skipped is lost.
         LOST_SAVE_OUTCOME: ${{ steps.lost-save.outcome }}
       run: |
         set -euo pipefail

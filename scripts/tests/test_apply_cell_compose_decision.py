@@ -236,12 +236,20 @@ def test_cell_json_carries_exactly_the_contract_keys(monkeypatch, tmp_path, kwar
 
 @pytest.mark.parametrize(
     ("outcome", "lost"),
-    [("failure", True), ("success", False), ("skipped", False), ("", False)],
+    [
+        ("failure", True),
+        ("cancelled", True),
+        ("", True),
+        ("success", False),
+        ("skipped", False),
+    ],
 )
 def test_state_lost_is_the_lost_save_warning_having_fired(monkeypatch, tmp_path, outcome, lost):
-    """The warning step ends `exit 1` whenever it runs, so `failure` is exactly "it fired".
+    """The warning step ends `exit 1` whenever it runs, so `failure` is "it fired"; a cancelled or
+    unknown outcome counts as lost too (fail-closed).
 
-    Mutation: `!= "skipped"` in place of `== "failure"` (success reddens)."""
+    Mutations: `== "failure"` (cancelled reddens); `not in ("skipped",)` (success reddens);
+    `not in ("success",)` (skipped reddens)."""
     cell = _run_compose(monkeypatch, tmp_path, apply="success", lost_save=outcome)
     assert cell["state_lost"] is lost
 
