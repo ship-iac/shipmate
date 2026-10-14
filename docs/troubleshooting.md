@@ -803,11 +803,16 @@ merge, open a new pull request touching the stack.
 
 ### `plan artifact ... could not be decrypted: openssl failed`
 
-openssl itself failed on the reviewed plan artifact, after printing its own
-error: the artifact is truncated or corrupt. Nothing was applied, and the
-cell's `apply / <stack> / <env>` check stays pending. Re-plan: on an open pull
-request, comment `shipmate plan` or push; after the merge, open a new pull
-request touching the stack.
+openssl itself failed on the reviewed plan artifact, and its error above the
+refusal says why. Nothing was applied, and the cell's
+`apply / <stack> / <env>` check stays pending.
+
+- **The artifact is shorter than its 16-byte salted header.** Re-plan, as in
+  the section above. A longer truncated artifact decrypts without an openssl
+  error and refuses as `plan artifact does not decrypt to an OpenTofu plan`.
+- **openssl or the disk failed on the runner**, for example an openssl without
+  `-pbkdf2` or `-iter`, or no space for the temporary file. Fix the runner; a
+  re-plan fails the same way.
 
 ### `state cache entry ... is plaintext`
 
@@ -823,10 +828,17 @@ resource can collide with or be duplicated by its re-creation.
 
 ### `state cache entry ... could not be decrypted: openssl failed`
 
-openssl itself failed on the matched entry, after printing its own error: the
-entry is truncated or corrupt. `gh cache delete <key> --repo <owner>/<repo>`,
-with the key from the message, deletes it; the next restore uses the previous
-entry.
+openssl itself failed on the matched entry, and its error above the refusal
+says why.
+
+- **The entry is shorter than its 16-byte salted header.** It is truncated:
+  `gh cache delete <key> --repo <owner>/<repo>`, with the key from the message,
+  deletes it, and the next restore uses the previous entry. A longer truncated
+  entry decrypts without an openssl error and refuses as
+  `state cache entry ... does not decrypt to OpenTofu state`.
+- **openssl or the disk failed on the runner**, for example an openssl without
+  `-pbkdf2` or `-iter`, or no space for the temporary file. Fix the runner;
+  deleting the entry does not help.
 
 ### `state cache entry ... does not decrypt to OpenTofu state`
 

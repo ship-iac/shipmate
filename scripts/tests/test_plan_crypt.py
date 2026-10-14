@@ -77,35 +77,37 @@ _NOT_A_PLAN = (
 
 
 def test_decrypt_openssl_failure_names_the_artifact_and_leaves_no_temp(tmp_path, monkeypatch):
-    """A truncated ciphertext fails openssl itself, after it has created the output file.
+    """openssl exits non-zero on an artifact shorter than its 16-byte salted header, after it
+    has created the output file; 16 bytes or more decrypts with exit 0.
 
     Mutations: drop `_openssl`'s `finally` cleanup, and `.crypt.tmp` stays; drop the
     `CalledProcessError` handler, and a traceback replaces the `::error::` line; drop
     `failure=failure` from decrypt's `_openssl` call, and the generic line names no remedy.
     """
     monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    f = _write(tmp_path, b"Salted__abcd")
+    f = _write(tmp_path, b"Salted__0123456")
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(f))
     assert exc.value.code == (
-        f"::error::plan artifact `{f}` could not be decrypted: openssl failed (its error is "
-        "printed above). The artifact is truncated or corrupt. Nothing was applied. Re-plan: "
-        "comment shipmate plan or push, or after the merge open a new pull request touching the "
-        "stack."
+        f"::error::plan artifact `{f}` could not be decrypted: openssl failed, and its error "
+        "above says why. Nothing was applied. An artifact shorter than its 16-byte salted header "
+        "needs a re-plan: comment shipmate plan or push, or after the merge open a new pull "
+        "request touching the stack. An openssl or disk failure on the runner needs the runner "
+        "fixed; a re-plan fails the same way."
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
-    assert f.read_bytes() == b"Salted__abcd"
+    assert f.read_bytes() == b"Salted__0123456"
 
 
 def test_encrypt_openssl_failure_names_the_file(tmp_path, monkeypatch):
-    """Mutation: drop the `failure or` fallback's generic message, and encrypt reports `None`."""
+    """Mutation: drop the runner sentence from encrypt's message."""
     monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
     missing = str(tmp_path / "absent.otplan")
     with pytest.raises(SystemExit) as exc:
         pcx.encrypt(missing)
-    assert (
-        exc.value.code
-        == f"::error::openssl failed to encrypt `{missing}`; its error is printed above."
+    assert exc.value.code == (
+        f"::error::openssl failed to encrypt `{missing}`; its error is printed above. An openssl "
+        "or disk failure on the runner needs the runner fixed."
     )
     assert list(tmp_path.iterdir()) == []
 
@@ -289,21 +291,22 @@ def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypa
 
 
 def test_decrypt_state_openssl_failure_names_the_entry_and_its_remedy(tmp_path, monkeypatch):
-    """A truncated entry fails openssl itself, not the shape check.
+    """An entry shorter than its 16-byte salted header fails openssl itself.
 
     Mutation: drop `failure=failure` from decrypt_state's `_openssl` call, and the generic
     openssl line loses the cache key and the delete command.
     """
     monkeypatch.setenv("GITHUB_REPOSITORY", "ship-iac/sample")
     monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
-    f = _write(tmp_path, b"Salted__ab")
+    f = _write(tmp_path, b"Salted__0123456")
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt_state(str(f), KEY)
     assert exc.value.code == (
         "::error::state cache entry `state/app-net/dev-eu/123-1` could not be decrypted: openssl "
-        "failed (its error is printed above), so the entry is truncated or corrupt. tofu was not "
-        "run. `gh cache delete state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes the "
-        "entry, and the next restore uses the previous one."
+        "failed, and its error above says why. tofu was not run. An entry shorter than its "
+        "16-byte salted header is truncated: `gh cache delete state/app-net/dev-eu/123-1 --repo "
+        "ship-iac/sample` deletes it, and the next restore uses the previous one. An openssl or "
+        "disk failure on the runner needs the runner fixed; deleting the entry does not help."
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
 
@@ -385,3 +388,15 @@ def test_cli_decrypt_state_without_cache_key_prints_usage(tmp_path):
     """Mutation: let main accept `decrypt-state <file>` with 3 args."""
     with pytest.raises(SystemExit, match=r"^usage: plan-crypt"):
         pcx.main(["plan-crypt", "decrypt-state", str(_write(tmp_path))])
+
+
+def test_decrypt_a_16_byte_header_only_artifact_reaches_the_plan_check(tmp_path, monkeypatch):
+    """openssl decrypts a bare salted header to an empty file with exit 0.
+
+    Mutation: let `_is_plan` accept an empty file.
+    """
+    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    f = _write(tmp_path, b"Salted__01234567")
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt(str(f))
+    assert exc.value.code == _NOT_A_PLAN

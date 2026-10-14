@@ -312,9 +312,9 @@ creates all of them, including `shipmate-engine` and its branch policy:
   without an approving review").
 
   **A value can come from a GitHub variable.** Write `{vars: NAME}` in
-  place of any string, list items included, except the keys
-  [`../CONTRACT.md`](../CONTRACT.md) §Variable references names
-  (`apply: {vars: PROD_APPLY_ROLE}`), and define the name as a
+  place of any string, list items included (`apply: {vars: PROD_APPLY_ROLE}`),
+  except the keys [`../CONTRACT.md`](../CONTRACT.md) §Variable references
+  names, and define the name as a
   repository or organization variable. A resolved value is printed in job
   outputs and logs, so reference variables only, never secrets. Never define it
   on `shipmate-engine`: comment-ops and the plan summary bind that Environment,

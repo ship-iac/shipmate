@@ -852,9 +852,10 @@ the repository root, or none:
   cached file is encrypted with `SHIPMATE_PLAN_PASSPHRASE` (§Plan artifact
   encryption), because any workflow run, a fork's pull request included, can
   restore a default-branch cache entry. An empty passphrase refuses the restore
-  and the save. A plaintext entry, or one that does not decrypt to OpenTofu
-  state, fails the restore naming the matched cache key, so tofu never reads it
-  and the cell skips its save. A key-derivation change, a passphrase rotation
+  and the save. A plaintext entry, one openssl fails on (shorter than its
+  salted header, or an openssl or disk failure on the runner), or one that does
+  not decrypt to OpenTofu state fails the restore naming the matched cache key,
+  so tofu never reads it and the cell skips its save. A key-derivation change, a passphrase rotation
   and different values on `<env>-plan` and `<env>-apply` each make entries fail
   that way; `docs/troubleshooting.md` §`state cache entry ... does not decrypt
   to OpenTofu state` gives each remedy.
@@ -2800,13 +2801,14 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Required.** An empty or unset passphrase refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
-- **Fail-safe on mismatch.** apply-cell refuses in three cases. An artifact
-  without the `Salted__` magic header refuses and tells you to re-plan. An
-  artifact openssl fails on (truncated or corrupt) refuses and tells you to
-  re-plan. An artifact that does not decrypt to a plan file refuses by naming
+- **Fail-safe on mismatch.** An artifact without the `Salted__` magic header
+  refuses and tells you to re-plan. An artifact openssl fails on refuses and
+  says to re-plan when it is shorter than its 16-byte salted header, or to fix
+  the runner when openssl or the disk failed there. An artifact that does not
+  decrypt to a plan file refuses by naming
   the causes (a plan/apply value mismatch, a rotated passphrase, another key
   derivation or a corrupt artifact) and pointing to `docs/troubleshooting.md`
-  for each remedy. The apply check stays pending in every case.
+  for each remedy. The apply check stays pending in each case.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and

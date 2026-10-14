@@ -43,7 +43,7 @@ def _is_encrypted(path):
     return _starts_with(path, MAGIC)
 
 
-def _openssl(path, *, decrypt, accept=None, failure=None):
+def _openssl(path, *, decrypt, failure, accept=None):
     # The ONLY place the openssl flags live (coupling: plan-cell, apply-cell, actions/state).
     # openssl enc cannot read and write the same file, so go via a temp sibling, checked
     # by `accept` before the atomic replace. -pass env: keeps the secret out of argv.
@@ -74,10 +74,7 @@ def _openssl(path, *, decrypt, accept=None, failure=None):
         os.replace(tmp, path)
         return True
     except subprocess.CalledProcessError:
-        verb = "decrypt" if decrypt else "encrypt"
-        raise SystemExit(
-            failure or f"::error::openssl failed to {verb} `{path}`; its error is printed above."
-        ) from None
+        raise SystemExit(failure) from None
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -108,16 +105,21 @@ def _purge_command(prefix):
 def encrypt(path):
     """Encrypt in place, or refuse without a passphrase."""
     _require_passphrase()
-    _openssl(path, decrypt=False)
+    failure = (
+        f"::error::openssl failed to encrypt `{path}`; its error is printed above. An openssl or "
+        "disk failure on the runner needs the runner fixed."
+    )
+    _openssl(path, decrypt=False, failure=failure)
 
 
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on plaintext, when openssl fails (a truncated or corrupt
-    artifact), and on a result that is neither a zip archive nor OpenTofu's encrypted-plan
-    envelope (another passphrase or key derivation, or a corrupt artifact), leaving the
-    ciphertext in place. Never prints the file.
+    Refuses without a passphrase, on plaintext, when openssl fails (an artifact shorter than
+    its salted header, or the runner's openssl or disk), and on a result that is neither a
+    zip archive nor OpenTofu's encrypted-plan envelope (another passphrase or key
+    derivation, or a corrupt artifact), leaving the ciphertext in place. Never prints the
+    file.
     """
     _require_passphrase()
     if not _is_encrypted(path):
@@ -126,9 +128,10 @@ def decrypt(path):
             f"Re-plan to produce an encrypted plan: {_REPLAN}"
         )
     failure = (
-        f"::error::plan artifact `{path}` could not be decrypted: openssl failed (its error is "
-        "printed above). The artifact is truncated or corrupt. Nothing was applied. "
-        f"Re-plan: {_REPLAN}"
+        f"::error::plan artifact `{path}` could not be decrypted: openssl failed, and its "
+        "error above says why. Nothing was applied. An artifact shorter than its 16-byte salted "
+        f"header needs a re-plan: {_REPLAN} An openssl or disk failure on the runner needs the "
+        "runner fixed; a re-plan fails the same way."
     )
     if not _openssl(path, decrypt=True, accept=_is_plan, failure=failure):
         raise SystemExit(
@@ -164,8 +167,9 @@ def _is_state(path):
 def decrypt_state(path, cache_key):
     """Decrypt a restored state cache entry in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on a plaintext entry, and on a result that is not a
-    JSON object with `version` or `encryption_version` (saved with another passphrase or
+    Refuses without a passphrase, on a plaintext entry, when openssl fails (an entry
+    shorter than its salted header, or the runner's openssl or disk), and on a result that
+    is not a JSON object with `version` or `encryption_version` (saved with another passphrase or
     key derivation, or a corrupt entry), leaving the ciphertext in place. Never prints the
     file's contents.
     """
@@ -182,9 +186,11 @@ def decrypt_state(path, cache_key):
         )
     delete = f"gh cache delete {cache_key}{_repo_flag()}"
     failure = (
-        f"::error::state cache entry `{cache_key}` could not be decrypted: openssl failed (its "
-        "error is printed above), so the entry is truncated or corrupt. tofu was not run. "
-        f"`{delete}` deletes the entry, and the next restore uses the previous one."
+        f"::error::state cache entry `{cache_key}` could not be decrypted: openssl failed, and "
+        "its error above says why. tofu was not run. An entry shorter than its 16-byte salted "
+        f"header is truncated: `{delete}` deletes it, and the next restore uses the previous "
+        "one. An openssl or disk failure on the runner needs the runner fixed; deleting the "
+        "entry does not help."
     )
     if not _openssl(path, decrypt=True, accept=_is_state, failure=failure):
         raise SystemExit(
