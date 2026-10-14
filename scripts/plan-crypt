@@ -12,10 +12,11 @@ unsalted (plaintext) file.
 
 AES-256-CTR is an unauthenticated stream cipher: a WRONG passphrase, or a file
 written with another iteration count, decrypts to garbage WITH EXIT 0 -- it does
-NOT error. For a plan, the fail-safe is downstream: apply-cell's render step fails
-on OpenTofu's own plan-file error from `tofu show`, before any apply step, so the
-apply check stays pending. For state, decrypt-state checks the result itself,
-because tofu reads an empty state file as no state.
+NOT error. For a plan, the fail-safe is downstream and before any apply step: at
+the state restore (cell-init's decrypt_state) when a local-backend cell has a
+cached entry, otherwise at apply-cell's render step, on OpenTofu's own plan-file
+error from `tofu show`. The apply check stays pending. For state, decrypt-state
+checks the result itself, because tofu reads an empty state file as no state.
 """
 
 import json
@@ -93,8 +94,10 @@ def encrypt(path):
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse without a passphrase or on plaintext.
 
-    A wrong passphrase or iteration count is not detected here: apply-cell's render step
-    fails on OpenTofu's own plan-file error from `tofu show`, before any apply step.
+    A wrong passphrase or another key derivation is not detected here. The cell fails
+    before any apply step: at the state restore (cell-init's decrypt_state) when a
+    local-backend cell has a cached entry, otherwise at apply-cell's render step, on
+    OpenTofu's own plan-file error from `tofu show`.
     """
     _require_passphrase()
     if not _is_encrypted(path):

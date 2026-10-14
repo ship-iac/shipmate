@@ -82,7 +82,7 @@ def test_encrypt_derives_the_key_with_600000_iterations(tmp_path, monkeypatch):
 
 def test_wrong_passphrase_yields_garbage_not_an_error(tmp_path, monkeypatch):
     # Documents the CTR fact: wrong pass decrypts to garbage WITHOUT raising.
-    # The fail-safe is apply-cell's `tofu show` render step refusing the garbage plan file.
+    # The fail-safe is downstream: cell-init's state restore or apply-cell's `tofu show`.
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
     pcx.decrypt(str(f))

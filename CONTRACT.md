@@ -2753,10 +2753,11 @@ required `plan-passphrase` input before upload, using a single symmetric cipher:
 `openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -salt`, passphrase supplied via
 `-pass env:` (never on the command line). The key derives with 600,000
 PBKDF2-SHA256 iterations, so a plan artifact or cached state entry written with
-any other count decrypts to garbage (a plan apply then fails at `apply-cell`'s
-render step, on OpenTofu's own plan-file error from `tofu show`, before any
-apply step; a state restore refuses at `decrypt_state`). `apply-cell` decrypts it after download on every
-apply path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
+any other count decrypts to garbage. A plan apply then fails before any apply
+step: at the state restore (`cell-init`'s `decrypt_state`) when a local-backend
+cell has a cached entry, otherwise at `apply-cell`'s render step, on OpenTofu's
+own plan-file error from `tofu show`. `apply-cell` decrypts the plan after
+download on every apply path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
 reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
 forms. The same cipher and secret encrypt a local backend's cached state
@@ -2793,10 +2794,12 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   before any cache call. No plan artifact uploads unencrypted.
 - **Fail-safe on mismatch.** apply-cell refuses an artifact without the
   `Salted__` magic header, with a re-plan instruction, rather than apply it. A
-  wrong passphrase is not detected
-  at decrypt (AES-CTR is unauthenticated and decrypts to garbage without error);
-  `apply-cell`'s render step fails on OpenTofu's own plan-file error from
-  `tofu show`, before any apply step, and the apply check stays pending.
+  wrong passphrase or another key derivation is not detected at decrypt
+  (AES-CTR is unauthenticated and decrypts to garbage without error). The cell
+  fails before any apply step: at the state restore (`cell-init`'s
+  `decrypt_state`) when a local-backend cell has a cached entry, otherwise at
+  `apply-cell`'s render step, on OpenTofu's own plan-file error from
+  `tofu show`. The apply check stays pending.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and
