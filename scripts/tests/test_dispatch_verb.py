@@ -544,8 +544,9 @@ def test_a_failed_dispatch_posts_the_shared_failure_reply(tmp_path):
 
 def _answering_stub(answer, reply_exit=0):
     """A gh stub that answers the dispatch call with `answer` on stdout and a warning on stderr,
-    records each call's token and argv, saves the reply's body, and exits `reply_exit` on the
-    reply call. The dispatch call is the one whose API path argument is a dispatches path."""
+    records each call's token and argv, saves the reply's body and the run id handed to
+    `reply-comment`, and exits `reply_exit` on the reply call. The dispatch call is the one
+    whose API path argument is a dispatches path."""
     return (
         "#!/bin/bash\nprintf 'token=%s\\n' \"$GH_TOKEN\" >> argv.txt\n"
         "printf '%s\\n' \"$@\" >> argv.txt\n"
@@ -553,6 +554,7 @@ def _answering_stub(answer, reply_exit=0):
         "  echo 'warning: gh noise on a successful call' >&2\n"
         f"  cat <<'ANSWER'\n{answer}\nANSWER\n"
         "  exit 0\nfi; done\n"
+        "printf '%s' \"${SHIPMATE_REPLY_RUN_ID-}\" > run_id.txt\n"
         'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
         "done\n"
         f"exit {reply_exit}\n"
@@ -605,24 +607,25 @@ def test_a_started_run_gets_a_reply_linking_it(tmp_path, verb, environment, head
 
 
 @pytest.mark.parametrize(
-    "answer",
+    ("answer", "passed_id"),
     [
-        "",
-        '{"workflow_run_id":"abc"}',
-        '{"workflow_run_id":123456789012345678901}',
-        # Over Linux's 128 KiB per-variable exec limit and Windows' 32 KiB environment block.
-        '{"workflow_run_id":"' + "9" * 200_000 + '"}',
+        ("", ""),
+        ('{"workflow_run_id":"abc"}', "abc"),
+        ('{"workflow_run_id":123456789012345678901}', "123456789012345678901"),
+        # Over Linux's 128 KiB per-variable exec limit, so it must be cut before exec.
+        ('{"workflow_run_id":"' + "9" * 200_000 + '"}', "9" * 21),
     ],
     ids=["204-empty", "non-numeric", "21-digits", "oversized"],
 )
 @bash_only
-def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path, answer):
+def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path, answer, passed_id):
     """A 204 (no body), a non-numeric id, a 21-digit id and an oversized one all yield the
-    no-link notice, and the step exits 0: the run has started whatever the answer says.
+    no-link notice, and the step exits 0: the run has started whatever the answer says. The
+    id reaches `reply-comment` cut to 21 characters, whole otherwise.
 
     Mutations: remove the `|| run_id=""` parse guard (the 204 case exits non-zero under
-    `set -e`); pass `"$run_id"` uncut (the oversized value cannot be exec'd, so no reply is
-    posted). The id check itself is `_shipmate.is_run_id`, pinned in `test_reply_comment.py`.
+    `set -e`); pass `"$run_id"` uncut (the oversized case hands over 200 000 characters).
+    The id check itself is `_shipmate.is_run_id`, pinned in `test_reply_comment.py`.
     """
     result, _ = _run_dispatch(
         tmp_path, verb="apply", environment="dev-eu", gh_stub=_answering_stub(answer)
@@ -633,6 +636,7 @@ def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path,
         "⚪ started the apply run; it is listed in this repository's Actions tab\n\n"
         f"[run]({_RUN_URL})"
     )
+    assert (tmp_path / "run_id.txt").read_text(encoding="utf-8") == passed_id
 
 
 @bash_only
