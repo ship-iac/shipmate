@@ -784,10 +784,9 @@ before any apply step, and its `apply / <stack> / <env>` check stays pending.
 - **`plan artifact does not decrypt to an OpenTofu plan`.** The decrypted file
   is neither a zip archive, which an OpenTofu plan file is, nor the JSON
   envelope OpenTofu's own plan encryption writes. AES-256-CTR decrypts
-  with any key, so the cause is a `SHIPMATE_PLAN_PASSPHRASE` that differs from
-  the one that encrypted the plan, a plan encrypted with another key derivation
-  (by an earlier engine release, [`../CONTRACT.md`](../CONTRACT.md) §Plan
-  artifact encryption), or a corrupt artifact.
+  with any key, so the plan was encrypted with another passphrase or key
+  derivation ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), or
+  the artifact is corrupt.
 
 The fix is a re-plan with the current passphrase and engine: on an open pull
 request, comment `shipmate plan` or push; after the merge, open a new pull

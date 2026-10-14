@@ -44,7 +44,7 @@ def _is_encrypted(path):
 
 
 def _openssl(path, *, decrypt, accept=None):
-    # The ONLY place the openssl flags live (coupling: plan-cell <-> apply-cell).
+    # The ONLY place the openssl flags live (coupling: plan-cell, apply-cell, actions/state).
     # openssl enc cannot read and write the same file, so go via a temp sibling, checked
     # by `accept` before the atomic replace. -pass env: keeps the secret out of argv.
     tmp = path + ".crypt.tmp"
@@ -67,12 +67,20 @@ def _openssl(path, *, decrypt, accept=None):
     ]
     if decrypt:
         args.insert(2, "-d")
-    subprocess.run(args, check=True)  # noqa: S603, S607 - fixed argv, no shell; secret via env, openssl is a runner prereq
-    if accept and not accept(tmp):
-        os.remove(tmp)
-        return False
-    os.replace(tmp, path)
-    return True
+    try:
+        subprocess.run(args, check=True)  # noqa: S603, S607 - fixed argv, no shell; secret via env, openssl is a runner prereq
+        if accept and not accept(tmp):
+            return False
+        os.replace(tmp, path)
+        return True
+    except subprocess.CalledProcessError:
+        verb = "decrypt" if decrypt else "encrypt"
+        raise SystemExit(
+            f"::error::openssl failed to {verb} `{path}`; its error is printed above."
+        ) from None
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
 
 def _require_passphrase():
@@ -118,10 +126,9 @@ def decrypt(path):
         )
     if not _openssl(path, decrypt=True, accept=_is_plan):
         raise SystemExit(
-            "::error::plan artifact does not decrypt to an OpenTofu plan: "
-            "SHIPMATE_PLAN_PASSPHRASE or the key derivation differs from the one that encrypted "
-            "it (an earlier engine release used another derivation), or the artifact is corrupt. "
-            f"Nothing was applied. Re-plan: {_REPLAN}"
+            "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with "
+            "another passphrase or key derivation, or it is corrupt. Nothing was applied. "
+            f"Re-plan: {_REPLAN}"
         )
 
 

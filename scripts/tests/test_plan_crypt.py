@@ -4,8 +4,8 @@ import pytest
 from _loader import load_script, step_by
 
 pcx = load_script("plan-crypt")
+
 # A plaintext OpenTofu plan is a zip archive, so the payload carries the zip local-file header.
-# A plaintext OpenTofu plan is a zip archive; decrypt refuses a result without its header.
 PLAIN = b"PK\x03\x04SECRET_PLAN_BODY\nresource null_resource.x {}\n"
 # The top-level keys, in order, of a plan OpenTofu v1.12.4 writes under an
 # `encryption { plan { ... } }` block (pbkdf2 key provider, aes_gcm method); values shortened.
@@ -68,11 +68,27 @@ def _raw_openssl(src, dst, *flags):
 
 
 _NOT_A_PLAN = (
-    "::error::plan artifact does not decrypt to an OpenTofu plan: SHIPMATE_PLAN_PASSPHRASE or the "
-    "key derivation differs from the one that encrypted it (an earlier engine release used "
-    "another derivation), or the artifact is corrupt. Nothing was applied. Re-plan: comment "
+    "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with another "
+    "passphrase or key derivation, or it is corrupt. Nothing was applied. Re-plan: comment "
     "shipmate plan or push, or after the merge open a new pull request touching the stack."
 )
+
+
+def test_decrypt_openssl_failure_names_the_file_and_leaves_no_temp(tmp_path, monkeypatch):
+    """A truncated ciphertext fails openssl itself, after it has created the output file.
+
+    Mutations: drop `_openssl`'s `finally` cleanup, and `.crypt.tmp` stays; drop the
+    `CalledProcessError` handler, and a traceback replaces the `::error::` line.
+    """
+    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    f = _write(tmp_path, b"Salted__ab")
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt(str(f))
+    assert (
+        exc.value.code == f"::error::openssl failed to decrypt `{f}`; its error is printed above."
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
+    assert f.read_bytes() == b"Salted__ab"
 
 
 def test_decrypt_refuses_a_default_iteration_ciphertext_and_keeps_it(tmp_path, monkeypatch):
