@@ -443,10 +443,10 @@ def test_a_fully_resolved_run_leaves_nothing_for_the_stranded_step_to_fail_on(tm
     assert run_step(tmp_path, GH_STUB + _fail_body(), env, timeout=120).returncode == 0
 
 
-#: The PATCH body as gh receives it, hand-written; the here-string adds the trailing newline.
+#: The PATCH body gh receives, written by hand rather than read from the action.
 COMPLETE_BODY = (
     '{"status": "completed", "conclusion": "success", "output": {"title": "applied", '
-    '"summary": "Applied the reviewed plan for this stack x environment."}}\n'
+    '"summary": "Applied the reviewed plan for this stack x environment."}}'
 )
 
 

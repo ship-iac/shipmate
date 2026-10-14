@@ -28,12 +28,13 @@ CONSUMER_WORKFLOW = "shipmate.yml"
 
 
 def test_the_dispatch_step_runs_the_body_builder_this_file_exercises():
-    # A whole run line, not a substring: the recording `gh` stub never reads the body, so a
-    # commented-out builder would leave every body assertion here exercising a script nothing
-    # runs, and production would POST an empty --input.
+    # A whole run line, not a substring: a substring also matches a commented-out builder. The
+    # body tests in this file run `scripts/dispatch-body` directly, so this line is what ties
+    # them to the script the step runs.
     assert (
         'body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body") '
-        "|| { say_no_run_started; exit 1; }"
+        '|| { echo "::error::could not build the dispatch request body"; '
+        "say_no_run_started; exit 1; }"
     ) in run_lines(step_by(DISPATCH_ACTION, name="workflow_dispatch apply"))
 
 
@@ -153,13 +154,22 @@ def _create_stub_commands(tmp_path):
     return str(tmp_path), str(python3_path), str(gh_path)
 
 
-def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB, unset=()):
+def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB, failing_script=""):
     """Run the shipped step with a gh stub that records its argv; returns the
-    CompletedProcess and the recorded argv text. `unset` names variables removed from the
-    step's env."""
-    path_dir, _, gh_path = _create_stub_commands(tmp_path)
+    CompletedProcess and the recorded argv text. When `failing_script` names an engine script,
+    `python3` exits 1 for that script and runs every other one."""
+    path_dir, python3_path, gh_path = _create_stub_commands(tmp_path)
     Path(gh_path).write_text(gh_stub)
     Path(gh_path).chmod(0o755)
+    if failing_script:
+        real = tmp_path / "python3-real"
+        Path(python3_path).rename(real)
+        Path(python3_path).write_text(
+            f'#!/bin/bash\nif [[ "$1" == */{failing_script} ]]; then exit 1; fi\n'
+            f'exec "{real.as_posix()}" "$@"\n',
+            newline="\n",
+        )
+        Path(python3_path).chmod(0o755)
 
     env = os.environ.copy()
     env["PATH"] = f"{path_dir}:{env.get('PATH', '')}"
@@ -179,8 +189,6 @@ def _run_dispatch(tmp_path, verb, environment="", gh_stub=RECORDING_GH_STUB, uns
     # `mktemp` honours TMPDIR, so a temporary file the step leaves behind is visible here.
     (tmp_path / "tmp").mkdir()
     env["TMPDIR"] = str(tmp_path / "tmp")
-    for name in unset:
-        del env[name]
 
     result = run_step(tmp_path, _extract_dispatch_run_block(), env)
     argv_file = tmp_path / "argv.txt"
@@ -243,7 +251,7 @@ def test_every_verb_dispatches_the_one_consumer_file(tmp_path, verb):
     job. What kept the verbs apart before was the filename; what keeps them apart now is the
     five `if:` expressions `shipmate doctor`'s `shipmate.yml` probe compares whole.
 
-    Mutation: make the `case` resolve a per-verb filename again.
+    Mutation: make the `case` resolve a per-verb filename.
     """
     result, argv = _run_dispatch(tmp_path, verb=verb, environment="dev-eu")
     assert result.returncode == 0, f"{verb} dispatch failed: {result.stdout}{result.stderr}"
@@ -383,16 +391,45 @@ def test_a_failed_dispatch_prints_the_api_answer_to_the_log(tmp_path):
 
 @bash_only
 def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(tmp_path):
-    """`dispatch-body` fails here because `DISPATCH_REF` is unset. The step exits 1 without
-    the dispatch call, and the failure reply carrying the run link is posted.
+    """`python3` exits 1 for `dispatch-body` here. The step exits 1 without the dispatch call,
+    annotates the failure, and posts the failure reply carrying the run link.
 
-    Mutation: drop the `|| { say_no_run_started; exit 1; }` handler from the body build.
+    Mutations: drop the body build's `|| { ...; say_no_run_started; exit 1; }` handler; drop
+    the handler's `::error::` echo.
     """
-    result, argv = _run_dispatch(tmp_path, verb="apply", unset=("DISPATCH_REF",))
+    result, argv = _run_dispatch(tmp_path, verb="apply", failing_script="dispatch-body")
     assert result.returncode == 1, f"a failed body build must fail the step: {result.stdout}"
+    assert "::error::could not build the dispatch request body" in result.stdout.splitlines(), (
+        f"the failure must be annotated: {result.stdout}"
+    )
     assert _DISPATCH_PATH not in argv, f"a failed body build must dispatch nothing: {argv!r}"
     assert "/issues/42/comments" in argv and _RUN_URL in argv, (
         f"the commenter must be told no run started: {argv!r}"
+    )
+
+
+#: Saves the dispatch call's stdin to `sent.txt`; every other call succeeds silently.
+_STDIN_SAVING_STUB = (
+    "#!/bin/bash\n"
+    'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
+    "  cat > sent.txt\n  exit 0\nfi; done\n"
+)
+
+
+@bash_only
+def test_the_built_body_reaches_the_dispatch_call_on_stdin_whole(tmp_path):
+    """gh reads the request body from stdin (`--input -`), and it is the builder's output
+    byte for byte.
+
+    Mutation: pass `"${body:0:5}"` to gh instead of `"$body"`.
+    """
+    result, _ = _run_dispatch(
+        tmp_path, verb="apply", environment="dev-eu", gh_stub=_STDIN_SAVING_STUB
+    )
+    assert result.returncode == 0, f"dispatch failed: {result.stdout}{result.stderr}"
+    assert (tmp_path / "sent.txt").read_text(encoding="utf-8") == (
+        '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
+        '"environment": "dev-eu"}, "return_run_details": true}'
     )
 
 
@@ -462,7 +499,7 @@ def test_a_dispatch_against_a_repo_without_shipmate_yml_prints_the_layout_messag
     'workflow_dispatch' trigger (HTTP 422)`; one declaring fewer inputs than the body names
     answers `Unexpected inputs provided`.
 
-    Mutations: scope the condition to one verb again and the other two stop being explained;
+    Mutations: scope the condition to one verb and the other two stop being explained;
     drop any one of the three message-text halves and its shape stops being explained; point
     the remedy at `docs/releasing.md`, or reword any other part of the message, and the
     whole-value comparison reddens; delete the `$err` `printf` line and the hint prints without
@@ -639,7 +676,7 @@ def test_a_started_run_gets_a_reply_linking_it(tmp_path, verb, environment, head
     gh warning on stderr, which must not reach the parsed answer.
 
     Mutations: parse `html_url` instead of `workflow_run_id`; capture the dispatch with `2>&1`
-    again (the warning corrupts the JSON, and the link is lost); pass no run id to the reply;
+    (the warning corrupts the JSON, and the link is lost); pass no run id to the reply;
     skip the reply for one verb (`[ "$VERB" = plan ] ||`); drop `GH_TOKEN="$COMMENT_TOKEN"`
     from `reply`.
     """

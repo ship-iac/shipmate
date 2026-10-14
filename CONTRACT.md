@@ -1114,8 +1114,8 @@ dispatch time on that comment-handling run — for every verb alike, since they 
 run is not visible from the pull request, so every refusal in the dispatch step
 — an unwired verb, an unknown one, a failure building the request, and a
 rejected API call alike — also tries to post a `🔴 failed:` reply there whose
-footer links the run. The run holds the
-error; the failure reply never carries the API's answer. A failure reply that
+footer links the run. The run holds the error; the failure reply never carries
+the API's answer. A failure reply that
 cannot be posted is a warning on the comment-handling run, and the step still
 fails with its own status. A dispatch that succeeded then tries to post the
 started-run reply, a `⚪` notice:

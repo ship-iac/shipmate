@@ -83,12 +83,12 @@ runs:
           plan|apply|unlock) WORKFLOW=shipmate.yml ;;
           *) echo "::error::verb must be plan, apply or unlock (got: $VERB)"; say_no_run_started; exit 1 ;;
         esac
-        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body") || { say_no_run_started; exit 1; }
-        errfile=$(mktemp) || { say_no_run_started; exit 1; }
+        body=$(python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body") || { echo "::error::could not build the dispatch request body"; say_no_run_started; exit 1; }
+        errfile=$(mktemp) || { echo "::error::could not create a temporary file for the dispatch"; say_no_run_started; exit 1; }
         trap 'rm -f -- "$errfile"' EXIT
         rc=0
         # stdout alone is the API's answer, parsed below; gh writes its own messages to stderr.
-        out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input - <<<"$body" 2>"$errfile") || rc=$?
+        out=$(printf '%s' "$body" | gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input - 2>"$errfile") || rc=$?
         err=$(<"$errfile")
         [ -z "$out" ] || printf '%s\n' "$out"
         [ -z "$err" ] || printf '%s\n' "$err"

@@ -110,7 +110,7 @@ runs:
           [ -z "$id" ] && continue
           ok=""
           for _ in 1 2 3 4 5; do
-            if gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input - <<<"$body" >/dev/null; then ok=1; break; fi
+            if printf '%s' "$body" | gh api -X PATCH "repos/$GITHUB_REPOSITORY/check-runs/$id" --input - >/dev/null; then ok=1; break; fi
             sleep 3
           done
           [ -n "$ok" ] || { echo "::error::failed to complete apply check $id after retries"; exit 1; }
