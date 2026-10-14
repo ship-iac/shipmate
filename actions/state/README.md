@@ -47,12 +47,12 @@ call.
   state file.
 
 **The cache is not durable storage**: GitHub can evict an entry at any time,
-and a restore then uses the next-older entry or none. The local-backend sample
-stacks use `random_pet` (and `terraform_data` in `repo-example-stacks`), which
-re-create on a cache miss; a real resource is duplicated or collides. A save
-after an apply is verified, and a lost one fails the apply cell: follow
-`docs/troubleshooting.md` §`The apply step ran and its state was not saved`.
-The small window
-for concurrent read/modify/write races is closed by the per-stack x environment
-`concurrency` group that serializes applies and unlocks; `actions/state` itself makes no
+and a restore then uses the next-older entry or none. Either way the state
+lacks what later applies recorded, so the next plan re-creates it: harmless for
+the local-backend samples' `random_pet` (and `terraform_data` in
+`repo-example-stacks`), a duplicate or collision for a real resource.
+`docs/troubleshooting.md` §`The apply step ran and its state was not saved`
+covers a lost save and a lost entry. The small window for concurrent
+read/modify/write races is closed by the per-stack x environment `concurrency`
+group that serializes applies and unlocks; `actions/state` itself makes no
 locking guarantees.
