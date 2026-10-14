@@ -104,9 +104,8 @@ runs:
         else
           echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF)"
         fi
-        # The run has started, so nothing below may fail the step: the reply is reviewer-facing and
-        # degrades to a warning. Of the API's answer, which has no bounded length, only what python
-        # prints for `workflow_run_id` is passed on, cut to 21 characters so an oversized value
-        # cannot fail exec; `reply-comment` links it only if it is 1-20 digits.
+        # The run has started, so nothing below may fail the step: the reply degrades to a warning.
+        # Only `workflow_run_id` is passed on, cut to 21 characters so an oversized value cannot
+        # fail exec; `reply-comment` checks it.
         run_id=$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin)["workflow_run_id"])' 2>/dev/null) || run_id=""
         reply started "" "${run_id:0:21}" || echo "::warning::could not post the dispatch reply; the run started"

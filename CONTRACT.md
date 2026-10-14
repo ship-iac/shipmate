@@ -1116,8 +1116,8 @@ run is not visible from the pull request, so every refusal in the dispatch step
 post a `🔴 failed:` reply there whose footer links the run. The run holds the
 error; the failure reply never carries the API's answer. A failure reply that
 cannot be posted is a warning on the comment-handling run, and the step still
-fails with the dispatch's status. A dispatch that succeeded then replies in one
-of these ways, as a `⚪` notice, the started-run reply:
+fails with its own status. A dispatch that succeeded then tries to post the
+started-run reply, a `⚪` notice:
 
 - With a usable run id it reads `started [the <verb> run](<url>)`, linking the
   run it started by a URL the engine builds from the `workflow_run_id` the API

@@ -12,9 +12,9 @@ script, so every one carries the shared header and footer from `summary-comment`
 - `SHIPMATE_REPLY_TEXT`: the reason or notice, posted unescaped. Engine text, holding a
   commenter's text only inside a code span (`comment-parse`'s `_quotable`). Not read for
   `started`.
-- `SHIPMATE_REPLY_RUN_ID`: read for `started` only, the raw `workflow_run_id` of the dispatch
-  answer. When it is 1 to 20 digits the notice links that run (`started_text`); otherwise it
-  says where the run is listed.
+- `SHIPMATE_REPLY_RUN_ID`: read for `started` only, the `workflow_run_id` of the dispatch
+  answer, unchecked but cut to 21 characters by the caller. When it is 1 to 20 digits the
+  notice links that run (`started_text`); otherwise it says where the run is listed.
 
 The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBER` of
 `GITHUB_REPOSITORY`; gh's response is discarded and nothing is printed. Any argument exits 1 with
