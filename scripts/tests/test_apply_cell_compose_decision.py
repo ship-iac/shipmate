@@ -69,14 +69,11 @@ def _run_compose(
     return json.loads(cell_path.read_text(encoding="utf-8"))
 
 
-#: Hand-written, never read from FAILSAFES; shared by the parametrized row and the precedence test.
+#: Hand-written, never read from FAILSAFES.
 _DECRYPT_REASON = (
-    "plan artifact could not be decrypted: with no passphrase, forward SHIPMATE_PLAN_PASSPHRASE "
-    "from the calling `apply` or `deploy` job, and set it as a repository or organization secret "
-    "or on `<env>-apply` too, not on `<env>-plan` alone; with different values on `<env>-plan` "
-    "and `<env>-apply`, set `<env>-plan`'s to `<env>-apply`'s value, then re-plan; a plaintext "
-    "or corrupt artifact, or one encrypted with a rotated passphrase or another key derivation, "
-    "needs a re-plan; an openssl error is in the job log"
+    "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt artifact, "
+    "another key derivation, a rotated passphrase, or different values on <env>-plan and "
+    "<env>-apply); docs/troubleshooting.md gives each remedy"
 )
 
 #: Every outcome an all-green cell reads: each fail-safe and the apply succeeded. Hand-written, as
@@ -135,8 +132,8 @@ _ALL_SUCCESS = {
         pytest.param("restore", "state restore failed", id="restore_state"),
         pytest.param(
             "plan_digest",
-            "the stored plan does not render to the plan text that was reviewed, or tofu cannot "
-            "read it (a tofu or provider version changed); re-plan",
+            "the stored plan cannot be rendered, or does not render to the plan text that was "
+            "reviewed; re-plan",
             id="plan_digest",
         ),
     ],
@@ -231,3 +228,18 @@ def test_cell_json_carries_exactly_the_four_contract_keys_all_strings(
     for key, value in cell.items():
         assert isinstance(value, str), f"{key} is {type(value).__name__}, not str: {value!r}"
     assert cell["result"] in ("applied", "failed", "blocked")
+
+
+def test_the_decrypt_reason_renders_without_escaped_entities_in_a_code_span(monkeypatch, tmp_path):
+    """The apply comment escapes `<`/`>` in a reason; outside a code span the entity renders as
+    the character, inside one it shows as `&lt;`.
+
+    Mutation: backtick `<env>-plan` in the DECRYPT reason.
+    """
+    cell = _run_compose(monkeypatch, tmp_path, **{**_ALL_SUCCESS, "decrypt": "failure"})
+    row = {"status": "blocked", "reason": cell["reason"]}
+    assert load_script("apply-comment")._state(row) == (
+        "blocked: plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
+        "artifact, another key derivation, a rotated passphrase, or different values on "
+        "&lt;env&gt;-plan and &lt;env&gt;-apply); docs/troubleshooting.md gives each remedy"
+    )

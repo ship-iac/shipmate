@@ -126,13 +126,11 @@ def decrypt(path):
         )
     if not _openssl(path, decrypt=True, accept=_is_plan):
         raise SystemExit(
-            "::error::plan artifact does not decrypt to an OpenTofu plan. Nothing was applied. "
-            "If the plan and apply sides read different SHIPMATE_PLAN_PASSPHRASE values "
-            "(different secrets on `<env>-plan` and `<env>-apply`), set `<env>-plan`'s secret "
-            "to `<env>-apply`'s value, never the reverse (apply cells saved the cached state), "
-            "then re-plan; a re-plan alone fails the same way. If the plan was encrypted with a "
-            "passphrase since rotated or another key derivation, or the artifact is corrupt, "
-            f"re-plan: {_REPLAN}"
+            "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with "
+            "another key derivation or a rotated passphrase, the plan and apply sides read "
+            "different SHIPMATE_PLAN_PASSPHRASE values, or it is corrupt. Nothing was applied. "
+            "docs/troubleshooting.md section `plan artifact does not decrypt to an OpenTofu "
+            "plan` gives each remedy."
         )
 
 
@@ -147,7 +145,9 @@ def _json_keys(path):
 
 def _is_plan(path):
     # OpenTofu's own plan encryption writes a JSON envelope holding `encryption_version`.
-    return _starts_with(path, PLAN_MAGIC) or "encryption_version" in _json_keys(path)
+    if _starts_with(path, PLAN_MAGIC):
+        return True
+    return _starts_with(path, b"{") and "encryption_version" in _json_keys(path)
 
 
 def _is_state(path):
@@ -174,23 +174,21 @@ def decrypt_state(path, cache_key):
             "A sample stack's null and random resources re-create; a real resource can "
             "collide with or be duplicated by its re-creation."
         )
-    delete = f"`gh cache delete {cache_key}{_repo_flag()}` deletes it and the next restore uses"
+    delete = f"gh cache delete {cache_key}{_repo_flag()}"
     failure = (
         f"::error::state cache entry `{cache_key}` could not be decrypted: openssl failed (its "
-        f"error is printed above), so the entry is truncated or corrupt. tofu was not run. "
-        f"{delete} the previous one."
+        "error is printed above), so the entry is truncated or corrupt. tofu was not run. "
+        f"`{delete}` deletes the entry, and the next restore uses the previous one."
     )
     if not _openssl(path, decrypt=True, accept=_is_state, failure=failure):
         raise SystemExit(
-            f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state. tofu "
-            "was not run. If the plan and apply sides read different SHIPMATE_PLAN_PASSPHRASE "
-            "values (different secrets on `<env>-plan` and `<env>-apply`; an apply cell saved "
-            "the entry, a plan or drift cell restores it), set `<env>-plan`'s secret to "
-            "`<env>-apply`'s value, then re-plan or re-run the drift sweep; deleting entries does "
-            f"not fix that. If the entry is corrupt, {delete} the previous one. "
-            "If the passphrase was rotated, set the old secret back. After a rotation or with "
-            "another key derivation, every entry under the prefix was saved the same way, and "
-            f"deleting them all discards the state: `{_purge_command(prefix)}`."
+            f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state: it "
+            "was saved with another key derivation or a rotated passphrase, the plan and apply "
+            "sides read different SHIPMATE_PLAN_PASSPHRASE values, or it is corrupt. tofu was "
+            "not run. docs/troubleshooting.md section `state cache entry ... does not decrypt to "
+            "OpenTofu state` says which command fits which cause. Delete this entry: "
+            f"`{delete}`. Delete every entry under its prefix, which discards that state: "
+            f"`{_purge_command(prefix)}`."
         )
 
 

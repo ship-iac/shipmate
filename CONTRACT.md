@@ -854,12 +854,10 @@ the repository root, or none:
   restore a default-branch cache entry. An empty passphrase refuses the restore
   and the save. A plaintext entry, or one that does not decrypt to OpenTofu
   state, fails the restore naming the matched cache key, so tofu never reads it
-  and the cell skips its save. Rotating the passphrase makes every cached entry
-  fail that way: set the old passphrase back, or delete the `state/` entries,
-  which discards that state (§Plan artifact encryption, "Rotation"). Different
-  values on `<env>-plan` and `<env>-apply` fail a plan or drift cell's restore
-  of the state an apply cell saved: set `<env>-plan`'s value to
-  `<env>-apply`'s; deleting entries does not help.
+  and the cell skips its save. A key-derivation change, a passphrase rotation
+  and different values on `<env>-plan` and `<env>-apply` each make entries fail
+  that way; `docs/troubleshooting.md` §`state cache entry ... does not decrypt
+  to OpenTofu state` gives each remedy.
 - **None** — a backend such as S3 owns the state. Both `actions/state` steps are
   skipped, shipmate never handles a state file, and the backend and its locking
   are the consumer's configuration.
@@ -2789,9 +2787,9 @@ environment, and a plan cell names its own plan environment. The same value on b
   in that environment refuses at `Decrypt reviewed plan artifact`.
 - **As different values on `<env>-plan` and `<env>-apply`**, every apply in
   that environment refuses at `Decrypt reviewed plan artifact`, and on a local
-  backend a plan cell refuses the state an apply cell saved. Set `<env>-plan`'s
-  value to `<env>-apply`'s, never the reverse (apply cells saved the cached
-  state), then re-plan; a re-plan alone fails the same way.
+  backend a plan cell refuses the state an apply cell saved
+  (`docs/troubleshooting.md` §`plan artifact does not decrypt to an OpenTofu
+  plan` has the remedy).
 
 Scoping it to a plan environment buys nothing either — those must have no
 branch policy at all (`docs/hardening.md` §6), so any branch's workflow can
@@ -2818,13 +2816,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   §Consumption's one-change rule keeps the same on both paths; the passphrase
   must match on both too. A mismatch surfaces as the fail-safe above, not a
   silent wrong apply.
-- **Rotation.** A new passphrase cannot decrypt anything the old one encrypted.
-  Outstanding plans fail in the apply cell (the fail-safe above); re-plan them.
-  Every cached local-state entry fails its restore with `does not decrypt to
-  OpenTofu state`, and older entries
-  under the same prefix were saved with the old passphrase too. Either set the
-  old passphrase back, or delete the `state/` entries, which discards that
-  state: OpenTofu no longer tracks the resources it recorded.
+- **Rotation.** A new passphrase cannot decrypt anything the old one encrypted:
+  outstanding plans refuse in the apply cell (the fail-safe above), and every
+  cached local-state entry refuses its restore. `docs/troubleshooting.md` gives
+  the remedies under each refusal's heading.
 
 ## Engine-owned tofu invocation
 

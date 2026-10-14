@@ -617,9 +617,8 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 - As a secret on `<env>-plan` alone, every apply in that environment refuses at
   `Decrypt reviewed plan artifact`.
 - As different values on `<env>-plan` and `<env>-apply`, every apply in that
-  environment refuses at `Decrypt reviewed plan artifact`, and a re-plan alone
-  fails the same way: set `<env>-plan`'s value to `<env>-apply`'s, never the
-  reverse, because apply cells saved the cached state.
+  environment refuses at `Decrypt reviewed plan artifact`
+  ([`troubleshooting.md`](troubleshooting.md) has the remedy).
 
 ## Required — apply
 

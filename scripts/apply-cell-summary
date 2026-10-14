@@ -28,13 +28,9 @@ FAILSAFES = [
     (
         "DECRYPT_OUTCOME",
         (
-            "plan artifact could not be decrypted: with no passphrase, forward "
-            "SHIPMATE_PLAN_PASSPHRASE from the calling `apply` or `deploy` job, and set it as a "
-            "repository or organization secret or on `<env>-apply` too, not on `<env>-plan` "
-            "alone; with different values on `<env>-plan` and `<env>-apply`, set `<env>-plan`'s "
-            "to `<env>-apply`'s value, then re-plan; a plaintext or corrupt artifact, or one "
-            "encrypted with a rotated passphrase or another key derivation, needs a re-plan; an "
-            "openssl error is in the job log"
+            "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
+            "artifact, another key derivation, a rotated passphrase, or different values on "
+            "<env>-plan and <env>-apply); docs/troubleshooting.md gives each remedy"
         ),
     ),
     (
@@ -54,8 +50,8 @@ FAILSAFES = [
     (
         "PLAN_DIGEST_OUTCOME",
         (
-            "the stored plan does not render to the plan text that was reviewed, or tofu cannot "
-            "read it (a tofu or provider version changed); re-plan"
+            "the stored plan cannot be rendered, or does not render to the plan text that was "
+            "reviewed; re-plan"
         ),
     ),
 ]

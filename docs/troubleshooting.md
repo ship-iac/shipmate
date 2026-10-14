@@ -778,25 +778,28 @@ split environment alone reaches the wrong cells
 
 An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
 before any apply step, and its `apply / <stack> / <env>` check stays pending.
+`plan artifact is plaintext` means the artifact carries no `Salted__` header:
+it was uploaded unencrypted. Re-plan.
 
-- **`plan artifact is plaintext`.** The artifact carries no `Salted__` header:
-  it was uploaded unencrypted.
-- **`plan artifact does not decrypt to an OpenTofu plan`.** The decrypted file
-  is neither a zip archive, which an OpenTofu plan file is, nor the JSON
-  envelope OpenTofu's own plan encryption writes. AES-256-CTR decrypts
-  with any key ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption),
-  so the cause is one of:
-  - **The plan and apply sides read different values**, for example different
-    `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A
-    re-plan alone fails the same way: set `<env>-plan`'s value to
-    `<env>-apply`'s, never the reverse (apply cells saved the cached state),
-    then re-plan.
-  - **The plan was encrypted with a passphrase since rotated, or with another
-    key derivation, or the artifact is corrupt.** Re-plan.
+`plan artifact does not decrypt to an OpenTofu plan` means the decrypted file is
+neither a zip archive, which an OpenTofu plan file is, nor the JSON envelope
+OpenTofu's own plan encryption writes. AES-256-CTR decrypts with any key
+([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), so the cause is
+one of:
 
-A plaintext artifact needs a re-plan too. To re-plan on an open pull request,
-comment `shipmate plan` or push; after the merge, open a new pull request
-touching the stack.
+- **The plan was encrypted by an earlier engine release's key derivation.**
+  Re-plan.
+- **The passphrase was rotated after the plan.** Re-plan.
+- **The plan and apply sides read different values**, for example different
+  `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A
+  re-plan alone fails the same way. Make the two equal, then re-plan. On a
+  local backend, set `<env>-plan`'s value to `<env>-apply`'s and never the
+  reverse, because apply cells saved the cached state; on a remote backend
+  either direction works.
+- **The artifact is corrupt.** Re-plan.
+
+To re-plan on an open pull request, comment `shipmate plan` or push; after the
+merge, open a new pull request touching the stack.
 
 ### `state cache entry ... is plaintext`
 
@@ -821,27 +824,25 @@ entry.
 
 A local backend's restore decrypted the matched entry to something that is not
 OpenTofu state, and refused before tofu read it. AES-256-CTR decrypts with any
-key, so the cause is a passphrase that differs from the one that saved the
-entry, an entry saved with another key derivation
-([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), or a corrupt
-entry:
+key ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption), so the
+cause is one of the following. The message gives both delete commands: one for
+the named entry, one for every entry under its prefix. Deleting every entry
+under the prefix discards that state, as in §`state cache entry ... is
+plaintext`.
 
-- **The plan and apply sides read different values**, for example different
-  `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A plan
-  or drift cell restores the state an apply cell saved, so its restore refuses.
-  Set `<env>-plan`'s value to `<env>-apply`'s, then re-plan or re-run the drift
-  sweep; deleting entries does not fix this.
-- **The entry is corrupt.** `gh cache delete <key> --repo <owner>/<repo>`, with
-  the key from the message, deletes it; the next restore uses the previous
-  entry.
+- **The entry was saved by an earlier engine release's key derivation.** Every
+  older entry under the prefix was saved the same way, and no secret change
+  helps. Delete every entry under the prefix.
 - **The passphrase was rotated.** Every older entry under the prefix was saved
   with the old passphrase too. Set the old passphrase back, or delete every
-  entry under the prefix with the command the message gives, which discards
-  that state as in §`state cache entry ... is plaintext`.
-- **The entry was saved with another key derivation.** Every older entry under
-  the prefix was saved the same way, and setting the old passphrase back does
-  not help. Delete every entry under the prefix with the command the message
-  gives, which discards that state.
+  entry under the prefix.
+- **The plan and apply sides read different values**, for example different
+  `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. An apply
+  cell saved the entry and a plan or drift cell restores it. Set
+  `<env>-plan`'s value to `<env>-apply`'s, never the reverse, then re-plan or
+  re-run the drift sweep. Deleting entries does not fix this.
+- **The entry is corrupt.** Delete the named entry; the next restore uses the
+  previous one.
 
 ### `could not install python3-yaml`, or `the engine needs PyYAML`
 

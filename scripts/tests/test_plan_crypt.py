@@ -68,13 +68,11 @@ def _raw_openssl(src, dst, *flags):
 
 
 _NOT_A_PLAN = (
-    "::error::plan artifact does not decrypt to an OpenTofu plan. Nothing was applied. If the "
-    "plan and apply sides read different SHIPMATE_PLAN_PASSPHRASE values (different secrets on "
-    "`<env>-plan` and `<env>-apply`), set `<env>-plan`'s secret to `<env>-apply`'s value, never "
-    "the reverse (apply cells saved the cached state), then re-plan; a re-plan alone fails the "
-    "same way. If the plan was encrypted with a passphrase since rotated or another key "
-    "derivation, or the artifact is corrupt, re-plan: comment shipmate plan or push, or after "
-    "the merge open a new pull request touching the stack."
+    "::error::plan artifact does not decrypt to an OpenTofu plan: it was encrypted with another "
+    "key derivation or a rotated passphrase, the plan and apply sides read different "
+    "SHIPMATE_PLAN_PASSPHRASE values, or it is corrupt. Nothing was applied. "
+    "docs/troubleshooting.md section `plan artifact does not decrypt to an OpenTofu plan` gives "
+    "each remedy."
 )
 
 
@@ -253,9 +251,8 @@ def test_decrypt_state_plaintext_refuses_naming_the_key(tmp_path, monkeypatch, r
 
 
 def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypatch):
-    """Mutations: drop the corrupt-entry `gh cache delete` remedy; drop `--repo` from it; restore
-    the two-cause sentence `SHIPMATE_PLAN_PASSPHRASE does not match the one that saved the entry,
-    or the entry is corrupt`."""
+    """Mutations: drop the `gh cache delete` command; drop `--repo` from it; drop the plan/apply
+    mismatch cause."""
     monkeypatch.setenv("GITHUB_REPOSITORY", "ship-iac/sample")
     f = _encrypted(tmp_path, monkeypatch, STATE)
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
@@ -263,17 +260,14 @@ def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypa
         pcx.decrypt_state(str(f), KEY)
     assert exc.value.code == (
         "::error::state cache entry `state/app-net/dev-eu/123-1` does not decrypt to OpenTofu "
-        "state. tofu was not run. If the plan and apply sides read different "
-        "SHIPMATE_PLAN_PASSPHRASE values (different secrets on `<env>-plan` and `<env>-apply`; "
-        "an apply cell saved the entry, a plan or drift cell restores it), set `<env>-plan`'s "
-        "secret to `<env>-apply`'s value, then re-plan or re-run the drift sweep; deleting "
-        "entries does not fix that. If the entry is corrupt, `gh cache delete "
-        "state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes it and the next restore uses "
-        "the previous one. If the passphrase was rotated, set the old secret back. After a "
-        "rotation or with another key derivation, every entry under the prefix was saved the "
-        "same way, and deleting them all discards the state: `gh cache list --repo "
-        "ship-iac/sample --key state/app-net/dev-eu/ --limit 1000 --json id --jq '.[].id' | "
-        "xargs -n1 gh cache delete --repo ship-iac/sample`."
+        "state: it was saved with another key derivation or a rotated passphrase, the plan and "
+        "apply sides read different SHIPMATE_PLAN_PASSPHRASE values, or it is corrupt. tofu was "
+        "not run. docs/troubleshooting.md section `state cache entry ... does not decrypt to "
+        "OpenTofu state` says which command fits which cause. Delete this entry: `gh cache delete "
+        "state/app-net/dev-eu/123-1 --repo ship-iac/sample`. Delete every entry under its prefix, "
+        "which discards that state: `gh cache list --repo ship-iac/sample --key "
+        "state/app-net/dev-eu/ --limit 1000 --json id --jq '.[].id' | xargs -n1 gh cache delete "
+        "--repo ship-iac/sample`."
     )
 
 
@@ -291,8 +285,8 @@ def test_decrypt_state_openssl_failure_names_the_entry_and_its_remedy(tmp_path, 
     assert exc.value.code == (
         "::error::state cache entry `state/app-net/dev-eu/123-1` could not be decrypted: openssl "
         "failed (its error is printed above), so the entry is truncated or corrupt. tofu was not "
-        "run. `gh cache delete state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes it and "
-        "the next restore uses the previous one."
+        "run. `gh cache delete state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes the "
+        "entry, and the next restore uses the previous one."
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == ["stack.otplan"]
 

@@ -164,8 +164,8 @@ runs:
       run: |
         set -euo pipefail
         # Binds the reviewed plan text to the plan about to run. `tofu show` is byte-identical
-        # across runners at one tofu version (a version or provider change refuses the plan file),
-        # so a difference is a content mismatch. Needs the providers `init` installs: runs after it.
+        # across runners at one tofu version (another tofu version refuses the plan file), so a
+        # difference is a content mismatch. Needs the providers `init` installs: runs after it.
         rendered="$RUNNER_TEMP/rendered-plan.txt"
         tofu -chdir="$STACK" show -no-color stack.otplan > "$rendered"
         # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
