@@ -451,7 +451,7 @@ keeps a leading `0`. Indentation is the one structure rule.
 ```yaml
 # .github/shipmate-config.yml
 layout: tf_vars                    # tf_vars | workspace | folder
-max_parallel: 10                   # cell jobs one plan, drift or unlock matrix runs at once
+max_parallel: 10                   # cell jobs one plan or drift matrix runs at once
 
 identities:
   dev:
@@ -490,29 +490,29 @@ as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pa
 (§Comment-ops). The three hold `true` or `false`, bare or quoted; `shared` and
 `explicit` default to `false`, `gated` to `true`.
 
-**`max_parallel` caps the plan, drift and unlock matrices.** It is a whole
-number from 1 to 256, and 10 when absent: each plan matrix, drift sweep and
-unlock runs at most that many cell jobs at once, and the rest queue. The cap is
-per matrix per run: two runs at once, a pull request's plan and a drift sweep,
-each take up to it. The default leaves room for other jobs: GitHub limits the
-concurrent jobs of standard GitHub-hosted runners per account, to 20 on Free,
-40 on Pro, 60 on Team and 500 on Enterprise
-([Actions limits](https://docs.github.com/en/actions/reference/limits)), and a
-cap at that limit lets one matrix hold every runner the account has. It also
-bounds how many stacks call one cloud account's APIs at once: each cell's
-`tofu` runs up to 10 operations in parallel, and some provider APIs throttle
-per account. GitHub runs a matrix with `max-parallel: 0` unbounded, so 0
-refuses, and so does anything that is not a whole number from 1 to 256.
+**`max_parallel` caps the plan and drift matrices.** It is a whole number from
+1 to 256, and 10 when absent: each plan matrix and drift sweep runs at most that
+many cell jobs at once, and the rest queue, so a plan or sweep over the cap
+takes longer, in batches. The cap is per matrix per run. 10 is half of the 20
+concurrent jobs GitHub allows standard GitHub-hosted runners on Free (40 on
+Pro, 60 on Team, 500 on Enterprise;
+[Actions limits](https://docs.github.com/en/actions/reference/limits)), so one
+plan or sweep leaves room for other jobs, but a plan and a drift sweep running
+together can fill a Free account's pool: stagger the drift files' crons. The
+cap also bounds how many stacks call one cloud account's APIs at once: each
+cell's `tofu` runs up to 10 operations in parallel, and some provider APIs
+throttle per account. GitHub runs a matrix with `max-parallel: 0` unbounded, so
+0 refuses, and so does anything that is not a whole number from 1 to 256.
 
-**Apply waves are not capped.** A matrix with more cells than its cap runs in
-batches, and a bound environment's required reviewers and wait timer apply
-again to every batch (probed on a public repository). An apply wave binds
-`<env>-apply`, so a cap there would re-ask each approval per batch and let a
-gated environment's waiting cells hold the slots an ungated environment's cells
-in the same wave need. Unlock binds `<env>-apply` too, and is capped: an unlock
-over more locked cells than `max_parallel` in a gated environment asks again for
-each batch. Plans and drift sweeps bind `<env>-plan`, which carries no reviewers
-(§Env model); a shared environment binds its bare `<env>` on every path.
+**Apply waves and unlock are not capped.** Both bind `<env>-apply`, and GitHub
+applies a bound environment's required reviewers and wait timer again to every
+batch of a capped matrix (probed on a public repository), and a capped cell
+queued behind a live apply's concurrency group would hold a slot the others
+need. Plans and drift
+sweeps bind `<env>-plan`, which carries no reviewers (§Env model). The one
+exception is a `shared: true` environment: it binds its bare `<env>` on plans
+and drift too, so its reviewers or wait timer apply again to each batch of a
+plan or sweep over the cap.
 
 One quoting rule: a string value starting with `{`, `[`, `*`, `&`, `!` or `#`
 is quoted (`"{workload}-plan"`). Unquoted, YAML reads the character as syntax:
@@ -1668,9 +1668,6 @@ ever runs against a given stack × environment at a time, regardless of whether
 it was triggered by a pre-merge comment or a post-merge push. A second apply for
 the same cell queues behind the first rather than racing or cancelling it, and
 is then refused by the exact-plan fail-safe if the first advanced the state.
-`unlock` shares this group: an unlock cell waiting on it holds one of the unlock
-matrix's `max_parallel` slots, so other unlock cells can wait behind it (probed
-on a public repository).
 
 ## Post-plan topology
 

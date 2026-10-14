@@ -18,7 +18,6 @@ inputs:
     default: ""
 outputs:
   cells: { description: "The unlock queue as a flat JSON array, [] when it is empty, never the empty string.", value: "${{ steps.d.outputs.cells }}" }
-  max_parallel: { description: "The unlock matrix's `max-parallel`, a whole number from 1 to 256 -- the table's `max_parallel` (10 when unset), the most cell jobs the matrix runs at once.", value: "${{ steps.d.outputs.max_parallel }}" }
 runs:
   using: composite
   steps:

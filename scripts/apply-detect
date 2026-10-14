@@ -213,14 +213,13 @@ def dag_shape_notice(deps):
     DAG, and "no declared dependency" is a legitimate state, so nothing can
     detect a MISSING edge — a repository migrating from another tool leaves its
     ordering behind in that tool's config with nothing to say so. What this line
-    buys is a reader who knows the repository seeing the widest level's width and
+    buys is a reader who knows the repository seeing the concurrency figure and
     knowing at once whether it is true."""
     lv = wv.stack_levels(deps)
-    widest = max((len(x) for x in lv), default=0)
     return (
         f"::notice::{len(deps)} stacks, {sum(len(d) for d in deps.values())} after edges, "
-        f"{len(lv)} wave levels; the widest level holds {widest} "
-        f"stack{'' if widest == 1 else 's'}"
+        f"{len(lv)} wave levels; {max((len(x) for x in lv), default=0)} stacks would apply "
+        "concurrently"
     )
 
 

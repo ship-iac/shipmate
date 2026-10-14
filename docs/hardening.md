@@ -460,8 +460,8 @@ enforcement.
 edit the repository's or the organization's variable it names, not by a merge.**
 `shared`, `explicit` and `gated` hold `true` or `false`, `max_parallel` holds a
 number, and all four refuse a reference, so which environments share one
-binding, which a bare apply skips, which apply unreviewed and how many plan,
-drift and unlock cell jobs run at once stay merged commits. Where this page says editing
+binding, which a bare apply skips, which apply unreviewed and how many plan
+and drift cell jobs run at once stay merged commits. Where this page says editing
 one of these keys is a pull request, that holds only for a value the file writes
 out ([`../CONTRACT.md`](../CONTRACT.md) §Variable references).
 

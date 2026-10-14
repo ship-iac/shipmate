@@ -193,14 +193,12 @@ def test_check_runs_jsonl_parsing_reuses_apply_gates_parse_jsonl(monkeypatch):
 
 
 def test_dag_shape_notice_reports_a_flat_graph():
-    """Mutation: always write `stack` -- it reads `holds 3 stack`."""
-
     # The migration shape: every stack independent, so the whole repository would apply at
     # once. Nothing can detect the missing edges, so this line is how a reader who knows the
     # repository notices.
     deps = {"stacks/a": set(), "stacks/b": set(), "stacks/c": set()}
     assert ad.dag_shape_notice(deps) == (
-        "::notice::3 stacks, 0 after edges, 1 wave levels; the widest level holds 3 stacks"
+        "::notice::3 stacks, 0 after edges, 1 wave levels; 3 stacks would apply concurrently"
     )
 
 
@@ -215,7 +213,7 @@ def test_dag_shape_notice_reports_a_layered_graph():
         "stacks/d": {"stacks/b", "stacks/c"},
     }
     assert ad.dag_shape_notice(deps) == (
-        "::notice::4 stacks, 4 after edges, 3 wave levels; the widest level holds 2 stacks"
+        "::notice::4 stacks, 4 after edges, 3 wave levels; 2 stacks would apply concurrently"
     )
 
 
@@ -416,8 +414,6 @@ def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
 
 
 def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
-    """Mutation: always write `stacks` -- it reads `holds 1 stacks`."""
-
     # The line is worth nothing unprinted, so this executes the real entry point. An absent
     # decision refuses the run, and this test is about the notice.
     _apply_env(monkeypatch, tmp_path)
@@ -426,7 +422,7 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
     )
     ad.main()
     assert (
-        "::notice::2 stacks, 1 after edges, 2 wave levels; the widest level holds 1 stack"
+        "::notice::2 stacks, 1 after edges, 2 wave levels; 1 stacks would apply concurrently"
         in capsys.readouterr().out.splitlines()
     )
 
@@ -497,7 +493,7 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
 
     assert "envlevel0_waves=" not in out.read_text(encoding="utf-8")
     assert capsys.readouterr().out.splitlines() == [
-        "::notice::9 stacks, 8 after edges, 9 wave levels; the widest level holds 1 stack"
+        "::notice::9 stacks, 8 after edges, 9 wave levels; 1 stacks would apply concurrently"
     ]
 
 

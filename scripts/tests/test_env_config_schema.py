@@ -456,7 +456,7 @@ def test_max_parallel_refuses_an_unvalidated_bad_value(value):
         env_config.max_parallel({"max_parallel": value})
     assert str(excinfo.value) == (
         f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the most "
-        "cell jobs a plan, drift or unlock matrix runs at once)."
+        "cell jobs a plan or drift matrix runs at once)."
     )
 
 
@@ -490,7 +490,7 @@ def test_a_malformed_max_parallel_refuses(value):
     """
     assert _refusal({"layout": "folder", "max_parallel": value}) == (
         f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the most "
-        "cell jobs a plan, drift or unlock matrix runs at once)."
+        "cell jobs a plan or drift matrix runs at once)."
     )
 
 

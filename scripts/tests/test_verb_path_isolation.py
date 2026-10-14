@@ -106,10 +106,7 @@ UNLOCK_RUN_STEPS = {"guard": 1, "detect": 0, "unlock": 0}
 #: The whole `outputs:` mapping of unlock's `detect`. `test_matrix_max_parallel_guard.py` pins
 #: the consumer end of this wire, and without this one the producer end can be re-aimed at
 #: `waves`, the empty string here, which fans the job out and dies at fromJSON.
-DETECT_OUTPUTS = {
-    "cells": "${{ steps.d.outputs.cells }}",
-    "max_parallel": "${{ steps.d.outputs.max_parallel }}",
-}
+DETECT_OUTPUTS = {"cells": "${{ steps.d.outputs.cells }}"}
 
 #: Named so a failure says which one leaked in.
 APPLY_FAMILY = ("apply-cell", "apply-complete", "gate-refresh", "apply-summary")

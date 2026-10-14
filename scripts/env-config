@@ -319,8 +319,8 @@ _RESERVED_WORKLOADS = ("vars", "role", "region")
 #: Everything the file may declare at its top level.
 _TOP_KEYS = ("layout", "identities", "environments", "max_parallel")
 
-#: The cell jobs one plan, drift or unlock matrix runs at once when the table sets no
-#: `max_parallel`. Apply waves are not capped.
+#: The cell jobs one plan or drift matrix runs at once when the table sets no
+#: `max_parallel`. Apply waves and unlock are not capped.
 DEFAULT_MAX_PARALLEL = 10
 
 #: A whole number with no sign, space or leading zero. `[0-9]`, not `\d`, refuses non-ASCII
@@ -436,7 +436,7 @@ def env_binding(env, shared, path):
 
 
 def max_parallel(table):
-    """The most cell jobs one plan, drift or unlock matrix runs at once: the table's
+    """The most cell jobs one plan or drift matrix runs at once: the table's
     `max_parallel`, else `DEFAULT_MAX_PARALLEL`. A malformed value refuses here too, with
     `validate_structure`'s message, so an unvalidated table can never yield 0, which GitHub
     runs unbounded."""
@@ -457,7 +457,7 @@ def _check_max_parallel(table, errors):
     if not (digits and int(value) <= 256):
         errors.append(
             f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the "
-            "most cell jobs a plan, drift or unlock matrix runs at once)."
+            "most cell jobs a plan or drift matrix runs at once)."
         )
 
 

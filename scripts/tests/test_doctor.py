@@ -6536,10 +6536,7 @@ def test_an_unset_reference_is_the_invalid_file_finding(monkeypatch):
 #: contract states.
 _MAX_PARALLEL_UNSET = (
     doctor.NOTICE,
-    (
-        "`max_parallel`: not set, so each plan, drift sweep and unlock runs at most 10 "
-        "cell jobs at once."
-    ),
+    ("`max_parallel`: not set, so each plan and drift sweep runs at most 10 cell jobs at once."),
 )
 
 
@@ -6578,7 +6575,7 @@ def test_a_set_max_parallel_is_read_back():
     `"max_parallel" not in table` -- the not-set line shows."""
     assert doctor._config_defaults({"layout": "folder", "max_parallel": "5"})[2] == (
         doctor.NOTICE,
-        ("`max_parallel: 5`: each plan, drift sweep and unlock runs at most 5 cell jobs at once."),
+        ("`max_parallel: 5`: each plan and drift sweep runs at most 5 cell jobs at once."),
     )
 
 

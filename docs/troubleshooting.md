@@ -622,7 +622,7 @@ branch's** copy of the file — that is the only copy execution reads.
 | `declares no layout` | either the key is genuinely absent, or it is indented under another key — see the indentation trap below |
 | `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities`, `environments` and `max_parallel` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
 | `max_parallel is …; it must be a whole number from 1 to 256` | `max_parallel` takes a bare whole number, quoted or not: no sign, space, decimal point or leading zero. GitHub runs a matrix with `max-parallel: 0` unbounded, so 0 is refused; remove the key for the default of 10 |
-| `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds the plan, drift and unlock matrices stays a merged commit. Write the number |
+| `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds the plan and drift matrices stays a merged commit. Write the number |
 | `environments.<env>.<key> must be true or false, got …` | `shared`, `explicit` and `gated` hold `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise resolve to the default |
 | `environments.<env>.<key> holds a variable reference; a flag accepts no variable reference` | `shared`, `explicit` and `gated` are written into the file, so which environments are shared, held back or ungated stays a merged commit. Write `true` or `false` |
 | `environment <env>: region is empty` | `region:` with nothing after it, or `region: #eu-west-1`, which YAML reads as a comment. Write the region, or remove the key |
@@ -660,10 +660,10 @@ The fix in every case is the same: write the top-level settings at column 1.
 
 **Three settings refuse nothing when they are absent.** `needs`, `explicit`
 and `max_parallel` are optional and take tolerant defaults — no ordering, no
-exclusions, and at most 10 cell jobs at once per plan, drift sweep and unlock. A file that sets
-`explicit` on no entry is structurally valid, and a bare `shipmate apply` then
-applies every environment, production included. Nothing warns.
-`shipmate doctor` echoes all three on every report for exactly this reason;
+exclusions, and at most 10 cell jobs at once per plan and drift sweep. A file
+that sets `explicit` on no entry is structurally valid, and a bare
+`shipmate apply` then applies every environment, production included. Nothing
+warns. `shipmate doctor` echoes all three on every report for exactly this reason;
 read them before merging.
 
 **Editing them on a branch does not change what that branch applies.**

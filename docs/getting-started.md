@@ -78,15 +78,14 @@ migration that audited the OpenTofu code instead of porting the config went from
 6 declared edges to 105, and from 2 wave levels to 6.
 
 Three detect jobs report the shape as a `::notice::` line — stack count, `after`
-edge count, wave levels, and how many stacks the widest level holds. A reader
+edge count, wave levels, and how many stacks would apply concurrently. A reader
 who knows the repository can judge that last number immediately; nobody else
-can. It counts stacks in one graph level, not cells: a wave holds those stacks
-in every environment of its env-level. Exactly three print it: the detect jobs
-of a dispatched `shipmate apply <env>`, of a bare `shipmate apply`, and of the
-post-merge deploy, so it arrives after the plan review that would have been the
-place to fix the graph. A plan run does not print it — seeing no such line
-there says nothing about the graph. Before that point the equivalent is
-`terramate experimental run-graph --label stack.dir` run locally.
+can. Exactly three print it: the detect jobs of a dispatched `shipmate apply <env>`,
+of a bare `shipmate apply`, and of the post-merge deploy, so it arrives after the
+plan review that would have been the place to fix the graph. A plan run does not
+print it — seeing no such line there says nothing about the graph. Before that
+point the equivalent is `terramate experimental run-graph --label stack.dir` run
+locally.
 
 **Tags.** Environment membership is derived from `env/<name>` tags and nothing
 else; [Before you start](#before-you-start) covers adopting a repository whose
@@ -676,9 +675,7 @@ rules from Settings → Environments → `<name>` (or the API):
   production and leave dev self-service; the maximally-hardened position gates
   every apply environment where the plan allows it.
   [`hardening.md`](hardening.md) #6 states what each choice costs — shipmate
-  does not make it for you. An unlock over more locked cells than
-  `max_parallel` asks for the approval again for each batch; apply waves are
-  not capped ([`../CONTRACT.md`](../CONTRACT.md) §Environment table).
+  does not make it for you.
 - **Pair a reviewer-gated environment with `explicit: true` in
   `.github/shipmate-config.yml`.**
   Set it on the bare env's entry (`environments.prod` — neither `prod-plan`
