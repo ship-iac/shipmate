@@ -2753,22 +2753,21 @@ required `plan-passphrase` input before upload, using a single symmetric cipher:
 `openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -md sha256 -salt`, passphrase
 supplied via `-pass env:` (never on the command line). The key derives with
 600,000 PBKDF2-SHA256 iterations, so a plan artifact or cached state entry
-written with any other count or digest decrypts to garbage. A plan apply then
-fails before any apply step: at the state restore (`cell-init`'s
-`decrypt_state`) only when the cell's cached entry was also saved with another
-key derivation or passphrase; otherwise (no cached entry, a remote backend, or
-an entry saved with the current key) at `apply-cell`'s render step, on
-OpenTofu's own plan-file error from `tofu show`. `apply-cell` decrypts the plan
-after download on every apply path: both paths pass it as the
-`SHIPMATE_PLAN_PASSPHRASE` secret into the reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
+written with another passphrase or any other count or digest decrypts to
+garbage, without an error. Each decrypt therefore checks its result: a plan
+that does not start with the zip header an OpenTofu plan file carries refuses
+at `Decrypt reviewed plan artifact`, before any apply step, and a cached state
+entry that does not parse as OpenTofu state refuses at the state restore
+(§State backend). `apply-cell` decrypts the plan after download on every apply
+path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
+reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
 forms. The same cipher and secret encrypt a local backend's cached state
-(§State backend). Consumers set
-`SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret and forward it
-by name in the `secrets:` block of their `shipmate.yml`'s `plan`, `deploy`
-and `apply` jobs and of each drift file's `drift` job. Never `secrets: inherit`:
-it hands the engine the caller's whole secret set, and across an organization
-boundary it delivers nothing at all.
+(§State backend). Consumers set `SHIPMATE_PLAN_PASSPHRASE` as a repository or
+organization secret and forward it by name in the `secrets:` block of their
+`shipmate.yml`'s `plan`, `deploy` and `apply` jobs and of each drift file's
+`drift` job. Never `secrets: inherit`: it hands the engine the caller's whole
+secret set, and across an organization boundary it delivers nothing at all.
 
 Not a variable, and not a secret on one half of a split environment alone: a
 secret on one environment is released only to a job that *names* that
@@ -2794,16 +2793,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Required.** An empty or unset passphrase refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
-- **Fail-safe on mismatch.** apply-cell refuses an artifact without the
-  `Salted__` magic header, with a re-plan instruction, rather than apply it. A
-  wrong passphrase or another key derivation is not detected at decrypt
-  (AES-CTR is unauthenticated and decrypts to garbage without error). The cell
-  fails before any apply step: at the state restore (`cell-init`'s
-  `decrypt_state`) only when the cell's cached entry was also saved with
-  another key derivation or passphrase; otherwise (no cached entry, a remote
-  backend, or an entry saved with the current key) at `apply-cell`'s render
-  step, on OpenTofu's own plan-file error from `tofu show`. The apply check
-  stays pending.
+- **Fail-safe on mismatch.** apply-cell refuses, with a re-plan instruction,
+  an artifact without the `Salted__` magic header and one that does not decrypt
+  to a plan file (a wrong passphrase, another key derivation or a corrupt
+  artifact; see above). The apply check stays pending.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and

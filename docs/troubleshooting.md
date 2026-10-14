@@ -540,14 +540,8 @@ cell re-renders the stored plan with the command that wrote it and compares.
   moved fails at the apply with `Inconsistent dependency lock file`. Neither
   produces this message. There is no force. Re-plan the stack on its pull request
   and review the fresh plan.
-- **`tofu show` cannot read the stored plan.** The step fails on OpenTofu's own
-  `Failed to read the given file as a state or plan file`, before any digest is
-  compared: the plan was encrypted with another passphrase or key derivation
-  (an earlier engine release), and decrypting it with the current key yields
-  garbage ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption).
-  Re-plan the stack on its pull request.
 
-Nothing has been applied in any case: the render and comparison run before
+Nothing has been applied in either case: the comparison runs before
 `tofu apply`, and the pending check is what keeps the gate from greening over
 an unapplied stack.
 
@@ -779,6 +773,24 @@ same value on both `<env>-plan` and `<env>-apply`, and map it by name in the
 each drift file's `drift` job. A secret on `shipmate-engine` or on one half of a
 split environment alone reaches the wrong cells
 ([`getting-started.md`](getting-started.md) lists each placement).
+
+### `plan artifact does not decrypt to an OpenTofu plan`, or `plan artifact is plaintext`
+
+An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
+before any apply step, and its `apply / <stack> / <env>` check stays pending.
+
+- **`plan artifact is plaintext`.** The artifact carries no `Salted__` header:
+  it was uploaded unencrypted.
+- **`plan artifact does not decrypt to an OpenTofu plan`.** The decrypted file
+  is not a zip archive, which every OpenTofu plan file is. AES-256-CTR decrypts
+  with any key, so the cause is a `SHIPMATE_PLAN_PASSPHRASE` that differs from
+  the one that encrypted the plan, a plan encrypted with another key derivation
+  (by an earlier engine release, [`../CONTRACT.md`](../CONTRACT.md) §Plan
+  artifact encryption), or a corrupt artifact.
+
+The fix is a re-plan with the current passphrase and engine: on an open pull
+request, comment `shipmate plan` or push; after the merge, open a new pull
+request touching the stack.
 
 ### `state cache entry ... is plaintext`
 

@@ -17,7 +17,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **The plan and state encryption key derives with 600,000 PBKDF2 iterations instead of OpenSSL's default 10,000, so plan artifacts and cached local state written by an earlier release no longer decrypt.**
+- **The plan and state encryption key derives with 600,000 PBKDF2 iterations instead of OpenSSL's default 10,000, so plan artifacts and cached local state written by an earlier release no longer decrypt: such a plan's apply refuses at decrypt, and deleting the old state entries discards that state (OpenTofu stops tracking those resources).**
 - **Every plan and drift sweep now runs at most 10 cell jobs at once, the `max_parallel` default, so one over 10 cells runs in batches; apply waves and unlock stay uncapped. A `shared: true` environment's reviewers or wait timer apply again to each batch of a plan or sweep over the cap.**
 - **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**
 - **`apply-complete` re-reads a lagging jobs listing after 2, 3 and 5 seconds and then every 10 seconds, instead of every 10 seconds from the first retry; the total sleep stays 110 seconds.**

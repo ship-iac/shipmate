@@ -5,20 +5,16 @@ Single definition of the openssl invocation so plan-cell (require first, encrypt
 before upload), apply-cell (decrypt after download) and actions/state (encrypt before
 save, decrypt after restore) can never drift. The openssl flags live ONLY here.
 
-Cipher: openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -md sha256 -salt, passphrase from the
-PLAN_PASSPHRASE env var (never argv). The passphrase is required: every
-operation refuses when it is empty or unset, and every decrypt refuses an
-unsalted (plaintext) file.
+Cipher: openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -md sha256 -salt,
+passphrase from the PLAN_PASSPHRASE env var (never argv). The passphrase is
+required: every operation refuses when it is empty or unset, and every decrypt
+refuses an unsalted (plaintext) file.
 
 AES-256-CTR is an unauthenticated stream cipher: a WRONG passphrase, or a file
 written with another key derivation, decrypts to garbage WITH EXIT 0 -- it does
-NOT error. For a plan, the fail-safe is downstream and before any apply step: at
-the state restore (cell-init's decrypt_state) only when the cell's cached entry
-was also saved with another key derivation or passphrase; otherwise (no cached
-entry, a remote backend, or an entry saved with the current key) at apply-cell's
-render step, on OpenTofu's own plan-file error from `tofu show`. The apply check
-stays pending. For state, decrypt-state
-checks the result itself, because tofu reads an empty state file as no state.
+NOT error. So each decrypt checks its own result: a plan must start with the zip
+header, state must parse as OpenTofu state (CONTRACT.md §Plan artifact
+encryption).
 """
 
 import json
@@ -27,6 +23,10 @@ import subprocess
 import sys
 
 MAGIC = b"Salted__"  # openssl salted-header prefix (first 8 bytes)
+PLAN_MAGIC = b"PK\x03\x04"  # zip local-file header: an OpenTofu plan file is a zip archive
+_REPLAN = (
+    "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
+)
 ENV_VAR = "PLAN_PASSPHRASE"  # name of the env var carrying the secret (not the secret itself)
 
 
@@ -34,9 +34,13 @@ def _passphrase():
     return os.environ.get(ENV_VAR, "")
 
 
-def _is_encrypted(path):
+def _starts_with(path, magic):
     with open(path, "rb") as fh:
-        return fh.read(len(MAGIC)) == MAGIC
+        return fh.read(len(magic)) == magic
+
+
+def _is_encrypted(path):
+    return _starts_with(path, MAGIC)
 
 
 def _openssl(path, *, decrypt):
@@ -96,22 +100,25 @@ def encrypt(path):
 
 
 def decrypt(path):
-    """Decrypt a plan artifact in place, or refuse without a passphrase or on plaintext.
+    """Decrypt a plan artifact in place, or refuse before tofu can read it.
 
-    A wrong passphrase or another key derivation is not detected here. The cell fails
-    before any apply step: at the state restore (cell-init's decrypt_state) only when
-    the cell's cached entry was also saved with another key derivation or passphrase;
-    otherwise (no cached entry, a remote backend, or an entry saved with the current
-    key) at apply-cell's render step, on OpenTofu's own plan-file error from `tofu show`.
+    Refuses without a passphrase, on plaintext, and on a result that is not a zip archive
+    (another passphrase or key derivation, or a corrupt artifact). Never prints the file.
     """
     _require_passphrase()
     if not _is_encrypted(path):
         raise SystemExit(
             "::error::plan artifact is plaintext; refusing to apply an unencrypted plan. "
-            "Re-plan to produce an encrypted plan: comment shipmate plan or push, or after the "
-            "merge open a new pull request touching the stack."
+            f"Re-plan to produce an encrypted plan: {_REPLAN}"
         )
     _openssl(path, decrypt=True)
+    if not _starts_with(path, PLAN_MAGIC):
+        raise SystemExit(
+            "::error::plan artifact does not decrypt to an OpenTofu plan: "
+            "SHIPMATE_PLAN_PASSPHRASE or the key derivation differs from the one that encrypted "
+            "it (an earlier engine release used another derivation), or the artifact is corrupt. "
+            f"Nothing was applied. Re-plan: {_REPLAN}"
+        )
 
 
 def _is_state(path):

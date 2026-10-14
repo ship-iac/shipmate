@@ -28,8 +28,8 @@ FAILSAFES = [
     (
         "DECRYPT_OUTCOME",
         (
-            "plan artifact could not be decrypted (no passphrase, a plaintext artifact or an "
-            "openssl error)"
+            "plan artifact could not be decrypted (no passphrase, a plaintext or corrupt "
+            "artifact, another passphrase or key derivation, or an openssl error); re-plan"
         ),
     ),
     (
@@ -50,7 +50,7 @@ FAILSAFES = [
         "PLAN_DIGEST_OUTCOME",
         (
             "the stored plan does not render to the plan text that was reviewed, or tofu cannot "
-            "read it (encrypted with another passphrase or key derivation); re-plan"
+            "read it (the tofu version changed); re-plan"
         ),
     ),
 ]

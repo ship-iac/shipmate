@@ -5,7 +5,8 @@ from _loader import load_script, step_by
 
 pcx = load_script("plan-crypt")
 
-PLAIN = b"SECRET_PLAN_BODY\nresource null_resource.x {}\n"
+# An OpenTofu plan file is a zip archive; decrypt refuses a result without its header.
+PLAIN = b"PK\x03\x04SECRET_PLAN_BODY\nresource null_resource.x {}\n"
 STATE = b'{"version":4,"serial":1}'
 KEY = "state/app-net/dev-eu/123-1"
 UNSET = (
@@ -60,17 +61,27 @@ def _raw_openssl(src, dst, *flags):
     )
 
 
-def test_decrypt_derives_the_600000_iteration_key(tmp_path, monkeypatch):
-    """CTR decrypts any key with exit 0, so only the bytes show which key decrypt derived.
+_NOT_A_PLAN = (
+    "::error::plan artifact does not decrypt to an OpenTofu plan: SHIPMATE_PLAN_PASSPHRASE or the "
+    "key derivation differs from the one that encrypted it (an earlier engine release used "
+    "another derivation), or the artifact is corrupt. Nothing was applied. Re-plan: comment "
+    "shipmate plan or push, or after the merge open a new pull request touching the stack."
+)
 
-    Mutations: `return` before decrypt's `_openssl` call, and the file stays ciphertext; drop
-    `-iter`/`600000` from `_openssl`, and OpenSSL's default 10,000 recovers the plan.
+
+def test_decrypt_refuses_a_default_iteration_ciphertext(tmp_path, monkeypatch):
+    """The bytes left behind show decrypt derived the 600,000-iteration key, not 10,000.
+
+    Mutations: `return` before decrypt's `_openssl` call; drop `-iter`/`600000` from `_openssl`,
+    and OpenSSL's default 10,000 recovers the plan; delete decrypt's zip-header check.
     """
     monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
     plain, f, expected = _write(tmp_path), tmp_path / "old.otplan", tmp_path / "expected"
     _raw_openssl(plain, f, "-iter", "10000")
     _raw_openssl(f, expected, "-d", "-iter", "600000")
-    pcx.decrypt(str(f))
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt(str(f))
+    assert exc.value.code == _NOT_A_PLAN
     assert f.read_bytes() == expected.read_bytes() != PLAIN
 
 
@@ -83,13 +94,27 @@ def test_encrypt_derives_the_key_with_600000_iterations(tmp_path, monkeypatch):
     assert out.read_bytes() == PLAIN
 
 
-def test_wrong_passphrase_yields_garbage_not_an_error(tmp_path, monkeypatch):
-    # Documents the CTR fact: wrong pass decrypts to garbage WITHOUT raising.
-    # The fail-safe is downstream: apply-cell's `tofu show`, or an older cached state entry.
+def test_decrypt_wrong_passphrase_refuses(tmp_path, monkeypatch):
+    """CTR decrypts a wrong key to garbage with exit 0; the zip-header check refuses it.
+
+    Mutation: delete decrypt's zip-header check.
+    """
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
-    pcx.decrypt(str(f))
-    assert f.read_bytes() != PLAIN
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt(str(f))
+    assert exc.value.code == _NOT_A_PLAN
+
+
+def test_decrypt_refuses_a_zip_payload_that_is_not_a_plan(tmp_path, monkeypatch):
+    """A zip end-of-archive record shares the `PK` prefix with the plan's local-file header.
+
+    Mutation: compare decrypt's result against `b"PK"` alone.
+    """
+    f = _encrypted(tmp_path, monkeypatch, b"PK\x05\x06" + bytes(18))
+    with pytest.raises(SystemExit) as exc:
+        pcx.decrypt(str(f))
+    assert exc.value.code == _NOT_A_PLAN
 
 
 def test_decrypt_plaintext_plan_refuses(tmp_path, monkeypatch):
