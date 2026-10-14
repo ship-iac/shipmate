@@ -409,7 +409,8 @@ def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_
     reason for the failure, and the stranded cell must be named in the `::error::`.
 
     The waits back off from 2 s to a 110 s total, and the last attempt does not sleep.
-    Mutations: the first delay 2 -> 10; one later delay 10 -> 20."""
+    Mutations: the first delay 2 -> 10; one later delay 10 -> 20; the last attempt sleeps
+    (`set -u` aborts on the missing delay); `attempts` drops its `+ 1`."""
     lagging = _jsonl(
         [
             job("L0 / apply / dns / dev-eu", "success"),
