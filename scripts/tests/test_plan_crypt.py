@@ -93,10 +93,10 @@ def _no_header(kind, path, repo=" --repo ship-iac/sample"):
         f"1000 --json id --jq '.[].id' | xargs -n1 gh cache delete{repo}` (the restore matches by "
         "prefix, so deleting only `state/app-net/dev-eu/123-1` restores the next-older entry, "
         "which is no shipmate-crypt-v1 entry either). Deleting discards that state: OpenTofu no "
-        "longer tracks the resources it recorded, and every plan of the stack in this environment "
+        "longer tracks the resources it recorded, and a plan of the stack in this environment "
         "re-creates them. A plan or drift cell can then be re-run; never re-run a refused "
         "apply or deploy. For a stack with real resources, read docs/troubleshooting.md "
-        "section `state cache entry ... is not a shipmate-crypt-v1 entry` before deleting."
+        "section `state cache entry ... is not a shipmate-crypt-v1 entry`."
     )
 
 

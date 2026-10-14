@@ -987,19 +987,18 @@ restore matches by prefix, so deleting only the named entry restores the
 next-older one.
 
 Deleting discards that state: OpenTofu no longer tracks the resources it
-recorded, and every plan of the stack in that environment re-creates them. A
+recorded, and a plan of the stack in that environment re-creates them. A
 plan or drift cell can be re-run. For the local-backend samples' resources the
 re-creation is harmless.
 
 For a stack with real resources, applying such a plan duplicates or collides
 with each existing object, and the engine documents no recovery beyond
-adopting them. Before deleting, list the stack's resources at the provider:
-afterwards nothing lists what the deleted state recorded. Never re-run a
-refused apply cell or deploy. Then add an `import` block for each instance on a
-pull request touching the stack, as in steps 5, 7 and 8 of §`The apply step ran
-and its state was not saved`, with the import ID its provider's documentation
-names, and apply that pull request's plan once each instance shows
-`to import`. A resource whose provider does not implement import re-creates.
+adopting them. Never re-run a refused apply cell or deploy. List the stack's
+resources from earlier `Apply the stored plan` logs (`Creation complete` or
+`Import complete`) or at the provider, add an `import` block for each instance
+on a pull request touching the stack, as in steps 5, 7 and 8 of §`The apply
+step ran and its state was not saved`, with the import ID its provider's
+documentation names, and apply that plan only under step 4 of that section.
 
 ### `state cache entry ... cannot be read`
 
