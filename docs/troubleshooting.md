@@ -790,8 +790,10 @@ resource can collide with or be duplicated by its re-creation.
 
 A local backend's restore decrypted the matched entry to something that is not
 OpenTofu state, and refused before tofu read it. AES-256-CTR decrypts with any
-passphrase, so the cause is either a passphrase that differs from the one that
-saved the entry, or a corrupt entry:
+key, so the cause is an entry saved with a passphrase that differs from the
+current one, an entry saved with another key derivation (the engine derives
+the key with 600,000 PBKDF2 iterations, [`../CONTRACT.md`](../CONTRACT.md)
+§Plan artifact encryption), or a corrupt entry:
 
 - **The entry is corrupt.** `gh cache delete <key> --repo <owner>/<repo>`, with
   the key from the message, deletes it; the next restore uses the previous
@@ -800,6 +802,10 @@ saved the entry, or a corrupt entry:
   with the old passphrase too. Set the old passphrase back, or delete every
   entry under the prefix with the command the message gives, which discards
   that state as in §`state cache entry ... is plaintext`.
+- **The entry was saved with another key derivation.** Every older entry under
+  the prefix was saved the same way, and setting the old passphrase back does
+  not help. Delete every entry under the prefix with the command the message
+  gives, which discards that state.
 
 ### `could not install python3-yaml`, or `the engine needs PyYAML`
 

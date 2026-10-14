@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 from _loader import load_script, step_by
 
@@ -50,9 +52,37 @@ def test_round_trip_with_correct_passphrase(tmp_path, monkeypatch):
     assert f.read_bytes() == PLAIN
 
 
+def _raw_openssl(src, dst, *flags):
+    subprocess.run(
+        ["openssl", "enc", *flags, "-aes-256-ctr", "-pbkdf2", "-salt"]
+        + ["-in", str(src), "-out", str(dst), "-pass", "env:PLAN_PASSPHRASE"],
+        check=True,
+    )
+
+
+def test_decrypt_does_not_accept_a_default_iteration_ciphertext(tmp_path, monkeypatch):
+    """CTR decrypts any key with exit 0, so only the bytes show which key decrypt derived.
+
+    Mutation: drop `-iter`/`600000` from `_openssl`, and OpenSSL's default 10,000 matches.
+    """
+    monkeypatch.setenv("PLAN_PASSPHRASE", "correct horse")
+    plain, f = _write(tmp_path), tmp_path / "old.otplan"
+    _raw_openssl(plain, f, "-iter", "10000")
+    pcx.decrypt(str(f))
+    assert f.read_bytes() != PLAIN
+
+
+def test_encrypt_derives_the_key_with_600000_iterations(tmp_path, monkeypatch):
+    """Mutation: `-iter 600001` in `_openssl`, and the bytes no longer decrypt to the plan."""
+    f = _encrypted(tmp_path, monkeypatch, PLAIN)
+    out = tmp_path / "plain.otplan"
+    _raw_openssl(f, out, "-d", "-iter", "600000")
+    assert out.read_bytes() == PLAIN
+
+
 def test_wrong_passphrase_yields_garbage_not_an_error(tmp_path, monkeypatch):
     # Documents the CTR fact: wrong pass decrypts to garbage WITHOUT raising.
-    # The real fail-safe is tofu rejecting the garbage plan at apply, not here.
+    # The fail-safe is apply-cell's `tofu show` render step refusing the garbage plan file.
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
     pcx.decrypt(str(f))
@@ -113,7 +143,9 @@ def test_decrypt_state_plaintext_refuses_naming_the_key(tmp_path, monkeypatch, r
 
 
 def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypatch):
-    """Mutations: drop the corrupt-entry `gh cache delete` remedy; drop `--repo` from it."""
+    """Mutations: drop the corrupt-entry `gh cache delete` remedy; drop `--repo` from it; restore
+    the two-cause sentence `SHIPMATE_PLAN_PASSPHRASE does not match the one that saved the entry,
+    or the entry is corrupt`."""
     monkeypatch.setenv("GITHUB_REPOSITORY", "ship-iac/sample")
     f = _encrypted(tmp_path, monkeypatch, STATE)
     monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
@@ -121,13 +153,13 @@ def test_decrypt_state_wrong_passphrase_names_both_recoveries(tmp_path, monkeypa
         pcx.decrypt_state(str(f), KEY)
     assert exc.value.code == (
         "::error::state cache entry `state/app-net/dev-eu/123-1` does not decrypt to OpenTofu "
-        "state: SHIPMATE_PLAN_PASSPHRASE does not match the one that saved the entry, or the "
-        "entry is corrupt. tofu was not run. If the entry is corrupt, `gh cache delete "
+        "state: it was saved with another SHIPMATE_PLAN_PASSPHRASE or another key derivation, or "
+        "it is corrupt. tofu was not run. If the entry is corrupt, `gh cache delete "
         "state/app-net/dev-eu/123-1 --repo ship-iac/sample` deletes it and the next restore uses "
-        "the previous one. If the passphrase was rotated, every entry under the prefix was saved "
-        "with the old one: set the old secret back, or delete them all, which discards the "
-        "state: `gh cache list --repo ship-iac/sample --key state/app-net/dev-eu/ --limit 1000 "
-        "--json id --jq '.[].id' | xargs -n1 gh cache delete --repo ship-iac/sample`."
+        "the previous one. Otherwise every entry under the prefix was saved the same way: set the "
+        "old secret back, which helps only after a passphrase rotation, or delete them all, which "
+        "discards the state: `gh cache list --repo ship-iac/sample --key state/app-net/dev-eu/ "
+        "--limit 1000 --json id --jq '.[].id' | xargs -n1 gh cache delete --repo ship-iac/sample`."
     )
 
 

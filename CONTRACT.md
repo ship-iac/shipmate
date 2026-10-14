@@ -2750,8 +2750,12 @@ engine, and both are equally visible in the plan artifact — the machine plan
 The reviewed machine plan file (`stack.otplan`) is encrypted at rest in the
 uploaded artifact. `plan-cell` (in `plan.yml`) encrypts the plan with its
 required `plan-passphrase` input before upload, using a single symmetric cipher:
-`openssl enc -aes-256-ctr -pbkdf2 -salt`, passphrase supplied via `-pass env:`
-(never on the command line). `apply-cell` decrypts it after download on every
+`openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -salt`, passphrase supplied via
+`-pass env:` (never on the command line). The key derives with 600,000
+PBKDF2-SHA256 iterations, so a plan artifact or cached state entry written with
+any other count decrypts to garbage (a plan apply then fails at `apply-cell`'s
+render step, on OpenTofu's own plan-file error from `tofu show`, before any
+apply step; a state restore refuses at `decrypt_state`). `apply-cell` decrypts it after download on every
 apply path: both paths pass it as the `SHIPMATE_PLAN_PASSPHRASE` secret into the
 reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
@@ -2791,8 +2795,8 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   `Salted__` magic header, with a re-plan instruction, rather than apply it. A
   wrong passphrase is not detected
   at decrypt (AES-CTR is unauthenticated and decrypts to garbage without error);
-  the exact-plan invariant catches it — `tofu apply` rejects the garbage plan and
-  the apply check stays pending.
+  `apply-cell`'s render step fails on OpenTofu's own plan-file error from
+  `tofu show`, before any apply step, and the apply check stays pending.
 - **Scope: the machine plan file and cached local state.** `fingerprint.txt` and
   `planned-head.txt` are a hash and a commit sha, and stay plain. The rendered
   plan `plan.txt` — in the `cell-summary` artifact, the PR sticky comment, and
@@ -2806,8 +2810,9 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   must match on both too. A mismatch surfaces as the fail-safe above, not a
   silent wrong apply.
 - **Rotation.** A new passphrase cannot decrypt anything the old one encrypted.
-  Outstanding plans fail at apply; re-plan them. Every cached local-state entry
-  fails its restore with `does not decrypt to OpenTofu state`, and older entries
+  Outstanding plans fail in the apply cell (the fail-safe above); re-plan them.
+  Every cached local-state entry fails its restore with `does not decrypt to
+  OpenTofu state`, and older entries
   under the same prefix were saved with the old passphrase too. Either set the
   old passphrase back, or delete the `state/` entries, which discards that
   state: OpenTofu no longer tracks the resources it recorded.

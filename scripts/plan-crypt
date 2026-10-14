@@ -5,17 +5,17 @@ Single definition of the openssl invocation so plan-cell (require first, encrypt
 before upload), apply-cell (decrypt after download) and actions/state (encrypt before
 save, decrypt after restore) can never drift. The openssl flags live ONLY here.
 
-Cipher: openssl enc -aes-256-ctr -pbkdf2 -salt, passphrase from the
+Cipher: openssl enc -aes-256-ctr -pbkdf2 -iter 600000 -salt, passphrase from the
 PLAN_PASSPHRASE env var (never argv). The passphrase is required: every
 operation refuses when it is empty or unset, and every decrypt refuses an
 unsalted (plaintext) file.
 
-AES-256-CTR is an unauthenticated stream cipher: a WRONG passphrase decrypts to
-garbage WITH EXIT 0 -- it does NOT error. For a plan, the wrong-passphrase
-fail-safe is enforced downstream by `tofu apply stack.otplan` rejecting the
-garbage plan (exact-plan invariant), so the apply check stays pending. For
-state, decrypt-state checks the result itself, because tofu reads an empty
-state file as no state.
+AES-256-CTR is an unauthenticated stream cipher: a WRONG passphrase, or a file
+written with another iteration count, decrypts to garbage WITH EXIT 0 -- it does
+NOT error. For a plan, the fail-safe is downstream: apply-cell's render step fails
+on OpenTofu's own plan-file error from `tofu show`, before any apply step, so the
+apply check stays pending. For state, decrypt-state checks the result itself,
+because tofu reads an empty state file as no state.
 """
 
 import json
@@ -46,6 +46,8 @@ def _openssl(path, *, decrypt):
         "enc",
         "-aes-256-ctr",
         "-pbkdf2",
+        "-iter",
+        "600000",
         "-salt",
         "-in",
         path,
@@ -91,7 +93,8 @@ def encrypt(path):
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse without a passphrase or on plaintext.
 
-    A wrong passphrase is not detected here: `tofu apply` rejects the garbage plan.
+    A wrong passphrase or iteration count is not detected here: apply-cell's render step
+    fails on OpenTofu's own plan-file error from `tofu show`, before any apply step.
     """
     _require_passphrase()
     if not _is_encrypted(path):
@@ -117,8 +120,8 @@ def decrypt_state(path, cache_key):
     """Decrypt a restored state cache entry in place, or refuse before tofu can read it.
 
     Refuses without a passphrase, on a plaintext entry, and on a result that is not a
-    JSON object with `version` or `encryption_version` (wrong passphrase, or a corrupt
-    entry). Never prints the file's contents.
+    JSON object with `version` or `encryption_version` (saved with another passphrase or
+    key derivation, or a corrupt entry). Never prints the file's contents.
     """
     _require_passphrase()
     prefix = cache_key.rpartition("/")[0] + "/"
@@ -134,13 +137,13 @@ def decrypt_state(path, cache_key):
     _openssl(path, decrypt=True)
     if not _is_state(path):
         raise SystemExit(
-            f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state: "
-            "SHIPMATE_PLAN_PASSPHRASE does not match the one that saved the entry, or the entry "
-            f"is corrupt. tofu was not run. If the entry is corrupt, `gh cache delete {cache_key}"
-            f"{_repo_flag()}` deletes it and the next restore uses the previous one. If the "
-            "passphrase was rotated, every entry under the prefix was saved with the old one: set "
-            "the old secret back, or delete them all, which discards the state: "
-            f"`{_purge_command(prefix)}`."
+            f"::error::state cache entry `{cache_key}` does not decrypt to OpenTofu state: it "
+            "was saved with another SHIPMATE_PLAN_PASSPHRASE or another key derivation, or it is "
+            f"corrupt. tofu was not run. If the entry is corrupt, `gh cache delete {cache_key}"
+            f"{_repo_flag()}` deletes it and the next restore uses the previous one. Otherwise "
+            "every entry under the prefix was saved the same way: set the old secret back, which "
+            "helps only after a passphrase rotation, or delete them all, which discards the "
+            f"state: `{_purge_command(prefix)}`."
         )
 
 

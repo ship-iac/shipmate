@@ -600,7 +600,10 @@ page's S3 example owns its state, and the engine's state steps are skipped
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
 `SHIPMATE_PLAN_PASSPHRASE` is required: it encrypts every plan artifact and a
-local backend's cached state, and a cell without it refuses. Set it as a
+local backend's cached state, and a cell without it refuses. Generate it with
+`openssl rand -base64 32`: use a random value, not a human passphrase, because
+anyone who can read the repository's Actions runs can download the ciphertext
+([`hardening.md`](hardening.md) §What none of this fixes). Set it as a
 repository or organization secret, or as the same value on both `<env>-plan`
 and `<env>-apply`. An environment secret reaches only a job that binds that
 environment, and a plan cell binds its own plan environment, so these placements
