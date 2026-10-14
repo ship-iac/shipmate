@@ -440,8 +440,16 @@ def test_a_failed_body_build_says_so_on_the_pull_request_and_dispatches_nothing(
     )
 
 
-#: Saves the dispatch call's stdin to `sent.txt`; every other call succeeds silently.
-_STDIN_SAVING_STUB = _on_dispatch_call("  cat > sent.txt\n  exit 0")
+#: Saves the dispatch call's stdin to `sent.txt` only when its argv carries `--input -`;
+#: every other call succeeds silently.
+_STDIN_SAVING_STUB = _on_dispatch_call(
+    "  prev=''\n"
+    '  for b in "$@"; do\n'
+    '    if [ "$prev" = --input ] && [ "$b" = - ]; then cat > sent.txt; fi\n'
+    '    prev="$b"\n'
+    "  done\n"
+    "  exit 0"
+)
 
 
 @pytest.mark.parametrize(
@@ -452,7 +460,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call("  cat > sent.txt\n  exit 0")
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "plan", "pr_number": "42"}, '
-                '"return_run_details": true}'
+                '"return_run_details": true}\n'
             ),
         ),
         (
@@ -460,7 +468,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call("  cat > sent.txt\n  exit 0")
             "",
             (
                 '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42"}, '
-                '"return_run_details": true}'
+                '"return_run_details": true}\n'
             ),
         ),
         (
@@ -468,7 +476,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call("  cat > sent.txt\n  exit 0")
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "apply", "ref": "abc123", "pr_number": "42", '
-                '"environment": "dev-eu"}, "return_run_details": true}'
+                '"environment": "dev-eu"}, "return_run_details": true}\n'
             ),
         ),
         (
@@ -476,7 +484,7 @@ _STDIN_SAVING_STUB = _on_dispatch_call("  cat > sent.txt\n  exit 0")
             "dev-eu",
             (
                 '{"ref": "main", "inputs": {"verb": "unlock", "ref": "abc123", '
-                '"environment": "dev-eu"}, "return_run_details": true}'
+                '"environment": "dev-eu"}, "return_run_details": true}\n'
             ),
         ),
     ],
@@ -486,17 +494,19 @@ _STDIN_SAVING_STUB = _on_dispatch_call("  cat > sent.txt\n  exit 0")
 def test_the_built_body_reaches_the_dispatch_call_on_stdin_whole(
     tmp_path, verb, environment, expected
 ):
-    """For every verb, gh reads the request body from stdin (`--input -`), and it is the
-    hand-written body for that verb byte for byte.
+    """For every verb, the dispatch call carries `--input -`, and its stdin is the hand-written
+    body for that verb byte for byte, with the one newline the here-string appends.
 
-    Mutations: pass `"${body:0:5}"` to gh instead of `"$body"`; run `dispatch-body` with a
-    different `ENVIRONMENT` when the verb is `unlock`.
+    Mutations: drop `--input -` from the dispatch call; pass `"${body:0:5}"` instead of
+    `"$body"`; run `dispatch-body` with a different `ENVIRONMENT` when the verb is `unlock`.
     """
     result, _ = _run_dispatch(
         tmp_path, verb=verb, environment=environment, gh_stub=_STDIN_SAVING_STUB
     )
     assert result.returncode == 0, f"dispatch failed: {result.stdout}{result.stderr}"
-    assert (tmp_path / "sent.txt").read_text(encoding="utf-8") == expected
+    sent = tmp_path / "sent.txt"
+    assert sent.exists(), "the dispatch call did not read its body from stdin via --input -"
+    assert sent.read_text(encoding="utf-8") == expected
 
 
 def _silent_answer_stub(out, rc):

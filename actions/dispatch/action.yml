@@ -88,7 +88,7 @@ runs:
         trap 'rm -f -- "$errfile"' EXIT
         rc=0
         # stdout alone is the API's answer, parsed below; gh writes its own messages to stderr.
-        out=$(printf '%s' "$body" | gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input - 2>"$errfile") || rc=$?
+        out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input - <<<"$body" 2>"$errfile") || rc=$?
         err=$(<"$errfile")
         [ -z "$out" ] || printf '%s\n' "$out"
         [ -z "$err" ] || printf '%s\n' "$err"
