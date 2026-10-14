@@ -991,14 +991,16 @@ recorded, and every plan of the stack in that environment re-creates them. A
 plan or drift cell can be re-run. For the local-backend samples' resources the
 re-creation is harmless. For a stack with real resources:
 
-- Never re-run a refused apply cell or deploy: it applies its stored plan
+- Never re-run a refused apply cell or deploy: it can apply its stored plan
   against the empty state.
 - Do not apply or merge any plan of the stack in that environment until every
-  resource the deleted state recorded shows `to import` in it. Add an
-  `import` block for each, as in step 5 of §`The apply step ran and its state
-  was not saved`. Take each id from an earlier `Apply the stored plan` log's
-  `Creation complete ... [id=...]` line while that log is retained, or from
-  the provider, using the import ID its documentation names.
+  managed resource the deleted state recorded shows `to import` in it, except
+  one whose provider does not implement import (step 7 of §`The apply step ran
+  and its state was not saved`), which re-creates. Add an `import` block for
+  each, as in step 5 of that section. Take each id from an earlier
+  `Apply the stored plan` log's `Creation complete` or `Import complete` line
+  while that log is retained; for every other resource, find it at the
+  provider and use the import ID its documentation names.
 
 ### `state cache entry ... cannot be read`
 

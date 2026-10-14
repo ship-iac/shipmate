@@ -94,7 +94,8 @@ def _no_header(kind, path, repo=" --repo ship-iac/sample"):
         "prefix, so deleting only `state/app-net/dev-eu/123-1` restores the next-older entry, "
         "which is no shipmate-crypt-v1 entry either). Deleting discards that state: OpenTofu no "
         "longer tracks the resources it recorded, and every plan of the stack in this environment "
-        "re-creates them. A plan or drift cell can then be re-run. docs/troubleshooting.md "
+        "re-creates them. A plan or drift cell can then be re-run; never re-run a refused "
+        "apply or deploy. docs/troubleshooting.md "
         "section `state cache entry ... is not a shipmate-crypt-v1 entry` says what to do "
         "before applying or merging such a plan."
     )
