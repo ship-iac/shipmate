@@ -879,14 +879,15 @@ other case, re-plan and reconcile against the provider:
    the re-plan's creates are new. Before applying the re-plan, check each
    create it shows against the provider (the cloud console or API), the new
    object of a `+/-` (`create_before_destroy`) replace included. Adopt a plain
-   create that already exists with an `import` block (step 5). The engine
-   documents no recovery for a `+/-` replace whose new object already exists:
-   the plan does not name that object, and it shares the old object's
-   unchanged attributes. This case is not probed. Do not apply the re-plan or
-   forget the address until the extra object has been identified at the
-   provider (by creation time). On the open pull request,
-   the re-plan completes or replaces the cell's apply check. After the merge,
-   a new pull request's plan completes only its own head's check. The merged
+   create that already exists with an `import` block (step 5). For a `+/-`
+   (create_before_destroy) replace whose new object already exists at the
+   provider, the engine documents no recovery, and this case is not probed:
+   the plan does not identify the object the lost apply created. Do not apply
+   the re-plan or forget the address; reconcile the two objects at the
+   provider first, so that only the one the state tracks remains. On the open
+   pull request, the re-plan completes or replaces the cell's apply check.
+   After the merge, a new pull request's plan completes only its own head's
+   check. The merged
    head's check stays pending, and nothing reads it again: a later deploy
    takes only the pending checks of its own merge's pull request. Never re-run
    that deploy, which reads it. When nothing is
