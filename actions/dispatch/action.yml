@@ -57,13 +57,16 @@ runs:
         COMMENT_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
+        # reply <outcome> [text] [run id]: one reply on the pull request, with the workflow token.
+        # It never carries the API's answer, which has no bounded length.
+        reply() {
+          GH_TOKEN="$COMMENT_TOKEN" SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME="$1" \
+            SHIPMATE_REPLY_TEXT="${2-}" SHIPMATE_REPLY_RUN_ID="${3-}" python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment"
+        }
         # Every refusal below lands on a run whose checks attach to the dispatch ref, so the pull
-        # request would show nothing. The footer links this run, never the API's answer: that has
-        # no bounded length. `|| true`: a cosmetic failure cannot mask the status.
+        # request would show nothing. `|| true`: a cosmetic failure cannot mask the status.
         say_no_run_started() {
-          GH_TOKEN="$COMMENT_TOKEN" SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME=failed \
-            SHIPMATE_REPLY_TEXT="the command was authorized, but dispatching its workflow failed, so no run started. The error is in this run's log." \
-            python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" || true
+          reply failed "the command was authorized, but dispatching its workflow failed, so no run started. The error is in this run's log." || true
         }
         # A composite action's `required: true` is not enforced by GitHub, so a caller that omits
         # the input arrives with the empty string. Refuse rather than default: a default runs one
@@ -82,13 +85,16 @@ runs:
         esac
         python3 "$GITHUB_ACTION_PATH/../../scripts/dispatch-body" > body.json
         rc=0
-        out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>&1) || rc=$?
-        printf '%s\n' "$out"
+        # stdout alone is the API's answer, parsed below; gh writes its own messages to stderr.
+        errfile=$(mktemp)
+        out=$(gh api -X POST "repos/$REPO/actions/workflows/$WORKFLOW/dispatches" --input body.json 2>"$errfile") || rc=$?
+        err=$(<"$errfile")
+        printf '%s\n' "$out" "$err"
         if [ "$rc" -ne 0 ]; then
           # Measured, in order: an absent file answers 404, one with no such trigger `Workflow
           # does not have 'workflow_dispatch' trigger (HTTP 422)`, one declaring fewer inputs
           # than the body names `Unexpected inputs provided`. Anything else is not skew.
-          if [[ "$out" == *"HTTP 404"* || "$out" == *workflow_dispatch* || "$out" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no workflow_dispatch trigger or not the inputs this verb's dispatch sends. docs/getting-started.md publishes it; re-pinning cannot create it."; fi
+          if [[ "$out$err" == *"HTTP 404"* || "$out$err" == *workflow_dispatch* || "$out$err" == *"Unexpected inputs provided"* ]]; then echo "::error::This repository has no .github/workflows/shipmate.yml, or that file declares no workflow_dispatch trigger or not the inputs this verb's dispatch sends. docs/getting-started.md publishes it; re-pinning cannot create it."; fi
           say_no_run_started
           exit "$rc"
         fi
@@ -97,16 +103,7 @@ runs:
         else
           echo "::notice title=dispatch::dispatched $WORKFLOW on $DISPATCH_REF for ${ENVIRONMENT:-all environments} (ref $REF)"
         fi
-        # The run has started, so nothing below may fail the step. The link is built here from a
-        # bounded id: the API's `html_url` has no bounded length and could break out of the link.
+        # The run has started, so nothing below may fail the step: the reply is reviewer-facing and
+        # degrades to a warning. `reply-comment` checks the raw id before it links the run.
         run_id=$(printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin)["workflow_run_id"])' 2>/dev/null) || run_id=""
-        [[ "$run_id" =~ ^[0-9]{1,20}$ ]] || run_id=""
-        if [ -n "$run_id" ]; then
-          reply="started [the $VERB run]($GITHUB_SERVER_URL/$REPO/actions/runs/$run_id)"
-        else
-          reply="started the $VERB run; it is listed in this repository's Actions tab"
-        fi
-        # Reviewer-facing only: a failed reply degrades to a warning.
-        GH_TOKEN="$COMMENT_TOKEN" SHIPMATE_REPLY_VERB="$VERB" SHIPMATE_REPLY_ENV="$ENVIRONMENT" SHIPMATE_REPLY_OUTCOME=notice \
-          SHIPMATE_REPLY_TEXT="$reply" python3 "$GITHUB_ACTION_PATH/../../scripts/reply-comment" \
-          || echo "::warning::could not post the dispatch reply; the run started"
+        reply started "" "$run_id" || echo "::warning::could not post the dispatch reply; the run started"

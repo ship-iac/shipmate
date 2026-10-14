@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post a one-verdict reply comment: a refusal, a failure or a notice.
+"""Post a one-verdict reply comment: a refusal, a failure, a notice or a started run.
 
 The bash sites in `actions/comment-ops` and `actions/dispatch` post their replies through this
 script, so every one carries the shared header and footer from `summary-comment`. Reads:
@@ -7,10 +7,14 @@ script, so every one carries the shared header and footer from `summary-comment`
 - `SHIPMATE_REPLY_VERB`, `SHIPMATE_REPLY_ENV`: the header words, `_md_escape`d there; an empty
   verb gives `### shipmate`.
 - `SHIPMATE_REPLY_OUTCOME`: `refused` (the engine decided not to run the command), `failed` (it
-  could not), or `notice`. Anything else prints `::error::` to stderr and exits 1, posting
-  nothing.
+  could not), `notice`, or `started` (a dispatch started the verb's run). Anything else prints
+  `::error::` to stderr and exits 1, posting nothing.
 - `SHIPMATE_REPLY_TEXT`: the reason or notice, posted unescaped. Engine text, holding a
-  commenter's text only inside a code span (`comment-parse`'s `_quotable`).
+  commenter's text only inside a code span (`comment-parse`'s `_quotable`). Not read for
+  `started`.
+- `SHIPMATE_REPLY_RUN_ID`: read for `started` only, the raw `workflow_run_id` of the dispatch
+  answer. When it is 1 to 20 digits the notice links that run (`started_text`); otherwise it
+  says where the run is listed.
 
 The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBER` of
 `GITHUB_REPOSITORY`; gh's response is discarded and nothing is printed. Any argument exits 1 with
@@ -18,22 +22,30 @@ The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBE
 before any `gh` call; a failed POST exits 1 with gh's stderr.
 
 The footer links this run (`current_run_url()`), then `FOOTER_HINT` on a refusal or a failure;
-a notice asks nothing of the reader, so it carries no hint.
+a notice or a started run asks nothing of the reader, so it carries no hint.
 """
 
 import os
 import sys
 
-from _shipmate import _load, current_run_url, is_pr_number, run
+from _shipmate import _load, current_run_url, is_pr_number, is_run_id, run
 
 sc = _load("summary-comment")
 
-VERDICTS = {"refused": "🔴 refused: ", "failed": "🔴 failed: ", "notice": "⚪ "}
+VERDICTS = {"refused": "🔴 refused: ", "failed": "🔴 failed: ", "notice": "⚪ ", "started": "⚪ "}
+
+
+def started_text(verb, run_id):
+    """The `started` verdict text. The link is built from `run_id`, never taken from the API's
+    `html_url`, whose length is unbounded and which could break out of the markdown link."""
+    if is_run_id(run_id):
+        return f"started [the {sc._md_escape(verb)} run]({current_run_url(run_id)})"
+    return f"started the {sc._md_escape(verb)} run; it is listed in this repository's Actions tab"
 
 
 def body(verb, env, outcome, text, run_url):
     """The whole comment body for `outcome`, which must be a key of `VERDICTS`."""
-    foot = sc.footer(run_url, hint=outcome != "notice")
+    foot = sc.footer(run_url, hint=outcome in ("refused", "failed"))
     return f"{sc.header(verb, env)}\n\n{VERDICTS[outcome]}{text}\n\n{foot}"
 
 
@@ -43,7 +55,8 @@ def main():
     outcome = os.environ.get("SHIPMATE_REPLY_OUTCOME", "")
     if outcome not in VERDICTS:
         print(
-            f"::error::SHIPMATE_REPLY_OUTCOME must be refused, failed or notice (got: {outcome})",
+            "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed, notice or started "
+            f"(got: {outcome})",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -52,13 +65,12 @@ def main():
     if not is_pr_number(pr):
         print(f"::error::PR_NUMBER must be a pull request number (got: {pr})", file=sys.stderr)
         sys.exit(1)
-    text = body(
-        os.environ.get("SHIPMATE_REPLY_VERB", ""),
-        os.environ.get("SHIPMATE_REPLY_ENV", ""),
-        outcome,
-        os.environ.get("SHIPMATE_REPLY_TEXT", ""),
-        current_run_url(),
-    )
+    verb = os.environ.get("SHIPMATE_REPLY_VERB", "")
+    if outcome == "started":
+        verdict = started_text(verb, os.environ.get("SHIPMATE_REPLY_RUN_ID", ""))
+    else:
+        verdict = os.environ.get("SHIPMATE_REPLY_TEXT", "")
+    text = body(verb, os.environ.get("SHIPMATE_REPLY_ENV", ""), outcome, verdict, current_run_url())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     run(["gh", "api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "-f", f"body={text}"])
 

@@ -1138,7 +1138,8 @@ The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
 `🔴 failed: <reason>` when it could not (an App token mint, a workflow
 dispatch, an errored read or decision of the commenter's permission), and
-`⚪ <text>` for a notice. `scripts/reply-comment` renders and posts all three.
+`⚪ <text>` for a notice, the dispatch's started-run reply included.
+`scripts/reply-comment` renders and posts all of them.
 
 `shipmate plan` plans the pull request's changed stacks on demand, authoring
 exactly what a push-triggered plan authors and nothing more: the sticky plan
@@ -2267,8 +2268,8 @@ not upserted against a marker: every run's comment is new, so a
 failure-then-retry sequence stays visible as separate comments rather than
 overwriting the evidence of the failure — an audit trail. A run refused or
 cancelled at `apply.yml`'s `review` job (the pull request closed, re-pushed or
-turned draft since the comment) posts no comment and writes no gate: the red run
-is the only signal.
+turned draft since the comment) posts no comment and writes no gate: the red run,
+which the dispatch's notice reply links, is the signal.
 
 Structure, in order, blank lines between the parts, each part present only when
 it has content: the header, the verdict line, one line or fold-out per row, the

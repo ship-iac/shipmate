@@ -510,22 +510,25 @@ def test_a_failed_dispatch_posts_the_shared_failure_reply(tmp_path):
 
 
 def _answering_stub(answer, reply_exit=0):
-    """A gh stub that answers the dispatch call with `answer`, records each call's token and
-    argv, saves the reply's body, and exits `reply_exit` on the reply call."""
+    """A gh stub that answers the dispatch call with `answer` on stdout and a warning on stderr,
+    records each call's token and argv, saves the reply's body, and exits `reply_exit` on the
+    reply call. The dispatch call is the one whose API path argument is a dispatches path."""
     return (
-        "#!/bin/bash\nprintf 'token=%s\n' \"$GH_TOKEN\" >> argv.txt\n"
-        "printf '%s\n' \"$@\" >> argv.txt\n"
-        'if [[ "$*" == *dispatches* ]]; then\n'
+        "#!/bin/bash\nprintf 'token=%s\\n' \"$GH_TOKEN\" >> argv.txt\n"
+        "printf '%s\\n' \"$@\" >> argv.txt\n"
+        'for a in "$@"; do if [[ "$a" == repos/*/actions/workflows/*/dispatches ]]; then\n'
+        "  echo 'warning: gh noise on a successful call' >&2\n"
         f"  cat <<'ANSWER'\n{answer}\nANSWER\n"
-        "  exit 0\nfi\n"
+        "  exit 0\nfi; done\n"
         'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
         "done\n"
         f"exit {reply_exit}\n"
     )
 
 
-#: E1's measured 200 answer, with an `html_url` that is not the engine-built link and would
-#: break out of a markdown link if pasted.
+#: The answer probed on 2026-10-14 (`return_run_details=true` answers 200 with
+#: `workflow_run_id`, `run_url` and `html_url`), with an `html_url` that is not the engine-built
+#: link and would break out of a markdown link if pasted.
 _STARTED_ANSWER = (
     '{"workflow_run_id":38481239914,'
     '"run_url":"https://api.github.com/repos/org/repo/actions/runs/38481239914",'
@@ -547,10 +550,13 @@ def test_a_started_run_gets_a_reply_linking_it(tmp_path, verb, environment, head
     """Every dispatching verb replies on the pull request with the whole notice: the header, a
     verdict linking the started run by a URL the engine builds from `workflow_run_id`, and the
     footer linking the comment-handling run. Posted with the workflow token, since the App
-    token is minted `actions: write` and cannot comment.
+    token is minted `actions: write` and cannot comment. The stub's dispatch answer carries a
+    gh warning on stderr, which must not reach the parsed answer.
 
-    Mutations: link `html_url` from the answer instead; drop the link; skip the reply for one
-    verb (`if [ "$VERB" != plan ]`); swap `$COMMENT_TOKEN` for `$GH_TOKEN`.
+    Mutations: parse `html_url` instead of `workflow_run_id`; capture the dispatch with `2>&1`
+    again (the warning corrupts the JSON, and the link is lost); pass no run id to the reply;
+    skip the reply for one verb (`[ "$VERB" = plan ] ||`); drop `GH_TOKEN="$COMMENT_TOKEN"`
+    from `reply`.
     """
     result, argv = _run_dispatch(
         tmp_path, verb=verb, environment=environment, gh_stub=_answering_stub(_STARTED_ANSWER)
@@ -579,9 +585,8 @@ def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path,
     """A 204 (no body), a non-numeric id and a 21-digit id all yield the no-link notice, and
     the step exits 0: the run has started whatever the answer says.
 
-    Mutations: remove the `|| run_id=""` parse guard (the 204 case exits non-zero under
-    `set -e`); widen the check to `^[0-9]+` (the 21-digit case links); drop the check (the
-    non-numeric case links).
+    Mutation: remove the `|| run_id=""` parse guard (the 204 case exits non-zero under
+    `set -e`). The id check itself is `_shipmate.is_run_id`, pinned in `test_reply_comment.py`.
     """
     result, _ = _run_dispatch(
         tmp_path, verb="apply", environment="dev-eu", gh_stub=_answering_stub(answer)

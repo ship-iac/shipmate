@@ -1155,7 +1155,8 @@ landed between the `shipmate apply` comment and the run. Wait for the new head's
 plan, then comment `shipmate apply` again.
 
 A run refused or cancelled in `review` posts no apply comment and leaves the
-gate as it was: the red run is the only signal.
+gate as it was: the red run, which the dispatch reply on the pull request links,
+is the signal.
 
 An apply run whose `summary` job was cancelled before it ran, because a later
 gate writer on the same head queued behind it, also posts no apply comment. Its
