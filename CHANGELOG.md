@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 ### Changed
 
 - **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**
+- **`apply-complete` re-reads a lagging jobs listing after 2, 3 and 5 seconds and then every 10 seconds, instead of every 10 seconds from the first retry; the total wait stays 110 seconds.**
 
 ### Fixed
 
