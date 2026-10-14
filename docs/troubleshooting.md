@@ -853,16 +853,12 @@ the refusal. What to do depends on the step that refused:
 
 ### `The apply step ran and its state was not saved`
 
-An apply cell's `Save state` failed after its `Apply the stored plan` step ran.
-The step's status is the discriminator:
-
-- **`skipped`.** Nothing was applied, and a re-run of the job is safe. The
-  warning does not print in this case.
-- **`success`, `failure` or `cancelled`.** The apply may have advanced state,
-  and that state was not saved. Do not re-run the job or re-plan against the
-  cached entry: both act on the state from before the apply, or on no state on
-  a stack's first apply. The cell's apply check stays pending, and the apply
-  comment shows it as not recorded.
+An apply cell's `Save state` failed, and its `Apply the stored plan` step ran:
+its status is `success`, `failure` or `cancelled`. The apply may have advanced
+state, and that state was not saved. Do not re-run the job or re-plan against
+the cached entry: both act on the state from before the apply, or on no state
+on a stack's first apply. The cell's apply check stays pending, and the apply
+comment shows it as not recorded, or failed when the apply itself failed.
 
 The engine has no recovery for local-backend state lost this way. The
 resources the apply created exist, and OpenTofu does not track them.

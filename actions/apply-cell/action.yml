@@ -218,7 +218,7 @@ runs:
     - name: Warn that the applied state was not saved
       # `Save state` also runs when the apply was skipped; only an apply that ran can have
       # advanced state that a re-run or a re-plan against the cache would act on again.
-      if: ${{ failure() && steps.apply.outcome != 'skipped' && steps.save-state.outcome == 'failure' }}
+      if: ${{ always() && steps.apply.outcome != 'skipped' && steps.save-state.outcome == 'failure' }}
       shell: bash
       run: |
         echo "::error::The apply step ran and its state was not saved. Do not re-run this job or re-plan against the cache: both act on the state from before the apply. See docs/troubleshooting.md section The apply step ran and its state was not saved."

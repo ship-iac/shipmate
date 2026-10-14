@@ -2451,10 +2451,10 @@ job believed before its check was completed:
   pending, because the check was not completed after the apply: the cell's
   job did not succeed (`Save state` failed, or it was cancelled), the
   `complete` job failed, or a newer plan re-created the check.
-  `shipmate / gate` stays pending. With a remote backend, or when `Save state`
-  succeeded, the stack needs a re-plan: state has advanced past the reviewed
-  `.otplan`, so the saved plan is stale. When `Save state` failed on a local
-  backend, see `docs/troubleshooting.md` §`The apply step ran and its state was not saved`. The `not recorded:` note names the affected cells — capped, with
+  `shipmate / gate` stays pending, and the stack needs a re-plan: state has
+  advanced past the reviewed `.otplan`, so the saved plan is stale. When
+  `Save state` failed on a local backend, see `docs/troubleshooting.md`
+  §`The apply step ran and its state was not saved`. The `not recorded:` note names the affected cells — capped, with
   any remainder summarized as a count, since notes are part of the comment the
   size fallback cannot shed and the usual cause strands a whole matrix at once;
   the row lines always name every one of them. Each such cell keeps its full

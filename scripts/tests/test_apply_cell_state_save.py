@@ -54,7 +54,7 @@ def test_save_state_still_requires_successful_restore():
 _LOST_SAVE_WARNING = {
     "name": "Warn that the applied state was not saved",
     "if": (
-        "${{ failure() && steps.apply.outcome != 'skipped' "
+        "${{ always() && steps.apply.outcome != 'skipped' "
         "&& steps.save-state.outcome == 'failure' }}"
     ),
     "shell": "bash",
@@ -68,9 +68,10 @@ _LOST_SAVE_WARNING = {
 
 def test_a_lost_state_save_after_an_apply_warns_against_a_re_run():
     """`Save state` runs under always(), also when the apply was skipped; the warning must fire
-    only when the apply step ran.
+    only when the apply step ran, a cancelled run included, where failure() is false.
 
-    Mutation: drop `steps.apply.outcome != 'skipped'` from the warning's `if:`.
+    Mutations: drop `steps.apply.outcome != 'skipped'` from the warning's `if:`; `failure()` in
+    place of `always()`.
     """
     steps = action_steps("apply-cell")
     names = [s.get("name") for s in steps]
