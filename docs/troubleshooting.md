@@ -991,13 +991,15 @@ recorded, and every plan of the stack in that environment re-creates them. A
 plan or drift cell can be re-run. For the local-backend samples' resources the
 re-creation is harmless.
 
-For a stack with real resources, every instance the deleted state recorded is
-in the condition §`The apply step ran and its state was not saved` describes
-for a lost apply's resources. Never re-run a refused apply cell or deploy, and
-do not apply or merge any plan of the stack in that environment by any route,
-until that section's steps 4 to 9 have adopted every such instance. No entry
-remains to restore, so take each id from the latest retained `Apply the stored
-plan` log for its address or from the provider.
+For a stack with real resources, applying such a plan duplicates or collides
+with each existing object, and the engine documents no recovery beyond
+adopting them. Before deleting, list the stack's resources at the provider:
+afterwards nothing lists what the deleted state recorded. Never re-run a
+refused apply cell or deploy. Then add an `import` block for each instance on a
+pull request touching the stack, as in steps 5, 7 and 8 of §`The apply step ran
+and its state was not saved`, with the import ID its provider's documentation
+names, and apply that pull request's plan once each instance shows
+`to import`. A resource whose provider does not implement import re-creates.
 
 ### `state cache entry ... cannot be read`
 
