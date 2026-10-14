@@ -1,5 +1,5 @@
 name: shipmate state
-description: Restore or save OpenTofu local state for one stack x environment via actions/cache (loss-tolerant), encrypted at rest with the plan passphrase.
+description: Restore or save OpenTofu local state for one stack x environment via actions/cache, encrypted at rest with the plan passphrase.
 inputs:
   stack-slug:
     description: Filesystem-safe stack id (path separators replaced by '-').

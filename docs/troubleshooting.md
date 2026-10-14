@@ -989,17 +989,8 @@ next-older one.
 Deleting discards that state: OpenTofu no longer tracks the resources it
 recorded, and a plan of the stack in that environment re-creates them. A
 plan or drift cell can be re-run; never re-run a refused apply cell or deploy.
-For the local-backend samples' resources the re-creation is harmless.
-
-For a stack with real resources, applying such a plan duplicates or collides
-with each existing object, and the engine documents no recovery beyond
-adopting them. List the stack's resources from earlier `Apply the stored plan`
-logs (`Creation complete` or `Import complete` lines, less later
-`Destruction complete` lines) or at the provider. On a pull request touching
-the stack, add an `import` block for each instance whose provider implements
-import (step 7 of §`The apply step ran and its state was not saved` covers the
-rest), with the id step 8 of that section describes, and apply that plan only
-under its step 4.
+For a real resource, applying that plan duplicates or collides with the
+existing object.
 
 ### `state cache entry ... cannot be read`
 
@@ -1043,7 +1034,8 @@ secret, never by deleting. Check the causes in this order:
   `gh cache delete <key> --repo <owner>/<repo>`.
 
 Deleting has a cost. The restore then uses the next-older entry under the
-prefix if one survives (entries unused for 7 days are evicted), or none, so the
+prefix if one survives (entries unused for the repository's cache retention
+period, 7 days by default, are evicted), or none, so the
 stack is in the state §`The apply step ran and its state was not saved`
 describes: its step 3 lists every apply since the entry the restore then uses.
 
