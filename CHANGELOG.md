@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.46.0] — 2026-10-15
 
+Tags `ec6aea5`.
+
 ### Changed — BREAKING
 
 - **Plan artifacts and cached local state use the authenticated shipmate-crypt-v1 format: a header, a random salt, the AES-256-CTR ciphertext and an HMAC-SHA256 tag, keyed by one 600,000-iteration PBKDF2-SHA256 derivation per operation and bound to the file's kind and, for state, its cache prefix, and each decrypt verifies the tag before openssl reads the file. A plan artifact or state entry written by an earlier release refuses as not shipmate-crypt-v1: re-plan open pull requests, and on a local backend delete the `state/` entries with the command the refusal names, which discards that state (OpenTofu stops tracking those resources). Generate `SHIPMATE_PLAN_PASSPHRASE` with `openssl rand -base64 32` (`docs/getting-started.md`): anyone who can read the repository's Actions runs can download the ciphertext, and a later rotation makes every cached state entry refuse again, so rotate a human-chosen passphrase at this re-pin.**
