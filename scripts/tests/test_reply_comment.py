@@ -6,6 +6,7 @@ import sys
 
 import pytest
 from _loader import SCRIPTS, load_script
+from _shipmate import run_annotated
 
 rc = load_script("reply-comment")
 
@@ -83,9 +84,9 @@ def test_an_unknown_outcome_exits_non_zero_and_prints_nothing():
 
 
 def _post(monkeypatch, *argv, pr="42", outcome="refused"):
-    """Run `main` in-process with `argv`; return (exit code, captured `run` calls)."""
+    """Run `main` in-process with `argv`; return (exit code, captured `(argv, stdin)` calls)."""
     calls = []
-    monkeypatch.setattr(rc, "run", lambda args: calls.append(args) or '{"id": 1}')
+    monkeypatch.setattr(rc, "run", lambda args, stdin=None: calls.append((args, stdin)) or "{}")
     monkeypatch.setattr(sys, "argv", ["reply-comment", *argv])
     for key, value in {
         "GITHUB_SERVER_URL": "https://github.com",
@@ -106,7 +107,7 @@ def _post(monkeypatch, *argv, pr="42", outcome="refused"):
 
 
 def test_main_posts_the_body_to_the_pull_request_and_prints_nothing(monkeypatch, capsys):
-    """The whole argv, hand-written.
+    """The whole argv and stdin, hand-written.
 
     Mutations: take the issue number from `GITHUB_RUN_ID`; drop `-X POST`; `print(text); return`
     before the post.
@@ -114,15 +115,10 @@ def test_main_posts_the_body_to_the_pull_request_and_prints_nothing(monkeypatch,
     code, calls = _post(monkeypatch)
     assert code == 0
     assert calls == [
-        [
-            "gh",
-            "api",
-            "-X",
-            "POST",
-            "repos/org/repo/issues/42/comments",
-            "-f",
-            f"body=### shipmate apply dev-eu\n\n🔴 refused: no\n\n{_FOOTER}",
-        ]
+        (
+            ["gh", "api", "-X", "POST", "repos/org/repo/issues/42/comments", "-F", "body=@-"],
+            f"### shipmate apply dev-eu\n\n🔴 refused: no\n\n{_FOOTER}",
+        )
     ]
     assert capsys.readouterr().out == ""
 
@@ -209,5 +205,36 @@ def test_main_posts_the_started_text_and_ignores_the_reply_text(monkeypatch):
     )
     assert code == 0
     assert calls == [
-        ["gh", "api", "-X", "POST", "repos/org/repo/issues/42/comments", "-f", f"body={body}"]
+        (["gh", "api", "-X", "POST", "repos/org/repo/issues/42/comments", "-F", "body=@-"], body)
     ]
+
+
+def test_a_failed_post_names_the_pull_request_and_not_the_body(monkeypatch, capsys):
+    """`run`'s failure message quotes the argv, so a body in the argv reaches the log.
+
+    Mutation: post with `-f body={text}` and no stdin -- the body appears in stderr.
+    """
+    failed = subprocess.CompletedProcess([], 1, b"", b"HTTP 403: forbidden\nsecond line")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: failed)
+    monkeypatch.setattr(sys, "argv", ["reply-comment"])
+    for key, value in {
+        "GITHUB_SERVER_URL": "https://github.com",
+        "GITHUB_REPOSITORY": "org/repo",
+        "GITHUB_RUN_ID": "7777",
+        "PR_NUMBER": "42",
+        "SHIPMATE_REPLY_OUTCOME": "refused",
+        "SHIPMATE_REPLY_TEXT": "body-only-text",
+    }.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(SystemExit) as exc:
+        run_annotated(rc.main)
+    err = capsys.readouterr().err
+    assert (exc.value.code, err) == (
+        1,
+        (
+            "::error::could not post the reply on pull request #42: command failed (1): gh api "
+            "-X POST repos/org/repo/issues/42/comments -F body=@-"
+            "%0AHTTP 403: forbidden%0Asecond line\n"
+        ),
+    )
+    assert "body-only-text" not in err

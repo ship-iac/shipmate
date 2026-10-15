@@ -42,7 +42,7 @@ import os
 import subprocess
 from urllib.parse import quote
 
-from _shipmate import _run, cell_summaries, current_run_url, is_head_sha
+from _shipmate import _run, cell_summaries, current_run_url, is_head_sha, run_annotated
 
 CELL_KEYS = (
     "stack",
@@ -239,4 +239,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

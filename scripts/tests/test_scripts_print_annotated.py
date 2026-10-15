@@ -3,23 +3,65 @@ import ast
 import pytest
 from _loader import ENGINE
 
+SCRIPTS = sorted(p.name for p in (ENGINE / "scripts").iterdir() if p.is_file() and not p.suffix)
+
 MAIN_BLOCK = "if __name__ == '__main__':\n    run_annotated(main)"
+#: Hand-written: each block that is not `MAIN_BLOCK`.
+BLOCKS = {
+    "gate-status": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
+    "plan-classify": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",
+    "plan-crypt": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",
+    "plan-cell-summary": (
+        "if __name__ == '__main__':\n"
+        "    args = sys.argv[1:]\n"
+        "    if args == ['--step-line']:\n"
+        "        print(step_line())\n"
+        "    elif args:\n"
+        "        raise SystemExit(f'::error::plan-cell-summary takes no argument or --step-line, "
+        "got {args}')\n"
+        "    else:\n"
+        "        run_annotated(main)"
+    ),
+}
+#: Run by an operator in a terminal, never by a workflow: `onboard` strips `::error::` for human
+#: output itself, and `register-app` never raises one.
+TERMINAL = {"onboard", "register-app"}
+TERMINAL_BLOCK = "if __name__ == '__main__':\n    utf8_output()\n    main()"
+#: Imported by other scripts, never run.
+LIBRARIES = {"env-config", "waves"}
 
 
-@pytest.mark.parametrize(
-    "script", ["build-matrix", "apply-detect", "deploy-detect", "unlock-detect", "upsert-comment"]
-)
-def test_an_annotated_script_prints_its_refusal_through_run_annotated(script):
-    """Each detect script's refusal, and `upsert-comment`'s failed write with gh's stderr, reaches
-    the log only through `run_annotated`, which prints every line of it as one escaped workflow
-    command: a bare `main()` lets the interpreter print the raw text, and the annotation shows
-    only its first line.
-
-    Mutation: revert one script's block to `main()` -- its case red (run for each of the five)."""
+def _blocks(script):
     tree = ast.parse((ENGINE / "scripts" / script).read_text(encoding="utf-8"))
-    blocks = [
+    return [
         ast.unparse(node)
         for node in tree.body
         if isinstance(node, ast.If) and ast.unparse(node.test) == "__name__ == '__main__'"
     ]
-    assert blocks == [MAIN_BLOCK]
+
+
+@pytest.mark.parametrize("script", SCRIPTS)
+def test_every_script_prints_its_refusal_through_run_annotated(script):
+    """A script's refusal reaches the log only through `run_annotated`, which prints every line
+    of it as one escaped workflow command: a bare `main()` lets the interpreter print the raw
+    text, and the annotation shows only its first line. A new script with no block is red.
+
+    Mutations: revert `apply-gate`'s block to `main()`; revert `gate-status`'s to
+    `main(sys.argv[1:])`; delete `waves` from `LIBRARIES`; add an extensionless script with no
+    block -- each red."""
+    if script in LIBRARIES:
+        expected = []
+    elif script in TERMINAL:
+        expected = [TERMINAL_BLOCK]
+    else:
+        expected = [BLOCKS.get(script, MAIN_BLOCK)]
+    assert _blocks(script) == expected
+
+
+def test_gate_status_passes_its_argv_through_run_annotated():
+    """The literal case beside the parametrization, so an enumeration that finds no script
+    still fails. Mutation: revert `gate-status`'s block to `main(sys.argv[1:])` -- red."""
+    assert "gate-status" in SCRIPTS
+    assert _blocks("gate-status") == [
+        "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])"
+    ]

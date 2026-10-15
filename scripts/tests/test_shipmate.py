@@ -313,3 +313,11 @@ def test_run_annotated_passes_any_other_exit_through(capsys, code):
 def test_run_annotated_returns_when_main_returns(capsys):
     """Mutation: `raise SystemExit(1)` after `main()` returns -- red."""
     assert _annotated(lambda: None, capsys) == (None, "")
+
+
+def test_run_annotated_passes_its_arguments_to_main():
+    """`gate-status`, `plan-classify` and `plan-crypt` read their argv as `main`'s argument.
+    Mutation: call `main()` without `*args` -- red."""
+    calls = []
+    assert run_annotated(lambda *a: calls.append(a), ["refresh", "x"], "y") is None
+    assert calls == [(["refresh", "x"], "y")]

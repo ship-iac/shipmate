@@ -21,6 +21,8 @@ skipped `detect` there is a failure like any other non-success.
 
 import os
 
+from _shipmate import run_annotated
+
 _HOLD = "hold"
 _POST = "post"
 _NOTHING = "nothing-changed"
@@ -189,4 +191,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

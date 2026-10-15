@@ -37,6 +37,8 @@ import secrets
 import subprocess
 import sys
 
+from _shipmate import run_annotated
+
 MAGIC = b"shipmate-crypt-v1\n"
 SALT_LEN = 16
 TAG_LEN = 32
@@ -306,4 +308,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    run_annotated(main, sys.argv)

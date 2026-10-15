@@ -9,6 +9,8 @@ a stack x env whose plan attempt did not succeed.
 import json
 import os
 
+from _shipmate import run_annotated
+
 
 def main():
     # plan_ok is false whenever `Plan + classify drift` did not conclude with success,
@@ -30,4 +32,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

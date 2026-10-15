@@ -190,8 +190,8 @@ def is_refusal(code) -> TypeGuard[str]:
     return isinstance(code, str) and code.startswith("::error::")
 
 
-def run_annotated(main):
-    """Call `main`; print an `::error::` exit as one escaped workflow command per error.
+def run_annotated(main, *args):
+    """Call `main(*args)`; print an `::error::` exit as one escaped workflow command per error.
 
     The runner parses workflow commands per line, so a raw multi-line refusal annotates only its
     first line. The code splits into lines with `splitlines`, as `build-matrix`'s `refusal`
@@ -203,7 +203,7 @@ def run_annotated(main):
     Producers stay raw: this is the one print site of an annotated script's refusal.
     """
     try:
-        main()
+        main(*args)
     except SystemExit as exc:
         code = exc.code
         if not is_refusal(code):

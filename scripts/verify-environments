@@ -22,6 +22,8 @@ import json
 import os
 import sys
 
+from _shipmate import run_annotated
+
 
 def required_bindings(waves):
     """Every environment this run's cells will bind: the `env_binding` detect stamped."""
@@ -102,4 +104,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

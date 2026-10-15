@@ -34,6 +34,7 @@ from _shipmate import (
     check_runs,
     current_run_url,
     run,
+    run_annotated,
     validate_head_sha,
 )
 
@@ -215,4 +216,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    run_annotated(main, sys.argv[1:])

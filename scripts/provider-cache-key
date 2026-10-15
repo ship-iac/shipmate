@@ -17,6 +17,8 @@ import os
 import pathlib
 import re
 
+from _shipmate import run_annotated
+
 _PROVIDER = re.compile(r'^provider\s+"([^"]+)"\s*\{[^}]*?^\s*version\s*=\s*"([^"]+)"', re.M)
 
 
@@ -38,4 +40,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

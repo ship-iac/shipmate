@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **A multi-line `::error::` from any engine script keeps every line in its annotation, and `reply-comment` no longer prints the reply body on a failed POST.**
+
 ## [0.46.0] — 2026-10-15
 
 Tags `ec6aea5`.

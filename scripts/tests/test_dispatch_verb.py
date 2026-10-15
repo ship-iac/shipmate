@@ -130,7 +130,12 @@ def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
 _SILENT_GH_STUB = "#!/bin/bash\necho '{}'\n"
 
 #: Appends, so the dispatch call's argv survives the reply call that follows it.
-RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\necho '{}'\n"
+#: A reply's body arrives on stdin (`body=@-`) and is appended after its argv.
+RECORDING_GH_STUB = (
+    "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\n"
+    '[[ " $* " == *" body=@- "* ]] && cat >> argv.txt\n'
+    "echo '{}'\n"
+)
 
 
 def _on_dispatch_call(action):
@@ -639,7 +644,9 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
 #: the failure branch does after the refusal is observable rather than inferred.
 _RECORDING_FAILURE_STUB = (
     "#!/bin/bash\nprintf 'token=%s\\n' \"$GH_TOKEN\" >> argv.txt\n"
-    "printf '%s\\n' \"$@\" >> argv.txt\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+    "printf '%s\\n' \"$@\" >> argv.txt\n"
+    '[[ " $* " == *" body=@- "* ]] && cat >> argv.txt\n'
+    "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 )
 #: The run link, hand-written from the three runner variables the step reads.
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
@@ -675,7 +682,8 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
 #: Fails every call and saves the comment body it is handed.
 _BODY_FAILURE_STUB = (
     "#!/bin/bash\n"
-    'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+    'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; '
+    'elif [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
     "done\n"
     "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 )
@@ -714,7 +722,8 @@ def _answering_stub(answer, reply_exit=0):
         f"  cat <<'ANSWER'\n{answer}\nANSWER\n"
         "  exit 0\nfi; done\n"
         "printf '%s' \"${SHIPMATE_REPLY_RUN_ID-}\" > run_id.txt\n"
-        'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+        'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; '
+        'elif [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
         "done\n"
         f"exit {reply_exit}\n"
     )
