@@ -28,7 +28,7 @@ runs:
         set -euo pipefail
         if ! python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks "$HEAD_SHA" \
           '.check_runs[]' > "$RUNNER_TEMP/checks.jsonl"; then
-          echo "::error::could not list the check runs on $HEAD_SHA; the log line above names the cause"
+          echo "::error::could not list the check runs on $HEAD_SHA; the step log names the cause"
           exit 1
         fi
         snap=$(python3 "$GITHUB_ACTION_PATH/../../scripts/apply-snapshot" < "$RUNNER_TEMP/checks.jsonl")

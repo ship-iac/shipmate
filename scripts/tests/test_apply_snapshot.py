@@ -126,7 +126,7 @@ def test_an_empty_app_id_is_reported_before_malformed_input(monkeypatch):
 
 _HEAD = "d" * 40
 _LISTING_FAILED = (
-    f"::error::could not list the check runs on {_HEAD}; the log line above names the cause\n"
+    f"::error::could not list the check runs on {_HEAD}; the step log names the cause\n"
 )
 
 

@@ -83,7 +83,7 @@ def _status_post(state, description):
 
 HOLD_POST = _status_post("failure", HOLD_DESCRIPTION)
 LISTING_FAILED = (
-    f"::error::could not list the check runs on {HEAD_SHA}; the log line above names the cause"
+    f"::error::could not list the check runs on {HEAD_SHA}; the step log names the cause"
 )
 PUBLISH_HOLD_POST = _status_post("failure", PUBLISH_HOLD)
 #: `gate-status refuse-newer`'s whole refusal, the one message of both steps' newer-run check.
