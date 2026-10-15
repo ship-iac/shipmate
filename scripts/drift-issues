@@ -42,7 +42,14 @@ import os
 import subprocess
 from urllib.parse import quote
 
-from _shipmate import _run, cell_summaries, current_run_url, is_head_sha
+from _shipmate import (
+    _run,
+    cell_summaries,
+    command_data,
+    current_run_url,
+    is_head_sha,
+    run_annotated,
+)
 
 CELL_KEYS = (
     "stack",
@@ -180,6 +187,13 @@ def default_branch_head(branch):
     return head if is_head_sha(head) else None
 
 
+def _update_failed(label, exc):
+    """Print one escaped `::error::` command for `label`: a `_run` failure's text spans lines
+    and carries its own prefix, and a raw print annotates only its first line."""
+    reason = str(exc.code).removeprefix("::error::")
+    print("::error::" + command_data(f"drift issue update failed for {label}: {reason}"))
+
+
 def close_removed(rows, present, url):
     """Close every open `drift: ` Issue naming no cell in `present`; the labels that failed.
     The raw rows, not `existing`, so every duplicate-titled Issue of a removed cell closes."""
@@ -197,7 +211,7 @@ def close_removed(rows, present, url):
         try:
             _run(["gh", "issue", "close", str(row["number"]), "--comment", comment])
         except SystemExit as exc:
-            print(f"::error::drift issue update failed for {label}: {exc}")
+            _update_failed(label, exc)
             failed.append(label)
     return failed
 
@@ -217,7 +231,7 @@ def main():
         try:
             upsert_or_close(cell, existing, url)
         except SystemExit as exc:
-            print(f"::error::drift issue update failed for {label}: {exc}")
+            _update_failed(label, exc)
             failed.append(label)
     sha = os.environ.get("GITHUB_SHA", "")
     head = default_branch_head(os.environ.get("SHIPMATE_DEFAULT_BRANCH", ""))
@@ -239,4 +253,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

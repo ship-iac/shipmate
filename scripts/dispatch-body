@@ -7,6 +7,8 @@ Printed to stdout, which the step captures and hands to `gh api --input -` on st
 import json
 import os
 
+from _shipmate import run_annotated
+
 
 def main():
     verb = os.environ["VERB"]
@@ -40,4 +42,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

@@ -14,6 +14,8 @@ artifact uploads: a later run, and its comment, do not know the state was lost.
 import json
 import os
 
+from _shipmate import run_annotated
+
 # Checked in pipeline order and matched on 'failure', not "!= success": a
 # composite-action step failure halts every later non-always() step, so a fail-safe
 # that never ran reads 'skipped', not 'failure'. Matching 'failure' exactly means only
@@ -103,4 +105,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

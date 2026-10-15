@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-from _shipmate import _load
+from _shipmate import _load, run_annotated
 
 ag = _load("apply-gate")
 
@@ -58,4 +58,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

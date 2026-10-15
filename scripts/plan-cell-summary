@@ -13,11 +13,10 @@ import os
 import pathlib
 import sys
 
+from _shipmate import _load, run_annotated
+
 
 def step_line():
-    # Imported here so the fail-closed cell.json path imports nothing beyond the stdlib.
-    from _shipmate import _load
-
     sc = _load("summary-comment")
     cell = {"changed": os.environ["CHANGED"] == "true"}
     # The same derivation as summary-comment's load_cells, so the step summary and the comment
@@ -49,4 +48,4 @@ if __name__ == "__main__":
     elif args:
         raise SystemExit(f"::error::plan-cell-summary takes no argument or --step-line, got {args}")
     else:
-        main()
+        run_annotated(main)

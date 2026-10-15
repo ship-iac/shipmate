@@ -35,7 +35,7 @@ import pathlib
 import re
 import sys
 
-from _shipmate import _load, cell_summaries
+from _shipmate import _load, cell_summaries, run_annotated
 
 ag = _load("apply-gate")
 gs = _load("gate-state")
@@ -150,4 +150,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

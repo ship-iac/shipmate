@@ -1066,7 +1066,7 @@ _EXPR = re.compile(r"\$\{\{ (.+?) \}\}")
 #: A `gh` that saves the comment body it is handed and answers as the API does.
 _BODY_GH = (
     "#!/bin/bash\n"
-    'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+    'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; fi; '
     "done\n"
     "echo '{}'\n"
 )

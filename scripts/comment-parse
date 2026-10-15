@@ -14,7 +14,7 @@ import os
 import re
 import sys
 
-from _shipmate import _load, current_run_url
+from _shipmate import _load, current_run_url, run_annotated
 
 ec = _load("env-config")
 
@@ -210,4 +210,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

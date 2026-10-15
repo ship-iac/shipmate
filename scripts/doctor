@@ -73,6 +73,7 @@ from _shipmate import (
     load_workflow_text,
     review_count,
     run,
+    run_annotated,
     utf8_output,
     yaml_error_text,
 )
@@ -2760,4 +2761,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

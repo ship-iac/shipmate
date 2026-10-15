@@ -29,6 +29,8 @@ import os
 import re
 import sys
 
+from _shipmate import run_annotated
+
 _ERROR_LINE = "Error acquiring the state lock"
 _BLOCK_START = "Lock Info:"
 
@@ -141,4 +143,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

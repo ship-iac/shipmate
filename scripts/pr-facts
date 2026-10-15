@@ -24,7 +24,7 @@ import json
 import os
 
 from _shipmate import gh_json as _gh_json
-from _shipmate import is_pr_number
+from _shipmate import is_pr_number, run_annotated
 
 #: The output keys, in the order they are written. Named once so the action's
 #: outputs and this list cannot drift apart silently.
@@ -140,4 +140,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

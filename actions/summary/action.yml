@@ -355,8 +355,10 @@ runs:
         # Skipped when this run published a queued check, which cannot be done yet.
         if [ "$STATE" = "pending" ] && [ "$MODE" != "draft" ] && [ -f bodies.jsonl ] \
           && ! grep -q '"status": "queued"' bodies.jsonl; then
-          # A hold or a failed read does not fail this step, so its annotation stays a warning.
-          if ! python3 "$gate_status" refresh "$HEAD_SHA" 2>&1 | sed 's/^::error:://'; then
+          # `run_annotated` prints the error as one escaped command; swapping its severity keeps it
+          # escaped, so the runner decodes `%0A` and no stderr line starts a command. A hold or a
+          # failed read does not fail this step, so both annotations here are warnings.
+          if ! python3 "$gate_status" refresh "$HEAD_SHA" 2>&1 | sed 's/^::error::/::warning::/'; then
             echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
           fi
         fi

@@ -85,6 +85,7 @@ def _run_gate(
     state="pending",
     read_fails=False,
     checks_rc=0,
+    checks_stderr="",
     bodies=NO_CHANGES_BODY + "\n",
 ):
     if bodies is not None:
@@ -102,6 +103,7 @@ def _run_gate(
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://example.invalid",
         "GITHUB_RUN_ID": "999",
+        "FAKE_CHECKS_STDERR": checks_stderr,
     }
     return run_with_gate_gh(
         tmp_path,
@@ -186,20 +188,42 @@ def test_no_bodies_file_skips_the_refresh(tmp_path):
 
 @bash_only
 def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
-    """The listing's `::error::` reaches the log unannotated: the step passes, so the failure is a
-    warning only. Mutations: drop the `if !` around the refresh -> `set -e` fails the step; drop
+    """The listing's `::error::` reaches the log as a warning: the step passes, so the failure is
+    a warning only. Mutations: drop the `if !` around the refresh -> `set -e` fails the step; drop
     the `sed` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "pending", checks_rc=1)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [READ_ARGV, _write_argv("pending", "the reason"), CHECKS_ARGV]
     assert (proc.stdout, proc.stderr) == (
         (
-            f"command failed (1): gh {' '.join(CHECKS_ARGV)}\n"
+            f"::warning::command failed (1): gh {' '.join(CHECKS_ARGV)}\n"
             f"::warning::could not refresh the gate of {HEAD_SHA}; it stays pending until an "
             "apply refreshes it\n"
         ),
         "",
     )
+
+
+@bash_only
+def test_a_failed_refresh_logs_each_line_of_gh_stderr(tmp_path):
+    """`run_annotated` escapes a multi-line error into one workflow command; the step swaps its
+    `::error::` for `::warning::` and leaves it escaped, so the runner shows every line inside one
+    warning and no line of gh's stderr starts a command of its own.
+
+    Mutations: decode `%0A` in the step, indented or not -> `::warning::injected` on its own
+    line; strip the prefix (`sed 's/^::error:://'`) -> the error is no warning."""
+    stderr = "HTTP 502: bad gateway\n::warning::injected\nretry 100%0A later"
+    proc, _ = _run_gate(tmp_path, "post", "pending", checks_rc=1, checks_stderr=stderr)
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    escaped = (
+        f"::warning::command failed (1): gh {' '.join(CHECKS_ARGV)}"
+        "%0AHTTP 502: bad gateway%0A::warning::injected%0Aretry 100%250A later"
+    )
+    step_warning = (
+        f"::warning::could not refresh the gate of {HEAD_SHA}; it stays pending until an "
+        "apply refreshes it"
+    )
+    assert (proc.stdout, proc.stderr) == (f"{escaped}\n{step_warning}\n", "")
 
 
 @bash_only
