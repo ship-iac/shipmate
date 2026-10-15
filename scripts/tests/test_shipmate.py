@@ -316,8 +316,8 @@ def test_run_annotated_returns_when_main_returns(capsys):
 
 
 def test_run_annotated_passes_its_arguments_to_main():
-    """`gate-status`, `plan-classify` and `plan-crypt` read their argv as `main`'s argument.
-    Mutation: call `main()` without `*args` -- red."""
+    """The arguments after `main` reach `main` unchanged. Mutation: call `main()` without
+    `*args` -- red."""
     calls = []
     assert run_annotated(lambda *a: calls.append(a), ["refresh", "x"], "y") is None
     assert calls == [(["refresh", "x"], "y")]

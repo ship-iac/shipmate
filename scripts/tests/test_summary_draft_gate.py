@@ -207,16 +207,19 @@ def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
 @bash_only
 def test_a_failed_refresh_logs_each_line_of_gh_stderr(tmp_path):
     """`run_annotated` escapes a multi-line error into one line; the step decodes it, so the log
-    shows gh's stderr on its own lines with no `%0A`, and a literal `%` once. Mutations: drop the
-    `%0A` decode -> one line with `%0A`; decode `%25` first -> the literal `%0A` splits the line."""
-    stderr = "HTTP 502: bad gateway\nretry 100%0A later"
+    shows gh's stderr on its own indented lines with no `%0A`, and a literal `%` once. The indent
+    keeps a stderr line starting `::` from running as a workflow command. Mutations: drop the
+    `%0A` decode -> one line with `%0A`; decode `%25` first -> the literal `%0A` splits the line;
+    decode `%0A` without the indent -> `::warning::injected` at column 0."""
+    stderr = "HTTP 502: bad gateway\n::warning::injected\nretry 100%0A later"
     proc, _ = _run_gate(tmp_path, "post", "pending", checks_rc=1, checks_stderr=stderr)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert (proc.stdout, proc.stderr) == (
         (
             f"command failed (1): gh {' '.join(CHECKS_ARGV)}\n"
-            "HTTP 502: bad gateway\n"
-            "retry 100%0A later\n"
+            "  HTTP 502: bad gateway\n"
+            "  ::warning::injected\n"
+            "  retry 100%0A later\n"
             f"::warning::could not refresh the gate of {HEAD_SHA}; it stays pending until an "
             "apply refreshes it\n"
         ),

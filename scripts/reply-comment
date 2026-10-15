@@ -20,8 +20,8 @@ The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBE
 `GITHUB_REPOSITORY`; gh's response is discarded and nothing is printed. Any argument exits 1 with
 `::error::usage` before anything else. A `PR_NUMBER` that is not a pull-request number exits 1
 before any `gh` call; a failed POST exits 1 unannotated, naming the pull request and gh's
-stderr, never the body. `actions/dispatch` degrades that to a warning; `actions/comment-ops`
-runs it under `set -e`, so a failed reply fails that step.
+stderr, never the body, so a caller that degrades it to a warning gets no error annotation
+beside it.
 
 The footer links this run (`current_run_url()`), then `FOOTER_HINT` on a refusal or a failure;
 a notice or a started run asks nothing of the reader, so it carries no hint.

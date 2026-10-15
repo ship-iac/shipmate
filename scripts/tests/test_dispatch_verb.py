@@ -130,10 +130,10 @@ def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
 _SILENT_GH_STUB = "#!/bin/bash\necho '{}'\n"
 
 #: Appends, so the dispatch call's argv survives the reply call that follows it.
-#: A reply's body arrives on stdin (`body=@-`) and is appended after its argv.
+#: A reply's body arrives on stdin (`body=@-`) and is appended after its argv, then a newline.
 RECORDING_GH_STUB = (
     "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\n"
-    '[[ " $* " == *" body=@- "* ]] && cat >> argv.txt\n'
+    '[[ " $* " == *" body=@- "* ]] && { cat; echo; } >> argv.txt\n'
     "echo '{}'\n"
 )
 
@@ -645,7 +645,7 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
 _RECORDING_FAILURE_STUB = (
     "#!/bin/bash\nprintf 'token=%s\\n' \"$GH_TOKEN\" >> argv.txt\n"
     "printf '%s\\n' \"$@\" >> argv.txt\n"
-    '[[ " $* " == *" body=@- "* ]] && cat >> argv.txt\n'
+    '[[ " $* " == *" body=@- "* ]] && { cat; echo; } >> argv.txt\n'
     "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 )
 #: The run link, hand-written from the three runner variables the step reads.
