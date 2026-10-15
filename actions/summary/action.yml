@@ -353,8 +353,8 @@ runs:
       run: |
         set -euo pipefail
         # After the sticky comment: a failed `post` or `nothing-changed` write ends the job with no
-        # apply check published. A run with nothing to publish (held, draft, nothing changed) reads
-        # nothing, so it cannot fail before `Create/refresh gate`.
+        # apply check published. A run with nothing to publish (held, draft, or no cell planned)
+        # reads nothing, so it cannot fail before `Create/refresh gate`.
         [ -s bodies.jsonl ] || exit 0
         # `gate-hold` writes outside this job's concurrency group, after the publish hold's read. A
         # newer run's hold, or a failed read, publishes nothing, and the publish hold stands.

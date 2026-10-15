@@ -1177,8 +1177,9 @@ comment that could not be listed or written, or whose pull request head could
 not be read ("could not read the head of pull request #<n>"), fails the summary
 job before that write too, and before any apply check is published; the error
 is in the job's annotation for a failed write and in the step log for a failed
-listing or head read. A run that fails while publishing the apply checks has
-already replaced the comment with its plan. A held
+listing or head read. A run that fails after `Upsert sticky comment` leaves
+whatever that step wrote, the new body when it wrote one, else the comment as it
+was. A held
 run's comment, which only explains the red gate, warns instead and the gate is
 still written. After such a failure, a publish hold the run wrote
 stays, and a run that planned no cell wrote none, so the head keeps the gate it

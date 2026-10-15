@@ -2159,10 +2159,9 @@ plan unknown. Every hold the summary's gate decision writes (a `detect` that
 did not succeed, incomplete evidence) replaces the comment with the held body,
 which says why and makes no claim about any plan, and creates the comment when
 the pull request has none. `gate-hold`'s hold (below) leaves the comment as it
-is, and so does a run that failed before `Upsert sticky comment` and left its
-publish hold; a run that fails later, while publishing the apply checks or at
-its final gate write, has already replaced it (below). In order, blank lines
-between the parts:
+is. A run that fails after `Upsert sticky comment` leaves whatever that step
+wrote under its publish hold: the new body when it wrote one, else the comment
+as it was (below). In order, blank lines between the parts:
 
 - the marker and the header `### shipmate plan`;
 - `🔴 the gate is held`, then the verdict line's
@@ -2323,9 +2322,10 @@ downloaded a cell summary: a failed download leaves none over planned cells.
 The apply checks publish after the sticky plan comment is written, so a plan
 comment that could not be listed or written ends the job with no apply check
 published, and a pre-merge `shipmate apply` refuses as it does over a partial
-plan. A run that fails while publishing the apply checks has already replaced
-the comment with this run's plan, and keeps the publish hold. A run with no check to publish (held, draft, nothing changed) skips the
-publish step without reading anything. The job's final gate write replaces the
+plan. A run that fails after `Upsert sticky comment` leaves whatever that step
+wrote, the new body when it wrote one, else the comment as it was, under its
+publish hold. A run with no check to publish (held, draft, or no cell planned)
+skips the publish step without reading anything. The job's final gate write replaces the
 hold. A run whose plan job was cancelled writes no final gate, and keeps the
 hold when it downloaded any cell summary.
 
