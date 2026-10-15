@@ -334,9 +334,8 @@ def cell_names(raw):
 
 
 def missing_names(raw):
-    """The one parser of the summary's `missing` output, for `gate-state` and the held comment
-    alike: `cell_names(raw)`, or `[]` when it is None, so a malformed value names no cell in
-    either place and never raises."""
+    """The one parser of the summary's `missing` output: `cell_names(raw)`, or `[]` when it is
+    None, so a malformed value names no cell and never raises."""
     return cell_names(raw) or []
 
 

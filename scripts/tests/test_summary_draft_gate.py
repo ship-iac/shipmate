@@ -293,7 +293,6 @@ def test_the_upsert_stub_records_a_post_run(tmp_path):
     proc, made = _run_upsert(tmp_path, "post")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert made == [
-        ["api", "repos/acme/demo/pulls/7", "--jq", ".head.sha"],
         [
             "api",
             "--paginate",
@@ -301,5 +300,6 @@ def test_the_upsert_stub_records_a_post_run(tmp_path):
             '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}',
             "repos/acme/demo/issues/7/comments?per_page=100",
         ],
+        ["api", "repos/acme/demo/pulls/7", "--jq", ".head.sha"],
         ["api", "repos/acme/demo/issues/7/comments", "-F", "body=@comment.md"],
     ]

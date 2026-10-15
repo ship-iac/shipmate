@@ -295,41 +295,29 @@ runs:
           echo "the pull request was a draft when this run started and was not planned; the sticky plan comment was left as it is"
           exit 0
         fi
-        # A cancelled plan job: this run writes no gate, so a held body could sit over a gate it
-        # never wrote. The comment is kept.
+        # A cancelled plan job: this run writes no final gate, so a held body could sit over a gate
+        # it never wrote. The comment is kept.
         if [ "$MODE" = "hold" ]; then
-          echo "::warning::the plan job was cancelled, so this run writes no gate; the sticky plan comment was left as it is"
+          echo "::warning::the plan job was cancelled, so this run writes no final gate; the sticky plan comment was left as it is"
           exit 0
         fi
         degraded="::warning::the sticky plan comment was not updated with why the gate is held; the gate description says it"
-        # The comment is keyed per pull request, not per head, so a re-run of an old run would
-        # replace a newer head's comment. gh's stderr is prefixed: a line it starts could be a
-        # workflow command.
-        if ! head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha 2>head.err); then
-          sed 's/^/gh: /' head.err
-          if [ "$MODE" = "held" ]; then
-            echo "$degraded"
-            exit 0
-          fi
-          echo "::error::could not read the head of pull request #$PR, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
-          exit 1
-        fi
-        if [ "$head" != "$HEAD_SHA" ]; then
-          echo "::notice::pull request #$PR has moved past $HEAD_SHA; its sticky plan comment belongs to the newer head's run and was not written"
-          exit 0
-        fi
+        # `--head`: the comment is keyed per pull request, so a re-run of an old run would replace
+        # a newer head's comment. upsert-comment then writes nothing and prints `moved`.
+        moved="::notice::pull request #$PR has moved past $HEAD_SHA; its sticky plan comment belongs to the newer head's run and was not written"
         # Degrades: `Create/refresh gate` writes the `failure` gate and its description either way,
         # and a red gate over a stale comment greens nothing. A failed render writes no comment.
         if [ "$MODE" = "held" ]; then
           result=failed
           if SHIPMATE_COMMENT_MODE=held python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" \
             < check-runs.jsonl 2>held.err; then
-            result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR" held.md 2>>held.err) || result=failed
+            result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR" held.md --head "$HEAD_SHA" 2>>held.err) || result=failed
           fi
-          # This step passes, so either script's `::error::` warns; any other line (gh's raw
-          # stderr on a failed listing) is prefixed, so no gh text starts a workflow command.
-          sed -e 's/^::error::/::warning::/;t' -e 's/^/gh: /' held.err >&2
-          if [ "$result" != created ] && [ "$result" != updated ]; then
+          # This step passes, so either script's `::error::` warns.
+          sed 's/^::error::/::warning::/' held.err >&2
+          if [ "$result" = moved ]; then
+            echo "$moved"
+          elif [ "$result" != created ] && [ "$result" != updated ]; then
             echo "$degraded"
           fi
           exit 0
@@ -337,7 +325,7 @@ runs:
         # Nothing changed: only an existing comment is kept current, or it would keep showing
         # applies that no longer exist. A doctor warning (the comment links the run page its
         # annotations live on), an unmanaged stacks line or a lost pairs line still posts.
-        args=("$PR" comment.md)
+        args=("$PR" comment.md --head "$HEAD_SHA")
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ]; then
           args+=(--update-only)
         fi
@@ -347,6 +335,11 @@ runs:
         if [ "$result" = "list-failed" ]; then
           echo "::error::could not list this pull request's comments, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
           exit 1
+        elif [ "$result" = "head-failed" ]; then
+          echo "::error::could not read the head of pull request #$PR, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
+          exit 1
+        elif [ "$result" = "moved" ]; then
+          echo "$moved"
         elif [ "$result" = "skipped" ]; then
           echo "nothing changed, no existing plan comment, no doctor findings; nothing to post"
         fi

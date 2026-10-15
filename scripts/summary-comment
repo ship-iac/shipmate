@@ -298,13 +298,15 @@ def verdict(cells, head_sha, run_url):
 #: The held comment's reason is cut here, so its body stays far under `HARD_CAP` with every cell
 #: line it can carry.
 HELD_REASON_CAP = 4000
+#: The most cell lines the held comment names before it counts the rest.
+HELD_CELL_NAMES = 10
 
 
 def held_comment(reason, missing, plan_result, checks, run_url, head_sha):
     """The comment of a held gate: marker, header, `🔴 the gate is held` and `provenance`, then
     `reason` (the gate description before its 140-character cut, at most `HELD_REASON_CAP`
     characters) in a plain fence, then one line per cell of `missing` (`{stack, environment}`
-    pairs) linking its plan check, then `FOOTER_HINT`. At most `UNMANAGED_NAMES` cell lines,
+    pairs) linking its plan check, then `FOOTER_HINT`. At most `HELD_CELL_NAMES` cell lines,
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
     and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `plan
     failed` under a failed plan job, else `no plan summary read`."""
@@ -320,10 +322,10 @@ def held_comment(reason, missing, plan_result, checks, run_url, head_sha):
             cell_line(
                 "🔴", c["stack"], c["environment"], state, check_url(c, checks, run_url), "plan"
             )
-            for c in missing[:UNMANAGED_NAMES]
+            for c in missing[:HELD_CELL_NAMES]
         ]
-        if len(missing) > UNMANAGED_NAMES:
-            more = len(missing) - UNMANAGED_NAMES
+        if len(missing) > HELD_CELL_NAMES:
+            more = len(missing) - HELD_CELL_NAMES
             lines.append(f"and {more} more cells have no plan")
         parts.append("\n".join(lines))
     parts.append(FOOTER_HINT)
@@ -572,9 +574,9 @@ def main():
     mode = os.environ.get("SHIPMATE_COMMENT_MODE", "")
     if mode not in ("", "held"):
         raise SystemExit(f"::error::SHIPMATE_COMMENT_MODE must be empty or held (got: {mode!r})")
-    # prefix="" gathers every check-run on the head SHA: plan jobs, pending apply checks,
-    # detect/summary. Plan check names carry the consumer's calling job as a `shipmate / ` prefix,
-    # so the anchor is check_url's exact lookup — and `apply / ` never collides.
+    # prefix="" gathers every check-run on the head SHA: plan checks, detect/summary, and earlier
+    # runs' apply checks, since this run publishes its own after the comment. Plan check names
+    # carry the calling job's `shipmate / ` prefix, so check_url's lookup is exact.
     checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the verdict's run link and the per-cell fallback link promise.

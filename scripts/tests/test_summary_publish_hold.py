@@ -426,7 +426,6 @@ def test_a_failed_comment_write_stops_the_job_before_any_apply_check(tmp_path):
             STATUSES_LIST,
             APPLY_LIST,
             PUBLISH_HOLD_POST,
-            ["api", "repos/acme/demo/pulls/7", "--jq", ".head.sha"],
             [
                 "api",
                 "--paginate",
