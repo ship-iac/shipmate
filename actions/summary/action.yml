@@ -352,8 +352,8 @@ runs:
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
       run: |
         set -euo pipefail
-        # After the sticky comment: a failed `post` or `nothing-changed` write ends the job with no
-        # apply check published. A run with nothing to publish (held, draft, or no cell planned)
+        # After the comment, so a failed plan-comment write publishes no apply check. Nothing to
+        # publish (held, draft, no cell planned, or every check already published by this run)
         # reads nothing, so it cannot fail before `Create/refresh gate`.
         [ -s bodies.jsonl ] || exit 0
         # `gate-hold` writes outside this job's concurrency group, after the publish hold's read. A

@@ -6,7 +6,7 @@ Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
 cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
 artifacts). Writes comment.md, plus pending, count, unmanaged, lost and missing to
 GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned cells with no
-cell summary, empty unless detect succeeded.
+cell summary, empty unless detect succeeded and `planned-cell-names` is a valid list.
 
 With `SHIPMATE_COMMENT_MODE=held` it writes the held comment (`held_comment`) to held.md instead,
 reads no cell summary and writes nothing to GITHUB_OUTPUT; any other non-empty value refuses. The

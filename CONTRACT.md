@@ -2159,9 +2159,8 @@ plan unknown. Every hold the summary's gate decision writes (a `detect` that
 did not succeed, incomplete evidence) replaces the comment with the held body,
 which says why and makes no claim about any plan, and creates the comment when
 the pull request has none. `gate-hold`'s hold (below) leaves the comment as it
-is. A run that fails after `Upsert sticky comment` leaves whatever that step
-wrote under its publish hold: the new body when it wrote one, else the comment
-as it was (below). In order, blank lines between the parts:
+is. What a run that fails part way leaves on the comment and the gate is stated
+with the publish hold (below). In order, blank lines between the parts:
 
 - the marker and the header `### shipmate plan`;
 - `🔴 the gate is held`, then the verdict line's
@@ -2322,11 +2321,14 @@ downloaded a cell summary: a failed download leaves none over planned cells.
 The apply checks publish after the sticky plan comment is written, so a plan
 comment that could not be listed or written ends the job with no apply check
 published, and a pre-merge `shipmate apply` refuses as it does over a partial
-plan. A run that fails after `Upsert sticky comment` leaves whatever that step
-wrote, the new body when it wrote one, else the comment as it was, under its
-publish hold. A run with no check to publish (held, draft, or no cell planned)
-skips the publish step without reading anything. The job's final gate write replaces the
-hold. A run whose plan job was cancelled writes no final gate, and keeps the
+plan. A run that fails after `Upsert sticky comment` leaves the comment as that
+step left it: replaced when it wrote, unchanged when it did not. A run that
+fails before that step leaves the comment unchanged. Either way the gate shows
+this run's publish hold when it wrote one (it downloaded a cell summary), a
+newer run's hold when `refuse-newer` stopped it, and otherwise the gate the head
+already had, or none. A run with no check to publish (held, draft, no cell
+planned, or every check already published by this run) skips the publish step
+without reading anything. The job's final gate write replaces the hold. A run whose plan job was cancelled writes no final gate, and keeps the
 hold when it downloaded any cell summary.
 
 The job publishes only the apply checks its own run has not published yet,

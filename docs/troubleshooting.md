@@ -1177,13 +1177,10 @@ comment that could not be listed or written, or whose pull request head could
 not be read ("could not read the head of pull request #<n>"), fails the summary
 job before that write too, and before any apply check is published; the error
 is in the job's annotation for a failed write and in the step log for a failed
-listing or head read. A run that fails after `Upsert sticky comment` leaves
-whatever that step wrote, the new body when it wrote one, else the comment as it
-was. A held
-run's comment, which only explains the red gate, warns instead and the gate is
-still written. After such a failure, a publish hold the run wrote
-stays, and a run that planned no cell wrote none, so the head keeps the gate it
-had, or no `shipmate / gate` status, which a required gate also blocks. The
+listing or head read. A held run's comment write, which only explains the red
+gate, warns on those failures instead, and the gate is still written. What a run
+that fails part way leaves on the comment and the gate is in
+[`CONTRACT.md`](../CONTRACT.md) §Plan comment. The
 summary job also holds the gate when it cannot read the head's gate statuses or
 apply checks, or cannot build the checks to publish (a cell summary missing a key),
 whether or not it downloaded a cell summary: a failed download leaves none over
