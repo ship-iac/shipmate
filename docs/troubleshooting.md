@@ -462,8 +462,8 @@ produces no plan and its `shipmate / <stack> / <env>` check does not go green.
 The failing
 plan job leaves `shipmate / gate` held red with `shipmate / <stack> / <env>
 failed to plan; fix it before merging`, or `plan incomplete (plan job: failure);
-fix the failing plan checks before merging` when the cell's name does not fit
-— a hold, not an absence (§`shipmate / gate` never goes green, "The
+fix the failing plan checks before merging` when no failed cell is known or its
+name does not fit — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 That run publishes no apply check. Checks an earlier plan run of the same head
 published stay; on a head with none, a `shipmate apply` replies "no reviewed plan
