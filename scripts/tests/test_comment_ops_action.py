@@ -728,7 +728,8 @@ def test_the_authorize_step_binds_exactly_this_env():
 _GATHER_HEAD = "e" * 40
 
 #: A `gh` that logs the endpoint each call reads, and the token it read it with, and answers it
-#: as the API does after `--jq`; the check-runs listing answers `$FAKE_LISTING`.
+#: as the API does after `--jq`; the check-runs listing answers `$FAKE_LISTING` and exits
+#: `$FAKE_LISTING_RC`.
 _GATHER_GH = f"""#!/bin/bash
 for a in "$@"; do
   if [[ "$a" == repos/* || "$a" == graphql ]]; then
@@ -743,6 +744,7 @@ elif [[ "$*" == *graphql* ]]; then
   echo APPROVED
 elif [[ "$*" == */check-runs* ]]; then
   printf '%s' "$FAKE_LISTING"
+  exit "${{FAKE_LISTING_RC:-0}}"
 fi
 """
 
@@ -761,8 +763,8 @@ _GATHER_LISTING = (
 )
 
 
-def _run_gather(tmp_path):
-    """Run the gather step's shipped body; return (outputs, endpoints read in order)."""
+def _gather(tmp_path, listing=_GATHER_LISTING, listing_rc=0):
+    """Run the gather step's shipped body; return the CompletedProcess."""
     write_python3_shim(tmp_path)
     (tmp_path / "gh").write_text(_GATHER_GH, encoding="utf-8", newline="\n")
     (tmp_path / "gh").chmod(0o755)
@@ -774,6 +776,7 @@ def _run_gather(tmp_path):
         "GITHUB_ACTION_PATH": str(ACTIONS / "comment-ops"),
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_OUTPUT": str(out_file),
+        "RUNNER_TEMP": str(tmp_path),
         "OWNER": "org",
         "USER": "alice",
         "PR_NUMBER": "42",
@@ -781,12 +784,44 @@ def _run_gather(tmp_path):
         "SHIPMATE_APP_ID": "1",
         "APP_TOKEN": "app_token",
         "GH_TOKEN": "workflow_token",
-        "FAKE_LISTING": _GATHER_LISTING,
+        "FAKE_LISTING": listing,
+        "FAKE_LISTING_RC": str(listing_rc),
     }
-    result = run_step(tmp_path, _gather_step()["run"], env)
+    return run_step(tmp_path, _gather_step()["run"], env)
+
+
+def _run_gather(tmp_path):
+    """Run the gather step's shipped body; return (outputs, endpoints read in order)."""
+    result = _gather(tmp_path)
     assert result.returncode == 0, result.stderr
-    outputs = github_outputs(out_file)
+    outputs = github_outputs(tmp_path / "github_output")
     return outputs, (tmp_path / "endpoints.txt").read_text().splitlines()
+
+
+@bash_only
+def test_a_failed_head_listing_fails_the_gather_step_with_an_error(tmp_path):
+    """`gate-status checks` prints its cause unannotated, so the step names the head itself.
+    Mutation: delete the failed listing's `::error::` line -> stdout is empty."""
+    result = _gather(tmp_path, listing_rc=1)
+    assert result.returncode != 0
+    assert result.stdout == (
+        f"::error::could not list the check runs on {_GATHER_HEAD}; the step log names the cause\n"
+    )
+
+
+@bash_only
+def test_an_apply_gate_failure_is_not_reported_as_a_listing_failure(tmp_path):
+    """A listing apply-gate cannot parse fails the step after a successful listing. Mutation:
+    pipe the listing into apply-gate inside the `if !` -> the step prints the listing error;
+    `exit 1` before the listing -> the check-runs endpoint is never read."""
+    result = _gather(tmp_path, listing="not json\n")
+    assert result.returncode != 0
+    assert result.stdout == ""
+    endpoints = (tmp_path / "endpoints.txt").read_text().splitlines()
+    assert (
+        endpoints[-1] == f"repos/org/repo/commits/{_GATHER_HEAD}/check-runs?filter=all&per_page=100"
+    )
+    assert "::error::malformed JSON line" in result.stderr
 
 
 @bash_only

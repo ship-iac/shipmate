@@ -19,8 +19,8 @@ except in `checks`. `refresh` over a hold prints why, unannotated, and exits `HE
 decides whether a hold fails its step. `refuse-newer` prints its refusal as an `::error::` line
 and exits `NEWER`, so a caller tells a newer run from a failed read (exit 1). `checks` serves
 `_shipmate.check_runs` to the bash sites: UTF-8 with LF line ends on any host, and a malformed
-`<sha>` or a failed listing exits 1 unannotated, so a caller that degrades prints the only
-annotation.
+`<sha>` or a failed listing exits 1 unannotated: a caller that degrades prints the only
+annotation as a warning, and a fail-closed caller prints its own `::error::`.
 """
 
 import os
@@ -209,7 +209,7 @@ def main(argv):
     sha = args[0]
     if cmd == "deploy" and not sha:
         raise SystemExit("::error::detect produced no head SHA; deploy cannot gate")
-    # Unannotated for `checks`, whose degrading callers print the only annotation.
+    # Unannotated for `checks`: each caller annotates, as a warning where it degrades.
     validate_head_sha(sha, "head SHA", annotate=cmd != "checks")
     _COMMANDS[cmd][1](*args)
 

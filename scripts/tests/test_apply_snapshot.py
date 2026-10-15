@@ -125,14 +125,23 @@ def test_an_empty_app_id_is_reported_before_malformed_input(monkeypatch):
 
 
 _HEAD = "d" * 40
+_LISTING_FAILED = (
+    f"::error::could not list the check runs on {_HEAD}; the step log names the cause\n"
+)
 
 
 @bash_only
-@pytest.mark.parametrize(("checks_rc", "expected_rc"), [(0, 0), (1, 1)], ids=["listed", "failed"])
-def test_a_failed_listing_fails_the_snapshot_step(tmp_path, checks_rc, expected_rc):
+@pytest.mark.parametrize(
+    ("checks_rc", "expected_rc", "expected_stdout"),
+    [(0, 0, ""), (1, 1, _LISTING_FAILED)],
+    ids=["listed", "failed"],
+)
+def test_a_failed_listing_fails_the_snapshot_step(
+    tmp_path, checks_rc, expected_rc, expected_stdout
+):
     """An empty wave set needs no check, so the listing is the step's only way to fail; the
-    `listed` case is the control. Mutation: append `|| true` to the listing -> `failed` exits
-    0."""
+    `listed` case is the control. Mutations: delete the failed listing's `exit 1` -> `failed`
+    exits 0; delete its `::error::` line -> `failed` prints nothing on stdout."""
     env = {
         **os.environ,
         "GH_TOKEN": "x",
@@ -152,7 +161,7 @@ def test_a_failed_listing_fails_the_snapshot_step(tmp_path, checks_rc, expected_
         checks_rc=checks_rc,
         checks_jq=".check_runs[]",
     )
-    assert proc.returncode == expected_rc, proc.stderr
+    assert (proc.returncode, proc.stdout) == (expected_rc, expected_stdout), proc.stderr
     assert calls == [
         [
             "api",

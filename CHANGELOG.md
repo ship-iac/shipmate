@@ -40,6 +40,7 @@ section below names the SHA the release tags.
 - **The merge deploy's stranded-check and `needs` inversion refusals say the fix pull request's cells are applied before merge under a required gate (`shipmate apply`, and `shipmate apply <env>` for an `explicit` environment), or by its deploy otherwise, instead of by its deploy alone.**
 - **A plan run whose plan job did not succeed (a skipped plan job with no cell planned is not held), whose planned cell count was not reported, or whose cell summaries do not match that count publishes no apply check, so a pre-merge `shipmate apply` cannot apply its cells. Apply checks an earlier plan run of the same head published stay.**
 - **A detect refusal's annotation carries every line of its message, and a literal `%0A` or `%25` in a stack path shows verbatim, as it now does in detect's warnings and notices, the drift `tags` query included. The `needs` inversion refusal's first line, the one the gate description shows, leads with its remedy, so the gate's 140-character cut drops stack names rather than the fix: `needs order inverted, fix default-branch needs or tags: <stack> / <env> before <stack> / <env>, which it runs after`.**
+- **A failed check-runs listing in the apply snapshot, the `shipmate apply` authorization step or the plan summary's publish hold prints an `::error::` naming the head commit, instead of failing the step with the cause in the log only.**
 
 ## [0.45.0] — 2026-10-13
 

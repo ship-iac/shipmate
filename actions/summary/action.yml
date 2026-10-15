@@ -135,6 +135,8 @@ runs:
         if ! python3 "$gate_status" checks "$SHIPMATE_HEAD_SHA" \
           '.check_runs[] | {name, status, conclusion, started_at, id, app: {id: .app.id}, external_id}' \
           > apply-check-runs.jsonl; then
+          # Before the hold: under `set -e` a failed hold write ends the step.
+          echo "::error::could not list the check runs on $SHIPMATE_HEAD_SHA; the step log names the cause"
           hold "$ended"
           exit 1
         fi
