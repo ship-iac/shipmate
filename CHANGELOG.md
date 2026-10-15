@@ -10,6 +10,10 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed
+
+- **A held `shipmate / gate` replaces the sticky plan comment with why it is held: the hold reason in a fence and one line per cell that left no plan, then the help hint; a failed plan job's gate description names its first such cell. No plan comment write lands once the pull request has moved to a newer head, and the apply checks publish after the comment, so a failed comment write publishes none.**
+
 ### Fixed
 
 - **A multi-line `::error::` from any engine script a workflow step runs keeps every line in its annotation, a failed gate refresh in the plan summary logs gh's error as a warning annotation, and `reply-comment` no longer prints the reply body on a failed POST.**

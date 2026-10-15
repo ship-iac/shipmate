@@ -23,9 +23,9 @@ Prints exactly one word and exits 0:
 - `skipped`: no match under `--update-only`; nothing written.
 - `list-failed`: the listing failed on any page, or printed a line that is not an `{id, head}`
   object, so nothing was written; the error goes to stderr without `::error::`, because each
-  caller decides: `comment-ops`' doctor step degrades on it, and `summary` fails its step with
-  its own `::error::`. A POST here would create a second sticky that later runs could PATCH
-  instead of this one.
+  caller decides: `comment-ops`' doctor step and `summary`'s held comment degrade on it, and
+  `summary`'s plan comment fails its step with its own `::error::`. A POST here would create a
+  second sticky that later runs could PATCH instead of this one.
 
 A failed PATCH or POST exits 1 with one `::error::` annotation that carries gh's stderr. gh's
 response to a write never reaches stdout.
