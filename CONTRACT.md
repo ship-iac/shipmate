@@ -506,8 +506,9 @@ operations in parallel, and some provider APIs throttle per account. GitHub runs
 0 refuses, and so does anything that is not a whole number from 1 to 256.
 
 **Apply waves and unlock are not capped.** Both bind `<env>-apply`, and GitHub
-applies a bound environment's required reviewers and wait timer again to every
-batch of a capped matrix (probed on a public repository), and a capped cell
+applies a bound environment's wait timer again to every batch of a capped
+matrix (probed on a public repository with a wait timer; required reviewers
+were not probed and are assumed to do the same), and a capped cell
 queued behind a live apply's concurrency group would hold a slot the others
 need. Plans and drift
 sweeps bind `<env>-plan`, which carries no reviewers (§Env model). The one
