@@ -2158,10 +2158,11 @@ before uploading a cell summary, a failed `cell-summary.*` download) leaves the
 plan unknown. Every hold the summary's gate decision writes (a `detect` that
 did not succeed, incomplete evidence) replaces the comment with the held body,
 which says why and makes no claim about any plan, and creates the comment when
-the pull request has none. A publish hold or `gate-hold`'s hold (below) that
-stands was left by a run that ended before its final gate write, and that run's
-comment is left as it is. In order, blank lines between the
-parts:
+the pull request has none. `gate-hold`'s hold (below) leaves the comment as it
+is, and so does a run that failed before `Upsert sticky comment` and left its
+publish hold; a run that fails later, while publishing the apply checks or at
+its final gate write, has already replaced it (below). In order, blank lines
+between the parts:
 
 - the marker and the header `### shipmate plan`;
 - `🔴 the gate is held`, then the verdict line's

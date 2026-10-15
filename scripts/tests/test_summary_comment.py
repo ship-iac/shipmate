@@ -1171,7 +1171,7 @@ def test_held_comment_is_the_whole_held_body(reason, missing, plan_result, body)
 
 
 def test_held_comment_caps_its_cell_lines_and_its_reason():
-    """Mutations: drop the `UNMANAGED_NAMES` slice -- twelve lines; drop the reason cut -- the
+    """Mutations: drop the `HELD_CELL_NAMES` slice -- twelve lines; drop the reason cut -- the
     fence holds 5,000 characters."""
     missing = [{"stack": f"stacks/s{i:02}", "environment": "dev"} for i in range(12)]
     body = sc.held_comment("x" * 5000, missing, "failure", {}, RUN_URL, SHA)

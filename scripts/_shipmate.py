@@ -13,9 +13,8 @@ switch for their console output. It also holds the pull-request number check tha
 listing every reader of a head's checks uses, the ruleset, environment and ``CODEOWNERS``
 readers and the names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json``
 summaries, builds this run's page link, joins a capped list of names and parses a list of cell
-names. It parses YAML: the
-strings-only config loader and the YAML 1.2 workflow loader, both importing PyYAML only when
-first called.
+names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both
+importing PyYAML only when first called.
 """
 
 import functools

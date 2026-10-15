@@ -27,8 +27,9 @@ inputs:
   planned-cell-names:
     description: >-
       detect's `cells` output: the planned cells by name, JSON [{environment, stack}, ...]. Empty
-      when build-matrix refused, and set although a later detect step failed. The cells it names
-      that left no cell summary are the ones the gate description and the held comment name.
+      when build-matrix refused, and set although a later detect step failed. The held comment
+      lists the cells it names that left no cell summary; under a failed plan job the gate
+      description names the first of them.
     required: false
     default: ""
   on-demand:

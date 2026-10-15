@@ -381,7 +381,7 @@ _SUMMARY_SKIPPED = (
     "nothing changed, no existing plan comment, no doctor findings; nothing to post\n"
 )
 _SHA = "a" * 40
-#: The pull request head read every writing mode makes first.
+#: The pull request head read every writing mode makes after the comment listing.
 _PULLS = ["api", "repos/o/r/pulls/7", "--jq", ".head.sha"]
 _DEGRADED = (
     "::warning::the sticky plan comment was not updated with why the gate is held; the gate "

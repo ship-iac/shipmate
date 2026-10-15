@@ -108,8 +108,7 @@ REFUSED = (
 
 # Records every call's argv one line per argument, then the stdin of an `--input -` call, then a
 # `--` line. FAKE_FAIL_CHECK fails that check-runs POST (1-based); pipeline members run in
-# subshells, so its counter lives in a file. The pull request's head reads as `$FAKE_SHA`, and its
-# comment listing fails.
+# subshells, so its counter lives in a file. The pull request's comment listing fails.
 GH_STUB = """\
 #!/bin/bash
 printf '%s\\n' "$@" >> "$CALLS"
@@ -128,8 +127,6 @@ then
 elif [ "$1 $2" = "api repos/acme/demo/statuses/$FAKE_SHA" ]; then
   echo '{}'
   exit "$FAKE_STATUS_POST_RC"
-elif [ "$*" = "api repos/acme/demo/pulls/7 --jq .head.sha" ]; then
-  echo "$FAKE_SHA"
 elif [ "$1 $2 $5" = "api --paginate repos/acme/demo/issues/7/comments?per_page=100" ]; then
   exit 1
 elif [ "$*" = "api repos/acme/demo/check-runs --input -" ]; then
