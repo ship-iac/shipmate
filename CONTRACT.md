@@ -2314,22 +2314,21 @@ it holds the gate in either direction.
 
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
-only some checks published leaves a hold that `gate-refresh` will not green.
-The same hold is written when the job cannot read the head's gate statuses,
-list the head's apply checks or build the ones to publish, whether or not it
-downloaded a cell summary: a failed download leaves none over planned cells.
-The apply checks publish after the sticky plan comment is written, so a plan
-comment that could not be listed or written ends the job with no apply check
-published, and a pre-merge `shipmate apply` refuses as it does over a partial
-plan. A run that fails after `Upsert sticky comment` leaves the comment as that
-step left it: replaced when it wrote, unchanged when it did not. A run that
-fails before that step leaves the comment unchanged. Either way the gate shows
-this run's publish hold when it wrote one (it downloaded a cell summary), a
-newer run's hold when `refuse-newer` stopped it, and otherwise the gate the head
-already had, or none. A run with no check to publish (held, draft, no cell
-planned, or every check already published by this run) skips the publish step
-without reading anything. The job's final gate write replaces the hold. A run whose plan job was cancelled writes no final gate, and keeps the
-hold when it downloaded any cell summary.
+only some checks published leaves a hold that `gate-refresh` will not green. The
+same hold is written when the job cannot read the head's gate statuses, list the
+head's apply checks or build the ones to publish, whether or not it downloaded a
+cell summary: a failed download leaves none over planned cells. The apply checks
+publish after the sticky plan comment is written, so a plan comment that could
+not be listed or written ends the job with no apply check published, and a
+pre-merge `shipmate apply` refuses as it does over a partial plan. A run that
+fails part way changes the comment only if its `Upsert sticky comment` step
+wrote it (created or replaced) before the failure, and changes the gate only
+through the holds above; a hold it wrote stays until a fresh plan. A head left
+with no `shipmate / gate` status is blocked by a required gate too. A run with
+no check to publish (held, draft, no cell planned, or every check already
+published by this run) skips the publish step without reading anything. The
+job's final gate write replaces the hold. A run whose plan job was cancelled
+writes no final gate, and keeps the hold when it downloaded any cell summary.
 
 The job publishes only the apply checks its own run has not published yet,
 judged by the run id each App-authored check records. A re-run of the summary
