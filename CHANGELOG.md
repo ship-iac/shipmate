@@ -8,7 +8,7 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## Unreleased
+## [0.46.0] — 2026-10-15
 
 ### Changed — BREAKING
 
@@ -24,7 +24,7 @@ section below names the SHA the release tags.
 
 - **A plan artifact or state cache entry that fails authentication (another passphrase, different values on `<env>-plan` and `<env>-apply`, a corrupt, truncated or altered file, or a state entry copied under another stack's or environment's key) refuses before openssl runs, with `plan artifact ... failed authentication` or `state cache entry ... failed authentication`, instead of a corrupt plan failing at the render step on `tofu show`. The state refusal names no delete command; `docs/troubleshooting.md` tells the causes apart.**
 - **An openssl or disk failure on the runner, a missing openssl included, and an artifact or entry that cannot be read refuse with an `::error::` line instead of a traceback. A decrypt's openssl or disk failure names a re-run of the job or a runner fix; a plan artifact that cannot be read names a re-plan or a safe re-run, and a state entry a safe re-run; an encrypt failure names no re-run and points at `docs/troubleshooting.md`.**
-- **An apply cell whose apply step ran and whose state was not saved prints an `::error::`: the apply step ran and its state was not saved or not verified; never re-run this job or its workflow run; a re-run, a `shipmate apply` comment, or a merge can apply this cell's reviewed plan again against the state from before the apply; before applying or merging any plan of this stack in this environment, on any pull request, follow `docs/troubleshooting.md` §`The apply step ran and its state was not saved`, which holds the recovery procedure.**
+- **An apply cell whose apply step ran and whose state was not saved (the save failed, was cancelled or was not verified, or was skipped because the apply left no state file) prints an `::error::` and fails the job, so its apply check stays pending: the apply step ran and its state was not saved or not verified; never re-run this job or its workflow run; a re-run, a `shipmate apply` comment, or a merge can apply this cell's reviewed plan again against the state from before the apply; before applying or merging any plan of this stack in this environment, on any pull request, follow `docs/troubleshooting.md` §`The apply step ran and its state was not saved`, which holds the recovery procedure.**
 - **The apply comment's `not recorded:` note ends `Re-plan.` instead of `Re-plan and re-apply.`**
 - **Every plan and drift sweep now runs at most 10 cell jobs at once, the `max_parallel` default, so one over 10 cells runs in batches; apply waves and unlock stay uncapped. A `shared: true` environment's reviewers or wait timer apply again to each batch of a plan or sweep over the cap.**
 - **The gate hold a plan run writes while it publishes its apply checks names the run and says to re-plan only once it has ended: `plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended`.**
@@ -33,7 +33,6 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **`actions/state` verifies a save by looking its entry up under the exact save key and reports the result as a `saved` output, so a save that `actions/cache/save` reports as successful while the cache stored nothing no longer counts as saved.**
-- **The lost-save `::error::` also fires for a cancelled or unverified save and for a save skipped because the apply left no state file, and it now fails the apply cell's job, so the apply check stays pending in each case.**
 - **`actions/dispatch` and `actions/apply-complete` send their API request bodies on stdin instead of writing them to a `body.json` in the job workspace, and the dispatch log no longer prints an empty line for a missing answer or error. A dispatch that fails to build its request body or create the temporary file for gh's error output posts the `🔴 failed:` reply too.**
 - **A failed write of the sticky plan comment or the doctor report annotates gh's whole error, not only its first line. A plan comment that cannot be listed now fails the `summary` job too, instead of warning while the gate is written over the previous head's plan comment. Either failure stops the job before its gate write: a publish hold the run wrote stays until the pull request is re-planned, and a run that planned no cell leaves the head's gate as it was.**
 - **The plan, both apply forms and the merge deploy refuse a Terramate stack ordering cycle, a stack ordered after itself included, when they read the run-graph and before any other ordering check, naming the stacks on it. The plan refuses even with no cell to plan, instead of failing each planned cell on the loop, and the deploy's refusal also lists the merge's pending cells. Every plan but a drift sweep now runs `terramate experimental run-graph` and refuses when it fails, a plan with no cell and one in a repository with no `needs` included.**
