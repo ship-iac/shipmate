@@ -454,9 +454,14 @@ runs:
         # Unlock consumes no plan and authorize ignores the file for it, so it stays {}.
         if [ "$SHIPMATE_VERB" != unlock ]; then
           head=$(python3 -c "import json;print(json.load(open('pr.json'))['head']['sha'])")
-          GH_TOKEN="$APP_TOKEN" python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks \
-            "$head" '.check_runs[]' \
-            | python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs > plan_run.json
+          # A file, not a pipe, so an apply-gate failure is not reported as a listing failure.
+          if ! GH_TOKEN="$APP_TOKEN" python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" checks \
+            "$head" '.check_runs[]' > head-checks.jsonl; then
+            echo "::error::could not list the check runs on $head; the log line above names the cause"
+            exit 1
+          fi
+          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs < head-checks.jsonl \
+            > plan_run.json
         else
           echo '{}' > plan_run.json
         fi
