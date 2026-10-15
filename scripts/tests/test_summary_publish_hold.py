@@ -13,6 +13,10 @@ re-run) never replaces a newer run's gate or checks. A failed read of either, or
 `pending-checks`, holds whether or not a cell summary was downloaded: a hold is always safe, and a
 failed download leaves no cell summary over planned cells.
 
+`Create apply checks` runs after the sticky comment, so a failed `post` or `nothing-changed`
+comment write publishes no apply check. With nothing in `bodies.jsonl` it reads nothing;
+otherwise it runs `gate-status refuse-newer` first and refuses, writing nothing, over a newer
+run's hold: `gate-hold` writes outside the job's concurrency group, after the hold step's read.
 `Create/refresh gate` runs `gate-status refuse-newer` again before its final write and refuses,
 writing nothing, over a newer run's hold. It skips its self-refresh when this run published a queued
 check, which cannot be done yet.
@@ -27,7 +31,15 @@ import json
 import os
 
 import pytest
-from _loader import ACTIONS, bash_only, read_calls, run_step, step_by, write_python3_shim
+from _loader import (
+    ACTIONS,
+    action_steps,
+    bash_only,
+    read_calls,
+    run_step,
+    step_by,
+    write_python3_shim,
+)
 
 HEAD_SHA = "a" * 40
 RUN_ID = "42"
@@ -35,6 +47,7 @@ RUN_URL = f"https://github.com/acme/demo/actions/runs/{RUN_ID}"
 APP_ID = "4242"
 HOLD = "Hold the gate while apply checks publish"
 CREATE = "Create apply checks (pending / no-changes)"
+UPSERT = "Upsert sticky comment"
 GATE = "Create/refresh gate"
 HOLD_DESCRIPTION = (
     "re-plan this pull request (comment shipmate plan or push): "
@@ -95,7 +108,8 @@ REFUSED = (
 
 # Records every call's argv one line per argument, then the stdin of an `--input -` call, then a
 # `--` line. FAKE_FAIL_CHECK fails that check-runs POST (1-based); pipeline members run in
-# subshells, so its counter lives in a file.
+# subshells, so its counter lives in a file. The pull request's head reads as `$FAKE_SHA`, and its
+# comment listing fails.
 GH_STUB = """\
 #!/bin/bash
 printf '%s\\n' "$@" >> "$CALLS"
@@ -114,6 +128,10 @@ then
 elif [ "$1 $2" = "api repos/acme/demo/statuses/$FAKE_SHA" ]; then
   echo '{}'
   exit "$FAKE_STATUS_POST_RC"
+elif [ "$*" = "api repos/acme/demo/pulls/7 --jq .head.sha" ]; then
+  echo "$FAKE_SHA"
+elif [ "$1 $2 $5" = "api --paginate repos/acme/demo/issues/7/comments?per_page=100" ]; then
+  exit 1
 elif [ "$*" = "api repos/acme/demo/check-runs --input -" ]; then
   n=$(( $(cat "$COUNT" 2>/dev/null || echo 0) + 1 ))
   echo "$n" > "$COUNT"
@@ -224,7 +242,10 @@ def _run(
         "STATE": "pending",
         "DESCRIPTION": "waiting",
         "MODE": "post",
-        "PLAN_RESULT": "success",
+        "PR": "7",
+        "DOCTOR_WARNED": "false",
+        "UNMANAGED": "false",
+        "LOST": "false",
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_RUN_ID": RUN_ID,
@@ -271,6 +292,7 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
+        STATUSES_LIST,
         _check_post("a"),
         _check_post("b"),
     ]
@@ -297,6 +319,7 @@ def test_a_failed_check_post_fails_the_step_and_stops_publishing(tmp_path):
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
+        STATUSES_LIST,
         _check_post("a"),
         _check_post("b"),
     ]
@@ -348,6 +371,7 @@ def test_the_final_gate_write_replaces_the_hold_and_skips_the_refresh(tmp_path):
         STATUSES_LIST,
         APPLY_LIST,
         PUBLISH_HOLD_POST,
+        STATUSES_LIST,
         _check_post("a"),
         STATUSES_LIST,
         _status_post("pending", "waiting"),
@@ -361,6 +385,57 @@ def test_a_newer_runs_hold_refuses_the_final_write(tmp_path):
     hold."""
     codes, calls, stderr, _ = _run(tmp_path, statuses=_lines(_gate("failure", 50)), steps=(GATE,))
     assert (codes, calls, stderr) == ([1], [STATUSES_LIST], REFUSED)
+
+
+def _write_bodies(tmp_path, text):
+    (tmp_path / "bodies.jsonl").write_text(text, encoding="utf-8")
+
+
+@bash_only
+def test_a_newer_runs_hold_refuses_the_apply_checks(tmp_path):
+    """A newer same-head run held the gate while this run wrote its comment.
+    Mutation: delete the `refuse-newer` line in `Create apply checks` -- the check POST follows."""
+    _write_bodies(tmp_path, '{"name": "apply / stacks/a / dev"}\n')
+    codes, calls, stderr, _ = _run(tmp_path, statuses=_lines(_gate("failure", 50)), steps=(CREATE,))
+    assert (codes, calls, stderr) == ([1], [STATUSES_LIST], REFUSED)
+
+
+@bash_only
+def test_nothing_to_publish_reads_nothing(tmp_path):
+    """A held, draft or nothing-changed run passes this step whatever the statuses API does.
+    Mutation: drop the `[ -s bodies.jsonl ] || exit 0` guard -- the failed read fails the step."""
+    _write_bodies(tmp_path, "")
+    codes, calls, _, _ = _run(tmp_path, statuses_rc=1, steps=(CREATE,))
+    assert (codes, calls) == ([0], [])
+
+
+@bash_only
+def test_a_failed_comment_write_stops_the_job_before_any_apply_check(tmp_path):
+    """The hold, apply-check, comment and gate steps in the order the action file gives them:
+    a `post` run whose comment listing fails publishes no apply check and writes no final gate,
+    because a failed step skips the default-`success()` steps after it.
+    Mutation: move `Create apply checks` back above the mirror step -- its POST follows the hold."""
+    _write_cells(tmp_path, "a")
+    (tmp_path / "comment.md").write_text("<!-- shipmate:summary -->\n", encoding="utf-8")
+    wanted = {HOLD, CREATE, UPSERT, GATE}
+    steps = tuple(s["name"] for s in action_steps("summary") if s.get("name") in wanted)
+    codes, calls, _, _ = _run(tmp_path, steps=steps)
+    assert (codes, calls) == (
+        [0, 1],
+        [
+            STATUSES_LIST,
+            APPLY_LIST,
+            PUBLISH_HOLD_POST,
+            ["api", "repos/acme/demo/pulls/7", "--jq", ".head.sha"],
+            [
+                "api",
+                "--paginate",
+                "--jq",
+                '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}',
+                "repos/acme/demo/issues/7/comments?per_page=100",
+            ],
+        ],
+    )
 
 
 @bash_only

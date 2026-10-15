@@ -1215,16 +1215,19 @@ def test_main_refuses_an_unknown_comment_mode(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():
-    """A failed comment listing or write fails the upsert step, so `Create/refresh gate`, a later
-    step, does not write a gate over a comment that still shows the previous head's plan.
+def test_the_apply_checks_and_the_gate_follow_the_upsert_step_that_may_fail():
+    """A failed comment listing or write fails the upsert step, so neither `Create apply checks`
+    nor `Create/refresh gate`, later steps, publishes over a comment that still shows the previous
+    head's plan.
 
-    Mutation: move `Create/refresh gate` above `Upsert sticky comment` -- red."""
-    src = (_ENGINE / "actions" / "summary" / "action.yml").read_text(encoding="utf-8")
-    names = [ln.strip() for ln in src.splitlines() if ln.strip().startswith("- name:")]
-    upsert = next(i for i, n in enumerate(names) if "Upsert sticky comment" in n)
-    gate = next(i for i, n in enumerate(names) if "Create/refresh gate" in n)
-    assert gate > upsert
+    Mutations: move `Create/refresh gate` above `Upsert sticky comment`; move `Create apply checks`
+    back above the mirror step -- red."""
+    names = [s.get("name") for s in action_steps("summary")]
+    assert (
+        names.index("Upsert sticky comment")
+        < names.index("Create apply checks (pending / no-changes)")
+        < names.index("Create/refresh gate")
+    )
 
 
 @pytest.mark.parametrize("warned", ["true", "false", ""])
