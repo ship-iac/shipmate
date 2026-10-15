@@ -159,7 +159,7 @@ re-pin, so it belongs in the tree they pin, not in a commit that arrives after
 it. A commit cannot name its own SHA, so the section's SHA line is backfilled by
 the first commit after the tag.
 
-If the tree carries an `Unreleased` heading — `## [Unreleased]` in
+If the tree carries an `Unreleased` heading — `## Unreleased` in
 `CHANGELOG.md` — rename it to the version in that same PR and
 `grep -rn "Unreleased" CHANGELOG.md docs/` for the cross-references that name the
 section, or the release ships pointing at a heading that no longer exists.
