@@ -32,6 +32,7 @@ import sys
 
 from _shipmate import (
     _load,
+    cell_names,
     cell_summaries,
     command_data,
     current_run_url,
@@ -463,6 +464,30 @@ def load_cells(cells_dir):
     return out
 
 
+def missing_cells(planned, cells):
+    """The `{stack, environment}` pairs of `planned` that no cell summary in `cells` names,
+    sorted by (environment, stack): the cells whose plan this run never read."""
+    read = {(c["stack"], c["environment"]) for c in cells}
+    gone = [p for p in planned if (p["stack"], p["environment"]) not in read]
+    return sorted(gone, key=lambda p: (p["environment"], p["stack"]))
+
+
+def _missing(cells):
+    """`missing_cells` of the `planned-cell-names` input, or none unless detect succeeded: a fmt
+    or codegen failure still carries the full list. A value that is not a list of names warns."""
+    raw = os.environ.get("SHIPMATE_PLANNED_CELLS_NAMES", "")
+    planned = cell_names(raw) if raw else []
+    if planned is None:
+        print(
+            "::warning::planned-cell-names is not a JSON list of {stack, environment} strings; "
+            "the gate description and the plan comment name no cell without a plan"
+        )
+        planned = []
+    if os.environ.get("SHIPMATE_DETECT_RESULT", "") != "success":
+        return []
+    return missing_cells(planned, cells)
+
+
 def _named_output(raw, input_name, key, noun):
     """build-matrix's `{"count": N, key: [...]}` from the `input_name` input's `raw` value:
     `None` when empty, `None` with one warning when it is not that shape, with `N` a
@@ -514,11 +539,14 @@ def main():
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
     pending = any(c["changed"] for c, _ in cells)
+    missing = _missing([c for c, _ in cells])
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(
             f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n"
             f"unmanaged={'true' if named else 'false'}\n"
             f"lost={'true' if lost_named else 'false'}\n"
+            # `json.dumps` escapes CR and LF, so an author's stack path stays on this one line.
+            f"missing={json.dumps(missing)}\n"
         )
 
 

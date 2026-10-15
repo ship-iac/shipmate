@@ -913,12 +913,16 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     )
     # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`. Mutation:
     # binding `SHIPMATE_DOCTOR_WARNED` again -- a plan comment reads nothing from doctor.
-    # Mutation: mapping `unmanaged-stacks` or `lost-env-tags` to another env name.
+    # Mutation: mapping `unmanaged-stacks` or `lost-env-tags` to another env name. Mutation:
+    # dropping `SHIPMATE_PLANNED_CELLS_NAMES` or `SHIPMATE_DETECT_RESULT` -- `missing` is always
+    # empty.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_UNMANAGED": "${{ inputs.unmanaged-stacks }}",
         "SHIPMATE_LOST_ENV_TAGS": "${{ inputs.lost-env-tags }}",
+        "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
+        "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
     }
     # Mutation: `required: true` (GitHub does not enforce it, but it misdocuments a draft run).
     for name in ("unmanaged-stacks", "lost-env-tags"):
@@ -965,7 +969,7 @@ def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
     one path, the count of 3 over none and the count of -1."""
     monkeypatch.setenv("SHIPMATE_UNMANAGED", raw)
     assert _run_main(tmp_path, monkeypatch, []) == (
-        f"pending=false\ncount=0\nunmanaged={flag}\nlost=false\n"
+        f"pending=false\ncount=0\nunmanaged={flag}\nlost=false\nmissing=[]\n"
     )
     assert capsys.readouterr().out == out
     line = "\n\n" + _LEAD.format(1) + ": stacks/x" if flag == "true" else ""
@@ -999,7 +1003,7 @@ def test_main_names_the_lost_pairs_without_touching_the_gate_outputs(
     Mutation: read the lost value under `paths` -- the first bad case renders a line."""
     monkeypatch.setenv("SHIPMATE_LOST_ENV_TAGS", raw)
     assert _run_main(tmp_path, monkeypatch, []) == (
-        f"pending=false\ncount=0\nunmanaged=false\nlost={flag}\n"
+        f"pending=false\ncount=0\nunmanaged=false\nlost={flag}\nmissing=[]\n"
     )
     assert capsys.readouterr().out == out
     line = "\n\n" + _LOST_LEAD.format(1) + ": stacks/x / dev" if flag == "true" else ""
@@ -1022,7 +1026,7 @@ def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monke
     (tmp_path / "out.txt").unlink()
     capsys.readouterr()
     assert _run_main(tmp_path, monkeypatch, []) == (
-        "pending=true\ncount=130\nunmanaged=false\nlost=false\n"
+        "pending=true\ncount=130\nunmanaged=false\nlost=false\nmissing=[]\n"
     )
     assert capsys.readouterr().out == _NO_ROOM
     assert len((tmp_path / "comment.md").read_text(encoding="utf-8")) == sc.HARD_CAP - 10
@@ -1034,6 +1038,54 @@ def test_main_reports_zero_count_when_no_cell_summaries_arrived(tmp_path, monkey
     text = _run_main(tmp_path, monkeypatch, [])
     assert "count=0\n" in text
     assert "pending=false\n" in text
+
+
+_PLANNED = [
+    {"environment": "dev-eu", "stack": "stacks/b"},
+    {"environment": "dev-eu", "stack": "stacks/app"},
+    {"environment": "prod", "stack": "stacks/a"},
+    {"environment": "dev", "stack": "stacks/c"},
+]
+_BAD_NAMES = (
+    "::warning::planned-cell-names is not a JSON list of {stack, environment} strings; the gate "
+    "description and the plan comment name no cell without a plan\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "detect", "missing", "out"),
+    [
+        (
+            json.dumps(_PLANNED),
+            "success",
+            (
+                '[{"stack": "stacks/c", "environment": "dev"}, '
+                '{"stack": "stacks/b", "environment": "dev-eu"}, '
+                '{"stack": "stacks/a", "environment": "prod"}]'
+            ),
+            "",
+        ),
+        ("", "success", "[]", ""),
+        ('[{"stack": "stacks/b"}]', "success", "[]", _BAD_NAMES),
+        ('{"stack": "stacks/b", "environment": "dev"}', "success", "[]", _BAD_NAMES),
+        ("not json", "success", "[]", _BAD_NAMES),
+        (json.dumps(_PLANNED), "failure", "[]", ""),
+    ],
+    ids=["names", "empty", "no-environment", "not-a-list", "not-json", "detect-failed"],
+)
+def test_main_names_the_planned_cells_with_no_cell_summary(
+    tmp_path, monkeypatch, capsys, raw, detect, missing, out
+):
+    """`missing` is the planned cells this run read no summary for, in the comment's (environment,
+    stack) order, and none unless detect succeeded: a fmt failure still carries the full list.
+    Mutations: return `planned` unfiltered -- `names` red (the read cell is named); drop the sort
+    -- `names` red; drop the detect-result condition -- `detect-failed` red; misspell
+    `SHIPMATE_PLANNED_CELLS_NAMES` in `_missing` -- `names` red."""
+    monkeypatch.setenv("SHIPMATE_PLANNED_CELLS_NAMES", raw)
+    monkeypatch.setenv("SHIPMATE_DETECT_RESULT", detect)
+    text = _run_main(tmp_path, monkeypatch, [_cell()])
+    assert text.splitlines()[-1] == f"missing={missing}"
+    assert capsys.readouterr().out == out
 
 
 def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():

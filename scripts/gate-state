@@ -21,7 +21,9 @@ skipped `detect` there is a failure like any other non-success.
 
 import os
 
-from _shipmate import run_annotated
+from _shipmate import _load, missing_names, run_annotated
+
+ag = _load("apply-gate")
 
 _HOLD = "hold"
 _POST = "post"
@@ -47,19 +49,34 @@ def _as_int(value):
         return None
 
 
-def _plan_gap(*, plan_result, planned):
+def _failed_cells(missing):
+    """The description naming the first of `missing` (`{stack, environment}` pairs in the comment's
+    order) by its plan check, or None when there is none or the text passes the 140 characters
+    the statuses API accepts: a cut would name a check that does not exist."""
+    if not missing:
+        return None
+    check = f"{ag.CALLER_PREFIX}{missing[0]['stack']} / {missing[0]['environment']}"
+    if len(missing) == 1:
+        text = f"{check} failed to plan; fix it before merging"
+    else:
+        text = f"{check} and {len(missing) - 1} more failed to plan; fix them before merging"
+    return text if len(text) <= 140 else None
+
+
+def _plan_gap(*, plan_result, planned, missing):
     """A hold description when the plan job produced no usable plan, else None.
 
     `skipped` with cells planned is the one that is not obviously a failure: the
     job the matrix was built for did not run at all, so there is nothing to
-    review and nothing to apply.
+    review and nothing to apply. A failed plan job names its first cell without a plan when one
+    is known (`_failed_cells`); `missing` changes no other text.
     """
     if plan_result == "skipped" and planned != 0:
         return f"the plan job did not run for {planned} planned cell(s); re-plan before merging"
     if plan_result not in ("success", "skipped"):
-        return (
-            f"plan incomplete (plan job: {plan_result}); fix the failing "
-            "shipmate / <stack> / <env> plan check before merging"
+        named = _failed_cells(missing) if plan_result == "failure" else None
+        return named or (
+            f"plan incomplete (plan job: {plan_result}); fix the failing plan checks before merging"
         )
     return None
 
@@ -85,7 +102,7 @@ def _evidence_gap(*, cell_count, planned):
     return None
 
 
-def evidence_gap(*, plan_result, planned_cells, cell_count):
+def evidence_gap(*, plan_result, planned_cells, cell_count, missing=()):
     """A hold description when this plan run's evidence is not trustworthy, else None.
 
     The one predicate the gate and the apply-check publisher share: `decide` holds the gate on
@@ -93,6 +110,8 @@ def evidence_gap(*, plan_result, planned_cells, cell_count):
     reported (a string, possibly empty); `cell_count` is the number of cell summaries parsed.
     The plan-job checks run before the evidence check, so a plan job that broke or never ran is
     reported as a plan problem rather than shadowed by the evidence shortfall it also produces.
+    `missing`, the planned cells with no cell summary, changes only a failed plan job's text,
+    never whether there is a gap.
     """
     planned = _as_int(planned_cells)
     if planned is None:
@@ -100,7 +119,7 @@ def evidence_gap(*, plan_result, planned_cells, cell_count):
             "the planned cell count was not reported, so this run's evidence is "
             "unknown; re-plan before merging"
         )
-    return _plan_gap(plan_result=plan_result, planned=planned) or _evidence_gap(
+    return _plan_gap(plan_result=plan_result, planned=planned, missing=missing) or _evidence_gap(
         cell_count=cell_count, planned=planned
     )
 
@@ -109,10 +128,11 @@ def _detect_gap(detect_result, refusal):
     """The hold description for a `detect` that did not succeed.
 
     A `detect` that failed with a `::error::` line (a refusal or a failed tool or API call) is
-    named by that line, cut here to the 140 characters the statuses API accepts; an empty one
-    (a fmt or codegen failure, a crash with no `::error::` line) keeps the generic text."""
+    named by that line, whole: `main` cuts the description, and the held comment shows all of it.
+    An empty one (a fmt or codegen failure, a crash with no `::error::` line) keeps the generic
+    text."""
     if refusal:
-        return f"detect failed: {refusal}"[:140]
+        return f"detect failed: {refusal}"
     return (
         f"change detection did not succeed ({detect_result}); fix the "
         "shipmate / detect job before merging"
@@ -129,6 +149,7 @@ def decide(
     is_draft=False,
     on_demand=False,
     refusal="",
+    missing=(),
 ):
     """Return (state, description, comment_mode).
 
@@ -146,7 +167,7 @@ def decide(
     no count.
 
     `refusal` is the first line of the `::error::` refusal message `build-matrix` failed with
-    (`_detect_gap`).
+    (`_detect_gap`). `missing` goes to `evidence_gap`.
     """
     if detect_result == "skipped" and is_draft and not on_demand:
         return "pending", DRAFT_DESCRIPTION, _DRAFT
@@ -154,7 +175,9 @@ def decide(
         return "failure", _detect_gap(detect_result, refusal), _HOLD
     if plan_result == "cancelled":
         return None, "", _HOLD
-    gap = evidence_gap(plan_result=plan_result, planned_cells=planned_cells, cell_count=cell_count)
+    gap = evidence_gap(
+        plan_result=plan_result, planned_cells=planned_cells, cell_count=cell_count, missing=missing
+    )
     if gap:
         return "failure", gap, _HOLD
     if pending:
@@ -183,10 +206,15 @@ def main():
         is_draft=os.environ.get("SHIPMATE_IS_DRAFT", "false") == "true",
         on_demand=os.environ.get("SHIPMATE_ON_DEMAND", "false") == "true",
         refusal=os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
+        missing=missing_names(os.environ.get("SHIPMATE_MISSING", "")),
     )
+    # A stack path holding CR or LF would end the `GITHUB_OUTPUT` line. `reason` is the whole
+    # text, for the held comment.
+    flat = desc.replace("\r", " ").replace("\n", " ")
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"state={state or ''}\n")
-        fh.write(f"description={desc[:140]}\n")
+        fh.write(f"description={flat[:140]}\n")
+        fh.write(f"reason={flat}\n")
         fh.write(f"comment_mode={mode}\n")
 
 

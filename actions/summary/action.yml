@@ -24,6 +24,13 @@ inputs:
   planned-cells:
     description: How many cells detect planned (its `count` output). Compared against the cell summaries this job parses; any disagreement holds the gate and publishes no apply check.
     required: true
+  planned-cell-names:
+    description: >-
+      detect's `cells` output: the planned cells by name, JSON [{environment, stack}, ...]. Empty
+      when build-matrix refused, and set although a later detect step failed. The cells it names
+      that left no cell summary are the ones the gate description and the held comment name.
+    required: false
+    default: ""
   on-demand:
     description: >-
       '"true"' when a human named this plan (the plan workflow's workflow_dispatch leg). Such a
@@ -245,6 +252,10 @@ runs:
         # line, invalid renders none and warns. None touches `count`, `pending` or the gate.
         SHIPMATE_UNMANAGED: ${{ inputs.unmanaged-stacks }}
         SHIPMATE_LOST_ENV_TAGS: ${{ inputs.lost-env-tags }}
+        # The cells named in `missing`: none unless detect succeeded, since a fmt or codegen
+        # failure still carries a full list.
+        SHIPMATE_PLANNED_CELLS_NAMES: ${{ inputs.planned-cell-names }}
+        SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
       run: |
         set -euo pipefail
         # Reviewer-facing only (cosmetic links), so a failure degrades to an empty listing and links
@@ -266,6 +277,7 @@ runs:
         SHIPMATE_PLANNED_CELLS: ${{ inputs.planned-cells }}
         SHIPMATE_CELL_COUNT: ${{ steps.build.outputs.count }}
         SHIPMATE_PENDING: ${{ steps.build.outputs.pending }}
+        SHIPMATE_MISSING: ${{ steps.build.outputs.missing }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
       run: |

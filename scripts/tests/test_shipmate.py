@@ -14,6 +14,7 @@ from _shipmate import (
     gate_check,
     is_head_sha,
     is_pr_number,
+    missing_names,
     named,
     review_count,
     run_annotated,
@@ -155,6 +156,29 @@ def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
 def test_named_lists_cap_items_whole_and_counts_the_rest():
     """Mutation: `>=` for `>` in `named` -- red on the `len == cap` case."""
     assert [named(["a", "b"], 2), named(["a", "b", "c"], 2)] == ["a, b", "a, b, and 1 more"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "names"),
+    [
+        (
+            '[{"stack": "a", "environment": "dev", "x": 1}]',
+            [{"stack": "a", "environment": "dev"}],
+        ),
+        ("[]", []),
+        ("", []),
+        ("not json", []),
+        ('{"stack": "a", "environment": "dev"}', []),
+        ('[{"stack": "a"}]', []),
+        ('[{"stack": "a", "environment": 1}]', []),
+        ('["a / dev"]', []),
+    ],
+    ids=["names", "empty-list", "empty", "bad-json", "object", "no-env", "int-env", "string"],
+)
+def test_missing_names_reads_names_or_nothing_and_never_raises(raw, names):
+    """Mutations: let bad JSON raise (drop the `except`) -- `empty` and `bad-json` red; drop the
+    `environment` type check -- `no-env` and `int-env` red."""
+    assert missing_names(raw) == names
 
 
 _SHA = "0123456789abcdef0123456789abcdef01234567"

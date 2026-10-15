@@ -18,6 +18,7 @@ EXPECTED_GATE_ENV = {
     "SHIPMATE_PLANNED_CELLS": "${{ inputs.planned-cells }}",
     "SHIPMATE_CELL_COUNT": "${{ steps.build.outputs.count }}",
     "SHIPMATE_PENDING": "${{ steps.build.outputs.pending }}",
+    "SHIPMATE_MISSING": "${{ steps.build.outputs.missing }}",
     "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
     "SHIPMATE_ON_DEMAND": "${{ inputs.on-demand }}",
 }
@@ -30,7 +31,7 @@ def _summary_action_gate_step():
 def test_the_action_hands_gate_state_exactly_these_env_vars():
     """The whole mapping, not a membership check: an env var added here that gate-state does not
     read, or dropped from here while gate-state still reads it, both end as a gate decided from a
-    default."""
+    default. Mutation: drop the `SHIPMATE_MISSING` mapping -- red."""
     assert _summary_action_gate_step()["env"] == EXPECTED_GATE_ENV
 
 
