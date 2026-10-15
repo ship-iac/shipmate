@@ -19,8 +19,8 @@ script, so every one carries the shared header and footer from `summary-comment`
 The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBER` of
 `GITHUB_REPOSITORY`; gh's response is discarded and nothing is printed. Any argument exits 1 with
 `::error::usage` before anything else. A `PR_NUMBER` that is not a pull-request number exits 1
-before any `gh` call; a failed POST exits 1 with one `::error::` annotation naming the pull
-request and carrying gh's stderr, never the body.
+before any `gh` call; a failed POST exits 1 unannotated, naming the pull request and gh's
+stderr, never the body: each caller decides its severity.
 
 The footer links this run (`current_run_url()`), then `FOOTER_HINT` on a refusal or a failure;
 a notice or a started run asks nothing of the reader, so it carries no hint.
@@ -78,7 +78,7 @@ def main():
     try:
         run(argv, stdin=text)
     except SystemExit as exc:
-        sys.exit(f"::error::could not post the reply on pull request #{pr}: {exc.code}")
+        sys.exit(f"could not post the reply on pull request #{pr}: {exc.code}")
 
 
 if __name__ == "__main__":

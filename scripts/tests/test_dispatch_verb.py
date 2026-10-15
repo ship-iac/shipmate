@@ -809,9 +809,11 @@ def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path,
 
 @bash_only
 def test_a_failed_reply_after_a_started_run_warns_and_exits_zero(tmp_path):
-    """The run has started, so a reply that cannot be posted degrades to a warning.
+    """The run has started, so a reply that cannot be posted degrades to a warning, and the
+    warning stays the only annotation on the passing step.
 
-    Mutation: remove the `|| echo "::warning::..."` degrade, and the step exits non-zero.
+    Mutations: remove the `|| echo "::warning::..."` degrade, and the step exits non-zero;
+    prefix `reply-comment`'s failed-POST exit with `::error::` -- an error on stderr.
     """
     result, _ = _run_dispatch(
         tmp_path,
@@ -823,6 +825,7 @@ def test_a_failed_reply_after_a_started_run_warns_and_exits_zero(tmp_path):
     assert "::warning::could not post the dispatch reply; the run started" in (
         result.stdout.splitlines()
     ), f"the warning must print whole: {result.stdout}"
+    assert "::error::" not in result.stderr, result.stderr
 
 
 @bash_only

@@ -210,12 +210,15 @@ def test_main_posts_the_started_text_and_ignores_the_reply_text(monkeypatch):
 
 
 def test_a_failed_post_names_the_pull_request_and_not_the_body(monkeypatch, capsys):
-    """`run`'s failure message quotes the argv, so a body in the argv reaches the log.
+    """`run`'s failure message quotes the argv, so the body travels on stdin. The exit is
+    unannotated: `run_annotated` passes it through, and `dispatch` degrades it to a warning.
 
-    Mutation: post with `-f body={text}` and no stdin -- the body appears in stderr.
+    Mutations: post with `-f body={text}` and no stdin -- the body appears in the message and
+    stdin is empty; prefix the message with `::error::` -- an annotation on stderr.
     """
+    calls = []
     failed = subprocess.CompletedProcess([], 1, b"", b"HTTP 403: forbidden\nsecond line")
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: failed)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: calls.append(k.get("input")) or failed)
     monkeypatch.setattr(sys, "argv", ["reply-comment"])
     for key, value in {
         "GITHUB_SERVER_URL": "https://github.com",
@@ -228,13 +231,12 @@ def test_a_failed_post_names_the_pull_request_and_not_the_body(monkeypatch, caps
         monkeypatch.setenv(key, value)
     with pytest.raises(SystemExit) as exc:
         run_annotated(rc.main)
-    err = capsys.readouterr().err
-    assert (exc.value.code, err) == (
-        1,
+    assert (exc.value.code, capsys.readouterr().err) == (
         (
-            "::error::could not post the reply on pull request #42: command failed (1): gh api "
-            "-X POST repos/org/repo/issues/42/comments -F body=@-"
-            "%0AHTTP 403: forbidden%0Asecond line\n"
+            "could not post the reply on pull request #42: command failed (1): gh api -X POST "
+            "repos/org/repo/issues/42/comments -F body=@-\nHTTP 403: forbidden\nsecond line"
         ),
+        "",
     )
-    assert "body-only-text" not in err
+    assert "body-only-text" not in exc.value.code
+    assert len(calls) == 1 and b"body-only-text" in calls[0]
