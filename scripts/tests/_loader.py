@@ -413,6 +413,7 @@ def github_outputs(path):
 #: write ``scripts/gate-status`` makes; any other call prints to stderr and exits 1. It records
 #: each call's argv as ``run_with_gh_recorder``'s stub does. The statuses listing answers
 #: ``$FAKE_PAGE1$FAKE_PAGE2`` when paginated and ``$FAKE_PAGE1`` alone when not, as GitHub would.
+#: The check-runs listing also prints ``$FAKE_CHECKS_STDERR`` (empty when unset) to stderr.
 _GATE_GH = """\
 #!/bin/bash
 printf '%s\n' "$@" -- >> "$CALLS"
@@ -421,6 +422,7 @@ checks="$head/check-runs?filter=all&per_page=100 --jq $FAKE_CHECKS_JQ"
 statuses="$head/statuses?per_page=100 --jq $FAKE_STATUSES_JQ"
 if [ "$*" = "api --paginate $checks" ]; then
   printf '%s' "$FAKE_CHECKS"
+  printf '%s' "${FAKE_CHECKS_STDERR:-}" >&2
   exit "${FAKE_CHECKS_RC:-0}"
 elif [ "$*" = "api --paginate $statuses" ]; then
   printf '%s%s' "$FAKE_PAGE1" "$FAKE_PAGE2"

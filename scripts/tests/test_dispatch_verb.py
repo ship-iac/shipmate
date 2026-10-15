@@ -682,8 +682,7 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
 #: Fails every call and saves the comment body it is handed.
 _BODY_FAILURE_STUB = (
     "#!/bin/bash\n"
-    'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; '
-    'elif [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+    'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; fi; '
     "done\n"
     "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 )
@@ -722,8 +721,7 @@ def _answering_stub(answer, reply_exit=0):
         f"  cat <<'ANSWER'\n{answer}\nANSWER\n"
         "  exit 0\nfi; done\n"
         "printf '%s' \"${SHIPMATE_REPLY_RUN_ID-}\" > run_id.txt\n"
-        'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; '
-        'elif [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+        'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; fi; '
         "done\n"
         f"exit {reply_exit}\n"
     )

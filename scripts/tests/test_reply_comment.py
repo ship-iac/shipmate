@@ -238,5 +238,5 @@ def test_a_failed_post_names_the_pull_request_and_not_the_body(monkeypatch, caps
         ),
         "",
     )
-    assert "body-only-text" not in exc.value.code
+    assert "body-only-text" not in str(exc.value.code)
     assert len(calls) == 1 and b"body-only-text" in calls[0]

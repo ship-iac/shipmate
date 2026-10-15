@@ -85,6 +85,7 @@ def _run_gate(
     state="pending",
     read_fails=False,
     checks_rc=0,
+    checks_stderr="",
     bodies=NO_CHANGES_BODY + "\n",
 ):
     if bodies is not None:
@@ -102,6 +103,7 @@ def _run_gate(
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://example.invalid",
         "GITHUB_RUN_ID": "999",
+        "FAKE_CHECKS_STDERR": checks_stderr,
     }
     return run_with_gate_gh(
         tmp_path,
@@ -188,7 +190,7 @@ def test_no_bodies_file_skips_the_refresh(tmp_path):
 def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
     """The listing's `::error::` reaches the log unannotated: the step passes, so the failure is a
     warning only. Mutations: drop the `if !` around the refresh -> `set -e` fails the step; drop
-    the `sed` -> an `::error::` line."""
+    the `awk` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "pending", checks_rc=1)
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert calls == [READ_ARGV, _write_argv("pending", "the reason"), CHECKS_ARGV]
@@ -203,9 +205,29 @@ def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
 
 
 @bash_only
+def test_a_failed_refresh_logs_each_line_of_gh_stderr(tmp_path):
+    """`run_annotated` escapes a multi-line error into one line; the step decodes it, so the log
+    shows gh's stderr on its own lines with no `%0A`, and a literal `%` once. Mutations: drop the
+    `%0A` decode -> one line with `%0A`; decode `%25` first -> the literal `%0A` splits the line."""
+    stderr = "HTTP 502: bad gateway\nretry 100%0A later"
+    proc, _ = _run_gate(tmp_path, "post", "pending", checks_rc=1, checks_stderr=stderr)
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert (proc.stdout, proc.stderr) == (
+        (
+            f"command failed (1): gh {' '.join(CHECKS_ARGV)}\n"
+            "HTTP 502: bad gateway\n"
+            "retry 100%0A later\n"
+            f"::warning::could not refresh the gate of {HEAD_SHA}; it stays pending until an "
+            "apply refreshes it\n"
+        ),
+        "",
+    )
+
+
+@bash_only
 def test_a_held_refresh_warns_without_an_error_annotation(tmp_path):
     """`gate-status refresh` over a hold (this run's own, 999) exits 3 with unannotated text.
-    Mutations: treat a refresh failure as fatal (drop the `if !`) -> exit 3; drop the `sed` and
+    Mutations: treat a refresh failure as fatal (drop the `if !`) -> exit 3; drop the `awk` and
     prefix the hold text with `::error::` in `gate-status` -> an `::error::` line."""
     proc, calls = _run_gate(tmp_path, "post", "failure")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"

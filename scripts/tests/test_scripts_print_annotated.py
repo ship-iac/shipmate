@@ -3,7 +3,51 @@ import ast
 import pytest
 from _loader import ENGINE
 
-SCRIPTS = sorted(p.name for p in (ENGINE / "scripts").iterdir() if p.is_file() and not p.suffix)
+SCRIPTS = sorted(
+    p.name
+    for p in (ENGINE / "scripts").iterdir()
+    if p.is_file() and not p.suffix and not p.name.startswith(".") and not p.name.endswith("~")
+)
+
+#: Hand-written: every engine script, so an added, renamed or deleted one is red.
+SCRIPTS_EXPECTED = [
+    "apply-cell-summary",
+    "apply-comment",
+    "apply-complete",
+    "apply-detect",
+    "apply-gate",
+    "apply-snapshot",
+    "authorize",
+    "build-matrix",
+    "comment-parse",
+    "deploy-detect",
+    "dispatch-body",
+    "doctor",
+    "drift-cell-summary",
+    "drift-issues",
+    "env-config",
+    "env-inject",
+    "gate-config",
+    "gate-state",
+    "gate-status",
+    "lock-info",
+    "mirror-checks",
+    "onboard",
+    "pending-checks",
+    "plan-cell-summary",
+    "plan-classify",
+    "plan-crypt",
+    "pr-facts",
+    "provider-cache-key",
+    "register-app",
+    "reply-comment",
+    "state-path",
+    "summary-comment",
+    "unlock-detect",
+    "upsert-comment",
+    "verify-environments",
+    "waves",
+]
 
 MAIN_BLOCK = "if __name__ == '__main__':\n    run_annotated(main)"
 #: Hand-written: each block that is not `MAIN_BLOCK`.
@@ -40,6 +84,14 @@ def _blocks(script):
     ]
 
 
+def test_the_enumeration_finds_every_engine_script_and_the_registries_name_only_scripts():
+    """A parametrization from the directory cannot see a script it fails to find, and a registry
+    key naming no script exempts nothing. Mutations: add a scratch script; delete a name from
+    `SCRIPTS_EXPECTED`; rename a `BLOCKS` key -- each red."""
+    assert SCRIPTS == SCRIPTS_EXPECTED
+    assert set(BLOCKS) | TERMINAL | LIBRARIES <= set(SCRIPTS)
+
+
 @pytest.mark.parametrize("script", SCRIPTS)
 def test_every_script_prints_its_refusal_through_run_annotated(script):
     """A script's refusal reaches the log only through `run_annotated`, which prints every line
@@ -56,12 +108,3 @@ def test_every_script_prints_its_refusal_through_run_annotated(script):
     else:
         expected = [BLOCKS.get(script, MAIN_BLOCK)]
     assert _blocks(script) == expected
-
-
-def test_gate_status_passes_its_argv_through_run_annotated():
-    """The literal case beside the parametrization, so an enumeration that finds no script
-    still fails. Mutation: revert `gate-status`'s block to `main(sys.argv[1:])` -- red."""
-    assert "gate-status" in SCRIPTS
-    assert _blocks("gate-status") == [
-        "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])"
-    ]

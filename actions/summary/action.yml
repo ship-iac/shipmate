@@ -356,7 +356,9 @@ runs:
         if [ "$STATE" = "pending" ] && [ "$MODE" != "draft" ] && [ -f bodies.jsonl ] \
           && ! grep -q '"status": "queued"' bodies.jsonl; then
           # A hold or a failed read does not fail this step, so its annotation stays a warning.
-          if ! python3 "$gate_status" refresh "$HEAD_SHA" 2>&1 | sed 's/^::error:://'; then
+          # `run_annotated` escapes a multi-line error into one line; decode it, `%25` last.
+          if ! python3 "$gate_status" refresh "$HEAD_SHA" 2>&1 \
+            | awk 'sub(/^::error::/, "") { gsub(/%0D/, ""); gsub(/%0A/, "\n"); gsub(/%25/, "%") } { print }'; then
             echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
           fi
         fi
