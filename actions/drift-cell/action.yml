@@ -117,7 +117,7 @@ runs:
       # ONLY channel by which this cell's drift becomes visible. Lose it and drift-issues never
       # sees the cell, leaving no Issue and a green sweep over real drift.
       if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: drift-summary.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
         path: ${{ runner.temp }}/cell.json
