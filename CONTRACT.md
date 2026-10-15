@@ -2185,12 +2185,14 @@ A run whose plan job was cancelled writes no final gate (below) and keeps the
 comment as it is, with a warning; a draft autoplan keeps it too (§Post-plan
 topology).
 
-Every comment write, the held body included, first reads the pull request's
-head and writes nothing when the pull request has moved past the head this run
-planned, with a notice: the comment is per pull request, and a re-run of an
-older run would otherwise replace the newer head's comment. A failed read warns
-and writes nothing for the held body, and fails the job before any apply check
-or gate is written for the plan body.
+Every comment write, the held body included, reads the pull request's head
+once the comment listing shows a write follows, and writes nothing when the pull
+request has moved past the head this run planned, with a notice: the comment is
+per pull request, and a re-run of an older run would otherwise replace the newer
+head's comment. A run that writes nothing (no comment yet, nothing changed)
+reads no head. A failed read warns and writes nothing for the held body, and
+fails the job ("could not read the head of pull request #<n>") before any apply
+check or gate is written for the plan body.
 
 Where the zero *does* mean no stacks changed, the suppression is create-only:
 an existing comment is always updated to the no-changes body, because a pull
@@ -2207,7 +2209,9 @@ posts: a pull request that changes only stacks with no `env/*` tag plans nothing
 and the comment is where it says so. When the line is left out for size (below),
 this exception does not apply.
 
-An existing comment is edited in place on every plan run (comment lookup is marker +
+An existing comment is edited in place on every plan run but a draft autoplan, a
+cancelled plan job and a run whose pull request moved to a newer head (comment
+lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
 App name, which a consumer org may have had to slug differently than
 `shipmate[bot]`), so GitHub's comment revision history doubles as the audit
@@ -2318,7 +2322,8 @@ downloaded a cell summary: a failed download leaves none over planned cells.
 The apply checks publish after the sticky plan comment is written, so a plan
 comment that could not be listed or written ends the job with no apply check
 published, and a pre-merge `shipmate apply` refuses as it does over a partial
-plan. A run with no check to publish (held, draft, nothing changed) skips the
+plan. A run that fails while publishing the apply checks has already replaced
+the comment with this run's plan, and keeps the publish hold. A run with no check to publish (held, draft, nothing changed) skips the
 publish step without reading anything. The job's final gate write replaces the
 hold. A run whose plan job was cancelled writes no final gate, and keeps the
 hold when it downloaded any cell summary.
