@@ -157,9 +157,8 @@ runs:
           exit 1
         fi
         # Fail-closed, never `|| true`: gate-refresh greens an absent or pending gate, so a job dying
-        # mid-publish would let an apply of the published cells merge the unpublished ones. A re-run
-        # that publishes nothing still holds. The hold stands through the comment steps to
-        # `Create apply checks`, which reads `bodies.jsonl`; `Create/refresh gate` replaces it.
+        # mid-publish would merge the unpublished cells. A re-run that publishes nothing still
+        # holds. It stands until `Create/refresh gate`; `Create apply checks` publishes after it.
         if [ -n "$cells" ]; then
           hold "plan run $GITHUB_RUN_ID holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended"
         fi
@@ -327,8 +326,9 @@ runs:
             < check-runs.jsonl 2>held.err; then
             result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR" held.md 2>>held.err) || result=failed
           fi
-          # Either script's `::error::` stays one escaped command; this step passes, so it warns.
-          sed 's/^::error::/::warning::/' held.err >&2
+          # This step passes, so either script's `::error::` warns; any other line (gh's raw
+          # stderr on a failed listing) is prefixed, so no gh text starts a workflow command.
+          sed -e 's/^::error::/::warning::/;t' -e 's/^/gh: /' held.err >&2
           if [ "$result" != created ] && [ "$result" != updated ]; then
             echo "$degraded"
           fi
@@ -341,10 +341,8 @@ runs:
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ]; then
           args+=(--update-only)
         fi
-        # A failed listing or write fails the job before `Create/refresh gate` and before any apply
-        # check is published: a gate written over a stale comment shows reviewers the previous
-        # head's plan. A publish hold this run wrote stays; a run that planned no cell wrote none,
-        # so the head keeps the gate it had, if any.
+        # A failed listing or write fails the job before any apply check or gate: a gate over a
+        # stale comment shows the previous head's plan. A publish hold this run wrote stays.
         result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "${args[@]}")
         if [ "$result" = "list-failed" ]; then
           echo "::error::could not list this pull request's comments, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"

@@ -2173,7 +2173,7 @@ parts:
   sorted by environment then stack: `🔴 <stack> (<env>): plan failed` under a
   failed plan job, else `🔴 <stack> (<env>): no plan summary read`, linking the
   cell's `shipmate / <stack> / <env>` check, or the run when the head has none.
-  At most ten, then `and N more cells have no plan; the run lists them`. The
+  At most ten, then `and N more cells have no plan`. The
   cells are `detect`'s planned `cells` the run read no summary for, so under a
   failed plan job a cell whose summary download failed is named too;
 - the help hint ``Comment `shipmate help` for the available commands.``

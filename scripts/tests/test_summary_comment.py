@@ -942,8 +942,9 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
     }
-    # Mutation: `required: true` (GitHub does not enforce it, but it misdocuments a draft run).
-    for name in ("unmanaged-stacks", "lost-env-tags"):
+    # Mutation: `required: true` on any of the three (GitHub does not enforce it, but it
+    # misdocuments a draft run).
+    for name in ("unmanaged-stacks", "lost-env-tags", "planned-cell-names"):
         decl = load_workflow_text(src)["inputs"][name]
         assert {k: v for k, v in decl.items() if k != "description"} == {
             "required": False,
@@ -1178,7 +1179,7 @@ def test_held_comment_caps_its_cell_lines_and_its_reason():
     assert lines[6] == "x" * 4000
     cells = [ln for ln in lines if ln.startswith("🔴 stacks/")]
     assert [ln.split(" (")[0] for ln in cells] == [f"🔴 stacks/s{i:02}" for i in range(10)]
-    assert lines[-3] == "and 2 more cells have no plan; the run lists them"
+    assert lines[-3] == "and 2 more cells have no plan"
 
 
 def _held_main(tmp_path, monkeypatch, mode):

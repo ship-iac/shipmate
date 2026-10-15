@@ -324,7 +324,7 @@ def held_comment(reason, missing, plan_result, checks, run_url, head_sha):
         ]
         if len(missing) > UNMANAGED_NAMES:
             more = len(missing) - UNMANAGED_NAMES
-            lines.append(f"and {more} more cells have no plan; the run lists them")
+            lines.append(f"and {more} more cells have no plan")
         parts.append("\n".join(lines))
     parts.append(FOOTER_HINT)
     return "\n\n".join(parts)

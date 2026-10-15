@@ -430,10 +430,12 @@ def test_summary_held_write_failure_degrades(tmp_path):
 
 @bash_only
 def test_summary_held_list_failure_degrades(tmp_path):
-    """Mutation: count only a failed run as unwritten (`[ "$result" = failed ]`) -- no
-    warning."""
-    proc, calls = _run_summary(tmp_path, "held", list_rc=1)
+    """gh's stderr reaches the log prefixed, so a line of it cannot start a workflow command.
+    Mutations: count only a failed run as unwritten (`[ "$result" = failed ]`) -- no warning;
+    drop the `gh: ` prefix -- the raw `::warning::x` line."""
+    proc, calls = _run_summary(tmp_path, "held", list_rc=1, list_stderr="::warning::x\n")
     assert (proc.returncode, proc.stdout, calls) == (0, _DEGRADED, [_PULLS, _LIST])
+    assert proc.stderr == f"gh: command failed (1): {' '.join(LIST_ARGV)}\ngh: ::warning::x\n"
 
 
 @bash_only
