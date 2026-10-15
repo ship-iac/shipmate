@@ -208,8 +208,7 @@ def test_a_failed_refresh_warns_and_keeps_the_pending_gate(tmp_path):
 def test_a_failed_refresh_logs_each_line_of_gh_stderr(tmp_path):
     """`run_annotated` escapes a multi-line error into one workflow command; the step swaps its
     `::error::` for `::warning::` and leaves it escaped, so the runner shows every line inside one
-    warning and no line of gh's stderr starts a command of its own. The runner trims leading
-    whitespace before it parses a command, so every line is checked trimmed.
+    warning and no line of gh's stderr starts a command of its own.
 
     Mutations: decode `%0A` in the step, indented or not -> `::warning::injected` on its own
     line; strip the prefix (`sed 's/^::error:://'`) -> the error is no warning."""
@@ -225,8 +224,6 @@ def test_a_failed_refresh_logs_each_line_of_gh_stderr(tmp_path):
         "apply refreshes it"
     )
     assert (proc.stdout, proc.stderr) == (f"{escaped}\n{step_warning}\n", "")
-    commands = [ln.lstrip() for ln in proc.stdout.splitlines() if ln.lstrip().startswith("::")]
-    assert commands == [escaped, step_warning]
 
 
 @bash_only

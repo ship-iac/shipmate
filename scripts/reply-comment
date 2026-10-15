@@ -55,17 +55,14 @@ def main():
         sys.exit("::error::usage: reply-comment")
     outcome = os.environ.get("SHIPMATE_REPLY_OUTCOME", "")
     if outcome not in VERDICTS:
-        print(
+        sys.exit(
             "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed, notice or started "
-            f"(got: {outcome})",
-            file=sys.stderr,
+            f"(got: {outcome})"
         )
-        sys.exit(1)
     pr = os.environ.get("PR_NUMBER", "")
     # Bound into the API path; dispatch hands its input through unvalidated.
     if not is_pr_number(pr):
-        print(f"::error::PR_NUMBER must be a pull request number (got: {pr})", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr})")
     verb = os.environ.get("SHIPMATE_REPLY_VERB", "")
     if outcome == "started":
         verdict = started_text(verb, os.environ.get("SHIPMATE_REPLY_RUN_ID", ""))
@@ -78,7 +75,9 @@ def main():
     try:
         run(argv, stdin=text)
     except SystemExit as exc:
-        sys.exit(f"could not post the reply on pull request #{pr}: {exc.code}")
+        # One line: unannotated, so a raw stderr line could start a workflow command.
+        reason = " | ".join(str(exc.code).splitlines())
+        sys.exit(f"could not post the reply on pull request #{pr}: {reason}")
 
 
 if __name__ == "__main__":

@@ -94,9 +94,10 @@ def test_the_enumeration_finds_every_engine_script_and_the_registries_name_only_
 
 @pytest.mark.parametrize("script", SCRIPTS)
 def test_every_script_prints_its_refusal_through_run_annotated(script):
-    """A script's refusal reaches the log only through `run_annotated`, which prints every line
-    of it as one escaped workflow command: a bare `main()` lets the interpreter print the raw
-    text, and the annotation shows only its first line. A new script with no block is red.
+    """A script's `SystemExit` refusal reaches the log only through `run_annotated`, which prints
+    every line of it as one escaped workflow command: a bare `main()` lets the interpreter print
+    the raw text, and the annotation shows only its first line. A new script with no block is
+    red.
 
     Mutations: revert `apply-gate`'s block to `main()`; revert `gate-status`'s to
     `main(sys.argv[1:])`; delete `waves` from `LIBRARIES`; add an extensionless script with no

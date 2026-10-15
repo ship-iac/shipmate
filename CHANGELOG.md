@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
-- **A multi-line `::error::` from any engine script a workflow step runs keeps every line in its annotation, and `reply-comment` no longer prints the reply body on a failed POST.**
+- **A multi-line `::error::` from any engine script a workflow step runs keeps every line in its annotation, a failed gate refresh in the plan summary logs gh's error as a warning annotation, and `reply-comment` no longer prints the reply body on a failed POST.**
 
 ## [0.46.0] — 2026-10-15
 

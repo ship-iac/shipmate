@@ -83,6 +83,23 @@ def test_an_unknown_outcome_exits_non_zero_and_prints_nothing():
     )
 
 
+def test_a_multi_line_pr_number_refusal_prints_one_escaped_annotation():
+    """`dispatch` hands `PR_NUMBER` through unvalidated, so its refusal goes through
+    `run_annotated`. Mutation: print the refusal to stderr and `sys.exit(1)` -- two raw lines."""
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "reply-comment")],
+        env={**os.environ, "SHIPMATE_REPLY_OUTCOME": "refused", "PR_NUMBER": "4\n::warning::x"},
+        capture_output=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1,
+        "",
+        "::error::PR_NUMBER must be a pull request number (got: 4%0A::warning::x)\n",
+    )
+
+
 def _post(monkeypatch, *argv, pr="42", outcome="refused"):
     """Run `main` in-process with `argv`; return (exit code, captured `(argv, stdin)` calls)."""
     calls = []
@@ -125,7 +142,10 @@ def test_main_posts_the_body_to_the_pull_request_and_prints_nothing(monkeypatch,
 
 def test_an_unknown_outcome_posts_nothing(monkeypatch):
     """Mutation: post before validating the outcome."""
-    assert _post(monkeypatch, outcome="refuse") == (1, [])
+    assert _post(monkeypatch, outcome="refuse") == (
+        "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed, notice or started (got: refuse)",
+        [],
+    )
 
 
 @pytest.mark.parametrize("pr", ["1; x", "", "0", "007"])
@@ -211,10 +231,12 @@ def test_main_posts_the_started_text_and_ignores_the_reply_text(monkeypatch):
 
 def test_a_failed_post_names_the_pull_request_and_not_the_body(monkeypatch, capsys):
     """`run`'s failure message quotes the argv, so the body travels on stdin. The exit is
-    unannotated: `run_annotated` passes it through, and `dispatch` degrades it to a warning.
+    unannotated, so `run_annotated` passes it through, and on one line, so no raw stderr line
+    can start a workflow command.
 
     Mutations: post with `-f body={text}` and no stdin -- the body appears in the message and
-    stdin is empty; prefix the message with `::error::` -- an annotation on stderr.
+    stdin is empty; prefix the message with `::error::` -- an annotation on stderr; drop the
+    `" | ".join` -- gh's stderr on its own lines.
     """
     calls = []
     failed = subprocess.CompletedProcess([], 1, b"", b"HTTP 403: forbidden\nsecond line")
@@ -234,7 +256,7 @@ def test_a_failed_post_names_the_pull_request_and_not_the_body(monkeypatch, caps
     assert (exc.value.code, capsys.readouterr().err) == (
         (
             "could not post the reply on pull request #42: command failed (1): gh api -X POST "
-            "repos/org/repo/issues/42/comments -F body=@-\nHTTP 403: forbidden\nsecond line"
+            "repos/org/repo/issues/42/comments -F body=@- | HTTP 403: forbidden | second line"
         ),
         "",
     )
