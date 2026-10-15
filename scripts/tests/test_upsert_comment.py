@@ -312,25 +312,55 @@ _SUMMARY_LIST_FAILED = (
 _SUMMARY_SKIPPED = (
     "nothing changed, no existing plan comment, no doctor findings; nothing to post\n"
 )
+_SHA = "a" * 40
+#: The pull request head read every writing mode makes first.
+_PULLS = ["api", "repos/o/r/pulls/7", "--jq", ".head.sha"]
+_DEGRADED = (
+    "::warning::the sticky plan comment was not updated with why the gate is held; the gate "
+    "description says it\n"
+)
+#: The held body for `_run_summary`'s defaults, hand-written.
+_HELD_BODY = (
+    f"{SUMMARY}\n### shipmate plan\n\n"
+    f"🔴 the gate is held at [aaaaaaa](https://gh/o/r/commit/{_SHA}) in "
+    "[run #7](https://gh/o/r/actions/runs/1)\n\n"
+    "```\nthe reason\n```\n\n"
+    "Comment `shipmate help` for the available commands."
+)
 
 
-def _run_summary(tmp_path, mode, *, warned="false", unmanaged="false", lost="false", **gh):
-    """The summary action's upsert step under its own env names; return (process, gh calls)."""
+def _run_summary(
+    tmp_path, mode, *, warned="false", unmanaged="false", lost="false", head=_SHA, env=None, **gh
+):
+    """The summary action's upsert step under its own env names; return (process, gh calls).
+    `env` adds to or, with None values, removes from the step's environment."""
     (tmp_path / "comment.md").write_text(SUMMARY + "\n### shipmate plan\n", encoding="utf-8")
-    env = {
+    (tmp_path / "check-runs.jsonl").write_text("", encoding="utf-8")
+    full = {
         **os.environ,
         "GH_TOKEN": "x",
         "PR": "7",
+        "HEAD_SHA": _SHA,
         "MODE": mode,
-        "PLAN_RESULT": "failure",
         "DOCTOR_WARNED": warned,
         "UNMANAGED": unmanaged,
         "LOST": lost,
+        "SHIPMATE_HOLD_REASON": "the reason",
+        "SHIPMATE_MISSING": "[]",
+        "SHIPMATE_PLAN_RESULT": "failure",
         "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_SERVER_URL": "https://gh",
+        "GITHUB_RUN_ID": "1",
+        "GITHUB_RUN_NUMBER": "7",
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
     }
+    for k, v in (env or {}).items():
+        if v is None:
+            full.pop(k, None)
+        else:
+            full[k] = v
     run = step_by("summary", name="Upsert sticky comment")["run"]
-    return run_with_gh_recorder(tmp_path, run, env, **gh)
+    return run_with_gh_recorder(tmp_path, run, full, head=head, **gh)
 
 
 @bash_only
@@ -348,16 +378,111 @@ def _run_summary(tmp_path, mode, *, warned="false", unmanaged="false", lost="fal
         (
             "hold",
             (
-                "::warning::the plan job (failure) did not produce a trustworthy set of cell "
-                "summaries; the sticky plan comment was left as it is\n"
+                "::warning::the plan job was cancelled, so this run writes no gate; the sticky "
+                "plan comment was left as it is\n"
             ),
         ),
     ],
 )
 def test_summary_draft_and_hold_make_no_comment_call(tmp_path, mode, stdout):
-    """Mutation: move the `hold` branch below the `upsert-comment` call."""
+    """Mutations: move the `hold` branch below the `upsert-comment` call; route `hold` into the
+    held render (drop its branch) -- the head read and the held write follow."""
     proc, calls = _run_summary(tmp_path, mode, listing=_head(5, SUMMARY) + "\n")
     assert (proc.returncode, proc.stdout, calls) == (0, stdout, [])
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("listing", "write"),
+    [("", _post_of("held.md")), (_head(5, SUMMARY), _patch_of("held.md"))],
+    ids=["no-comment", "existing"],
+)
+def test_summary_held_writes_the_held_body(tmp_path, listing, write):
+    """A held gate creates the comment when there is none and replaces the existing one.
+    Mutations: pass `--update-only` on the held write -- `no-comment` writes nothing; render
+    without `SHIPMATE_COMMENT_MODE=held` -- no held body, and no write."""
+    proc, calls = _run_summary(tmp_path, "held", listing=listing + "\n")
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        0,
+        "",
+        "",
+        [_PULLS, _LIST, write],
+    )
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == _HELD_BODY
+
+
+@bash_only
+def test_summary_held_write_failure_degrades(tmp_path):
+    """The step passes, so `Create/refresh gate` still writes the `failure` gate with its
+    description; the write's error reaches the log as a warning. Mutations: `exit 1` after the
+    degraded warning -- red; drop the `sed` -- an `::error::` line."""
+    proc, calls = _run_summary(tmp_path, "held", write_rc=1, write_stderr="HTTP 502\n")
+    assert (proc.returncode, proc.stdout, calls) == (
+        0,
+        _DEGRADED,
+        [_PULLS, _LIST, _post_of("held.md")],
+    )
+    assert proc.stderr == (
+        "::warning::could not write the sticky comment: command failed (1): gh api "
+        "repos/o/r/issues/7/comments -F body=@held.md%0AHTTP 502\n"
+    )
+
+
+@bash_only
+def test_summary_held_list_failure_degrades(tmp_path):
+    """Mutation: count only a failed run as unwritten (`[ "$result" = failed ]`) -- no
+    warning."""
+    proc, calls = _run_summary(tmp_path, "held", list_rc=1)
+    assert (proc.returncode, proc.stdout, calls) == (0, _DEGRADED, [_PULLS, _LIST])
+
+
+@bash_only
+def test_summary_held_render_failure_writes_no_comment(tmp_path):
+    """A render that raises (no `GITHUB_RUN_NUMBER` for `provenance`) never reaches the write.
+    Mutation: run `upsert-comment` with comment.md after a failed render too (`|| true` on the
+    render) -- the listing and a POST follow."""
+    proc, calls = _run_summary(tmp_path, "held", env={"GITHUB_RUN_NUMBER": None})
+    assert (proc.returncode, proc.stdout, calls) == (0, _DEGRADED, [_PULLS])
+    assert not (tmp_path / "held.md").exists()
+
+
+@bash_only
+@pytest.mark.parametrize("mode", ["held", "post", "nothing-changed"])
+def test_summary_writes_nothing_over_a_newer_head(tmp_path, mode):
+    """A re-run of an old run never replaces the comment of the head the pull request has moved
+    to. Mutation: drop the head comparison -- the listing and a write follow."""
+    proc, calls = _run_summary(tmp_path, mode, head="b" * 40, warned="true")
+    assert (proc.returncode, proc.stdout, calls) == (
+        0,
+        (
+            f"::notice::pull request #7 has moved past {_SHA}; its sticky plan comment belongs "
+            "to the newer head's run and was not written\n"
+        ),
+        [_PULLS],
+    )
+
+
+@bash_only
+def test_summary_held_head_read_failure_degrades(tmp_path):
+    """Mutation: fail the step on a failed head read whatever the mode -- exit 1."""
+    proc, calls = _run_summary(tmp_path, "held", head_rc=1)
+    assert (proc.returncode, proc.stdout, calls) == (0, _DEGRADED, [_PULLS])
+
+
+@bash_only
+@pytest.mark.parametrize("mode", ["post", "nothing-changed"])
+def test_summary_post_head_read_failure_fails_the_step(tmp_path, mode):
+    """A comment write cannot be judged current, so the job stops before the gate, as on a failed
+    listing. Mutation: degrade the failed read for every mode (`exit 0`) -- red."""
+    proc, calls = _run_summary(tmp_path, mode, head_rc=1)
+    assert (proc.returncode, proc.stdout, calls) == (
+        1,
+        (
+            "::error::could not read the head of pull request #7, so the sticky plan comment was "
+            "not updated; re-plan this pull request (comment shipmate plan or push)\n"
+        ),
+        [_PULLS],
+    )
 
 
 @bash_only
@@ -393,7 +518,7 @@ def test_summary_posts_unless_quiet_and_keeps_an_existing_comment_current(
     proc, calls = _run_summary(
         tmp_path, mode, warned=warned, unmanaged=unmanaged, lost=lost, listing=listing + "\n"
     )
-    assert (proc.returncode, proc.stdout, calls) == (0, stdout, expected), proc.stderr
+    assert (proc.returncode, proc.stdout, calls) == (0, stdout, [_PULLS, *expected]), proc.stderr
 
 
 @bash_only
@@ -408,7 +533,7 @@ def test_summary_list_failure_fails_the_step_and_writes_nothing(tmp_path):
         1,
         _SUMMARY_LIST_FAILED,
         f"command failed (1): {' '.join(LIST_ARGV)}\n",
-        [_LIST],
+        [_PULLS, _LIST],
     )
 
 
@@ -434,7 +559,7 @@ def test_summary_write_failure_fails_the_step(tmp_path):
     block to `main()` (the raw multi-line text reaches stderr)."""
     proc, calls = _run_summary(tmp_path, "post", write_rc=1, write_stderr=_WRITE_STDERR)
     assert proc.returncode != 0
-    assert calls == [_LIST, _post_of("comment.md")]
+    assert calls == [_PULLS, _LIST, _post_of("comment.md")]
     assert proc.stderr == _write_annotation("comment.md")
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decide the `shipmate / gate` state, and whether the sticky comment may be written.
+"""Decide the `shipmate / gate` state, and how the sticky comment is written.
 
 Runs in the trusted `summary` job of the plan workflow, which `needs:` the
 `detect` and `plan` jobs and is handed their results directly.
@@ -26,6 +26,7 @@ from _shipmate import _load, missing_names, run_annotated
 ag = _load("apply-gate")
 
 _HOLD = "hold"
+_HELD = "held"
 _POST = "post"
 _NOTHING = "nothing-changed"
 _DRAFT = "draft"
@@ -153,7 +154,9 @@ def decide(
 ):
     """Return (state, description, comment_mode).
 
-    state is None when nothing should be written at all.
+    state is None when nothing should be written at all: a cancelled plan job, whose comment mode
+    `hold` keeps the sticky comment as it is. Every `failure` state has comment mode `held`, which
+    replaces the comment with why the gate is held.
 
     `plan_result` is a JOB result, not a run conclusion, and the two disagree on
     exactly one value: `skipped`. A run whose plan matrix was empty arrives as a
@@ -172,14 +175,14 @@ def decide(
     if detect_result == "skipped" and is_draft and not on_demand:
         return "pending", DRAFT_DESCRIPTION, _DRAFT
     if detect_result != "success":
-        return "failure", _detect_gap(detect_result, refusal), _HOLD
+        return "failure", _detect_gap(detect_result, refusal), _HELD
     if plan_result == "cancelled":
         return None, "", _HOLD
     gap = evidence_gap(
         plan_result=plan_result, planned_cells=planned_cells, cell_count=cell_count, missing=missing
     )
     if gap:
-        return "failure", gap, _HOLD
+        return "failure", gap, _HELD
     if pending:
         return (
             "pending",

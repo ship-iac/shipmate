@@ -55,7 +55,7 @@ def test_an_on_demand_plan_of_a_draft_with_detect_skipped_is_a_failure():
         is_draft=True,
         on_demand=True,
     )
-    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "hold")
+    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "held")
 
 
 def test_a_draft_whose_detect_ran_is_judged_on_its_evidence():
@@ -71,7 +71,7 @@ def test_a_draft_whose_detect_ran_is_judged_on_its_evidence():
 def test_a_non_draft_with_detect_skipped_is_a_failure():
     """Mutation: drop `is_draft` from the draft branch -> `pending`."""
     got = d(detect_result="skipped", planned_cells="", cell_count=0, pending=False)
-    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "hold")
+    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "held")
 
 
 def test_detect_failure_is_a_red_gate_not_a_silent_skip():
@@ -79,14 +79,14 @@ def test_detect_failure_is_a_red_gate_not_a_silent_skip():
     # would leave the pull request with no gate to explain it.
     state, desc, mode = d(detect_result="failure")
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
     assert "detect" in desc
 
 
 def test_a_detect_refusal_names_itself_in_the_gate():
     """Mutation: return the generic text when a refusal exists -- the refusal is not named."""
     got = d(detect_result="failure", refusal="stack 'x' carries 2 workload tags")
-    assert got == ("failure", "detect failed: stack 'x' carries 2 workload tags", "hold")
+    assert got == ("failure", "detect failed: stack 'x' carries 2 workload tags", "held")
 
 
 def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
@@ -97,7 +97,7 @@ def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
     assert got == (
         "failure",
         "change detection did not succeed (failure); fix the shipmate / detect job before merging",
-        "hold",
+        "held",
     )
 
 
@@ -120,7 +120,7 @@ def test_main_cuts_a_long_refusal_to_the_statuses_limit(tmp_path, monkeypatch, c
         "state": "failure",
         "description": 'detect failed: stack "a/b" ' + "x" * 113,
         "reason": 'detect failed: stack "a/b" ' + "x" * 288,
-        "comment_mode": "hold",
+        "comment_mode": "held",
     }
 
 
@@ -136,7 +136,7 @@ def test_empty_matrix_greens_the_gate():
 def test_skipped_plan_with_planned_cells_holds():
     state, _, mode = d(plan_result="skipped", planned_cells="3", cell_count=0)
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
 
 
 def test_skipped_empty_matrix_with_parsed_cells_holds():
@@ -144,19 +144,27 @@ def test_skipped_empty_matrix_with_parsed_cells_holds():
     # run this job cannot account for.
     state, _, mode = d(plan_result="skipped", planned_cells="0", cell_count=2, pending=False)
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
 
 
 def test_cancelled_plan_writes_nothing():
-    state, _, mode = d(plan_result="cancelled")
-    assert state is None
-    assert mode == "hold"
+    """The one `hold`: no gate is written, so the comment is kept rather than replaced by a held
+    body over a gate this run never wrote. Mutation: return `_HELD` for it -- red."""
+    assert d(plan_result="cancelled") == (None, "", "hold")
+
+
+def test_every_failure_state_is_held():
+    """Mutations: return `_HOLD` for a detect failure, or for an evidence gap -- red."""
+    assert [d(**kw)[2] for kw in ({"detect_result": "failure"}, {"plan_result": "failure"})] == [
+        "held",
+        "held",
+    ]
 
 
 def test_failed_plan_is_a_red_gate():
     state, _, mode = d(plan_result="failure")
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
 
 
 @pytest.mark.parametrize("planned", ["", "unknown", "3.0", "None"])
@@ -167,7 +175,7 @@ def test_a_non_integer_planned_count_holds(planned):
     state, desc, mode = d(planned_cells=planned)
     assert state == "failure"
     assert "planned cell count was not reported" in desc
-    assert mode == "hold"
+    assert mode == "held"
 
 
 def test_fewer_cells_than_planned_holds():
@@ -178,7 +186,7 @@ def test_fewer_cells_than_planned_holds():
             "re-plan this pull request (comment shipmate plan or push): "
             "3 cell(s) planned but 2 cell summary/summaries read"
         ),
-        "hold",
+        "held",
     )
 
 
@@ -186,7 +194,7 @@ def test_more_cells_than_planned_holds():
     # A `<` comparison would let this through. Two directions, one `!=`.
     state, _, mode = d(planned_cells="3", cell_count=4)
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
 
 
 @pytest.mark.parametrize(
@@ -242,7 +250,7 @@ def test_main_holds_the_gate_on_an_empty_planned_count_env(tmp_path, monkeypatch
         "state": "failure",
         "description": _NOT_REPORTED,
         "reason": _NOT_REPORTED,
-        "comment_mode": "hold",
+        "comment_mode": "held",
     }
 
 
@@ -255,7 +263,7 @@ def test_main_holds_the_gate_when_the_planned_count_env_is_absent(tmp_path, monk
         "state": "failure",
         "description": _NOT_REPORTED,
         "reason": _NOT_REPORTED,
-        "comment_mode": "hold",
+        "comment_mode": "held",
     }
 
 
@@ -290,7 +298,7 @@ def test_main_reads_the_on_demand_flag(tmp_path, monkeypatch, capsys):
         "state": "failure",
         "description": _DETECT_SKIPPED_DESCRIPTION,
         "reason": _DETECT_SKIPPED_DESCRIPTION,
-        "comment_mode": "hold",
+        "comment_mode": "held",
     }
 
 
@@ -410,5 +418,5 @@ def test_main_reads_the_missing_cells_and_flattens_a_line_break(tmp_path, monkey
         "state": "failure",
         "description": text,
         "reason": text,
-        "comment_mode": "hold",
+        "comment_mode": "held",
     }

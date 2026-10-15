@@ -317,14 +317,19 @@ def write_python3_shim(bin_dir):
 
 #: A bash ``gh`` for ``run_with_gh_recorder``: it appends each call's argv to ``$CALLS``, one line
 #: per argument and ``--`` after each call, answers a ``--paginate`` listing with
-#: ``$FAKE_LISTING`` and exit ``$FAKE_LIST_RC``, and any other call with JSON and
-#: ``$FAKE_WRITE_RC``, after printing ``$FAKE_WRITE_STDERR`` (empty when unset) to stderr.
+#: ``$FAKE_LISTING`` and exit ``$FAKE_LIST_RC``, a ``--jq .head.sha`` read with ``$FAKE_HEAD`` and
+#: exit ``$FAKE_HEAD_RC``, and any other call with JSON and ``$FAKE_WRITE_RC``, after printing
+#: ``$FAKE_WRITE_STDERR`` (empty when unset) to stderr.
 _GH_RECORDER = """\
 #!/bin/bash
 printf '%s\\n' "$@" -- >> "$CALLS"
 if [ "$2" = "--paginate" ]; then
   printf '%s' "${FAKE_LISTING:-}"
   exit "${FAKE_LIST_RC:-0}"
+fi
+if [ "$3 $4" = "--jq .head.sha" ]; then
+  printf '%s\\n' "${FAKE_HEAD:-}"
+  exit "${FAKE_HEAD_RC:-0}"
 fi
 echo '{"id": 99}'
 printf '%s' "${FAKE_WRITE_STDERR:-}" >&2
@@ -346,14 +351,24 @@ def read_calls(path):
 
 
 def run_with_gh_recorder(
-    tmp_path, body, env, *, listing="", list_rc=0, write_rc=0, write_stderr=""
+    tmp_path,
+    body,
+    env,
+    *,
+    listing="",
+    list_rc=0,
+    write_rc=0,
+    write_stderr="",
+    head="",
+    head_rc=0,
 ):
     """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and a recording ``gh`` first
     on PATH; return (process, the argv after ``gh`` of each call, in order).
 
-    ``listing`` is what a ``--paginate`` call prints before exiting ``list_rc``; every other call
-    prints ``write_stderr`` to stderr and exits ``write_rc``. ``env`` is extended, not replaced,
-    with PATH and the stub's variables.
+    ``listing`` is what a ``--paginate`` call prints before exiting ``list_rc``; ``head`` is what a
+    ``--jq .head.sha`` read prints before exiting ``head_rc``; every other call prints
+    ``write_stderr`` to stderr and exits ``write_rc``. ``env`` is extended, not replaced, with PATH
+    and the stub's variables.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -369,6 +384,8 @@ def run_with_gh_recorder(
         "FAKE_LIST_RC": str(list_rc),
         "FAKE_WRITE_RC": str(write_rc),
         "FAKE_WRITE_STDERR": write_stderr,
+        "FAKE_HEAD": head,
+        "FAKE_HEAD_RC": str(head_rc),
     }
     proc = run_step(tmp_path, body, env)
     return proc, read_calls(calls)

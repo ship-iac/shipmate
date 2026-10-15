@@ -836,6 +836,24 @@ def test_the_upsert_quiet_inputs_read_doctor_and_build():
     assert env["LOST"] == "${{ steps.build.outputs.lost }}"
 
 
+def test_the_upsert_step_maps_exactly_these_env_vars():
+    """The held render reads the uncut reason, the cells with no plan and the plan job's result;
+    the head comparison reads `HEAD_SHA`. Mutations: map `SHIPMATE_HOLD_REASON` to
+    `steps.gate.outputs.description` -- the cut text; drop `HEAD_SHA` -- every write skips."""
+    assert step_by("summary", name="Upsert sticky comment")["env"] == {
+        "GH_TOKEN": "${{ steps.token.outputs.token }}",
+        "PR": "${{ inputs.pr-number }}",
+        "HEAD_SHA": "${{ inputs.head-sha }}",
+        "MODE": "${{ steps.gate.outputs.comment_mode }}",
+        "DOCTOR_WARNED": "${{ steps.doctor.outputs.warned }}",
+        "UNMANAGED": "${{ steps.build.outputs.unmanaged }}",
+        "LOST": "${{ steps.build.outputs.lost }}",
+        "SHIPMATE_HOLD_REASON": "${{ steps.gate.outputs.reason }}",
+        "SHIPMATE_MISSING": "${{ steps.build.outputs.missing }}",
+        "SHIPMATE_PLAN_RESULT": "${{ inputs.plan-result }}",
+    }
+
+
 #: The doctor step's whole shell body, hand-written: doctor's result is read here once, as the
 #: `warned` output, and warnings count while notices do not.
 _DOCTOR_RUN = [
@@ -1086,6 +1104,115 @@ def test_main_names_the_planned_cells_with_no_cell_summary(
     text = _run_main(tmp_path, monkeypatch, [_cell()])
     assert text.splitlines()[-1] == f"missing={missing}"
     assert capsys.readouterr().out == out
+
+
+_A_DEV = {"stack": "stacks/a", "environment": "dev"}
+_B_PROD = {"stack": "stacks/b", "environment": "prod"}
+#: An author-controlled stack path a refusal names: a backtick, a mention and a closing tag.
+_HOSTILE = "detect failed: stack 'x`y @team </summary>' carries 2 workload tags"
+
+
+@pytest.mark.parametrize(
+    ("reason", "missing", "plan_result", "body"),
+    [
+        (
+            _HOSTILE,
+            [],
+            "failure",
+            HEAD + f"🔴 the gate is held {AT}\n\n```\n{_HOSTILE}\n```\n\n{HINT}",
+        ),
+        (
+            "detect failed: stack 'x```y' carries 2 workload tags",
+            [],
+            "failure",
+            HEAD
+            + f"🔴 the gate is held {AT}\n\n"
+            + "````\ndetect failed: stack 'x```y' carries 2 workload tags\n````\n\n"
+            + HINT,
+        ),
+        (
+            "shipmate / stacks/a / dev and 1 more failed to plan; fix them before merging",
+            [_A_DEV, _B_PROD],
+            "failure",
+            HEAD
+            + f"🔴 the gate is held {AT}\n\n"
+            + "```\nshipmate / stacks/a / dev and 1 more failed to plan; fix them before "
+            + "merging\n```\n\n"
+            + '🔴 stacks/a (dev): plan failed <a href="https://gh/c/a">plan</a>\n'
+            + '🔴 stacks/b (prod): plan failed <a href="https://gh/run/1">plan</a>\n\n'
+            + HINT,
+        ),
+        (
+            (
+                "re-plan this pull request (comment shipmate plan or push): 2 cell(s) planned "
+                "but 1 cell summary/summaries read"
+            ),
+            [_A_DEV],
+            "success",
+            HEAD
+            + f"🔴 the gate is held {AT}\n\n"
+            + "```\nre-plan this pull request (comment shipmate plan or push): 2 cell(s) "
+            + "planned but 1 cell summary/summaries read\n```\n\n"
+            + '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>\n\n'
+            + HINT,
+        ),
+    ],
+    ids=["refusal", "three-backticks", "failed-plan", "evidence-gap"],
+)
+def test_held_comment_is_the_whole_held_body(reason, missing, plan_result, body):
+    """The fence shows the reason verbatim and nothing in it renders; each cell with no plan is a
+    bare line linking its plan check, or the run without one.
+    Mutations: `lang="diff"` -- every case; a fixed three-backtick fence -- `three-backticks`;
+    drop `FOOTER_HINT` -- every case; drop `provenance` -- every case; state `plan failed`
+    whatever the plan job -- `evidence-gap`."""
+    checks = {"shipmate / stacks/a / dev": {"html_url": "https://gh/c/a"}}
+    assert sc.held_comment(reason, missing, plan_result, checks, RUN_URL, SHA) == body
+
+
+def test_held_comment_caps_its_cell_lines_and_its_reason():
+    """Mutations: drop the `UNMANAGED_NAMES` slice -- twelve lines; drop the reason cut -- the
+    fence holds 5,000 characters."""
+    missing = [{"stack": f"stacks/s{i:02}", "environment": "dev"} for i in range(12)]
+    body = sc.held_comment("x" * 5000, missing, "failure", {}, RUN_URL, SHA)
+    lines = body.split("\n")
+    assert lines[6] == "x" * 4000
+    cells = [ln for ln in lines if ln.startswith("🔴 stacks/")]
+    assert [ln.split(" (")[0] for ln in cells] == [f"🔴 stacks/s{i:02}" for i in range(10)]
+    assert lines[-3] == "and 2 more cells have no plan; the run lists them"
+
+
+def _held_main(tmp_path, monkeypatch, mode):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    monkeypatch.setenv("HEAD_SHA", SHA)
+    monkeypatch.setenv("SHIPMATE_COMMENT_MODE", mode)
+    monkeypatch.setenv("SHIPMATE_HOLD_REASON", "the reason")
+    monkeypatch.setenv("SHIPMATE_MISSING", json.dumps([_A_DEV]))
+    monkeypatch.setenv("SHIPMATE_PLAN_RESULT", "failure")
+    listing = '{"name": "shipmate / stacks/a / dev", "html_url": "https://gh/c/a", "id": 1}\n'
+    monkeypatch.setattr(sc.sys, "stdin", io.StringIO(listing))
+    sc.main()
+
+
+def test_main_held_mode_writes_only_the_held_body(tmp_path, monkeypatch):
+    """No comment.md and no GITHUB_OUTPUT line, so a failed held render can never fall through to
+    the plan body. Mutations: misspell `SHIPMATE_MISSING` in `_held_main` -- no cell line;
+    write the held body to comment.md -- red; fall through to the plan body after it -- the
+    outputs are written."""
+    _held_main(tmp_path, monkeypatch, "held")
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        HEAD + f"🔴 the gate is held {MAIN_AT}\n\n```\nthe reason\n```\n\n"
+        '🔴 stacks/a (dev): plan failed <a href="https://gh/c/a">plan</a>\n\n' + HINT
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["held.md"]
+
+
+def test_main_refuses_an_unknown_comment_mode(tmp_path, monkeypatch):
+    """Mutation: treat any non-empty mode as `held` -- held.md is written."""
+    with pytest.raises(SystemExit) as exc:
+        _held_main(tmp_path, monkeypatch, "hold")
+    assert exc.value.code == "::error::SHIPMATE_COMMENT_MODE must be empty or held (got: 'hold')"
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_the_gate_step_runs_after_the_upsert_step_that_may_skip():

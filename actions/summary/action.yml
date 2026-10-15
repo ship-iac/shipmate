@@ -289,11 +289,15 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         PR: ${{ inputs.pr-number }}
+        HEAD_SHA: ${{ inputs.head-sha }}
         MODE: ${{ steps.gate.outputs.comment_mode }}
-        PLAN_RESULT: ${{ inputs.plan-result }}
         DOCTOR_WARNED: ${{ steps.doctor.outputs.warned }}
         UNMANAGED: ${{ steps.build.outputs.unmanaged }}
         LOST: ${{ steps.build.outputs.lost }}
+        # The held render's inputs; `reason` is the gate description before its 140-character cut.
+        SHIPMATE_HOLD_REASON: ${{ steps.gate.outputs.reason }}
+        SHIPMATE_MISSING: ${{ steps.build.outputs.missing }}
+        SHIPMATE_PLAN_RESULT: ${{ inputs.plan-result }}
       run: |
         set -euo pipefail
         # A draft autoplan planned nothing, so an existing comment still describes a head
@@ -302,11 +306,42 @@ runs:
           echo "the pull request was a draft when this run started and was not planned; the sticky plan comment was left as it is"
           exit 0
         fi
-        # gate-state collapses every untrustworthy-plan case into comment_mode=hold. Keep the
-        # existing comment rather than show an incomplete picture; `Create/refresh gate` fails
-        # the gate on those cases, so the pull request still shows that something is wrong.
+        # A cancelled plan job: this run writes no gate, so a held body could sit over a gate it
+        # never wrote. The comment is kept.
         if [ "$MODE" = "hold" ]; then
-          echo "::warning::the plan job ($PLAN_RESULT) did not produce a trustworthy set of cell summaries; the sticky plan comment was left as it is"
+          echo "::warning::the plan job was cancelled, so this run writes no gate; the sticky plan comment was left as it is"
+          exit 0
+        fi
+        degraded="::warning::the sticky plan comment was not updated with why the gate is held; the gate description says it"
+        # The comment is keyed per pull request, not per head, so a re-run of an old run would
+        # replace a newer head's comment. gh's stderr is prefixed: a line it starts could be a
+        # workflow command.
+        if ! head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha 2>head.err); then
+          sed 's/^/gh: /' head.err
+          if [ "$MODE" = "held" ]; then
+            echo "$degraded"
+            exit 0
+          fi
+          echo "::error::could not read the head of pull request #$PR, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
+          exit 1
+        fi
+        if [ "$head" != "$HEAD_SHA" ]; then
+          echo "::notice::pull request #$PR has moved past $HEAD_SHA; its sticky plan comment belongs to the newer head's run and was not written"
+          exit 0
+        fi
+        # Degrades: `Create/refresh gate` writes the `failure` gate and its description either way,
+        # and a red gate over a stale comment greens nothing. A failed render writes no comment.
+        if [ "$MODE" = "held" ]; then
+          result=failed
+          if SHIPMATE_COMMENT_MODE=held python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" \
+            < check-runs.jsonl 2>held.err; then
+            result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR" held.md 2>>held.err) || result=failed
+          fi
+          # Either script's `::error::` stays one escaped command; this step passes, so it warns.
+          sed 's/^::error::/::warning::/' held.err >&2
+          if [ "$result" != created ] && [ "$result" != updated ]; then
+            echo "$degraded"
+          fi
           exit 0
         fi
         # Nothing changed: only an existing comment is kept current, or it would keep showing

@@ -140,6 +140,17 @@ def test_a_draft_run_writes_the_gate_on_a_head_with_none_and_does_not_refresh(tm
 
 
 @bash_only
+def test_a_held_run_writes_its_failure_gate_without_a_read_or_a_refresh(tmp_path):
+    """A `failure` state is never refreshed, and only a draft reads the head's gate first.
+    Mutations: run the held-read for `held` too (`[ "$MODE" = "draft" ] || [ "$MODE" = "held" ]`)
+    -- a second statuses read; refresh every state but `draft` (drop `[ "$STATE" = "pending" ]`)
+    -- a check-runs listing follows."""
+    proc, calls = _run_gate(tmp_path, "held", "", state="failure")
+    assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
+    assert calls == [READ_ARGV, _write_argv("failure", "the reason")]
+
+
+@bash_only
 def test_a_failed_read_writes_nothing_and_warns(tmp_path):
     """Mutation: drop the `if !` around the read -> `set -e` fails the step."""
     proc, calls = _run_gate(tmp_path, "draft", "", read_fails=True)
@@ -255,13 +266,14 @@ def _run_upsert(tmp_path, mode):
             **os.environ,
             "GH_TOKEN": "x",
             "PR": "7",
+            "HEAD_SHA": HEAD_SHA,
             "MODE": mode,
-            "PLAN_RESULT": "skipped",
             "DOCTOR_WARNED": "false",
             "UNMANAGED": "false",
             "GITHUB_REPOSITORY": "acme/demo",
             "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         },
+        head=HEAD_SHA,
     )
 
 
@@ -281,6 +293,7 @@ def test_the_upsert_stub_records_a_post_run(tmp_path):
     proc, made = _run_upsert(tmp_path, "post")
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     assert made == [
+        ["api", "repos/acme/demo/pulls/7", "--jq", ".head.sha"],
         [
             "api",
             "--paginate",
