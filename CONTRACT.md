@@ -1868,8 +1868,7 @@ The five jobs:
 
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
 workflow files for five probes — whether each file parses as YAML, stale engine
-pins, `pull_request_target`
-triggers, whether any file calls engine `drift.yml`, and `shipmate.yml`'s
+pins, `pull_request_target` triggers, whether any file calls engine `drift.yml`, and `shipmate.yml`'s
 wiring, whose checks of the plan-calling job
 name, dispatch wiring and event routing observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
@@ -2175,7 +2174,7 @@ the publish hold (below). In order, blank lines between the parts:
   linking the cell's `shipmate / <stack> / <env>` check, or the run when the
   head has none. At most ten, then `and N more cells have no plan summary`. The
   cells are `detect`'s planned `cells` the run read no summary for: a cell whose
-  plan failed and a cell whose summary download failed read the same;
+  plan cell job failed and a cell whose summary download failed read the same;
 - the help hint ``Comment `shipmate help` for the available commands.``
 
 The held body only explains a red gate, so it degrades: a failed render,

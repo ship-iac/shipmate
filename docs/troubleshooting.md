@@ -462,7 +462,7 @@ produces no plan and its `shipmate / <stack> / <env>` check does not go green.
 The failing
 plan job leaves `shipmate / gate` held red with `shipmate / <stack> / <env>
 has no plan summary; fix its plan or re-plan`, or `plan incomplete (plan job: failure);
-fix the failing plan checks before merging` when no cell is known or its
+fix the failing plan checks before merging` when no planned cell lacks a summary or its
 name does not fit — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 That run publishes no apply check. Checks an earlier plan run of the same head
