@@ -976,11 +976,11 @@ def _contents_ref(ctx):
     read reports the pin stale on the very PR that fixes it. "No commit" is
     therefore a reason to SKIP the probe, not to read something else.
 
-    Anything that is not a 40-char hex SHA counts as absent rather than being
-    interpolated into the request path (same guard as apply-detect's) — a probe
-    must not be able to retarget a `gh api` URL, however it was configured."""
-    sha = ctx.get("head_sha") or ""
-    return f"?ref={sha}" if _SHA40.fullmatch(sha) else None
+    Anything that is not a head SHA (`is_head_sha`) counts as absent rather than being
+    interpolated into the request path — a probe must not be able to retarget a `gh api`
+    URL, however it was configured."""
+    sha = ctx.get("head_sha")
+    return f"?ref={sha}" if is_head_sha(sha) else None
 
 
 def _workflow_names(base):
