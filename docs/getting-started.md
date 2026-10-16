@@ -276,10 +276,11 @@ its state path built from `${var.env}` and `${var.region}`
 repositories already laid out by OpenTofu workspace or by one directory per
 environment and region.
 
-Each environment, whether an `environments` entry or only an `env/<name>` stack tag,
-needs two GitHub Environments (`<env>-plan`, `<env>-apply`), or one bare `<env>` when
-its entry holds `shared: true`. The repository needs `shipmate-engine` once: four
-split environments need nine.
+Count the GitHub Environments from §Environments for this tier: two per environment,
+one for an entry holding `shared: true`, and `shipmate-engine` once, so four split
+environments need nine. Under `tf_vars` every environment has an `environments` entry
+with a region, and a stack tagged into one without it is refused; under `workspace` or
+`folder` an `env/<name>` stack tag alone also makes an environment.
 
 The environment identity your layout injects comes from the environment table,
 `.github/shipmate-config.yml` on your repository's default branch
@@ -353,29 +354,29 @@ and `environments`, caps how many cells one plan or drift sweep runs at once ([`
 up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
 §"What it costs").
 
-**What each ordering and review key does.** Four are keys of an `environments` entry;
+**What each apply-path key does.** Four are keys of an `environments` entry;
 `after` is a Terramate stack attribute (`after = [...]` in the stack block). In the
 review column, approving review is the branch ruleset's `reviewDecision`, and
 environment reviewers are the GitHub Environment's required reviewers, a different
-control. `—` means the path runs as it would without the key.
+control. `—` means the key has no effect there.
 
 | Key (default) | Holds back | Bare `shipmate apply` | `shipmate apply <env>` | Merge deploy | Review | Gives up |
 | --- | --- | --- | --- | --- | --- | --- |
 | `gated: false` (`true`) | — | On `REVIEW_REQUIRED`, applies it and holds the gated environments | Authorized on `REVIEW_REQUIRED` | — | Approving review not required; `CHANGES_REQUESTED` and an unknown or absent decision still refuse. Environment reviewers untouched | The approving review before a pre-merge apply |
-| `explicit: true` (`false`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | — | — | A bare apply no longer completes the pull request: the gate stays pending until `shipmate apply <env>` names it |
+| `explicit: true` (`false`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | Applies it | Environment reviewers are the deploy's control, and a shared environment has none | A bare apply no longer completes the pull request: the gate stays pending until `shipmate apply <env>` names it |
 | `shared: true` (`false`) | — | Binds the bare `<env>` | Binds the bare `<env>` | Binds the bare `<env>` | Environment reviewers would stall its plans and drift sweeps too | The reviewer gate and the plan/apply OIDC subject split |
-| `needs: [<env>]` (none) | Its applies, until the listed environments fully apply in that run | Env-levels in order | One env-level, not ordered by `needs`; `needs` still picks which upstream cells a cell waits on | Env-levels in order; a failure skips the later levels | — | Later levels wait for every earlier one; at most four levels |
-| `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | A cell after a pending cell of another environment waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
+| `needs: [<env>]` (none) | Its applies, until every earlier env-level fully applies (bare apply and deploy) | Env-levels in order; a failure skips the later levels | One env-level, not ordered by `needs`; `needs` still picks which upstream cells a cell waits on | Env-levels in order; a failure skips the later levels | — | Later levels wait for every earlier one; at most four levels |
+| `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
 
-On a bare apply, an environment ordered by `needs` after one that does not fully apply
-in the run — failed, held for review, excluded as `explicit`, or holding a waiting
-cell — is skipped, an ungated one included.
+On a bare apply, a failure skips every later env-level. An environment held for review,
+excluded as `explicit`, or holding a waiting cell skips only the environments ordered
+after it by `needs`, an ungated one included.
 
 Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `gated` and `explicit`,
 §Env model for `shared`, §Env apply order for `needs` and the waiting cells, §Fan-out for
 `after`'s waves. The four table keys are read from the default branch
 (§Environment table, §Env model), so a pull request cannot change its own; a deploy
-re-run reads `after` from the merged commit. §"Applying chosen environments without an
+re-run reads `after` from the merged commit (§Env apply order). §"Applying chosen environments without an
 approving review" has the `gated` setup.
 
 ### The workflow file
