@@ -13,9 +13,11 @@ section below names the SHA the release tags.
 ### Added
 
 - **`scripts/onboard`'s checklist reads the repository's Actions settings and marks `docs/hardening.md` rows 10, 12 and 20 `ok`, `todo` or `cannot check`; a `todo` prints the `gh api -X PUT` calls for that row. `shipmate doctor`'s report says it does not check rows 10 to 12 and 20, and that `scripts/onboard` checks rows 10, 12 and 20.**
+- **`scripts/repin <consumer> <tag>` re-pins every engine ref under a consumer's `.github/workflows/` to a release tag. It writes nothing unless the tag is a `vX.Y.Z` tag on `origin/main`, every ref can be rewritten, every called engine workflow exists at the tag and the tag's `shipmate` fence renders; it then prints the diff from that fence to `shipmate.yml`, pins masked, and exits 2 when they differ. `docs/releasing.md` § Re-pin a consumer runs it in place of the `sed` procedure.**
 
 ### Changed
 
+- **`scripts/onboard` prints the diff from the published fence to `shipmate.yml`, pins masked, after a `differs beyond its pin, not overwritten` line, and its `pin-only` line names `scripts/repin`.**
 - **`docs/hardening.md`'s allowed-actions list drops `astral-sh/setup-uv`, which only the engine's own CI uses.**
 - **A plan run that holds `shipmate / gate` for a failed `detect` or incomplete evidence replaces the sticky plan comment with why: the hold reason in a fence and one line per cell that left no plan, then the help hint; a failed plan job's gate description names its first such cell. No plan comment write lands once the pull request has moved to a newer head, and the apply checks publish after the comment, so a failed comment write publishes none.**
 - **The comment-ops `ops` job runs on `ubuntu-latest`, so a `shipmate apply`, `shipmate unlock` or `shipmate doctor` comment no longer installs PyYAML with `apt-get` (7.6 s in one consumer's run).**
