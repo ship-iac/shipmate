@@ -14,13 +14,13 @@ every file as it was:
    release smoke being the intended case.
 2. In every `*.yml` and `*.yaml` file directly under `<consumer>/.github/workflows/` (GitHub
    runs only those two extensions; other files are not read), the first
-   `ship-iac/shipmate/<path>@<40 hex>` of each line, the slug matched case-insensitively,
-   with an optional closing `"` and `# v...` label, becomes `<slug>/<path>@<sha> # <tag>`.
-   The slug keeps the consumer's spelling, and line endings are kept.
-3. Every engine ref in those files then ends its line as `@<sha> # <tag>` or
-   `@<sha>" # <tag>`, one ref per line. `@main`, a single-quoted ref and a comment after the
-   label each refuse, listed as `<file>:<line>: <text>` with the line as it stands on disk,
-   to fix by hand. A directory holding no engine ref refuses.
+   `ship-iac/shipmate/<path>@<40 hex>` of each line, with an optional closing `"` and
+   `# vX.Y.Z` label, becomes `ship-iac/shipmate/<path>@<sha> # <tag>`. Line endings are kept.
+3. Every engine ref in those files, the slug matched case-insensitively, then ends its line as
+   `@<sha> # <tag>` or `@<sha>" # <tag>`, one ref per line. `@main`, a single-quoted ref, a
+   case-variant slug such as `Ship-IaC/shipmate`, text after or glued to the label each
+   refuse, listed as `<file>:<line>: <text>` with the line as it stands on disk, to fix by
+   hand. A directory holding no engine ref refuses.
 4. Every engine workflow the directory calls with an `@` ref exists at `<sha>`.
 5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
    it, on the branch the consumer's `shipmate.yml` push trigger names when its one
@@ -48,9 +48,12 @@ onboard = _load("onboard")
 
 ENGINE = pathlib.Path(__file__).resolve().parents[1]
 SHIM = "shipmate.yml"
-_SLUG = rf"(?<![\w.-])(?i:{re.escape(onboard.ENGINE_SLUG)})"
-_PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)([ \t]+# v[^ \t]*)?')
-_REF = re.compile(rf'{_SLUG}/([^@ \t"]+)@')
+_SLUG = rf"(?<![\w.-]){re.escape(onboard.ENGINE_SLUG)}"
+_LABEL = r"[ \t]+# v[0-9]+\.[0-9]+\.[0-9]+(?=[ \t]|$)"
+_PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)({_LABEL})?')
+#: Case-insensitive, unlike `_PIN`: GitHub resolves `Ship-IaC/shipmate` too, so a variant the
+#: rewrite leaves alone still refuses as a leftover.
+_REF = re.compile(rf'(?i:{_SLUG})/([^@ \t"]+)@')
 _TRIGGER = re.compile(r"^    branches: \[([^\]\n]*)\]$", re.M)
 
 

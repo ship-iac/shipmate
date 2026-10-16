@@ -2022,24 +2022,6 @@ def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     assert onboard._exit_code() == 0
 
 
-def test_a_case_variant_slug_differing_only_in_its_pin_reports_pin_only(tmp_path):
-    """GitHub resolves the slug case-insensitively and `scripts/repin` rewrites such a pin, so
-    the spelling alone is no drift. Mutation: drop the `(?i:)` group from `_ANY_PIN` -- the
-    variant line keeps its pin and reads as `differs`."""
-    path, _text = _plan_shim(tmp_path)
-    older = onboard._render(PAGE, "d" * 40, "v9.9.8", "main")
-    variant = older.replace("ship-iac/shipmate/", "Ship-IaC/shipmate/", 1)
-    path.write_text(variant, encoding="utf-8", newline="\n")
-    onboard._reconcile_shim(_shim_ctx(tmp_path))
-    assert onboard.REPORT == [
-        (
-            "pin-only",
-            "shipmate.yml",
-            "move every engine ref in one commit with scripts/repin (docs/releasing.md)",
-        )
-    ]
-
-
 def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     """A consumer's own edit to a shim is theirs. Overwriting it is this script exceeding
     its mandate, and it is unrecoverable from the run output.

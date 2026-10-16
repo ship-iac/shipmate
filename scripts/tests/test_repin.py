@@ -228,11 +228,16 @@ def test_a_refusal_before_the_tag_resolves_prints_nothing(
         pytest.param(
             {
                 "shipmate.yml": GOOD
-                + b"  x:\n    uses: Ship-IaC/shipmate/.github/workflows/apply.yml@main\n"
+                + f"  x:\n    uses: Ship-IaC/shipmate/.github/workflows/apply.yml@{OLD}\n".encode()
             },
             LEFTOVER
-            + "shipmate.yml:5:     uses: Ship-IaC/shipmate/.github/workflows/apply.yml@main",
+            + f"shipmate.yml:5:     uses: Ship-IaC/shipmate/.github/workflows/apply.yml@{OLD}",
             id="case-variant",
+        ),
+        pytest.param(
+            {"shipmate.yml": f"    uses: {WF}/plan.yml@{OLD} # v1.0.0,see-#12\n".encode()},
+            LEFTOVER + f"shipmate.yml:1:     uses: {WF}/plan.yml@{OLD} # v1.0.0,see-#12",
+            id="text-glued-to-the-label",
         ),
         pytest.param(
             {"shipmate.yml": f"    uses: {WF}/plan.yml@main # was {WF}/plan.yml@{OLD}\n".encode()},
@@ -265,7 +270,8 @@ def test_a_refusal_writes_nothing(engine, tmp_path, monkeypatch, capsys, files, 
     at-main-with-a-pin-in-its-comment, single-quoted); test from the line's last ref instead of
     its first (at-main-with-a-pin-in-its-comment); delete the `_check_callees` call
     (callee-missing); delete the `no engine reference` check (no-engine-ref); drop the `(?i:)`
-    group from `_SLUG` (case-variant); drop the `<tag> -> <sha>` print (every case); list the
+    group from `_REF` (case-variant); restore the label class to `# v[^ \\t]*`
+    (text-glued-to-the-label); drop the `<tag> -> <sha>` print (every case); list the
     rewritten line instead of the line on disk (at-main-with-a-pin-in-its-comment,
     single-quoted).
     """
@@ -535,45 +541,6 @@ def test_a_ref_under_another_owner_is_not_rewritten(engine, tmp_path, monkeypatc
     assert _other(engine, tmp_path, monkeypatch, capsys, files) == {
         "other.yml": _pinned(engine.sha).encode() + acme
     }
-
-
-def test_a_case_variant_slug_is_rewritten_keeping_its_spelling(
-    engine, tmp_path, monkeypatch, capsys
-):
-    """GitHub matches an owner and repository name case-insensitively. Mutation: drop the
-    `(?i:)` group from `_SLUG` -- the pin is left on `OLD` and refused as a leftover."""
-    files = {"other.yml": GOOD.replace(b"ship-iac/shipmate", b"Ship-IaC/ShipMate")}
-    assert _other(engine, tmp_path, monkeypatch, capsys, files) == {
-        "other.yml": _pinned(engine.sha).replace("ship-iac/shipmate", "Ship-IaC/ShipMate").encode()
-    }
-
-
-def test_a_case_variant_pin_in_the_shim_is_masked_in_the_diff(
-    engine, tmp_path, monkeypatch, capsys
-):
-    """`_depin` masks a case-variant slug to its canonical spelling, so the context line shows
-    neither the SHA nor a spurious difference. Mutation: drop the `(?i:)` group from onboard's
-    `_ANY_PIN` -- the plan line shows as removed and re-added, with the SHA."""
-    shim = _fence_shim("main", OLD, "\n").replace(
-        b"ship-iac/shipmate/.github/workflows/plan.yml@" + OLD.encode() + b"\n",
-        b"Ship-IaC/shipmate/.github/workflows/plan.yml@" + OLD.encode() + b"\n    with: {x: 1}\n",
-    )
-    consumer(tmp_path, {"shipmate.yml": shim})
-    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
-    assert capsys.readouterr().out == (
-        f"v1.2.3 -> {engine.sha}\n"
-        "updated shipmate.yml\n"
-        "--- shipmate.yml (fence)\n"
-        "+++ shipmate.yml\n"
-        "@@ -5,6 +5,7 @@\n"
-        " jobs:\n"
-        "   plan:\n"
-        f"     uses: {WF}/plan.yml@<pin>\n"
-        "+    with: {x: 1}\n"
-        "   apply:\n"
-        f"     uses: {WF}/apply.yml@<pin>\n"
-        "   deploy:\n"
-    )
 
 
 def test_a_yaml_file_is_rewritten_like_a_yml_file(engine, tmp_path, monkeypatch, capsys):
