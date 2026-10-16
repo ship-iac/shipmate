@@ -206,9 +206,7 @@ the release commit, from `repo-example-stacks-aws`:
 
    `<release-sha>` is the full lowercase 40-hex commit, `main`'s tip. § Re-pin a consumer
    covers the script's checks and output. When it exits 1 listing refs or missing workflows,
-   fix those on the scratch branch and run its line alone again; a listed ref that is also on
-   the sample's `main` needs a sample pull request as well, or the re-pin after the release
-   refuses it again. When it exits 2, reconcile `shipmate.yml` with the diff it prints; that
+   fix those on the scratch branch and run its line alone again. When it exits 2, reconcile `shipmate.yml` with the diff it prints; that
    is not a failure. Any other refusal of the script is a stop, below. Then commit the re-pin
    on `smoke/vX.Y.Z` as one commit and push it; step 2 dispatches that pushed branch:
 
