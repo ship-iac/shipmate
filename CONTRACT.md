@@ -1992,11 +1992,11 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   step, and the control jobs below call `gh api` on the plan, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
 - The engine's ten control jobs, which run neither `tofu` nor `terramate`,
-  take no runner input; nine run on `ubuntu-slim`. `plan.yml`'s `facts` and
-  `gate-hold` run on `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
-  `docs/aws.md` §Runner choice lists them and names the one control job on
-  `ubuntu-latest`. An account that cannot use that
-  label leaves them waiting for a runner.
+  take no runner input. Nine run on `ubuntu-slim`, and `comment-ops.yml`'s
+  `ops` runs on `ubuntu-latest`. `plan.yml`'s `facts` and `gate-hold` run on
+  `ubuntu-slim` whatever `runs_on` the `plan` caller passes. `docs/aws.md`
+  §Runner choice lists them and gives the reason for `ops`. An account that
+  cannot use `ubuntu-slim` leaves those nine waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
   engine's `python-yaml` action checks that `python3` imports it and, when it
