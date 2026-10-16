@@ -318,7 +318,7 @@ its `todo` items.
 | --- | --- |
 | `ok` | what the run read already satisfies the item. |
 | `todo` | the item is not done; what to do follows. |
-| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, `shipmate-engine`'s custom deployment protection rules could not be listed, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
+| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, `shipmate-engine`'s custom deployment protection rules could not be listed, `drift sweeps` cannot compute coverage (see below), and a read of the repository's Actions settings failed. Confirm it by hand. |
 
 `custom deployment protection rules on shipmate-engine` appears only when the
 environment exists and has an enabled custom deployment protection rule, or its

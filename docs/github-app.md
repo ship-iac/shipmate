@@ -466,7 +466,7 @@ exits 2 on a usage error, so a loop branching on 2 cannot tell a drifted
 repository from a mistyped flag. Add `--dry-run` for a first pass that reports
 what every repository would get and writes nothing.
 
-Each run ends with the checklist of what it cannot set, each item marked `ok`,
+Each run ends with the checklist of what it does not set, each item marked `ok`,
 `todo` or `cannot check` from what the run read.
 [`getting-started.md`](getting-started.md) §Quick path lists the items.
 

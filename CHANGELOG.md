@@ -10,8 +10,13 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Added
+
+- **`scripts/onboard`'s checklist reads the repository's Actions settings and marks `docs/hardening.md` rows 10, 12 and 20 `ok`, `todo` or `cannot check`; a `todo` prints the `gh api -X PUT` calls for that row. `shipmate doctor`'s report says it does not check rows 10 to 12 and 20, and that `scripts/onboard` checks rows 10, 12 and 20.**
+
 ### Changed
 
+- **`docs/hardening.md`'s allowed-actions list drops `astral-sh/setup-uv`, which only the engine's own CI uses.**
 - **A plan run that holds `shipmate / gate` for a failed `detect` or incomplete evidence replaces the sticky plan comment with why: the hold reason in a fence and one line per cell that left no plan, then the help hint; a failed plan job's gate description names its first such cell. No plan comment write lands once the pull request has moved to a newer head, and the apply checks publish after the comment, so a failed comment write publishes none.**
 
 ### Fixed

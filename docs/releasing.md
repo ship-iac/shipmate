@@ -205,7 +205,9 @@ the release commit, from `repo-example-stacks-aws`:
    `scripts/tests/test_third_party_actions_consumers_must_allow.py` reddens when
    the engine's third-party set changes, so you find out while committing rather
    than from a consumer. When it does: add the pattern to `docs/hardening.md`'s
-   list — it is a setting the consumer has to change by hand.
+   list and to `ALLOWED_PATTERNS` in `scripts/onboard`. The release cannot change
+   a consumer's list; `scripts/onboard` reports the missing pattern and prints the
+   `PUT` that adds it.
 
 2. Drive the consumer's workflow file directly at that ref, with the inputs
    `actions/dispatch` would send — exactly those inputs, and no others:
