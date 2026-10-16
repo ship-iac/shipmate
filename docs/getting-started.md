@@ -371,8 +371,8 @@ control. `—` means the key has no effect there.
 
 On a bare apply, an environment held for review, excluded as `explicit`, or holding a
 waiting cell skips the environments ordered after it by `needs`, an ungated one
-included, and its pending cells make the cells ordered `after` them wait, which can skip
-more; §Env apply order computes the whole set.
+included, and its cells that do not apply in the run make the cells ordered `after` them
+wait, which can skip more; §Env apply order computes the whole set.
 
 Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `gated` and `explicit`,
 §Env model for `shared`, §Env apply order for `needs` and the waiting cells, §Fan-out for
