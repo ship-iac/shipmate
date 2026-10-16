@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.47.0] — 2026-10-17
 
+Tags `00fa6af`.
+
 ### Added
 
 - **`scripts/onboard`'s checklist reads the repository's Actions settings and marks `docs/hardening.md` rows 10, 12 and 20 `ok`, `todo` or `cannot check`. A `todo` prints the `gh api -X PUT` calls for that row, except rows 12 and 20 while Actions are disabled, which point to Settings. `shipmate doctor`'s report says: `` _Not checked: the repository's Actions settings (docs/hardening.md rows 10 to 12 and 20), which no token a workflow can obtain reads. `scripts/onboard` checks rows 10, 12 and 20._ ``**
