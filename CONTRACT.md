@@ -1984,8 +1984,8 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and GNU
   coreutils (`setup` hashes the Terramate download with `sha256sum`).
 - Every GitHub-hosted Ubuntu image from 24.04 on, including the minimal
-  `ubuntu-slim` image, satisfies this; PyYAML arrives through the install
-  below. The `ubuntu-slim` image's
+  `ubuntu-slim` image, satisfies this. The full images ship PyYAML; on
+  `ubuntu-slim` it arrives through the install below. The `ubuntu-slim` image's
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. The CLI is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
