@@ -27,11 +27,12 @@ A mention elsewhere (a mapping key, a step name, `run:` text) does not count, so
 an `env:` entry instead.
 """
 
+import ast
 import re
 
 from _loader import SCRIPTS, action_steps, step_by
 
-_MAIN = (SCRIPTS / "lock-info").read_text(encoding="utf-8").split("\ndef main():", 1)[1]
+_SOURCE = (SCRIPTS / "lock-info").read_text(encoding="utf-8")
 _ACTION = "unlock-cell"
 
 
@@ -42,7 +43,15 @@ def _consumed(steps):
 
 def test_lock_info_writes_exactly_the_probe_outputs_unlock_cell_consumes():
     """Renaming `steps.probe.outputs.lock_id` to `lock_idx` in the action reddens this."""
-    written = set(re.findall(r'\.write\(f?"([a-z_]+)=', _MAIN))
+    written = {
+        kw.arg
+        for node in ast.walk(ast.parse(_SOURCE))
+        if isinstance(node, ast.FunctionDef) and node.name == "main"
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call) and getattr(call.func, "id", None) == "write_outputs"
+        for kw in call.keywords
+        if kw.arg is not None
+    }
     consumed = _consumed(action_steps(_ACTION))
     probe = step_by(_ACTION, id="probe")
     step_written = set(

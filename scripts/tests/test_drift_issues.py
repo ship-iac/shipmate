@@ -179,7 +179,10 @@ def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
     di.upsert_or_close(cell, {}, "url")
     assert len(rec.calls) == 1
     assert rec.calls[0][:3] == ["gh", "issue", "create"]
-    assert label_calls, "expected the label to be (best-effort) created"
+    assert [c[0] for c in label_calls] == [
+        ["gh", "label", "create", "drift", "--color", "FBCA04"]
+        + ["--description", "shipmate drift", "--force"]
+    ]
 
 
 def test_two_new_issues_create_the_label_once(monkeypatch):

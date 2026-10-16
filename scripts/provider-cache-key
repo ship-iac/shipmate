@@ -17,7 +17,7 @@ import os
 import pathlib
 import re
 
-from _shipmate import run_annotated
+from _shipmate import run_annotated, write_outputs
 
 _PROVIDER = re.compile(r'^provider\s+"([^"]+)"\s*\{[^}]*?^\s*version\s*=\s*"([^"]+)"', re.M)
 
@@ -35,8 +35,7 @@ def main():
         text = lock.read_text(encoding="utf-8", errors="replace")
     except OSError:
         text = ""
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"digest={digest(text)}\n")
+    write_outputs(digest=digest(text))
 
 
 if __name__ == "__main__":

@@ -476,9 +476,8 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
     wave jobs refuses before any output instead of emitting wave0..wave7 with the deepest cells
     dropped. The DAG-shape notice still prints first: it is the line that explains the depth.
 
-    Mutation: bucket the cells in `main` without `env_level_waves` (one unpadded
-    `{waveN: cells}` dict from `wv.assign_waves` into `write_env_level_waves`) -- the run
-    writes the waves and exits 0.
+    Mutation: `per_level = [{f"wave{i}": c for i, c in enumerate(wv.assign_waves(
+    wv.levels(deps), runnable))}]` in `main`, unpadded -- the run writes nine waves and exits 0.
     Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
     """
     depth = ad.wv.MAX_WAVES + 1

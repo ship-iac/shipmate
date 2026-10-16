@@ -17,7 +17,7 @@ pending cell `needs` puts on a later env-level refuses the whole run.
 import os
 import time
 
-from _shipmate import StackCycle, _load, run_annotated, validate_head_sha
+from _shipmate import StackCycle, _load, run_annotated, validate_head_sha, write_outputs
 from _shipmate import gh_json as _gh_json
 
 bm = _load("build-matrix")
@@ -165,8 +165,7 @@ def main():
     # Before any refusal past head validation, so a refused deploy's summary can write the gate's
     # failure on the head.
     # Hyphen-free: `steps.d.outputs.head-sha` parses the '-' as subtraction.
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"head_sha={head}\n")
+    write_outputs(head_sha=head)
     # `all_stacks=False`: the map covers the changed stacks alone and is no evidence that
     # an environment is unused or a workload untagged, so both warnings stay silent here.
     tag_map = bm.all_tags()
@@ -201,8 +200,7 @@ def main():
         f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
         f"envlevels={level_counts} empty={not any(level_counts)}"
     )
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        wv.write_env_level_waves(fh, per_level)
+    write_outputs(**wv.env_level_outputs(per_level))
 
 
 if __name__ == "__main__":

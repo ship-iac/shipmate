@@ -21,7 +21,7 @@ skipped `detect` there is a failure like any other non-success.
 
 import os
 
-from _shipmate import _load, missing_names, run_annotated
+from _shipmate import _load, missing_names, run_annotated, write_outputs
 
 ag = _load("apply-gate")
 
@@ -214,11 +214,7 @@ def main():
     # A stack path holding CR or LF would end the `GITHUB_OUTPUT` line. `reason` is the whole
     # text, for the held comment.
     flat = desc.replace("\r", " ").replace("\n", " ")
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"state={state or ''}\n")
-        fh.write(f"description={flat[:140]}\n")
-        fh.write(f"reason={flat}\n")
-        fh.write(f"comment_mode={mode}\n")
+    write_outputs(state=state or "", description=flat[:140], reason=flat, comment_mode=mode)
 
 
 if __name__ == "__main__":

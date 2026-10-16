@@ -458,34 +458,24 @@ def _job_url(row, jobs, run_url):
     return url or run_url
 
 
+def _tail_lines(text, room):
+    sliced = text[-room:]
+    return sliced[sliced.find("\n") + 1 :] if "\n" in sliced else ""
+
+
 def render_apply_section(line, text, url, limit):
-    """Largest form of a row that fits in `limit` characters: fold-out of its bare `line` with
-    the full apply.txt `text` -> fold-out with a truncated one -> `line`, which the caller has
-    already reserved room for.
+    """`sc.fold` of a row's apply.txt `text` in a plain fence.
 
     Truncation keeps the TAIL, cutting the front, unlike the plan renderer:
-    the line a reader opens this section for is always at the end. Cut at a
-    line boundary, and the truncated body REUSES the full body's fence so a cut
-    can never re-open the fence-escape hole."""
+    the line a reader opens this section for is always at the end."""
     # A limit under MIN_PLAN_CHARS means this row's budget is spent; returning before
     # `_fence_of` also keeps a wide fan-out from regex-scanning every capped apply.txt.
     if text is None or limit < sc.MIN_PLAN_CHARS:
         return line
-    f = sc._fence_of(text)
-    head = f"<details><summary>{line}</summary>\n\n"
-    full = f"{head}{sc.fence(text, f, lang='')}\n</details>"
-    if len(full) <= limit:
-        return full
     trailer = (
         f"\n\n_Truncated, earlier output elided; [full output in the job log]({url})._\n</details>"
     )
-    room = limit - len(head) - len(sc.fence("", f, lang="")) - len(trailer)
-    if room >= sc.MIN_PLAN_CHARS:
-        sliced = text[-room:]
-        cut = sliced[sliced.find("\n") + 1 :] if "\n" in sliced else ""
-        if cut:
-            return f"{head}{sc.fence(cut, f, lang='')}{trailer}"
-    return line
+    return sc.fold(line, text, limit, trailer, _tail_lines, lang="")
 
 
 def _empty_verdict(failed_run, held, waiting):

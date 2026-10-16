@@ -75,6 +75,7 @@ from _shipmate import (
     run,
     run_annotated,
     utf8_output,
+    write_outputs,
     yaml_error_text,
 )
 from _shipmate import gh_json as _gh_json
@@ -976,11 +977,11 @@ def _contents_ref(ctx):
     read reports the pin stale on the very PR that fixes it. "No commit" is
     therefore a reason to SKIP the probe, not to read something else.
 
-    Anything that is not a 40-char hex SHA counts as absent rather than being
-    interpolated into the request path (same guard as apply-detect's) — a probe
-    must not be able to retarget a `gh api` URL, however it was configured."""
-    sha = ctx.get("head_sha") or ""
-    return f"?ref={sha}" if _SHA40.fullmatch(sha) else None
+    Anything that is not a head SHA (`is_head_sha`) counts as absent rather than being
+    interpolated into the request path — a probe must not be able to retarget a `gh api`
+    URL, however it was configured."""
+    sha = ctx.get("head_sha")
+    return f"?ref={sha}" if is_head_sha(sha) else None
 
 
 def _workflow_names(base):
@@ -2289,16 +2290,6 @@ def harvest_pending(lines, app_id=""):
     return False
 
 
-def _write_step_output(name, value):
-    """Append `name=<value>` to the calling action step's GITHUB_OUTPUT, a bool as
-    `true`/`false`."""
-    path = os.environ["GITHUB_OUTPUT"]
-    if isinstance(value, bool):
-        value = "true" if value else "false"
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(f"{name}={value}\n")
-
-
 #: The check-runs listing's jq projection: every field `latest_check_ids`, `harvest_pending`
 #: and `ag.plan_records` read, the nested `app.id` included.
 _CHECK_RUNS_JQ = (
@@ -2339,7 +2330,7 @@ def _harvest(repo, head, app_id):
     else:
         try:
             ids = latest_check_ids(lines, app_id)
-            _write_step_output("harvest_pending", harvest_pending(lines, app_id))
+            write_outputs(harvest_pending=harvest_pending(lines, app_id))
         except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor degrades, never fails
             _degrade(e, "doctor check-ids reduction failed; doctor reports settings probes only")
             ids, failed = [], True
@@ -2415,13 +2406,12 @@ def check_ids():
     head = _head_sha(repo)
     if not is_head_sha(head):
         print("::warning::could not read the PR head SHA; doctor reports settings probes only")
-        for name, value in (("head_sha", ""), ("plan_run_ids", ""), ("harvest_failed", True)):
-            _write_step_output(name, value)
+        write_outputs(head_sha="", plan_run_ids="", harvest_failed=True)
         return
-    _write_step_output("head_sha", head)
+    write_outputs(head_sha=head)
     lines, failed = _harvest(repo, head, app_id)
-    _write_step_output("harvest_failed", failed)
-    _write_step_output("plan_run_ids", " ".join(_download_cells(repo, lines, app_id)))
+    write_outputs(harvest_failed=failed)
+    write_outputs(plan_run_ids=" ".join(_download_cells(repo, lines, app_id)))
 
 
 def load_annotations(ctx):

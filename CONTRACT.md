@@ -853,8 +853,7 @@ the repository root, or none:
   cached file is encrypted with `SHIPMATE_PLAN_PASSPHRASE` (§Plan artifact
   encryption), because any workflow run, a fork's pull request included, can
   restore a default-branch cache entry. An empty passphrase refuses the restore
-  and the save. An entry that is not shipmate-crypt-v1 (saved unencrypted or
-  by an earlier engine release), one that fails authentication, and an openssl
+  and the save. An entry that fails authentication and an openssl
   or disk failure on the runner each fail the restore naming the matched cache
   key, so tofu never reads it and the cell skips its save. A passphrase
   rotation, different values on `<env>-plan` and `<env>-apply`, a corrupt,
@@ -2897,11 +2896,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Required.** An empty or unset passphrase refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
-- **Fail-safe on mismatch.** An artifact that is not shipmate-crypt-v1
-  (uploaded unencrypted, or encrypted by an earlier engine release) refuses and
-  tells you to re-plan. An artifact that fails authentication refuses naming
-  the causes (another passphrase, a rotated one or different values on
-  `<env>-plan` and `<env>-apply`, or a corrupt, truncated or altered artifact)
+- **Fail-safe on mismatch.** An artifact that is not a whole shipmate-crypt-v1
+  file whose tag verifies fails authentication and refuses naming the causes
+  (another passphrase, a rotated one or different values on `<env>-plan` and
+  `<env>-apply`, or a corrupt, truncated or altered artifact)
   and points to `docs/troubleshooting.md` for each remedy; the engine cannot
   tell them apart. An openssl or disk failure on the runner refuses and tells
   you to re-run the job or fix the runner. An artifact that cannot be read

@@ -2836,8 +2836,8 @@ def test_a_refused_max_parallel_writes_no_matrix(monkeypatch, tmp_path):
     """A refusal after `matrix=` and `empty=false` were written leaves a matrix job reading an
     empty cap, which fails the run with an expression error instead of the refusal.
 
-    Mutation: call `ec.max_parallel(table)` inside the `GITHUB_OUTPUT` block again -- `matrix=`,
-    `empty=` and `count=` are written before the refusal."""
+    Mutation: write `matrix`, `empty` and `count` in their own `write_outputs` call before
+    `cap = ec.max_parallel(table)` -- they are written before the refusal."""
 
     def refuse(table):
         raise SystemExit("::error::max_parallel is '0'; refused")

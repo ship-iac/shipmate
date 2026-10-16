@@ -139,7 +139,7 @@ def test_reuses_single_sourced_helpers():
     assert aad.cells_for_env is not None
     assert aad.with_plan_runs is not None
     assert aad.wv.env_level_waves is not None
-    assert aad.wv.write_env_level_waves is not None
+    assert aad.wv.env_level_outputs is not None
     assert not hasattr(aad, "dd")
     assert not hasattr(aad, "cells_from_artifacts")
 

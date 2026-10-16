@@ -45,6 +45,7 @@ from _shipmate import (
     is_head_sha,
     missing_names,
     run_annotated,
+    write_outputs,
 )
 
 ag = _load("apply-gate")
@@ -258,32 +259,40 @@ def _plan_line(cell, url):
     return cell_line(emoji(cell), cell["stack"], cell["environment"], state(cell), url, "plan")
 
 
+def fold(line, body, limit, trailer, cut, lang="diff"):
+    """Largest form of a section that fits in `limit` characters: fold-out of its bare `line`
+    with the whole `body` -> fold-out with `cut(body, room)` and `trailer` -> `line`, which the
+    caller has already reserved room for. `cut` returns whole lines of at most `room`
+    characters, or "" when none fits. The cut body reuses the full body's fence, so a cut can
+    never re-open the fence-escape hole."""
+    f = _fence_of(body)
+    head = f"<details><summary>{line}</summary>\n\n"
+    full = f"{head}{fence(body, f, lang)}\n</details>"
+    if len(full) <= limit:
+        return full
+    room = limit - len(head) - len(fence("", f, lang)) - len(trailer)
+    if room >= MIN_PLAN_CHARS:
+        kept = cut(body, room)
+        if kept:
+            return f"{head}{fence(kept, f, lang)}{trailer}"
+    return line
+
+
+def _head_lines(text, room):
+    # When the first line alone exceeds `room`, `rfind` returns -1, so degrade to the bare
+    # line instead of cutting mid-line.
+    sliced = text[:room]
+    return sliced[: sliced.rfind("\n")] if "\n" in sliced else ""
+
+
 def render_section(line, plan_text, url, limit):
-    """Largest form of a cell that fits in `limit` characters: fold-out of its bare `line` with
-    the full plan -> fold-out with a truncated plan (cut at a line boundary, check-run link
-    appended) -> `line`, which the caller has already reserved room for. The fence for the
-    truncated body reuses the full body's fence so a cut can never re-open the fence-escape
-    hole."""
+    """`fold` of a cell's plan, truncated at the end with a link to its check run."""
     # A limit under MIN_PLAN_CHARS means this cell's budget is spent, so link the check run
     # rather than inline whatever small plan happens to fit.
     if plan_text is None or limit < MIN_PLAN_CHARS:
         return line
-    body = diff_map(plan_text)
-    f = _fence_of(body)
-    head = f"<details><summary>{line}</summary>\n\n"
-    full = f"{head}{fence(body, f)}\n</details>"
-    if len(full) <= limit:
-        return full
     trailer = f"\n\n_Truncated, [full plan in the check run]({url})._\n</details>"
-    room = limit - len(head) - len(fence("", f)) - len(trailer)
-    if room >= MIN_PLAN_CHARS:
-        sliced = body[:room]
-        # Cut at the last full line inside `room`. When the first line alone already exceeds
-        # `room`, `rfind` returns -1, so degrade to the bare line instead of cutting mid-line.
-        cut = sliced[: sliced.rfind("\n")] if "\n" in sliced else ""
-        if cut:
-            return f"{head}{fence(cut, f)}{trailer}"
-    return line
+    return fold(line, diff_map(plan_text), limit, trailer, _head_lines)
 
 
 def verdict(cells, head_sha, run_url):
@@ -603,14 +612,14 @@ def main():
         fh.write(body)
     pending = any(c["changed"] for c, _ in cells)
     missing = _missing([c for c, _ in cells])
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(
-            f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n"
-            f"unmanaged={'true' if named else 'false'}\n"
-            f"lost={'true' if lost_named else 'false'}\n"
-            # `json.dumps` escapes CR and LF, so an author's stack path stays on this one line.
-            f"missing={json.dumps(missing)}\n"
-        )
+    write_outputs(
+        pending=pending,
+        count=len(cells),
+        unmanaged=bool(named),
+        lost=bool(lost_named),
+        # `json.dumps` escapes CR and LF, so an author's stack path stays on this one line.
+        missing=json.dumps(missing),
+    )
 
 
 if __name__ == "__main__":
