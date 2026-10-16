@@ -8,22 +8,25 @@ consumer repository's checkout. Every check runs before the first write, so a re
 every file as it was:
 
 1. `<tag>` is `vX.Y.Z` and resolves as a tag, never as a branch of that name, to a commit on
-   the engine's `origin/main`, fetched first.
+   the engine's `origin/main`, fetched first. When `origin` holds the tag, its commit is the
+   local tag's commit: a stale local tag refuses.
 2. In every `*.yml` file directly under `<consumer>/.github/workflows/`, the first
    `ship-iac/shipmate/<path>@<40 hex>` of each line, with an optional closing `"` and
    `# v...` label, becomes `ship-iac/shipmate/<path>@<sha> # <tag>`. Line endings are kept.
-3. Every engine ref in every file of that directory then ends its line as `@<sha> # <tag>`,
-   one ref per line. `@main`, a single-quoted ref, a comment after the label and a `.yaml`
-   file each refuse, listed as `<file>:<line>: <text>`, to fix by hand. A directory holding no
-   engine ref refuses.
-4. Every engine workflow the directory calls exists at `<sha>`.
+3. Every engine ref, matched case-insensitively, in every `*.yml` and `*.yaml` file of that
+   directory then ends its line as `@<sha> # <tag>`, one ref per line. `@main`, a
+   single-quoted ref, a comment after the label and a `.yaml` file each refuse, listed as
+   `<file>:<line>: <text>`, to fix by hand. A directory holding no engine ref refuses. Other
+   files are not read: GitHub runs only those two extensions.
+4. Every engine workflow the directory calls with an `@` ref exists at `<sha>`.
 5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
-   it, on the branch the consumer's `shipmate.yml` push trigger names: its one
-   `    branches: [X]` line, else `main`. A trigger on a branch other than the default is
-   `onboard`'s to report, not this script's.
+   it, on the branch the consumer's `shipmate.yml` push trigger names when its one
+   `    branches: [X]` line holds a single plain branch name, else on `main`, so a list or a
+   wildcard shows in the diff. A single branch other than the default is `onboard`'s to
+   report, not this script's.
 
 It then writes each changed file, prints `updated <file>` or `unchanged <file>` for every file
-of the directory, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
+it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
 It does not commit.
 
 Exit codes: 0 written and `shipmate.yml` matches the fence; 2 written and `shipmate.yml`
@@ -41,12 +44,9 @@ onboard = _load("onboard")
 
 ENGINE = pathlib.Path(__file__).resolve().parents[1]
 SHIM = "shipmate.yml"
-_SLUG = re.escape(onboard.ENGINE_SLUG)
-#: `[ \t]`, never `\s`: the substitution runs on one line's body, and a match must never
-#: reach the next line.
+_SLUG = r"(?<![\w.-])" + re.escape(onboard.ENGINE_SLUG)
 _PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)([ \t]+# v[^ \t]*)?')
-_REF = re.compile(rf'{_SLUG}/[^@ \t"]+@')
-_CALLEE = re.compile(rf'{_SLUG}/(\.github/workflows/[^@ \t"]+)')
+_REF = re.compile(rf'{_SLUG}/([^@ \t"]+)@', re.IGNORECASE)
 _TRIGGER = re.compile(r"^    branches: \[([^\]\n]*)\]$", re.M)
 
 
@@ -91,7 +91,24 @@ def _resolve(tag):
         )
     if rc:
         raise SystemExit(f"git merge-base --is-ancestor failed in {ENGINE}:\n{err}")
+    _check_remote_tag(tag, sha)
     return sha
+
+
+def _check_remote_tag(tag, sha):
+    """Refuse when `origin` holds `tag` on a commit other than `sha`. A tag `origin` lacks
+    passes: the release smoke re-pins before the tag is pushed."""
+    ref = f"refs/tags/{tag}"
+    rc, out, err = _git("ls-remote", "origin", ref, f"{ref}^{{}}")
+    if rc:
+        raise SystemExit(f"git ls-remote origin failed in {ENGINE}:\n{err}")
+    remote = dict(line.split("\t")[::-1] for line in out.splitlines())
+    peeled = remote.get(f"{ref}^{{}}", remote.get(ref))
+    if peeled not in (None, sha):
+        raise SystemExit(
+            f"the local tag {tag} names {sha}, but origin's names {peeled}. Replace the local "
+            f"tag: `git -C {ENGINE} tag -d {tag} && git -C {ENGINE} fetch origin tag {tag}`."
+        )
 
 
 def _read(consumer):
@@ -101,8 +118,12 @@ def _read(consumer):
         raise SystemExit(f"no workflows directory at {wf}.")
     texts = {}
     for name in sorted(p.name for p in wf.iterdir() if p.is_file()):
+        if not name.endswith((".yml", ".yaml")):
+            continue
         try:
-            texts[name] = (wf / name).read_text(encoding="utf-8", newline="")
+            # Not `read_text`: it takes `newline` only from Python 3.13, and CI runs 3.12.
+            with (wf / name).open(encoding="utf-8", newline="") as f:
+                texts[name] = f.read()
         except UnicodeDecodeError:
             raise SystemExit(f"{wf / name} is not UTF-8 text, so it cannot be re-pinned.") from None
     return wf, texts
@@ -139,7 +160,8 @@ def _check_refs(wf, texts, sha, tag):
 
 
 def _check_callees(texts, sha, tag):
-    callees = sorted({c for text in texts.values() for c in _CALLEE.findall(text)})
+    paths = {m[1] for t in texts.values() for b, _ in _lines(t) for m in _REF.finditer(b)}
+    callees = sorted(p for p in paths if p.startswith(".github/workflows/"))
     missing = [c for c in callees if _git("cat-file", "-e", f"{sha}:{c}")[0]]
     if missing:
         raise SystemExit(
@@ -153,8 +175,9 @@ def _render(texts, sha, tag):
     if rc:
         raise SystemExit(f"cannot read docs/getting-started.md at {tag}:\n{err}")
     shim = texts.get(SHIM, "").replace("\r\n", "\n")
-    branches = _TRIGGER.findall(shim)
-    return onboard._render(page, sha, tag, branches[0] if len(branches) == 1 else "main")
+    found = _TRIGGER.findall(shim)
+    plain = len(found) == 1 and onboard._BRANCH_RE.fullmatch(found[0])
+    return onboard._render(page, sha, tag, found[0] if plain else "main")
 
 
 def main():
@@ -177,8 +200,7 @@ def main():
         print(f"{SHIM} absent")
         sys.exit(2)
     diff = onboard.shim_diff(rendered, new[SHIM], SHIM)
-    # A shim without a final newline leaves the diff's last line unterminated.
-    print(diff.removesuffix("\n") or f"{SHIM} matches the {tag} fence")
+    print(diff or f"{SHIM} matches the {tag} fence\n", end="")
     sys.exit(2 if diff else 0)
 
 

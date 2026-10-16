@@ -666,12 +666,13 @@ def _depin(text):
 
 def shim_diff(fence_text, shim_text, name):
     """The unified diff from `fence_text` to `shim_text`, pins masked by `_depin` and both sides
-    CRLF-normalized, headed `<name> (fence)` and `<name>`; "" when they agree. `onboard` and
-    `scripts/repin` both print it."""
+    CRLF-normalized, headed `<name> (fence)` and `<name>`; "" when they agree. A non-empty diff
+    ends in a newline even when `shim_text` does not, so it can be printed with `end=""`."""
     fence, shim = (
         _depin(t.replace("\r\n", "\n")).splitlines(keepends=True) for t in (fence_text, shim_text)
     )
-    return "".join(difflib.unified_diff(fence, shim, fromfile=f"{name} (fence)", tofile=name))
+    diff = "".join(difflib.unified_diff(fence, shim, fromfile=f"{name} (fence)", tofile=name))
+    return diff if diff.endswith("\n") or not diff else diff + "\n"
 
 
 def _reconcile_shim(ctx):

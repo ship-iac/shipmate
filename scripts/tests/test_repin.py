@@ -55,8 +55,8 @@ def _commit(repo, files, message):
 
 @pytest.fixture
 def engine(tmp_path, monkeypatch):
-    """An engine checkout with a bare `origin`, `TAG` on its pushed `main`, holding `PAGE` and
-    every callee in `CALLEES`; this machine's git config out of the way."""
+    """An engine checkout with a bare `origin`, `TAG` on its pushed `main` and pushed itself,
+    holding `PAGE` and every callee in `CALLEES`; this machine's git config out of the way."""
     (tmp_path / "gitconfig").write_bytes(b"")
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "gitconfig"))
@@ -73,6 +73,7 @@ def engine(tmp_path, monkeypatch):
     _git(repo, "push", "-q", "origin", "main")
     # Annotated, as a release tag is: its own object SHA differs from the commit's.
     _git(repo, "tag", "-a", "-m", TAG, TAG)
+    _git(repo, "push", "-q", "origin", TAG)
     monkeypatch.setattr(repin, "ENGINE", repo)
     return types.SimpleNamespace(path=repo, sha=sha)
 
@@ -130,7 +131,9 @@ def test_every_pin_is_rewritten_in_place_keeping_its_line_endings(
     quote group `("?)` (the quoted pin loses its closing quote's place); run the substitution
     over the whole file text with `\\s+` for `[ \\t]+` (the apply line swallows the note line);
     `# {sha}` for `# {tag}` in the replacement; print `updated` for every file; drop
-    `^{commit}` from the `rev-parse` argument (the pins carry the annotated tag's object SHA).
+    `^{commit}` from the `rev-parse` argument (the annotated tag's object SHA is not origin's
+    peeled commit, so the run refuses);
+    compare origin's unpeeled tag line instead of its `^{}` line (the run refuses as stale).
     """
     wf = consumer(tmp_path, {"ci.yml": CI, "shipmate.yml": SHIM_BEFORE, "sweep.yml": SWEEP_BEFORE})
     sha = engine.sha
@@ -207,6 +210,16 @@ LEFTOVER = (
         ),
         pytest.param(
             TAG,
+            {
+                "shipmate.yml": GOOD
+                + b"  x:\n    uses: Ship-IaC/shipmate/.github/workflows/apply.yml@main\n"
+            },
+            LEFTOVER
+            + "shipmate.yml:5:     uses: Ship-IaC/shipmate/.github/workflows/apply.yml@main",
+            id="case-variant",
+        ),
+        pytest.param(
+            TAG,
             {"shipmate.yml": f"    uses: {WF}/plan.yml@main # was {WF}/plan.yml@{OLD}\n".encode()},
             LEFTOVER
             + f"shipmate.yml:1:     uses: {WF}/plan.yml@main # was {WF}/plan.yml@{{sha}} # v1.2.3",
@@ -250,7 +263,8 @@ def test_a_refusal_writes_nothing(engine, tmp_path, monkeypatch, capsys, tag, fi
     (at-main, at-main-with-a-pin-in-its-comment, single-quoted, yaml-extension); test from the
     line's last ref instead of its first (at-main-with-a-pin-in-its-comment); check only `.yml`
     files for leftovers (yaml-extension); delete the `_check_callees` call (callee-missing);
-    delete the `no engine reference` check (no-engine-ref).
+    delete the `no engine reference` check (no-engine-ref); drop `re.IGNORECASE` from `_REF`
+    (case-variant).
     """
     wf = consumer(tmp_path, files)
     expected = message.format(engine=engine.path, sha=engine.sha, wf=wf)
@@ -393,8 +407,7 @@ def test_a_shim_with_an_extra_line_prints_its_diff_and_exits_2(
 
 
 def test_a_shim_without_a_final_newline_ends_the_diff_on_one(engine, tmp_path, monkeypatch, capsys):
-    """Mutation: print the diff as `shim_diff` returns it, with `end=""` -- the output ends
-    mid-line."""
+    """Mutation: drop `shim_diff`'s final-newline guarantee -- the output ends mid-line."""
     shim = _fence_shim("main", OLD, "\n").removesuffix(b"\n")
     consumer(tmp_path, {"shipmate.yml": shim})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
@@ -420,6 +433,101 @@ def test_a_file_that_is_not_utf8_is_refused_before_any_write(engine, tmp_path, m
     )
     assert capsys.readouterr().out == ""
     assert on_disk(wf) == files
+
+
+def test_a_local_tag_on_another_commit_than_origins_is_refused(
+    engine, tmp_path, monkeypatch, capsys
+):
+    """origin holds `TAG` on the fixture commit; the local `TAG` moves to a later commit on
+    `main`. Mutation: delete the `_check_remote_tag` call -- the run writes."""
+    later = _commit(engine.path, {"later.txt": "x\n"}, "later")
+    _git(engine.path, "push", "-q", "origin", "main")
+    _git(engine.path, "tag", "-f", "-a", "-m", TAG, TAG)
+    wf = consumer(tmp_path, {"shipmate.yml": GOOD})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == (
+        f"the local tag v1.2.3 names {later}, but origin's names {engine.sha}. Replace the "
+        f"local tag: `git -C {engine.path} tag -d v1.2.3 && git -C {engine.path} fetch origin "
+        "tag v1.2.3`."
+    )
+    assert capsys.readouterr().out == ""
+    assert on_disk(wf) == {"shipmate.yml": GOOD}
+
+
+def _other(engine, tmp_path, monkeypatch, capsys, files, tag=TAG):
+    """Run over `files` holding no `shipmate.yml`; return the bytes left on disk."""
+    wf = consumer(tmp_path, files)
+    assert run(monkeypatch, str(tmp_path / "consumer"), tag) == 2
+    assert capsys.readouterr().out == "updated other.yml\nshipmate.yml absent\n"
+    return on_disk(wf)
+
+
+def _pinned(sha, sep="\n"):
+    return f"jobs:{sep}  plan:{sep}    uses: {WF}/plan.yml@{sha} # v1.2.3{sep}"
+
+
+def test_a_tag_origin_lacks_passes(engine, tmp_path, monkeypatch, capsys):
+    """The release smoke re-pins before the tag is pushed. Mutation: refuse when origin lacks
+    the tag (`peeled != sha`)."""
+    _git(engine.path, "tag", "v1.2.4")
+    assert _other(engine, tmp_path, monkeypatch, capsys, {"other.yml": GOOD}, "v1.2.4") == {
+        "other.yml": _pinned(engine.sha).replace("v1.2.3", "v1.2.4").encode()
+    }
+
+
+def test_a_wildcard_trigger_renders_on_main_and_shows_in_the_diff(
+    engine, tmp_path, monkeypatch, capsys
+):
+    """Mutation: drop the `_BRANCH_RE` test in `_render` -- the fence renders on `'**'` and
+    the shim matches."""
+    consumer(tmp_path, {"shipmate.yml": _fence_shim("'**'", f"{OLD} # v0.1.0", "\n")})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
+    assert capsys.readouterr().out == (
+        "updated shipmate.yml\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -1,7 +1,7 @@\n"
+        " name: shipmate\n"
+        " on:\n"
+        "   push:\n"
+        "-    branches: [main]\n"
+        "+    branches: ['**']\n"
+        " jobs:\n"
+        "   plan:\n"
+        f"     uses: {WF}/plan.yml@<pin>\n"
+    )
+
+
+def test_a_workflow_path_named_without_an_at_is_no_callee(engine, tmp_path, monkeypatch, capsys):
+    """A CRLF comment ending in an engine workflow path that does not exist at the tag.
+    Mutation: collect callees with `ship-iac/shipmate/(\\.github/workflows/[^@ \\t"]+)` over
+    the whole text -- `gone.yml\\r\\n` is a missing callee and the run refuses."""
+    note = f"# see {WF}/gone.yml\r\n"
+    files = {"other.yml": (_pinned(OLD, "\r\n").replace("v1.2.3", "v0.1.0") + note).encode()}
+    assert _other(engine, tmp_path, monkeypatch, capsys, files) == {
+        "other.yml": (_pinned(engine.sha, "\r\n") + note).encode()
+    }
+
+
+def test_a_ref_under_another_owner_is_not_rewritten(engine, tmp_path, monkeypatch, capsys):
+    """Mutation: drop the `(?<![\\w.-])` boundary from `_SLUG` -- the `acme-` line is rewritten."""
+    acme = (
+        b"  x:\n    uses: acme-ship-iac/shipmate/.github/workflows/plan.yml@" + OLD.encode() + b"\n"
+    )
+    files = {"other.yml": GOOD + acme}
+    assert _other(engine, tmp_path, monkeypatch, capsys, files) == {
+        "other.yml": _pinned(engine.sha).encode() + acme
+    }
+
+
+def test_only_yml_and_yaml_files_are_read(engine, tmp_path, monkeypatch, capsys):
+    """GitHub runs only those two extensions, so a `.DS_Store` beside them is not the script's
+    to read. Mutation: drop the extension filter in `_read` -- `.DS_Store` is refused as not
+    UTF-8."""
+    files = {".DS_Store": b"\xff\x00", "other.yml": GOOD}
+    assert _other(engine, tmp_path, monkeypatch, capsys, files) == {
+        ".DS_Store": b"\xff\x00",
+        "other.yml": _pinned(engine.sha).encode(),
+    }
 
 
 def test_an_absent_shim_is_reported_and_exits_2(engine, tmp_path, monkeypatch, capsys):

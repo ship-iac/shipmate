@@ -2088,6 +2088,12 @@ def test_a_locally_edited_file_prints_its_diff_after_the_report_line(tmp_path, c
     )
 
 
+def test_a_diff_ends_in_a_newline_when_the_shim_does_not():
+    """Both callers print the diff with `end=""`, so an unterminated last line would glue onto
+    the next output. Mutation: return the joined diff as it is."""
+    assert onboard.shim_diff("a\n", "b", "f") == "--- f (fence)\n+++ f\n@@ -1 +1 @@\n-a\n+b\n"
+
+
 def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
     """The shim is written LF-delimited whatever platform the operator runs on: every other
     copy of it -- the docs, the other consumers -- is LF; `scripts/repin` keeps whatever
