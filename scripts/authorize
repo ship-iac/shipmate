@@ -33,7 +33,7 @@ import os
 import re
 import sys
 
-from _shipmate import run_annotated
+from _shipmate import run_annotated, write_outputs
 
 
 def parse_ungated_envs(raw):
@@ -235,9 +235,7 @@ def _main_permission():
         raise SystemExit(f"::error::unknown verb {verb!r}")
     reason = _permission_reason(os.environ.get("PERMISSION", ""), verb) or ""
     ok = not reason
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"authorized={'true' if ok else 'false'}\n")
-        fh.write(f"reason={reason}\n")
+    write_outputs(authorized=ok, reason=reason)
     print(f"::notice title=authorize::authorized={ok} reason={reason or 'ok'}")
 
 
@@ -275,12 +273,13 @@ def main():
         and bool(environment)
         and _ungated_exemption(review_decision, environment, ungated_envs)
     )
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"authorized={'true' if ok else 'false'}\n")
-        fh.write(f"ungated_exemption={'true' if exempted else 'false'}\n")
-        fh.write(f"reason={reason}\n")
-        fh.write(f"environment={environment}\n")
-        fh.write(f"head_sha={pr.get('head', {}).get('sha', '')}\n")
+    write_outputs(
+        authorized=ok,
+        ungated_exemption=bool(exempted),
+        reason=reason,
+        environment=environment,
+        head_sha=pr.get("head", {}).get("sha", ""),
+    )
     print(f"::notice title=authorize::authorized={ok} reason={reason or 'ok'}")
 
 

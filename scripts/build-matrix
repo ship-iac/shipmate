@@ -15,7 +15,7 @@ import os
 import posixpath
 import re
 
-from _shipmate import _load, _run, command_data, is_refusal, named, run_annotated
+from _shipmate import _load, _run, command_data, is_refusal, named, run_annotated, write_outputs
 
 ec = _load("env-config")
 wv = _load("waves")
@@ -716,8 +716,7 @@ def main():
         if is_refusal(exc.code):
             refusal = exc.code.splitlines()[0].removeprefix("::error::")
             # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
-            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-                fh.write(f"refusal={refusal}\n")
+            write_outputs(refusal=refusal)
         raise
 
 
@@ -760,18 +759,19 @@ def _detect():
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
     # Before the write: a refusal after `matrix=` would leave a matrix with no cap.
     cap = ec.max_parallel(table)
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"matrix={json.dumps({'include': cells})}\n")
-        fh.write(f"empty={'true' if not cells else 'false'}\n")
-        fh.write(f"count={len(cells)}\n")
-        fh.write(f"max_parallel={cap}\n")
-        fh.write(f"cells={json.dumps(tree)}\n")
-        named = {"count": len(unmanaged), "paths": unmanaged[:UNMANAGED_NAMES]}
-        fh.write(f"unmanaged={json.dumps(named)}\n")
-        lost = ""
-        if pairs is not None:
-            lost = json.dumps({"count": len(pairs), "pairs": pairs[:UNMANAGED_NAMES]})
-        fh.write(f"lost={lost}\n")
+    named = {"count": len(unmanaged), "paths": unmanaged[:UNMANAGED_NAMES]}
+    lost = ""
+    if pairs is not None:
+        lost = json.dumps({"count": len(pairs), "pairs": pairs[:UNMANAGED_NAMES]})
+    write_outputs(
+        matrix=json.dumps({"include": cells}),
+        empty=not cells,
+        count=len(cells),
+        max_parallel=cap,
+        cells=json.dumps(tree),
+        unmanaged=json.dumps(named),
+        lost=lost,
+    )
     listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
     print(f"{len(cells)} cell(s): {listing}")
 

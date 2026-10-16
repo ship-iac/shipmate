@@ -24,7 +24,7 @@ import json
 import os
 
 from _shipmate import gh_json as _gh_json
-from _shipmate import is_pr_number, run_annotated
+from _shipmate import is_pr_number, run_annotated, write_outputs
 
 #: The output keys, in the order they are written. Named once so the action's
 #: outputs and this list cannot drift apart silently.
@@ -130,9 +130,7 @@ def main():
                 "with `verb: plan` (see `docs/getting-started.md`)."
             )
         facts = from_api(number, os.environ.get("GITHUB_REPOSITORY", ""))
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        for key in KEYS:
-            fh.write(f"{key}={facts[key]}\n")
+    write_outputs(**{key: facts[key] for key in KEYS})
     print(
         f"pull request #{facts['pr_number']} at {facts['head_sha']} "
         f"({facts['head_repo']}), draft={facts['is_draft']}, on-demand={facts['on_demand']}"

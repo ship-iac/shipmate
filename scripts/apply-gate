@@ -30,7 +30,7 @@ import os
 import re
 import sys
 
-from _shipmate import is_pr_number, run_annotated
+from _shipmate import is_pr_number, run_annotated, write_outputs
 
 APPLY_PREFIX = "apply / "
 #: The consumer names its engine-calling job `shipmate`, and GitHub names a called workflow's
@@ -200,8 +200,7 @@ def main():
         return
     runs = app_runs(sys.stdin, app_id)
     v = verdict(runs)
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"verdict={v}\n")
+    write_outputs(verdict=v)
 
 
 if __name__ == "__main__":

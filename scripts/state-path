@@ -15,7 +15,7 @@ import os
 import posixpath
 import re
 
-from _shipmate import run_annotated
+from _shipmate import run_annotated, write_outputs
 
 #: `actions/cache` reads a newline in `path:` as a second path and `!` or `*` as patterns.
 _SAFE = re.compile(r"[A-Za-z0-9._/-]+")
@@ -83,8 +83,7 @@ def main():
     record = _read_record(stack, os.environ.get("TF_DATA_DIR") or ".terraform")
     path = state_path(stack, record, os.environ.get("TF_WORKSPACE", ""))
     print(path)
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"path={path}\n")
+    write_outputs(path=path)
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ because the unlock job's `strategy.matrix.include` is `fromJSON(cells)` and
 import json
 import os
 
-from _shipmate import _load, run_annotated, validate_head_sha
+from _shipmate import _load, run_annotated, validate_head_sha, write_outputs
 
 ad = _load("apply-detect")
 # Aliases, not loads: unlock-detect and apply-detect share one build-matrix instance.
@@ -81,8 +81,7 @@ def main():
             "applied out of band, is released out of band; see the state-lock "
             "section of docs/troubleshooting.md."
         )
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"cells={json.dumps(pending)}\n")
+    write_outputs(cells=json.dumps(pending))
 
 
 if __name__ == "__main__":

@@ -45,6 +45,7 @@ from _shipmate import (
     is_head_sha,
     missing_names,
     run_annotated,
+    write_outputs,
 )
 
 ag = _load("apply-gate")
@@ -603,14 +604,14 @@ def main():
         fh.write(body)
     pending = any(c["changed"] for c, _ in cells)
     missing = _missing([c for c, _ in cells])
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(
-            f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n"
-            f"unmanaged={'true' if named else 'false'}\n"
-            f"lost={'true' if lost_named else 'false'}\n"
-            # `json.dumps` escapes CR and LF, so an author's stack path stays on this one line.
-            f"missing={json.dumps(missing)}\n"
-        )
+    write_outputs(
+        pending=pending,
+        count=len(cells),
+        unmanaged=bool(named),
+        lost=bool(lost_named),
+        # `json.dumps` escapes CR and LF, so an author's stack path stays on this one line.
+        missing=json.dumps(missing),
+    )
 
 
 if __name__ == "__main__":

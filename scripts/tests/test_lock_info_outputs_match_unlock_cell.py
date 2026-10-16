@@ -42,7 +42,8 @@ def _consumed(steps):
 
 def test_lock_info_writes_exactly_the_probe_outputs_unlock_cell_consumes():
     """Renaming `steps.probe.outputs.lock_id` to `lock_idx` in the action reddens this."""
-    written = set(re.findall(r'\.write\(f?"([a-z_]+)=', _MAIN))
+    calls = "".join(re.findall(r"write_outputs\(([^)]*)\)", _MAIN))
+    written = set(re.findall(r"\b([a-z_]+)=", calls))
     consumed = _consumed(action_steps(_ACTION))
     probe = step_by(_ACTION, id="probe")
     step_written = set(

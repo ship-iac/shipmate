@@ -231,6 +231,16 @@ def gh_json(path, run=None):
     return json.loads((run or _run)(["gh", "api", path]))
 
 
+def write_outputs(**pairs):
+    """Append each `name=value` pair to the calling step's `GITHUB_OUTPUT`, a bool as
+    `true`/`false`. A value holding CR or LF would end its line early."""
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        for name, value in pairs.items():
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            fh.write(f"{name}={value}\n")
+
+
 def utf8_output():
     """Write stdout and stderr as UTF-8: a cp1252 Windows console prints `—` and `§` as `?`.
 
