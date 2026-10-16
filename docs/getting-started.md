@@ -281,15 +281,15 @@ Each `environments` entry needs two GitHub Environments (`<env>-plan`,
 Five settings decide when an environment's cells apply. Each row names its
 [`../CONTRACT.md`](../CONTRACT.md) section. Approving review is the branch
 ruleset's `reviewDecision`; environment reviewers are the GitHub Environment's
-required reviewers, a different control.
+required reviewers, a different control. `—` means the key does not act there.
 
 | Key (default), source | Holds back | Bare `shipmate apply` | `shipmate apply <env>` | Merge deploy | Approving review | Environment reviewers | Gives up |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `gated: false` (`true`), §Comment-ops | — | Applies it on `REVIEW_REQUIRED`, holds the gated rest | Authorized on `REVIEW_REQUIRED` | Not one of the key's three readers | Not required; `CHANGES_REQUESTED` still refuses | Untouched | An approving review before apply |
+| `gated: false` (`true`), §Comment-ops | — | Applies it on `REVIEW_REQUIRED`, holds the gated rest | Authorized on `REVIEW_REQUIRED` | — | Not required; `CHANGES_REQUESTED` still refuses | Untouched | An approving review before apply |
 | `explicit: true` (`false`), §Comment-ops | The env from a bare apply | Skips it; its checks and the gate stay pending | Applies it | Applies it | — | The deploy's control, not this key | A bare apply: it must be named |
 | `shared: true` (`false`), §Env model | — | Binds bare `<env>` | Binds bare `<env>` | Binds bare `<env>` | — | Given up: one gates plans and drift too | The reviewer gate and the plan/apply OIDC `sub` split |
 | `needs: [<env>]` (none), §Env apply order | The env, until its `needs` fully apply | Env-levels in order; a failure skips successors | Not ordered by it: one env-level | Env-levels in order; a failure skips successors | — | — | Successors wait until a failed level is fixed |
-| `after = [...]`, a Terramate stack attribute, §Fan-out | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying waits | A cell after a pending cell elsewhere waits | Stack waves | — | — | — |
+| `after = [...]`, a Terramate stack attribute, §Fan-out | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying waits | A cell after a pending cell elsewhere waits | Stack waves | — | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
 
 `needs`, `explicit` and `gated` are read from the default branch
 ([`../CONTRACT.md`](../CONTRACT.md) §Environment table), and so is `shared`
