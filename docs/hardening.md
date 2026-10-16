@@ -782,10 +782,10 @@ hardening step).
 10, 12 and 20 as checklist items; each `todo` prints the `gh api -X PUT` calls
 for that row, which leave the other rows' fields as they are (measured on a
 repository already in mode `selected`; whether the switch from `all` keeps
-`sha_pinning_required` is not probed),
-and a failed read makes each row it serves `cannot check`. Row 11 stays a check
-by hand. These reads, with the same credential, are the by-hand route for all
-four:
+`sha_pinning_required` is not probed); on a repository with Actions disabled,
+rows 12 and 20 point to the Settings page instead. A failed read makes each row
+it serves `cannot check`. Row 11 stays a check by hand. These reads, with the
+same credential, are the by-hand route for all four:
 
 ```bash
 gh api repos/OWNER/REPO/actions/permissions/workflow

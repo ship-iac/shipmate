@@ -804,10 +804,10 @@ def _read_or_reason(path):
 
 
 #: Rows 12 and 20 while Actions are off: what re-enabling resets is unprobed, so no command.
-ACTIONS_DISABLED = (
-    "Actions are disabled on this repository. Enable them in Settings → Actions, "
-    "then run onboard again."
-)
+ACTIONS_DISABLED = [
+    "Actions are disabled on this repository, by its own setting or an organization",
+    "policy. Enable them in Settings → Actions → General, then run onboard again.",
+]
 
 
 def _unread(item, path, reason):
@@ -855,7 +855,7 @@ def _sha_pinning_item(path, perms, reason):
     if perms is None:
         return _unread(item, path, reason)
     if perms.get("enabled") is False:
-        return "todo", item, [ACTIONS_DISABLED]
+        return "todo", item, [*ACTIONS_DISABLED]
     if perms.get("sha_pinning_required") is True:
         return "ok", item, []
     put = ["gh", "api", "-X", "PUT", path, "-F", "enabled=true", "-F", "sha_pinning_required=true"]
@@ -923,7 +923,7 @@ def _allowed_actions_item(base, perms, reason):
     if perms is None:
         return _unread(item, base, reason)
     if perms.get("enabled") is False:
-        return "todo", item, [ACTIONS_DISABLED]
+        return "todo", item, [*ACTIONS_DISABLED]
     if perms.get("allowed_actions") != "selected":
         return "todo", item, _allowed_actions_setup(base, perms.get("allowed_actions"))
     path = f"{base}/selected-actions"

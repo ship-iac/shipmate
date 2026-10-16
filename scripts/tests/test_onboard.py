@@ -2709,10 +2709,10 @@ def test_cannot_check_names_gh_s_error_line(monkeypatch, message, reason):
     )
 
 
-DISABLED = (
-    "Actions are disabled on this repository. Enable them in Settings → Actions, "
-    "then run onboard again."
-)
+DISABLED = [
+    "Actions are disabled on this repository, by its own setting or an organization",
+    "policy. Enable them in Settings → Actions → General, then run onboard again.",
+]
 
 
 @pytest.mark.parametrize(
@@ -2723,14 +2723,14 @@ DISABLED = (
     ],
 )
 def test_disabled_actions_point_to_settings_and_print_no_command(monkeypatch, perms):
-    """Actions off makes rows 12 and 20 `todo` with one pointer line and no `gh api`,
+    """Actions off makes rows 12 and 20 `todo` with the Settings pointer and no `gh api`,
     whatever the mode and pinning fields hold.
 
     Mutations, each proven: drop the `enabled` test from `_allowed_actions_item`; drop it
     from `_sha_pinning_item`.
     """
     items = _settings_rows(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
-    assert items[1:] == [("todo", ROW_12, [DISABLED]), ("todo", ROW_20, [DISABLED])]
+    assert items[1:] == [("todo", ROW_12, DISABLED), ("todo", ROW_20, DISABLED)]
 
 
 @pytest.mark.parametrize("perms", [{"enabled": True, "sha_pinning_required": True}, {}])
