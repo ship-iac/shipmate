@@ -183,13 +183,14 @@ yours: `SHIPMATE_PLAN_PASSPHRASE`, the table with the
 cloud role, region and env identity your layout injects,
 adding the repository to the App installation, an approving review before apply,
 a `CODEOWNERS` entry, a git-tracked `.terraform.lock.hcl` in each stack, the
-repository's Actions settings ([`hardening.md`](hardening.md) §10–12 and 20), and
+repository's Actions settings for rows 10, 12 and 20 of
+[`hardening.md`](hardening.md) §10–12 and 20, and
 the pull request carrying the workflow file. Three items check the whole tree
 before a run does: `unmanaged stacks` names the stacks with no `env/*` tag,
 `stack tags` the tag refusals a plan would raise and the workload tags that
 disagree with the table, and `drift sweeps` the cells no drift file sweeps. It marks
 each item `ok`, `todo` or `cannot check` from what the run read, and only a
-`todo` prints what to do. These can be `cannot check`: the App
+`todo` prints what to do. The items that can be `cannot check` are: the App
 installation, which only an App JWT can read; the custom deployment protection
 rules on `shipmate-engine`, when they cannot be listed; once a `CODEOWNERS` file
 exists, whether its entries cover the IaC, the workflows,

@@ -2113,7 +2113,7 @@ todo          allowed actions (hardening.md row 12)
     those workflows fail at "Set up job" too: this run cannot read the current list
     while the mode is not `selected`, so it cannot add them.
     Run the second command straight after the first: until the list is in, every
-    workflow run fails at "Set up job".
+    shipmate run fails at "Set up job".
     {MODE_PUT}
     {LIST_PUT}
 
@@ -2543,7 +2543,7 @@ def test_mode_all_prints_the_mode_put_then_the_required_list(monkeypatch):
                 'those workflows fail at "Set up job" too: this run cannot read the current list',
                 "while the mode is not `selected`, so it cannot add them.",
                 "Run the second command straight after the first: until the list is in, every",
-                'workflow run fails at "Set up job".',
+                'shipmate run fails at "Set up job".',
                 MODE_PUT,
                 LIST_PUT,
             ],

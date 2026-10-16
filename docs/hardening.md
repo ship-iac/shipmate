@@ -733,7 +733,7 @@ Settings → Actions → General:
   Switch `allowed_actions` to `selected` first, then set the list straight
   after. The selected-actions endpoint answers `409 Conflict` until the mode is
   `selected`, so the list cannot be written first; and from the mode change until
-  the list is in, every workflow run fails at "Set up job". `scripts/onboard`
+  the list is in, every shipmate run fails at "Set up job". `scripts/onboard`
   prints both calls in that order.
 
   `<owner>/shipmate/*@*` covers every shape the engine is referenced in.
@@ -780,9 +780,11 @@ hardening step).
 
 `scripts/onboard`, which runs with a repository-admin credential, checks rows
 10, 12 and 20 as checklist items; each `todo` prints the `gh api -X PUT` calls
-for that row, which leave the other rows' fields as they are, and a failed read
-makes each row it serves `cannot check`. Row 11 stays a check by hand. These
-reads, with the same credential, are the by-hand route for all four:
+for that row, which leave the other rows' fields as they are (measured on a
+repository already in mode `selected`; the switch from `all` is not probed),
+and a failed read makes each row it serves `cannot check`. Row 11 stays a check
+by hand. These reads, with the same credential, are the by-hand route for all
+four:
 
 ```bash
 gh api repos/OWNER/REPO/actions/permissions/workflow

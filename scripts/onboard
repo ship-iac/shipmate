@@ -865,7 +865,7 @@ def _allowed_actions_setup(base, mode):
         'those workflows fail at "Set up job" too: this run cannot read the current list',
         "while the mode is not `selected`, so it cannot add them.",
         "Run the second command straight after the first: until the list is in, every",
-        'workflow run fails at "Set up job".',
+        'shipmate run fails at "Set up job".',
         shlex.join(first),
         _selected_actions_command(f"{base}/selected-actions", ALLOWED_PATTERNS),
     ]
