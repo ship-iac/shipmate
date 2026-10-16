@@ -711,7 +711,6 @@ Settings → Actions → General:
 
   ```
   <owner>/shipmate/*@*
-  astral-sh/setup-uv@*
   opentofu/setup-opentofu@*
   aws-actions/configure-aws-credentials@*
   ```
