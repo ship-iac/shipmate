@@ -205,9 +205,12 @@ the release commit, from `repo-example-stacks-aws`:
    ```
 
    `<release-sha>` is the full lowercase 40-hex commit, `main`'s tip. § Re-pin a consumer
-   covers the script's checks and output: on its exit 1 or 2, make the edits it names on the
-   scratch branch and run its line alone again. Then commit the re-pin on `smoke/vX.Y.Z` as
-   one commit and push it; step 2 dispatches that pushed branch:
+   covers the script's checks and output. When it exits 1 listing refs or missing workflows,
+   fix those on the scratch branch and run its line alone again; a listed ref that is also on
+   the sample's `main` needs a sample pull request as well, or the re-pin after the release
+   refuses it again. When it exits 2, reconcile `shipmate.yml` with the diff it prints; that
+   is not a failure. Any other refusal of the script is a stop, below. Then commit the re-pin
+   on `smoke/vX.Y.Z` as one commit and push it; step 2 dispatches that pushed branch:
 
    ```bash
    git -C ../repo-example-stacks-aws push -u origin smoke/vX.Y.Z
@@ -266,8 +269,8 @@ the release commit, from `repo-example-stacks-aws`:
    copy, still on the *old* pin. The scratch
    branch is never read, and the smoke goes green without touching the new
    code.
-3. A green smoke runs the first three lines of step 1's cleanup, which throw the scratch
-   branch away and keep the tag, then cuts the release as below, which pushes the tag. A
+3. A green smoke runs step 1's cleanup without its `git tag -d` line, which throws the
+   scratch branch away and keeps the tag, then cuts the release as below, which pushes the tag. A
    failed smoke runs the whole cleanup. Nothing reaches the sample's default branch before
    the tag is pushed and released.
 
@@ -334,8 +337,9 @@ A red `manifest-load` means a fix commit, so the release SHA moves: smoke the ne
 commit, starting with the cleanup in step 1 of § Smoke the live path before the tag.
 
 Push the annotated tag the smoke created; when no smoke created it, the block creates it
-here. It tags only `main`'s tip. A refused check before the push means the smoke and the cut
-disagree on the commit: smoke again, starting with that cleanup. When only
+here. It tags only `main`'s tip. When a check before the push refuses, fix a mistyped
+`<release-sha>` and run the block again; otherwise the smoke and the cut disagree on the
+commit: smoke again, starting with that cleanup. When only
 `gh release create` fails, the tag is already pushed: run that line alone again.
 
 ```bash
