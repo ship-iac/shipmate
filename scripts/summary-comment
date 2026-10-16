@@ -319,7 +319,8 @@ def held_comment(reason, missing, checks, run_url, head_sha):
     pairs) linking its plan check, then `FOOTER_HINT`. At most `HELD_CELL_NAMES` cell lines,
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
     and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `no
-    plan summary read`: its plan cell job or the summary download failed."""
+    plan summary read`: its plan matrix job did not succeed or the summary download failed,
+    and the run cannot tell which."""
     reason = reason[:HELD_REASON_CAP]
     parts = [
         f"{MARKER}\n{header('plan')}",

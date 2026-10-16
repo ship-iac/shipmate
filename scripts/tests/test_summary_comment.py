@@ -1155,14 +1155,14 @@ _HOSTILE = "detect failed: stack 'x`y @team </summary>' carries 2 workload tags"
             + HINT,
         ),
     ],
-    ids=["refusal", "three-backticks", "missing-cells", "evidence-gap"],
+    ids=["refusal", "three-backticks", "plan-job-failed", "evidence-gap"],
 )
 def test_held_comment_is_the_whole_held_body(reason, missing, body):
     """The fence shows the reason verbatim and nothing in it renders; each cell with no plan
     summary is a bare line linking its plan check, or the run without one.
     Mutations: `lang="diff"` -- every case; a fixed three-backtick fence -- `three-backticks`;
     drop `FOOTER_HINT` -- every case; drop `provenance` -- every case; label a cell `plan
-    failed` -- `missing-cells` and `evidence-gap`."""
+    failed` -- `plan-job-failed` and `evidence-gap`."""
     checks = {"shipmate / stacks/a / dev": {"html_url": "https://gh/c/a"}}
     assert sc.held_comment(reason, missing, checks, RUN_URL, SHA) == body
 
