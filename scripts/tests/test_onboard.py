@@ -2049,6 +2049,7 @@ on:
 jobs:
   plan:
     uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
+
   apply:
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
 ```
@@ -2056,10 +2057,12 @@ jobs:
 
 
 def test_a_locally_edited_file_prints_its_diff_after_the_report_line(tmp_path, capsys):
-    """The `differs` line alone leaves the operator to find the edit. The page is this test's
-    own, so an edit to the real fence cannot redden it.
+    """The `differs` line alone leaves the operator to find the edit, and the diff is indented
+    under it so it does not read as more report lines. The page is this test's own, so an edit
+    to the real fence cannot redden it.
 
-    Mutation: drop the `shim_diff` print from `_reconcile_shim`.
+    Mutations: drop the `shim_diff` print from `_reconcile_shim`; drop the indent; drop the
+    indent's predicate (the blank context line stays unindented).
     """
     (tmp_path / "docs").mkdir()
     (tmp_path / "docs" / "getting-started.md").write_text(SMALL_PAGE, encoding="utf-8")
@@ -2069,22 +2072,23 @@ def test_a_locally_edited_file_prints_its_diff_after_the_report_line(tmp_path, c
     path.write_text(
         "name: shipmate\non:\n  push:\n    branches: [main]\njobs:\n  plan:\n"
         f"    uses: ship-iac/shipmate/.github/workflows/plan.yml@{old} # v9.9.8\n"
-        "    with: {x: 1}\n  apply:\n"
+        "    with: {x: 1}\n\n  apply:\n"
         f"    uses: ship-iac/shipmate/.github/workflows/apply.yml@{old} # v9.9.8\n",
         encoding="utf-8",
     )
     onboard._reconcile_shim(ctx(root=tmp_path, engine=tmp_path, sha="c" * 40, version="v9.9.9"))
     assert capsys.readouterr().out == (
         "differs shipmate.yml: differs beyond its pin, not overwritten\n"
-        "--- shipmate.yml (fence)\n"
-        "+++ shipmate.yml\n"
-        "@@ -5,5 +5,6 @@\n"
-        " jobs:\n"
-        "   plan:\n"
-        "     uses: ship-iac/shipmate/.github/workflows/plan.yml@<pin>\n"
-        "+    with: {x: 1}\n"
-        "   apply:\n"
-        "     uses: ship-iac/shipmate/.github/workflows/apply.yml@<pin>\n"
+        "    --- shipmate.yml (fence)\n"
+        "    +++ shipmate.yml\n"
+        "    @@ -5,6 +5,7 @@\n"
+        "     jobs:\n"
+        "       plan:\n"
+        "         uses: ship-iac/shipmate/.github/workflows/plan.yml@<pin>\n"
+        "    +    with: {x: 1}\n"
+        "     \n"
+        "       apply:\n"
+        "         uses: ship-iac/shipmate/.github/workflows/apply.yml@<pin>\n"
     )
 
 

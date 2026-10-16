@@ -7,17 +7,19 @@ Run from anywhere: the engine is the checkout holding this script, and `<consume
 consumer repository's checkout. Every check runs before the first write, so a refusal leaves
 every file as it was:
 
-1. `<tag>` is `vX.Y.Z` and resolves as a tag, never as a branch of that name, to a commit on
-   the engine's `origin/main`, fetched first. When `origin` holds the tag, its commit is the
-   local tag's commit: a stale local tag refuses.
-2. In every `*.yml` file directly under `<consumer>/.github/workflows/`, the first
-   `ship-iac/shipmate/<path>@<40 hex>` of each line, with an optional closing `"` and
-   `# v...` label, becomes `ship-iac/shipmate/<path>@<sha> # <tag>`. Line endings are kept.
-3. Every engine ref, matched case-insensitively, in every `*.yml` and `*.yaml` file of that
-   directory then ends its line as `@<sha> # <tag>`, one ref per line. `@main`, a
-   single-quoted ref, a comment after the label and a `.yaml` file each refuse, listed as
-   `<file>:<line>: <text>`, to fix by hand. A directory holding no engine ref refuses. Other
-   files are not read: GitHub runs only those two extensions.
+1. `<tag>` is `vX.Y.Z` and resolves as a tag, never as a branch of that name. When `origin`
+   holds the tag, its commit is the local tag's commit: a stale local tag refuses. The commit
+   is on the engine's `origin/main`, fetched first. It prints `<tag> -> <sha>`, and
+   `origin has no tag <tag>: pinning to a local tag` when `origin` lacks it, the pre-push
+   release smoke being the intended case.
+2. In every `*.yml` and `*.yaml` file directly under `<consumer>/.github/workflows/` (GitHub
+   runs only those two extensions; other files are not read), the first
+   `ship-iac/shipmate/<path>@<40 hex>` of each line, the slug matched case-insensitively,
+   with an optional closing `"` and `# v...` label, becomes `<slug>/<path>@<sha> # <tag>`.
+   The slug keeps the consumer's spelling, and line endings are kept.
+3. Every engine ref in those files then ends its line as `@<sha> # <tag>`, one ref per line.
+   `@main`, a single-quoted ref and a comment after the label each refuse, listed as
+   `<file>:<line>: <text>`, to fix by hand. A directory holding no engine ref refuses.
 4. Every engine workflow the directory calls with an `@` ref exists at `<sha>`.
 5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
    it, on the branch the consumer's `shipmate.yml` push trigger names when its one
@@ -29,8 +31,9 @@ It then writes each changed file, prints `updated <file>` or `unchanged <file>` 
 it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
 It does not commit.
 
-Exit codes: 0 written and `shipmate.yml` matches the fence; 2 written and `shipmate.yml`
-differs or is absent; 1 a refusal or a usage error, nothing written.
+Exit codes: 0 every engine ref pinned to the tag and `shipmate.yml` matches the fence (a re-run
+that writes nothing also exits 0); 2 every engine ref pinned and `shipmate.yml` differs or is
+absent; 1 a refusal or a usage error, nothing written.
 """
 
 import pathlib
@@ -44,9 +47,9 @@ onboard = _load("onboard")
 
 ENGINE = pathlib.Path(__file__).resolve().parents[1]
 SHIM = "shipmate.yml"
-_SLUG = r"(?<![\w.-])" + re.escape(onboard.ENGINE_SLUG)
+_SLUG = rf"(?<![\w.-])(?i:{re.escape(onboard.ENGINE_SLUG)})"
 _PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)([ \t]+# v[^ \t]*)?')
-_REF = re.compile(rf'{_SLUG}/([^@ \t"]+)@', re.IGNORECASE)
+_REF = re.compile(rf'{_SLUG}/([^@ \t"]+)@')
 _TRIGGER = re.compile(r"^    branches: \[([^\]\n]*)\]$", re.M)
 
 
@@ -70,7 +73,8 @@ def _lines(text):
 
 
 def _resolve(tag):
-    """The commit `tag` names, refused unless it is a release tag on `origin/main`."""
+    """(the commit `tag` names, whether `origin` holds the tag), refused unless it is a release
+    tag on `origin/main` agreeing with `origin`'s."""
     if not onboard._VERSION_RE.fullmatch(tag):
         raise SystemExit(f"{tag!r} is not a vX.Y.Z release tag.")
     rc, _out, err = _git("fetch", "origin", "main")
@@ -83,6 +87,7 @@ def _resolve(tag):
             f"`git -C {ENGINE} fetch origin tag {tag}`."
         )
     sha = sha.strip()
+    on_origin = _check_remote_tag(tag, sha)
     rc, _out, err = _git("merge-base", "--is-ancestor", sha, "origin/main")
     if rc == 1:
         raise SystemExit(
@@ -91,13 +96,12 @@ def _resolve(tag):
         )
     if rc:
         raise SystemExit(f"git merge-base --is-ancestor failed in {ENGINE}:\n{err}")
-    _check_remote_tag(tag, sha)
-    return sha
+    return sha, on_origin
 
 
 def _check_remote_tag(tag, sha):
-    """Refuse when `origin` holds `tag` on a commit other than `sha`. A tag `origin` lacks
-    passes: the release smoke re-pins before the tag is pushed."""
+    """Whether `origin` holds `tag`, refused when it does on a commit other than `sha`. A tag
+    `origin` lacks passes: the release smoke re-pins before the tag is pushed."""
     ref = f"refs/tags/{tag}"
     rc, out, err = _git("ls-remote", "origin", ref, f"{ref}^{{}}")
     if rc:
@@ -109,6 +113,7 @@ def _check_remote_tag(tag, sha):
             f"the local tag {tag} names {sha}, but origin's names {peeled}. Replace the local "
             f"tag: `git -C {ENGINE} tag -d {tag} && git -C {ENGINE} fetch origin tag {tag}`."
         )
+    return peeled is not None
 
 
 def _read(consumer):
@@ -133,10 +138,7 @@ def _rewrite(texts, sha, tag):
     def line(body):
         return _PIN.sub(lambda m: f"{m[1]}@{sha}{m[2]} # {tag}", body, count=1)
 
-    return {
-        name: "".join(line(b) + t for b, t in _lines(text)) if name.endswith(".yml") else text
-        for name, text in texts.items()
-    }
+    return {name: "".join(line(b) + t for b, t in _lines(text)) for name, text in texts.items()}
 
 
 def _check_refs(wf, texts, sha, tag):
@@ -184,7 +186,10 @@ def main():
     if len(sys.argv) != 3:
         raise SystemExit("usage: python <engine>/scripts/repin <consumer> <tag>")
     consumer, tag = sys.argv[1:]
-    sha = _resolve(tag)
+    sha, on_origin = _resolve(tag)
+    print(f"{tag} -> {sha}")
+    if not on_origin:
+        print(f"origin has no tag {tag}: pinning to a local tag")
     wf, texts = _read(consumer)
     new = _rewrite(texts, sha, tag)
     _check_refs(wf, new, sha, tag)

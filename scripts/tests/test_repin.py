@@ -139,6 +139,7 @@ def test_every_pin_is_rewritten_in_place_keeping_its_line_endings(
     sha = engine.sha
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
+        f"v1.2.3 -> {sha}\n"
         "unchanged ci.yml\n"
         "updated shipmate.yml\n"
         "updated sweep.yml\n"
@@ -202,14 +203,29 @@ LEFTOVER = (
             "`git -C {engine} fetch origin tag v9.9.8`.",
             id="unknown-tag",
         ),
+    ],
+)
+def test_a_refusal_before_the_tag_resolves_prints_nothing(
+    engine, tmp_path, monkeypatch, capsys, tag, files, message
+):
+    """Mutations, each red: delete the `_VERSION_RE` check (not-a-version); delete the
+    `rev-parse` return-code check (unknown-tag)."""
+    wf = consumer(tmp_path, files)
+    expected = message.format(engine=engine.path)
+    assert run(monkeypatch, str(tmp_path / "consumer"), tag) == expected
+    assert capsys.readouterr().out == ""
+    assert on_disk(wf) == files
+
+
+@pytest.mark.parametrize(
+    "files, message",
+    [
         pytest.param(
-            TAG,
             {"shipmate.yml": GOOD + f"  apply:\n    uses: {WF}/apply.yml@main\n".encode()},
             LEFTOVER + f"shipmate.yml:5:     uses: {WF}/apply.yml@main",
             id="at-main",
         ),
         pytest.param(
-            TAG,
             {
                 "shipmate.yml": GOOD
                 + b"  x:\n    uses: Ship-IaC/shipmate/.github/workflows/apply.yml@main\n"
@@ -219,57 +235,43 @@ LEFTOVER = (
             id="case-variant",
         ),
         pytest.param(
-            TAG,
             {"shipmate.yml": f"    uses: {WF}/plan.yml@main # was {WF}/plan.yml@{OLD}\n".encode()},
             LEFTOVER
             + f"shipmate.yml:1:     uses: {WF}/plan.yml@main # was {WF}/plan.yml@{{sha}} # v1.2.3",
             id="at-main-with-a-pin-in-its-comment",
         ),
         pytest.param(
-            TAG,
             {"shipmate.yml": f"    uses: '{WF}/plan.yml@{OLD}'\n".encode()},
             LEFTOVER + f"shipmate.yml:1:     uses: '{WF}/plan.yml@{{sha}} # v1.2.3'",
             id="single-quoted",
         ),
         pytest.param(
-            TAG,
-            {
-                "shipmate.yml": GOOD,
-                "sweep.yaml": f"    uses: {WF}/drift.yml@{OLD} # v0.1.0\n".encode(),
-            },
-            LEFTOVER + f"sweep.yaml:1:     uses: {WF}/drift.yml@{OLD} # v0.1.0",
-            id="yaml-extension",
-        ),
-        pytest.param(
-            TAG,
             {"shipmate.yml": GOOD + f"  gone:\n    uses: {WF}/gone.yml@{OLD}\n".encode()},
             "engine workflows missing at v1.2.3, so their pins would not resolve: make the "
             "consumer-file edit its CHANGELOG names:\n.github/workflows/gone.yml",
             id="callee-missing",
         ),
         pytest.param(
-            TAG,
             {"ci.yml": CI},
             "no engine reference under {wf}.",
             id="no-engine-ref",
         ),
     ],
 )
-def test_a_refusal_writes_nothing(engine, tmp_path, monkeypatch, capsys, tag, files, message):
-    """Each refusal is the script's own whole message, nothing is printed, and every byte stays.
+def test_a_refusal_writes_nothing(engine, tmp_path, monkeypatch, capsys, files, message):
+    """Each refusal is the script's own whole message, only the resolved tag is printed, and
+    every byte stays.
 
-    Mutations, one per case, each red: delete the `_VERSION_RE` check (not-a-version); delete
-    the `rev-parse` return-code check (unknown-tag); delete the end-of-line `good` test
-    (at-main, at-main-with-a-pin-in-its-comment, single-quoted, yaml-extension); test from the
-    line's last ref instead of its first (at-main-with-a-pin-in-its-comment); check only `.yml`
-    files for leftovers (yaml-extension); delete the `_check_callees` call (callee-missing);
-    delete the `no engine reference` check (no-engine-ref); drop `re.IGNORECASE` from `_REF`
-    (case-variant).
+    Mutations, one per case, each red: delete the end-of-line `good` test (at-main,
+    at-main-with-a-pin-in-its-comment, single-quoted); test from the line's last ref instead of
+    its first (at-main-with-a-pin-in-its-comment); delete the `_check_callees` call
+    (callee-missing); delete the `no engine reference` check (no-engine-ref); drop the `(?i:)`
+    group from `_SLUG` (case-variant); drop the `<tag> -> <sha>` print (every case).
     """
     wf = consumer(tmp_path, files)
-    expected = message.format(engine=engine.path, sha=engine.sha, wf=wf)
-    assert run(monkeypatch, str(tmp_path / "consumer"), tag) == expected
-    assert capsys.readouterr().out == ""
+    expected = message.format(sha=engine.sha, wf=wf)
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == expected
+    assert capsys.readouterr().out == f"v1.2.3 -> {engine.sha}\n"
     assert on_disk(wf) == files
 
 
@@ -305,7 +307,7 @@ def test_a_page_with_two_shipmate_fences_refuses_before_any_write(
 ):
     """Mutation: move the `_render` call after the write loop -- the message is the same and
     the file is rewritten."""
-    _commit(engine.path, {"docs/getting-started.md": PAGE + PAGE}, "two fences")
+    two = _commit(engine.path, {"docs/getting-started.md": PAGE + PAGE}, "two fences")
     _git(engine.path, "push", "-q", "origin", "main")
     _git(engine.path, "tag", "v1.3.0")
     wf = consumer(tmp_path, {"shipmate.yml": GOOD})
@@ -313,7 +315,9 @@ def test_a_page_with_two_shipmate_fences_refuses_before_any_write(
         "2 documented fences are named 'shipmate'; expected exactly one. The workflow file is "
         "rendered from the docs, so its fence name must agree."
     )
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out == (
+        f"v1.3.0 -> {two}\norigin has no tag v1.3.0: pinning to a local tag\n"
+    )
     assert on_disk(wf) == {"shipmate.yml": GOOD}
 
 
@@ -322,7 +326,7 @@ def test_a_missing_workflows_directory_is_refused(engine, tmp_path, monkeypatch,
     assert run(monkeypatch, str(tmp_path / "nowhere"), TAG) == (
         f"no workflows directory at {tmp_path / 'nowhere' / '.github' / 'workflows'}."
     )
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out == f"v1.2.3 -> {engine.sha}\n"
 
 
 def test_a_usage_error_exits_1(monkeypatch, capsys):
@@ -356,7 +360,8 @@ def test_a_crlf_shim_equal_to_the_fence_but_for_its_pins_matches(
     wf = consumer(tmp_path, {"shipmate.yml": _fence_shim("main", f"{OLD} # v0.1.0", "\r\n")})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 0
     assert (
-        capsys.readouterr().out == "updated shipmate.yml\nshipmate.yml matches the v1.2.3 fence\n"
+        capsys.readouterr().out
+        == f"v1.2.3 -> {engine.sha}\nupdated shipmate.yml\nshipmate.yml matches the v1.2.3 fence\n"
     )
     assert on_disk(wf) == {"shipmate.yml": _fence_shim("main", f"{engine.sha} # v1.2.3", "\r\n")}
 
@@ -367,7 +372,8 @@ def test_a_crlf_shim_on_develop_matches_a_develop_render(engine, tmp_path, monke
     wf = consumer(tmp_path, {"shipmate.yml": _fence_shim("develop", f"{OLD} # v0.1.0", "\r\n")})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 0
     assert (
-        capsys.readouterr().out == "updated shipmate.yml\nshipmate.yml matches the v1.2.3 fence\n"
+        capsys.readouterr().out
+        == f"v1.2.3 -> {engine.sha}\nupdated shipmate.yml\nshipmate.yml matches the v1.2.3 fence\n"
     )
     assert on_disk(wf) == {"shipmate.yml": _fence_shim("develop", f"{engine.sha} # v1.2.3", "\r\n")}
 
@@ -383,6 +389,7 @@ def test_a_shim_with_an_extra_line_prints_its_diff_and_exits_2(
     wf = consumer(tmp_path, {"shipmate.yml": shim})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\n"
         "updated shipmate.yml\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
@@ -412,6 +419,7 @@ def test_a_shim_without_a_final_newline_ends_the_diff_on_one(engine, tmp_path, m
     consumer(tmp_path, {"shipmate.yml": shim})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\n"
         "updated shipmate.yml\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
@@ -431,7 +439,7 @@ def test_a_file_that_is_not_utf8_is_refused_before_any_write(engine, tmp_path, m
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == (
         f"{wf / 'bin.yml'} is not UTF-8 text, so it cannot be re-pinned."
     )
-    assert capsys.readouterr().out == ""
+    assert capsys.readouterr().out == f"v1.2.3 -> {engine.sha}\n"
     assert on_disk(wf) == files
 
 
@@ -453,11 +461,14 @@ def test_a_local_tag_on_another_commit_than_origins_is_refused(
     assert on_disk(wf) == {"shipmate.yml": GOOD}
 
 
-def _other(engine, tmp_path, monkeypatch, capsys, files, tag=TAG):
-    """Run over `files` holding no `shipmate.yml`; return the bytes left on disk."""
+def _other(engine, tmp_path, monkeypatch, capsys, files, out=None, tag=TAG):
+    """Run over `files` holding no `shipmate.yml`, asserting the whole output `out` (by default
+    the resolved tag and `updated other.yml`); return the bytes left on disk."""
     wf = consumer(tmp_path, files)
     assert run(monkeypatch, str(tmp_path / "consumer"), tag) == 2
-    assert capsys.readouterr().out == "updated other.yml\nshipmate.yml absent\n"
+    assert capsys.readouterr().out == (
+        out or f"v1.2.3 -> {engine.sha}\nupdated other.yml\nshipmate.yml absent\n"
+    )
     return on_disk(wf)
 
 
@@ -466,10 +477,15 @@ def _pinned(sha, sep="\n"):
 
 
 def test_a_tag_origin_lacks_passes(engine, tmp_path, monkeypatch, capsys):
-    """The release smoke re-pins before the tag is pushed. Mutation: refuse when origin lacks
-    the tag (`peeled != sha`)."""
+    """The release smoke re-pins before the tag is pushed, and the run says so. Mutations:
+    refuse when origin lacks the tag (`peeled != sha`); drop the `origin has no tag` print."""
     _git(engine.path, "tag", "v1.2.4")
-    assert _other(engine, tmp_path, monkeypatch, capsys, {"other.yml": GOOD}, "v1.2.4") == {
+    out = (
+        f"v1.2.4 -> {engine.sha}\norigin has no tag v1.2.4: pinning to a local tag\n"
+        "updated other.yml\nshipmate.yml absent\n"
+    )
+    files = {"other.yml": GOOD}
+    assert _other(engine, tmp_path, monkeypatch, capsys, files, out, "v1.2.4") == {
         "other.yml": _pinned(engine.sha).replace("v1.2.3", "v1.2.4").encode()
     }
 
@@ -482,6 +498,7 @@ def test_a_wildcard_trigger_renders_on_main_and_shows_in_the_diff(
     consumer(tmp_path, {"shipmate.yml": _fence_shim("'**'", f"{OLD} # v0.1.0", "\n")})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
     assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\n"
         "updated shipmate.yml\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
@@ -519,6 +536,45 @@ def test_a_ref_under_another_owner_is_not_rewritten(engine, tmp_path, monkeypatc
     }
 
 
+def test_a_case_variant_slug_is_rewritten_keeping_its_spelling(
+    engine, tmp_path, monkeypatch, capsys
+):
+    """GitHub matches an owner and repository name case-insensitively. Mutation: drop the
+    `(?i:)` group from `_SLUG` -- the pin is left on `OLD` and refused as a leftover."""
+    files = {"other.yml": GOOD.replace(b"ship-iac/shipmate", b"Ship-IaC/ShipMate")}
+    assert _other(engine, tmp_path, monkeypatch, capsys, files) == {
+        "other.yml": _pinned(engine.sha).replace("ship-iac/shipmate", "Ship-IaC/ShipMate").encode()
+    }
+
+
+def test_a_yaml_file_is_rewritten_like_a_yml_file(engine, tmp_path, monkeypatch, capsys):
+    """GitHub runs both extensions. Mutation: rewrite only names ending in `.yml` -- the
+    `.yaml` pin is refused as a leftover."""
+    out = f"v1.2.3 -> {engine.sha}\nupdated other.yaml\nshipmate.yml absent\n"
+    assert _other(engine, tmp_path, monkeypatch, capsys, {"other.yaml": GOOD}, out) == {
+        "other.yaml": _pinned(engine.sha).encode()
+    }
+
+
+def test_a_stale_local_tag_off_origin_main_gets_the_stale_tag_remedy(
+    engine, tmp_path, monkeypatch, capsys
+):
+    """origin holds `TAG` on the fixture commit; the local `TAG` moves to a commit only on a
+    side branch. Mutation: run `_check_remote_tag` after the merge-base check -- the run refuses
+    as not on origin/main, naming no remedy for the tag."""
+    _git(engine.path, "checkout", "-q", "-b", "side")
+    side = _commit(engine.path, {"side.txt": "x\n"}, "side")
+    _git(engine.path, "tag", "-f", "-a", "-m", TAG, TAG)
+    wf = consumer(tmp_path, {"shipmate.yml": GOOD})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == (
+        f"the local tag v1.2.3 names {side}, but origin's names {engine.sha}. Replace the "
+        f"local tag: `git -C {engine.path} tag -d v1.2.3 && git -C {engine.path} fetch origin "
+        "tag v1.2.3`."
+    )
+    assert capsys.readouterr().out == ""
+    assert on_disk(wf) == {"shipmate.yml": GOOD}
+
+
 def test_only_yml_and_yaml_files_are_read(engine, tmp_path, monkeypatch, capsys):
     """GitHub runs only those two extensions, so a `.DS_Store` beside them is not the script's
     to read. Mutation: drop the extension filter in `_read` -- `.DS_Store` is refused as not
@@ -534,7 +590,10 @@ def test_an_absent_shim_is_reported_and_exits_2(engine, tmp_path, monkeypatch, c
     """Mutation: exit 0 on the absent branch."""
     wf = consumer(tmp_path, {"sweep.yml": SWEEP_BEFORE})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
-    assert capsys.readouterr().out == "updated sweep.yml\nshipmate.yml absent\n"
+    assert (
+        capsys.readouterr().out
+        == f"v1.2.3 -> {engine.sha}\nupdated sweep.yml\nshipmate.yml absent\n"
+    )
     assert on_disk(wf) == {
         "sweep.yml": (
             f"name: sweep\r\non: workflow_dispatch\r\njobs:\r\n  drift:\r\n"

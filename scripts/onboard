@@ -702,7 +702,9 @@ def _reconcile_shim(ctx):
         report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:
         report("differs", filename, "differs beyond its pin, not overwritten")
-        print(shim_diff(text, current, filename), end="")
+        # The predicate indents a blank context line (" \n") too; the default skips it.
+        diff = textwrap.indent(shim_diff(text, current, filename), "    ", lambda _line: True)
+        print(diff, end="")
 
 
 def _passphrase_item(ctx):
