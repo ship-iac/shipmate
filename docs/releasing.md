@@ -33,8 +33,12 @@ pin and table, so the edits take effect together at merge.
    - the tag has the `vX.Y.Z` form and resolves as a tag, never as a branch of that name;
    - its commit is on `origin/main`, because a commit reachable only from a branch stops
      resolving once that branch is force-pushed or deleted;
+   - when `origin` holds the tag, it names the same commit as the local tag. A stale local
+     tag refuses with the remedy `git tag -d vX.Y.Z && git fetch origin tag vX.Y.Z`. A tag
+     `origin` lacks passes, because the release smoke re-pins before the push;
    - the directory holds at least one engine ref;
-   - every engine ref in every file directly in `<consumer>/.github/workflows/` ends its line
+   - every engine ref in every `.yml` and `.yaml` file directly in
+     `<consumer>/.github/workflows/` ends its line
      as `@<sha> # vX.Y.Z` or `@<sha>" # vX.Y.Z` after the rewrite, `<sha>` being the tag's
      commit;
    - every engine workflow the consumer calls exists at the tag;
@@ -302,8 +306,12 @@ gh workflow run manifest-load.yml --ref main
 A red `manifest-load` means a fix commit, so the release SHA moves: delete the local tag
 (`git tag -d vX.Y.Z`) and smoke the new release commit from step 1.
 
+Push the annotated tag the smoke created. When no smoke created it, the first line creates
+it here, on `<release-sha>`:
+
 ```bash
-git push origin v0.2.0   # the annotated tag the smoke created
+git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || git tag -a v0.2.0 -m v0.2.0 <release-sha>
+git push origin v0.2.0
 gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
 ```
 
