@@ -17,33 +17,19 @@ runs:
         # versions this release was tested with. An unresolved version must fail the step:
         # setup-opentofu reads an empty tofu_version as "latest", which is silent tool drift.
         versions="$GITHUB_ACTION_PATH/../../VERSIONS"
-        if [ ! -f "$versions" ]; then
-          echo "::error::$versions does not exist: it carries the terramate= and tofu= versions this release pins."
-          exit 1
-        fi
+        need() { "${@:2}" || { echo "::error::$1"; exit 1; }; }
+        need "$versions does not exist: it carries the terramate= and tofu= versions this release pins." test -f "$versions"
         TERRAMATE_VERSION="$(sed -n 's/^terramate=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
         TOFU_VERSION="$(sed -n 's/^tofu=//p' "$versions" | tail -n1 | tr -d '[:space:]')"
-        if [ -z "$TERRAMATE_VERSION" ]; then
-          echo "::error::$versions carries no terramate= line; restore it."
-          exit 1
-        fi
-        if [ -z "$TOFU_VERSION" ]; then
-          echo "::error::$versions carries no tofu= line; restore it."
-          exit 1
-        fi
+        need "$versions carries no terramate= line; restore it." test -n "$TERRAMATE_VERSION"
+        need "$versions carries no tofu= line; restore it." test -n "$TOFU_VERSION"
         # `sha256sum` lines whose asset name starts with the prefix. The name carries the
         # version, so a version bump without its checksum lines finds none and refuses.
         pinned() { tr -d '\r' < "$versions" | awk -v p="$1" 'NF == 2 && index($2, p) == 1'; }
         TERRAMATE_SHA256="$(pinned "terramate_${TERRAMATE_VERSION}_")"
         TOFU_SHA256="$(pinned "tofu_${TOFU_VERSION}_" | awk '{print $1}')"
-        if [ -z "$TERRAMATE_SHA256" ]; then
-          echo "::error::$versions carries no sha256 line for terramate ${TERRAMATE_VERSION}; paste the release's checksum lines."
-          exit 1
-        fi
-        if [ -z "$TOFU_SHA256" ]; then
-          echo "::error::$versions carries no sha256 line for tofu ${TOFU_VERSION}; paste the release's checksum lines."
-          exit 1
-        fi
+        need "$versions carries no sha256 line for terramate ${TERRAMATE_VERSION}; paste the release's checksum lines." test -n "$TERRAMATE_SHA256"
+        need "$versions carries no sha256 line for tofu ${TOFU_VERSION}; paste the release's checksum lines." test -n "$TOFU_SHA256"
         {
           echo "terramate=$TERRAMATE_VERSION"
           echo "tofu=$TOFU_VERSION"

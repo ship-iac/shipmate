@@ -10,6 +10,7 @@ from _detect_fixtures import (
     run_graph_capture,
     spy_env_config,
     stub_read_table,
+    wave_cells,
 )
 from _detect_fixtures import check_run as _check
 from _loader import github_outputs, load_script
@@ -217,16 +218,6 @@ def _run_main(
     return github_outputs(out)
 
 
-def _wave_cells(parsed):
-    return [
-        c
-        for lvl in range(dd.wv.MAX_ENV_LEVELS)
-        for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
-        for i in range(dd.ad.wv.MAX_WAVES)
-        for c in w[f"wave{i}"]
-    ]
-
-
 def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path, monkeypatch):
     """The post-merge path resolves no plan run from the plan workflow's runs, and it reads the
     head's check-run listing exactly once: two reads of one listing disagree when a re-plan
@@ -242,7 +233,7 @@ def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path,
         checks=[_apply_check("stacks/app")],
         urls=urls,
     )
-    assert len(_wave_cells(parsed)) == 1  # Not vacuous: a cell exists.
+    assert len(wave_cells(dd.wv, parsed)) == 1  # Not vacuous: a cell exists.
     assert urls == [CHECK_RUNS_URL]
 
 
@@ -283,7 +274,7 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
             _apply_check("stacks/app", "dev-us", plan_run="222"),
         ],
     )
-    assert sorted((c["environment"], c["plan_run_id"]) for c in _wave_cells(parsed)) == [
+    assert sorted((c["environment"], c["plan_run_id"]) for c in wave_cells(dd.wv, parsed)) == [
         ("dev-eu", "111"),
         ("dev-us", "222"),
     ]
@@ -353,7 +344,7 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
             _check(name="apply / stacks/app / dev-us", external_id="b" * 64),
         ],
     )
-    assert [c["environment"] for c in _wave_cells(parsed)] == ["dev-eu"]
+    assert [c["environment"] for c in wave_cells(dd.wv, parsed)] == ["dev-eu"]
 
 
 def test_main_notice_reports_the_no_op_evidence(tmp_path, monkeypatch, capsys):
@@ -390,7 +381,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
             _check(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
         ],
     )
-    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
 
 
 def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
@@ -483,7 +474,7 @@ def test_main_unpacks_the_real_compute_cells_return(tmp_path, monkeypatch):
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
-    assert [(c["environment"], c["stack"]) for c in _wave_cells(parsed)] == [
+    assert [(c["environment"], c["stack"]) for c in wave_cells(dd.wv, parsed)] == [
         ("dev-eu", "stacks/app")
     ]
 
@@ -673,7 +664,7 @@ def test_main_skips_an_open_check_on_a_stack_the_scan_does_not_cover(tmp_path, m
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
-    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
 
 
 def test_a_name_whose_rest_is_no_env_name_is_not_the_stack_s_check(tmp_path, monkeypatch):
@@ -688,7 +679,7 @@ def test_a_name_whose_rest_is_no_env_name_is_not_the_stack_s_check(tmp_path, mon
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
-    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
 
 
 def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path, monkeypatch):
@@ -702,7 +693,7 @@ def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path,
         stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
         deps={"stacks/app": set(), "stacks/gone": set()},
     )
-    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(dd.wv, parsed)] == ["stacks/app"]
 
 
 _PROBE_DEPS = {

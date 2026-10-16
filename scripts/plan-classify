@@ -67,13 +67,7 @@ def main(argv):
     if "--fingerprint-only" in argv:
         return
     with open("plan.json", encoding="utf-8") as fh:
-        counts = classify(json.load(fh))
-    write_outputs(
-        changed=bool(counts["changed"]),
-        add=counts["add"],
-        change=counts["change"],
-        destroy=counts["destroy"],
-    )
+        write_outputs(**classify(json.load(fh)))
 
 
 if __name__ == "__main__":

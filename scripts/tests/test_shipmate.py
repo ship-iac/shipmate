@@ -9,12 +9,12 @@ from _loader import ENGINE
 from _shipmate import (
     _run,
     approval_rules,
+    cell_names,
     check_runs,
     command_data,
     gate_check,
     is_head_sha,
     is_pr_number,
-    missing_names,
     named,
     review_count,
     run_annotated,
@@ -171,19 +171,19 @@ def test_named_lists_cap_items_whole_and_counts_the_rest():
             [{"stack": "a", "environment": "dev"}],
         ),
         ("[]", []),
-        ("", []),
-        ("not json", []),
-        ('{"stack": "a", "environment": "dev"}', []),
-        ('[{"stack": "a"}]', []),
-        ('[{"stack": "a", "environment": 1}]', []),
-        ('["a / dev"]', []),
+        ("", None),
+        ("not json", None),
+        ('{"stack": "a", "environment": "dev"}', None),
+        ('[{"stack": "a"}]', None),
+        ('[{"stack": "a", "environment": 1}]', None),
+        ('["a / dev"]', None),
     ],
     ids=["names", "empty-list", "empty", "bad-json", "object", "no-env", "int-env", "string"],
 )
-def test_missing_names_reads_names_or_nothing_and_never_raises(raw, names):
+def test_cell_names_reads_names_or_none_and_never_raises(raw, names):
     """Mutations: let bad JSON raise (drop the `except`) -- `empty` and `bad-json` red; drop the
     `environment` type check -- `no-env` and `int-env` red."""
-    assert missing_names(raw) == names
+    assert cell_names(raw) == names
 
 
 _SHA = "0123456789abcdef0123456789abcdef01234567"

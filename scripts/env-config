@@ -532,10 +532,6 @@ def _empty(name, where):
     )
 
 
-def _not_an_account(name, where):
-    return SystemExit(f"::error::identities.{name}.{where} is not a 12-digit AWS account id.")
-
-
 def _check_value(name, where, field, value):
     """One string at an identity's field position: non-empty, an account id where the field
     is `account`, and no brace but the placeholder in a role."""
@@ -543,7 +539,9 @@ def _check_value(name, where, field, value):
         raise _empty(name, where)
     if field == "account":
         if not _ACCOUNT_ID.fullmatch(value):
-            raise _not_an_account(name, where)
+            raise SystemExit(
+                f"::error::identities.{name}.{where} is not a 12-digit AWS account id."
+            )
     elif "{" in value.replace(_PLACEHOLDER, "") or "}" in value.replace(_PLACEHOLDER, ""):
         raise SystemExit(
             f"::error::identities.{name}.{where} holds a brace outside {_PLACEHOLDER}, the "
@@ -579,13 +577,6 @@ def _check_field(name, field, value, errors):
         )
 
 
-def _aws_key_error(name, key):
-    return (
-        f"::error::identities.{name}.aws.{key} is not a field this engine implements. An "
-        "identity holds aws.account, aws.plan and aws.apply."
-    )
-
-
 def _check_identity(identity, name, errors):
     """One identity's own shape, one message per check into `errors`. A non-mapping
     identity, or a non-mapping `aws`, gets its one message and no other check."""
@@ -604,7 +595,12 @@ def _check_identity(identity, name, errors):
         _mapping(aws, f"identities.{name}.aws")
     if not shape.ok:
         return
-    errors.extend(_aws_key_error(name, key) for key in sorted(aws) if key not in _ID_FIELDS)
+    errors.extend(
+        f"::error::identities.{name}.aws.{key} is not a field this engine implements. An "
+        "identity holds aws.account, aws.plan and aws.apply."
+        for key in sorted(aws)
+        if key not in _ID_FIELDS
+    )
     if not any(field in aws for field in _ROLE_FIELDS):
         errors.append(
             f"::error::identities.{name} sets neither aws.plan nor aws.apply, so it grants no "

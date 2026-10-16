@@ -848,8 +848,7 @@ def test_the_gather_step_reads_the_plan_runs_from_the_heads_own_check_runs(tmp_p
     run for the whole command and had to compare that run's head against the PR's -- a comparison
     this listing makes unnecessary and, being keyed on the head already, unfalsifiable.
 
-    Mutations: drop `--plan-runs` -> apply-gate writes a verdict and `plan_run.json` is empty;
-    drop `GH_TOKEN="$APP_TOKEN"` -> the listing is read with the workflow token."""
+    Mutation: drop `GH_TOKEN="$APP_TOKEN"` -> the listing is read with the workflow token."""
     _run_gather(tmp_path)
     plan_runs = (tmp_path / "plan_run.json").read_text(encoding="utf-8")
     assert plan_runs == '{"apply / stacks/a / dev": "77"}\n'

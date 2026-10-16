@@ -25,9 +25,6 @@ _RUNNER = (
     "Re-run the job, which clears a transient hosted-runner disk failure, or fix a self-hosted "
     "runner's openssl or disk."
 )
-_REPLAN = (
-    "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
-)
 #: Hand-written, never read from the module.
 _HEADER = b"shipmate-crypt-v1\n"
 _OPENSSL_ARGV = [

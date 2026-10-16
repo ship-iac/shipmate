@@ -11,6 +11,7 @@ from _detect_fixtures import (
     _record,
     answering_run_graph,
     forbid_shared_runner,
+    foreign_message,
     run_graph_capture,
 )
 from _detect_fixtures import check_run as _check
@@ -865,15 +866,6 @@ def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
     )
 
 
-def _foreign_message(listed):
-    return (
-        f"::error::apply aborted: the plan recorded for {listed} was not made on pull request "
-        "#8, so this apply is refused. Re-plan on this pull request (push or comment `shipmate "
-        "plan`), then apply again; if another open pull request shares this head commit, the "
-        "newest plan decides which one may apply."
-    )
-
-
 def test_a_record_for_another_or_no_pull_request_refuses_naming_each():
     """`stacks/app` records PR 7 and `stacks/dns` records none; both are named with what they
     record. Mutation: skip records without `pr` (`and pr and pr != pr_number`) -- the
@@ -881,7 +873,7 @@ def test_a_record_for_another_or_no_pull_request_refuses_naming_each():
     lines = _lines(_apply_check("stacks/app", pr="7"), _apply_check("stacks/dns", pr=None))
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number="8")
-    assert str(exc_info.value) == _foreign_message(
+    assert str(exc_info.value) == foreign_message(
         "apply / stacks/app / dev-eu (pull request #7), "
         "apply / stacks/dns / dev-eu (records no pull request)"
     )
@@ -943,7 +935,7 @@ def test_main_refuses_a_pending_cell_recorded_for_another_pull_request(monkeypat
     _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", pr="7")])
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
-    assert str(exc_info.value) == _foreign_message("apply / stacks/app / dev-eu (pull request #7)")
+    assert str(exc_info.value) == foreign_message("apply / stacks/app / dev-eu (pull request #7)")
 
 
 def test_main_never_consults_an_applied_cells_record(monkeypatch, tmp_path):

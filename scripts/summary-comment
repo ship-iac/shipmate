@@ -43,7 +43,6 @@ from _shipmate import (
     command_data,
     current_run_url,
     is_head_sha,
-    missing_names,
     run_annotated,
     write_outputs,
 )
@@ -371,11 +370,6 @@ def names_line(value, key, lead):
     return line or f"{lead}; their {key} are too long to list here."
 
 
-def unmanaged_line(unmanaged):
-    """`names_line` of build-matrix's `unmanaged` output."""
-    return names_line(unmanaged, "paths", UNMANAGED_LEAD)
-
-
 def _join(sections):
     """One newline between consecutive bare lines, a blank line on both sides of a fold-out:
     without the blank line after `</details>`, the next line stays inside the HTML block and
@@ -389,7 +383,7 @@ def _join(sections):
 
 
 def build_comment(cells, checks, run_url, head_sha, unmanaged=None, lost=None):
-    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the `unmanaged_line` of
+    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the unmanaged paths line of
     `unmanaged` and the lost pairs line of `lost` when each count is not zero, every cell in
     order (a fold-out for a changed cell with plan text, else its bare line). No footer: the
     verdict links the run, and neither plan verdict asks anything. Every cell is guaranteed its
@@ -403,7 +397,7 @@ def build_comment(cells, checks, run_url, head_sha, unmanaged=None, lost=None):
     bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
     named = []
     for line, what in (
-        (unmanaged_line(unmanaged), "unmanaged stacks"),
+        (names_line(unmanaged, "paths", UNMANAGED_LEAD), "unmanaged stacks"),
         (names_line(lost, "pairs", LOST_LEAD), "lost stack / environment pairs"),
     ):
         # The smallest body with the line; past HARD_CAP it goes, so the refusal below keeps
@@ -571,7 +565,7 @@ def _named_output(raw, input_name, key, noun):
 def _held_main(checks, url):
     body = held_comment(
         os.environ.get("SHIPMATE_HOLD_REASON", ""),
-        missing_names(os.environ.get("SHIPMATE_MISSING", "")),
+        cell_names(os.environ.get("SHIPMATE_MISSING", "")) or [],
         os.environ.get("SHIPMATE_PLAN_RESULT", ""),
         checks,
         url,

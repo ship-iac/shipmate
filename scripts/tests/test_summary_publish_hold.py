@@ -76,7 +76,6 @@ APPLY_LIST = [
     "--jq",
     APPLY_CHECKS_JQ,
 ]
-REFRESH_LIST = [*APPLY_LIST[:4], REFRESH_CHECKS_JQ]
 
 
 def _status_post(state, description):

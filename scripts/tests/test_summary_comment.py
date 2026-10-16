@@ -495,31 +495,33 @@ def test_the_two_unmanaged_name_caps_are_equal():
 def test_the_unmanaged_line_names_ten_paths_and_counts_the_rest():
     """The count comes from `count`, not from the ten paths carried.
     Mutation: `more = len(paths) - len(names)` reddens it."""
-    assert sc.unmanaged_line(_named(12, *(f"s{i:02}" for i in range(10)))) == (
-        _LEAD.format(12) + ": s00, s01, s02, s03, s04, s05, s06, s07, s08, s09, and 2 more"
-    )
-    assert sc.unmanaged_line(_named(0)) == ""
-    assert sc.unmanaged_line(None) == ""
+    assert sc.names_line(
+        _named(12, *(f"s{i:02}" for i in range(10))), "paths", sc.UNMANAGED_LEAD
+    ) == (_LEAD.format(12) + ": s00, s01, s02, s03, s04, s05, s06, s07, s08, s09, and 2 more")
+    assert sc.names_line(_named(0), "paths", sc.UNMANAGED_LEAD) == ""
+    assert sc.names_line(None, "paths", sc.UNMANAGED_LEAD) == ""
 
 
 def test_the_unmanaged_line_counts_the_paths_build_matrix_left_out():
     """`count` covers paths the output does not carry. Mutation: count `paths` instead of
     reading `count` -- the line says 3 and names no rest."""
-    assert sc.unmanaged_line(_named(25, "a", "b", "c")) == (
+    assert sc.names_line(_named(25, "a", "b", "c"), "paths", sc.UNMANAGED_LEAD) == (
         _LEAD.format(25) + ": a, b, c, and 22 more"
     )
 
 
 def test_the_unmanaged_line_stops_at_its_character_cap():
     """Mutation: removing the character cap reddens it."""
-    line = sc.unmanaged_line(_named(11, "a" * 400, "b" * 400, *["c" * 3000] * 8))
+    line = sc.names_line(
+        _named(11, "a" * 400, "b" * 400, *["c" * 3000] * 8), "paths", sc.UNMANAGED_LEAD
+    )
     assert line == _LEAD.format(11) + ": " + "a" * 400 + ", " + "b" * 400 + ", and 9 more"
     assert len(line) <= sc.UNMANAGED_LINE_CAP
 
 
 def test_the_unmanaged_line_names_no_path_when_none_fits():
     """Mutation: joining the empty name list (renders `: , and 10 more`) reddens it."""
-    assert sc.unmanaged_line(_named(10, *["p" * 3000] * 10)) == (
+    assert sc.names_line(_named(10, *["p" * 3000] * 10), "paths", sc.UNMANAGED_LEAD) == (
         _LEAD.format(10) + "; their paths are too long to list here."
     )
 
