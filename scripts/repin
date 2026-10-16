@@ -99,8 +99,13 @@ def _read(consumer):
     wf = pathlib.Path(consumer) / ".github" / "workflows"
     if not wf.is_dir():
         raise SystemExit(f"no workflows directory at {wf}.")
-    names = sorted(p.name for p in wf.iterdir() if p.is_file())
-    return wf, {n: (wf / n).read_text(encoding="utf-8", newline="") for n in names}
+    texts = {}
+    for name in sorted(p.name for p in wf.iterdir() if p.is_file()):
+        try:
+            texts[name] = (wf / name).read_text(encoding="utf-8", newline="")
+        except UnicodeDecodeError:
+            raise SystemExit(f"{wf / name} is not UTF-8 text, so it cannot be re-pinned.") from None
+    return wf, texts
 
 
 def _rewrite(texts, sha, tag):
@@ -172,7 +177,8 @@ def main():
         print(f"{SHIM} absent")
         sys.exit(2)
     diff = onboard.shim_diff(rendered, new[SHIM], SHIM)
-    print(diff or f"{SHIM} matches the {tag} fence\n", end="")
+    # A shim without a final newline leaves the diff's last line unterminated.
+    print(diff.removesuffix("\n") or f"{SHIM} matches the {tag} fence")
     sys.exit(2 if diff else 0)
 
 

@@ -71,7 +71,8 @@ def engine(tmp_path, monkeypatch):
     sha = _commit(repo, {**files, "docs/getting-started.md": PAGE}, "release")
     _git(repo, "remote", "add", "origin", str(origin))
     _git(repo, "push", "-q", "origin", "main")
-    _git(repo, "tag", TAG)
+    # Annotated, as a release tag is: its own object SHA differs from the commit's.
+    _git(repo, "tag", "-a", "-m", TAG, TAG)
     monkeypatch.setattr(repin, "ENGINE", repo)
     return types.SimpleNamespace(path=repo, sha=sha)
 
@@ -128,7 +129,8 @@ def test_every_pin_is_rewritten_in_place_keeping_its_line_endings(
     Mutations, each red: read without `newline=""` (the CRLF file comes back LF); drop the
     quote group `("?)` (the quoted pin loses its closing quote's place); run the substitution
     over the whole file text with `\\s+` for `[ \\t]+` (the apply line swallows the note line);
-    `# {sha}` for `# {tag}` in the replacement; print `updated` for every file.
+    `# {sha}` for `# {tag}` in the replacement; print `updated` for every file; drop
+    `^{commit}` from the `rev-parse` argument (the pins carry the annotated tag's object SHA).
     """
     wf = consumer(tmp_path, {"ci.yml": CI, "shipmate.yml": SHIM_BEFORE, "sweep.yml": SWEEP_BEFORE})
     sha = engine.sha
@@ -388,6 +390,36 @@ def test_a_shim_with_an_extra_line_prints_its_diff_and_exits_2(
             f"    uses: {WF}/deploy.yml@{sha} # v1.2.3\n"
         ).encode()
     }
+
+
+def test_a_shim_without_a_final_newline_ends_the_diff_on_one(engine, tmp_path, monkeypatch, capsys):
+    """Mutation: print the diff as `shim_diff` returns it, with `end=""` -- the output ends
+    mid-line."""
+    shim = _fence_shim("main", OLD, "\n").removesuffix(b"\n")
+    consumer(tmp_path, {"shipmate.yml": shim})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == 2
+    assert capsys.readouterr().out == (
+        "updated shipmate.yml\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -8,4 +8,4 @@\n"
+        "   apply:\n"
+        f"     uses: {WF}/apply.yml@<pin>\n"
+        "   deploy:\n"
+        f"-    uses: {WF}/deploy.yml@<pin>\n"
+        f"+    uses: {WF}/deploy.yml@<pin>\n"
+    )
+
+
+def test_a_file_that_is_not_utf8_is_refused_before_any_write(engine, tmp_path, monkeypatch, capsys):
+    """Mutation: drop the `UnicodeDecodeError` handler in `_read` -- the decode error escapes."""
+    files = {"bin.yml": b"\xff\n", "shipmate.yml": GOOD}
+    wf = consumer(tmp_path, files)
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == (
+        f"{wf / 'bin.yml'} is not UTF-8 text, so it cannot be re-pinned."
+    )
+    assert capsys.readouterr().out == ""
+    assert on_disk(wf) == files
 
 
 def test_an_absent_shim_is_reported_and_exits_2(engine, tmp_path, monkeypatch, capsys):
