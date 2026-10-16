@@ -51,8 +51,8 @@ pin and table, so the edits take effect together at merge.
    callee the release deleted or renamed: make the consumer-file edit the release's CHANGELOG
    entries name, in the same commit.
 
-2. Read its output. The first line is `vX.Y.Z -> <sha>`, the commit every ref now names. The
-   end is the diff from the tag's fence to `shipmate.yml`, pins masked.
+2. Read its output. The first line is `vX.Y.Z -> <sha>`, the commit the run resolved; on
+   exit 0 or 2 every ref names it. The end is the diff from the tag's fence to `shipmate.yml`, pins masked.
    A non-empty diff means the release changed the fence, or the file carries a local edit:
    reconcile `shipmate.yml` in the same commit. The exit code says the same:
 
@@ -190,11 +190,16 @@ the release commit, from `repo-example-stacks-aws`:
 
    The script takes a tag, so create the annotated tag in the engine clone first, on
    `<release-sha>`, the release commit's full 40-hex SHA, and do not push it yet. The block is
-   `&&`-chained, so a failed tag creation stops it:
+   `&&`-chained and can be re-run after any failure: it creates the tag only when absent, and
+   `checkout -B` resets the scratch branch. A refusal at the `[[` or the `test` means
+   `<release-sha>` is not the full 40-hex commit, or the local tag names another commit:
+   `git tag -d vX.Y.Z` and run it again.
 
    ```bash
-   git tag -a vX.Y.Z -m vX.Y.Z <release-sha> && \
-     git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z && \
+   [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
+     { git rev-parse -q --verify refs/tags/vX.Y.Z >/dev/null || git tag -a vX.Y.Z -m vX.Y.Z <release-sha>; } && \
+     test "$(git rev-parse 'vX.Y.Z^{commit}')" = <release-sha> && \
+     git -C ../repo-example-stacks-aws checkout -B smoke/vX.Y.Z origin/main && \
      python scripts/repin ../repo-example-stacks-aws vX.Y.Z
    ```
 
@@ -308,15 +313,17 @@ gh workflow run manifest-load.yml --ref main
 A red `manifest-load` means a fix commit, so the release SHA moves: delete the local tag
 (`git tag -d vX.Y.Z`) and smoke the new release commit from step 1.
 
-Push the annotated tag the smoke created. When no smoke created it, the first line creates
-it here, on `<release-sha>`; the `test` then refuses to push a tag that names any other
-commit. A refusal there means a stale local tag: `git tag -d v0.2.0` and run it again.
+Push the annotated tag the smoke created. When no smoke created it, the block creates it
+here, on `<release-sha>`; the `test` then refuses to push a tag that names any other commit.
+A refusal at the `[[` or the `test` means `<release-sha>` is not the full 40-hex commit, or
+the local tag is stale: `git tag -d v0.2.0` and run it again.
 
 ```bash
-{ git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || git tag -a v0.2.0 -m v0.2.0 <release-sha>; } && \
+[[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
+  { git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || git tag -a v0.2.0 -m v0.2.0 <release-sha>; } && \
   test "$(git rev-parse 'v0.2.0^{commit}')" = <release-sha> && \
-  git push origin v0.2.0
-gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
+  git push origin v0.2.0 && \
+  gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
 ```
 
 **Push the tag first; `--target` does not work on this repository.**
