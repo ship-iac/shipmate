@@ -45,16 +45,18 @@ pin and table, so the edits take effect together at merge.
    - every engine workflow the consumer calls exists at the tag;
    - the tag's `shipmate` fence in `docs/getting-started.md` renders.
 
-   A refusal writes nothing. A ref listed as `<file>:<line>: <text>` is one the script does
-   not rewrite (`@main`, a single-quoted ref, a comment after the `# vX.Y.Z` label): fix it by
-   hand and run the script again. A listed missing workflow is a
-   callee the release deleted or renamed: make the consumer-file edit the release's CHANGELOG
-   entries name, in the same commit.
+   A refusal writes nothing. A ref listed as `<file>:<line>: <text>`, the line as it stands on
+   disk, is one the script does not rewrite: `@main`, a single-quoted ref, a case-variant slug
+   such as `Ship-IaC/shipmate`, or text after or glued to the `# vX.Y.Z` label. Fix it by hand
+   and run the script again. A listed missing workflow is a callee the release deleted or
+   renamed: make the consumer-file edit the release's CHANGELOG entries name, in the same
+   commit.
 
 2. Read its output. The first line is `vX.Y.Z -> <sha>`, the commit the run resolved; on
-   exit 0 or 2 every ref names it. The end is the diff from the tag's fence to `shipmate.yml`, pins masked.
-   A non-empty diff means the release changed the fence, or the file carries a local edit:
-   reconcile `shipmate.yml` in the same commit. The exit code says the same:
+   exit 0 or 2 every ref names it. The end is the diff from the tag's fence to
+   `shipmate.yml`, pins masked. A non-empty diff means the release changed the fence, or the
+   file carries a local edit: reconcile `shipmate.yml` in the same commit. The exit code says
+   the same:
 
    | Exit | Meaning |
    | --- | --- |
@@ -191,14 +193,20 @@ the release commit, from `repo-example-stacks-aws`:
    The script takes a tag, so create the annotated tag in the engine clone first, on
    `<release-sha>`, the release commit's full 40-hex SHA, and do not push it yet. The block is
    `&&`-chained and can be re-run after any failure: it creates the tag only when absent, and
-   `checkout -B` resets the scratch branch. A refusal at the `[[` or the `test` means
-   `<release-sha>` is not the full 40-hex commit, or the local tag names another commit:
-   `git tag -d vX.Y.Z` and run it again.
+   `checkout -B` resets the scratch branch to the sample's `origin/main`. When the scratch
+   branch was already pushed, delete it on origin first:
+   `git -C ../repo-example-stacks-aws push origin --delete smoke/vX.Y.Z`. The two checks refuse
+   separately:
+
+   - the `[[` refusing means `<release-sha>` is not the full 40-hex commit: pass the full SHA;
+   - the `test` refusing means the local tag names another commit: `git tag -d vX.Y.Z` and
+     run the block again.
 
    ```bash
    [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
      { git rev-parse -q --verify refs/tags/vX.Y.Z >/dev/null || git tag -a vX.Y.Z -m vX.Y.Z <release-sha>; } && \
      test "$(git rev-parse 'vX.Y.Z^{commit}')" = <release-sha> && \
+     git -C ../repo-example-stacks-aws fetch origin main && \
      git -C ../repo-example-stacks-aws checkout -B smoke/vX.Y.Z origin/main && \
      python scripts/repin ../repo-example-stacks-aws vX.Y.Z
    ```
@@ -247,7 +255,10 @@ the release commit, from `repo-example-stacks-aws`:
    copy, still on the *old* pin. The scratch
    branch is never read, and the smoke goes green without touching the new
    code.
-3. Throw the branch away and cut the release as below, which pushes the tag. A failed smoke
+3. Throw the scratch branch away, local and remote
+   (`git -C ../repo-example-stacks-aws push origin --delete smoke/vX.Y.Z`, then
+   `git -C ../repo-example-stacks-aws checkout main && git -C ../repo-example-stacks-aws branch -D smoke/vX.Y.Z`),
+   and cut the release as below, which pushes the tag. A failed smoke
    deletes the local tag instead (`git tag -d vX.Y.Z`). Nothing reaches the sample's default
    branch before the tag is pushed and released.
 
@@ -315,8 +326,11 @@ A red `manifest-load` means a fix commit, so the release SHA moves: delete the l
 
 Push the annotated tag the smoke created. When no smoke created it, the block creates it
 here, on `<release-sha>`; the `test` then refuses to push a tag that names any other commit.
-A refusal at the `[[` or the `test` means `<release-sha>` is not the full 40-hex commit, or
-the local tag is stale: `git tag -d v0.2.0` and run it again.
+The two checks refuse separately:
+
+- the `[[` refusing means `<release-sha>` is not the full 40-hex commit: pass the full SHA;
+- the `test` refusing means the local tag is stale: `git tag -d v0.2.0` and run the block
+  again.
 
 ```bash
 [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
