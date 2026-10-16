@@ -565,7 +565,7 @@ def _named_output(raw, input_name, key, noun):
 def _held_main(checks, url):
     body = held_comment(
         os.environ.get("SHIPMATE_HOLD_REASON", ""),
-        cell_names(os.environ.get("SHIPMATE_MISSING", "")) or [],
+        cell_names(os.environ.get("SHIPMATE_MISSING", "")),
         os.environ.get("SHIPMATE_PLAN_RESULT", ""),
         checks,
         url,

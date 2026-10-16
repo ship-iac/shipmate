@@ -88,8 +88,7 @@ def _not_attempted_note(rows, env_name):
         )
     return (
         f"not attempted: the apply checks stay pending; {retry} If a cell's job log shows "
-        "`The apply step ran and its state was not saved`, follow docs/troubleshooting.md "
-        "section of that name first."
+        f"{_LOST_LOG}, follow docs/troubleshooting.md section of that name first."
     )
 
 

@@ -192,16 +192,17 @@ def cap_cells(cells, all_stacks):
         f"::error::{len(cells)} plan cells exceeds the GitHub Actions matrix limit of "
         f"{MATRIX_LIMIT}. "
     )
-    if all_stacks:
-        raise SystemExit(
-            head + "A drift sweep is one matrix; split it across more drift files, each calling "
-            "drift.yml with a narrower `tags` query (docs/drift.md)."
-        )
     raise SystemExit(
-        head + "Split the change across several pull requests -- the matrix is "
-        "built over `terramate list --changed`. A one-line edit to a shared local module "
-        "correctly marks every dependent stack changed and is one atomic change by nature; "
-        "there the only lever is to reduce the number of environments in play."
+        head
+        + (
+            "A drift sweep is one matrix; split it across more drift files, each calling "
+            "drift.yml with a narrower `tags` query (docs/drift.md)."
+            if all_stacks
+            else "Split the change across several pull requests -- the matrix is "
+            "built over `terramate list --changed`. A one-line edit to a shared local module "
+            "correctly marks every dependent stack changed and is one atomic change by nature; "
+            "there the only lever is to reduce the number of environments in play."
+        )
     )
 
 

@@ -180,6 +180,8 @@ def plan_records(check_run_lines, app_id):
 
 
 def verdict(check_runs):
+    """The gate verdict over `check_runs`, which must already be `app_runs` output: this does
+    not filter by App identity."""
     latest = latest_by_name(check_runs)
     return "complete" if latest and all(_is_done(r) for r in latest.values()) else "pending"
 
