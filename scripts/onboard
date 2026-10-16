@@ -790,9 +790,9 @@ def _custom_rule_items(ctx):
 def _read_or_reason(path):
     """`(parsed gh api <path>, None)`, or `(None, reason)` when the read fails for any reason.
 
-    `_run` raises `command failed (N): <argv>` and then gh's scrubbed stderr, so `reason` is
-    every non-empty stderr line joined with "; ", or the first line when gh printed nothing.
-    Only for a checklist row that degrades to
+    `_run` raises `command failed (N): <argv>` followed by gh's scrubbed stderr, where gh
+    prints its error first and hints after. `reason` is that first stderr line, or the
+    `command failed` line when gh printed nothing. Only for a checklist row that degrades to
     `cannot check`. A reconciler that writes uses `_gh_json_or_none`, which treats only a
     404 as absent.
     """
@@ -800,7 +800,14 @@ def _read_or_reason(path):
         return _gh_json(path), None
     except SystemExit as e:
         lines = [ln for ln in str(e).splitlines() if ln.strip()]
-        return None, "; ".join(lines[1:] or lines)
+        return None, (lines[1:] or lines or [""])[0]
+
+
+#: Rows 12 and 20 while Actions are off: what re-enabling resets is unprobed, so no command.
+ACTIONS_DISABLED = (
+    "Actions are disabled on this repository. Enable them in Settings → Actions, "
+    "then run onboard again."
+)
 
 
 def _unread(item, path, reason):
@@ -847,18 +854,20 @@ def _sha_pinning_item(path, perms, reason):
     item = "actions pinned to a full-length commit SHA (hardening.md row 20)"
     if perms is None:
         return _unread(item, path, reason)
-    disabled = perms.get("enabled") is False
-    if perms.get("sha_pinning_required") is True and not disabled:
+    if perms.get("enabled") is False:
+        return "todo", item, [ACTIONS_DISABLED]
+    if perms.get("sha_pinning_required") is True:
         return "ok", item, []
     put = ["gh", "api", "-X", "PUT", path, "-F", "enabled=true", "-F", "sha_pinning_required=true"]
-    lines = [
-        "With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,",
-        "with the exemptions in docs/hardening.md row 20.",
-        shlex.join(put),
-    ]
-    if disabled:
-        lines.insert(0, "Actions are disabled on this repository; the command enables them too.")
-    return "todo", item, lines
+    return (
+        "todo",
+        item,
+        [
+            "With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,",
+            "with the exemptions in docs/hardening.md row 20.",
+            shlex.join(put),
+        ],
+    )
 
 
 def _selected_actions_command(path, patterns):
@@ -870,12 +879,13 @@ def _selected_actions_command(path, patterns):
     return shlex.join(args)
 
 
-def _allowed_actions_setup(base, state):
-    """Row 12 while Actions are off or the mode is not `selected`, when the current list
-    cannot be read (409). `state` is the line saying which."""
+def _allowed_actions_setup(base, mode):
+    """Row 12 while the mode is not `selected`, when the current list cannot be read (409)."""
     first = ["gh", "api", "-X", "PUT", base, "-F", "enabled=true", "-f", "allowed_actions=selected"]
     return [
-        state,
+        "`allowed_actions` was not in the read."
+        if mode is None
+        else f"`allowed_actions` is `{mode}`, not `selected`.",
         "The list below holds only what shipmate needs. For each other third-party action",
         "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
         'those workflows fail at "Set up job" too: this run cannot read the current list',
@@ -912,15 +922,10 @@ def _allowed_actions_item(base, perms, reason):
     item = "allowed actions (hardening.md row 12)"
     if perms is None:
         return _unread(item, base, reason)
-    mode = perms.get("allowed_actions")
     if perms.get("enabled") is False:
-        state = "Actions are disabled on this repository; the first command enables them."
-        return "todo", item, _allowed_actions_setup(base, state)
-    if mode is None:
-        return "todo", item, _allowed_actions_setup(base, "`allowed_actions` was not in the read.")
-    if mode != "selected":
-        state = f"`allowed_actions` is `{mode}`, not `selected`."
-        return "todo", item, _allowed_actions_setup(base, state)
+        return "todo", item, [ACTIONS_DISABLED]
+    if perms.get("allowed_actions") != "selected":
+        return "todo", item, _allowed_actions_setup(base, perms.get("allowed_actions"))
     path = f"{base}/selected-actions"
     selected, reason = _read_or_reason(path)
     if selected is None:

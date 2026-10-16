@@ -2686,20 +2686,20 @@ def test_a_failed_read_makes_only_the_rows_it_serves_cannot_check(monkeypatch, f
     [
         (
             (
-                f"command failed (1): gh api {ACTIONS_WORKFLOW}\n{GH_403}\n\n"
+                f"command failed (1): gh api {ACTIONS_WORKFLOW}\n\n{GH_403}\n\n"
                 "Try authenticating with:  gh auth login\n"
             ),
-            f"{GH_403}; Try authenticating with:  gh auth login",
+            GH_403,
         ),
         ("command failed (1): gh api x\n", "command failed (1): gh api x"),
     ],
 )
-def test_cannot_check_names_gh_s_stderr(monkeypatch, message, reason):
-    """The reason is every non-empty line after `command failed ...`, joined, so a trailing
-    gh hint does not replace the error; with no stderr it is that first line.
+def test_cannot_check_names_gh_s_error_line(monkeypatch, message, reason):
+    """gh prints its error first and hints after, so the reason is the first non-empty line
+    after `command failed ...`; with no stderr it is that `command failed` line.
 
-    Mutations, each proven: take only the last line; keep blank lines; drop the `or lines`
-    fallback.
+    Mutations, each proven: take the last line instead; keep blank lines; drop the
+    fallback to the `command failed` line.
     """
     items = _settings_rows(monkeypatch, {ACTIONS_WORKFLOW: SystemExit(message)})
     assert items[0] == (
@@ -2709,63 +2709,50 @@ def test_cannot_check_names_gh_s_stderr(monkeypatch, message, reason):
     )
 
 
-#: Row 12's lines after its first while the mode is not `selected`.
-SETUP_TAIL = [
-    "The list below holds only what shipmate needs. For each other third-party action",
-    "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
-    'those workflows fail at "Set up job" too: this run cannot read the current list',
-    "while the mode is not `selected`, so it cannot add them.",
-    "Run the second command straight after the first: switching from `all`, the list",
-    "was observed empty until the second call, so a shipmate run in between stops at",
-    '"Set up job".',
-    MODE_PUT,
-    LIST_PUT,
-]
-DISABLED_12 = "Actions are disabled on this repository; the first command enables them."
-DISABLED_20 = "Actions are disabled on this repository; the command enables them too."
-SHA_PIN_LINES = [
-    "With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,",
-    "with the exemptions in docs/hardening.md row 20.",
-    SHA_PIN_PUT,
-]
+DISABLED = (
+    "Actions are disabled on this repository. Enable them in Settings → Actions, "
+    "then run onboard again."
+)
 
 
 @pytest.mark.parametrize(
-    ("perms", "rows"),
+    "perms",
     [
-        (
-            {"enabled": False, "allowed_actions": "all", "sha_pinning_required": False},
-            [
-                ("todo", ROW_12, [DISABLED_12, *SETUP_TAIL]),
-                ("todo", ROW_20, [DISABLED_20, *SHA_PIN_LINES]),
-            ],
-        ),
-        (
-            {"enabled": False, "allowed_actions": "selected", "sha_pinning_required": True},
-            [
-                ("todo", ROW_12, [DISABLED_12, *SETUP_TAIL]),
-                ("todo", ROW_20, [DISABLED_20, *SHA_PIN_LINES]),
-            ],
-        ),
-        (
-            {"enabled": True, "sha_pinning_required": True},
-            [
-                ("todo", ROW_12, ["`allowed_actions` was not in the read.", *SETUP_TAIL]),
-                ("ok", ROW_20, []),
-            ],
-        ),
+        {"enabled": False},
+        {"enabled": False, "allowed_actions": "selected", "sha_pinning_required": True},
     ],
 )
-def test_disabled_actions_are_named_on_rows_12_and_20(monkeypatch, perms, rows):
-    """Actions off makes rows 12 and 20 `todo` saying their command enables Actions, whatever
-    the mode and pinning fields hold; a read without `allowed_actions` says so neutrally.
+def test_disabled_actions_point_to_settings_and_print_no_command(monkeypatch, perms):
+    """Actions off makes rows 12 and 20 `todo` with one pointer line and no `gh api`,
+    whatever the mode and pinning fields hold.
 
-    Mutations, each proven: drop the `enabled is False` test from `_allowed_actions_item`;
-    move it after the mode test; drop `not disabled` from `_sha_pinning_item`'s `ok` test;
-    drop its disabled line; drop the `mode is None` branch.
+    Mutations, each proven: drop the `enabled` test from `_allowed_actions_item`; drop it
+    from `_sha_pinning_item`.
     """
     items = _settings_rows(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
-    assert items[1:] == rows
+    assert items[1:] == [("todo", ROW_12, [DISABLED]), ("todo", ROW_20, [DISABLED])]
+
+
+@pytest.mark.parametrize("perms", [{"enabled": True, "sha_pinning_required": True}, {}])
+def test_a_read_without_allowed_actions_says_so(monkeypatch, perms):
+    """Mutation: drop the `mode is None` case from `_allowed_actions_setup`'s first line."""
+    items = _settings_rows(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
+    assert items[1] == (
+        "todo",
+        ROW_12,
+        [
+            "`allowed_actions` was not in the read.",
+            "The list below holds only what shipmate needs. For each other third-party action",
+            "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
+            'those workflows fail at "Set up job" too: this run cannot read the current list',
+            "while the mode is not `selected`, so it cannot add them.",
+            "Run the second command straight after the first: switching from `all`, the list",
+            "was observed empty until the second call, so a shipmate run in between stops at",
+            '"Set up job".',
+            MODE_PUT,
+            LIST_PUT,
+        ],
+    )
 
 
 def test_the_ruleset_reconciler_stores_the_review_count(monkeypatch):
