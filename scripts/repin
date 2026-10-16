@@ -42,8 +42,8 @@ onboard = _load("onboard")
 ENGINE = pathlib.Path(__file__).resolve().parents[1]
 SHIM = "shipmate.yml"
 _SLUG = re.escape(onboard.ENGINE_SLUG)
-#: The documented sed re-pin's classes, with `[[:space:]]` narrowed to `[ \t]`: the
-#: substitution runs on one line's body, and a match must never reach the next line.
+#: `[ \t]`, never `\s`: the substitution runs on one line's body, and a match must never
+#: reach the next line.
 _PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)([ \t]+# v[^ \t]*)?')
 _REF = re.compile(rf'{_SLUG}/[^@ \t"]+@')
 _CALLEE = re.compile(rf'{_SLUG}/(\.github/workflows/[^@ \t"]+)')

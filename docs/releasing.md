@@ -22,7 +22,7 @@ table and consumer-file edit the release's CHANGELOG `### Removed` and `### Chan
 name in the re-pin commit itself. The re-pin pull request's runs use the default branch's old
 pin and table, so the edits take effect together at merge.
 
-1. Rewrite every engine ref, from an engine clone that holds the tag:
+1. Rewrite every engine ref. `<engine>` is an engine clone that holds the tag:
 
    ```bash
    python <engine>/scripts/repin <consumer> vX.Y.Z
@@ -33,8 +33,10 @@ pin and table, so the edits take effect together at merge.
    - the tag has the `vX.Y.Z` form and resolves as a tag, never as a branch of that name;
    - its commit is on `origin/main`, because a commit reachable only from a branch stops
      resolving once that branch is force-pushed or deleted;
-   - every engine ref in every file under `<consumer>/.github/workflows/` ends its line as
-     `@<sha> # vX.Y.Z` after the rewrite, `<sha>` being the tag's commit;
+   - the directory holds at least one engine ref;
+   - every engine ref in every file directly in `<consumer>/.github/workflows/` ends its line
+     as `@<sha> # vX.Y.Z` or `@<sha>" # vX.Y.Z` after the rewrite, `<sha>` being the tag's
+     commit;
    - every engine workflow the consumer calls exists at the tag;
    - the tag's `shipmate` fence in `docs/getting-started.md` renders.
 
@@ -52,8 +54,8 @@ pin and table, so the edits take effect together at merge.
    | Exit | Meaning |
    | --- | --- |
    | 0 | written, and `shipmate.yml` matches the fence |
-   | 2 | written, and `shipmate.yml` differs from the fence or is absent |
    | 1 | a refusal or a usage error; nothing written |
+   | 2 | written, and `shipmate.yml` differs from the fence or is absent |
 
 3. Commit the rewrite as one commit. The script does not commit.
 
@@ -296,6 +298,9 @@ gh run list --workflow manifest-load.yml --json headSha,conclusion --jq '.[] | s
 # and the steps' @main resolves to that same tip:
 gh workflow run manifest-load.yml --ref main
 ```
+
+A red `manifest-load` means a fix commit, so the release SHA moves: delete the local tag
+(`git tag -d vX.Y.Z`) and smoke the new release commit from step 1.
 
 ```bash
 git push origin v0.2.0   # the annotated tag the smoke created
