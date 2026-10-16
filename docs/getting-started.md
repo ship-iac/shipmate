@@ -403,14 +403,11 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Only the `plan` job and each drift file's `drift` job accept a `runs_on:`
-input. Behind every other call the engine's detect jobs and cells run on
-`ubuntu-latest`. The engine's control jobs, `plan.yml`'s `facts` and `gate-hold`
-included, run on `ubuntu-slim`, except `comment-ops.yml`'s `ops`, which runs on
-`ubuntu-latest` ([`aws.md`](aws.md) §Runner choice). The fences below omit
-`runs_on:`, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
-`ubuntu-latest` too. Pass it only for a different label your plan actually
-offers; one it does not leaves every job of that call except `facts` and
-`gate-hold` waiting for a runner that never arrives.
+input. Every other engine job's runner is fixed; [`aws.md`](aws.md) §Runner
+choice lists them. The fences below omit `runs_on:`, as
+`repo-example-stacks-aws` does, so `plan` and `drift` run on `ubuntu-latest`.
+Pass it only for a different label your plan actually offers; one it does not
+leaves that call waiting for a runner that never arrives.
 
 ```yaml
 name: shipmate

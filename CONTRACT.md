@@ -1983,20 +1983,21 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
   PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and GNU
   coreutils (`setup` hashes the Terramate download with `sha256sum`).
-- Every GitHub-hosted Ubuntu image from 24.04 on, including the minimal
-  `ubuntu-slim` image, satisfies this. The full images ship PyYAML; on
-  `ubuntu-slim` it arrives through the install below. The `ubuntu-slim` image's
+- Every GitHub-hosted Ubuntu image from 24.04 on, `ubuntu-slim` included,
+  provides these tools other than PyYAML. The `ubuntu-24.04` and `ubuntu-26.04`
+  x64 images ship PyYAML (probed 2026-10-15); `ubuntu-slim` has none. On any
+  runner whose `python3` cannot import it, PyYAML arrives through the install
+  below. The `ubuntu-slim` image's
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. The CLI is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
-  step, and the control jobs below call `gh api` on the plan, apply and
+  step, and the `ubuntu-slim` jobs below call `gh api` on the plan, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
-- The engine's ten control jobs, which run neither `tofu` nor `terramate`,
-  take no runner input. Nine run on `ubuntu-slim`, and `comment-ops.yml`'s
-  `ops` runs on `ubuntu-latest`. `plan.yml`'s `facts` and `gate-hold` run on
-  `ubuntu-slim` whatever `runs_on` the `plan` caller passes. `docs/aws.md`
-  §Runner choice lists them and gives the reason for `ops`. An account that
-  cannot use `ubuntu-slim` leaves those nine waiting for a runner.
+- Ten engine jobs take no runner input. Nine run on `ubuntu-slim`;
+  `comment-ops.yml`'s `ops` runs on `ubuntu-latest`. `docs/aws.md` §Runner
+  choice lists them. `plan.yml`'s `facts` and `gate-hold` run on `ubuntu-slim`
+  whatever `runs_on` the `plan` caller passes. An account that cannot use
+  `ubuntu-slim` leaves those nine waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
   engine's `python-yaml` action checks that `python3` imports it and, when it

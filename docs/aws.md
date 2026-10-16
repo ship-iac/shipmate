@@ -266,31 +266,29 @@ pass none, so those jobs run on
 the `ubuntu-latest` default. Outside them the
 runner is fixed:
 
-- `ubuntu-slim`: the control jobs other than `ops`; none runs `tofu` or
-  `terramate`. These are `guard`, `review` and `summary` in `apply.yml`,
-  `snapshot` and `complete` in `apply-env-level.yml`, `summary` in `deploy.yml`,
-  `guard` in `unlock.yml`, and `facts` and `gate-hold` in `plan.yml`, which the
-  `plan` job's `runs_on:` does not reach.
-- `ubuntu-latest`: the `detect` jobs of `apply.yml`, `deploy.yml` and
-  `unlock.yml`, which run `terramate`; every apply and unlock cell, which runs
-  `tofu`; and `ops` in `comment-ops.yml`, because its `doctor`, `apply` and
-  `unlock` routes parse YAML and `ubuntu-latest`'s `python3` ships PyYAML,
-  where `ubuntu-slim` would install it with `apt-get` on each such comment.
-  Every `ops` run takes `ubuntu-latest`, including every comment that only
-  mentions shipmate or names a route that parses no YAML.
+- `ubuntu-slim`: `guard`, `review` and `summary` in `apply.yml`, `snapshot`
+  and `complete` in `apply-env-level.yml`, `summary` in `deploy.yml`, `guard`
+  in `unlock.yml`, and `facts` and `gate-hold` in `plan.yml`. The `plan` job's
+  `runs_on:` does not reach `facts` or `gate-hold`.
+- `ubuntu-latest`: `detect` in `apply.yml`, `deploy.yml` and `unlock.yml`,
+  which runs `terramate`; the apply cells in `apply-env-level.yml` and `unlock`
+  in `unlock.yml`, which run `tofu`; and `ops` in `comment-ops.yml`. Every
+  `ops` run takes `ubuntu-latest`, whatever the comment says; only an
+  authorized `doctor`, `apply` or `unlock` comment needs PyYAML there, which
+  `ubuntu-slim` would install with `apt-get`.
+
+None of the nine `ubuntu-slim` jobs, and not `ops`, runs `tofu` or `terramate`.
 
 The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
-`drift`; their cells download only `hashicorp/random`. On a caller-chosen
-`ubuntu-slim`, `plan.yml`'s `detect` and `summary` and `drift.yml`'s `detect`
-install PyYAML with `apt-get` on every run. An AWS repository's
+`drift`; their cells download only `hashicorp/random`. An AWS repository's
 cells pull `hashicorp/aws`. The provider cache serves a stack once its
 `.terraform.lock.hcl` is committed ([`../CONTRACT.md`](../CONTRACT.md)
 §Terramate safeguards, "Lock files and the provider cache") and a drift or
 apply cell has saved the entry; plan cells never save. Without a committed
 lock, as in `repo-example-stacks-aws`, every `init -reconfigure` downloads the
-provider again. Before passing the slim image to `plan` or `drift`, weigh it
-against both costs: that provider download, and the PyYAML install in
-`detect` and `summary` on every run.
+provider again. Before passing `runs_on: ubuntu-slim` to `plan` or `drift`,
+weigh two costs: that provider download, and the PyYAML install with `apt-get`
+it adds to `plan.yml`'s `detect` and `summary` and `drift.yml`'s `detect`.
 
 ## The sample's workload
 
