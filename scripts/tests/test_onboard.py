@@ -2155,7 +2155,7 @@ todo          SHIPMATE_PLAN_PASSPHRASE repository secret
     An organization secret of that name is not visible to this read.
 
 todo          `.github/shipmate-config.yml`
-    Add one: copy the example in docs/getting-started.md §Environments for this tier.
+    Add one: copy the example in docs/getting-started.md §The table.
 
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
