@@ -1178,8 +1178,8 @@ not be read ("could not read the head of pull request #<n>"), fails the summary
 job before that write too, and before any apply check is published; the error
 is in the job's annotation for a failed write and in the step log for a failed
 listing or head read. A held run's comment write, which only explains the red
-gate, warns on those failures instead, and the gate is still written. What a run
-that fails part way leaves on the comment and the gate is in
+gate, warns on those failures instead, and the gate is still written. What a
+summary job that fails part way leaves on the comment is in
 [`CONTRACT.md`](../CONTRACT.md) §Plan comment. The
 summary job also holds the gate when it cannot read the head's gate statuses or
 apply checks, or cannot build the checks to publish (a cell summary missing a key),
