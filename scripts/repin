@@ -17,9 +17,10 @@ every file as it was:
    `ship-iac/shipmate/<path>@<40 hex>` of each line, the slug matched case-insensitively,
    with an optional closing `"` and `# v...` label, becomes `<slug>/<path>@<sha> # <tag>`.
    The slug keeps the consumer's spelling, and line endings are kept.
-3. Every engine ref in those files then ends its line as `@<sha> # <tag>`, one ref per line.
-   `@main`, a single-quoted ref and a comment after the label each refuse, listed as
-   `<file>:<line>: <text>`, to fix by hand. A directory holding no engine ref refuses.
+3. Every engine ref in those files then ends its line as `@<sha> # <tag>` or
+   `@<sha>" # <tag>`, one ref per line. `@main`, a single-quoted ref and a comment after the
+   label each refuse, listed as `<file>:<line>: <text>` with the line as it stands on disk,
+   to fix by hand. A directory holding no engine ref refuses.
 4. Every engine workflow the directory calls with an `@` ref exists at `<sha>`.
 5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
    it, on the branch the consumer's `shipmate.yml` push trigger names when its one
@@ -141,17 +142,20 @@ def _rewrite(texts, sha, tag):
     return {name: "".join(line(b) + t for b, t in _lines(text)) for name, text in texts.items()}
 
 
-def _check_refs(wf, texts, sha, tag):
+def _check_refs(wf, texts, new, sha, tag):
+    """Refuse a rewritten line in `new` whose engine ref is not the pin, listing the line as it
+    stands in `texts`, the file on disk."""
     # The rest of the line after the FIRST ref must be exactly the pin, so a second ref on the
     # line refuses too: a pinned ref in a comment cannot hide an earlier `@main`.
     good = re.compile(rf'{sha}"? # {re.escape(tag)}')
     bad, seen = [], False
-    for name, text in texts.items():
-        for n, (body, _end) in enumerate(_lines(text), 1):
+    for name, text in new.items():
+        pairs = zip(_lines(text), _lines(texts[name]), strict=True)
+        for n, ((body, _end), (old, _old_end)) in enumerate(pairs, 1):
             ref = _REF.search(body)
             seen = seen or bool(ref)
             if ref and not good.fullmatch(body, ref.end()):
-                bad.append(f"{name}:{n}: {body}")
+                bad.append(f"{name}:{n}: {old}")
     if bad:
         raise SystemExit(
             f"engine refs not on `@{sha} # {tag}` alone at the end of their line; fix each by "
@@ -192,7 +196,7 @@ def main():
         print(f"origin has no tag {tag}: pinning to a local tag")
     wf, texts = _read(consumer)
     new = _rewrite(texts, sha, tag)
-    _check_refs(wf, new, sha, tag)
+    _check_refs(wf, texts, new, sha, tag)
     _check_callees(new, sha, tag)
     rendered = _render(new, sha, tag)
     for name, text in new.items():

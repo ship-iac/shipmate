@@ -621,9 +621,12 @@ _DOC_PIN = re.compile(
 )
 #: Only a 40-hex pin, matching what `scripts/repin` rewrites: a file still carrying
 #: the docs placeholder must not be reported `pin-only`, because that names a remedy which would
-#: then find no engine reference to move.
+#: then find no engine reference to move. The slug matches case-insensitively, as GitHub and
+#: `scripts/repin` resolve it, and `_depin` writes it in its canonical spelling, so a case
+#: variant differing only in its pin reads `pin-only`.
 _ANY_PIN = re.compile(
-    rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@[0-9a-f]{{40}}[^\S\n]*(#[^\n]*)?"
+    rf"(?i:{re.escape(ENGINE_SLUG)})(?P<path>/\.github/workflows/[^@\s]+)"
+    rf"@[0-9a-f]{{40}}[^\S\n]*(#[^\n]*)?"
 )
 
 
@@ -661,7 +664,7 @@ def _render(page_text, sha, version, default_branch):
 
 def _depin(text):
     """`text` with every engine pin and its trailing comment reduced to a placeholder."""
-    return _ANY_PIN.sub(r"\g<ref>@<pin>", text)
+    return _ANY_PIN.sub(rf"{ENGINE_SLUG}\g<path>@<pin>", text)
 
 
 def shim_diff(fence_text, shim_text, name):
