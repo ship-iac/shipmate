@@ -40,6 +40,7 @@ SCRIPTS_EXPECTED = [
     "pr-facts",
     "provider-cache-key",
     "register-app",
+    "repin",
     "reply-comment",
     "state-path",
     "summary-comment",
@@ -58,8 +59,8 @@ BLOCKS = {
     "plan-cell-summary": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
 }
 #: Run by an operator in a terminal, never by a workflow: `onboard` strips `::error::` for human
-#: output itself, and `register-app` never raises one.
-TERMINAL = {"onboard", "register-app"}
+#: output itself, and neither `register-app` nor `repin` raises one.
+TERMINAL = {"onboard", "register-app", "repin"}
 TERMINAL_BLOCK = "if __name__ == '__main__':\n    utf8_output()\n    main()"
 #: Imported by other scripts, never run.
 LIBRARIES = {"env-config", "waves"}

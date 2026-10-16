@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Re-pin every engine ref of one consumer repository to a release tag.
+
+    python <engine>/scripts/repin <consumer> <tag>
+
+Run from anywhere: the engine is the checkout holding this script, and `<consumer>` is the
+consumer repository's checkout. Every check runs before the first write, so a refusal leaves
+every file as it was:
+
+1. `<tag>` is `vX.Y.Z` and resolves as a tag, never as a branch of that name, to a commit on
+   the engine's `origin/main`, fetched first.
+2. In every `*.yml` file directly under `<consumer>/.github/workflows/`, the first
+   `ship-iac/shipmate/<path>@<40 hex>` of each line, with an optional closing `"` and
+   `# v...` label, becomes `ship-iac/shipmate/<path>@<sha> # <tag>`. Line endings are kept.
+3. Every engine ref in every file of that directory then ends its line as `@<sha> # <tag>`,
+   one ref per line. `@main`, a single-quoted ref, a comment after the label and a `.yaml`
+   file each refuse, listed as `<file>:<line>: <text>`, to fix by hand. A directory holding no
+   engine ref refuses.
+4. Every engine workflow the directory calls exists at `<sha>`.
+5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
+   it, on the branch the consumer's `shipmate.yml` push trigger names: its one
+   `    branches: [X]` line, else `main`. A trigger on a branch other than the default is
+   `onboard`'s to report, not this script's.
+
+It then writes each changed file, prints `updated <file>` or `unchanged <file>` for every file
+of the directory, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
+It does not commit.
+
+Exit codes: 0 written and `shipmate.yml` matches the fence; 2 written and `shipmate.yml`
+differs or is absent; 1 a refusal or a usage error, nothing written.
+"""
+
+import pathlib
+import re
+import subprocess
+import sys
+
+from _shipmate import _load, utf8_output
+
+onboard = _load("onboard")
+
+ENGINE = pathlib.Path(__file__).resolve().parents[1]
+SHIM = "shipmate.yml"
+_SLUG = re.escape(onboard.ENGINE_SLUG)
+#: The documented sed re-pin's classes, with `[[:space:]]` narrowed to `[ \t]`: the
+#: substitution runs on one line's body, and a match must never reach the next line.
+_PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)([ \t]+# v[^ \t]*)?')
+_REF = re.compile(rf'{_SLUG}/[^@ \t"]+@')
+_CALLEE = re.compile(rf'{_SLUG}/(\.github/workflows/[^@ \t"]+)')
+_TRIGGER = re.compile(r"^    branches: \[([^\]\n]*)\]$", re.M)
+
+
+def _git(*args):
+    """(return code, stdout, stderr) of `git -C <engine> <args>`."""
+    argv = ["git", "-C", str(ENGINE), *args]
+    # shell=False over a code-built git argv; the tag is checked against `_VERSION_RE` first.
+    p = subprocess.run(argv, capture_output=True)  # noqa: S603
+    out, err = (s.decode("utf-8", "replace") for s in (p.stdout, p.stderr))
+    return p.returncode, out, err.strip()
+
+
+def _lines(text):
+    """(body, terminator) per line, split at `\\n` alone as sed splits: never `str.splitlines`,
+    which also splits at `\\f`, `\\v` and `\\u2028`."""
+    for line in re.findall(r"[^\n]*\n|[^\n]+", text):
+        body = line.removesuffix("\n")
+        if body != line:
+            body = body.removesuffix("\r")
+        yield body, line[len(body) :]
+
+
+def _resolve(tag):
+    """The commit `tag` names, refused unless it is a release tag on `origin/main`."""
+    if not onboard._VERSION_RE.fullmatch(tag):
+        raise SystemExit(f"{tag!r} is not a vX.Y.Z release tag.")
+    rc, _out, err = _git("fetch", "origin", "main")
+    if rc:
+        raise SystemExit(f"git fetch origin main failed in {ENGINE}:\n{err}")
+    rc, sha, _err = _git("rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}")
+    if rc:
+        raise SystemExit(
+            f"no tag {tag} in the engine checkout at {ENGINE}. Fetch it with "
+            f"`git -C {ENGINE} fetch origin tag {tag}`."
+        )
+    sha = sha.strip()
+    rc, _out, err = _git("merge-base", "--is-ancestor", sha, "origin/main")
+    if rc == 1:
+        raise SystemExit(
+            f"{tag} ({sha}) is not on origin/main. A commit reachable only from a branch stops "
+            "resolving once that branch is force-pushed or deleted."
+        )
+    if rc:
+        raise SystemExit(f"git merge-base --is-ancestor failed in {ENGINE}:\n{err}")
+    return sha
+
+
+def _read(consumer):
+    """(the workflows directory, {file name: text}) with every line ending kept."""
+    wf = pathlib.Path(consumer) / ".github" / "workflows"
+    if not wf.is_dir():
+        raise SystemExit(f"no workflows directory at {wf}.")
+    names = sorted(p.name for p in wf.iterdir() if p.is_file())
+    return wf, {n: (wf / n).read_text(encoding="utf-8", newline="") for n in names}
+
+
+def _rewrite(texts, sha, tag):
+    def line(body):
+        return _PIN.sub(lambda m: f"{m[1]}@{sha}{m[2]} # {tag}", body, count=1)
+
+    return {
+        name: "".join(line(b) + t for b, t in _lines(text)) if name.endswith(".yml") else text
+        for name, text in texts.items()
+    }
+
+
+def _check_refs(wf, texts, sha, tag):
+    # The rest of the line after the FIRST ref must be exactly the pin, so a second ref on the
+    # line refuses too: a pinned ref in a comment cannot hide an earlier `@main`.
+    good = re.compile(rf'{sha}"? # {re.escape(tag)}')
+    bad, seen = [], False
+    for name, text in texts.items():
+        for n, (body, _end) in enumerate(_lines(text), 1):
+            ref = _REF.search(body)
+            seen = seen or bool(ref)
+            if ref and not good.fullmatch(body, ref.end()):
+                bad.append(f"{name}:{n}: {body}")
+    if bad:
+        raise SystemExit(
+            f"engine refs not on `@{sha} # {tag}` alone at the end of their line; fix each by "
+            "hand and run again:\n" + "\n".join(bad)
+        )
+    if not seen:
+        raise SystemExit(f"no engine reference under {wf}.")
+
+
+def _check_callees(texts, sha, tag):
+    callees = sorted({c for text in texts.values() for c in _CALLEE.findall(text)})
+    missing = [c for c in callees if _git("cat-file", "-e", f"{sha}:{c}")[0]]
+    if missing:
+        raise SystemExit(
+            f"engine workflows missing at {tag}, so their pins would not resolve: make the "
+            "consumer-file edit its CHANGELOG names:\n" + "\n".join(missing)
+        )
+
+
+def _render(texts, sha, tag):
+    rc, page, err = _git("show", f"{sha}:docs/getting-started.md")
+    if rc:
+        raise SystemExit(f"cannot read docs/getting-started.md at {tag}:\n{err}")
+    shim = texts.get(SHIM, "").replace("\r\n", "\n")
+    branches = _TRIGGER.findall(shim)
+    return onboard._render(page, sha, tag, branches[0] if len(branches) == 1 else "main")
+
+
+def main():
+    if len(sys.argv) != 3:
+        raise SystemExit("usage: python <engine>/scripts/repin <consumer> <tag>")
+    consumer, tag = sys.argv[1:]
+    sha = _resolve(tag)
+    wf, texts = _read(consumer)
+    new = _rewrite(texts, sha, tag)
+    _check_refs(wf, new, sha, tag)
+    _check_callees(new, sha, tag)
+    rendered = _render(new, sha, tag)
+    for name, text in new.items():
+        if text == texts[name]:
+            print(f"unchanged {name}")
+        else:
+            (wf / name).write_text(text, encoding="utf-8", newline="")
+            print(f"updated {name}")
+    if SHIM not in new:
+        print(f"{SHIM} absent")
+        sys.exit(2)
+    diff = onboard.shim_diff(rendered, new[SHIM], SHIM)
+    print(diff or f"{SHIM} matches the {tag} fence\n", end="")
+    sys.exit(2 if diff else 0)
+
+
+if __name__ == "__main__":
+    utf8_output()
+    main()

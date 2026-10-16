@@ -50,10 +50,15 @@ def test_utf8_output_switches_both_streams_from_cp1252_to_utf8(monkeypatch):
             ["--name", "x", "--repo", "é", "--out", "key.pem"],
             "--repo must be <owner>/<repo>: 'é'\n",
         ),
+        (
+            "repin",
+            ["c", "é"],
+            "'é' is not a vX.Y.Z release tag.\n",
+        ),
     ],
 )
 def test_a_script_run_as_a_file_writes_its_refusal_as_utf8(tmp_path, script, argv, refusal):
-    """Both refusals run before any `gh` or `git` call. Mutation: delete `utf8_output()` from
+    """Each refusal runs before any `gh` or `git` call. Mutation: delete `utf8_output()` from
     the script's `__main__` block; `é` then leaves as cp1252's `\\xe9`."""
     env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
     proc = subprocess.run(

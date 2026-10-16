@@ -17,6 +17,7 @@ from _shipmate import load_workflow_text
 
 onboard = load_script("onboard")
 ec = load_script("env-config")
+PAGE = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
 
 
 def make_gh(routes):
@@ -1603,7 +1604,7 @@ def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monk
     shim = tmp_path / ".github" / "workflows" / "shipmate.yml"
     shim.parent.mkdir(parents=True)
     shim.write_text(
-        onboard._render(ENGINE, "a" * 40, "v0.26.0", "main"), encoding="utf-8", newline="\n"
+        onboard._render(PAGE, "a" * 40, "v0.26.0", "main"), encoding="utf-8", newline="\n"
     )
     fake, exit_ = run_main(monkeypatch, tmp_path, {}, [])
     assert exit_.code == 0
@@ -1891,7 +1892,7 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     - edit the fence's top-level `name:` line -> the locator matches zero fences and refuses;
     - edit a `uses:` filename in the fence -> the callee list differs.
     """
-    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"))}
+    found = {"shipmate.yml": _callees(onboard._render(PAGE, "c" * 40, "v9.9.9", "main"))}
     assert found == _EXPECTED_CALLEES
 
 
@@ -1899,7 +1900,8 @@ def test_the_published_drift_fence_calls_drift_yml_on_the_placeholder():
     """The consumer saves the `shipmate drift` fence by hand, so nothing renders or pins it,
     and only this test reads it. Exactly one fence carries the name (`_fence` refuses
     otherwise), and its `uses:` lines, compared whole against a hand-written list, are one
-    call of engine `drift.yml` on the placeholder the re-pin in docs/releasing.md rewrites.
+    call of engine `drift.yml` on the placeholder, which `scripts/repin` does not rewrite: the
+    consumer replaces it with a 40-hex pin by hand.
 
     Mutation: `@main` in place of `@<engine-sha>` in the fence.
     """
@@ -1926,9 +1928,8 @@ def test_every_shim_is_pinned_at_every_site():
     expensive: `_DOC_PIN` requires the trailing `#` comment, so a docs edit dropping
     `# see the latest release` from one line stops that pin being rewritten; and it is
     anchored on `ship-iac`, so normalising an owner in the docs to `<owner>` would unpin all
-    five. `_DOC_PIN` stays anchored deliberately -- the docs/releasing.md re-pin is anchored
-    the same way and the two writers must agree -- and this vector is what makes either edit
-    loud.
+    five. `_DOC_PIN` stays anchored deliberately -- `scripts/repin` is anchored the same way
+    and the two writers must agree -- and this vector is what makes either edit loud.
 
     Hand-written, never derived from the docs.
 
@@ -1936,7 +1937,7 @@ def test_every_shim_is_pinned_at_every_site():
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """
-    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")}
+    rendered = {"shipmate.yml": onboard._render(PAGE, "c" * 40, "v9.9.9", "main")}
     assert {name: text.count(f"@{'c' * 40} # v9.9.9") for name, text in rendered.items()} == (
         _EXPECTED_PINS
     )
@@ -1951,7 +1952,7 @@ def _plan_shim(tmp_path):
     """(path to the consumer's shipmate.yml, the text this script would render for it)."""
     path = tmp_path / ".github" / "workflows" / "shipmate.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
+    return path, onboard._render(PAGE, "c" * 40, "v9.9.9", "main")
 
 
 def test_the_rendered_push_trigger_names_the_default_branch():
@@ -1961,8 +1962,8 @@ def test_the_rendered_push_trigger_names_the_default_branch():
 
     Mutation: drop the substitution from `_render`.
     """
-    main = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
-    assert onboard._render(ENGINE, "c" * 40, "v9.9.9", "develop") == main.replace(
+    main = onboard._render(PAGE, "c" * 40, "v9.9.9", "main")
+    assert onboard._render(PAGE, "c" * 40, "v9.9.9", "develop") == main.replace(
         "    branches: [main]\n", "    branches: [develop]\n"
     )
 
@@ -2000,21 +2001,21 @@ def test_an_identical_file_reports_ok_through_crlf(tmp_path):
 
 def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     """A consumer sitting on an older release differs only in its pin, and moving a pin is
-    the docs/releasing.md re-pin's job. Naming that remedy is the whole point of the verb,
+    `scripts/repin`'s job. Naming that remedy is the whole point of the verb,
     and it is not drift, so it must not set exit 2 and fail the operator's run.
 
     Mutation: make `_depin` leave the trailing comment in place, so the version comment alone
     reads as `differs`.
     """
     path, _text = _plan_shim(tmp_path)
-    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "main")
+    older = onboard._render(PAGE, "d" * 40, "v9.9.8", "main")
     path.write_text(older, encoding="utf-8", newline="\n")
     onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [
         (
             "pin-only",
             "shipmate.yml",
-            "move every engine ref to this engine's SHA in one commit (docs/releasing.md)",
+            "move every engine ref in one commit with scripts/repin (docs/releasing.md)",
         )
     ]
     assert path.read_text(encoding="utf-8") == older
@@ -2038,9 +2039,59 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     assert onboard._exit_code() == 2
 
 
+SMALL_PAGE = """# Getting started
+
+```yaml
+name: shipmate
+on:
+  push:
+    branches: [main]
+jobs:
+  plan:
+    uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
+  apply:
+    uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
+```
+"""
+
+
+def test_a_locally_edited_file_prints_its_diff_after_the_report_line(tmp_path, capsys):
+    """The `differs` line alone leaves the operator to find the edit. The page is this test's
+    own, so an edit to the real fence cannot redden it.
+
+    Mutation: drop the `shim_diff` print from `_reconcile_shim`.
+    """
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "getting-started.md").write_text(SMALL_PAGE, encoding="utf-8")
+    path = tmp_path / ".github" / "workflows" / "shipmate.yml"
+    path.parent.mkdir(parents=True)
+    old = "d" * 40
+    path.write_text(
+        "name: shipmate\non:\n  push:\n    branches: [main]\njobs:\n  plan:\n"
+        f"    uses: ship-iac/shipmate/.github/workflows/plan.yml@{old} # v9.9.8\n"
+        "    with: {x: 1}\n  apply:\n"
+        f"    uses: ship-iac/shipmate/.github/workflows/apply.yml@{old} # v9.9.8\n",
+        encoding="utf-8",
+    )
+    onboard._reconcile_shim(ctx(root=tmp_path, engine=tmp_path, sha="c" * 40, version="v9.9.9"))
+    assert capsys.readouterr().out == (
+        "differs shipmate.yml: differs beyond its pin, not overwritten\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -5,5 +5,6 @@\n"
+        " jobs:\n"
+        "   plan:\n"
+        "     uses: ship-iac/shipmate/.github/workflows/plan.yml@<pin>\n"
+        "+    with: {x: 1}\n"
+        "   apply:\n"
+        "     uses: ship-iac/shipmate/.github/workflows/apply.yml@<pin>\n"
+    )
+
+
 def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
     """The shim is written LF-delimited whatever platform the operator runs on: every other
-    copy of it -- the docs, the docs/releasing.md re-pin, the other consumers -- is LF.
+    copy of it -- the docs, the other consumers -- is LF; `scripts/repin` keeps whatever
+    endings a file already has.
 
     The whole kwargs mapping is compared against a hand-written dict rather than only the
     bytes on disk, for the reason `test_run_passes_stdin_as_bytes_with_text_mode_off` gives:
@@ -2066,8 +2117,8 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
 
 def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp_path):
     """A consumer who pasted the published fence by hand holds `@<engine-sha>`, which is not a
-    pin the docs/releasing.md re-pin can move: its `sed` requires 40 hex, so it would rewrite
-    nothing. Naming a remedy that cannot work is worse than naming none, so
+    pin `scripts/repin` can move: it rewrites only a 40-hex pin, so it would refuse the file's
+    refs as left over. Naming a remedy that cannot work is worse than naming none, so
     that file is `differs`.
 
     Mutation: widen `_ANY_PIN` from `[0-9a-f]{40}` to `\\S+`.

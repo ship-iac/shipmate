@@ -41,6 +41,7 @@ sweep that run refuses. Each is a checklist item; none changes the exit code.
 
 import argparse
 import contextlib
+import difflib
 import importlib.util
 import io
 import json
@@ -618,7 +619,7 @@ ALLOWED_PATTERNS = (
 _DOC_PIN = re.compile(
     rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
 )
-#: Only a 40-hex pin, matching what the docs/releasing.md re-pin rewrites: a file still carrying
+#: Only a 40-hex pin, matching what `scripts/repin` rewrites: a file still carrying
 #: the docs placeholder must not be reported `pin-only`, because that names a remedy which would
 #: then find no engine reference to move.
 _ANY_PIN = re.compile(
@@ -643,13 +644,11 @@ def _fence(page_text, name):
     return bodies[0]
 
 
-def _render(engine, sha, version, default_branch):
-    """The full text of one consumer workflow file, LF-delimited and newline-terminated,
-    with its `push` trigger on `default_branch`."""
-    text = _fence(
-        (pathlib.Path(engine) / "docs" / "getting-started.md").read_text(encoding="utf-8"),
-        "shipmate",
-    )
+def _render(page_text, sha, version, default_branch):
+    """The full text of one consumer workflow file, rendered from the `shipmate` fence of
+    `page_text` (a `docs/getting-started.md`), LF-delimited and newline-terminated, with its
+    `push` trigger on `default_branch`."""
+    text = _fence(page_text, "shipmate")
     trigger = "    branches: [main]\n"
     if text.count(trigger) != 1:
         raise SystemExit(
@@ -665,6 +664,16 @@ def _depin(text):
     return _ANY_PIN.sub(r"\g<ref>@<pin>", text)
 
 
+def shim_diff(fence_text, shim_text, name):
+    """The unified diff from `fence_text` to `shim_text`, pins masked by `_depin` and both sides
+    CRLF-normalized, headed `<name> (fence)` and `<name>`; "" when they agree. `onboard` and
+    `scripts/repin` both print it."""
+    fence, shim = (
+        _depin(t.replace("\r\n", "\n")).splitlines(keepends=True) for t in (fence_text, shim_text)
+    )
+    return "".join(difflib.unified_diff(fence, shim, fromfile=f"{name} (fence)", tofile=name))
+
+
 def _reconcile_shim(ctx):
     """Write the consumer workflow file, reporting anything already there.
 
@@ -673,7 +682,8 @@ def _reconcile_shim(ctx):
     """
     filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
-    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"])
+    page = (pathlib.Path(ctx["engine"]) / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    text = _render(page, ctx["sha"], ctx["version"], ctx["default_branch"])
     if not path.is_file():
         write_file(path, text, filename)
         return
@@ -685,12 +695,13 @@ def _reconcile_shim(ctx):
         report(
             "pin-only",
             filename,
-            "move every engine ref to this engine's SHA in one commit (docs/releasing.md)",
+            "move every engine ref in one commit with scripts/repin (docs/releasing.md)",
         )
     elif "<engine-sha>" in current:
         report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:
         report("differs", filename, "differs beyond its pin, not overwritten")
+        print(shim_diff(text, current, filename), end="")
 
 
 def _passphrase_item(ctx):
