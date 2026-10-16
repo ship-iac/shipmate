@@ -619,11 +619,9 @@ ALLOWED_PATTERNS = (
 _DOC_PIN = re.compile(
     rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
 )
-#: Only a 40-hex pin under the lowercase slug, as `scripts/repin` rewrites: a file still
-#: carrying the docs placeholder must not be reported `pin-only`, because that names a remedy
-#: which would then find no engine reference to move. It masks the pin and ANY trailing comment,
-#: wider than repin's rewrite, so a `pin-only` file whose comment repin does not accept gets
-#: repin's leftover listing.
+#: Only a 40-hex pin: a file still carrying the docs placeholder is not `pin-only`, a remedy
+#: `scripts/repin` could not apply. The mask (pin and any trailing comment) is wider than
+#: repin's rewrite, so repin may still list such a file's comment as a leftover.
 _ANY_PIN = re.compile(
     rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@[0-9a-f]{{40}}[^\S\n]*(#[^\n]*)?"
 )

@@ -17,8 +17,8 @@ every file as it was:
    `ship-iac/shipmate/<path>@<40 hex>` of each line, with an optional closing `"` and
    `# vX.Y.Z` label, becomes `ship-iac/shipmate/<path>@<sha> # <tag>`. Line endings are kept.
 3. Every engine ref in those files, the slug matched case-insensitively, then ends its line as
-   `@<sha> # <tag>` or `@<sha>" # <tag>`, one ref per line. `@main`, a single-quoted ref, a
-   case-variant slug such as `Ship-IaC/shipmate`, text after or glued to the label each
+   `@<sha> # <tag>` or `@<sha>" # <tag>`, trailing blanks allowed, one ref per line. `@main`,
+   a single-quoted ref, a case-variant slug, and text after or glued to the label each
    refuse, listed as `<file>:<line>: <text>` with the line as it stands on disk, to fix by
    hand. A directory holding no engine ref refuses.
 4. Every engine workflow the directory calls with an `@` ref exists at `<sha>`.
@@ -32,9 +32,9 @@ It then writes each changed file, prints `updated <file>` or `unchanged <file>` 
 it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
 It does not commit.
 
-Exit codes: 0 every engine ref pinned to the tag and `shipmate.yml` matches the fence (a re-run
-that writes nothing also exits 0); 2 every engine ref pinned and `shipmate.yml` differs or is
-absent; 1 a refusal or a usage error, nothing written.
+Exit codes: 0 every engine ref pinned to the tag and `shipmate.yml` matches the fence; 2 every
+engine ref pinned and `shipmate.yml` differs or is absent; 1 a refusal or a usage error,
+nothing written. A re-run that writes nothing exits 0 or 2 by the same rule.
 """
 
 import pathlib
@@ -150,14 +150,15 @@ def _check_refs(wf, texts, new, sha, tag):
     stands in `texts`, the file on disk."""
     # The rest of the line after the FIRST ref must be exactly the pin, so a second ref on the
     # line refuses too: a pinned ref in a comment cannot hide an earlier `@main`.
-    good = re.compile(rf'{sha}"? # {re.escape(tag)}')
+    good = re.compile(rf'{sha}"? # {re.escape(tag)}[ \t]*')
+    slug = f"{onboard.ENGINE_SLUG}/"
     bad, seen = [], False
     for name, text in new.items():
         pairs = zip(_lines(text), _lines(texts[name]), strict=True)
         for n, ((body, _end), (old, _old_end)) in enumerate(pairs, 1):
             ref = _REF.search(body)
             seen = seen or bool(ref)
-            if ref and not good.fullmatch(body, ref.end()):
+            if ref and not (ref[0].startswith(slug) and good.fullmatch(body, ref.end())):
                 bad.append(f"{name}:{n}: {old}")
     if bad:
         raise SystemExit(

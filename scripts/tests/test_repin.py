@@ -543,6 +543,36 @@ def test_a_ref_under_another_owner_is_not_rewritten(engine, tmp_path, monkeypatc
     }
 
 
+def test_a_case_variant_slug_already_on_the_pin_refuses(engine, tmp_path, monkeypatch, capsys):
+    """Only the lowercase slug is rewritten, so a variant already on `@<sha> # <tag>` must
+    still refuse. Mutation: drop the exact-slug test in `_check_refs` -- the line passes."""
+    line = f"    uses: Ship-IaC/shipmate/.github/workflows/apply.yml@{engine.sha} # v1.2.3"
+    files = {"shipmate.yml": GOOD + f"  x:\n{line}\n".encode()}
+    wf = consumer(tmp_path, files)
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG) == (
+        LEFTOVER.format(sha=engine.sha) + f"shipmate.yml:5: {line}"
+    )
+    assert capsys.readouterr().out == f"v1.2.3 -> {engine.sha}\n"
+    assert on_disk(wf) == files
+
+
+@pytest.mark.parametrize(
+    "before, after",
+    [
+        pytest.param(f"{OLD} # v0.1.0  ", "{sha} # v1.2.3  ", id="labelled"),
+        pytest.param(f"{OLD}  ", "{sha} # v1.2.3  ", id="unlabelled"),
+    ],
+)
+def test_trailing_blanks_after_a_pin_pass(engine, tmp_path, monkeypatch, capsys, before, after):
+    """Mutation: drop the trailing `[ \\t]*` from `good` -- both lines refuse invisibly."""
+    files = {"other.yml": f"jobs:\n  plan:\n    uses: {WF}/plan.yml@{before}\n".encode()}
+    assert _other(engine, tmp_path, monkeypatch, capsys, files) == {
+        "other.yml": (
+            f"jobs:\n  plan:\n    uses: {WF}/plan.yml@{after.format(sha=engine.sha)}\n"
+        ).encode()
+    }
+
+
 def test_a_yaml_file_is_rewritten_like_a_yml_file(engine, tmp_path, monkeypatch, capsys):
     """GitHub runs both extensions. Mutation: rewrite only names ending in `.yml` -- the
     `.yaml` pin is refused as a leftover."""
