@@ -780,16 +780,6 @@ each drift file's `drift` job. A secret on `shipmate-engine` or on one half of a
 split environment alone reaches the wrong cells
 ([`getting-started.md`](getting-started.md) lists each placement).
 
-### `plan artifact ... is not a shipmate-crypt-v1 artifact`
-
-An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
-before any apply step, and its `apply / <stack> / <env>` check stays pending.
-The artifact does not start with the shipmate-crypt-v1 header
-([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption): it was uploaded
-unencrypted, or encrypted by an earlier engine release. Re-plan: comment
-`shipmate plan` or push on an open pull request; after the merge, open a new
-pull request touching the stack.
-
 ### `plan artifact ... failed authentication`
 
 An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
@@ -816,8 +806,9 @@ The apply cell could not open its reviewed plan artifact; the error at
 the end of the message says why. Nothing was applied.
 
 - **The artifact downloaded without `stack.otplan`.** No earlier step reports
-  it. Re-plan, as in §`plan artifact ... is not a shipmate-crypt-v1 artifact`;
-  a re-run downloads the same artifact.
+  it. Re-plan: comment `shipmate plan` or push on an open pull request; after
+  the merge, open a new pull request touching the stack. A re-run downloads the
+  same artifact.
 - **The runner's disk failed.** The refusal comes before any apply step, so a
   re-run of the job is safe; a self-hosted runner needs its disk fixed.
 
@@ -978,21 +969,6 @@ other case, re-plan and reconcile against the provider:
    replaced resource as a create rather than a replace.
 9. Once applied, delete the `import` and `removed` blocks in a later pull
    request.
-
-### `state cache entry ... is not a shipmate-crypt-v1 entry`
-
-A local backend's restore matched a cache entry saved unencrypted or by an
-earlier engine release, and refused before tofu read it. Every older entry
-under its prefix was saved the same way, and no secret change helps. The
-message gives the command that deletes every entry under the prefix; the
-restore matches by prefix, so deleting only the named entry restores the
-next-older one.
-
-Deleting discards that state: OpenTofu no longer tracks the resources it
-recorded, and a plan of the stack in that environment re-creates them. A
-plan or drift cell can be re-run; never re-run a refused apply cell or deploy.
-For a real resource, applying that plan duplicates or collides with the
-existing object.
 
 ### `state cache entry ... cannot be read`
 

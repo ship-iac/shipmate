@@ -35,9 +35,7 @@ call.
   miss; `apply-cell` reads `saved` and fails the cell when an apply ran.
 - Restore: a matched entry is authenticated, then decrypted in place, before
   tofu reads it. A cache miss restores nothing and runs no decrypt. An entry
-  saved unencrypted or by an earlier engine release fails the restore with the
-  `gh cache` command that deletes every entry under its prefix. An entry that
-  fails authentication (another passphrase, a corrupt, truncated or altered
+  that fails authentication (another passphrase, a corrupt, truncated or altered
   entry, or one copied under another stack's or environment's key) fails it
   naming the matched cache key and no command: `docs/troubleshooting.md` tells
   the causes apart. An openssl or disk failure on the runner fails it too;

@@ -23,15 +23,12 @@ The passphrase comes from the PLAN_PASSPHRASE env var and is required: every ope
 refuses when it is empty or unset.
 
 AES-256-CTR is unauthenticated: a wrong key or a damaged byte decrypts to garbage WITH
-EXIT 0. So a decrypt checks, in this order, before openssl sees any byte: a file that
-starts with `Salted__` (every earlier release's ciphertext) or is plaintext (a zip, or a
-whole JSON object) refuses as not shipmate-crypt-v1; anything else that is not a whole v1
-file whose tag verifies refuses as failing authentication. Only then does openssl run.
+EXIT 0. So a decrypt refuses anything that is not a whole v1 file whose tag verifies as
+failing authentication, before openssl sees any byte.
 """
 
 import hashlib
 import hmac
-import json
 import os
 import secrets
 import subprocess
@@ -133,19 +130,6 @@ def _require_passphrase():
         )
 
 
-def _repo_flag():
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    return f" --repo {repo}" if repo else ""
-
-
-def _purge_command(prefix):
-    repo = _repo_flag()
-    return (
-        f"gh cache list{repo} --key {prefix} --limit 1000 --json id --jq '.[].id' "
-        f"| xargs -n1 gh cache delete{repo}"
-    )
-
-
 def _encrypt(path, kind, scope):
     """The encrypt both artifact kinds share. `_keys` binds `kind` through the HMAC labels and
     `_tag` binds `scope`, as `_decrypt` reads them."""
@@ -180,17 +164,7 @@ def encrypt_state(path, cache_key):
     _encrypt(path, "state", _state_scope(cache_key))
 
 
-def _is_pre_v1(data):
-    # A one-bit flip turns MAGIC's `s` into `{`, so only a whole JSON object reads as plaintext.
-    if data.startswith((b"Salted__", b"PK\x03\x04")):
-        return True
-    try:
-        return isinstance(json.loads(data), dict)
-    except ValueError:
-        return False
-
-
-def _decrypt(path, kind, scope, *, unreadable, no_header, unauthenticated, failure):
+def _decrypt(path, kind, scope, *, unreadable, unauthenticated, failure):
     """The decrypt both artifact kinds share; each caller supplies its refusals."""
     _require_passphrase()
     try:
@@ -198,8 +172,6 @@ def _decrypt(path, kind, scope, *, unreadable, no_header, unauthenticated, failu
             data = fh.read()
     except OSError as exc:
         raise SystemExit(f"{unreadable} Error: {exc}") from None
-    if _is_pre_v1(data):
-        raise SystemExit(no_header)
     if len(data) < MIN_LEN or not data.startswith(MAGIC):
         raise SystemExit(unauthenticated)
     enc_key, mac_key = _keys(data[len(MAGIC) : len(MAGIC) + SALT_LEN], kind)
@@ -212,8 +184,7 @@ def _decrypt(path, kind, scope, *, unreadable, no_header, unauthenticated, failu
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on an artifact that cannot be read, on one that is not
-    shipmate-crypt-v1 (plaintext, or an earlier release's ciphertext), on one that fails
+    Refuses without a passphrase, on an artifact that cannot be read, on one that fails
     authentication (another passphrase, corruption, truncation or alteration), and when
     openssl or the disk fails on the runner, leaving the ciphertext in place. Never prints
     the file.
@@ -226,11 +197,6 @@ def decrypt(path):
             f"::error::plan artifact `{path}` cannot be read. Nothing was applied. An artifact "
             f"downloaded without stack.otplan needs a re-plan: {_REPLAN} For a disk failure on "
             "the runner, the refusal comes before any apply step, so a re-run of the job is safe."
-        ),
-        no_header=(
-            f"::error::plan artifact `{path}` is not a shipmate-crypt-v1 artifact: it was "
-            "uploaded unencrypted or encrypted by an earlier engine release. Nothing was "
-            f"applied. Re-plan: {_REPLAN}"
         ),
         unauthenticated=(
             f"::error::plan artifact `{path}` failed authentication: it was encrypted with "
@@ -249,10 +215,9 @@ def decrypt(path):
 def decrypt_state(path, cache_key):
     """Decrypt a restored state cache entry in place, or refuse before tofu can read it.
 
-    Refuses as `decrypt` does, naming the cache key. An entry that is not shipmate-crypt-v1
-    names the command that deletes every entry under its prefix; one that fails
-    authentication names no delete command, because the refusal cannot tell corruption from a
-    wrong passphrase. Never prints the file's contents.
+    Refuses as `decrypt` does, naming the cache key. An authentication failure names no delete
+    command, because the refusal cannot tell corruption from a wrong passphrase. Never prints
+    the file's contents.
     """
     prefix = _state_scope(cache_key)
     _decrypt(
@@ -263,16 +228,6 @@ def decrypt_state(path, cache_key):
             f"::error::state cache entry `{cache_key}` cannot be read: the restore may not have "
             "written the file, or the runner's disk failed. tofu was not run. The refusal comes "
             "before any apply step, so a re-run of the job is safe."
-        ),
-        no_header=(
-            f"::error::state cache entry `{cache_key}` is not a shipmate-crypt-v1 entry: it was "
-            "saved unencrypted or by an earlier engine release. Delete every entry under its "
-            f"prefix: `{_purge_command(prefix)}` (the restore matches by prefix, "
-            f"so deleting only `{cache_key}` restores the next-older entry, which is no "
-            "shipmate-crypt-v1 entry either). Deleting discards that state: OpenTofu no longer "
-            "tracks the resources it recorded, and a plan of the stack in this environment "
-            "re-creates them. A plan or drift cell can then be re-run; never re-run a refused "
-            "apply or deploy."
         ),
         unauthenticated=(
             f"::error::state cache entry `{cache_key}` failed authentication: it was saved with "
