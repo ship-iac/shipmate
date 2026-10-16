@@ -55,7 +55,7 @@ def _missing_description(missing):
     order) by its plan check as having no plan summary, or None when there is none or the text
     passes the 140 characters the statuses API accepts: a cut would name a check that does not
     exist. A cell is missing when its plan matrix job did not succeed or the summary download
-    failed, and the run cannot tell which, so the text names neither."""
+    failed, so the text names neither."""
     if not missing:
         return None
     check = f"{ag.CALLER_PREFIX}{missing[0]['stack']} / {missing[0]['environment']}"
