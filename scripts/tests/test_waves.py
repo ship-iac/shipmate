@@ -1,4 +1,3 @@
-import json
 import subprocess
 
 import pytest
@@ -354,18 +353,21 @@ def test_env_level_waves_empty_order_is_a_single_level():
 
 
 def test_env_level_outputs_emits_waves_and_empty_flags():
-    # The shared GITHUB_OUTPUT writer must emit envlevelN_waves as JSON plus an envlevelN_empty
-    # flag per level: 'false' for a level with any cell, 'true' for an empty one. Single-sourced,
-    # so the three detects cannot drift apart on apply-env-level.yml's contract.
+    # The shared outputs: envlevelN_waves as JSON plus an envlevelN_empty bool per level, which
+    # `write_outputs` renders `true`/`false`. Single-sourced, so the three detects cannot drift
+    # apart on apply-env-level.yml's contract.
     cell = {"stack": "s", "environment": "dev-eu"}
     per_level = [
         {f"wave{i}": ([cell] if i == 0 else []) for i in range(8)},
         {f"wave{i}": [] for i in range(8)},
     ]
+    rest = (
+        '"wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], "wave6": [], "wave7": []'
+    )
     assert w.env_level_outputs(per_level) == {
-        "envlevel0_waves": json.dumps(per_level[0]),
+        "envlevel0_waves": '{"wave0": [{"stack": "s", "environment": "dev-eu"}], ' + rest + "}",
         "envlevel0_empty": False,
-        "envlevel1_waves": json.dumps(per_level[1]),
+        "envlevel1_waves": '{"wave0": [], ' + rest + "}",
         "envlevel1_empty": True,
     }
 
