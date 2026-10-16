@@ -162,8 +162,8 @@ def _check_refs(wf, texts, new, sha, tag):
                 bad.append(f"{name}:{n}: {old}")
     if bad:
         raise SystemExit(
-            f"engine refs not on `@{sha} # {tag}` alone at the end of their line; fix each by "
-            "hand and run again:\n" + "\n".join(bad)
+            f"engine refs not spelled `{slug}...@{sha} # {tag}` alone at the end of their line; "
+            "fix each by hand and run again:\n" + "\n".join(bad)
         )
     if not seen:
         raise SystemExit(f"no engine reference under {wf}.")

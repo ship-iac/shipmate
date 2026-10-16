@@ -182,8 +182,8 @@ jobs:
 
 GOOD = f"jobs:\n  plan:\n    uses: {WF}/plan.yml@{OLD} # v0.1.0\n".encode()
 LEFTOVER = (
-    "engine refs not on `@{sha} # v1.2.3` alone at the end of their line; fix each by hand "
-    "and run again:\n"
+    "engine refs not spelled `ship-iac/shipmate/...@{sha} # v1.2.3` alone at the end of their "
+    "line; fix each by hand and run again:\n"
 )
 
 
