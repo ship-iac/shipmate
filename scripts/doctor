@@ -2628,6 +2628,13 @@ def _verdict(findings, sections, ctx):
     return circle, f"{circle} {', '.join(t for _, t in tokens)} {sha}"
 
 
+#: Not a finding: in `warnings()` it would suppress the all-clear and annotate every plan run.
+NOT_CHECKED = (
+    "_Not checked: the repository's Actions settings (docs/hardening.md rows 10 to 12 and 20), "
+    "which no token a workflow can obtain reads. `scripts/onboard` checks rows 10, 12 and 20._"
+)
+
+
 def _report_head(ctx, verdict):
     """Shared by both render paths -- the marker is this comment's identity (the
     upsert PATCHes by it), so neither path can drift out of marker compliance."""
@@ -2640,6 +2647,8 @@ def _report_head(ctx, verdict):
         _plan_runs_line(ctx),
         "",
         "#### repository settings",
+        "",
+        NOT_CHECKED,
         "",
     ]
 

@@ -1894,6 +1894,11 @@ _COVERED = (
     "environments of the stacks changed in this pull request: `dev-eu`."
 )
 
+_NOT_CHECKED = (
+    "_Not checked: the repository's Actions settings (docs/hardening.md rows 10 to 12 and 20), "
+    "which no token a workflow can obtain reads. `scripts/onboard` checks rows 10, 12 and 20._"
+)
+
 
 def test_report_with_no_findings_is_the_whole_all_clear_body():
     """Mutation: render the verdict without `provenance` -- `🟢 no problems found` alone.
@@ -1907,6 +1912,8 @@ def test_report_with_no_findings_is_the_whole_all_clear_body():
         "Cell summaries from plan run ID 1281.\n"
         "\n"
         "#### repository settings\n"
+        "\n"
+        f"{_NOT_CHECKED}\n"
         "\n"
         f"{_COVERED}\n"
         "\n"
@@ -1938,6 +1945,8 @@ def test_report_with_a_warning_a_notice_and_a_harvested_failure_is_the_whole_bod
         "\n"
         "#### repository settings\n"
         "\n"
+        f"{_NOT_CHECKED}\n"
+        "\n"
         "- 🟠 gate ruleset is missing\n"
         "- ⚪ apply env has no protection\n"
         "\n"
@@ -1963,6 +1972,8 @@ def test_report_with_a_pending_harvest_and_no_findings_is_the_whole_body():
         "\n"
         "#### repository settings\n"
         "\n"
+        f"{_NOT_CHECKED}\n"
+        "\n"
         f"{_COVERED}\n"
         "\n"
         "#### warnings from this commit's workflow runs\n"
@@ -1986,6 +1997,8 @@ def test_report_with_one_warning_is_the_whole_body_with_the_hint():
         "Cell summaries from plan run ID 1281.\n"
         "\n"
         "#### repository settings\n"
+        "\n"
+        f"{_NOT_CHECKED}\n"
         "\n"
         "- 🟠 gate ruleset is missing\n"
         "\n"
@@ -2101,6 +2114,25 @@ def test_findings_only_fallback_uses_the_same_all_clear_line():
     body = doctor._findings_only_report([], _ctx(envs={"dev-eu"}), "🟢", "🟢 no problems found")
     assert "`dev-eu`" in body
     assert "changed in this pull request" in body
+
+
+def test_findings_only_fallback_is_the_whole_all_clear_body():
+    """Mutation: drop `NOT_CHECKED` from `_report_head`. Mutation: append it in `render_report`
+    instead of `_report_head`."""
+    assert doctor._findings_only_report([], _ctx(), "🟢", f"🟢 no problems found {_AT}") == (
+        "<!-- shipmate:doctor -->\n"
+        "### shipmate doctor\n"
+        "\n"
+        f"🟢 no problems found {_AT}\n"
+        "\n"
+        "Cell summaries from plan run ID 1281.\n"
+        "\n"
+        "#### repository settings\n"
+        "\n"
+        f"{_NOT_CHECKED}\n"
+        "\n"
+        f"{_COVERED}"
+    )
 
 
 def test_harvest_incomplete_note_says_the_harvest_is_incomplete():
