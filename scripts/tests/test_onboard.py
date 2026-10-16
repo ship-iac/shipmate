@@ -2104,6 +2104,7 @@ cannot check  o/r in the App installation's repository selection
     The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
 todo          GITHUB_TOKEN read-only, Actions may not approve pull requests (hardening.md row 10)
+    Workflows without their own `permissions:` block then get a read-only `GITHUB_TOKEN`.
     {WORKFLOW_PERMS_PUT}
 
 todo          allowed actions (hardening.md row 12)
@@ -2112,14 +2113,15 @@ todo          allowed actions (hardening.md row 12)
     this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or
     those workflows fail at "Set up job" too: this run cannot read the current list
     while the mode is not `selected`, so it cannot add them.
-    Run the second command straight after the first: until the list is in, every
-    shipmate run fails at "Set up job".
+    Run the second command straight after the first: once switched, the list was
+    observed empty until the second call, so a shipmate run in between stops at
+    "Set up job".
     {MODE_PUT}
     {LIST_PUT}
 
 todo          actions pinned to a full-length commit SHA (hardening.md row 20)
-    With this on, every `uses:` in this repository's workflows has to name a
-    full-length commit SHA.
+    With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,
+    with the exemptions in docs/hardening.md rows 10 to 12 and 20.
     {SHA_PIN_PUT}
 
 todo          approving review before apply
@@ -2470,10 +2472,11 @@ ROW_10 = "GITHUB_TOKEN read-only, Actions may not approve pull requests (hardeni
 ROW_12 = "allowed actions (hardening.md row 12)"
 ROW_20 = "actions pinned to a full-length commit SHA (hardening.md row 20)"
 ROWS_OK = [("ok", ROW_10, []), ("ok", ROW_12, []), ("ok", ROW_20, [])]
-FORBIDDEN = SystemExit("gh: Resource not accessible by integration (HTTP 403)")
+GH_403 = "gh: Resource not accessible by integration (HTTP 403)"
+FORBIDDEN = SystemExit(f"command failed (1): gh api {ACTIONS}\n{GH_403}")
 
 
-def _actions_settings_items(monkeypatch, answers, drop=()):
+def _settings_rows(monkeypatch, answers, drop=()):
     """`_actions_settings_items` over `ACTIONS_OK_ROUTES` with `answers` replacing reads
     and the paths in `drop` unrouted, so reading one fails the test."""
     routes = {k: v for k, v in {**ACTIONS_OK_ROUTES, **answers}.items() if k not in drop}
@@ -2487,7 +2490,7 @@ def test_hardened_actions_settings_are_ok_beside_extra_consumer_patterns(monkeyp
     Mutation: add `or set(current) != set(ALLOWED_PATTERNS)` to the `missing` test in
     `_allowed_actions_gaps`, comparing the list for equality instead of as a superset.
     """
-    assert _actions_settings_items(monkeypatch, {}) == ROWS_OK
+    assert _settings_rows(monkeypatch, {}) == ROWS_OK
 
 
 @pytest.mark.parametrize(
@@ -2500,21 +2503,34 @@ def test_hardened_actions_settings_are_ok_beside_extra_consumer_patterns(monkeyp
 def test_either_workflow_permission_off_alone_makes_row_10_todo(monkeypatch, workflow):
     """Mutation: drop the `can_approve_pull_request_reviews` test from `_token_item`,
     judging on `default_workflow_permissions` alone."""
-    items = _actions_settings_items(monkeypatch, {ACTIONS_WORKFLOW: workflow})
-    assert items == [("todo", ROW_10, [WORKFLOW_PERMS_PUT]), *ROWS_OK[1:]]
+    items = _settings_rows(monkeypatch, {ACTIONS_WORKFLOW: workflow})
+    assert items == [
+        (
+            "todo",
+            ROW_10,
+            [
+                (
+                    "Workflows without their own `permissions:` block then get a read-only"
+                    " `GITHUB_TOKEN`."
+                ),
+                WORKFLOW_PERMS_PUT,
+            ],
+        ),
+        *ROWS_OK[1:],
+    ]
 
 
 def test_sha_pinning_off_makes_row_20_todo(monkeypatch):
     """Mutation: invert `_sha_pinning_item`'s predicate to `is not True`."""
     perms = {"enabled": True, "allowed_actions": "selected", "sha_pinning_required": False}
-    assert _actions_settings_items(monkeypatch, {ACTIONS: perms}) == [
+    assert _settings_rows(monkeypatch, {ACTIONS: perms}) == [
         *ROWS_OK[:2],
         (
             "todo",
             ROW_20,
             [
-                "With this on, every `uses:` in this repository's workflows has to name a",
-                "full-length commit SHA.",
+                "With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,",
+                "with the exemptions in docs/hardening.md rows 10 to 12 and 20.",
                 SHA_PIN_PUT,
             ],
         ),
@@ -2530,7 +2546,7 @@ def test_mode_all_prints_the_mode_put_then_the_required_list(monkeypatch):
     `_allowed_actions_item` before the mode test.
     """
     perms = {"enabled": True, "allowed_actions": "all", "sha_pinning_required": True}
-    items = _actions_settings_items(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
+    items = _settings_rows(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
     assert items == [
         ROWS_OK[0],
         (
@@ -2542,8 +2558,9 @@ def test_mode_all_prints_the_mode_put_then_the_required_list(monkeypatch):
                 "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
                 'those workflows fail at "Set up job" too: this run cannot read the current list',
                 "while the mode is not `selected`, so it cannot add them.",
-                "Run the second command straight after the first: until the list is in, every",
-                'shipmate run fails at "Set up job".',
+                "Run the second command straight after the first: once switched, the list was",
+                "observed empty until the second call, so a shipmate run in between stops at",
+                '"Set up job".',
                 MODE_PUT,
                 LIST_PUT,
             ],
@@ -2568,7 +2585,7 @@ def test_a_missing_required_pattern_is_appended_to_the_current_list(monkeypatch)
             "aws-actions/configure-aws-credentials@*",
         ],
     }
-    items = _actions_settings_items(monkeypatch, {SELECTED_ACTIONS: selected})
+    items = _settings_rows(monkeypatch, {SELECTED_ACTIONS: selected})
     assert items[1] == (
         "todo",
         ROW_12,
@@ -2587,24 +2604,38 @@ def test_a_missing_required_pattern_is_appended_to_the_current_list(monkeypatch)
 
 
 @pytest.mark.parametrize(
-    ("field", "value", "gap"),
+    ("field", "value", "detail"),
     [
-        ("verified_allowed", True, "`verified_allowed` is on."),
-        ("github_owned_allowed", False, "`github_owned_allowed` is off."),
+        (
+            "verified_allowed",
+            True,
+            [
+                "`verified_allowed` is on.",
+                "The command turns verified-creator actions off. For each one this repository's",
+                "own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or those workflows",
+                'fail at "Set up job".',
+            ],
+        ),
+        ("github_owned_allowed", False, ["`github_owned_allowed` is off."]),
     ],
 )
 def test_either_selected_actions_boolean_off_alone_makes_row_12_todo(
-    monkeypatch, field, value, gap
+    monkeypatch, field, value, detail
 ):
-    """Mutations, each proven: drop the `verified_allowed` test from `_allowed_actions_gaps`;
-    drop the `github_owned_allowed` test from it."""
+    """With `verified_allowed` on, the PUT that sets it off warns first that the
+    verified-creator actions this repository's own workflows use need their own pattern.
+
+    Mutations, each proven: drop the `verified_allowed` test from `_allowed_actions_gaps`;
+    drop the `github_owned_allowed` test from it; delete the `VERIFIED_OFF` branch in
+    `_allowed_actions_item`; make that branch unconditional.
+    """
     selected = {**ACTIONS_OK_ROUTES[SELECTED_ACTIONS], field: value}
-    items = _actions_settings_items(monkeypatch, {SELECTED_ACTIONS: selected})
+    items = _settings_rows(monkeypatch, {SELECTED_ACTIONS: selected})
     assert items[1] == (
         "todo",
         ROW_12,
         [
-            gap,
+            *detail,
             (
                 "gh api -X PUT repos/o/r/actions/permissions/selected-actions "
                 "-F github_owned_allowed=true -F verified_allowed=false "
@@ -2624,27 +2655,79 @@ def test_either_selected_actions_boolean_off_alone_makes_row_12_todo(
             ACTIONS,
             [
                 ROWS_OK[0],
-                ("cannot check", ROW_12, [f"`{ACTIONS}` could not be read."]),
-                ("cannot check", ROW_20, [f"`{ACTIONS}` could not be read."]),
+                ("cannot check", ROW_12, [f"`{ACTIONS}` could not be read: {GH_403}"]),
+                ("cannot check", ROW_20, [f"`{ACTIONS}` could not be read: {GH_403}"]),
             ],
         ),
         (
             ACTIONS_WORKFLOW,
-            [("cannot check", ROW_10, [f"`{ACTIONS_WORKFLOW}` could not be read."]), *ROWS_OK[1:]],
+            [
+                ("cannot check", ROW_10, [f"`{ACTIONS_WORKFLOW}` could not be read: {GH_403}"]),
+                *ROWS_OK[1:],
+            ],
         ),
         (
             SELECTED_ACTIONS,
             [
                 ROWS_OK[0],
-                ("cannot check", ROW_12, [f"`{SELECTED_ACTIONS}` could not be read."]),
+                ("cannot check", ROW_12, [f"`{SELECTED_ACTIONS}` could not be read: {GH_403}"]),
                 ROWS_OK[2],
             ],
         ),
     ],
 )
 def test_a_failed_read_makes_only_the_rows_it_serves_cannot_check(monkeypatch, failing, expected):
-    """Mutation: re-raise the `SystemExit` in `_read_or_none`."""
-    assert _actions_settings_items(monkeypatch, {failing: FORBIDDEN}) == expected
+    """Mutation: re-raise the `SystemExit` in `_read_or_reason`."""
+    assert _settings_rows(monkeypatch, {failing: FORBIDDEN}) == expected
+
+
+@pytest.mark.parametrize(
+    ("message", "reason"),
+    [
+        (FORBIDDEN.code, GH_403),
+        ("::error::command failed (1): gh api x\n\n", "command failed (1): gh api x"),
+    ],
+)
+def test_cannot_check_names_the_last_line_of_the_failure(monkeypatch, message, reason):
+    """gh's stderr ends the failure message, so its last non-empty line is the reason, and an
+    `::error::` prefix is not part of it.
+
+    Mutations, each proven: take the first line instead of the last; keep blank lines; drop
+    the `removeprefix`.
+    """
+    items = _settings_rows(monkeypatch, {ACTIONS_WORKFLOW: SystemExit(message)})
+    assert items[0] == (
+        "cannot check",
+        ROW_10,
+        [f"`{ACTIONS_WORKFLOW}` could not be read: {reason}"],
+    )
+
+
+@pytest.mark.parametrize("perms", [{"enabled": False, "allowed_actions": "all"}, {"enabled": True}])
+def test_disabled_actions_say_so_instead_of_naming_a_mode(monkeypatch, perms):
+    """Actions off, or no `allowed_actions` in the read, makes row 12 say the first command
+    enables Actions rather than print a `None` mode.
+
+    Mutations, each proven: drop the `enabled is False` test from `_allowed_actions_setup`;
+    drop the missing-mode test from it.
+    """
+    items = _settings_rows(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
+    assert items[1] == (
+        "todo",
+        ROW_12,
+        [
+            "Actions are disabled on this repository; the first command enables them.",
+            "The list below holds only what shipmate needs. For each other third-party action",
+            "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
+            'those workflows fail at "Set up job" too: this run cannot read the current list',
+            "while the mode is not `selected`, so it cannot add them.",
+            "Run the second command straight after the first: once switched, the list was",
+            "observed empty until the second call, so a shipmate run in between stops at",
+            '"Set up job".',
+            MODE_PUT,
+            LIST_PUT,
+        ],
+    )
 
 
 def test_the_ruleset_reconciler_stores_the_review_count(monkeypatch):

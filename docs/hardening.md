@@ -732,9 +732,9 @@ Settings → Actions → General:
 
   Switch `allowed_actions` to `selected` first, then set the list straight
   after. The selected-actions endpoint answers `409 Conflict` until the mode is
-  `selected`, so the list cannot be written first; and from the mode change until
-  the list is in, every shipmate run fails at "Set up job". `scripts/onboard`
-  prints both calls in that order.
+  `selected`, so the list cannot be written first; once switched, the list was
+  observed empty until the second call, so a shipmate run in between stops at
+  "Set up job". `scripts/onboard` prints both calls in that order.
 
   `<owner>/shipmate/*@*` covers every shape the engine is referenced in.
   Consumers reference only `<owner>/shipmate/.github/workflows/*.yml@<sha>`; the
