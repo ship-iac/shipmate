@@ -266,15 +266,18 @@ pass none, so those jobs run on
 the `ubuntu-latest` default. Outside them the
 runner is fixed:
 
-- `ubuntu-slim`: the control jobs, which run neither `tofu` nor `terramate`.
-  These are `guard`, `review` and `summary` in `apply.yml`, `snapshot` and
-  `complete` in `apply-env-level.yml`, `summary` in `deploy.yml`, `guard` in
-  `unlock.yml`, `ops` in `comment-ops.yml`, and `facts` and `gate-hold` in
-  `plan.yml`, which the `plan` job's `runs_on:` does not reach. `plan.yml`'s
-  `summary` takes `runs_on:`: its doctor step needs PyYAML, which `ubuntu-slim`
-  lacks, so the engine installs it there with `apt-get` on every run.
-- `ubuntu-latest`: every detect job, which runs `terramate`, and every apply
-  and unlock cell, which runs `tofu`.
+- `ubuntu-slim`: the control jobs except `ops`, which run neither `tofu` nor
+  `terramate`. These are `guard`, `review` and `summary` in `apply.yml`,
+  `snapshot` and `complete` in `apply-env-level.yml`, `summary` in `deploy.yml`,
+  `guard` in `unlock.yml`, and `facts` and `gate-hold` in `plan.yml`, which the
+  `plan` job's `runs_on:` does not reach. On a caller-chosen `ubuntu-slim`,
+  `plan.yml`'s `detect` and `summary` and `drift.yml`'s `detect` install PyYAML
+  with `apt-get` on every run.
+- `ubuntu-latest`: every detect job, which runs `terramate`; every apply and
+  unlock cell, which runs `tofu`; and `ops` in `comment-ops.yml`, because its
+  `doctor`, `apply` and `unlock` routes parse YAML and `ubuntu-latest`'s
+  `python3` ships PyYAML, where `ubuntu-slim` would install it with `apt-get`
+  on each such comment.
 
 The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
 `drift`; their cells download only `hashicorp/random`. An AWS repository's

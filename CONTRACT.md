@@ -1989,12 +1989,13 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. The CLI is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
-  step, and the control jobs below call `gh api` on the comment, apply and
+  step, and the control jobs below call `gh api` on the plan, apply and
   deploy paths. Self-hosted runners must preinstall these tools.
 - The engine's ten control jobs, which run neither `tofu` nor `terramate`,
-  take no runner input and run on `ubuntu-slim`. `plan.yml`'s `facts` and
+  take no runner input; nine run on `ubuntu-slim`. `plan.yml`'s `facts` and
   `gate-hold` run on `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
-  `docs/aws.md` §Runner choice lists them. An account that cannot use that
+  `docs/aws.md` §Runner choice lists them and names the one control job on
+  `ubuntu-latest`. An account that cannot use that
   label leaves them waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
