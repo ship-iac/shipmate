@@ -246,9 +246,8 @@ def refuse_unreviewed(env, table, decision):
     The same `authorize._review_reason` comment-ops evaluated, re-run against the
     decision the `review` job read server-side: comment-ops decided on the state
     at comment time, and an approval dismissed since then must not still apply.
-    Refusing here rather than in workflow YAML is deliberate — the review job has
-    no checkout, so it holds no scripts. The run dies before any wave, the apply
-    checks stay pending, and the gate stays pending with them.
+    The run dies before any wave, the apply checks stay pending, and the gate stays
+    pending with them.
 
     `table` must have been through `validate_structure`: `ungated_envs` reads only a
     boolean `false` as ungated, so a `gated: no` would otherwise refuse as
