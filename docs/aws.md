@@ -273,11 +273,11 @@ runner is fixed:
 - `ubuntu-latest`: `detect` in `apply.yml`, `deploy.yml` and `unlock.yml`,
   which runs `terramate`; the apply cells in `apply-env-level.yml` and `unlock`
   in `unlock.yml`, which run `tofu`; and `ops` in `comment-ops.yml`. Every
-  `ops` run takes `ubuntu-latest`, whatever the comment says; only an
-  authorized `doctor`, `apply` or `unlock` comment needs PyYAML there, which
-  `ubuntu-slim` would install with `apt-get`.
+  `ops` run takes `ubuntu-latest`, whatever the comment says; only a
+  `doctor`, `apply` or `unlock` comment from a commenter with write access
+  needs PyYAML there, which `ubuntu-slim` would install with `apt-get`.
 
-None of the nine `ubuntu-slim` jobs, and not `ops`, runs `tofu` or `terramate`.
+Neither the nine `ubuntu-slim` jobs nor `ops` runs `tofu` or `terramate`.
 
 The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
 `drift`; their cells download only `hashicorp/random`. An AWS repository's

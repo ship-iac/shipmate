@@ -2,7 +2,7 @@ name: plan
 on:
   workflow_call:
     inputs:
-      # The three local samples run a slimmer image than the apply path's fixed ubuntu-latest.
+      # The three local samples run a slimmer image than the apply path's ubuntu-latest cells.
       # `detect`, the plan cells and `summary` take it; `facts` and `gate-hold` run on ubuntu-slim.
       runs_on: { required: false, default: ubuntu-latest, type: string }
     secrets:
