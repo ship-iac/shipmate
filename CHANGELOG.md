@@ -23,8 +23,6 @@ section below names the SHA the release tags.
 - **A plan run that holds `shipmate / gate` for a failed `detect` or incomplete evidence replaces the sticky plan comment with why: the hold reason in a fence and one line per cell that left no plan, then the help hint; a failed plan job's gate description names its first such cell. No plan comment write lands once the pull request has moved to a newer head, and the apply checks publish after the comment, so a failed comment write publishes none.**
 - **The comment-ops `ops` job runs on `ubuntu-latest`, so a `shipmate apply`, `shipmate unlock` or `shipmate doctor` comment no longer installs PyYAML with `apt-get` (7.6 s in one consumer's run).**
 - **A plan artifact or state cache entry without the shipmate-crypt-v1 header refuses as failing authentication; the separate pre-v1 refusal and its purge command are gone.**
-- **A drift sweep that cannot create the `drift` label fails that cell at the label call instead of at `gh issue create`.**
-
 ### Fixed
 
 - **A multi-line `::error::` from any engine script a workflow step runs keeps every line in its annotation, a failed gate refresh in the plan summary logs gh's error as a warning annotation, and `reply-comment` no longer prints the reply body on a failed POST.**

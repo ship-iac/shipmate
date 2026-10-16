@@ -477,7 +477,7 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
     dropped. The DAG-shape notice still prints first: it is the line that explains the depth.
 
     Mutation: bucket the cells in `main` without `env_level_waves` (one unpadded
-    `{waveN: cells}` dict from `wv.assign_waves` into `write_env_level_waves`) -- the run
+    `{waveN: cells}` dict from `wv.assign_waves` into `env_level_outputs`) -- the run
     writes the waves and exits 0.
     Mutation: print the DAG-shape notice after `env_level_waves` -- the notice is missing.
     """

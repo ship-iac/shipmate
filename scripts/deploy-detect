@@ -200,8 +200,7 @@ def main():
         f"head={head} cells={len(cells)} completed={len(completed)} pending={len(pending)} "
         f"envlevels={level_counts} empty={not any(level_counts)}"
     )
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        wv.write_env_level_waves(fh, per_level)
+    write_outputs(**wv.env_level_outputs(per_level))
 
 
 if __name__ == "__main__":
