@@ -461,8 +461,8 @@ A plan cell fails on its very first step, before `terramate` runs, so the cell
 produces no plan and its `shipmate / <stack> / <env>` check does not go green.
 The failing
 plan job leaves `shipmate / gate` held red with `shipmate / <stack> / <env>
-failed to plan; fix it before merging`, or `plan incomplete (plan job: failure);
-fix the failing plan checks before merging` when no failed cell is known or its
+has no plan summary; fix its plan or re-plan`, or `plan incomplete (plan job: failure);
+fix the failing plan checks before merging` when no cell is known or its
 name does not fit — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 That run publishes no apply check. Checks an earlier plan run of the same head

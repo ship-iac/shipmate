@@ -20,9 +20,10 @@ section below names the SHA the release tags.
 - **`docs/getting-started.md` §The table holds the environment table: the layout choice, the GitHub Environment count, and one decision table for `gated`, `explicit`, `shared`, `needs` and `after` across both apply forms, the merge deploy, approving review and environment reviewers. `scripts/onboard`'s missing-table item points to it.**
 - **`scripts/onboard` prints the diff from the published fence to `shipmate.yml`, pins masked and indented, after a `differs beyond its pin, not overwritten` line, and its `pin-only` line names `scripts/repin`.**
 - **`docs/hardening.md`'s allowed-actions list drops `astral-sh/setup-uv`, which only the engine's own CI uses.**
-- **A plan run that holds `shipmate / gate` for a failed `detect` or incomplete evidence replaces the sticky plan comment with why: the hold reason in a fence and one line per cell that left no plan, then the help hint; a failed plan job's gate description names its first such cell. No plan comment write lands once the pull request has moved to a newer head, and the apply checks publish after the comment, so a failed comment write publishes none.**
+- **A plan run that holds `shipmate / gate` for a failed `detect` or incomplete evidence replaces the sticky plan comment with why: the hold reason in a fence and one line per cell that left no plan summary, then the help hint; a failed plan job's gate description names its first such cell. No plan comment write lands once the pull request has moved to a newer head, and the apply checks publish after the comment, so a failed comment write publishes none.**
 - **The comment-ops `ops` job runs on `ubuntu-latest`, so a `shipmate apply`, `shipmate unlock` or `shipmate doctor` comment no longer installs PyYAML with `apt-get` (7.6 s in one consumer's run).**
-- **A plan artifact or state cache entry without the shipmate-crypt-v1 header refuses as failing authentication; the separate pre-v1 refusal and its purge command are gone.**
+- **A plan artifact or state cache entry without the shipmate-crypt-v1 header refuses as failing authentication.**
+
 ### Fixed
 
 - **A multi-line `::error::` from any engine script a workflow step runs keeps every line in its annotation, a failed gate refresh in the plan summary logs gh's error as a warning annotation, and `reply-comment` no longer prints the reply body on a failed POST.**

@@ -415,7 +415,6 @@ def _run_summary(
         "LOST": lost,
         "SHIPMATE_HOLD_REASON": "the reason",
         "SHIPMATE_MISSING": "[]",
-        "SHIPMATE_PLAN_RESULT": "failure",
         "GITHUB_REPOSITORY": "o/r",
         "GITHUB_SERVER_URL": "https://gh",
         "GITHUB_RUN_ID": "1",

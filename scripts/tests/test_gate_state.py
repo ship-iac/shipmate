@@ -309,7 +309,7 @@ _PLAN_CANCELLED = (
 )
 _A, _B, _C = ({"stack": f"stacks/{s}", "environment": "dev"} for s in ("a", "b", "c"))
 #: The one-cell text around a stack path; 140 characters at `_FITS`.
-_ONE = "shipmate / {} / dev failed to plan; fix it before merging"
+_ONE = "shipmate / {} / dev has no plan summary; fix its plan or re-plan"
 _FITS = "s" * (140 - len(_ONE.format("")))
 
 
@@ -325,7 +325,7 @@ _FITS = "s" * (140 - len(_ONE.format("")))
             "3",
             0,
             [_A, _B, _C],
-            "shipmate / stacks/a / dev and 2 more failed to plan; fix them before merging",
+            "shipmate / stacks/a / dev and 2 more have no plan summary; fix their plans or re-plan",
         ),
         (
             "failure",
@@ -378,9 +378,9 @@ def test_evidence_gap_is_the_one_evidence_rule(
     (they still hold, as "None cell(s) planned"); `!=` -> `<` in `_evidence_gap` -- the
     `("success", "1", 2)` row; drop the name from the one-cell f-string -- the one-cell and
     140-character rows; name `missing[-1]` -- the three-name row; pass names for `cancelled` too
-    -- the named `cancelled` row; hold on any non-empty `missing` (a gap of `_failed_cells` when
-    `_plan_gap` finds none) -- the named `success` row; drop the 140-character bound -- the
-    141-character row."""
+    -- the named `cancelled` row; hold on any non-empty `missing` (a gap of
+    `_missing_description` when `_plan_gap` finds none) -- the named `success` row; drop the
+    140-character bound -- the 141-character row."""
     assert (
         gate_state.evidence_gap(
             plan_result=plan_result,
@@ -413,7 +413,7 @@ def test_main_reads_the_missing_cells_and_flattens_a_line_break(tmp_path, monkey
         SHIPMATE_CELL_COUNT="2",
         SHIPMATE_MISSING=missing,
     )
-    text = "shipmate / stacks/a  b / dev failed to plan; fix it before merging"
+    text = "shipmate / stacks/a  b / dev has no plan summary; fix its plan or re-plan"
     assert body == {
         "state": "failure",
         "description": text,

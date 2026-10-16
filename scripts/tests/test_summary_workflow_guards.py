@@ -112,7 +112,7 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop the `lost-env-tags:` line -> the comment never names a lost pair.
     Mutation: drop the action's `lost-env-tags` input -> its input names differ.
     Mutation: drop `detect`'s `refusal` output -> the gate never names a detect error.
-    Mutation: drop the `planned-cell-names:` line -> no cell without a plan is ever named."""
+    Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1

@@ -312,14 +312,14 @@ HELD_REASON_CAP = 4000
 HELD_CELL_NAMES = 10
 
 
-def held_comment(reason, missing, plan_result, checks, run_url, head_sha):
+def held_comment(reason, missing, checks, run_url, head_sha):
     """The comment of a held gate: marker, header, `🔴 the gate is held` and `provenance`, then
     `reason` (the gate description before its 140-character cut, at most `HELD_REASON_CAP`
     characters) in a plain fence, then one line per cell of `missing` (`{stack, environment}`
     pairs) linking its plan check, then `FOOTER_HINT`. At most `HELD_CELL_NAMES` cell lines,
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
-    and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `plan
-    failed` under a failed plan job, else `no plan summary read`."""
+    and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `no
+    plan summary read`: its plan or its summary download failed, and the run cannot tell which."""
     reason = reason[:HELD_REASON_CAP]
     parts = [
         f"{MARKER}\n{header('plan')}",
@@ -327,16 +327,20 @@ def held_comment(reason, missing, plan_result, checks, run_url, head_sha):
         fence(reason, _fence_of(reason), lang=""),
     ]
     if missing:
-        state = "plan failed" if plan_result == "failure" else "no plan summary read"
         lines = [
             cell_line(
-                "🔴", c["stack"], c["environment"], state, check_url(c, checks, run_url), "plan"
+                "🔴",
+                c["stack"],
+                c["environment"],
+                "no plan summary read",
+                check_url(c, checks, run_url),
+                "plan",
             )
             for c in missing[:HELD_CELL_NAMES]
         ]
         if len(missing) > HELD_CELL_NAMES:
             more = len(missing) - HELD_CELL_NAMES
-            lines.append(f"and {more} more cells have no plan")
+            lines.append(f"and {more} more cells have no plan summary")
         parts.append("\n".join(lines))
     parts.append(FOOTER_HINT)
     return "\n\n".join(parts)
@@ -527,7 +531,7 @@ def _missing(cells):
     if planned is None:
         print(
             "::warning::planned-cell-names is not a JSON list of {stack, environment} strings; "
-            "the gate description and the plan comment name no cell without a plan"
+            "the gate description and the plan comment name no cell"
         )
         planned = []
     if os.environ.get("SHIPMATE_DETECT_RESULT", "") != "success":
@@ -566,7 +570,6 @@ def _held_main(checks, url):
     body = held_comment(
         os.environ.get("SHIPMATE_HOLD_REASON", ""),
         cell_names(os.environ.get("SHIPMATE_MISSING", "")),
-        os.environ.get("SHIPMATE_PLAN_RESULT", ""),
         checks,
         url,
         os.environ.get("HEAD_SHA", ""),
