@@ -12,9 +12,9 @@ switch for their console output. It also holds the pull-request number check tha
 ``reply-comment`` and ``upsert-comment`` share, the head-SHA check and the one check-runs
 listing every reader of a head's checks uses, the ruleset, environment and ``CODEOWNERS``
 readers and the names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json``
-summaries, builds this run's page link and joins a capped list of names. It parses YAML: the
-strings-only config loader and the YAML 1.2 workflow loader, both importing PyYAML only when
-first called.
+summaries, builds this run's page link, joins a capped list of names and parses a list of cell
+names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both
+importing PyYAML only when first called.
 """
 
 import functools
@@ -313,6 +313,29 @@ def named(items, cap):
     if len(items) > cap:
         listed += f", and {len(items) - cap} more"
     return listed
+
+
+def cell_names(raw):
+    """`raw` as a JSON list of `{stack, environment}` objects with string values, each reduced to
+    those two keys, or None when it is anything else (empty included)."""
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(value, list) or not all(
+        isinstance(c, dict)
+        and isinstance(c.get("stack"), str)
+        and isinstance(c.get("environment"), str)
+        for c in value
+    ):
+        return None
+    return [{"stack": c["stack"], "environment": c["environment"]} for c in value]
+
+
+def missing_names(raw):
+    """The one parser of the summary's `missing` output: `cell_names(raw)`, or `[]` when it is
+    None, so a malformed value names no cell and never raises."""
+    return cell_names(raw) or []
 
 
 def current_run_url(run_id=None):

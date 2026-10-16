@@ -460,8 +460,10 @@ before any wave starts.
 A plan cell fails on its very first step, before `terramate` runs, so the cell
 produces no plan and its `shipmate / <stack> / <env>` check does not go green.
 The failing
-plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
-failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
+plan job leaves `shipmate / gate` held red with `shipmate / <stack> / <env>
+failed to plan; fix it before merging`, or `plan incomplete (plan job: failure);
+fix the failing plan checks before merging` when no failed cell is known or its
+name does not fit — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 That run publishes no apply check. Checks an earlier plan run of the same head
 published stay; on a head with none, a `shipmate apply` replies "no reviewed plan
@@ -1171,18 +1173,21 @@ checks, reading "plan run <id> holds this gate while it publishes; re-plan
 (comment shipmate plan or push) if that run has ended". That hold stays when the
 run ends before its final gate write (a failed or cancelled summary job, or a
 cancelled plan job after the summary downloaded a cell summary). A sticky plan
-comment that could not be listed or written fails the summary job before that
-write too; the error is in the job's annotation for a failed write and in the
-step log for a failed listing. After such a failure, a publish hold the run wrote
-stays, and a run that planned no cell wrote none, so the head keeps the gate it
-had, or no `shipmate / gate` status, which a required gate also blocks. The
+comment that could not be listed or written, or whose pull request head could
+not be read ("could not read the head of pull request #<n>"), fails the summary
+job before that write too, and before any apply check is published; the error
+is in the job's annotation for a failed write and in the step log for a failed
+listing or head read. A held run's comment write, which only explains the red
+gate, warns on those failures instead, and the gate is still written. What a
+summary job that fails part way leaves on the comment is in
+[`CONTRACT.md`](../CONTRACT.md) §Plan comment. The
 summary job also holds the gate when it cannot read the head's gate statuses or
 apply checks, or cannot build the checks to publish (a cell summary missing a key),
 whether or not it downloaded a cell summary: a failed download leaves none over
 planned cells. That hold reads "re-plan this pull request (comment shipmate plan
-or push): its plan run ended before writing a final gate". Its final write
-refuses, writing nothing and keeping the gate as it stands, when a newer plan
-run of the same head holds the gate by then. A plan run whose `summary` job was
+or push): its plan run ended before writing a final gate". Its apply-check
+publish and its final write each refuse, writing nothing and keeping the gate
+as it stands, when a newer plan run of the same head holds the gate by then. A plan run whose `summary` job was
 cancelled before it ran, because a later gate writer on the same head queued
 behind it (`CONTRACT.md` §Comment-ops, "The aggregate gate"), holds the gate
 from its `gate-hold` job, reading "its plan summary was cancelled before it

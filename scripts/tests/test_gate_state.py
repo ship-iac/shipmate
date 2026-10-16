@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from _loader import github_outputs, load_script
 
@@ -53,7 +55,7 @@ def test_an_on_demand_plan_of_a_draft_with_detect_skipped_is_a_failure():
         is_draft=True,
         on_demand=True,
     )
-    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "hold")
+    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "held")
 
 
 def test_a_draft_whose_detect_ran_is_judged_on_its_evidence():
@@ -69,7 +71,7 @@ def test_a_draft_whose_detect_ran_is_judged_on_its_evidence():
 def test_a_non_draft_with_detect_skipped_is_a_failure():
     """Mutation: drop `is_draft` from the draft branch -> `pending`."""
     got = d(detect_result="skipped", planned_cells="", cell_count=0, pending=False)
-    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "hold")
+    assert got == ("failure", _DETECT_SKIPPED_DESCRIPTION, "held")
 
 
 def test_detect_failure_is_a_red_gate_not_a_silent_skip():
@@ -77,14 +79,14 @@ def test_detect_failure_is_a_red_gate_not_a_silent_skip():
     # would leave the pull request with no gate to explain it.
     state, desc, mode = d(detect_result="failure")
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
     assert "detect" in desc
 
 
 def test_a_detect_refusal_names_itself_in_the_gate():
     """Mutation: return the generic text when a refusal exists -- the refusal is not named."""
     got = d(detect_result="failure", refusal="stack 'x' carries 2 workload tags")
-    assert got == ("failure", "detect failed: stack 'x' carries 2 workload tags", "hold")
+    assert got == ("failure", "detect failed: stack 'x' carries 2 workload tags", "held")
 
 
 def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
@@ -95,7 +97,7 @@ def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
     assert got == (
         "failure",
         "change detection did not succeed (failure); fix the shipmate / detect job before merging",
-        "hold",
+        "held",
     )
 
 
@@ -104,7 +106,9 @@ _LONG_REFUSAL = 'stack "a/b" ' + "x" * 288
 
 
 def test_main_cuts_a_long_refusal_to_the_statuses_limit(tmp_path, monkeypatch, capsys):
-    """Mutation: misspell `SHIPMATE_DETECT_REFUSAL` in `main()` -- the generic text."""
+    """`description` fits the statuses API; `reason`, the held comment's text, is whole.
+    Mutations: misspell `SHIPMATE_DETECT_REFUSAL` in `main()` -- the generic text; drop `[:140]`
+    in `main` -- the whole refusal as the description."""
     body = _main_body(
         tmp_path,
         monkeypatch,
@@ -115,7 +119,8 @@ def test_main_cuts_a_long_refusal_to_the_statuses_limit(tmp_path, monkeypatch, c
     assert body == {
         "state": "failure",
         "description": 'detect failed: stack "a/b" ' + "x" * 113,
-        "comment_mode": "hold",
+        "reason": 'detect failed: stack "a/b" ' + "x" * 288,
+        "comment_mode": "held",
     }
 
 
@@ -131,7 +136,7 @@ def test_empty_matrix_greens_the_gate():
 def test_skipped_plan_with_planned_cells_holds():
     state, _, mode = d(plan_result="skipped", planned_cells="3", cell_count=0)
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
 
 
 def test_skipped_empty_matrix_with_parsed_cells_holds():
@@ -139,19 +144,27 @@ def test_skipped_empty_matrix_with_parsed_cells_holds():
     # run this job cannot account for.
     state, _, mode = d(plan_result="skipped", planned_cells="0", cell_count=2, pending=False)
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
 
 
 def test_cancelled_plan_writes_nothing():
-    state, _, mode = d(plan_result="cancelled")
-    assert state is None
-    assert mode == "hold"
+    """The one `hold`: no gate is written, so the comment is kept rather than replaced by a held
+    body over a gate this run never wrote. Mutation: return `_HELD` for it -- red."""
+    assert d(plan_result="cancelled") == (None, "", "hold")
+
+
+def test_every_failure_state_is_held():
+    """Mutations: return `_HOLD` for a detect failure, or for an evidence gap -- red."""
+    assert [d(**kw)[2] for kw in ({"detect_result": "failure"}, {"plan_result": "failure"})] == [
+        "held",
+        "held",
+    ]
 
 
 def test_failed_plan_is_a_red_gate():
     state, _, mode = d(plan_result="failure")
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
 
 
 @pytest.mark.parametrize("planned", ["", "unknown", "3.0", "None"])
@@ -162,7 +175,7 @@ def test_a_non_integer_planned_count_holds(planned):
     state, desc, mode = d(planned_cells=planned)
     assert state == "failure"
     assert "planned cell count was not reported" in desc
-    assert mode == "hold"
+    assert mode == "held"
 
 
 def test_fewer_cells_than_planned_holds():
@@ -173,7 +186,7 @@ def test_fewer_cells_than_planned_holds():
             "re-plan this pull request (comment shipmate plan or push): "
             "3 cell(s) planned but 2 cell summary/summaries read"
         ),
-        "hold",
+        "held",
     )
 
 
@@ -181,7 +194,7 @@ def test_more_cells_than_planned_holds():
     # A `<` comparison would let this through. Two directions, one `!=`.
     state, _, mode = d(planned_cells="3", cell_count=4)
     assert state == "failure"
-    assert mode == "hold"
+    assert mode == "held"
 
 
 @pytest.mark.parametrize(
@@ -195,13 +208,18 @@ def test_more_cells_than_planned_holds():
         {"planned_cells": "256", "cell_count": 0},
         {"planned_cells": "256", "cell_count": 255},
         {"detect_result": "skipped", "is_draft": True},
-        {"detect_result": "failure", "refusal": _LONG_REFUSAL},
     ],
 )
 def test_every_description_fits_the_statuses_api(kw):
-    """Mutations: drop the `[:140]` in `_detect_gap` -- the long-refusal case; lengthen the
-    evidence-gap remedy -- the 256-cell cases."""
+    """A refusal is cut by `main`, not here (`test_main_cuts_a_long_refusal_to_the_statuses_limit`).
+    Mutation: lengthen the evidence-gap remedy -- the 256-cell cases."""
     assert len(d(**kw)[1]) <= 140
+
+
+_NOT_REPORTED = (
+    "the planned cell count was not reported, so this run's evidence is unknown; "
+    "re-plan before merging"
+)
 
 
 def _main_body(tmp_path, monkeypatch, capsys, **env):
@@ -230,11 +248,9 @@ def test_main_holds_the_gate_on_an_empty_planned_count_env(tmp_path, monkeypatch
     body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_PLANNED_CELLS="")
     assert body == {
         "state": "failure",
-        "description": (
-            "the planned cell count was not reported, so this run's evidence is unknown; "
-            "re-plan before merging"
-        ),
-        "comment_mode": "hold",
+        "description": _NOT_REPORTED,
+        "reason": _NOT_REPORTED,
+        "comment_mode": "held",
     }
 
 
@@ -245,11 +261,9 @@ def test_main_holds_the_gate_when_the_planned_count_env_is_absent(tmp_path, monk
     body = _main_body(tmp_path, monkeypatch, capsys, SHIPMATE_PLANNED_CELLS=None)
     assert body == {
         "state": "failure",
-        "description": (
-            "the planned cell count was not reported, so this run's evidence is unknown; "
-            "re-plan before merging"
-        ),
-        "comment_mode": "hold",
+        "description": _NOT_REPORTED,
+        "reason": _NOT_REPORTED,
+        "comment_mode": "held",
     }
 
 
@@ -273,6 +287,7 @@ def test_main_reads_the_draft_flag(tmp_path, monkeypatch, capsys):
     assert _main_draft(tmp_path, monkeypatch, capsys, "false") == {
         "state": "pending",
         "description": gate_state.DRAFT_DESCRIPTION,
+        "reason": gate_state.DRAFT_DESCRIPTION,
         "comment_mode": "draft",
     }
 
@@ -282,33 +297,49 @@ def test_main_reads_the_on_demand_flag(tmp_path, monkeypatch, capsys):
     assert _main_draft(tmp_path, monkeypatch, capsys, "true") == {
         "state": "failure",
         "description": _DETECT_SKIPPED_DESCRIPTION,
-        "comment_mode": "hold",
+        "reason": _DETECT_SKIPPED_DESCRIPTION,
+        "comment_mode": "held",
     }
 
 
-_NOT_REPORTED = (
-    "the planned cell count was not reported, so this run's evidence is unknown; "
-    "re-plan before merging"
+#: R4's no-names texts, hand-written.
+_PLAN_FAILED = "plan incomplete (plan job: failure); fix the failing plan checks before merging"
+_PLAN_CANCELLED = (
+    "plan incomplete (plan job: cancelled); fix the failing plan checks before merging"
 )
+_A, _B, _C = ({"stack": f"stacks/{s}", "environment": "dev"} for s in ("a", "b", "c"))
+#: The one-cell text around a stack path; 140 characters at `_FITS`.
+_ONE = "shipmate / {} / dev failed to plan; fix it before merging"
+_FITS = "s" * (140 - len(_ONE.format("")))
 
 
 @pytest.mark.parametrize(
-    ("plan_result", "planned_cells", "cell_count", "description"),
+    ("plan_result", "planned_cells", "cell_count", "missing", "description"),
     [
-        ("success", "2", 2, None),
+        ("success", "2", 2, (), None),
+        ("success", "2", 2, [_A], None),
+        ("failure", "2", 1, (), _PLAN_FAILED),
+        ("failure", "2", 1, [_A], _ONE.format("stacks/a")),
+        (
+            "failure",
+            "3",
+            0,
+            [_A, _B, _C],
+            "shipmate / stacks/a / dev and 2 more failed to plan; fix them before merging",
+        ),
         (
             "failure",
             "2",
             1,
-            (
-                "plan incomplete (plan job: failure); fix the failing "
-                "shipmate / <stack> / <env> plan check before merging"
-            ),
+            [{"stack": _FITS, "environment": "dev"}],
+            _ONE.format(_FITS),
         ),
+        ("failure", "2", 1, [{"stack": _FITS + "s", "environment": "dev"}], _PLAN_FAILED),
         (
             "success",
             "2",
             1,
+            (),
             (
                 "re-plan this pull request (comment shipmate plan or push): "
                 "2 cell(s) planned but 1 cell summary/summaries read"
@@ -318,6 +349,7 @@ _NOT_REPORTED = (
             "success",
             "1",
             2,
+            (),
             (
                 "re-plan this pull request (comment shipmate plan or push): "
                 "1 cell(s) planned but 2 cell summary/summaries read"
@@ -327,29 +359,64 @@ _NOT_REPORTED = (
             "skipped",
             "2",
             0,
+            (),
             "the plan job did not run for 2 planned cell(s); re-plan before merging",
         ),
-        ("skipped", "0", 0, None),
-        ("success", "", 0, _NOT_REPORTED),
-        ("success", "x", 0, _NOT_REPORTED),
-        (
-            "cancelled",
-            "1",
-            1,
-            (
-                "plan incomplete (plan job: cancelled); fix the failing "
-                "shipmate / <stack> / <env> plan check before merging"
-            ),
-        ),
+        ("skipped", "0", 0, (), None),
+        ("success", "", 0, (), _NOT_REPORTED),
+        ("success", "x", 0, (), _NOT_REPORTED),
+        ("cancelled", "1", 1, (), _PLAN_CANCELLED),
+        ("cancelled", "1", 1, [_A], _PLAN_CANCELLED),
     ],
 )
-def test_evidence_gap_is_the_one_evidence_rule(plan_result, planned_cells, cell_count, description):
-    """Mutations: drop the not-an-integer branch in `evidence_gap` -- the `""` and `"x"` rows
+def test_evidence_gap_is_the_one_evidence_rule(
+    plan_result, planned_cells, cell_count, missing, description
+):
+    """`missing` changes only a failed plan job's text: one name, or the first and a count, when
+    the text fits the statuses API whole, else the no-names text.
+    Mutations: drop the not-an-integer branch in `evidence_gap` -- the `""` and `"x"` rows
     (they still hold, as "None cell(s) planned"); `!=` -> `<` in `_evidence_gap` -- the
-    `("success", "1", 2)` row."""
+    `("success", "1", 2)` row; drop the name from the one-cell f-string -- the one-cell and
+    140-character rows; name `missing[-1]` -- the three-name row; pass names for `cancelled` too
+    -- the named `cancelled` row; hold on any non-empty `missing` (a gap of `_failed_cells` when
+    `_plan_gap` finds none) -- the named `success` row; drop the 140-character bound -- the
+    141-character row."""
     assert (
         gate_state.evidence_gap(
-            plan_result=plan_result, planned_cells=planned_cells, cell_count=cell_count
+            plan_result=plan_result,
+            planned_cells=planned_cells,
+            cell_count=cell_count,
+            missing=missing,
         )
         == description
     )
+
+
+def test_pending_checks_call_without_names_gets_the_no_names_text():
+    """`pending-checks` passes no `missing`. Mutation: default `missing` to a name -- red."""
+    assert (
+        gate_state.evidence_gap(plan_result="failure", planned_cells="2", cell_count=1)
+        == _PLAN_FAILED
+    )
+
+
+def test_main_reads_the_missing_cells_and_flattens_a_line_break(tmp_path, monkeypatch, capsys):
+    """A stack path's CR and LF reach `GITHUB_OUTPUT` as spaces, on one line each.
+    Mutations: misspell `SHIPMATE_MISSING` in `main` -- the no-names text; drop the CR/LF
+    replacement -- `github_outputs` raises on the broken line."""
+    missing = json.dumps([{"stack": "stacks/a\r\nb", "environment": "dev"}])
+    body = _main_body(
+        tmp_path,
+        monkeypatch,
+        capsys,
+        SHIPMATE_PLAN_RESULT="failure",
+        SHIPMATE_CELL_COUNT="2",
+        SHIPMATE_MISSING=missing,
+    )
+    text = "shipmate / stacks/a  b / dev failed to plan; fix it before merging"
+    assert body == {
+        "state": "failure",
+        "description": text,
+        "reason": text,
+        "comment_mode": "held",
+    }

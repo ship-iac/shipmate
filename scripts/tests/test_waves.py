@@ -481,13 +481,13 @@ def test_the_zigzag_with_no_needs_refuses_nothing():
 
 
 def test_the_gate_description_keeps_the_inversion_remedy_over_a_long_pair():
-    """`gate-state` cuts `detect failed: <first line>` to 140 characters, and these paths run
-    past it: the cut drops the pair's tail, never the remedy. Mutation: put the pair first and
-    the remedy last on the first line -- the remedy is cut."""
+    """`gate-state`'s `main` cuts `detect failed: <first line>` to 140 characters, and these
+    paths run past it: the cut drops the pair's tail, never the remedy. Mutation: put the pair
+    first and the remedy last on the first line -- the remedy is cut."""
     pairs = [(("stacks/platform/network", "prod-eu"), ("stacks/dns/zones", "prod-us"))]
     order = {"prod-us": ["prod-eu"]}
     first = w.inversion_error(pairs, order, {"prod-eu": 0, "prod-us": 1}).splitlines()[0]
-    gap = load_script("gate-state")._detect_gap("failure", first.removeprefix("::error::"))
+    gap = load_script("gate-state")._detect_gap("failure", first.removeprefix("::error::"))[:140]
     assert gap == (
         "detect failed: needs order inverted, fix default-branch needs or tags: "
         "stacks/platform/network / prod-eu before stacks/dns/zones / prod-us, "

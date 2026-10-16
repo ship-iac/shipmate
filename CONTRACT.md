@@ -2155,10 +2155,43 @@ zero means "no stacks changed" — `detect` reported a planned count of zero.
 Every other zero (a planned count that disagrees with the cell summaries
 actually read, a failed `detect`, plan cells that all failed
 before uploading a cell summary, a failed `cell-summary.*` download) leaves the
-plan unknown, so the run writes nothing at all and any existing comment — the
-reviewed plan for the previous push — is left standing rather than PATCHed down
-to a claim about a plan nobody read. Those runs all fail `shipmate / gate`, so
-the pull request still shows that something is wrong.
+plan unknown. Every hold the summary's gate decision writes (a `detect` that
+did not succeed, incomplete evidence) replaces the comment with the held body,
+which says why and makes no claim about any plan, and creates the comment when
+the pull request has none. `gate-hold`'s hold (below) leaves the comment as it
+is. What a summary job that fails part way leaves on the comment is stated with
+the publish hold (below). In order, blank lines between the parts:
+
+- the marker and the header `### shipmate plan`;
+- `🔴 the gate is held`, then the verdict line's
+  `at [<sha7>](<commit url>) in [run #<n>](<run url>)` ending (below);
+- the hold reason: the gate description before its 140-character cut, at most
+  4,000 characters, in a plain backtick fence longer than any backtick run in
+  it, so a stack path it names shows as written and nothing in it renders;
+- when `detect` succeeded, one line per planned cell that left no cell summary,
+  sorted by environment then stack: `🔴 <stack> (<env>): plan failed` under a
+  failed plan job, else `🔴 <stack> (<env>): no plan summary read`, linking the
+  cell's `shipmate / <stack> / <env>` check, or the run when the head has none.
+  At most ten, then `and N more cells have no plan`. The
+  cells are `detect`'s planned `cells` the run read no summary for, so under a
+  failed plan job a cell whose summary download failed is named too;
+- the help hint ``Comment `shipmate help` for the available commands.``
+
+The held body only explains a red gate, so it degrades: a failed render,
+listing or write warns "the sticky plan comment was not updated with why the
+gate is held; the gate description says it", and the job still writes the gate.
+A run whose plan job was cancelled writes no final gate (below) and keeps the
+comment as it is, with a warning; a draft autoplan keeps it too (§Post-plan
+topology).
+
+Every comment write, the held body included, reads the pull request's head
+once the comment listing shows a write follows, and writes nothing when the pull
+request has moved past the head this run planned, with a notice: the comment is
+per pull request, and a re-run of an older run would otherwise replace the newer
+head's comment. A run that writes nothing (no comment yet, nothing changed)
+reads no head. A failed read warns and writes nothing for the held body, and
+fails the job ("could not read the head of pull request #<n>") before any apply
+check or gate is written for the plan body.
 
 Where the zero *does* mean no stacks changed, the suppression is create-only:
 an existing comment is always updated to the no-changes body, because a pull
@@ -2175,7 +2208,9 @@ posts: a pull request that changes only stacks with no `env/*` tag plans nothing
 and the comment is where it says so. When the line is left out for size (below),
 this exception does not apply.
 
-An existing comment is edited in place on every plan run (comment lookup is marker +
+An existing comment is edited in place on every plan run but a draft autoplan, a
+cancelled plan job and a run whose pull request moved to a newer head (comment
+lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
 App name, which a consumer org may have had to slug differently than
 `shipmate[bot]`), so GitHub's comment revision history doubles as the audit
@@ -2185,9 +2220,10 @@ Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the unmanaged line and a blank line when
 the pull request changes an unmanaged stack, the lost pairs line and a blank
 line when it untags a stack / environment pair, one line or fold-out per planned
-stack × environment, sorted by environment then stack. There is no footer and no help
-hint, whether or not `doctor` warned: both verdicts are normal results and the
-verdict links the run. The doctor step records its decision once, as its
+stack × environment, sorted by environment then stack. The plan body has no
+footer and no help hint, whether or not `doctor` warned: both verdicts are
+normal results and the verdict links the run. The held body above ends with the
+hint. The doctor step records its decision once, as its
 `warned` output, which the post-or-skip rule reads; the build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
@@ -2200,7 +2236,7 @@ and `lost` outputs, which the same rule reads.
   `<run url>` the run's page. When that commit is not a 40-character lowercase
   hex SHA the line ends `at an unknown commit in [run #<n>](<run url>)`. The
   line reads the cells only: every failed plan job holds the gate, and a held
-  run posts no comment.
+  gate posts the held body instead.
 - **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
   managed by shipmate: <paths>`, naming at most ten paths within 1,000
   characters, then `, and M more`. When not even the first path fits, it ends
@@ -2278,13 +2314,19 @@ it holds the gate in either direction.
 
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
-only some checks published leaves a hold that `gate-refresh` will not green.
-The same hold is written when the job cannot read the head's gate statuses,
-list the head's apply checks or build the ones to publish, whether or not it
-downloaded a cell summary: a failed download leaves none over planned cells.
-The job's final gate write replaces the hold. A run whose plan job was
-cancelled writes no final gate, and keeps the hold when it downloaded any cell
-summary.
+only some checks published leaves a hold that `gate-refresh` will not green. The
+same hold is written when the job cannot read the head's gate statuses, list the
+head's apply checks or build the ones to publish, whether or not it downloaded a
+cell summary: a failed download leaves none over planned cells. The apply checks
+publish after the sticky plan comment is written, so a plan comment that could
+not be listed or written ends the job with no apply check published, and a
+pre-merge `shipmate apply` refuses as it does over a partial plan. A summary job
+that fails part way changes the comment only if its `Upsert sticky comment` step
+wrote it (created or replaced) before the failure. A run with no check to
+publish (held, draft, no cell planned, or every check already published by this
+run) skips the publish step without reading anything. The job's final gate write
+replaces the hold. A run whose plan job was cancelled writes no final gate, and
+keeps the hold when it downloaded any cell summary.
 
 The job publishes only the apply checks its own run has not published yet,
 judged by the run id each App-authored check records. A re-run of the summary
@@ -2293,10 +2335,11 @@ since. It refuses before writing anything when a newer plan run of the same
 head holds the gate ("plan run <id> holds the gate of <sha> and is newer than
 this run") or published apply checks there ("plan run <id>, newer than this run
 (<id>), published apply checks on this head"), so an older run never overwrites
-a newer run's gate or checks. Its final gate write reads the statuses again and
-refuses the same way, writing nothing, when a newer run of the same head holds
-the gate by then (that run's `summary` was evicted); a failed read writes
-nothing either, so the publish hold stands. A final `pending` gate is followed
+a newer run's gate or checks. Its apply-check publish and its final gate write
+each read the statuses again and refuse the same way, writing nothing, when a
+newer run of the same head holds the gate by then (that run's `summary` was
+evicted, and `gate-hold` writes outside the job's concurrency group); a failed
+read writes nothing either, so the publish hold stands. A final `pending` gate is followed
 by a refresh, unless this run published a queued apply check, which cannot be
 done yet: when every apply check is already done (an apply's refresh ran before
 this write), the summary greens the gate itself. A failed refresh, or one

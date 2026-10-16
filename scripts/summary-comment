@@ -4,7 +4,13 @@
 Reads the plan matrix jobs' auto check-runs (named `shipmate / <stack> / <env>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
 cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
-artifacts). Writes comment.md plus pending/count to GITHUB_OUTPUT.
+artifacts). Writes comment.md, plus pending, count, unmanaged, lost and missing to
+GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned cells with no
+cell summary, empty unless detect succeeded and `planned-cell-names` is a valid list.
+
+With `SHIPMATE_COMMENT_MODE=held` it writes the held comment (`held_comment`) to held.md instead,
+reads no cell summary and writes nothing to GITHUB_OUTPUT; any other non-empty value refuses. The
+mode is read in `main`, so loading this module stays free of side effects.
 
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
 leaves headroom below that cap; each changed cell's fold-out degrades
@@ -19,7 +25,7 @@ load this module.
 
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface,
 and shows only where the reader has something to do: under a refusal or a failure, under an
-apply or doctor verdict that is not 🟢. A plan comment never carries it.
+apply or doctor verdict that is not 🟢. A plan comment carries it only when the gate is held.
 """
 
 import html
@@ -32,10 +38,12 @@ import sys
 
 from _shipmate import (
     _load,
+    cell_names,
     cell_summaries,
     command_data,
     current_run_url,
     is_head_sha,
+    missing_names,
     run_annotated,
 )
 
@@ -281,12 +289,49 @@ def render_section(line, plan_text, url, limit):
 def verdict(cells, head_sha, run_url):
     """The line under the header: `🟢 no changes` when no cell changes (zero cells included),
     else `🟡 N of M cells change`, then `provenance`. It reads the cells only: every failed
-    plan job holds the gate, and a held run posts no comment."""
+    plan job holds the gate, and a held gate posts `held_comment` instead."""
     circle = worst(emoji(c) for c in cells)
     if circle == "🟢":
         return f"🟢 no changes {provenance(head_sha, run_url)}"
     n = sum(1 for c in cells if c["changed"])
     return f"{circle} {n} of {len(cells)} cells change {provenance(head_sha, run_url)}"
+
+
+#: The held comment's reason is cut here, so its body stays far under `HARD_CAP` with every cell
+#: line it can carry.
+HELD_REASON_CAP = 4000
+#: The most cell lines the held comment names before it counts the rest.
+HELD_CELL_NAMES = 10
+
+
+def held_comment(reason, missing, plan_result, checks, run_url, head_sha):
+    """The comment of a held gate: marker, header, `🔴 the gate is held` and `provenance`, then
+    `reason` (the gate description before its 140-character cut, at most `HELD_REASON_CAP`
+    characters) in a plain fence, then one line per cell of `missing` (`{stack, environment}`
+    pairs) linking its plan check, then `FOOTER_HINT`. At most `HELD_CELL_NAMES` cell lines,
+    then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
+    and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `plan
+    failed` under a failed plan job, else `no plan summary read`."""
+    reason = reason[:HELD_REASON_CAP]
+    parts = [
+        f"{MARKER}\n{header('plan')}",
+        f"🔴 the gate is held {provenance(head_sha, run_url)}",
+        fence(reason, _fence_of(reason), lang=""),
+    ]
+    if missing:
+        state = "plan failed" if plan_result == "failure" else "no plan summary read"
+        lines = [
+            cell_line(
+                "🔴", c["stack"], c["environment"], state, check_url(c, checks, run_url), "plan"
+            )
+            for c in missing[:HELD_CELL_NAMES]
+        ]
+        if len(missing) > HELD_CELL_NAMES:
+            more = len(missing) - HELD_CELL_NAMES
+            lines.append(f"and {more} more cells have no plan")
+        parts.append("\n".join(lines))
+    parts.append(FOOTER_HINT)
+    return "\n\n".join(parts)
 
 
 UNMANAGED_LEAD = "⚪ {} changed stack(s) carry no env/* tag and are not managed by shipmate"
@@ -463,6 +508,30 @@ def load_cells(cells_dir):
     return out
 
 
+def missing_cells(planned, cells):
+    """The `{stack, environment}` pairs of `planned` that no cell summary in `cells` names,
+    sorted by (environment, stack): the cells whose plan this run never read."""
+    read = {(c["stack"], c["environment"]) for c in cells}
+    gone = [p for p in planned if (p["stack"], p["environment"]) not in read]
+    return sorted(gone, key=lambda p: (p["environment"], p["stack"]))
+
+
+def _missing(cells):
+    """`missing_cells` of the `planned-cell-names` input, or none unless detect succeeded: a fmt
+    or codegen failure still carries the full list. A value that is not a list of names warns."""
+    raw = os.environ.get("SHIPMATE_PLANNED_CELLS_NAMES", "")
+    planned = cell_names(raw) if raw else []
+    if planned is None:
+        print(
+            "::warning::planned-cell-names is not a JSON list of {stack, environment} strings; "
+            "the gate description and the plan comment name no cell without a plan"
+        )
+        planned = []
+    if os.environ.get("SHIPMATE_DETECT_RESULT", "") != "success":
+        return []
+    return missing_cells(planned, cells)
+
+
 def _named_output(raw, input_name, key, noun):
     """build-matrix's `{"count": N, key: [...]}` from the `input_name` input's `raw` value:
     `None` when empty, `None` with one warning when it is not that shape, with `N` a
@@ -490,15 +559,34 @@ def _named_output(raw, input_name, key, noun):
     return None
 
 
+def _held_main(checks, url):
+    body = held_comment(
+        os.environ.get("SHIPMATE_HOLD_REASON", ""),
+        missing_names(os.environ.get("SHIPMATE_MISSING", "")),
+        os.environ.get("SHIPMATE_PLAN_RESULT", ""),
+        checks,
+        url,
+        os.environ.get("HEAD_SHA", ""),
+    )
+    with open("held.md", "w", encoding="utf-8") as fh:
+        fh.write(body)
+
+
 def main():
-    # prefix="" gathers every check-run on the head SHA: plan jobs, pending apply checks,
-    # detect/summary. Plan check names carry the consumer's calling job as a `shipmate / ` prefix,
-    # so the anchor is check_url's exact lookup — and `apply / ` never collides.
+    mode = os.environ.get("SHIPMATE_COMMENT_MODE", "")
+    if mode not in ("", "held"):
+        raise SystemExit(f"::error::SHIPMATE_COMMENT_MODE must be empty or held (got: {mode!r})")
+    # prefix="" gathers every check-run on the head SHA: plan checks, detect/summary, and earlier
+    # runs' apply checks, since this run publishes its own after the comment. Plan check names
+    # carry the calling job's `shipmate / ` prefix, so check_url's lookup is exact.
     checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
-    cells = load_cells(os.environ.get("CELLS", "cells"))
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the verdict's run link and the per-cell fallback link promise.
     url = current_run_url()
+    if mode == "held":
+        _held_main(checks, url)
+        return
+    cells = load_cells(os.environ.get("CELLS", "cells"))
     unmanaged = _named_output(
         os.environ.get("SHIPMATE_UNMANAGED", ""), "unmanaged-stacks", "paths", "unmanaged stack"
     )
@@ -514,11 +602,14 @@ def main():
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)
     pending = any(c["changed"] for c, _ in cells)
+    missing = _missing([c for c, _ in cells])
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(
             f"pending={'true' if pending else 'false'}\ncount={len(cells)}\n"
             f"unmanaged={'true' if named else 'false'}\n"
             f"lost={'true' if lost_named else 'false'}\n"
+            # `json.dumps` escapes CR and LF, so an author's stack path stays on this one line.
+            f"missing={json.dumps(missing)}\n"
         )
 
 
