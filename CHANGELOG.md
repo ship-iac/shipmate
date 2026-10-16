@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 
 ### Changed
 
+- **`docs/getting-started.md` §The table holds the environment table: the layout choice, the GitHub Environment count, and one decision table for `gated`, `explicit`, `shared`, `needs` and `after` across both apply forms, the merge deploy, approving review and environment reviewers. `scripts/onboard`'s missing-table item points to it.**
 - **`scripts/onboard` prints the diff from the published fence to `shipmate.yml`, pins masked and indented, after a `differs beyond its pin, not overwritten` line, and its `pin-only` line names `scripts/repin`.**
 - **`docs/hardening.md`'s allowed-actions list drops `astral-sh/setup-uv`, which only the engine's own CI uses.**
 - **A plan run that holds `shipmate / gate` for a failed `detect` or incomplete evidence replaces the sticky plan comment with why: the hold reason in a fence and one line per cell that left no plan, then the help hint; a failed plan job's gate description names its first such cell. No plan comment write lands once the pull request has moved to a newer head, and the apply checks publish after the comment, so a failed comment write publishes none.**

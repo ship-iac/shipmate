@@ -727,7 +727,7 @@ def _table_item(ctx):
         return (
             "todo",
             item,
-            ["Add one: copy the example in docs/getting-started.md §Environments for this tier."],
+            ["Add one: copy the example in docs/getting-started.md §The table."],
         )
     try:
         ec.validate(ctx["table"], ctx["envs"])
