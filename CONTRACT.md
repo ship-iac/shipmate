@@ -1867,10 +1867,9 @@ The five jobs:
   dispatched run evaluates at the default branch.
 
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
-workflow files for four probes — stale engine pins, `pull_request_target`
-triggers, whether any file calls engine `drift.yml`, and `shipmate.yml`'s
-wiring, whose checks of the plan-calling job
-name, dispatch wiring and event routing observe whether the plan comment's
+workflow files for five probes — whether each file parses as YAML, stale engine
+pins, `pull_request_target` triggers, whether any file calls engine `drift.yml`,
+and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring and event routing observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
 and whether the job it reaches is the one that verb names, and whose fourth
 check reports a drift job in it — and they report rather than fail.
@@ -2170,12 +2169,12 @@ the publish hold (below). In order, blank lines between the parts:
   4,000 characters, in a plain backtick fence longer than any backtick run in
   it, so a stack path it names shows as written and nothing in it renders;
 - when `detect` succeeded, one line per planned cell that left no cell summary,
-  sorted by environment then stack: `🔴 <stack> (<env>): plan failed` under a
-  failed plan job, else `🔴 <stack> (<env>): no plan summary read`, linking the
-  cell's `shipmate / <stack> / <env>` check, or the run when the head has none.
-  At most ten, then `and N more cells have no plan`. The
-  cells are `detect`'s planned `cells` the run read no summary for, so under a
-  failed plan job a cell whose summary download failed is named too;
+  sorted by environment then stack: `🔴 <stack> (<env>): no plan summary read`,
+  linking the cell's `shipmate / <stack> / <env>` check, or the run when the
+  head has none. At most ten, then `and N more cells have no plan summary`. The
+  cells are `detect`'s planned `cells` the run read no summary for: a cell whose
+  plan matrix job did not succeed and a cell whose summary download failed read
+  the same;
 - the help hint ``Comment `shipmate help` for the available commands.``
 
 The held body only explains a red gate, so it degrades: a failed render,

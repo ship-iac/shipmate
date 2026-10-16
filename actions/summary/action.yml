@@ -287,7 +287,6 @@ runs:
         # The held render's inputs; `reason` is the gate description before its 140-character cut.
         SHIPMATE_HOLD_REASON: ${{ steps.gate.outputs.reason }}
         SHIPMATE_MISSING: ${{ steps.build.outputs.missing }}
-        SHIPMATE_PLAN_RESULT: ${{ inputs.plan-result }}
       run: |
         set -euo pipefail
         # A draft autoplan planned nothing, so an existing comment still describes a head

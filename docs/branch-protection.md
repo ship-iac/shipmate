@@ -31,7 +31,7 @@ resolves to:
 |-------|-----------|-------|
 | `detect` failed with an `::error::` line (a refusal or a failed tool or API call) | `failure` — "detect failed: <the first line of the `::error::` refusal message>", cut to 140 characters | blocked |
 | `detect` failed without an `::error::` line (a fmt or codegen failure, a crash with none) | `failure` — "change detection did not succeed" | blocked |
-| A plan cell failed | `failure` — "shipmate / <stack> / <env> failed to plan; fix it before merging", "shipmate / <stack> / <env> and <N> more failed to plan; fix them before merging", or, when no failed cell is known or the named text passes 140 characters, "plan incomplete (plan job: failure); fix the failing plan checks before merging" | blocked |
+| A plan cell failed | `failure` — "shipmate / <stack> / <env> has no plan summary; fix its plan or re-plan", "shipmate / <stack> / <env> and <N> more have no plan summary; fix their plans or re-plan", or, when no cell without a summary is known or the named text passes 140 characters, "plan incomplete (plan job: failure); fix the failing plan checks before merging" | blocked |
 | The plan job was cancelled | no final gate: the summary's publish hold (`failure` — "plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended") stays when it downloaded any cell summary; otherwise the head keeps its earlier gate | blocked by the hold; otherwise as the earlier gate allows (none: blocked, the required check never arrives) |
 | The plan summary was cancelled by a later gate writer on the same head | `failure` — "re-plan this pull request (comment shipmate plan or push): its plan summary was cancelled before it published" | blocked |
 | Plans succeeded, applies still pending | `pending` | blocked |
@@ -248,7 +248,7 @@ On a free-tier private repo the required-check gate cannot be created at all.
 
 This is a GitHub configuration constraint, not a shipmate one. `actions/summary`
 still emits the correct `shipmate / gate` state in every case — `pending` while
-apply checks are outstanding, `failure` (naming the cell that "failed to plan") when a plan cell
-fails, and `success` when nothing is left to apply. shipmate's responsibility —
+apply checks are outstanding, `failure` (naming the cell that "has no plan summary") when a plan
+cell fails, and `success` when nothing is left to apply. shipmate's responsibility —
 producing a correct, stable, single required status — holds regardless of plan.
 The ruleset above enforces it once the repo is public or on a paid plan.

@@ -344,14 +344,14 @@ commit: smoke again, starting with that cleanup. When only
 ```bash
 [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
   git fetch origin main && test "$(git rev-parse origin/main)" = <release-sha> && \
-  { git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || git tag -a v0.2.0 -m v0.2.0 <release-sha>; } && \
-  test "$(git rev-parse 'v0.2.0^{commit}')" = <release-sha> && \
-  git push origin v0.2.0 && \
-  gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
+  { git rev-parse -q --verify refs/tags/vX.Y.Z >/dev/null || git tag -a vX.Y.Z -m vX.Y.Z <release-sha>; } && \
+  test "$(git rev-parse 'vX.Y.Z^{commit}')" = <release-sha> && \
+  git push origin vX.Y.Z && \
+  gh release create vX.Y.Z --title vX.Y.Z --generate-notes --verify-tag
 ```
 
 **Push the tag first; `--target` does not work on this repository.**
-`gh release create v0.2.0 --target <sha>` is rejected on this repository — `tag_name is not a valid tag` / `Release.target_commitish is invalid`,
+`gh release create vX.Y.Z --target <sha>` is rejected on this repository — `tag_name is not a valid tag` / `Release.target_commitish is invalid`,
 with the release SHA verified as `main`'s tip through the API in the same breath.
 Observed on `v0.14.2`; the cause was not diagnosed, so treat only the two-step
 form above as known-good. `--verify-tag` is what keeps the second command from

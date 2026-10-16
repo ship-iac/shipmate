@@ -50,17 +50,21 @@ def _as_int(value):
         return None
 
 
-def _failed_cells(missing):
+def _missing_description(missing):
     """The description naming the first of `missing` (`{stack, environment}` pairs in the comment's
-    order) by its plan check, or None when there is none or the text passes the 140 characters
-    the statuses API accepts: a cut would name a check that does not exist."""
+    order) by its plan check as having no plan summary, or None when there is none or the text
+    passes the 140 characters the statuses API accepts: a cut would name a check that does not
+    exist. A cell is missing when its plan matrix job did not succeed or the summary download
+    failed, so the text names neither."""
     if not missing:
         return None
     check = f"{ag.CALLER_PREFIX}{missing[0]['stack']} / {missing[0]['environment']}"
     if len(missing) == 1:
-        text = f"{check} failed to plan; fix it before merging"
+        text = f"{check} has no plan summary; fix its plan or re-plan"
     else:
-        text = f"{check} and {len(missing) - 1} more failed to plan; fix them before merging"
+        text = (
+            f"{check} and {len(missing) - 1} more have no plan summary; fix their plans or re-plan"
+        )
     return text if len(text) <= 140 else None
 
 
@@ -69,13 +73,13 @@ def _plan_gap(*, plan_result, planned, missing):
 
     `skipped` with cells planned is the one that is not obviously a failure: the
     job the matrix was built for did not run at all, so there is nothing to
-    review and nothing to apply. A failed plan job names its first cell without a plan when one
-    is known (`_failed_cells`); `missing` changes no other text.
+    review and nothing to apply. A failed plan job names its first cell with no plan summary when
+    one is known (`_missing_description`); `missing` changes no other text.
     """
     if plan_result == "skipped" and planned != 0:
         return f"the plan job did not run for {planned} planned cell(s); re-plan before merging"
     if plan_result not in ("success", "skipped"):
-        named = _failed_cells(missing) if plan_result == "failure" else None
+        named = _missing_description(missing) if plan_result == "failure" else None
         return named or (
             f"plan incomplete (plan job: {plan_result}); fix the failing plan checks before merging"
         )

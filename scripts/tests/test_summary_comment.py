@@ -839,7 +839,7 @@ def test_the_upsert_quiet_inputs_read_doctor_and_build():
 
 
 def test_the_upsert_step_maps_exactly_these_env_vars():
-    """The held render reads the uncut reason, the cells with no plan and the plan job's result;
+    """The held render reads the uncut reason and the cells with no plan summary;
     the head comparison reads `HEAD_SHA`. Mutations: map `SHIPMATE_HOLD_REASON` to
     `steps.gate.outputs.description` -- the cut text; drop `HEAD_SHA` -- every write skips."""
     assert step_by("summary", name="Upsert sticky comment")["env"] == {
@@ -852,7 +852,6 @@ def test_the_upsert_step_maps_exactly_these_env_vars():
         "LOST": "${{ steps.build.outputs.lost }}",
         "SHIPMATE_HOLD_REASON": "${{ steps.gate.outputs.reason }}",
         "SHIPMATE_MISSING": "${{ steps.build.outputs.missing }}",
-        "SHIPMATE_PLAN_RESULT": "${{ inputs.plan-result }}",
     }
 
 
@@ -1069,7 +1068,7 @@ _PLANNED = [
 ]
 _BAD_NAMES = (
     "::warning::planned-cell-names is not a JSON list of {stack, environment} strings; the gate "
-    "description and the plan comment name no cell without a plan\n"
+    "description and the plan comment name no cell\n"
 )
 
 
@@ -1116,33 +1115,30 @@ _HOSTILE = "detect failed: stack 'x`y @team </summary>' carries 2 workload tags"
 
 
 @pytest.mark.parametrize(
-    ("reason", "missing", "plan_result", "body"),
+    ("reason", "missing", "body"),
     [
         (
             _HOSTILE,
             [],
-            "failure",
             HEAD + f"🔴 the gate is held {AT}\n\n```\n{_HOSTILE}\n```\n\n{HINT}",
         ),
         (
             "detect failed: stack 'x```y' carries 2 workload tags",
             [],
-            "failure",
             HEAD
             + f"🔴 the gate is held {AT}\n\n"
             + "````\ndetect failed: stack 'x```y' carries 2 workload tags\n````\n\n"
             + HINT,
         ),
         (
-            "shipmate / stacks/a / dev and 1 more failed to plan; fix them before merging",
+            "shipmate / stacks/a / dev and 1 more have no plan summary; fix their plans or re-plan",
             [_A_DEV, _B_PROD],
-            "failure",
             HEAD
             + f"🔴 the gate is held {AT}\n\n"
-            + "```\nshipmate / stacks/a / dev and 1 more failed to plan; fix them before "
-            + "merging\n```\n\n"
-            + '🔴 stacks/a (dev): plan failed <a href="https://gh/c/a">plan</a>\n'
-            + '🔴 stacks/b (prod): plan failed <a href="https://gh/run/1">plan</a>\n\n'
+            + "```\nshipmate / stacks/a / dev and 1 more have no plan summary; fix their plans "
+            + "or re-plan\n```\n\n"
+            + '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>\n'
+            + '🔴 stacks/b (prod): no plan summary read <a href="https://gh/run/1">plan</a>\n\n'
             + HINT,
         ),
         (
@@ -1151,7 +1147,6 @@ _HOSTILE = "detect failed: stack 'x`y @team </summary>' carries 2 workload tags"
                 "but 1 cell summary/summaries read"
             ),
             [_A_DEV],
-            "success",
             HEAD
             + f"🔴 the gate is held {AT}\n\n"
             + "```\nre-plan this pull request (comment shipmate plan or push): 2 cell(s) "
@@ -1160,28 +1155,28 @@ _HOSTILE = "detect failed: stack 'x`y @team </summary>' carries 2 workload tags"
             + HINT,
         ),
     ],
-    ids=["refusal", "three-backticks", "failed-plan", "evidence-gap"],
+    ids=["refusal", "three-backticks", "plan-job-failed", "evidence-gap"],
 )
-def test_held_comment_is_the_whole_held_body(reason, missing, plan_result, body):
-    """The fence shows the reason verbatim and nothing in it renders; each cell with no plan is a
-    bare line linking its plan check, or the run without one.
+def test_held_comment_is_the_whole_held_body(reason, missing, body):
+    """The fence shows the reason verbatim and nothing in it renders; each cell with no plan
+    summary is a bare line linking its plan check, or the run without one.
     Mutations: `lang="diff"` -- every case; a fixed three-backtick fence -- `three-backticks`;
-    drop `FOOTER_HINT` -- every case; drop `provenance` -- every case; state `plan failed`
-    whatever the plan job -- `evidence-gap`."""
+    drop `FOOTER_HINT` -- every case; drop `provenance` -- every case; label a cell `plan
+    failed` -- `plan-job-failed` and `evidence-gap`."""
     checks = {"shipmate / stacks/a / dev": {"html_url": "https://gh/c/a"}}
-    assert sc.held_comment(reason, missing, plan_result, checks, RUN_URL, SHA) == body
+    assert sc.held_comment(reason, missing, checks, RUN_URL, SHA) == body
 
 
 def test_held_comment_caps_its_cell_lines_and_its_reason():
     """Mutations: drop the `HELD_CELL_NAMES` slice -- twelve lines; drop the reason cut -- the
     fence holds 5,000 characters."""
     missing = [{"stack": f"stacks/s{i:02}", "environment": "dev"} for i in range(12)]
-    body = sc.held_comment("x" * 5000, missing, "failure", {}, RUN_URL, SHA)
+    body = sc.held_comment("x" * 5000, missing, {}, RUN_URL, SHA)
     lines = body.split("\n")
     assert lines[6] == "x" * 4000
     cells = [ln for ln in lines if ln.startswith("🔴 stacks/")]
     assert [ln.split(" (")[0] for ln in cells] == [f"🔴 stacks/s{i:02}" for i in range(10)]
-    assert lines[-3] == "and 2 more cells have no plan"
+    assert lines[-3] == "and 2 more cells have no plan summary"
 
 
 def _held_main(tmp_path, monkeypatch, mode):
@@ -1191,7 +1186,6 @@ def _held_main(tmp_path, monkeypatch, mode):
     monkeypatch.setenv("SHIPMATE_COMMENT_MODE", mode)
     monkeypatch.setenv("SHIPMATE_HOLD_REASON", "the reason")
     monkeypatch.setenv("SHIPMATE_MISSING", json.dumps([_A_DEV]))
-    monkeypatch.setenv("SHIPMATE_PLAN_RESULT", "failure")
     listing = '{"name": "shipmate / stacks/a / dev", "html_url": "https://gh/c/a", "id": 1}\n'
     monkeypatch.setattr(sc.sys, "stdin", io.StringIO(listing))
     sc.main()
@@ -1205,7 +1199,7 @@ def test_main_held_mode_writes_only_the_held_body(tmp_path, monkeypatch):
     _held_main(tmp_path, monkeypatch, "held")
     assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
         HEAD + f"🔴 the gate is held {MAIN_AT}\n\n```\nthe reason\n```\n\n"
-        '🔴 stacks/a (dev): plan failed <a href="https://gh/c/a">plan</a>\n\n' + HINT
+        '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>\n\n' + HINT
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == ["held.md"]
 
