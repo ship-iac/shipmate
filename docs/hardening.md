@@ -718,10 +718,10 @@ Settings → Actions → General:
   The list must cover what the engine pulls in, not what your own workflows
   name. shipmate's composite actions execute inside your job, so their `uses:`
   refs are resolved against your repository's list: a consumer whose
-  `shipmate.yml` names no action at all still needs all three third-party
-  actions above — `astral-sh/setup-uv`, `opentofu/setup-opentofu` and
+  `shipmate.yml` names no action at all still needs both third-party
+  actions above — `opentofu/setup-opentofu` and
   `aws-actions/configure-aws-credentials`,
-  the last on every cell path (plan, drift, apply and unlock) even when no cell
+  the second on every cell path (plan, drift, apply and unlock) even when no cell
   resolves a role (the step is gated, the `uses:` is not). Omit it and a plan run fails at "Set up job", not
   only an apply. Allowing
   GitHub-owned actions covers the engine's other transitive dependencies
@@ -729,6 +729,12 @@ Settings → Actions → General:
   `actions/upload-artifact`); enumerating only the refs visible in your own
   files produces a list that fails at "Set up job" the first time an engine
   action runs.
+
+  Switch `allowed_actions` to `selected` first, then set the list straight
+  after. The selected-actions endpoint answers `409 Conflict` until the mode is
+  `selected`, so the list cannot be written first; and from the mode change until
+  the list is in, every workflow run fails at "Set up job". `scripts/onboard`
+  prints both calls in that order.
 
   `<owner>/shipmate/*@*` covers every shape the engine is referenced in.
   Consumers reference only `<owner>/shipmate/.github/workflows/*.yml@<sha>`; the
@@ -770,7 +776,13 @@ workflow `permissions:` key has no `administration` scope at any value, so
 `GITHUB_TOKEN` cannot substitute. No token a workflow run can obtain from the
 platform reads them (a repository-admin PAT stored as a secret would, but an
 audit credential carrying more authority than the thing it audits is not a
-hardening step). Check them by hand instead, with a repository-admin credential:
+hardening step).
+
+`scripts/onboard`, which runs with a repository-admin credential, checks rows
+10, 12 and 20 as checklist items; each `todo` prints the `gh api -X PUT` calls
+for that row, which leave the other rows' fields as they are, and a failed read
+makes each row it serves `cannot check`. Row 11 stays a check by hand. These
+reads, with the same credential, are the by-hand route for all four:
 
 ```bash
 gh api repos/OWNER/REPO/actions/permissions/workflow
@@ -788,6 +800,10 @@ strictest value is `all_external_contributors` (row 11); the third
 once the mode is `selected`. While it is anything else that endpoint answers
 `409 Conflict` with `All actions and workflows are allowed on this repository`,
 which is an answer for row 12 in its own right.
+
+An organization policy can set these for every repository it covers. A
+repository-level `PUT` may then be refused (not probed), and the organization
+owner changes the setting instead.
 
 ## 13–14. The App
 
