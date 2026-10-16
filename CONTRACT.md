@@ -3027,8 +3027,7 @@ list: commit it. It is OpenTofu's own recommendation for pinning provider
 versions and hashes, and the provider cache serves only stacks that commit it.
 A cell runs without one. `init -reconfigure` may rewrite a committed lock; that
 is a tracked-file change and `git-uncommitted` never runs on a cell.
-`repo-example-folders`, `repo-example-workspaces` and `repo-example-stacks-aws`
-gitignore it and show the no-cache path.
+All four sample repositories commit one per stack.
 
 The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
 

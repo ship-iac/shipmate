@@ -281,14 +281,15 @@ Neither the nine `ubuntu-slim` jobs nor `ops` runs `tofu` or `terramate`.
 
 The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
 `drift`; their cells download only `hashicorp/random`. An AWS repository's
-cells pull `hashicorp/aws`. The provider cache serves a stack once its
+cells pull `hashicorp/aws` as well. The provider cache serves a stack once its
 `.terraform.lock.hcl` is committed ([`../CONTRACT.md`](../CONTRACT.md)
 §Terramate safeguards, "Lock files and the provider cache") and a drift or
-apply cell has saved the entry; plan cells never save. Without a committed
-lock, every `init -reconfigure` downloads the provider again;
-`repo-example-stacks-aws` commits one per stack. Before passing `runs_on: ubuntu-slim` to `plan` or `drift`,
-weigh two costs: that provider download, and the PyYAML install with `apt-get`
-it adds to `plan.yml`'s `detect` and `summary` and `drift.yml`'s `detect`.
+apply cell has saved an entry for the same provider versions; plan cells never
+save. Without a committed lock, every `init -reconfigure` downloads the
+provider again. `repo-example-stacks-aws` commits one per stack. Before passing
+`runs_on: ubuntu-slim` to `plan` or `drift`, weigh two costs: the provider
+download, and the PyYAML install with `apt-get` it adds to `plan.yml`'s
+`detect` and `summary` and `drift.yml`'s `detect`.
 
 ## The sample's workload
 
