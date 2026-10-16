@@ -460,7 +460,7 @@ runs:
             echo "::error::could not list the check runs on $head; the step log names the cause"
             exit 1
           fi
-          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" --plan-runs < "$RUNNER_TEMP/head-checks.jsonl" \
+          python3 "$GITHUB_ACTION_PATH/../../scripts/apply-gate" < "$RUNNER_TEMP/head-checks.jsonl" \
             > plan_run.json
         else
           echo '{}' > plan_run.json

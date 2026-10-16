@@ -1387,10 +1387,10 @@ def test_unrecorded_note_escapes_evil_stack_and_env_names():
 
 
 def test_unrecorded_note_names_every_cell_when_under_the_cap():
-    rows = [_row(status="unrecorded", stack=f"s{i}") for i in range(ac._UNRECORDED_NAMED)]
+    rows = [_row(status="unrecorded", stack=f"s{i}") for i in range(ac._NAMED)]
     note = ac._unrecorded_note(rows)
     assert "more" not in note
-    for i in range(ac._UNRECORDED_NAMED):
+    for i in range(ac._NAMED):
         assert f"**s{i} (dev-eu)**" in note
 
 
@@ -1641,7 +1641,7 @@ def test_lock_note_omits_held_since_when_the_created_value_was_refused():
 
 def test_lock_note_cannot_blow_the_comment_cap():
     """apply.txt is capped at SIZE_BUDGET, not per field: a crafted `Created:` line of ~59,900 chars
-    parses fine, and `_LOCK_NAMED` bounds the cell count, not the rendered length. Notes belong to
+    parses fine, and `_NAMED` bounds the cell count, not the rendered length. Notes belong to
     the part of the comment that never sheds, so an unguarded value costs the comment at 2-3
     cells."""
     rows = [

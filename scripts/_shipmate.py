@@ -342,12 +342,6 @@ def cell_names(raw):
     return [{"stack": c["stack"], "environment": c["environment"]} for c in value]
 
 
-def missing_names(raw):
-    """The one parser of the summary's `missing` output: `cell_names(raw)`, or `[]` when it is
-    None, so a malformed value names no cell and never raises."""
-    return cell_names(raw) or []
-
-
 def current_run_url(run_id=None):
     """The page of run `run_id` of this repository, or of this workflow run when it is None, from
     the runner's default environment variables. `run_id` must already be checked (`is_run_id`)."""

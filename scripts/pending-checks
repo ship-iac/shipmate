@@ -32,10 +32,9 @@ import hashlib
 import json
 import os
 import pathlib
-import re
 import sys
 
-from _shipmate import _load, cell_summaries, run_annotated
+from _shipmate import _load, cell_summaries, is_run_id, run_annotated
 
 ag = _load("apply-gate")
 gs = _load("gate-state")
@@ -51,7 +50,7 @@ _SKEW = (
 
 def _plan_run():
     plan_run = os.environ.get("GITHUB_RUN_ID", "")
-    if not re.fullmatch(r"[0-9]+", plan_run):
+    if not is_run_id(plan_run):
         raise SystemExit(
             "::error::GITHUB_RUN_ID is unset or not a decimal run id: every apply "
             "check must record the plan run that produced its cell, or apply can "

@@ -6,7 +6,7 @@ import sys
 
 import pytest
 from _detect_fixtures import forbid_shared_runner
-from _loader import ENGINE, SCRIPTS, load_script
+from _loader import ENGINE, SCRIPTS, jsonl, load_script
 from _shipmate import codeowners_rules, first_codeowners, load_workflow_text
 from test_env_config_yaml_fixtures import CANONICAL
 
@@ -2311,10 +2311,6 @@ class _Unexpected(BaseException):
     in check-ids mode can swallow it."""
 
 
-def _listing(*rows):
-    return "".join(json.dumps(r) + "\n" for r in rows)
-
-
 def _workflow_run(cid, name, status="completed"):
     return {
         "id": cid,
@@ -2382,7 +2378,7 @@ def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(
+            _LISTING_ARGV: jsonl(
                 _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu", status="queued")
             ),
             _ann_argv(1): "[]",
@@ -2435,7 +2431,7 @@ def test_a_failed_reduction_marks_the_harvest_failed(monkeypatch, tmp_path, caps
     _run_check_ids(
         monkeypatch,
         tmp_path,
-        {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: _listing(_workflow_run(1, "app / dev-eu"))},
+        {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: jsonl(_workflow_run(1, "app / dev-eu"))},
     )
     assert _outputs(tmp_path) == f"head_sha={_HEAD}\nharvest_failed=true\nplan_run_ids=\n"
     assert _warnings(capsys) == [
@@ -2456,9 +2452,7 @@ def test_a_failed_annotations_fetch_writes_an_empty_payload_and_fetches_the_rest
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(
-                _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")
-            ),
+            _LISTING_ARGV: jsonl(_workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")),
             _ann_argv(1): SystemExit(_HARVEST_FAILED),
             _ann_argv(2): '[{"message": "w"}]',
         },
@@ -2481,9 +2475,7 @@ def test_harvest_failed_is_written_once_after_every_fetch(monkeypatch, tmp_path)
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(
-                _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")
-            ),
+            _LISTING_ARGV: jsonl(_workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")),
             _ann_argv(1): SystemExit(_HARVEST_FAILED),
             _ann_argv(2): "[]",
         },
@@ -2503,7 +2495,7 @@ def test_each_call_carries_its_own_token(monkeypatch, tmp_path):
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(
+            _LISTING_ARGV: jsonl(
                 _workflow_run(1, "app / dev-eu"), _apply_check(9, "apply / app / dev-eu", "1281")
             ),
             _ann_argv(1): "[]",
@@ -2565,7 +2557,7 @@ def test_the_plan_records_are_read_from_the_listing_before_any_download(monkeypa
         return real(lines, app_id)
 
     monkeypatch.setattr(doctor.ag, "plan_records", recording)
-    listing = _listing(_apply_check(9, "apply / app / dev-eu", "1281"))
+    listing = jsonl(_apply_check(9, "apply / app / dev-eu", "1281"))
     calls = _run_check_ids(
         monkeypatch,
         tmp_path,
@@ -2682,7 +2674,7 @@ def _download_cells(monkeypatch, tmp_path, undownloadable=()):
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(*rows),
+            _LISTING_ARGV: jsonl(*rows),
             **{_ann_argv(cid): "[]" for _, cid, _ in _PLANNED},
             **{_download_argv(rid): download for rid in _ARTIFACTS},
         },
@@ -6738,10 +6730,10 @@ def test_status_never_fails_the_run(monkeypatch):
     exception here would take down a `shipmate doctor` comment that the probe has already
     reported the same failure in. Mutation: drop the `except` clause in `config_status`."""
 
-    def boom(path):
+    def boom(path, fetch):
         raise RuntimeError("connection reset")
 
-    monkeypatch.setattr(doctor, "_contents_text", boom)
+    monkeypatch.setattr(doctor.ec, "contents_text", boom)
     assert doctor.config_status(_ctx()) == []
 
 

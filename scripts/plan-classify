@@ -69,7 +69,7 @@ def main(argv):
     with open("plan.json", encoding="utf-8") as fh:
         counts = classify(json.load(fh))
     write_outputs(
-        changed=bool(counts["changed"]),
+        changed=counts["changed"],
         add=counts["add"],
         change=counts["change"],
         destroy=counts["destroy"],

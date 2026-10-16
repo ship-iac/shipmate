@@ -57,15 +57,14 @@ _STATUS = {
 # evidence a reader needs to confirm what landed before re-planning.
 _SECTION_STATUSES = ("applied", "failed", "unrecorded")
 
-# How many cells the unrecorded note names before it summarizes the rest.
-_UNRECORDED_NAMED = 5
-
-# Same, for the state-not-saved note; same reasoning (see `_unrecorded_note`).
-_STATE_LOST_NAMED = 5
+# How many cells each note names before it summarizes the rest (see `_unrecorded_note`).
+_NAMED = 5
 _LOST_LOG = "`The apply step ran and its state was not saved`"
 
-# Same, for the state-lock note; same reasoning (see `_lock_note`).
-_LOCK_NAMED = 5
+
+def _bold_cell(row):
+    """`row`'s stack and environment in **bold** + `_md_name` (see `_unrecorded_note`)."""
+    return f"**{sc._md_name(row['stack'])} ({sc._md_name(row['environment'])})**"
 
 
 def _not_attempted_note(rows, env_name):
@@ -89,23 +88,18 @@ def _not_attempted_note(rows, env_name):
         )
     return (
         f"not attempted: the apply checks stay pending; {retry} If a cell's job log shows "
-        "`The apply step ran and its state was not saved`, follow docs/troubleshooting.md "
-        "section of that name first."
+        f"{_LOST_LOG}, follow docs/troubleshooting.md section of that name first."
     )
 
 
 def _state_lost_note(rows):
     """The 'state not saved' note: every cell whose apply ran and whose state was not saved,
     named in **bold** + `_md_name` like `_unrecorded_note`, capped for its reason."""
-    cells = [
-        f"**{sc._md_name(r['stack'])} ({sc._md_name(r['environment'])})**"
-        for r in rows
-        if r["state_lost"]
-    ]
+    cells = [_bold_cell(r) for r in rows if r["state_lost"]]
     if not cells:
         return ""
-    listed = named(cells, _STATE_LOST_NAMED)
-    if len(cells) > _STATE_LOST_NAMED:
+    listed = named(cells, _NAMED)
+    if len(cells) > _NAMED:
         listed += f", whose job logs show {_LOST_LOG}"
     return (
         f"state not saved: {listed}. The apply step ran and its state "
@@ -124,21 +118,17 @@ def _unrecorded_note(rows):
     Cell names are author-controlled, so **bold** + `_md_name` — never a
     backtick code span, which `_md_escape` does not escape.
 
-    The _UNRECORDED_NAMED cap is not cosmetic. Notes belong to the part of the
+    The _NAMED cap is not cosmetic. Notes belong to the part of the
     comment that never sheds, so uncapped this one could only push the render past
     HARD_CAP into `SystemExit`, costing the whole comment. Unrecorded rows are
     usually correlated across cells (expired App key, checks-API outage), so that
     is precisely the run that needs the comment most. The cell lines still name
     every affected cell."""
-    cells = [
-        f"**{sc._md_name(r['stack'])} ({sc._md_name(r['environment'])})**"
-        for r in rows
-        if r["status"] == "unrecorded"
-    ]
+    cells = [_bold_cell(r) for r in rows if r["status"] == "unrecorded"]
     if not cells:
         return ""
     return (
-        f"not recorded: {named(cells, _UNRECORDED_NAMED)}. The apply succeeded but its apply "
+        f"not recorded: {named(cells, _NAMED)}. The apply succeeded but its apply "
         "check is not recorded as complete (it failed, was cancelled, or a newer plan "
         "re-created it), so `shipmate / gate` stays pending. Re-plan."
     )
@@ -149,10 +139,7 @@ def _lock_cell(row, lock):
     was taken -- the last omitted entirely when lock-info refused the `Created`
     value (unbounded runtime output), so the sentence stays grammatical."""
     held = f", held since **{sc._md_escape(lock['created'])}**" if lock["created"] else ""
-    return (
-        f"**{sc._md_name(row['stack'])} ({sc._md_name(row['environment'])})** "
-        f"(lock **{sc._md_escape(lock['id'])}**{held})"
-    )
+    return f"{_bold_cell(row)} (lock **{sc._md_escape(lock['id'])}**{held})"
 
 
 def _lock_note(rows, env_name):
@@ -167,10 +154,10 @@ def _lock_note(rows, env_name):
     for the lock values, which is why lock-info bounds their length and charset
     at the source: it escapes neither `*` nor a backtick, and `apply_text` is
     capped only in total, so one crafted `Created:` line could both break out of
-    the bold span and, since _LOCK_NAMED bounds the cell COUNT and not the
+    the bold span and, since _NAMED bounds the cell COUNT and not the
     rendered length, push the comment past HARD_CAP and cost all of it.
 
-    The _LOCK_NAMED cap is the `_unrecorded_note` cap for the same reason: notes
+    The _NAMED cap applies here for the `_unrecorded_note` reason: notes
     belong to the part of the comment that never sheds. A stranded lock is usually
     correlated across the cells of one cancelled run -- precisely the run that
     needs the comment most.
@@ -190,7 +177,7 @@ def _lock_note(rows, env_name):
         return ""
     cmd = f"shipmate unlock {sc._md_escape(env_name)}" if env_name else "shipmate unlock <env>"
     return (
-        f"state lock held: {named(hits, _LOCK_NAMED)}. An earlier apply was cancelled or "
+        f"state lock held: {named(hits, _NAMED)}. An earlier apply was cancelled or "
         "killed before releasing the lock, so nothing in these cells was applied. Per-cell "
         "concurrency admits one apply at a time, so the holder was that cell's most recent "
         f"apply run. Release it with `{cmd}`, then re-apply. Unlocking is not recovery: if "

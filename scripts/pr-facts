@@ -26,10 +26,6 @@ import os
 from _shipmate import gh_json as _gh_json
 from _shipmate import is_pr_number, run_annotated, write_outputs
 
-#: The output keys, in the order they are written. Named once so the action's
-#: outputs and this list cannot drift apart silently.
-KEYS = ("head_sha", "head_repo", "base_sha", "pr_number", "is_draft", "on_demand")
-
 _DELETED_FORK = (
     "::error::this pull request's head repository no longer exists (a deleted fork), so "
     "there is nothing to check the fork refusal against, and planning it would run code "
@@ -130,7 +126,7 @@ def main():
                 "with `verb: plan` (see `docs/getting-started.md`)."
             )
         facts = from_api(number, os.environ.get("GITHUB_REPOSITORY", ""))
-    write_outputs(**{key: facts[key] for key in KEYS})
+    write_outputs(**facts)
     print(
         f"pull request #{facts['pr_number']} at {facts['head_sha']} "
         f"({facts['head_repo']}), draft={facts['is_draft']}, on-demand={facts['on_demand']}"

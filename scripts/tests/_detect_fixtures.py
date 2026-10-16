@@ -77,6 +77,29 @@ def _apply_check(stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, p
     )
 
 
+def foreign_message(listed):
+    """The refusal a detect raises when `listed` check runs record a plan made on a pull
+    request other than `PR_NUMBER`."""
+    return (
+        f"::error::apply aborted: the plan recorded for {listed} was not made on pull request "
+        "#8, so this apply is refused. Re-plan on this pull request (push or comment `shipmate "
+        "plan`), then apply again; if another open pull request shares this head commit, the "
+        "newest plan decides which one may apply."
+    )
+
+
+def wave_cells(wv, parsed):
+    """Every cell in the `envlevel<n>_waves` outputs `parsed`, flattened, sized by `waves`
+    module `wv`."""
+    return [
+        c
+        for lvl in range(wv.MAX_ENV_LEVELS)
+        for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
+        for i in range(wv.MAX_WAVES)
+        for c in w[f"wave{i}"]
+    ]
+
+
 #: What a detect reads when a test names no table. `layout` is required, and `folder` derives
 #: no identity variables, so a row carries only the stamp and the tier.
 MINIMAL_TABLE: dict[str, Any] = {"layout": "folder"}

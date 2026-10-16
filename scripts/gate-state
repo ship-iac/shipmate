@@ -21,7 +21,7 @@ skipped `detect` there is a failure like any other non-success.
 
 import os
 
-from _shipmate import _load, missing_names, run_annotated, write_outputs
+from _shipmate import _load, cell_names, run_annotated, write_outputs
 
 ag = _load("apply-gate")
 
@@ -209,7 +209,7 @@ def main():
         is_draft=os.environ.get("SHIPMATE_IS_DRAFT", "false") == "true",
         on_demand=os.environ.get("SHIPMATE_ON_DEMAND", "false") == "true",
         refusal=os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
-        missing=missing_names(os.environ.get("SHIPMATE_MISSING", "")),
+        missing=cell_names(os.environ.get("SHIPMATE_MISSING", "")),
     )
     # A stack path holding CR or LF would end the `GITHUB_OUTPUT` line. `reason` is the whole
     # text, for the held comment.
