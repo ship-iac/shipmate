@@ -285,8 +285,8 @@ cells pull `hashicorp/aws`. The provider cache serves a stack once its
 `.terraform.lock.hcl` is committed ([`../CONTRACT.md`](../CONTRACT.md)
 §Terramate safeguards, "Lock files and the provider cache") and a drift or
 apply cell has saved the entry; plan cells never save. Without a committed
-lock, as in `repo-example-stacks-aws`, every `init -reconfigure` downloads the
-provider again. Before passing `runs_on: ubuntu-slim` to `plan` or `drift`,
+lock, every `init -reconfigure` downloads the provider again;
+`repo-example-stacks-aws` commits one per stack. Before passing `runs_on: ubuntu-slim` to `plan` or `drift`,
 weigh two costs: that provider download, and the PyYAML install with `apt-get`
 it adds to `plan.yml`'s `detect` and `summary` and `drift.yml`'s `detect`.
 
