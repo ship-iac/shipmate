@@ -46,9 +46,8 @@ pin and table, so the edits take effect together at merge.
    - the tag's `shipmate` fence in `docs/getting-started.md` renders.
 
    A refusal writes nothing. A ref listed as `<file>:<line>: <text>`, the line as it stands on
-   disk, is one the script does not rewrite: `@main`, a single-quoted ref, a case-variant slug
-   such as `Ship-IaC/shipmate`, or text after or glued to the `# vX.Y.Z` label. Fix it by hand
-   and run the script again. A listed missing workflow is a callee the release deleted or
+   disk, is one the script does not rewrite: `@main`, a single-quoted ref, a case-variant slug,
+   or text after or glued to the `# vX.Y.Z` label. Fix it by hand and run the script again. A listed missing workflow is a callee the release deleted or
    renamed: make the consumer-file edit the release's CHANGELOG entries name, in the same
    commit.
 
@@ -60,9 +59,11 @@ pin and table, so the edits take effect together at merge.
 
    | Exit | Meaning |
    | --- | --- |
-   | 0 | every engine ref pinned to the tag, and `shipmate.yml` matches the fence; a re-run that writes nothing also exits 0 |
+   | 0 | every engine ref pinned to the tag, and `shipmate.yml` matches the fence |
    | 1 | a refusal or a usage error; nothing written |
    | 2 | every engine ref pinned to the tag, and `shipmate.yml` differs from the fence or is absent |
+
+   A re-run that writes nothing exits 0 or 2 by the same rule.
 
 3. Commit the rewrite as one commit. The script does not commit.
 
@@ -191,27 +192,31 @@ the release commit, from `repo-example-stacks-aws`:
    correctly-pinned consumers as stale and tell them to re-pin backwards.
 
    The script takes a tag, so create the annotated tag in the engine clone first, on
-   `<release-sha>`, the release commit's full 40-hex SHA, and do not push it yet. The block is
-   `&&`-chained and can be re-run after any failure: it creates the tag only when absent, and
-   `checkout -B` resets the scratch branch to the sample's `origin/main`. When the scratch
-   branch was already pushed, delete it on origin first:
-   `git -C ../repo-example-stacks-aws push origin --delete smoke/vX.Y.Z`. The two checks refuse
-   separately:
-
-   - the `[[` refusing means `<release-sha>` is not the full 40-hex commit: pass the full SHA;
-   - the `test` refusing means the local tag names another commit: `git tag -d vX.Y.Z` and
-     run the block again.
+   `<release-sha>`, and do not push it yet. The block creates the tag only when absent and the
+   scratch branch from the sample's `origin/main`:
 
    ```bash
    [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
      { git rev-parse -q --verify refs/tags/vX.Y.Z >/dev/null || git tag -a vX.Y.Z -m vX.Y.Z <release-sha>; } && \
      test "$(git rev-parse 'vX.Y.Z^{commit}')" = <release-sha> && \
      git -C ../repo-example-stacks-aws fetch origin main && \
-     git -C ../repo-example-stacks-aws checkout -B smoke/vX.Y.Z origin/main && \
+     git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z origin/main && \
      python scripts/repin ../repo-example-stacks-aws vX.Y.Z
    ```
 
-   § Re-pin a consumer covers its checks and output.
+   § Re-pin a consumer covers its checks and output. Commit the re-pin on `smoke/vX.Y.Z` as
+   one commit and push it; step 2 dispatches that pushed branch:
+
+   ```bash
+   git -C ../repo-example-stacks-aws push -u origin smoke/vX.Y.Z
+   ```
+
+   **Reset.** If a line of either block, this one or the cut's, refuses, read its message,
+   then reset: `git tag -d vX.Y.Z`;
+   `git -C ../repo-example-stacks-aws checkout main && git -C ../repo-example-stacks-aws branch -D smoke/vX.Y.Z`;
+   `git -C ../repo-example-stacks-aws push origin --delete smoke/vX.Y.Z` if it was pushed.
+   Fix the cause and run the block again. Both blocks need a clean sample tree.
+   `<release-sha>` is the full lowercase 40-hex commit, `main`'s tip.
 
    **The scratch branch carries the whole re-pin commit.** Its workflow-file edits are
    what the dispatch loads: a new pin under an old body is the load-time rejection
@@ -231,7 +236,7 @@ the release commit, from `repo-example-stacks-aws`:
    a consumer's list; `scripts/onboard` reports the missing pattern and prints the
    `PUT` that adds it.
 
-2. Drive the consumer's workflow file directly at that ref, with the inputs
+2. Drive the consumer's workflow file directly at the pushed branch, with the inputs
    `actions/dispatch` would send — exactly those inputs, and no others:
 
    ```bash
@@ -255,12 +260,9 @@ the release commit, from `repo-example-stacks-aws`:
    copy, still on the *old* pin. The scratch
    branch is never read, and the smoke goes green without touching the new
    code.
-3. Throw the scratch branch away, local and remote
-   (`git -C ../repo-example-stacks-aws push origin --delete smoke/vX.Y.Z`, then
-   `git -C ../repo-example-stacks-aws checkout main && git -C ../repo-example-stacks-aws branch -D smoke/vX.Y.Z`),
-   and cut the release as below, which pushes the tag. A failed smoke
-   deletes the local tag instead (`git tag -d vX.Y.Z`). Nothing reaches the sample's default
-   branch before the tag is pushed and released.
+3. Throw the scratch branch away, local and remote, as the reset in step 1 does but keeping
+   the tag, and cut the release as below, which pushes the tag. A failed smoke runs the whole
+   reset. Nothing reaches the sample's default branch before the tag is pushed and released.
 
 **What this catches, and what it cannot.** It catches the class that genuinely
 needs a consumer: the consumer file's `workflow_dispatch` input declarations
@@ -321,19 +323,15 @@ gh run list --workflow manifest-load.yml --json headSha,conclusion --jq '.[] | s
 gh workflow run manifest-load.yml --ref main
 ```
 
-A red `manifest-load` means a fix commit, so the release SHA moves: delete the local tag
-(`git tag -d vX.Y.Z`) and smoke the new release commit from step 1.
+A red `manifest-load` means a fix commit, so the release SHA moves: run the reset in
+§ Smoke the live path before the tag, step 1, and smoke the new release commit from there.
 
-Push the annotated tag the smoke created. When no smoke created it, the block creates it
-here, on `<release-sha>`; the `test` then refuses to push a tag that names any other commit.
-The two checks refuse separately:
-
-- the `[[` refusing means `<release-sha>` is not the full 40-hex commit: pass the full SHA;
-- the `test` refusing means the local tag is stale: `git tag -d v0.2.0` and run the block
-  again.
+Push the annotated tag the smoke created; when no smoke created it, the block creates it
+here. It tags only `main`'s tip, and a refusal takes the same reset:
 
 ```bash
 [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
+  git fetch origin main && test "$(git rev-parse origin/main)" = <release-sha> && \
   { git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || git tag -a v0.2.0 -m v0.2.0 <release-sha>; } && \
   test "$(git rev-parse 'v0.2.0^{commit}')" = <release-sha> && \
   git push origin v0.2.0 && \
