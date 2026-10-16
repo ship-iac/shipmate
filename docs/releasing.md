@@ -17,48 +17,55 @@ one line alone.
 
 ### Re-pin a consumer
 
-`<release-sha>` is the release's full 40-hex commit (`git rev-list -n1 vX.Y.Z` once tagged),
-never a short SHA. `<consumer>` is the consumer repository's checkout. Make every table and
-consumer-file edit the release's CHANGELOG `### Removed` and `### Changed` lines name in the
-re-pin commit itself. The re-pin pull request's runs use the default branch's old pin and
-table, so the edits take effect together at merge.
-Use GNU sed: `-b` keeps a CRLF file's line endings under Git Bash. On macOS, install GNU sed
-and run it as `gsed`, because BSD sed rejects `-b`.
+`<consumer>` is the consumer repository's checkout and `vX.Y.Z` the release tag. Make every
+table and consumer-file edit the release's CHANGELOG `### Removed` and `### Changed` lines
+name in the re-pin commit itself. The re-pin pull request's runs use the default branch's old
+pin and table, so the edits take effect together at merge.
 
-1. From the engine clone, check that `<release-sha>` is 40 hex and on `origin/main`, then
-   rewrite every engine ref. The checks are `&&`-chained, so a bad SHA rewrites nothing. A
-   short SHA or a tag would be written into every pin, and step 2 compares against the same
-   value, so it would pass. A commit reachable only from a branch stops resolving once that
-   branch is force-pushed or deleted.
+1. Rewrite every engine ref. `<engine>` is an engine clone that holds the tag:
 
    ```bash
-   [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && git fetch origin main && git merge-base --is-ancestor <release-sha> origin/main && \
-     sed -b -i -E 's|(ship-iac/shipmate/[^@[:space:]"]+)@[0-9a-f]{40}("?)([[:space:]]+# v[^[:space:]]*)?|\1@<release-sha>\2 # vX.Y.Z|' <consumer>/.github/workflows/*.yml
+   python <engine>/scripts/repin <consumer> vX.Y.Z
    ```
 
-2. List the engine refs the rewrite left behind, in every file under the workflows
-   directory. It must print nothing, because every engine ref moves in one commit. A printed
-   line is a ref the `sed` does not handle (`@main`, a single-quoted ref, a comment after the
-   `# vX.Y.Z` label, a `.yaml` file): fix it by hand and run step 2 again.
+   It fetches `origin/main` and checks, before it writes anything:
 
-   ```bash
-   grep -rnE 'ship-iac/shipmate/[^@[:space:]"]+@' <consumer>/.github/workflows/ | grep -vE '@<release-sha>"? # vX\.Y\.Z'$'\r''?$'
-   ```
+   - the tag has the `vX.Y.Z` form and resolves as a tag, never as a branch of that name;
+   - when `origin` holds the tag, it names the same commit as the local tag. A stale local
+     tag refuses with the remedy `git tag -d vX.Y.Z && git fetch origin tag vX.Y.Z`. A tag
+     `origin` lacks passes, because the release smoke re-pins before the push, and the
+     output says `origin has no tag vX.Y.Z: pinning to a local tag`;
+   - its commit is on `origin/main`, because a commit reachable only from a branch stops
+     resolving once that branch is force-pushed or deleted;
+   - the directory holds at least one engine ref;
+   - every engine ref in every `.yml` and `.yaml` file directly in
+     `<consumer>/.github/workflows/` is spelled `ship-iac/shipmate/...` and ends its line as
+     `@<sha> # vX.Y.Z` or `@<sha>" # vX.Y.Z`, trailing blanks allowed, after the rewrite,
+     `<sha>` being the tag's commit;
+   - every engine workflow the consumer calls exists at the tag;
+   - the tag's `shipmate` fence in `docs/getting-started.md` renders.
 
-3. Check that every engine workflow the consumer calls exists at `<release-sha>`, from the
-   engine clone. It must print nothing. A printed `missing at release: <path>` is a callee the
-   release deleted or renamed, and the pin would not resolve: make the consumer-file edit the
-   release's CHANGELOG entries name, in the same commit.
+   A refusal writes nothing. A ref listed as `<file>:<line>: <text>`, the line as it stands on
+   disk, is one the script does not rewrite: `@main`, a single-quoted ref, a case-variant slug,
+   or text after or glued to the `# vX.Y.Z` label. Fix it by hand and run the script again.
+   A listed missing workflow is a callee the release deleted or renamed: make the
+   consumer-file edit the release's CHANGELOG entries name, in the same commit.
 
-   ```bash
-   grep -rhoE 'ship-iac/shipmate/\.github/workflows/[^@[:space:]"]+' <consumer>/.github/workflows/ | sort -u | sed 's|ship-iac/shipmate/||' | \
-     while read -r f; do git cat-file -e "<release-sha>:$f" 2>/dev/null || echo "missing at release: $f"; done
-   ```
+2. Read its output. The first line is `vX.Y.Z -> <sha>`, the commit the run resolved; on
+   exit 0 or 2 every ref names it. The end is the diff from the tag's fence to
+   `shipmate.yml`, pins masked. A non-empty diff means the release changed the fence, or the
+   file carries a local edit: reconcile `shipmate.yml` in the same commit. The exit code says
+   the same:
 
-4. Commit the rewrite as one commit.
+   | Exit | Meaning |
+   | --- | --- |
+   | 0 | every engine ref pinned to the tag, and `shipmate.yml` matches the fence |
+   | 1 | a refusal or a usage error; nothing written |
+   | 2 | every engine ref pinned to the tag, and `shipmate.yml` differs from the fence or is absent |
 
-The `sed` reads `.yml` files only. Every consumer file this engine renders is `.yml`; step 2
-reports the engine refs it leaves in a `.yaml` workflow: rename that file or re-pin it by hand.
+   A re-run that writes nothing exits 0 or 2 by the same rule.
+
+3. Commit the rewrite as one commit. The script does not commit.
 
 ## Manifest load
 
@@ -184,12 +191,39 @@ the release commit, from `repo-example-stacks-aws`:
    exactly the backwards staleness that makes the pin probe report
    correctly-pinned consumers as stale and tell them to re-pin backwards.
 
+   The script takes a tag, so create the annotated tag in the engine clone first, on
+   `<release-sha>`, and do not push it yet. The block creates the tag only when absent and the
+   scratch branch from the sample's `origin/main`:
+
    ```bash
-   git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z
+   [[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
+     { git rev-parse -q --verify refs/tags/vX.Y.Z >/dev/null || git tag -a vX.Y.Z -m vX.Y.Z <release-sha>; } && \
+     test "$(git rev-parse 'vX.Y.Z^{commit}')" = <release-sha> && \
+     git -C ../repo-example-stacks-aws fetch origin main && \
+     git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z origin/main && \
+     python scripts/repin ../repo-example-stacks-aws vX.Y.Z
    ```
 
-   Then run § Re-pin a consumer with `<consumer>` set to `../repo-example-stacks-aws` and
-   `<release-sha>` set to the release commit.
+   `<release-sha>` is the full lowercase 40-hex commit, `main`'s tip. § Re-pin a consumer
+   covers the script's checks and output. When it exits 1 listing refs or missing workflows,
+   fix those on the scratch branch and run its line alone again. When it exits 2, reconcile `shipmate.yml` with the diff it prints; that
+   is not a failure. Any other refusal of the script is a stop, below. Then commit the re-pin
+   on `smoke/vX.Y.Z` as one commit and push it; step 2 dispatches that pushed branch:
+
+   ```bash
+   git -C ../repo-example-stacks-aws push -u origin smoke/vX.Y.Z
+   ```
+
+   **Any other stop starts the smoke over.** That covers a refused check in the block above,
+   a failed smoke, and a release SHA that moves. Run this cleanup, fix the cause, and run
+   step 1 again. Each line succeeds whether or not its tag or branch exists:
+
+   ```bash
+   git -C ../repo-example-stacks-aws checkout -f main
+   git -C ../repo-example-stacks-aws branch -D smoke/vX.Y.Z 2>/dev/null || true
+   git -C ../repo-example-stacks-aws push origin --delete smoke/vX.Y.Z 2>/dev/null || true
+   git tag -d vX.Y.Z 2>/dev/null || true
+   ```
 
    **The scratch branch carries the whole re-pin commit.** Its workflow-file edits are
    what the dispatch loads: a new pin under an old body is the load-time rejection
@@ -209,7 +243,7 @@ the release commit, from `repo-example-stacks-aws`:
    a consumer's list; `scripts/onboard` reports the missing pattern and prints the
    `PUT` that adds it.
 
-2. Drive the consumer's workflow file directly at that ref, with the inputs
+2. Drive the consumer's workflow file directly at the pushed branch, with the inputs
    `actions/dispatch` would send — exactly those inputs, and no others:
 
    ```bash
@@ -233,7 +267,10 @@ the release commit, from `repo-example-stacks-aws`:
    copy, still on the *old* pin. The scratch
    branch is never read, and the smoke goes green without touching the new
    code.
-3. Throw the branch away and cut the release as below.
+3. A green smoke runs step 1's cleanup without its `git tag -d` line, which throws the
+   scratch branch away and keeps the tag, then cuts the release as below, which pushes the tag. A
+   failed smoke runs the whole cleanup. Nothing reaches the sample's default branch before
+   the tag is pushed and released.
 
 **What this catches, and what it cannot.** It catches the class that genuinely
 needs a consumer: the consumer file's `workflow_dispatch` input declarations
@@ -294,9 +331,22 @@ gh run list --workflow manifest-load.yml --json headSha,conclusion --jq '.[] | s
 gh workflow run manifest-load.yml --ref main
 ```
 
+A red `manifest-load` means a fix commit, so the release SHA moves: smoke the new release
+commit, starting with the cleanup in step 1 of § Smoke the live path before the tag.
+
+Push the annotated tag the smoke created; when no smoke created it, the block creates it
+here. It tags only `main`'s tip. When a check before the push refuses, fix a mistyped
+`<release-sha>` and run the block again; otherwise the smoke and the cut disagree on the
+commit: smoke again, starting with that cleanup. When only
+`gh release create` fails, the tag is already pushed: run that line alone again.
+
 ```bash
-git tag -a v0.2.0 -m v0.2.0 <release-sha> && git push origin v0.2.0
-gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
+[[ <release-sha> =~ ^[0-9a-f]{40}$ ]] && \
+  git fetch origin main && test "$(git rev-parse origin/main)" = <release-sha> && \
+  { git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || git tag -a v0.2.0 -m v0.2.0 <release-sha>; } && \
+  test "$(git rev-parse 'v0.2.0^{commit}')" = <release-sha> && \
+  git push origin v0.2.0 && \
+  gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
 ```
 
 **Push the tag first; `--target` does not work on this repository.**
@@ -327,9 +377,9 @@ to that same SHA, annotating the pin `# vX.Y.Z`. Re-pinning first would leave
 the sample on a commit with no release, which is exactly the state the probe
 reads as staleness.
 
-Run § Re-pin a consumer with `<consumer>` set to `../repo-example-stacks-aws`. Its
-ancestor check refuses a target not reachable from `origin/main`, so it cannot re-pin a
-sample to a branch commit.
+Run `python scripts/repin ../repo-example-stacks-aws vX.Y.Z` (§ Re-pin a consumer). Its
+ancestor check refuses a tag not reachable from `origin/main`, so it cannot re-pin a sample
+to a branch commit.
 
 **A re-pin pull request changes no stack and no `global.version`.** Bump
 `global.version` in its own pull request afterwards, whose plan runs the new engine. Under

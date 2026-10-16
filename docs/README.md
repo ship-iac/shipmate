@@ -23,7 +23,7 @@ In reading order.
 | Page | What it is |
 | --- | --- |
 | [`development.md`](development.md) | Repo layout, toolchain, testing model, how guard tests must be written. |
-| [`releasing.md`](releasing.md) | Cutting a release: the manifest-load check, publishing the tag, and smoking the live path before it. |
+| [`releasing.md`](releasing.md) | Re-pinning a consumer with `scripts/repin`; cutting a release: the manifest-load check, publishing the tag, and smoking the live path before it. |
 
 [`../CONTRACT.md`](../CONTRACT.md) is the spec behind all of it — check names,
 the environment model, tag grammar, pinning and the comment grammar. Read it
