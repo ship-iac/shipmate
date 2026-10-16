@@ -31,11 +31,12 @@ pin and table, so the edits take effect together at merge.
    It fetches `origin/main` and checks, before it writes anything:
 
    - the tag has the `vX.Y.Z` form and resolves as a tag, never as a branch of that name;
-   - its commit is on `origin/main`, because a commit reachable only from a branch stops
-     resolving once that branch is force-pushed or deleted;
    - when `origin` holds the tag, it names the same commit as the local tag. A stale local
      tag refuses with the remedy `git tag -d vX.Y.Z && git fetch origin tag vX.Y.Z`. A tag
-     `origin` lacks passes, because the release smoke re-pins before the push;
+     `origin` lacks passes, because the release smoke re-pins before the push, and the
+     output says `origin has no tag vX.Y.Z: pinning to a local tag`;
+   - its commit is on `origin/main`, because a commit reachable only from a branch stops
+     resolving once that branch is force-pushed or deleted;
    - the directory holds at least one engine ref;
    - every engine ref in every `.yml` and `.yaml` file directly in
      `<consumer>/.github/workflows/` ends its line
@@ -46,20 +47,20 @@ pin and table, so the edits take effect together at merge.
 
    A refusal writes nothing. A ref listed as `<file>:<line>: <text>` is one the script does
    not rewrite (`@main`, a single-quoted ref, a comment after the `# vX.Y.Z` label): fix it by
-   hand and run the script again. It rewrites `*.yml` files only and lists a ref in a `.yaml`
-   file the same way: rename that file or re-pin it by hand. A listed missing workflow is a
+   hand and run the script again. A listed missing workflow is a
    callee the release deleted or renamed: make the consumer-file edit the release's CHANGELOG
    entries name, in the same commit.
 
-2. Read the end of its output: the diff from the tag's fence to `shipmate.yml`, pins masked.
+2. Read its output. The first line is `vX.Y.Z -> <sha>`, the commit every ref now names. The
+   end is the diff from the tag's fence to `shipmate.yml`, pins masked.
    A non-empty diff means the release changed the fence, or the file carries a local edit:
    reconcile `shipmate.yml` in the same commit. The exit code says the same:
 
    | Exit | Meaning |
    | --- | --- |
-   | 0 | written, and `shipmate.yml` matches the fence |
+   | 0 | every engine ref pinned to the tag, and `shipmate.yml` matches the fence; a re-run that writes nothing also exits 0 |
    | 1 | a refusal or a usage error; nothing written |
-   | 2 | written, and `shipmate.yml` differs from the fence or is absent |
+   | 2 | every engine ref pinned to the tag, and `shipmate.yml` differs from the fence or is absent |
 
 3. Commit the rewrite as one commit. The script does not commit.
 
@@ -188,12 +189,13 @@ the release commit, from `repo-example-stacks-aws`:
    correctly-pinned consumers as stale and tell them to re-pin backwards.
 
    The script takes a tag, so create the annotated tag in the engine clone first, on
-   `<release-sha>`, the release commit's full 40-hex SHA, and do not push it yet:
+   `<release-sha>`, the release commit's full 40-hex SHA, and do not push it yet. The block is
+   `&&`-chained, so a failed tag creation stops it:
 
    ```bash
-   git tag -a vX.Y.Z -m vX.Y.Z <release-sha>
-   git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z
-   python scripts/repin ../repo-example-stacks-aws vX.Y.Z
+   git tag -a vX.Y.Z -m vX.Y.Z <release-sha> && \
+     git -C ../repo-example-stacks-aws checkout -b smoke/vX.Y.Z && \
+     python scripts/repin ../repo-example-stacks-aws vX.Y.Z
    ```
 
    § Re-pin a consumer covers its checks and output.
@@ -307,11 +309,13 @@ A red `manifest-load` means a fix commit, so the release SHA moves: delete the l
 (`git tag -d vX.Y.Z`) and smoke the new release commit from step 1.
 
 Push the annotated tag the smoke created. When no smoke created it, the first line creates
-it here, on `<release-sha>`:
+it here, on `<release-sha>`; the `test` then refuses to push a tag that names any other
+commit. A refusal there means a stale local tag: `git tag -d v0.2.0` and run it again.
 
 ```bash
-git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || git tag -a v0.2.0 -m v0.2.0 <release-sha>
-git push origin v0.2.0
+{ git rev-parse -q --verify refs/tags/v0.2.0 >/dev/null || git tag -a v0.2.0 -m v0.2.0 <release-sha>; } && \
+  test "$(git rev-parse 'v0.2.0^{commit}')" = <release-sha> && \
+  git push origin v0.2.0
 gh release create v0.2.0 --title v0.2.0 --generate-notes --verify-tag
 ```
 
