@@ -732,9 +732,9 @@ Settings → Actions → General:
 
   Switch `allowed_actions` to `selected` first, then set the list straight
   after. The selected-actions endpoint answers `409 Conflict` until the mode is
-  `selected`, so the list cannot be written first; once switched, the list was
-  observed empty until the second call, so a shipmate run in between stops at
-  "Set up job". `scripts/onboard` prints both calls in that order.
+  `selected`, so the list cannot be written first; switching from `all`, the
+  list was observed empty until the second call, so a shipmate run in between
+  stops at "Set up job". `scripts/onboard` prints both calls in that order.
 
   `<owner>/shipmate/*@*` covers every shape the engine is referenced in.
   Consumers reference only `<owner>/shipmate/.github/workflows/*.yml@<sha>`; the
@@ -781,7 +781,8 @@ hardening step).
 `scripts/onboard`, which runs with a repository-admin credential, checks rows
 10, 12 and 20 as checklist items; each `todo` prints the `gh api -X PUT` calls
 for that row, which leave the other rows' fields as they are (measured on a
-repository already in mode `selected`; the switch from `all` is not probed),
+repository already in mode `selected`; whether the switch from `all` keeps
+`sha_pinning_required` is not probed),
 and a failed read makes each row it serves `cannot check`. Row 11 stays a check
 by hand. These reads, with the same credential, are the by-hand route for all
 four:

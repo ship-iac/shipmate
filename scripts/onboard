@@ -790,8 +790,9 @@ def _custom_rule_items(ctx):
 def _read_or_reason(path):
     """`(parsed gh api <path>, None)`, or `(None, reason)` when the read fails for any reason.
 
-    `reason` is the failure's last non-empty line, without an `::error::` prefix: `_run` ends
-    the message with gh's scrubbed stderr. Only for a checklist row that degrades to
+    `_run` raises `command failed (N): <argv>` and then gh's scrubbed stderr, so `reason` is
+    every non-empty stderr line joined with "; ", or the first line when gh printed nothing.
+    Only for a checklist row that degrades to
     `cannot check`. A reconciler that writes uses `_gh_json_or_none`, which treats only a
     404 as absent.
     """
@@ -799,7 +800,7 @@ def _read_or_reason(path):
         return _gh_json(path), None
     except SystemExit as e:
         lines = [ln for ln in str(e).splitlines() if ln.strip()]
-        return None, (lines or [""])[-1].removeprefix("::error::")
+        return None, "; ".join(lines[1:] or lines)
 
 
 def _unread(item, path, reason):
@@ -813,11 +814,11 @@ def _actions_settings_items(ctx):
     command sets only its own row's fields, because GitHub keeps a field a PUT omits.
     """
     base = f"repos/{ctx['repo']}/actions/permissions"
-    perms = _read_or_reason(base)
+    perms, reason = _read_or_reason(base)
     return [
         _token_item(f"{base}/workflow"),
-        _allowed_actions_item(base, perms),
-        _sha_pinning_item(base, perms),
+        _allowed_actions_item(base, perms, reason),
+        _sha_pinning_item(base, perms, reason),
     ]
 
 
@@ -842,23 +843,22 @@ def _token_item(path):
     )
 
 
-def _sha_pinning_item(path, read):
+def _sha_pinning_item(path, perms, reason):
     item = "actions pinned to a full-length commit SHA (hardening.md row 20)"
-    perms, reason = read
     if perms is None:
         return _unread(item, path, reason)
-    if perms.get("sha_pinning_required") is True:
+    disabled = perms.get("enabled") is False
+    if perms.get("sha_pinning_required") is True and not disabled:
         return "ok", item, []
     put = ["gh", "api", "-X", "PUT", path, "-F", "enabled=true", "-F", "sha_pinning_required=true"]
-    return (
-        "todo",
-        item,
-        [
-            "With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,",
-            "with the exemptions in docs/hardening.md rows 10 to 12 and 20.",
-            shlex.join(put),
-        ],
-    )
+    lines = [
+        "With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,",
+        "with the exemptions in docs/hardening.md row 20.",
+        shlex.join(put),
+    ]
+    if disabled:
+        lines.insert(0, "Actions are disabled on this repository; the command enables them too.")
+    return "todo", item, lines
 
 
 def _selected_actions_command(path, patterns):
@@ -870,22 +870,18 @@ def _selected_actions_command(path, patterns):
     return shlex.join(args)
 
 
-def _allowed_actions_setup(base, perms):
-    """Row 12 while the mode is not `selected`, when the current list cannot be read (409)."""
-    mode = perms.get("allowed_actions")
+def _allowed_actions_setup(base, state):
+    """Row 12 while Actions are off or the mode is not `selected`, when the current list
+    cannot be read (409). `state` is the line saying which."""
     first = ["gh", "api", "-X", "PUT", base, "-F", "enabled=true", "-f", "allowed_actions=selected"]
-    if perms.get("enabled") is False or not mode:
-        state = "Actions are disabled on this repository; the first command enables them."
-    else:
-        state = f"`allowed_actions` is `{mode}`, not `selected`."
     return [
         state,
         "The list below holds only what shipmate needs. For each other third-party action",
         "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
         'those workflows fail at "Set up job" too: this run cannot read the current list',
         "while the mode is not `selected`, so it cannot add them.",
-        "Run the second command straight after the first: once switched, the list was",
-        "observed empty until the second call, so a shipmate run in between stops at",
+        "Run the second command straight after the first: switching from `all`, the list",
+        "was observed empty until the second call, so a shipmate run in between stops at",
         '"Set up job".',
         shlex.join(first),
         _selected_actions_command(f"{base}/selected-actions", ALLOWED_PATTERNS),
@@ -912,13 +908,19 @@ VERIFIED_OFF = [
 ]
 
 
-def _allowed_actions_item(base, read):
+def _allowed_actions_item(base, perms, reason):
     item = "allowed actions (hardening.md row 12)"
-    perms, reason = read
     if perms is None:
         return _unread(item, base, reason)
-    if perms.get("allowed_actions") != "selected":
-        return "todo", item, _allowed_actions_setup(base, perms)
+    mode = perms.get("allowed_actions")
+    if perms.get("enabled") is False:
+        state = "Actions are disabled on this repository; the first command enables them."
+        return "todo", item, _allowed_actions_setup(base, state)
+    if mode is None:
+        return "todo", item, _allowed_actions_setup(base, "`allowed_actions` was not in the read.")
+    if mode != "selected":
+        state = f"`allowed_actions` is `{mode}`, not `selected`."
+        return "todo", item, _allowed_actions_setup(base, state)
     path = f"{base}/selected-actions"
     selected, reason = _read_or_reason(path)
     if selected is None:
