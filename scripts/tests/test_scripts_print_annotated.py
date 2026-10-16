@@ -55,17 +55,7 @@ BLOCKS = {
     "gate-status": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "plan-classify": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",
     "plan-crypt": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",
-    "plan-cell-summary": (
-        "if __name__ == '__main__':\n"
-        "    args = sys.argv[1:]\n"
-        "    if args == ['--step-line']:\n"
-        "        print(step_line())\n"
-        "    elif args:\n"
-        "        raise SystemExit(f'::error::plan-cell-summary takes no argument or --step-line, "
-        "got {args}')\n"
-        "    else:\n"
-        "        run_annotated(main)"
-    ),
+    "plan-cell-summary": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
 }
 #: Run by an operator in a terminal, never by a workflow: `onboard` strips `::error::` for human
 #: output itself, and `register-app` never raises one.
@@ -100,7 +90,8 @@ def test_every_script_prints_its_refusal_through_run_annotated(script):
     red.
 
     Mutations: revert `apply-gate`'s block to `main()`; revert `gate-status`'s to
-    `main(sys.argv[1:])`; delete `waves` from `LIBRARIES`; add an extensionless script with no
+    `main(sys.argv[1:])`; raise `plan-cell-summary`'s argument refusal in its `__main__` block
+    again; delete `waves` from `LIBRARIES`; add an extensionless script with no
     block -- each red."""
     if script in LIBRARIES:
         expected = []
