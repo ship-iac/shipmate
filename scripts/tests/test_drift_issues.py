@@ -170,29 +170,18 @@ def test_plan_not_ok_cell_is_skipped_entirely(monkeypatch):
 def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
     rec = _Recorder()
     monkeypatch.setattr(di, "_run", rec)
-    label_calls = []
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *a, **k: label_calls.append(a) or type("R", (), {"returncode": 0})(),
-    )
     cell = _cell(drifted=True, add=1)
     di.upsert_or_close(cell, {}, "url")
-    assert len(rec.calls) == 1
-    assert rec.calls[0][:3] == ["gh", "issue", "create"]
-    assert label_calls, "expected the label to be (best-effort) created"
+    assert [c[:3] for c in rec.calls] == [["gh", "label", "create"], ["gh", "issue", "create"]]
 
 
 def test_two_new_issues_create_the_label_once(monkeypatch):
     """Mutation: `@functools.cache` -> `@functools.lru_cache(maxsize=0)` on `_ensure_label`."""
-    monkeypatch.setattr(di, "_run", _Recorder())
-    label_calls = []
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda *a, **k: label_calls.append(a) or type("R", (), {"returncode": 0})(),
-    )
+    rec = _Recorder()
+    monkeypatch.setattr(di, "_run", rec)
     di.upsert_or_close(_cell(drifted=True, stack="stacks/app"), {}, "url")
     di.upsert_or_close(_cell(drifted=True, stack="stacks/db"), {}, "url")
-    assert len(label_calls) == 1
+    assert [c[:3] for c in rec.calls].count(["gh", "label", "create"]) == 1
 
 
 def test_drifted_with_existing_issue_edits_it(monkeypatch):
@@ -255,6 +244,8 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     def fake_run(args):
         if args[:3] == ["gh", "issue", "list"]:
             return "[]"
+        if args[:3] == ["gh", "label", "create"]:
+            return ""
         title = args[args.index("--title") + 1]
         if title.endswith("/ stacks/b"):
             raise SystemExit("::error::command failed (1): gh issue create\nHTTP 403: rate limit")
@@ -262,7 +253,6 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
         return ""
 
     monkeypatch.setattr(di, "_run", fake_run)
-    monkeypatch.setattr("subprocess.run", lambda *a, **k: type("R", (), {"returncode": 0})())
     with pytest.raises(SystemExit) as exc:
         di.main()
     assert created == ["drift: dev-eu / stacks/a", "drift: dev-eu / stacks/c"]
