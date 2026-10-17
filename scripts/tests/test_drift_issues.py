@@ -545,6 +545,6 @@ def test_the_download_fails_the_job_on_an_artifact_api_error():
     """
     assert step_by("drift-issues", name="Download drift cell summaries") == {
         "name": "Download drift cell summaries",
-        "uses": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
         "with": {"pattern": "drift-summary.*", "path": "drift"},
     }
