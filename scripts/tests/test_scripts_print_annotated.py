@@ -44,6 +44,7 @@ SCRIPTS_EXPECTED = [
     "reply-comment",
     "state-path",
     "summary-comment",
+    "tofu-error",
     "unlock-detect",
     "upsert-comment",
     "verify-environments",

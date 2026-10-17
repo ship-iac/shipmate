@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""Annotate a failed `tofu plan` with OpenTofu's first error diagnostic.
+
+Reads the plan's combined output on stdin and prints one `::error::` with the
+first diagnostic box (`╷`) whose title is `Error:`, up to its closing `╵`, colour and box
+prefix removed (`lock-info`'s `_strip`), cut at `CAP` characters. Prints nothing
+when the output holds no such box, so a failure outside OpenTofu keeps the
+runner's own "Process completed with exit code" annotation and nothing else.
+
+The text is author-controlled (a stack's config and provider output), so it
+prints only through `command_data`: a raw newline would start a second workflow
+command.
+"""
+
+import sys
+
+from _shipmate import _load, command_data, run_annotated
+
+li = _load("lock-info")
+
+#: Annotation messages are shown whole in the check run; the cut keeps one bounded.
+CAP = 1000
+
+
+def first_error(text):
+    """The first `Error:` diagnostic in `text`, stripped and joined with newlines, or "".
+
+    Only a title right after a box opener counts: an `Error: ` inside a warning's detail or in
+    terramate's log is not a diagnostic."""
+    lines = [li._strip(ln) for ln in text.splitlines()]
+    start = next(
+        (i for i in range(1, len(lines)) if lines[i - 1] == "╷" and lines[i].startswith("Error: ")),
+        None,
+    )
+    if start is None:
+        return ""
+    block = []
+    for ln in lines[start:]:
+        if ln == "╵":
+            break
+        block.append(ln)
+    return "\n".join(block).strip()[:CAP]
+
+
+def main():
+    # Provider output is not guaranteed UTF-8; a strict decode would lose the annotation.
+    error = first_error(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
+    if error:
+        print(f"::error::{command_data(error)}")
+
+
+if __name__ == "__main__":
+    run_annotated(main)

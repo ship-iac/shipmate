@@ -84,10 +84,13 @@ runs:
         # tofu's error text is the one thing a reader needs here, and an unclosed `::group::`
         # collapses it.
         set +e
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan
-        status=$?
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan 2>&1 | tee "$RUNNER_TEMP/plan-run.txt"
+        # tee's own status must not stand in for the plan's.
+        status=${PIPESTATUS[0]}
         set -e
         echo "::endgroup::"
+        # Reviewer-facing only: a failed extractor must not replace tofu's exit status.
+        [ "$status" -eq 0 ] || python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" < "$RUNNER_TEMP/plan-run.txt" || true
         # The explicit exit keeps a failed plan from falling through to the `tofu show` and
         # plan-classify lines that follow.
         [ "$status" -eq 0 ] || exit "$status"

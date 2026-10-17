@@ -8,6 +8,16 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **A plan or drift cell whose `tofu plan` fails annotates its check with OpenTofu's first `Error:` diagnostic, colour removed and cut at 1,000 characters, instead of only `Process completed with exit code 1.`; `shipmate doctor` lists it for the autoplan, while an on-demand `shipmate plan` keeps it on its own run. The sticky plan comment's `no plan summary read` line is unchanged and links that check.**
+
+### Changed
+
+- **`docs/getting-started.md` §The table's `gated` row says that at 0 required approving reviews `gated` changes nothing.**
+
 ## [0.47.0] — 2026-10-17
 
 Tags `00fa6af`.
