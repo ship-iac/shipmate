@@ -28,7 +28,7 @@ FIRST = (
 
 def _run(monkeypatch, capsys, text):
     data = text if isinstance(text, bytes) else text.encode()
-    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(data)))
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(data), encoding="utf-8"))
     te.main()
     return capsys.readouterr().out
 
