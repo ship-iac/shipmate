@@ -1,5 +1,5 @@
 name: shipmate summary
-description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, create the pending apply checks, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done.
+description: Download this run's plan cell summaries, mint a shipmate App installation token and, as the App, hold the gate while it publishes, mirror an on-demand plan's own per-cell checks onto the pull request head, upsert the sticky plan comment (the plan, or why the gate is held), create the pending apply checks, and write the shipmate / gate commit status through scripts/gate-status, greening it when this run published no queued apply check and every apply check is already done.
 inputs:
   pr-number:
     description: Pull request number.
@@ -24,6 +24,14 @@ inputs:
   planned-cells:
     description: How many cells detect planned (its `count` output). Compared against the cell summaries this job parses; any disagreement holds the gate and publishes no apply check.
     required: true
+  planned-cell-names:
+    description: >-
+      detect's `cells` output: the planned cells by name, JSON [{environment, stack}, ...]. Empty
+      when build-matrix refused, and set although a later detect step failed. The held comment
+      lists the cells it names that left no cell summary; under a failed plan job the gate
+      description names the first of them.
+    required: false
+    default: ""
   on-demand:
     description: >-
       '"true"' when a human named this plan (the plan workflow's workflow_dispatch leg). Such a
@@ -150,22 +158,11 @@ runs:
           exit 1
         fi
         # Fail-closed, never `|| true`: gate-refresh greens an absent or pending gate, so a job dying
-        # mid-publish would let an apply of the published cells merge the unpublished ones. A re-run
-        # that publishes nothing still holds. `Create/refresh gate` replaces this hold.
+        # mid-publish would merge the unpublished cells. A re-run that publishes nothing still
+        # holds. It stands until `Create/refresh gate`; `Create apply checks` publishes after it.
         if [ -n "$cells" ]; then
           hold "plan run $GITHUB_RUN_ID holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended"
         fi
-
-    - name: Create apply checks (pending / no-changes)
-      shell: bash
-      env:
-        GH_TOKEN: ${{ steps.token.outputs.token }}
-      run: |
-        set -euo pipefail
-        while IFS= read -r body; do
-          [ -z "$body" ] && continue
-          printf '%s' "$body" | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null
-        done < bodies.jsonl
 
     - name: Mirror this run's per-cell plan checks onto the head
       if: ${{ inputs.on-demand == 'true' }}
@@ -245,6 +242,10 @@ runs:
         # line, invalid renders none and warns. None touches `count`, `pending` or the gate.
         SHIPMATE_UNMANAGED: ${{ inputs.unmanaged-stacks }}
         SHIPMATE_LOST_ENV_TAGS: ${{ inputs.lost-env-tags }}
+        # The cells named in `missing`: none unless detect succeeded, since a fmt or codegen
+        # failure still carries a full list.
+        SHIPMATE_PLANNED_CELLS_NAMES: ${{ inputs.planned-cell-names }}
+        SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
       run: |
         set -euo pipefail
         # Reviewer-facing only (cosmetic links), so a failure degrades to an empty listing and links
@@ -266,6 +267,7 @@ runs:
         SHIPMATE_PLANNED_CELLS: ${{ inputs.planned-cells }}
         SHIPMATE_CELL_COUNT: ${{ steps.build.outputs.count }}
         SHIPMATE_PENDING: ${{ steps.build.outputs.pending }}
+        SHIPMATE_MISSING: ${{ steps.build.outputs.missing }}
         SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         SHIPMATE_ON_DEMAND: ${{ inputs.on-demand }}
       run: |
@@ -277,11 +279,14 @@ runs:
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
         PR: ${{ inputs.pr-number }}
+        HEAD_SHA: ${{ inputs.head-sha }}
         MODE: ${{ steps.gate.outputs.comment_mode }}
-        PLAN_RESULT: ${{ inputs.plan-result }}
         DOCTOR_WARNED: ${{ steps.doctor.outputs.warned }}
         UNMANAGED: ${{ steps.build.outputs.unmanaged }}
         LOST: ${{ steps.build.outputs.lost }}
+        # The held render's inputs; `reason` is the gate description before its 140-character cut.
+        SHIPMATE_HOLD_REASON: ${{ steps.gate.outputs.reason }}
+        SHIPMATE_MISSING: ${{ steps.build.outputs.missing }}
       run: |
         set -euo pipefail
         # A draft autoplan planned nothing, so an existing comment still describes a head
@@ -290,30 +295,73 @@ runs:
           echo "the pull request was a draft when this run started and was not planned; the sticky plan comment was left as it is"
           exit 0
         fi
-        # gate-state collapses every untrustworthy-plan case into comment_mode=hold. Keep the
-        # existing comment rather than show an incomplete picture; `Create/refresh gate` fails
-        # the gate on those cases, so the pull request still shows that something is wrong.
+        # A cancelled plan job: this run writes no final gate, so a held body could sit over a gate
+        # it never wrote. The comment is kept.
         if [ "$MODE" = "hold" ]; then
-          echo "::warning::the plan job ($PLAN_RESULT) did not produce a trustworthy set of cell summaries; the sticky plan comment was left as it is"
+          echo "::warning::the plan job was cancelled, so this run writes no final gate; the sticky plan comment was left as it is"
+          exit 0
+        fi
+        degraded="::warning::the sticky plan comment was not updated with why the gate is held; the gate description says it"
+        # `--head`: the comment is keyed per pull request, so a re-run of an old run would replace
+        # a newer head's comment. upsert-comment then writes nothing and prints `moved`.
+        moved="::notice::pull request #$PR has moved past $HEAD_SHA; its sticky plan comment belongs to the newer head's run and was not written"
+        # Degrades: `Create/refresh gate` writes the `failure` gate and its description either way,
+        # and a red gate over a stale comment greens nothing. A failed render writes no comment.
+        if [ "$MODE" = "held" ]; then
+          result=failed
+          if SHIPMATE_COMMENT_MODE=held python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" \
+            < check-runs.jsonl 2>held.err; then
+            result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "$PR" held.md --head "$HEAD_SHA" 2>>held.err) || result=failed
+          fi
+          # This step passes, so either script's `::error::` warns.
+          sed 's/^::error::/::warning::/' held.err >&2
+          if [ "$result" = moved ]; then
+            echo "$moved"
+          elif [ "$result" != created ] && [ "$result" != updated ]; then
+            echo "$degraded"
+          fi
           exit 0
         fi
         # Nothing changed: only an existing comment is kept current, or it would keep showing
         # applies that no longer exist. A doctor warning (the comment links the run page its
         # annotations live on), an unmanaged stacks line or a lost pairs line still posts.
-        args=("$PR" comment.md)
+        args=("$PR" comment.md --head "$HEAD_SHA")
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ]; then
           args+=(--update-only)
         fi
-        # A failed listing or write fails the job before `Create/refresh gate`: a gate written over
-        # a stale comment shows reviewers the previous head's plan. A publish hold this run wrote
-        # stays; a run that planned no cell wrote none, so the head keeps the gate it had, if any.
+        # A failed listing or write fails the job before any apply check or gate: a gate over a
+        # stale comment shows the previous head's plan. A publish hold this run wrote stays.
         result=$(python3 "$GITHUB_ACTION_PATH/../../scripts/upsert-comment" "${args[@]}")
         if [ "$result" = "list-failed" ]; then
           echo "::error::could not list this pull request's comments, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
           exit 1
+        elif [ "$result" = "head-failed" ]; then
+          echo "::error::could not read the head of pull request #$PR, so the sticky plan comment was not updated; re-plan this pull request (comment shipmate plan or push)"
+          exit 1
+        elif [ "$result" = "moved" ]; then
+          echo "$moved"
         elif [ "$result" = "skipped" ]; then
           echo "nothing changed, no existing plan comment, no doctor findings; nothing to post"
         fi
+
+    - name: Create apply checks (pending / no-changes)
+      shell: bash
+      env:
+        GH_TOKEN: ${{ steps.token.outputs.token }}
+        SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}
+      run: |
+        set -euo pipefail
+        # After the comment: a failed plan-comment listing, head read or write publishes no apply
+        # check. Nothing to publish (held, draft, no cell planned, or every check already published
+        # by this run) reads nothing, so it cannot fail before `Create/refresh gate`.
+        [ -s bodies.jsonl ] || exit 0
+        # `gate-hold` writes outside this job's concurrency group, after the publish hold's read. A
+        # newer run's hold, or a failed read, publishes nothing, and the publish hold stands.
+        python3 "$GITHUB_ACTION_PATH/../../scripts/gate-status" refuse-newer "$SHIPMATE_HEAD_SHA" || exit 1
+        while IFS= read -r body; do
+          [ -z "$body" ] && continue
+          printf '%s' "$body" | gh api "repos/$GITHUB_REPOSITORY/check-runs" --input - >/dev/null
+        done < bodies.jsonl
 
     - name: Create/refresh gate
       shell: bash
@@ -355,8 +403,10 @@ runs:
         # Skipped when this run published a queued check, which cannot be done yet.
         if [ "$STATE" = "pending" ] && [ "$MODE" != "draft" ] && [ -f bodies.jsonl ] \
           && ! grep -q '"status": "queued"' bodies.jsonl; then
-          # A hold or a failed read does not fail this step, so its annotation stays a warning.
-          if ! python3 "$gate_status" refresh "$HEAD_SHA" 2>&1 | sed 's/^::error:://'; then
+          # `run_annotated` prints the error as one escaped command; swapping its severity keeps it
+          # escaped, so the runner decodes `%0A` and no stderr line starts a command. A hold or a
+          # failed read does not fail this step, so both annotations here are warnings.
+          if ! python3 "$gate_status" refresh "$HEAD_SHA" 2>&1 | sed 's/^::error::/::warning::/'; then
             echo "::warning::could not refresh the gate of $HEAD_SHA; it stays pending until an apply refreshes it"
           fi
         fi

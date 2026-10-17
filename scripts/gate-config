@@ -10,9 +10,7 @@ enforce it, and an unvalidated `gated: no` resolves as gated, exempting nothing 
 reading as though it did.
 """
 
-import os
-
-from _shipmate import _load
+from _shipmate import _load, run_annotated, write_outputs
 
 ec = _load("env-config")
 
@@ -20,10 +18,9 @@ ec = _load("env-config")
 def main():
     table = ec.validate_structure(ec.read_table())
     ungated = ec.ungated_envs(table)
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        # Sorted, so two runs over one file cannot produce two different output strings.
-        fh.write(f"ungated_envs={','.join(sorted(ungated))}\n")
+    # Sorted, so two runs over one file cannot produce two different output strings.
+    write_outputs(ungated_envs=",".join(sorted(ungated)))
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

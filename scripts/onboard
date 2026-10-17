@@ -41,11 +41,13 @@ sweep that run refuses. Each is a checklist item; none changes the exit code.
 
 import argparse
 import contextlib
+import difflib
 import importlib.util
 import io
 import json
 import pathlib
 import re
+import shlex
 import sys
 import textwrap
 import urllib.parse
@@ -606,12 +608,20 @@ def _reconcile_ruleset(ctx):
 #: be dedented rather than missed.
 _FENCE = re.compile(r"^(?P<indent>[ \t]*)```yaml[ \t]*$\n(?P<body>.*?)^\1```", re.M | re.S)
 ENGINE_SLUG = "ship-iac/shipmate"
+#: The allowed-actions patterns a consumer needs beyond GitHub-owned actions.
+#: `test_third_party_actions_consumers_must_allow.py` ties it to the engine's third-party
+#: `uses:` and to the `docs/hardening.md` "Allowed actions" fence, order included.
+ALLOWED_PATTERNS = (
+    f"{ENGINE_SLUG}/*@*",
+    "opentofu/setup-opentofu@*",
+    "aws-actions/configure-aws-credentials@*",
+)
 _DOC_PIN = re.compile(
     rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@<engine-sha>[^\S\n]*#[^\n]*"
 )
-#: Only a 40-hex pin, matching what the docs/releasing.md re-pin rewrites: a file still carrying
-#: the docs placeholder must not be reported `pin-only`, because that names a remedy which would
-#: then find no engine reference to move.
+#: Only a 40-hex pin: a file still carrying the docs placeholder is not `pin-only`, a remedy
+#: `scripts/repin` could not apply. The mask (pin and any trailing comment) is wider than
+#: repin's rewrite, so repin may still list such a file's comment as a leftover.
 _ANY_PIN = re.compile(
     rf"(?P<ref>{re.escape(ENGINE_SLUG)}/\.github/workflows/[^@\s]+)@[0-9a-f]{{40}}[^\S\n]*(#[^\n]*)?"
 )
@@ -634,13 +644,11 @@ def _fence(page_text, name):
     return bodies[0]
 
 
-def _render(engine, sha, version, default_branch):
-    """The full text of one consumer workflow file, LF-delimited and newline-terminated,
-    with its `push` trigger on `default_branch`."""
-    text = _fence(
-        (pathlib.Path(engine) / "docs" / "getting-started.md").read_text(encoding="utf-8"),
-        "shipmate",
-    )
+def _render(page_text, sha, version, default_branch):
+    """The full text of one consumer workflow file, rendered from the `shipmate` fence of
+    `page_text` (a `docs/getting-started.md`), LF-delimited and newline-terminated, with its
+    `push` trigger on `default_branch`."""
+    text = _fence(page_text, "shipmate")
     trigger = "    branches: [main]\n"
     if text.count(trigger) != 1:
         raise SystemExit(
@@ -656,6 +664,17 @@ def _depin(text):
     return _ANY_PIN.sub(r"\g<ref>@<pin>", text)
 
 
+def shim_diff(fence_text, shim_text, name):
+    """The unified diff from `fence_text` to `shim_text`, pins masked by `_depin` and both sides
+    CRLF-normalized, headed `<name> (fence)` and `<name>`; "" when they agree. A non-empty diff
+    ends in a newline even when `shim_text` does not, so it can be printed with `end=""`."""
+    fence, shim = (
+        _depin(t.replace("\r\n", "\n")).splitlines(keepends=True) for t in (fence_text, shim_text)
+    )
+    diff = "".join(difflib.unified_diff(fence, shim, fromfile=f"{name} (fence)", tofile=name))
+    return diff if diff.endswith("\n") or not diff else diff + "\n"
+
+
 def _reconcile_shim(ctx):
     """Write the consumer workflow file, reporting anything already there.
 
@@ -664,7 +683,8 @@ def _reconcile_shim(ctx):
     """
     filename = "shipmate.yml"
     path = pathlib.Path(ctx["root"]) / ".github" / "workflows" / filename
-    text = _render(ctx["engine"], ctx["sha"], ctx["version"], ctx["default_branch"])
+    page = (pathlib.Path(ctx["engine"]) / "docs" / "getting-started.md").read_text(encoding="utf-8")
+    text = _render(page, ctx["sha"], ctx["version"], ctx["default_branch"])
     if not path.is_file():
         write_file(path, text, filename)
         return
@@ -676,12 +696,15 @@ def _reconcile_shim(ctx):
         report(
             "pin-only",
             filename,
-            "move every engine ref to this engine's SHA in one commit (docs/releasing.md)",
+            "move every engine ref in one commit with scripts/repin (docs/releasing.md)",
         )
     elif "<engine-sha>" in current:
         report("differs", filename, "the published fence, never pinned: delete it and run again")
     else:
         report("differs", filename, "differs beyond its pin, not overwritten")
+        # The predicate indents a blank context line (" \n") too; the default skips it.
+        diff = textwrap.indent(shim_diff(text, current, filename), "    ", lambda _line: True)
+        print(diff, end="")
 
 
 def _passphrase_item(ctx):
@@ -704,7 +727,7 @@ def _table_item(ctx):
         return (
             "todo",
             item,
-            ["Add one: copy the example in docs/getting-started.md §Environments for this tier."],
+            ["Add one: copy the example in docs/getting-started.md §The table."],
         )
     try:
         ec.validate(ctx["table"], ctx["envs"])
@@ -776,6 +799,158 @@ def _custom_rule_items(ctx):
         width=80,
     )
     return [("todo", item, [*lines, *(f"gh api -X DELETE {path}/{r.get('id')}" for r in enabled)])]
+
+
+def _read_or_reason(path):
+    """`(parsed gh api <path>, None)`, or `(None, reason)` when the read fails for any reason.
+
+    `_run` raises `command failed (N): <argv>` followed by gh's scrubbed stderr, where gh
+    prints its error first and hints after. `reason` is that first stderr line, or the
+    `command failed` line when gh printed nothing. Only for a checklist row that degrades to
+    `cannot check`. A reconciler that writes uses `_gh_json_or_none`, which treats only a
+    404 as absent.
+    """
+    try:
+        return _gh_json(path), None
+    except SystemExit as e:
+        lines = [ln for ln in str(e).splitlines() if ln.strip()]
+        return None, (lines[1:] or lines or [""])[0]
+
+
+#: Rows 12 and 20 while Actions are off: what re-enabling resets is unprobed, so no command.
+ACTIONS_DISABLED = [
+    "Actions are disabled on this repository, by its own setting or an organization",
+    "policy. Enable them in Settings → Actions → General, then run onboard again.",
+]
+
+
+def _unread(item, path, reason):
+    return "cannot check", item, [f"`{path}` could not be read: {reason}"]
+
+
+def _actions_settings_items(ctx):
+    """`docs/hardening.md` rows 10, 12 and 20, judged from the repository's Actions settings.
+
+    A failed read makes each row it serves `cannot check`, with gh's reason. Every printed
+    command sets only its own row's fields, because GitHub keeps a field a PUT omits.
+    """
+    base = f"repos/{ctx['repo']}/actions/permissions"
+    perms, reason = _read_or_reason(base)
+    return [
+        _token_item(f"{base}/workflow"),
+        _allowed_actions_item(base, perms, reason),
+        _sha_pinning_item(base, perms, reason),
+    ]
+
+
+def _token_item(path):
+    item = "GITHUB_TOKEN read-only, Actions may not approve pull requests (hardening.md row 10)"
+    data, reason = _read_or_reason(path)
+    if data is None:
+        return _unread(item, path, reason)
+    if (
+        data.get("default_workflow_permissions") == "read"
+        and data.get("can_approve_pull_request_reviews") is False
+    ):
+        return "ok", item, []
+    put = ["gh", "api", "-X", "PUT", path, "-f", "default_workflow_permissions=read"]
+    return (
+        "todo",
+        item,
+        [
+            "Workflows without their own `permissions:` block then get a read-only `GITHUB_TOKEN`.",
+            shlex.join([*put, "-F", "can_approve_pull_request_reviews=false"]),
+        ],
+    )
+
+
+def _sha_pinning_item(path, perms, reason):
+    item = "actions pinned to a full-length commit SHA (hardening.md row 20)"
+    if perms is None:
+        return _unread(item, path, reason)
+    if perms.get("enabled") is False:
+        return "todo", item, [*ACTIONS_DISABLED]
+    if perms.get("sha_pinning_required") is True:
+        return "ok", item, []
+    put = ["gh", "api", "-X", "PUT", path, "-F", "enabled=true", "-F", "sha_pinning_required=true"]
+    return (
+        "todo",
+        item,
+        [
+            "With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,",
+            "with the exemptions in docs/hardening.md row 20.",
+            shlex.join(put),
+        ],
+    )
+
+
+def _selected_actions_command(path, patterns):
+    """The PUT that writes `patterns` as the whole allowed list: GitHub replaces the list."""
+    args = ["gh", "api", "-X", "PUT", path, "-F", "github_owned_allowed=true"]
+    args += ["-F", "verified_allowed=false"]
+    for pattern in patterns:
+        args += ["-f", f"patterns_allowed[]={pattern}"]
+    return shlex.join(args)
+
+
+def _allowed_actions_setup(base, mode):
+    """Row 12 while the mode is not `selected`, when the current list cannot be read (409)."""
+    first = ["gh", "api", "-X", "PUT", base, "-F", "enabled=true", "-f", "allowed_actions=selected"]
+    return [
+        "`allowed_actions` was not in the read."
+        if mode is None
+        else f"`allowed_actions` is `{mode}`, not `selected`.",
+        "The list below holds only what shipmate needs. For each other third-party action",
+        "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
+        'those workflows fail at "Set up job" too: this run cannot read the current list',
+        "while the mode is not `selected`, so it cannot add them.",
+        "Run the second command straight after the first: switching from `all`, the list",
+        "was observed empty until the second call, so a shipmate run in between stops at",
+        '"Set up job".',
+        shlex.join(first),
+        _selected_actions_command(f"{base}/selected-actions", ALLOWED_PATTERNS),
+    ]
+
+
+def _allowed_actions_gaps(selected):
+    """What keeps an allowed list in mode `selected` from row 12, one phrase each."""
+    gaps = [] if selected.get("github_owned_allowed") is True else ["`github_owned_allowed` is off"]
+    if selected.get("verified_allowed") is not False:
+        gaps.append("`verified_allowed` is on")
+    current = selected.get("patterns_allowed") or []
+    missing = [p for p in ALLOWED_PATTERNS if p not in current]
+    if missing:
+        gaps.append(f"missing {', '.join(missing)}")
+    return gaps, [*current, *missing]
+
+
+#: Printed when the selected-actions PUT turns `verified_allowed` off.
+VERIFIED_OFF = [
+    "The command turns verified-creator actions off. For each one this repository's",
+    "own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or those workflows",
+    'fail at "Set up job".',
+]
+
+
+def _allowed_actions_item(base, perms, reason):
+    item = "allowed actions (hardening.md row 12)"
+    if perms is None:
+        return _unread(item, base, reason)
+    if perms.get("enabled") is False:
+        return "todo", item, [*ACTIONS_DISABLED]
+    if perms.get("allowed_actions") != "selected":
+        return "todo", item, _allowed_actions_setup(base, perms.get("allowed_actions"))
+    path = f"{base}/selected-actions"
+    selected, reason = _read_or_reason(path)
+    if selected is None:
+        return _unread(item, path, reason)
+    gaps, patterns = _allowed_actions_gaps(selected)
+    if not gaps:
+        return "ok", item, []
+    lines = [f"{'; '.join(gaps)}."]
+    if selected.get("verified_allowed") is not False:
+        lines += VERIFIED_OFF
+    return "todo", item, [*lines, _selected_actions_command(path, patterns)]
 
 
 def _reviewed(env):
@@ -1131,6 +1306,7 @@ def _checklist(ctx):
     items = [_passphrase_item(ctx), _table_item(ctx)]
     items.append(_app_item(ctx))
     items += _custom_rule_items(ctx)
+    items += _actions_settings_items(ctx)
     if gated:
         items.append(_review_item(ctx, reviewed, [e for e in gated if e in ctx["shared"]]))
     items += [

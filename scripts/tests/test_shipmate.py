@@ -9,6 +9,7 @@ from _loader import ENGINE
 from _shipmate import (
     _run,
     approval_rules,
+    cell_names,
     check_runs,
     command_data,
     gate_check,
@@ -49,10 +50,15 @@ def test_utf8_output_switches_both_streams_from_cp1252_to_utf8(monkeypatch):
             ["--name", "x", "--repo", "é", "--out", "key.pem"],
             "--repo must be <owner>/<repo>: 'é'\n",
         ),
+        (
+            "repin",
+            ["c", "é"],
+            "'é' is not a vX.Y.Z release tag.\n",
+        ),
     ],
 )
 def test_a_script_run_as_a_file_writes_its_refusal_as_utf8(tmp_path, script, argv, refusal):
-    """Both refusals run before any `gh` or `git` call. Mutation: delete `utf8_output()` from
+    """Each refusal runs before any `gh` or `git` call. Mutation: delete `utf8_output()` from
     the script's `__main__` block; `é` then leaves as cp1252's `\\xe9`."""
     env = {**os.environ, "PYTHONIOENCODING": "cp1252"}
     proc = subprocess.run(
@@ -155,6 +161,29 @@ def test_run_annotates_the_shared_runners_failure(monkeypatch, capsys):
 def test_named_lists_cap_items_whole_and_counts_the_rest():
     """Mutation: `>=` for `>` in `named` -- red on the `len == cap` case."""
     assert [named(["a", "b"], 2), named(["a", "b", "c"], 2)] == ["a, b", "a, b, and 1 more"]
+
+
+@pytest.mark.parametrize(
+    ("raw", "names"),
+    [
+        (
+            '[{"stack": "a", "environment": "dev", "x": 1}]',
+            [{"stack": "a", "environment": "dev"}],
+        ),
+        ("[]", []),
+        ("", None),
+        ("not json", None),
+        ('{"stack": "a", "environment": "dev"}', None),
+        ('[{"stack": "a"}]', None),
+        ('[{"stack": "a", "environment": 1}]', None),
+        ('["a / dev"]', None),
+    ],
+    ids=["names", "empty-list", "empty", "bad-json", "object", "no-env", "int-env", "string"],
+)
+def test_cell_names_reads_names_or_none_and_never_raises(raw, names):
+    """Mutations: let bad JSON raise (drop the `except`) -- `empty` and `bad-json` red; drop the
+    `environment` type check -- `no-env` and `int-env` red."""
+    assert cell_names(raw) == names
 
 
 _SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -313,3 +342,11 @@ def test_run_annotated_passes_any_other_exit_through(capsys, code):
 def test_run_annotated_returns_when_main_returns(capsys):
     """Mutation: `raise SystemExit(1)` after `main()` returns -- red."""
     assert _annotated(lambda: None, capsys) == (None, "")
+
+
+def test_run_annotated_passes_its_arguments_to_main():
+    """The arguments after `main` reach `main` unchanged. Mutation: call `main()` without
+    `*args` -- red."""
+    calls = []
+    assert run_annotated(lambda *a: calls.append(a), ["refresh", "x"], "y") is None
+    assert calls == [(["refresh", "x"], "y")]

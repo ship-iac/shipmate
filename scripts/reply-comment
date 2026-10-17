@@ -19,7 +19,8 @@ script, so every one carries the shared header and footer from `summary-comment`
 The body is POSTed with `gh` (`GH_TOKEN`) as a comment on pull request `PR_NUMBER` of
 `GITHUB_REPOSITORY`; gh's response is discarded and nothing is printed. Any argument exits 1 with
 `::error::usage` before anything else. A `PR_NUMBER` that is not a pull-request number exits 1
-before any `gh` call; a failed POST exits 1 with gh's stderr.
+before any `gh` call; a failed POST exits 1 unannotated, naming the pull request and gh's
+stderr, never the body.
 
 The footer links this run (`current_run_url()`), then `FOOTER_HINT` on a refusal or a failure;
 a notice or a started run asks nothing of the reader, so it carries no hint.
@@ -28,7 +29,7 @@ a notice or a started run asks nothing of the reader, so it carries no hint.
 import os
 import sys
 
-from _shipmate import _load, current_run_url, is_pr_number, is_run_id, run
+from _shipmate import _load, current_run_url, is_pr_number, is_run_id, run, run_annotated
 
 sc = _load("summary-comment")
 
@@ -54,17 +55,14 @@ def main():
         sys.exit("::error::usage: reply-comment")
     outcome = os.environ.get("SHIPMATE_REPLY_OUTCOME", "")
     if outcome not in VERDICTS:
-        print(
+        sys.exit(
             "::error::SHIPMATE_REPLY_OUTCOME must be refused, failed, notice or started "
-            f"(got: {outcome})",
-            file=sys.stderr,
+            f"(got: {outcome})"
         )
-        sys.exit(1)
     pr = os.environ.get("PR_NUMBER", "")
     # Bound into the API path; dispatch hands its input through unvalidated.
     if not is_pr_number(pr):
-        print(f"::error::PR_NUMBER must be a pull request number (got: {pr})", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(f"::error::PR_NUMBER must be a pull request number (got: {pr})")
     verb = os.environ.get("SHIPMATE_REPLY_VERB", "")
     if outcome == "started":
         verdict = started_text(verb, os.environ.get("SHIPMATE_REPLY_RUN_ID", ""))
@@ -72,8 +70,15 @@ def main():
         verdict = os.environ.get("SHIPMATE_REPLY_TEXT", "")
     text = body(verb, os.environ.get("SHIPMATE_REPLY_ENV", ""), outcome, verdict, current_run_url())
     repo = os.environ.get("GITHUB_REPOSITORY", "")
-    run(["gh", "api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "-f", f"body={text}"])
+    # The body goes through stdin: `run`'s failure message quotes the argv.
+    argv = ["gh", "api", "-X", "POST", f"repos/{repo}/issues/{pr}/comments", "-F", "body=@-"]
+    try:
+        run(argv, stdin=text)
+    except SystemExit as exc:
+        # One line: unannotated, so a raw stderr line could start a workflow command.
+        reason = " | ".join(str(exc.code).splitlines())
+        sys.exit(f"could not post the reply on pull request #{pr}: {reason}")
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

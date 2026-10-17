@@ -27,7 +27,7 @@ import os
 import re
 import sys
 
-from _shipmate import _load, gh_json
+from _shipmate import _load, gh_json, run_annotated
 
 ag = _load("apply-gate")
 
@@ -106,4 +106,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

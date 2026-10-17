@@ -104,7 +104,7 @@ merge forever.
 [`CONTRACT.md`](../CONTRACT.md) §Post-plan topology describes the jobs of the
 plan workflow, the triggers that select it, and the trust decision;
 §Check names holds the `shipmate / ` namespace; §Plan comment holds when a
-comment is written and when it is left standing.
+comment is written, and what it says when the gate is held.
 
 To make the gate enforce apply-before-merge, configure branch protection to
 require `shipmate / gate`; see [`branch-protection.md`](branch-protection.md).

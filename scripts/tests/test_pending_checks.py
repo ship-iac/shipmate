@@ -466,10 +466,7 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
     assert printed == ["apply / stacks/dns / dev-eu"]
 
 
-PLAN_FAILED = (
-    "plan incomplete (plan job: failure); fix the failing shipmate / <stack> / <env> plan check "
-    "before merging"
-)
+PLAN_FAILED = "plan incomplete (plan job: failure); fix the failing plan checks before merging"
 
 
 def _main(

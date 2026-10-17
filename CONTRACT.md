@@ -853,8 +853,7 @@ the repository root, or none:
   cached file is encrypted with `SHIPMATE_PLAN_PASSPHRASE` (§Plan artifact
   encryption), because any workflow run, a fork's pull request included, can
   restore a default-branch cache entry. An empty passphrase refuses the restore
-  and the save. An entry that is not shipmate-crypt-v1 (saved unencrypted or
-  by an earlier engine release), one that fails authentication, and an openssl
+  and the save. An entry that fails authentication and an openssl
   or disk failure on the runner each fail the restore naming the matched cache
   key, so tofu never reads it and the cell skips its save. A passphrase
   rotation, different values on `<env>-plan` and `<env>-apply`, a corrupt,
@@ -1868,10 +1867,9 @@ The five jobs:
   dispatched run evaluates at the default branch.
 
 Nothing matches on the workflow's `name:`. Doctor reads the consumer's
-workflow files for four probes — stale engine pins, `pull_request_target`
-triggers, whether any file calls engine `drift.yml`, and `shipmate.yml`'s
-wiring, whose checks of the plan-calling job
-name, dispatch wiring and event routing observe whether the plan comment's
+workflow files for five probes — whether each file parses as YAML, stale engine
+pins, `pull_request_target` triggers, whether any file calls engine `drift.yml`,
+and `shipmate.yml`'s wiring, whose checks of the plan-calling job name, dispatch wiring and event routing observe whether the plan comment's
 per-cell links will resolve, whether a commented verb reaches anything at all,
 and whether the job it reaches is the one that verb names, and whose fourth
 check reports a drift job in it — and they report rather than fail.
@@ -1983,19 +1981,21 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
   PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and GNU
   coreutils (`setup` hashes the Terramate download with `sha256sum`).
-- Every GitHub-hosted Ubuntu image from 24.04 on, including the minimal
-  `ubuntu-slim` image, satisfies this; PyYAML arrives through the install
-  below. The `ubuntu-slim` image's
+- Every GitHub-hosted Ubuntu image from 24.04 on, `ubuntu-slim` included,
+  provides these tools other than PyYAML. PyYAML differs per image: the
+  `ubuntu-24.04` and `ubuntu-26.04` x64 images ship it (probed 2026-10-15), and
+  `ubuntu-slim` has none, so there it arrives through the install step below.
+  The `ubuntu-slim` image's
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. The CLI is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
-  step, and the control jobs below call `gh api` on the comment, apply and
-  deploy paths. Self-hosted runners must preinstall these tools.
-- The engine's ten control jobs, which run neither `tofu` nor `terramate`,
-  take no runner input and run on `ubuntu-slim`. `plan.yml`'s `facts` and
-  `gate-hold` run on `ubuntu-slim` whatever `runs_on` the `plan` caller passes.
-  `docs/aws.md` §Runner choice lists them. An account that cannot use that
-  label leaves them waiting for a runner.
+  step, and several `ubuntu-slim` jobs on the plan, apply and deploy paths
+  call `gh api`. Self-hosted runners must preinstall these tools.
+- `docs/aws.md` §Runner choice names the calls that take `runs_on` and lists
+  the fixed runner of every other job a consumer's calls reach. `plan.yml`'s
+  `facts` and `gate-hold` run on `ubuntu-slim` whatever `runs_on` the `plan`
+  caller passes. An account that cannot use `ubuntu-slim` leaves the
+  `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
   engine's `python-yaml` action checks that `python3` imports it and, when it
@@ -2155,10 +2155,43 @@ zero means "no stacks changed" — `detect` reported a planned count of zero.
 Every other zero (a planned count that disagrees with the cell summaries
 actually read, a failed `detect`, plan cells that all failed
 before uploading a cell summary, a failed `cell-summary.*` download) leaves the
-plan unknown, so the run writes nothing at all and any existing comment — the
-reviewed plan for the previous push — is left standing rather than PATCHed down
-to a claim about a plan nobody read. Those runs all fail `shipmate / gate`, so
-the pull request still shows that something is wrong.
+plan unknown. Every hold the summary's gate decision writes (a `detect` that
+did not succeed, incomplete evidence) replaces the comment with the held body,
+which says why and makes no claim about any plan, and creates the comment when
+the pull request has none. `gate-hold`'s hold (below) leaves the comment as it
+is. What a summary job that fails part way leaves on the comment is stated with
+the publish hold (below). In order, blank lines between the parts:
+
+- the marker and the header `### shipmate plan`;
+- `🔴 the gate is held`, then the verdict line's
+  `at [<sha7>](<commit url>) in [run #<n>](<run url>)` ending (below);
+- the hold reason: the gate description before its 140-character cut, at most
+  4,000 characters, in a plain backtick fence longer than any backtick run in
+  it, so a stack path it names shows as written and nothing in it renders;
+- when `detect` succeeded, one line per planned cell that left no cell summary,
+  sorted by environment then stack: `🔴 <stack> (<env>): no plan summary read`,
+  linking the cell's `shipmate / <stack> / <env>` check, or the run when the
+  head has none. At most ten, then `and N more cells have no plan summary`. The
+  cells are `detect`'s planned `cells` the run read no summary for: a cell whose
+  plan matrix job did not succeed and a cell whose summary download failed read
+  the same;
+- the help hint ``Comment `shipmate help` for the available commands.``
+
+The held body only explains a red gate, so it degrades: a failed render,
+listing or write warns "the sticky plan comment was not updated with why the
+gate is held; the gate description says it", and the job still writes the gate.
+A run whose plan job was cancelled writes no final gate (below) and keeps the
+comment as it is, with a warning; a draft autoplan keeps it too (§Post-plan
+topology).
+
+Every comment write, the held body included, reads the pull request's head
+once the comment listing shows a write follows, and writes nothing when the pull
+request has moved past the head this run planned, with a notice: the comment is
+per pull request, and a re-run of an older run would otherwise replace the newer
+head's comment. A run that writes nothing (no comment yet, nothing changed)
+reads no head. A failed read warns and writes nothing for the held body, and
+fails the job ("could not read the head of pull request #<n>") before any apply
+check or gate is written for the plan body.
 
 Where the zero *does* mean no stacks changed, the suppression is create-only:
 an existing comment is always updated to the no-changes body, because a pull
@@ -2175,7 +2208,9 @@ posts: a pull request that changes only stacks with no `env/*` tag plans nothing
 and the comment is where it says so. When the line is left out for size (below),
 this exception does not apply.
 
-An existing comment is edited in place on every plan run (comment lookup is marker +
+An existing comment is edited in place on every plan run but a draft autoplan, a
+cancelled plan job and a run whose pull request moved to a newer head (comment
+lookup is marker +
 any Bot author — the shipmate App's bot login is derived from the registered
 App name, which a consumer org may have had to slug differently than
 `shipmate[bot]`), so GitHub's comment revision history doubles as the audit
@@ -2185,9 +2220,10 @@ Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the unmanaged line and a blank line when
 the pull request changes an unmanaged stack, the lost pairs line and a blank
 line when it untags a stack / environment pair, one line or fold-out per planned
-stack × environment, sorted by environment then stack. There is no footer and no help
-hint, whether or not `doctor` warned: both verdicts are normal results and the
-verdict links the run. The doctor step records its decision once, as its
+stack × environment, sorted by environment then stack. The plan body has no
+footer and no help hint, whether or not `doctor` warned: both verdicts are
+normal results and the verdict links the run. The held body above ends with the
+hint. The doctor step records its decision once, as its
 `warned` output, which the post-or-skip rule reads; the build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
@@ -2200,7 +2236,7 @@ and `lost` outputs, which the same rule reads.
   `<run url>` the run's page. When that commit is not a 40-character lowercase
   hex SHA the line ends `at an unknown commit in [run #<n>](<run url>)`. The
   line reads the cells only: every failed plan job holds the gate, and a held
-  run posts no comment.
+  gate posts the held body instead.
 - **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
   managed by shipmate: <paths>`, naming at most ten paths within 1,000
   characters, then `, and M more`. When not even the first path fits, it ends
@@ -2278,13 +2314,19 @@ it holds the gate in either direction.
 
 Before it publishes the first apply check, the `summary` job writes the gate
 `failure` with a description telling you to re-plan, so a job that dies with
-only some checks published leaves a hold that `gate-refresh` will not green.
-The same hold is written when the job cannot read the head's gate statuses,
-list the head's apply checks or build the ones to publish, whether or not it
-downloaded a cell summary: a failed download leaves none over planned cells.
-The job's final gate write replaces the hold. A run whose plan job was
-cancelled writes no final gate, and keeps the hold when it downloaded any cell
-summary.
+only some checks published leaves a hold that `gate-refresh` will not green. The
+same hold is written when the job cannot read the head's gate statuses, list the
+head's apply checks or build the ones to publish, whether or not it downloaded a
+cell summary: a failed download leaves none over planned cells. The apply checks
+publish after the sticky plan comment is written, so a plan comment that could
+not be listed or written ends the job with no apply check published, and a
+pre-merge `shipmate apply` refuses as it does over a partial plan. A summary job
+that fails part way changes the comment only if its `Upsert sticky comment` step
+wrote it (created or replaced) before the failure. A run with no check to
+publish (held, draft, no cell planned, or every check already published by this
+run) skips the publish step without reading anything. The job's final gate write
+replaces the hold. A run whose plan job was cancelled writes no final gate, and
+keeps the hold when it downloaded any cell summary.
 
 The job publishes only the apply checks its own run has not published yet,
 judged by the run id each App-authored check records. A re-run of the summary
@@ -2293,10 +2335,11 @@ since. It refuses before writing anything when a newer plan run of the same
 head holds the gate ("plan run <id> holds the gate of <sha> and is newer than
 this run") or published apply checks there ("plan run <id>, newer than this run
 (<id>), published apply checks on this head"), so an older run never overwrites
-a newer run's gate or checks. Its final gate write reads the statuses again and
-refuses the same way, writing nothing, when a newer run of the same head holds
-the gate by then (that run's `summary` was evicted); a failed read writes
-nothing either, so the publish hold stands. A final `pending` gate is followed
+a newer run's gate or checks. Its apply-check publish and its final gate write
+each read the statuses again and refuse the same way, writing nothing, when a
+newer run of the same head holds the gate by then (that run's `summary` was
+evicted, and `gate-hold` writes outside the job's concurrency group); a failed
+read writes nothing either, so the publish hold stands. A final `pending` gate is followed
 by a refresh, unless this run published a queued apply check, which cannot be
 done yet: when every apply check is already done (an apply's refresh ran before
 this write), the summary greens the gate itself. A failed refresh, or one
@@ -2852,11 +2895,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 - **Required.** An empty or unset passphrase refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
-- **Fail-safe on mismatch.** An artifact that is not shipmate-crypt-v1
-  (uploaded unencrypted, or encrypted by an earlier engine release) refuses and
-  tells you to re-plan. An artifact that fails authentication refuses naming
-  the causes (another passphrase, a rotated one or different values on
-  `<env>-plan` and `<env>-apply`, or a corrupt, truncated or altered artifact)
+- **Fail-safe on mismatch.** An artifact that is not a whole shipmate-crypt-v1
+  file whose tag verifies fails authentication and refuses naming the causes
+  (another passphrase, a rotated one or different values on `<env>-plan` and
+  `<env>-apply`, or a corrupt, truncated or altered artifact)
   and points to `docs/troubleshooting.md` for each remedy; the engine cannot
   tell them apart. An openssl or disk failure on the runner refuses and tells
   you to re-run the job or fix the runner. An artifact that cannot be read
@@ -2982,8 +3024,7 @@ list: commit it. It is OpenTofu's own recommendation for pinning provider
 versions and hashes, and the provider cache serves only stacks that commit it.
 A cell runs without one. `init -reconfigure` may rewrite a committed lock; that
 is a tracked-file change and `git-uncommitted` never runs on a cell.
-`repo-example-folders`, `repo-example-workspaces` and `repo-example-stacks-aws`
-gitignore it and show the no-cache path.
+All four sample repositories commit one per stack.
 
 The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
 

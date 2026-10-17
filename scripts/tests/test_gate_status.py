@@ -454,3 +454,20 @@ def test_checks_refuses_a_malformed_sha_unannotated(tmp_path):
         f"head SHA must be a 40-char lowercase hex SHA (got: {'A' * 40!r})\n",
         [],
     )
+
+
+@bash_only
+def test_a_multi_line_failure_prints_as_one_escaped_annotation(tmp_path):
+    """A failed `gh` call's stderr sits on the lines under the `::error::` line; printed raw, the
+    runner annotates only the first. The stub answers another head, so the statuses read fails
+    with its `unexpected gh call` line. Mutation: revert the `__main__` block to
+    `main(sys.argv[1:])` -- two raw lines."""
+    cmd = f'python3 "{(SCRIPTS / "gate-status").as_posix()}" refuse-newer {SHA}'
+    proc, calls = run_with_gate_gh(tmp_path, cmd, ENV, sha="b" * 40)
+    argv = " ".join(STATUSES_ARGV)
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        1,
+        "",
+        f"::error::command failed (1): gh {argv}%0Aunexpected gh call: {argv}\n",
+        [STATUSES_ARGV],
+    )

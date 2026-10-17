@@ -17,6 +17,7 @@ from _shipmate import load_workflow_text
 
 onboard = load_script("onboard")
 ec = load_script("env-config")
+PAGE = (ENGINE / "docs" / "getting-started.md").read_text(encoding="utf-8")
 
 
 def make_gh(routes):
@@ -80,6 +81,47 @@ VARIABLE_LIST = "gh variable list --json name,value"
 RULES = "repos/o/r/rules/branches/main?per_page=100"
 REMOTE_SHIM = "repos/o/r/contents/.github/workflows/shipmate.yml?ref=main"
 CUSTOM_POLICY = {"protected_branches": False, "custom_branch_policies": True}
+ACTIONS = "repos/o/r/actions/permissions"
+ACTIONS_WORKFLOW = f"{ACTIONS}/workflow"
+SELECTED_ACTIONS = f"{ACTIONS}/selected-actions"
+#: Every Actions-settings row met, with one consumer pattern beyond the engine's three.
+ACTIONS_OK_ROUTES = {
+    ACTIONS: {"enabled": True, "allowed_actions": "selected", "sha_pinning_required": True},
+    ACTIONS_WORKFLOW: {
+        "default_workflow_permissions": "read",
+        "can_approve_pull_request_reviews": False,
+    },
+    SELECTED_ACTIONS: {
+        "github_owned_allowed": True,
+        "verified_allowed": False,
+        "patterns_allowed": [
+            "ship-iac/shipmate/*@*",
+            "opentofu/setup-opentofu@*",
+            "aws-actions/configure-aws-credentials@*",
+            "terramate-io/terramate-action@*",
+        ],
+    },
+}
+ACTIONS_READS = [
+    ["gh", "api", ACTIONS],
+    ["gh", "api", ACTIONS_WORKFLOW],
+    ["gh", "api", SELECTED_ACTIONS],
+]
+WORKFLOW_PERMS_PUT = (
+    "gh api -X PUT repos/o/r/actions/permissions/workflow "
+    "-f default_workflow_permissions=read -F can_approve_pull_request_reviews=false"
+)
+SHA_PIN_PUT = (
+    "gh api -X PUT repos/o/r/actions/permissions -F enabled=true -F sha_pinning_required=true"
+)
+MODE_PUT = "gh api -X PUT repos/o/r/actions/permissions -F enabled=true -f allowed_actions=selected"
+LIST_PUT = (
+    "gh api -X PUT repos/o/r/actions/permissions/selected-actions "
+    "-F github_owned_allowed=true -F verified_allowed=false "
+    "-f 'patterns_allowed[]=ship-iac/shipmate/*@*' "
+    "-f 'patterns_allowed[]=opentofu/setup-opentofu@*' "
+    "-f 'patterns_allowed[]=aws-actions/configure-aws-credentials@*'"
+)
 
 
 def ctx(**over):
@@ -1049,8 +1091,8 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
     Mutations, each proven: swap any one of the seven `write(...)` calls for a direct
     `_run(...)`, which appears in the call list below; and make `write_file` fall through to
     `write_text` under `_DRY`, which puts a file in a checkout the operator was promised
-    would not be touched. `_checklist` is driven here too: it only prints, so any `gh`
-    call it grew would land in the list below.
+    would not be touched. `_checklist` is driven here too: it writes nothing, so every `gh`
+    call it makes is a read in the list below.
     """
     absent = SystemExit("gh: Not Found (HTTP 404)")
     fake = make_gh(
@@ -1063,6 +1105,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
             "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": absent,
             VARIABLE_LIST: [],
             RULES: [],
+            **ACTIONS_OK_ROUTES,
         }
     )
     monkeypatch.setattr(onboard, "_run", fake)
@@ -1083,6 +1126,7 @@ def test_dry_run_reaches_every_write_path_and_issues_only_reads(monkeypatch, tmp
         ["gh", "api", "repos/o/r/environments/dev-eu-apply"],
         ["gh", "api", "repos/o/r/environments/dev-eu-apply/deployment-branch-policies"],
         ["gh", "api", RULES],
+        *ACTIONS_READS,
     ]
     assert [verb for verb, _subject, _detail in onboard.REPORT] == [
         "would update",
@@ -1148,6 +1192,13 @@ FRESH_ROUTES = {
     VARIABLE_LIST: [],
     RULES: [],
     REMOTE_SHIM: ABSENT,
+    # Unhardened Actions settings, as observed on a consumer's repository; a new
+    # repository's own defaults depend on its organization.
+    ACTIONS: {"enabled": True, "allowed_actions": "all", "sha_pinning_required": False},
+    ACTIONS_WORKFLOW: {
+        "default_workflow_permissions": "write",
+        "can_approve_pull_request_reviews": True,
+    },
 }
 
 
@@ -1553,7 +1604,7 @@ def test_the_gate_ruleset_waits_for_the_workflow_file_on_the_default_branch(monk
     shim = tmp_path / ".github" / "workflows" / "shipmate.yml"
     shim.parent.mkdir(parents=True)
     shim.write_text(
-        onboard._render(ENGINE, "a" * 40, "v0.26.0", "main"), encoding="utf-8", newline="\n"
+        onboard._render(PAGE, "a" * 40, "v0.26.0", "main"), encoding="utf-8", newline="\n"
     )
     fake, exit_ = run_main(monkeypatch, tmp_path, {}, [])
     assert exit_.code == 0
@@ -1841,7 +1892,7 @@ def test_every_shim_fence_is_found_and_calls_exactly_the_expected_engine_workflo
     - edit the fence's top-level `name:` line -> the locator matches zero fences and refuses;
     - edit a `uses:` filename in the fence -> the callee list differs.
     """
-    found = {"shipmate.yml": _callees(onboard._render(ENGINE, "c" * 40, "v9.9.9", "main"))}
+    found = {"shipmate.yml": _callees(onboard._render(PAGE, "c" * 40, "v9.9.9", "main"))}
     assert found == _EXPECTED_CALLEES
 
 
@@ -1849,7 +1900,8 @@ def test_the_published_drift_fence_calls_drift_yml_on_the_placeholder():
     """The consumer saves the `shipmate drift` fence by hand, so nothing renders or pins it,
     and only this test reads it. Exactly one fence carries the name (`_fence` refuses
     otherwise), and its `uses:` lines, compared whole against a hand-written list, are one
-    call of engine `drift.yml` on the placeholder the re-pin in docs/releasing.md rewrites.
+    call of engine `drift.yml` on the placeholder, which `scripts/repin` does not rewrite: the
+    consumer replaces it with a 40-hex pin by hand.
 
     Mutation: `@main` in place of `@<engine-sha>` in the fence.
     """
@@ -1876,9 +1928,8 @@ def test_every_shim_is_pinned_at_every_site():
     expensive: `_DOC_PIN` requires the trailing `#` comment, so a docs edit dropping
     `# see the latest release` from one line stops that pin being rewritten; and it is
     anchored on `ship-iac`, so normalising an owner in the docs to `<owner>` would unpin all
-    five. `_DOC_PIN` stays anchored deliberately -- the docs/releasing.md re-pin is anchored
-    the same way and the two writers must agree -- and this vector is what makes either edit
-    loud.
+    five. `_DOC_PIN` stays anchored deliberately -- `scripts/repin` is anchored the same way
+    and the two writers must agree -- and this vector is what makes either edit loud.
 
     Hand-written, never derived from the docs.
 
@@ -1886,7 +1937,7 @@ def test_every_shim_is_pinned_at_every_site():
     `  # see the latest release` from the `plan` job's `uses:` line in the docs, which
     leaves that one call on `@<engine-sha>`.
     """
-    rendered = {"shipmate.yml": onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")}
+    rendered = {"shipmate.yml": onboard._render(PAGE, "c" * 40, "v9.9.9", "main")}
     assert {name: text.count(f"@{'c' * 40} # v9.9.9") for name, text in rendered.items()} == (
         _EXPECTED_PINS
     )
@@ -1901,7 +1952,7 @@ def _plan_shim(tmp_path):
     """(path to the consumer's shipmate.yml, the text this script would render for it)."""
     path = tmp_path / ".github" / "workflows" / "shipmate.yml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    return path, onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
+    return path, onboard._render(PAGE, "c" * 40, "v9.9.9", "main")
 
 
 def test_the_rendered_push_trigger_names_the_default_branch():
@@ -1911,8 +1962,8 @@ def test_the_rendered_push_trigger_names_the_default_branch():
 
     Mutation: drop the substitution from `_render`.
     """
-    main = onboard._render(ENGINE, "c" * 40, "v9.9.9", "main")
-    assert onboard._render(ENGINE, "c" * 40, "v9.9.9", "develop") == main.replace(
+    main = onboard._render(PAGE, "c" * 40, "v9.9.9", "main")
+    assert onboard._render(PAGE, "c" * 40, "v9.9.9", "develop") == main.replace(
         "    branches: [main]\n", "    branches: [develop]\n"
     )
 
@@ -1950,21 +2001,21 @@ def test_an_identical_file_reports_ok_through_crlf(tmp_path):
 
 def test_a_file_differing_only_in_its_pin_reports_pin_only(tmp_path):
     """A consumer sitting on an older release differs only in its pin, and moving a pin is
-    the docs/releasing.md re-pin's job. Naming that remedy is the whole point of the verb,
+    `scripts/repin`'s job. Naming that remedy is the whole point of the verb,
     and it is not drift, so it must not set exit 2 and fail the operator's run.
 
     Mutation: make `_depin` leave the trailing comment in place, so the version comment alone
     reads as `differs`.
     """
     path, _text = _plan_shim(tmp_path)
-    older = onboard._render(ENGINE, "d" * 40, "v9.9.8", "main")
+    older = onboard._render(PAGE, "d" * 40, "v9.9.8", "main")
     path.write_text(older, encoding="utf-8", newline="\n")
     onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [
         (
             "pin-only",
             "shipmate.yml",
-            "move every engine ref to this engine's SHA in one commit (docs/releasing.md)",
+            "move every engine ref in one commit with scripts/repin (docs/releasing.md)",
         )
     ]
     assert path.read_text(encoding="utf-8") == older
@@ -1988,9 +2039,69 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     assert onboard._exit_code() == 2
 
 
+SMALL_PAGE = """# Getting started
+
+```yaml
+name: shipmate
+on:
+  push:
+    branches: [main]
+jobs:
+  plan:
+    uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
+
+  apply:
+    uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
+```
+"""
+
+
+def test_a_locally_edited_file_prints_its_diff_after_the_report_line(tmp_path, capsys):
+    """The `differs` line alone leaves the operator to find the edit, and the diff is indented
+    under it so it does not read as more report lines. The page is this test's own, so an edit
+    to the real fence cannot redden it.
+
+    Mutations: drop the `shim_diff` print from `_reconcile_shim`; drop the indent; drop the
+    indent's predicate (the blank context line stays unindented).
+    """
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "getting-started.md").write_text(SMALL_PAGE, encoding="utf-8")
+    path = tmp_path / ".github" / "workflows" / "shipmate.yml"
+    path.parent.mkdir(parents=True)
+    old = "d" * 40
+    path.write_text(
+        "name: shipmate\non:\n  push:\n    branches: [main]\njobs:\n  plan:\n"
+        f"    uses: ship-iac/shipmate/.github/workflows/plan.yml@{old} # v9.9.8\n"
+        "    with: {x: 1}\n\n  apply:\n"
+        f"    uses: ship-iac/shipmate/.github/workflows/apply.yml@{old} # v9.9.8\n",
+        encoding="utf-8",
+    )
+    onboard._reconcile_shim(ctx(root=tmp_path, engine=tmp_path, sha="c" * 40, version="v9.9.9"))
+    assert capsys.readouterr().out == (
+        "differs shipmate.yml: differs beyond its pin, not overwritten\n"
+        "    --- shipmate.yml (fence)\n"
+        "    +++ shipmate.yml\n"
+        "    @@ -5,6 +5,7 @@\n"
+        "     jobs:\n"
+        "       plan:\n"
+        "         uses: ship-iac/shipmate/.github/workflows/plan.yml@<pin>\n"
+        "    +    with: {x: 1}\n"
+        "     \n"
+        "       apply:\n"
+        "         uses: ship-iac/shipmate/.github/workflows/apply.yml@<pin>\n"
+    )
+
+
+def test_a_diff_ends_in_a_newline_when_the_shim_does_not():
+    """Both callers print the diff with `end=""`, so an unterminated last line would glue onto
+    the next output. Mutation: return the joined diff as it is."""
+    assert onboard.shim_diff("a\n", "b", "f") == "--- f (fence)\n+++ f\n@@ -1 +1 @@\n-a\n+b\n"
+
+
 def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
     """The shim is written LF-delimited whatever platform the operator runs on: every other
-    copy of it -- the docs, the docs/releasing.md re-pin, the other consumers -- is LF.
+    copy of it -- the docs, the other consumers -- is LF; `scripts/repin` keeps whatever
+    endings a file already has.
 
     The whole kwargs mapping is compared against a hand-written dict rather than only the
     bytes on disk, for the reason `test_run_passes_stdin_as_bytes_with_text_mode_off` gives:
@@ -2016,8 +2127,8 @@ def test_an_absent_file_is_created_with_lf_endings(tmp_path, monkeypatch):
 
 def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp_path):
     """A consumer who pasted the published fence by hand holds `@<engine-sha>`, which is not a
-    pin the docs/releasing.md re-pin can move: its `sed` requires 40 hex, so it would rewrite
-    nothing. Naming a remedy that cannot work is worse than naming none, so
+    pin `scripts/repin` can move: it rewrites only a 40-hex pin, so it would refuse the file's
+    refs as left over. Naming a remedy that cannot work is worse than naming none, so
     that file is `differs`.
 
     Mutation: widen `_ANY_PIN` from `[0-9a-f]{40}` to `\\S+`.
@@ -2036,7 +2147,7 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
 #: no secret, every environment absent, no rule, no `CODEOWNERS`, no workflow file on the
 #: default branch, so the adoption item ends by asking for the re-run that creates the gate
 #: ruleset.
-FRESH_CHECKLIST = """
+FRESH_CHECKLIST = f"""
 Still yours, each item marked from what this run read:
 
 todo          SHIPMATE_PLAN_PASSPHRASE repository secret
@@ -2044,7 +2155,7 @@ todo          SHIPMATE_PLAN_PASSPHRASE repository secret
     An organization secret of that name is not visible to this read.
 
 todo          `.github/shipmate-config.yml`
-    Add one: copy the example in docs/getting-started.md §Environments for this tier.
+    Add one: copy the example in docs/getting-started.md §The table.
 
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
@@ -2052,6 +2163,27 @@ cannot check  o/r in the App installation's repository selection
     https://github.com/organizations/o/settings/installations
     under the App's `Configure` button, in `Repository access`.
     The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
+
+todo          GITHUB_TOKEN read-only, Actions may not approve pull requests (hardening.md row 10)
+    Workflows without their own `permissions:` block then get a read-only `GITHUB_TOKEN`.
+    {WORKFLOW_PERMS_PUT}
+
+todo          allowed actions (hardening.md row 12)
+    `allowed_actions` is `all`, not `selected`.
+    The list below holds only what shipmate needs. For each other third-party action
+    this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or
+    those workflows fail at "Set up job" too: this run cannot read the current list
+    while the mode is not `selected`, so it cannot add them.
+    Run the second command straight after the first: switching from `all`, the list
+    was observed empty until the second call, so a shipmate run in between stops at
+    "Set up job".
+    {MODE_PUT}
+    {LIST_PUT}
+
+todo          actions pinned to a full-length commit SHA (hardening.md row 20)
+    With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,
+    with the exemptions in docs/hardening.md row 20.
+    {SHA_PIN_PUT}
 
 todo          approving review before apply
     Required reviewers and `Prevent self-review` on dev-eu-apply
@@ -2098,6 +2230,9 @@ cannot check  o/r in the App installation's repository selection
     under the App's `Configure` button, in `Repository access`.
     The add-repository endpoint accepts PAT-classic tokens only, so it stays a UI step.
 
+ok            GITHUB_TOKEN read-only, Actions may not approve pull requests (hardening.md row 10)
+ok            allowed actions (hardening.md row 12)
+ok            actions pinned to a full-length commit SHA (hardening.md row 20)
 ok            approving review before apply
 cannot check  CODEOWNERS entry covering the IaC, workflows, shipmate-config.yml and CODEOWNERS
     `.github/CODEOWNERS` exists. Which paths it covers is GitHub's matching, not this run's.
@@ -2183,6 +2318,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
         VARIABLE_LIST: [{"name": "SHIPMATE_APP_ID", "value": "1"}],
         REMOTE_SHIM: {"name": "shipmate.yml"},
         "git ls-files -z -- :(top)*.terraform.lock.hcl": "stacks/app/.terraform.lock.hcl\0",
+        **ACTIONS_OK_ROUTES,
     }
     _fake, exit_ = run_main(monkeypatch, tmp_path, routes, [])
     assert exit_.code == 0
@@ -2393,6 +2529,293 @@ def test_the_review_count_reads_past_the_gate_rule(monkeypatch):
     )
 
 
+ROW_10 = "GITHUB_TOKEN read-only, Actions may not approve pull requests (hardening.md row 10)"
+ROW_12 = "allowed actions (hardening.md row 12)"
+ROW_20 = "actions pinned to a full-length commit SHA (hardening.md row 20)"
+ROWS_OK = [("ok", ROW_10, []), ("ok", ROW_12, []), ("ok", ROW_20, [])]
+GH_403 = "gh: Resource not accessible by integration (HTTP 403)"
+FORBIDDEN = SystemExit(f"command failed (1): gh api {ACTIONS}\n{GH_403}")
+
+
+def _settings_rows(monkeypatch, answers, drop=()):
+    """`_actions_settings_items` over `ACTIONS_OK_ROUTES` with `answers` replacing reads
+    and the paths in `drop` unrouted, so reading one fails the test."""
+    routes = {k: v for k, v in {**ACTIONS_OK_ROUTES, **answers}.items() if k not in drop}
+    monkeypatch.setattr(onboard, "_run", make_gh(routes))
+    return onboard._actions_settings_items(ctx())
+
+
+def test_hardened_actions_settings_are_ok_beside_extra_consumer_patterns(monkeypatch):
+    """A consumer's own pattern beyond the engine's three keeps row 12 `ok`.
+
+    Mutation: add `or set(current) != set(ALLOWED_PATTERNS)` to the `missing` test in
+    `_allowed_actions_gaps`, comparing the list for equality instead of as a superset.
+    """
+    assert _settings_rows(monkeypatch, {}) == ROWS_OK
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": False},
+        {"default_workflow_permissions": "read", "can_approve_pull_request_reviews": True},
+    ],
+)
+def test_either_workflow_permission_off_alone_makes_row_10_todo(monkeypatch, workflow):
+    """Mutation: drop the `can_approve_pull_request_reviews` test from `_token_item`,
+    judging on `default_workflow_permissions` alone."""
+    items = _settings_rows(monkeypatch, {ACTIONS_WORKFLOW: workflow})
+    assert items == [
+        (
+            "todo",
+            ROW_10,
+            [
+                (
+                    "Workflows without their own `permissions:` block then get a read-only"
+                    " `GITHUB_TOKEN`."
+                ),
+                WORKFLOW_PERMS_PUT,
+            ],
+        ),
+        *ROWS_OK[1:],
+    ]
+
+
+def test_sha_pinning_off_makes_row_20_todo(monkeypatch):
+    """Mutation: invert `_sha_pinning_item`'s predicate to `is not True`."""
+    perms = {"enabled": True, "allowed_actions": "selected", "sha_pinning_required": False}
+    assert _settings_rows(monkeypatch, {ACTIONS: perms}) == [
+        *ROWS_OK[:2],
+        (
+            "todo",
+            ROW_20,
+            [
+                "With this on, GitHub refuses a `uses:` not pinned to a full-length commit SHA,",
+                "with the exemptions in docs/hardening.md row 20.",
+                SHA_PIN_PUT,
+            ],
+        ),
+    ]
+
+
+def test_mode_all_prints_the_mode_put_then_the_required_list(monkeypatch):
+    """The mode PUT carries no `sha_pinning_required`, so it cannot undo row 20, and the
+    selected-actions list, which GitHub refuses with 409 outside mode `selected`, is not read.
+
+    Mutations, each proven: swap the two commands in `_allowed_actions_setup`; add
+    `-F sha_pinning_required=false` to its first; read `selected-actions` in
+    `_allowed_actions_item` before the mode test.
+    """
+    perms = {"enabled": True, "allowed_actions": "all", "sha_pinning_required": True}
+    items = _settings_rows(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
+    assert items == [
+        ROWS_OK[0],
+        (
+            "todo",
+            ROW_12,
+            [
+                "`allowed_actions` is `all`, not `selected`.",
+                "The list below holds only what shipmate needs. For each other third-party action",
+                "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
+                'those workflows fail at "Set up job" too: this run cannot read the current list',
+                "while the mode is not `selected`, so it cannot add them.",
+                "Run the second command straight after the first: switching from `all`, the list",
+                "was observed empty until the second call, so a shipmate run in between stops at",
+                '"Set up job".',
+                MODE_PUT,
+                LIST_PUT,
+            ],
+        ),
+        ROWS_OK[2],
+    ]
+
+
+def test_a_missing_required_pattern_is_appended_to_the_current_list(monkeypatch):
+    """The PUT replaces the whole list, so the command keeps every current entry, in order,
+    and appends the missing one; printing the required set alone would delete the consumer's.
+
+    Mutation: pass `ALLOWED_PATTERNS` instead of `patterns` to `_selected_actions_command`
+    in `_allowed_actions_item`.
+    """
+    selected = {
+        "github_owned_allowed": True,
+        "verified_allowed": False,
+        "patterns_allowed": [
+            "terramate-io/terramate-action@*",
+            "ship-iac/shipmate/*@*",
+            "aws-actions/configure-aws-credentials@*",
+        ],
+    }
+    items = _settings_rows(monkeypatch, {SELECTED_ACTIONS: selected})
+    assert items[1] == (
+        "todo",
+        ROW_12,
+        [
+            "missing opentofu/setup-opentofu@*.",
+            (
+                "gh api -X PUT repos/o/r/actions/permissions/selected-actions "
+                "-F github_owned_allowed=true -F verified_allowed=false "
+                "-f 'patterns_allowed[]=terramate-io/terramate-action@*' "
+                "-f 'patterns_allowed[]=ship-iac/shipmate/*@*' "
+                "-f 'patterns_allowed[]=aws-actions/configure-aws-credentials@*' "
+                "-f 'patterns_allowed[]=opentofu/setup-opentofu@*'"
+            ),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "detail"),
+    [
+        (
+            "verified_allowed",
+            True,
+            [
+                "`verified_allowed` is on.",
+                "The command turns verified-creator actions off. For each one this repository's",
+                "own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or those workflows",
+                'fail at "Set up job".',
+            ],
+        ),
+        ("github_owned_allowed", False, ["`github_owned_allowed` is off."]),
+    ],
+)
+def test_either_selected_actions_boolean_off_alone_makes_row_12_todo(
+    monkeypatch, field, value, detail
+):
+    """With `verified_allowed` on, the PUT that sets it off warns first that the
+    verified-creator actions this repository's own workflows use need their own pattern.
+
+    Mutations, each proven: drop the `verified_allowed` test from `_allowed_actions_gaps`;
+    drop the `github_owned_allowed` test from it; delete the `VERIFIED_OFF` branch in
+    `_allowed_actions_item`; make that branch unconditional.
+    """
+    selected = {**ACTIONS_OK_ROUTES[SELECTED_ACTIONS], field: value}
+    items = _settings_rows(monkeypatch, {SELECTED_ACTIONS: selected})
+    assert items[1] == (
+        "todo",
+        ROW_12,
+        [
+            *detail,
+            (
+                "gh api -X PUT repos/o/r/actions/permissions/selected-actions "
+                "-F github_owned_allowed=true -F verified_allowed=false "
+                "-f 'patterns_allowed[]=ship-iac/shipmate/*@*' "
+                "-f 'patterns_allowed[]=opentofu/setup-opentofu@*' "
+                "-f 'patterns_allowed[]=aws-actions/configure-aws-credentials@*' "
+                "-f 'patterns_allowed[]=terramate-io/terramate-action@*'"
+            ),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("failing", "expected"),
+    [
+        (
+            ACTIONS,
+            [
+                ROWS_OK[0],
+                ("cannot check", ROW_12, [f"`{ACTIONS}` could not be read: {GH_403}"]),
+                ("cannot check", ROW_20, [f"`{ACTIONS}` could not be read: {GH_403}"]),
+            ],
+        ),
+        (
+            ACTIONS_WORKFLOW,
+            [
+                ("cannot check", ROW_10, [f"`{ACTIONS_WORKFLOW}` could not be read: {GH_403}"]),
+                *ROWS_OK[1:],
+            ],
+        ),
+        (
+            SELECTED_ACTIONS,
+            [
+                ROWS_OK[0],
+                ("cannot check", ROW_12, [f"`{SELECTED_ACTIONS}` could not be read: {GH_403}"]),
+                ROWS_OK[2],
+            ],
+        ),
+    ],
+)
+def test_a_failed_read_makes_only_the_rows_it_serves_cannot_check(monkeypatch, failing, expected):
+    """Mutation: re-raise the `SystemExit` in `_read_or_reason`."""
+    assert _settings_rows(monkeypatch, {failing: FORBIDDEN}) == expected
+
+
+@pytest.mark.parametrize(
+    ("message", "reason"),
+    [
+        (
+            (
+                f"command failed (1): gh api {ACTIONS_WORKFLOW}\n\n{GH_403}\n\n"
+                "Try authenticating with:  gh auth login\n"
+            ),
+            GH_403,
+        ),
+        ("command failed (1): gh api x\n", "command failed (1): gh api x"),
+    ],
+)
+def test_cannot_check_names_gh_s_error_line(monkeypatch, message, reason):
+    """gh prints its error first and hints after, so the reason is the first non-empty line
+    after `command failed ...`; with no stderr it is that `command failed` line.
+
+    Mutations, each proven: take the last line instead; keep blank lines; drop the
+    fallback to the `command failed` line.
+    """
+    items = _settings_rows(monkeypatch, {ACTIONS_WORKFLOW: SystemExit(message)})
+    assert items[0] == (
+        "cannot check",
+        ROW_10,
+        [f"`{ACTIONS_WORKFLOW}` could not be read: {reason}"],
+    )
+
+
+DISABLED = [
+    "Actions are disabled on this repository, by its own setting or an organization",
+    "policy. Enable them in Settings → Actions → General, then run onboard again.",
+]
+
+
+@pytest.mark.parametrize(
+    "perms",
+    [
+        {"enabled": False},
+        {"enabled": False, "allowed_actions": "selected", "sha_pinning_required": True},
+    ],
+)
+def test_disabled_actions_point_to_settings_and_print_no_command(monkeypatch, perms):
+    """Actions off makes rows 12 and 20 `todo` with the Settings pointer and no `gh api`,
+    whatever the mode and pinning fields hold.
+
+    Mutations, each proven: drop the `enabled` test from `_allowed_actions_item`; drop it
+    from `_sha_pinning_item`.
+    """
+    items = _settings_rows(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
+    assert items[1:] == [("todo", ROW_12, DISABLED), ("todo", ROW_20, DISABLED)]
+
+
+@pytest.mark.parametrize("perms", [{"enabled": True, "sha_pinning_required": True}, {}])
+def test_a_read_without_allowed_actions_says_so(monkeypatch, perms):
+    """Mutation: drop the `mode is None` case from `_allowed_actions_setup`'s first line."""
+    items = _settings_rows(monkeypatch, {ACTIONS: perms}, drop={SELECTED_ACTIONS})
+    assert items[1] == (
+        "todo",
+        ROW_12,
+        [
+            "`allowed_actions` was not in the read.",
+            "The list below holds only what shipmate needs. For each other third-party action",
+            "this repository's own workflows use, add `-f 'patterns_allowed[]=<pattern>'`, or",
+            'those workflows fail at "Set up job" too: this run cannot read the current list',
+            "while the mode is not `selected`, so it cannot add them.",
+            "Run the second command straight after the first: switching from `all`, the list",
+            "was observed empty until the second call, so a shipmate run in between stops at",
+            '"Set up job".',
+            MODE_PUT,
+            LIST_PUT,
+        ],
+    )
+
+
 def test_the_ruleset_reconciler_stores_the_review_count(monkeypatch):
     """`_checklist` judges the reviewer item on `ctx["review_count"]`, which only
     `_reconcile_ruleset` sets.
@@ -2406,7 +2829,7 @@ def test_the_ruleset_reconciler_stores_the_review_count(monkeypatch):
     assert c["review_count"] == 2
 
 
-def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(capsys, tmp_path):
+def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(monkeypatch, capsys, tmp_path):
     """A shared env is bound by plan cells and every drift sweep covering it too, so a required
     reviewer on it stalls them rather than gating an apply: no environment is asked for
     reviewers, and the `pull_request` rule is the only apply gate left to judge.
@@ -2415,6 +2838,7 @@ def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(capsys, tmp
     bare shared environment satisfies; drop the `if gated` arm, omitting the item; compare
     `review_count > 1` in `_review_item`.
     """
+    monkeypatch.setattr(onboard, "_run", make_gh(ACTIONS_OK_ROUTES))
     item = "approving review before apply"
     onboard._checklist(ctx(root=tmp_path, shared={"dev-eu"}))
     assert checklist_items(capsys.readouterr().out)[item] == (
@@ -2433,12 +2857,15 @@ def test_a_shared_only_repository_is_judged_on_the_review_rule_alone(capsys, tmp
     )
 
 
-def test_a_shared_environment_beside_a_reviewed_one_needs_the_review_rule(capsys, tmp_path):
+def test_a_shared_environment_beside_a_reviewed_one_needs_the_review_rule(
+    monkeypatch, capsys, tmp_path
+):
     """A shared env forfeits the environment reviewer gate, so a reviewed `prod-apply`
     beside it does not gate its applies: only the `pull_request` rule does.
 
     Mutation: drop `and not shared` from `_review_item`'s second `ok`.
     """
+    monkeypatch.setattr(onboard, "_run", make_gh(ACTIONS_OK_ROUTES))
     item = "approving review before apply"
     mixed = {
         "root": tmp_path,
@@ -2463,12 +2890,13 @@ def test_a_shared_environment_beside_a_reviewed_one_needs_the_review_rule(capsys
     )
 
 
-def test_an_ungated_environment_is_not_asked_for_reviewers(capsys, tmp_path):
+def test_an_ungated_environment_is_not_asked_for_reviewers(monkeypatch, capsys, tmp_path):
     """`gated: false` exempts an environment from the review requirement, so asking for
     reviewers on it contradicts the table.
 
     Mutation: drop the `env not in ungated` filter from `_checklist`.
     """
+    monkeypatch.setattr(onboard, "_run", make_gh(ACTIONS_OK_ROUTES))
     onboard._checklist(
         ctx(
             root=tmp_path,
@@ -2481,13 +2909,16 @@ def test_an_ungated_environment_is_not_asked_for_reviewers(capsys, tmp_path):
     assert items["approving review before apply"] == ("ok", [])
 
 
-def test_the_checklist_skips_an_environment_the_reconciler_left_alone(capsys, tmp_path):
+def test_the_checklist_skips_an_environment_the_reconciler_left_alone(
+    monkeypatch, capsys, tmp_path
+):
     """`_reconcile_envs` touches neither half of an environment holding both a bare
     `<env>` and an `<env>-apply`, because which the engine binds is undecided. Naming its
     `<env>-apply` in the reviewer item points at one the run refused to reconcile.
 
     Mutation: drop the `env not in ctx["unresolved"]` filter from `_checklist`.
     """
+    monkeypatch.setattr(onboard, "_run", make_gh(ACTIONS_OK_ROUTES))
     onboard._checklist(ctx(root=tmp_path, envs=["dev-eu", "dev-us"], unresolved={"dev-us"}))
     items = checklist_items(capsys.readouterr().out)
     assert items["approving review before apply"] == (

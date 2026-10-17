@@ -35,6 +35,11 @@ def _head(cid, head):
     return json.dumps({"id": cid, "head": head})
 
 
+#: A pull request head, and the `--head` read's whole argv.
+_HEAD = "c" * 40
+PULLS_ARGV = ["gh", "api", "repos/o/r/pulls/7", "--jq", ".head.sha"]
+
+
 def _upsert(
     monkeypatch,
     tmp_path,
@@ -44,14 +49,21 @@ def _upsert(
     list_fails=False,
     write_fails=False,
     pr="7",
+    head=_HEAD,
+    head_fails=False,
 ):
-    """Run `main` in-process against a fake API; return (exit code, `run` calls)."""
+    """Run `main` in-process against a fake API; return (exit code, `run` calls). The pull
+    request's head reads as `head`, or fails with a gh error holding a CR and a command."""
     body = tmp_path / "comment.md"
     body.write_text(f"{first_line}\n### shipmate plan\n", encoding="utf-8")
     calls = []
 
     def fake_run(args):
         calls.append(args)
+        if args[2].startswith("repos/o/r/pulls/"):
+            if head_fails:
+                raise SystemExit("command failed (1): gh api\nHTTP 502\r::add-mask::x\r\n")
+            return f"{head}\n"
         if args[2] == "--paginate":
             if list_fails:
                 raise SystemExit("command failed (1): gh api\nHTTP 502")
@@ -150,7 +162,54 @@ def test_a_listing_failure_prints_list_failed_and_writes_nothing(monkeypatch, tm
     assert calls == [LIST_ARGV]
     out, err = capsys.readouterr()
     assert out == "list-failed\n"
-    assert err == "command failed (1): gh api\nHTTP 502\n"
+    assert err == "command failed (1): gh api | HTTP 502\n"
+
+
+@pytest.mark.parametrize("listing", [[], [_head(5, SUMMARY)]], ids=["post", "patch"])
+def test_a_head_match_writes(monkeypatch, tmp_path, capsys, listing):
+    """The head is read after the listing and before the write. Mutation: skip the head read
+    before a write -- no pulls call."""
+    code, calls = _upsert(monkeypatch, tmp_path, listing, "--head", _HEAD)
+    write = _post(tmp_path) if not listing else _patch(5, tmp_path)
+    assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV, write])
+    assert capsys.readouterr().out == ("created\n" if not listing else "updated\n")
+
+
+def test_a_moved_head_prints_moved_and_writes_nothing(monkeypatch, tmp_path, capsys):
+    """Mutation: compare `!=` -> `==` in `_head_stop` -- red."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--head", "d" * 40)
+    assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV])
+    assert capsys.readouterr() == ("moved\n", "")
+
+
+def test_a_failed_head_read_prints_head_failed_on_one_stderr_line(monkeypatch, tmp_path, capsys):
+    """gh's error, a CR-led `::add-mask::` included, stays on one line, so none of it starts a
+    workflow command. Mutations: drop the CR from `one_line`'s split -- `::add-mask::x` starts a
+    line; print the raw error -- red."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--head", _HEAD, head_fails=True)
+    assert (code, calls) == (0, [LIST_ARGV, PULLS_ARGV])
+    assert capsys.readouterr() == (
+        "head-failed\n",
+        "command failed (1): gh api | HTTP 502 | ::add-mask::x\n",
+    )
+
+
+def test_update_only_with_no_match_never_reads_the_head(monkeypatch, tmp_path, capsys):
+    """Nothing would be written, so a docs-only run makes no head read. Mutation: read the head
+    before the `skipped` exit -- a pulls call."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--update-only", "--head", _HEAD)
+    assert (code, calls) == (0, [LIST_ARGV])
+    assert capsys.readouterr().out == "skipped\n"
+
+
+@pytest.mark.parametrize("head", ["C" * 40, "c" * 39, "../x"])
+def test_a_head_that_is_not_a_sha_is_refused_before_any_call(monkeypatch, tmp_path, head):
+    """Mutation: drop the `is_head_sha` check -- red."""
+    code, calls = _upsert(monkeypatch, tmp_path, [], "--head", head)
+    assert (code, calls) == (
+        f"::error::--head must be a 40-char lowercase hex SHA (got: {head})",
+        [],
+    )
 
 
 def test_a_write_failure_exits_non_zero_with_an_error(monkeypatch, tmp_path, capsys):
@@ -235,11 +294,20 @@ def test_an_unparseable_listing_line_prints_list_failed_and_writes_nothing(
     )
 
 
-@pytest.mark.parametrize("flags", [["--update"], ["--update-only", "x"]])
+@pytest.mark.parametrize(
+    "flags",
+    [
+        ["--update"],
+        ["--update-only", "x"],
+        ["--update-only", "--update-only"],
+        ["--head"],
+        ["--head", "c" * 40, "--head", "c" * 40],
+    ],
+)
 def test_unknown_arguments_are_refused_before_any_call(monkeypatch, tmp_path, flags):
     """Mutation: accept any third argument as `--update-only`."""
     code, calls = _upsert(monkeypatch, tmp_path, [], *flags)
-    assert code == "::error::usage: upsert-comment PR BODYFILE [--update-only]"
+    assert code == "::error::usage: upsert-comment PR BODYFILE [--update-only] [--head SHA]"
     assert calls == []
 
 
@@ -312,25 +380,54 @@ _SUMMARY_LIST_FAILED = (
 _SUMMARY_SKIPPED = (
     "nothing changed, no existing plan comment, no doctor findings; nothing to post\n"
 )
+_SHA = "a" * 40
+#: The pull request head read every writing mode makes after the comment listing.
+_PULLS = ["api", "repos/o/r/pulls/7", "--jq", ".head.sha"]
+_DEGRADED = (
+    "::warning::the sticky plan comment was not updated with why the gate is held; the gate "
+    "description says it\n"
+)
+#: The held body for `_run_summary`'s defaults, hand-written.
+_HELD_BODY = (
+    f"{SUMMARY}\n### shipmate plan\n\n"
+    f"🔴 the gate is held at [aaaaaaa](https://gh/o/r/commit/{_SHA}) in "
+    "[run #7](https://gh/o/r/actions/runs/1)\n\n"
+    "```\nthe reason\n```\n\n"
+    "Comment `shipmate help` for the available commands."
+)
 
 
-def _run_summary(tmp_path, mode, *, warned="false", unmanaged="false", lost="false", **gh):
-    """The summary action's upsert step under its own env names; return (process, gh calls)."""
+def _run_summary(
+    tmp_path, mode, *, warned="false", unmanaged="false", lost="false", head=_SHA, env=None, **gh
+):
+    """The summary action's upsert step under its own env names; return (process, gh calls).
+    `env` adds to or, with None values, removes from the step's environment."""
     (tmp_path / "comment.md").write_text(SUMMARY + "\n### shipmate plan\n", encoding="utf-8")
-    env = {
+    (tmp_path / "check-runs.jsonl").write_text("", encoding="utf-8")
+    full = {
         **os.environ,
         "GH_TOKEN": "x",
         "PR": "7",
+        "HEAD_SHA": _SHA,
         "MODE": mode,
-        "PLAN_RESULT": "failure",
         "DOCTOR_WARNED": warned,
         "UNMANAGED": unmanaged,
         "LOST": lost,
+        "SHIPMATE_HOLD_REASON": "the reason",
+        "SHIPMATE_MISSING": "[]",
         "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_SERVER_URL": "https://gh",
+        "GITHUB_RUN_ID": "1",
+        "GITHUB_RUN_NUMBER": "7",
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
     }
+    for k, v in (env or {}).items():
+        if v is None:
+            full.pop(k, None)
+        else:
+            full[k] = v
     run = step_by("summary", name="Upsert sticky comment")["run"]
-    return run_with_gh_recorder(tmp_path, run, env, **gh)
+    return run_with_gh_recorder(tmp_path, run, full, head=head, **gh)
 
 
 @bash_only
@@ -348,16 +445,122 @@ def _run_summary(tmp_path, mode, *, warned="false", unmanaged="false", lost="fal
         (
             "hold",
             (
-                "::warning::the plan job (failure) did not produce a trustworthy set of cell "
-                "summaries; the sticky plan comment was left as it is\n"
+                "::warning::the plan job was cancelled, so this run writes no final gate; the "
+                "sticky plan comment was left as it is\n"
             ),
         ),
     ],
 )
 def test_summary_draft_and_hold_make_no_comment_call(tmp_path, mode, stdout):
-    """Mutation: move the `hold` branch below the `upsert-comment` call."""
+    """Mutations: move the `hold` branch below the `upsert-comment` call; route `hold` into the
+    held render (drop its branch) -- the head read and the held write follow."""
     proc, calls = _run_summary(tmp_path, mode, listing=_head(5, SUMMARY) + "\n")
     assert (proc.returncode, proc.stdout, calls) == (0, stdout, [])
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("listing", "write"),
+    [("", _post_of("held.md")), (_head(5, SUMMARY), _patch_of("held.md"))],
+    ids=["no-comment", "existing"],
+)
+def test_summary_held_writes_the_held_body(tmp_path, listing, write):
+    """A held gate creates the comment when there is none and replaces the existing one.
+    Mutations: pass `--update-only` on the held write -- `no-comment` writes nothing; render
+    without `SHIPMATE_COMMENT_MODE=held` -- no held body, and no write."""
+    proc, calls = _run_summary(tmp_path, "held", listing=listing + "\n")
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        0,
+        "",
+        "",
+        [_LIST, _PULLS, write],
+    )
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == _HELD_BODY
+
+
+@bash_only
+def test_summary_held_write_failure_degrades(tmp_path):
+    """The step passes, so `Create/refresh gate` still writes the `failure` gate with its
+    description; the write's error reaches the log as a warning. Mutations: `exit 1` after the
+    degraded warning -- red; drop the `sed` -- an `::error::` line."""
+    proc, calls = _run_summary(tmp_path, "held", write_rc=1, write_stderr="HTTP 502\n")
+    assert (proc.returncode, proc.stdout, calls) == (
+        0,
+        _DEGRADED,
+        [_LIST, _PULLS, _post_of("held.md")],
+    )
+    assert proc.stderr == (
+        "::warning::could not write the sticky comment: command failed (1): gh api "
+        "repos/o/r/issues/7/comments -F body=@held.md%0AHTTP 502\n"
+    )
+
+
+@bash_only
+def test_summary_held_list_failure_degrades(tmp_path):
+    """gh's stderr reaches the log on one line, so no line of it can start a workflow command.
+    Mutation: count only a failed run as unwritten (`[ "$result" = failed ]`) -- no warning."""
+    proc, calls = _run_summary(tmp_path, "held", list_rc=1, list_stderr="::warning::x\n")
+    assert (proc.returncode, proc.stdout, calls) == (0, _DEGRADED, [_LIST])
+    assert proc.stderr == f"command failed (1): {' '.join(LIST_ARGV)} | ::warning::x\n"
+
+
+@bash_only
+def test_summary_held_render_failure_writes_no_comment(tmp_path):
+    """A render that raises (no `GITHUB_RUN_NUMBER` for `provenance`) never reaches the write.
+    Mutation: run `upsert-comment` with comment.md after a failed render too (`|| true` on the
+    render) -- the listing and a POST follow."""
+    proc, calls = _run_summary(tmp_path, "held", env={"GITHUB_RUN_NUMBER": None})
+    assert (proc.returncode, proc.stdout, calls) == (0, _DEGRADED, [])
+    assert not (tmp_path / "held.md").exists()
+
+
+@bash_only
+@pytest.mark.parametrize("mode", ["held", "post", "nothing-changed"])
+def test_summary_writes_nothing_over_a_newer_head(tmp_path, mode):
+    """A re-run of an old run never replaces the comment of the head the pull request has moved
+    to. Mutations: drop `--head` from either upsert-comment call -- a write follows; misspell
+    `moved` in the step -- no notice."""
+    proc, calls = _run_summary(tmp_path, mode, head="b" * 40, warned="true")
+    assert (proc.returncode, proc.stdout, calls) == (
+        0,
+        (
+            f"::notice::pull request #7 has moved past {_SHA}; its sticky plan comment belongs "
+            "to the newer head's run and was not written\n"
+        ),
+        [_LIST, _PULLS],
+    )
+
+
+#: upsert-comment's one-line stderr for a failed head read; the stub prints no gh stderr.
+_HEAD_FAILED = "command failed (1): gh api repos/o/r/pulls/7 --jq .head.sha\n"
+
+
+@bash_only
+def test_summary_held_head_read_failure_degrades(tmp_path):
+    """Mutation: fail the held step on `head-failed` -- exit 1."""
+    proc, calls = _run_summary(tmp_path, "held", head_rc=1)
+    assert (proc.returncode, proc.stdout, proc.stderr, calls) == (
+        0,
+        _DEGRADED,
+        _HEAD_FAILED,
+        [_LIST, _PULLS],
+    )
+
+
+@bash_only
+@pytest.mark.parametrize("mode", ["post", "nothing-changed"])
+def test_summary_post_head_read_failure_fails_the_step(tmp_path, mode):
+    """A comment write cannot be judged current, so the job stops before the gate, as on a failed
+    listing. Mutation: `exit 0` on `head-failed` -- red."""
+    proc, calls = _run_summary(tmp_path, mode, head_rc=1, warned="true")
+    assert (proc.returncode, proc.stdout, calls) == (
+        1,
+        (
+            "::error::could not read the head of pull request #7, so the sticky plan comment was "
+            "not updated; re-plan this pull request (comment shipmate plan or push)\n"
+        ),
+        [_LIST, _PULLS],
+    )
 
 
 @bash_only
@@ -365,17 +568,41 @@ def test_summary_draft_and_hold_make_no_comment_call(tmp_path, mode, stdout):
     ("mode", "warned", "unmanaged", "lost", "listing", "expected", "stdout"),
     [
         ("nothing-changed", "false", "false", "false", "", [_LIST], _SUMMARY_SKIPPED),
-        ("post", "false", "false", "false", "", [_LIST, _post_of("comment.md")], ""),
-        ("nothing-changed", "true", "false", "false", "", [_LIST, _post_of("comment.md")], ""),
-        ("nothing-changed", "false", "true", "false", "", [_LIST, _post_of("comment.md")], ""),
-        ("nothing-changed", "false", "false", "true", "", [_LIST, _post_of("comment.md")], ""),
+        ("post", "false", "false", "false", "", [_LIST, _PULLS, _post_of("comment.md")], ""),
+        (
+            "nothing-changed",
+            "true",
+            "false",
+            "false",
+            "",
+            [_LIST, _PULLS, _post_of("comment.md")],
+            "",
+        ),
+        (
+            "nothing-changed",
+            "false",
+            "true",
+            "false",
+            "",
+            [_LIST, _PULLS, _post_of("comment.md")],
+            "",
+        ),
+        (
+            "nothing-changed",
+            "false",
+            "false",
+            "true",
+            "",
+            [_LIST, _PULLS, _post_of("comment.md")],
+            "",
+        ),
         (
             "nothing-changed",
             "false",
             "false",
             "false",
             _head(5, SUMMARY),
-            [_LIST, _patch_of("comment.md")],
+            [_LIST, _PULLS, _patch_of("comment.md")],
             "",
         ),
     ],
@@ -386,6 +613,7 @@ def test_summary_posts_unless_quiet_and_keeps_an_existing_comment_current(
 ):
     """Nothing changed, no doctor warning, no unmanaged line and no lost pairs line: update only.
 
+    A quiet run with no comment reads no head (`quiet`).
     Mutations: delete the `DOCTOR_WARNED` clause (doctor-warned red); delete the `UNMANAGED`
     clause (unmanaged red); delete the `LOST` clause (lost red); delete the `nothing-changed`
     clause (ordinary red).
@@ -434,7 +662,7 @@ def test_summary_write_failure_fails_the_step(tmp_path):
     block to `main()` (the raw multi-line text reaches stderr)."""
     proc, calls = _run_summary(tmp_path, "post", write_rc=1, write_stderr=_WRITE_STDERR)
     assert proc.returncode != 0
-    assert calls == [_LIST, _post_of("comment.md")]
+    assert calls == [_LIST, _PULLS, _post_of("comment.md")]
     assert proc.stderr == _write_annotation("comment.md")
 
 

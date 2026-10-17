@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
-"""Decide whether every `apply / <stack> / <env>` check on a commit is done.
+"""Judge the `apply / <stack> / <env>` checks on a commit.
 
 Reads check-runs as JSON Lines on stdin (one check-run object per line, as
-emitted by `gh api --paginate ... --jq '.check_runs[]'`). With `--plan-runs` it
-prints the run projection of `plan_records`, `{name: plan run id}`, on stdout for
-comment-ops' reviewed-plan lookup and decides nothing; otherwise it writes a single
-verdict to GITHUB_OUTPUT:
+emitted by `gh api --paginate ... --jq '.check_runs[]'`) and prints the run
+projection of `plan_records`, `{name: plan run id}`, on stdout for comment-ops'
+reviewed-plan lookup. `verdict` is the gate's done-predicate over the same checks:
 
 - `complete`   — every apply check's latest run is completed with a good
-                 conclusion (success, or neutral for no-change cells); the
-                 caller may complete the `shipmate / gate` check.
+                 conclusion (success, or neutral for no-change cells).
 - `pending`    — at least one apply check is still open, failed, or was
-                 cancelled, or the commit has no apply check at all; the
-                 caller must leave the gate untouched.
+                 cancelled, or the commit has no apply check at all.
 
 Check-runs are filtered to the shipmate GitHub App's identity (`from_app`,
-env `SHIPMATE_APP_ID`) before verdict is computed, so a same-name run created
-by any other identity can never feed the gate.
+env `SHIPMATE_APP_ID`), so a same-name run created by any other identity can
+never feed the gate.
 
 The GitHub API returns every historical run of a re-created check name, so
 runs are grouped by name and judged by the newest run per name, ordered by
@@ -30,7 +27,7 @@ import os
 import re
 import sys
 
-from _shipmate import is_pr_number
+from _shipmate import is_pr_number, is_run_id, run_annotated
 
 APPLY_PREFIX = "apply / "
 #: The consumer names its engine-calling job `shipmate`, and GitHub names a called workflow's
@@ -158,7 +155,7 @@ def plan_records(check_run_lines, app_id):
     the record carries no such value. Absence is not an error here: each caller decides per
     cell what a missing run, an unbound plan text or a missing pull request means.
 
-    `--plan-runs` prints `{name: run}` for every record whose run is not None and does not
+    `main` prints `{name: run}` for every record whose run is not None and does not
     narrow it for any other reason: authorize reads that projection as PLAN_RUN_JSON and
     answers an empty mapping with "no reviewed plan for the current PR head". A name dropped
     from it for a policy that is not its own, a missing digest included, surfaces as that
@@ -175,7 +172,7 @@ def plan_records(check_run_lines, app_id):
         digest = record.get("plan_sha256")
         pr = record.get("pr")
         out[name] = (
-            plan_run if isinstance(plan_run, str) and re.fullmatch(r"[0-9]+", plan_run) else None,
+            plan_run if isinstance(plan_run, str) and is_run_id(plan_run) else None,
             digest if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) else None,
             pr if isinstance(pr, str) and is_pr_number(pr) else None,
         )
@@ -183,26 +180,16 @@ def plan_records(check_run_lines, app_id):
 
 
 def verdict(check_runs):
+    """The gate verdict over `check_runs`, which must already be `app_runs` output: this does
+    not filter by App identity."""
     latest = latest_by_name(check_runs)
     return "complete" if latest and all(_is_done(r) for r in latest.values()) else "pending"
 
 
 def main():
-    mode = sys.argv[1:]
-    # Compared whole, not by membership: a typo'd flag must not fall through and
-    # write a gate verdict where the caller asked for the mapping.
-    if mode and mode != ["--plan-runs"]:
-        raise SystemExit(f"::error::unknown argument(s) {mode}")
-    app_id = os.environ["SHIPMATE_APP_ID"]
-    if mode:
-        records = plan_records(sys.stdin, app_id)
-        print(json.dumps({name: run for name, (run, _, _) in records.items() if run is not None}))
-        return
-    runs = app_runs(sys.stdin, app_id)
-    v = verdict(runs)
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"verdict={v}\n")
+    records = plan_records(sys.stdin, os.environ["SHIPMATE_APP_ID"])
+    print(json.dumps({name: run for name, (run, _, _) in records.items() if run is not None}))
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

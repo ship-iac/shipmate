@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 import pytest
-from _loader import ENGINE, SCRIPTS, action_steps, bash_only, load_script, run_step
+from _loader import ENGINE, SCRIPTS, action_steps, bash_only, jsonl, load_script, run_step
 
 apply_complete = load_script("apply-complete")
 
@@ -291,10 +291,6 @@ HARNESS_SNAP = {
 }
 
 
-def _jsonl(jobs):
-    return "".join(json.dumps(j) + "\n" for j in jobs)
-
-
 def _select(tmp_path, listings, snapshot=None):
     """Execute the selection step with `listings[n]` served on attempt n.
 
@@ -334,19 +330,17 @@ def _select(tmp_path, listings, snapshot=None):
 
 
 def _all_success(*cells):
-    return _jsonl([job(f"L0 / apply / {c} / dev-eu", "success") for c in cells])
+    return jsonl(*(job(f"L0 / apply / {c} / dev-eu", "success") for c in cells))
 
 
 @bash_only
 def test_the_listing_is_refetched_on_every_attempt(tmp_path):
     # The property that makes this a retry at all: hoisting the fetch above the `for` re-reads
     # one frozen snapshot on every attempt and sleeps the whole budget over it.
-    lagging = _jsonl(
-        [
-            job("L0 / apply / dns / dev-eu", "success"),
-            job("L0 / apply / app / dev-eu", "success"),
-            job("L0 / apply / web / dev-eu", None),
-        ]
+    lagging = jsonl(
+        job("L0 / apply / dns / dev-eu", "success"),
+        job("L0 / apply / app / dev-eu", "success"),
+        job("L0 / apply / web / dev-eu", None),
     )
     proc, ids, attempts, _ = _select(
         tmp_path, [lagging, lagging, _all_success("dns", "app", "web")]
@@ -389,12 +383,10 @@ def test_a_listing_matching_no_cell_at_all_is_retried_and_completes_nothing_mean
 def test_an_id_earned_by_one_attempt_survives_a_staler_later_listing(tmp_path):
     # Replicas differ, so a later read can be missing a row an earlier one had. A later read
     # may add a completion; it may never revoke one.
-    first = _jsonl(
-        [
-            job("L0 / apply / dns / dev-eu", "success"),
-            job("L0 / apply / app / dev-eu", "success"),
-            job("L0 / apply / web / dev-eu", None),
-        ]
+    first = jsonl(
+        job("L0 / apply / dns / dev-eu", "success"),
+        job("L0 / apply / app / dev-eu", "success"),
+        job("L0 / apply / web / dev-eu", None),
     )
     staler = _all_success("web")  # dns and app have vanished from this replica.
     proc, ids, _, _ = _select(tmp_path, [first, staler])
@@ -411,11 +403,9 @@ def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_
     The waits back off from 2 s to a 110 s total, and the last attempt does not sleep.
     Mutations: the first delay 2 -> 10; one later delay 10 -> 20; the last attempt sleeps
     (`set -u` aborts on the missing delay); `attempts` drops its `+ 1`."""
-    lagging = _jsonl(
-        [
-            job("L0 / apply / dns / dev-eu", "success"),
-            job("L0 / apply / web / dev-eu", None),
-        ]
+    lagging = jsonl(
+        job("L0 / apply / dns / dev-eu", "success"),
+        job("L0 / apply / web / dev-eu", None),
     )
     proc, ids, attempts, env = _select(tmp_path, [lagging])
     assert proc.returncode == 0, proc.stderr
