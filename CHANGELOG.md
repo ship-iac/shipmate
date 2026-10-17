@@ -8,7 +8,7 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## Unreleased
+## [0.47.1] — 2026-10-18
 
 ### Fixed
 
@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 ### Changed
 
 - **`docs/getting-started.md` §The table's `gated` row says that at 0 required approving reviews `gated` changes nothing.**
+- **Engine actions pin `actions/create-github-app-token` v3.3.0, `actions/download-artifact` v8.0.2 and `actions/upload-artifact` v7.0.2.**
 
 ## [0.47.0] — 2026-10-17
 
