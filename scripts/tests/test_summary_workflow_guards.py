@@ -125,7 +125,7 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
 #: an `if:` or a `github-token`, which the job's `contents: read` grant would not cover.
 EXPECTED_DOWNLOAD_STEP = {
     "name": "Download plan cell summaries",
-    "uses": "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     "continue-on-error": True,
     "with": {"pattern": "cell-summary.*", "path": "cells"},
 }
