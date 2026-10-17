@@ -12,7 +12,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
-- **A plan or drift cell whose `tofu plan` fails annotates its check with OpenTofu's first `Error:` diagnostic, colour removed and cut at 1,000 characters, instead of only `Process completed with exit code 1.`; `shipmate doctor` lists it under its warnings. The sticky plan comment's `no plan summary read` line is unchanged and links that check.**
+- **A plan or drift cell whose `tofu plan` fails annotates its check with OpenTofu's first `Error:` diagnostic, colour removed and cut at 1,000 characters, instead of only `Process completed with exit code 1.`; `shipmate doctor` lists it for the autoplan, while an on-demand `shipmate plan` keeps it on its own run. The sticky plan comment's `no plan summary read` line is unchanged and links that check.**
 
 ### Changed
 

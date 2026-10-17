@@ -2174,9 +2174,11 @@ the publish hold (below). In order, blank lines between the parts:
   head has none. At most ten, then `and N more cells have no plan summary`. The
   cells are `detect`'s planned `cells` the run read no summary for: a cell whose
   plan matrix job did not succeed and a cell whose summary download failed read
-  the same. When `tofu plan` itself failed, the linked check carries an
+  the same. When `tofu plan` itself failed, the cell's plan job carries an
   `::error::` annotation with OpenTofu's first `Error:` diagnostic, colour
-  removed and cut at 1,000 characters, which `shipmate doctor` harvests; a
+  removed and cut at 1,000 characters. For the autoplan that job is the linked
+  check and `shipmate doctor` harvests it; an on-demand `shipmate plan` keeps it
+  on its own run, because the App-mirrored head check carries no annotations. A
   drift cell's failed plan annotates the same way;
 - the help hint ``Comment `shipmate help` for the available commands.``
 

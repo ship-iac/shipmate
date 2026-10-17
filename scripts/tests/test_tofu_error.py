@@ -27,7 +27,8 @@ FIRST = (
 
 
 def _run(monkeypatch, capsys, text):
-    monkeypatch.setattr("sys.stdin", io.StringIO(text))
+    data = text if isinstance(text, bytes) else text.encode()
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO(data)))
     te.main()
     return capsys.readouterr().out
 
@@ -48,8 +49,25 @@ def test_prints_nothing_without_an_error_line(monkeypatch, capsys):
 
 def test_escapes_percent_and_cuts_at_cap(monkeypatch, capsys):
     """Mutations: drop the `%` escape (`command_data` -> identity); drop the `[:CAP]` cut."""
-    out = _run(monkeypatch, capsys, "Error: 100% " + "x" * 5000 + "\n")
+    out = _run(monkeypatch, capsys, "╷\n│ Error: 100% " + "x" * 5000 + "\n╵\n")
     assert out == "::error::Error: 100%25 " + "x" * (te.CAP - len("Error: 100% ")) + "\n"
+
+
+def test_skips_an_error_line_that_opens_no_box(monkeypatch, capsys):
+    """A warning's detail and a log line starting `Error: ` are not the diagnostic. Mutation:
+    drop the `lines[i - 1] == "╷"` condition."""
+    text = (
+        "Error: from a log line\n"
+        "╷\n│ Warning: deprecated\n│ Error: quoted in the detail\n╵\n"
+        "╷\n│ Error: the real one\n╵\n"
+    )
+    assert _run(monkeypatch, capsys, text) == "::error::Error: the real one\n"
+
+
+def test_annotates_despite_a_byte_that_is_not_utf8(monkeypatch, capsys):
+    """Provider output can carry any byte. Mutation: decode stdin strictly."""
+    out = _run(monkeypatch, capsys, "╷\n│ Error: bad ".encode() + b"\xff byte\n")
+    assert out == "::error::Error: bad � byte\n"
 
 
 #: Hand-written: the line both plan steps run after a failed plan.
@@ -63,10 +81,12 @@ ANNOTATE = (
     ("action", "step"), [("plan-cell", "Plan"), ("drift-cell", "Plan + classify drift")]
 )
 def test_each_plan_step_annotates_after_the_group_and_never_masks_the_status(action, step):
-    """The annotation runs once, right after `::endgroup::`, and an extractor failure cannot
-    change the step's exit status. Mutations: drop `|| true`; move the line above
-    `echo "::endgroup::"`; delete it from drift-cell."""
+    """The annotation runs once, right after `::endgroup::`, and neither an extractor failure nor
+    `tee`'s own status can change the step's exit status. Mutations: drop `|| true`; move the
+    line above `echo "::endgroup::"`; delete it from drift-cell; read `status=$?`."""
     lines = run_lines(step_by(action, name=step))
+    plan = next(i for i, ln in enumerate(lines) if ln.startswith("terramate run"))
+    assert lines[plan + 1] == "status=${PIPESTATUS[0]}"
     end = lines.index('echo "::endgroup::"')
     assert lines[end + 1] == ANNOTATE
     assert lines.count(ANNOTATE) == 1

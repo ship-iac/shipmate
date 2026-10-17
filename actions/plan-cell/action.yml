@@ -98,7 +98,8 @@ runs:
         # collapses it.
         set +e
         terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -lock=false -out=stack.otplan 2>&1 | tee "$RUNNER_TEMP/plan-run.txt"
-        status=$?
+        # tee's own status must not stand in for the plan's.
+        status=${PIPESTATUS[0]}
         set -e
         echo "::endgroup::"
         # Reviewer-facing only: a failed extractor must not replace tofu's exit status.
