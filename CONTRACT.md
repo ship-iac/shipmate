@@ -2174,7 +2174,10 @@ the publish hold (below). In order, blank lines between the parts:
   head has none. At most ten, then `and N more cells have no plan summary`. The
   cells are `detect`'s planned `cells` the run read no summary for: a cell whose
   plan matrix job did not succeed and a cell whose summary download failed read
-  the same;
+  the same. When `tofu plan` itself failed, the linked check carries an
+  `::error::` annotation with OpenTofu's first `Error:` diagnostic, colour
+  removed and cut at 1,000 characters, which `shipmate doctor` harvests; a
+  drift cell's failed plan annotates the same way;
 - the help hint ``Comment `shipmate help` for the available commands.``
 
 The held body only explains a red gate, so it degrades: a failed render,

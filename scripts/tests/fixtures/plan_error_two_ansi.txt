@@ -1,0 +1,18 @@
+[31m╷[0m[0m
+[31m│[0m [0m[1m[31mError: [0m[0m[1mReference to undeclared input variable[0m
+[31m│[0m [0m
+[31m│[0m [0m[0m  on main.tf line 2, in output "x":
+[31m│[0m [0m   2:   value = [4mvar.first_missing[0m[0m
+[31m│[0m [0m
+[31m│[0m [0mAn input variable with the name "first_missing" has not been declared. This
+[31m│[0m [0mvariable can be declared with a variable "first_missing" {} block.
+[31m╵[0m[0m
+[31m╷[0m[0m
+[31m│[0m [0m[1m[31mError: [0m[0m[1mReference to undeclared input variable[0m
+[31m│[0m [0m
+[31m│[0m [0m[0m  on main.tf line 5, in output "y":
+[31m│[0m [0m   5:   value = [4mvar.second_missing[0m[0m
+[31m│[0m [0m
+[31m│[0m [0mAn input variable with the name "second_missing" has not been declared.
+[31m│[0m [0mThis variable can be declared with a variable "second_missing" {} block.
+[31m╵[0m[0m

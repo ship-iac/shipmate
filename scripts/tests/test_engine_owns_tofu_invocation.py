@@ -43,7 +43,19 @@ _WRAPPER = [
 _INIT = [*_WRAPPER, "tofu", "init", "-input=false", "-reconfigure"]
 #: Reads the init record inside the wrapper, so it sees the TF_DATA_DIR and TF_WORKSPACE tofu saw.
 _LOCATE = [*_WRAPPER, "python3", "$GITHUB_ACTION_PATH/../../scripts/state-path"]
-_PLAN = [*_WRAPPER, "tofu", "plan", "-input=false", "-lock=false", "-out=stack.otplan"]
+#: Teed to RUNNER_TEMP for `tofu-error`, which annotates a failed plan with its first error.
+_PLAN = [
+    *_WRAPPER,
+    "tofu",
+    "plan",
+    "-input=false",
+    "-lock=false",
+    "-out=stack.otplan",
+    "2>&1",
+    "|",
+    "tee",
+    "$RUNNER_TEMP/plan-run.txt",
+]
 #: The apply takes the backend's lock, so no -lock=false, and applies the reviewed plan file. No
 #: -auto-approve either: a stored plan never prompts, so the flag would be inert, and without it
 #: a lost `stack.otplan` argument fails on "Error asking for approval" instead of re-planning from
