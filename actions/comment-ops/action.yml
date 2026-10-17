@@ -231,7 +231,7 @@ runs:
       id: doctortoken
       if: ${{ steps.parse.outputs.route == 'doctor' && steps.access.outputs.authorized == 'true' }}
       continue-on-error: true
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
@@ -270,7 +270,7 @@ runs:
       # installation is missing one, which is typical after a release adds one the App's
       # settings lack. The failure IS the probe result, so it is never fatal.
       continue-on-error: true
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
@@ -353,7 +353,7 @@ runs:
       # not hard-fail the job: `App token unavailable (App not installed?)` reports it to the
       # commenter.
       continue-on-error: true
-      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
       with:
         client-id: ${{ inputs.app-id }}
         private-key: ${{ inputs.private-key }}
