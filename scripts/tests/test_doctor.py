@@ -6,7 +6,7 @@ import sys
 
 import pytest
 from _detect_fixtures import forbid_shared_runner
-from _loader import ENGINE, SCRIPTS, load_script
+from _loader import ENGINE, SCRIPTS, jsonl, load_script
 from _shipmate import codeowners_rules, first_codeowners, load_workflow_text
 from test_env_config_yaml_fixtures import CANONICAL
 
@@ -1894,6 +1894,11 @@ _COVERED = (
     "environments of the stacks changed in this pull request: `dev-eu`."
 )
 
+_NOT_CHECKED = (
+    "_Not checked: the repository's Actions settings (docs/hardening.md rows 10 to 12 and 20), "
+    "which no token a workflow can obtain reads. `scripts/onboard` checks rows 10, 12 and 20._"
+)
+
 
 def test_report_with_no_findings_is_the_whole_all_clear_body():
     """Mutation: render the verdict without `provenance` -- `🟢 no problems found` alone.
@@ -1907,6 +1912,8 @@ def test_report_with_no_findings_is_the_whole_all_clear_body():
         "Cell summaries from plan run ID 1281.\n"
         "\n"
         "#### repository settings\n"
+        "\n"
+        f"{_NOT_CHECKED}\n"
         "\n"
         f"{_COVERED}\n"
         "\n"
@@ -1938,6 +1945,8 @@ def test_report_with_a_warning_a_notice_and_a_harvested_failure_is_the_whole_bod
         "\n"
         "#### repository settings\n"
         "\n"
+        f"{_NOT_CHECKED}\n"
+        "\n"
         "- 🟠 gate ruleset is missing\n"
         "- ⚪ apply env has no protection\n"
         "\n"
@@ -1963,6 +1972,8 @@ def test_report_with_a_pending_harvest_and_no_findings_is_the_whole_body():
         "\n"
         "#### repository settings\n"
         "\n"
+        f"{_NOT_CHECKED}\n"
+        "\n"
         f"{_COVERED}\n"
         "\n"
         "#### warnings from this commit's workflow runs\n"
@@ -1986,6 +1997,8 @@ def test_report_with_one_warning_is_the_whole_body_with_the_hint():
         "Cell summaries from plan run ID 1281.\n"
         "\n"
         "#### repository settings\n"
+        "\n"
+        f"{_NOT_CHECKED}\n"
         "\n"
         "- 🟠 gate ruleset is missing\n"
         "\n"
@@ -2101,6 +2114,25 @@ def test_findings_only_fallback_uses_the_same_all_clear_line():
     body = doctor._findings_only_report([], _ctx(envs={"dev-eu"}), "🟢", "🟢 no problems found")
     assert "`dev-eu`" in body
     assert "changed in this pull request" in body
+
+
+def test_findings_only_fallback_is_the_whole_all_clear_body():
+    """Mutation: drop `NOT_CHECKED` from `_report_head`. Mutation: append it in `render_report`
+    instead of `_report_head`."""
+    assert doctor._findings_only_report([], _ctx(), "🟢", f"🟢 no problems found {_AT}") == (
+        "<!-- shipmate:doctor -->\n"
+        "### shipmate doctor\n"
+        "\n"
+        f"🟢 no problems found {_AT}\n"
+        "\n"
+        "Cell summaries from plan run ID 1281.\n"
+        "\n"
+        "#### repository settings\n"
+        "\n"
+        f"{_NOT_CHECKED}\n"
+        "\n"
+        f"{_COVERED}"
+    )
 
 
 def test_harvest_incomplete_note_says_the_harvest_is_incomplete():
@@ -2279,10 +2311,6 @@ class _Unexpected(BaseException):
     in check-ids mode can swallow it."""
 
 
-def _listing(*rows):
-    return "".join(json.dumps(r) + "\n" for r in rows)
-
-
 def _workflow_run(cid, name, status="completed"):
     return {
         "id": cid,
@@ -2350,7 +2378,7 @@ def test_check_ids_mode_writes_the_harvest_pending_step_output(monkeypatch, tmp_
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(
+            _LISTING_ARGV: jsonl(
                 _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu", status="queued")
             ),
             _ann_argv(1): "[]",
@@ -2403,7 +2431,7 @@ def test_a_failed_reduction_marks_the_harvest_failed(monkeypatch, tmp_path, caps
     _run_check_ids(
         monkeypatch,
         tmp_path,
-        {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: _listing(_workflow_run(1, "app / dev-eu"))},
+        {_HEAD_ARGV: _HEAD + "\n", _LISTING_ARGV: jsonl(_workflow_run(1, "app / dev-eu"))},
     )
     assert _outputs(tmp_path) == f"head_sha={_HEAD}\nharvest_failed=true\nplan_run_ids=\n"
     assert _warnings(capsys) == [
@@ -2424,9 +2452,7 @@ def test_a_failed_annotations_fetch_writes_an_empty_payload_and_fetches_the_rest
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(
-                _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")
-            ),
+            _LISTING_ARGV: jsonl(_workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")),
             _ann_argv(1): SystemExit(_HARVEST_FAILED),
             _ann_argv(2): '[{"message": "w"}]',
         },
@@ -2449,9 +2475,7 @@ def test_harvest_failed_is_written_once_after_every_fetch(monkeypatch, tmp_path)
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(
-                _workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")
-            ),
+            _LISTING_ARGV: jsonl(_workflow_run(1, "app / dev-eu"), _workflow_run(2, "db / dev-eu")),
             _ann_argv(1): SystemExit(_HARVEST_FAILED),
             _ann_argv(2): "[]",
         },
@@ -2471,7 +2495,7 @@ def test_each_call_carries_its_own_token(monkeypatch, tmp_path):
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(
+            _LISTING_ARGV: jsonl(
                 _workflow_run(1, "app / dev-eu"), _apply_check(9, "apply / app / dev-eu", "1281")
             ),
             _ann_argv(1): "[]",
@@ -2533,7 +2557,7 @@ def test_the_plan_records_are_read_from_the_listing_before_any_download(monkeypa
         return real(lines, app_id)
 
     monkeypatch.setattr(doctor.ag, "plan_records", recording)
-    listing = _listing(_apply_check(9, "apply / app / dev-eu", "1281"))
+    listing = jsonl(_apply_check(9, "apply / app / dev-eu", "1281"))
     calls = _run_check_ids(
         monkeypatch,
         tmp_path,
@@ -2650,7 +2674,7 @@ def _download_cells(monkeypatch, tmp_path, undownloadable=()):
         tmp_path,
         {
             _HEAD_ARGV: _HEAD + "\n",
-            _LISTING_ARGV: _listing(*rows),
+            _LISTING_ARGV: jsonl(*rows),
             **{_ann_argv(cid): "[]" for _, cid, _ in _PLANNED},
             **{_download_argv(rid): download for rid in _ARTIFACTS},
         },
@@ -6706,10 +6730,10 @@ def test_status_never_fails_the_run(monkeypatch):
     exception here would take down a `shipmate doctor` comment that the probe has already
     reported the same failure in. Mutation: drop the `except` clause in `config_status`."""
 
-    def boom(path):
+    def boom(path, fetch):
         raise RuntimeError("connection reset")
 
-    monkeypatch.setattr(doctor, "_contents_text", boom)
+    monkeypatch.setattr(doctor.ec, "contents_text", boom)
     assert doctor.config_status(_ctx()) == []
 
 

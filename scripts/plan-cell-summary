@@ -13,11 +13,10 @@ import os
 import pathlib
 import sys
 
+from _shipmate import _load, run_annotated
+
 
 def step_line():
-    # Imported here so the fail-closed cell.json path imports nothing beyond the stdlib.
-    from _shipmate import _load
-
     sc = _load("summary-comment")
     cell = {"changed": os.environ["CHANGED"] == "true"}
     # The same derivation as summary-comment's load_cells, so the step summary and the comment
@@ -27,7 +26,14 @@ def step_line():
     return sc.cell_line(sc.emoji(cell), os.environ["STACK"], os.environ["ENV"], sc.state(cell))
 
 
-def main():
+def main(args=()):
+    if list(args) == ["--step-line"]:
+        print(step_line())
+        return
+    if args:
+        raise SystemExit(
+            f"::error::plan-cell-summary takes no argument or --step-line, got {list(args)}"
+        )
     with open("fingerprint.txt", encoding="utf-8") as fh:
         fingerprint = fh.read().strip()
     with open("cell.json", "w") as fh:
@@ -43,10 +49,4 @@ def main():
 
 
 if __name__ == "__main__":
-    args = sys.argv[1:]
-    if args == ["--step-line"]:
-        print(step_line())
-    elif args:
-        raise SystemExit(f"::error::plan-cell-summary takes no argument or --step-line, got {args}")
-    else:
-        main()
+    run_annotated(main, sys.argv[1:])

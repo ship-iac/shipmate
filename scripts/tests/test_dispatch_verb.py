@@ -130,7 +130,12 @@ def test_unlock_body_is_the_verb_the_ref_and_the_environment_alone():
 _SILENT_GH_STUB = "#!/bin/bash\necho '{}'\n"
 
 #: Appends, so the dispatch call's argv survives the reply call that follows it.
-RECORDING_GH_STUB = "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\necho '{}'\n"
+#: A reply's body arrives on stdin (`body=@-`) and is appended after its argv, then a newline.
+RECORDING_GH_STUB = (
+    "#!/bin/bash\nprintf '%s\\n' \"$@\" >> argv.txt\n"
+    '[[ " $* " == *" body=@- "* ]] && { cat; echo; } >> argv.txt\n'
+    "echo '{}'\n"
+)
 
 
 def _on_dispatch_call(action):
@@ -639,7 +644,9 @@ def test_a_422_about_another_input_is_not_reported_as_skew(tmp_path):
 #: the failure branch does after the refusal is observable rather than inferred.
 _RECORDING_FAILURE_STUB = (
     "#!/bin/bash\nprintf 'token=%s\\n' \"$GH_TOKEN\" >> argv.txt\n"
-    "printf '%s\\n' \"$@\" >> argv.txt\necho 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
+    "printf '%s\\n' \"$@\" >> argv.txt\n"
+    '[[ " $* " == *" body=@- "* ]] && { cat; echo; } >> argv.txt\n'
+    "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 )
 #: The run link, hand-written from the three runner variables the step reads.
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
@@ -675,7 +682,7 @@ def test_a_failed_dispatch_says_so_on_the_pull_request(tmp_path, verb):
 #: Fails every call and saves the comment body it is handed.
 _BODY_FAILURE_STUB = (
     "#!/bin/bash\n"
-    'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+    'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; fi; '
     "done\n"
     "echo 'gh: Not Found (HTTP 404)' >&2\nexit 1\n"
 )
@@ -714,7 +721,7 @@ def _answering_stub(answer, reply_exit=0):
         f"  cat <<'ANSWER'\n{answer}\nANSWER\n"
         "  exit 0\nfi; done\n"
         "printf '%s' \"${SHIPMATE_REPLY_RUN_ID-}\" > run_id.txt\n"
-        'for a in "$@"; do if [[ "$a" == body=* ]]; then printf "%s" "${a#body=}" > body.txt; fi; '
+        'for a in "$@"; do if [[ "$a" == body=@- ]]; then cat > body.txt; fi; '
         "done\n"
         f"exit {reply_exit}\n"
     )
@@ -800,9 +807,11 @@ def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path,
 
 @bash_only
 def test_a_failed_reply_after_a_started_run_warns_and_exits_zero(tmp_path):
-    """The run has started, so a reply that cannot be posted degrades to a warning.
+    """The run has started, so a reply that cannot be posted degrades to a warning, and the
+    warning stays the only annotation on the passing step.
 
-    Mutation: remove the `|| echo "::warning::..."` degrade, and the step exits non-zero.
+    Mutations: remove the `|| echo "::warning::..."` degrade, and the step exits non-zero;
+    prefix `reply-comment`'s failed-POST exit with `::error::` -- an error on stderr.
     """
     result, _ = _run_dispatch(
         tmp_path,
@@ -814,6 +823,7 @@ def test_a_failed_reply_after_a_started_run_warns_and_exits_zero(tmp_path):
     assert "::warning::could not post the dispatch reply; the run started" in (
         result.stdout.splitlines()
     ), f"the warning must print whole: {result.stdout}"
+    assert "::error::" not in result.stderr, result.stderr
 
 
 @bash_only

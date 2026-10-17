@@ -54,13 +54,6 @@ SNAPSHOT_STEPS = [
 ]
 
 
-def _wave_jobs():
-    jobs = workflow_jobs("apply-env-level.yml")
-    missing = [w for w in WAVES if w not in jobs]
-    assert not missing, f"apply-env-level.yml lost wave jobs: {missing}"
-    return {w: jobs[w] for w in WAVES}
-
-
 def test_every_cell_job_binds_the_resolved_environment():
     """Mutations: restore the ternary in one wave; bind `${{ matrix.environment }}` in `wave7`."""
     for workflow, job_id in sorted(CELL_BOUND):

@@ -10,6 +10,8 @@ import json
 import os
 import sys
 
+from _shipmate import run_annotated, write_outputs
+
 
 def classify(plan):
     """Classify an OpenTofu `show -json` plan dict into change counts."""
@@ -66,10 +68,13 @@ def main(argv):
         return
     with open("plan.json", encoding="utf-8") as fh:
         counts = classify(json.load(fh))
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"changed={'true' if counts['changed'] else 'false'}\n")
-        fh.write(f"add={counts['add']}\nchange={counts['change']}\ndestroy={counts['destroy']}\n")
+    write_outputs(
+        changed=counts["changed"],
+        add=counts["add"],
+        change=counts["change"],
+        destroy=counts["destroy"],
+    )
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    run_annotated(main, sys.argv)

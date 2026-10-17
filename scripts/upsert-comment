@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Create or update the sticky comment a body file names on a pull request.
 
-Usage: `upsert-comment PR BODYFILE [--update-only]`, with `gh` (`GH_TOKEN`) against
+Usage: `upsert-comment PR BODYFILE [--update-only] [--head SHA]`, with `gh` (`GH_TOKEN`) against
 `GITHUB_REPOSITORY`. A PR that is not a pull-request number exits 1 with `::error::` before the
-body file is read or any `gh` call, because it is bound into the API path.
+body file is read or any `gh` call, because it is bound into the API path; so does a `--head`
+that is not a 40-character lowercase hex SHA, and any other argument.
+
+With `--head`, the pull request's current head is read once the listing says a write follows,
+and nothing is written unless it is that SHA: the comment is keyed per pull request, so a run
+for an older head would otherwise replace the newer head's comment.
 
 The marker is BODYFILE's first line, which must be a whole `<!-- shipmate:<name> -->` with a
-1-40 letter lowercase name; anything else exits 1 with `::error::` before any `gh` call. The
-renderers (`summary-comment`, `doctor`) emit it first, so the body names its own comment.
+1-40 letter lowercase name; anything else exits 1 with `::error::` before any `gh` call. A
+renderer emits it first, so the body names its own comment.
 
 The listing keeps only Bot-authored comments, because the App's bot login derives from the App
 name, which an org may slug differently. A comment matches when its body starts with the marker,
@@ -20,12 +25,16 @@ Prints exactly one word and exits 0:
 
 - `updated`: the first match was PATCHed.
 - `created`: no match, so the body was POSTed.
-- `skipped`: no match under `--update-only`; nothing written.
+- `skipped`: no match under `--update-only`; nothing written, and the head is not read.
+- `moved`: the pull request's head is not `--head`; nothing written.
+- `head-failed`: the head read failed; nothing written.
 - `list-failed`: the listing failed on any page, or printed a line that is not an `{id, head}`
-  object, so nothing was written; the error goes to stderr without `::error::`, because each
-  caller decides: `comment-ops`' doctor step degrades on it, and `summary` fails its step with
-  its own `::error::`. A POST here would create a second sticky that later runs could PATCH
-  instead of this one.
+  object, so nothing was written. A POST here would create a second sticky that later runs
+  could PATCH instead of this one.
+
+On `head-failed` and `list-failed` the error goes to stderr without `::error::`, so the caller
+decides how to report it, on one line (`one_line`), so no line of gh's text starts a workflow
+command.
 
 A failed PATCH or POST exits 1 with one `::error::` annotation that carries gh's stderr. gh's
 response to a write never reaches stdout.
@@ -36,7 +45,7 @@ import os
 import re
 import sys
 
-from _shipmate import is_pr_number, run, run_annotated
+from _shipmate import is_head_sha, is_pr_number, run, run_annotated
 
 MARKER = re.compile(r"<!-- shipmate:[a-z]{1,40} -->")
 JQ = '.[] | select(.user.type == "Bot") | {id, head: ((.body // "")[0:64])}'
@@ -64,11 +73,46 @@ def find_existing(repo, pr, marker):
     return None
 
 
+def one_line(text):
+    """`text` with every run of CR and LF as ` | `, so no line of gh's output can start a workflow
+    command in the log."""
+    return " | ".join(part for part in re.split(r"[\r\n]+", str(text)) if part)
+
+
+def _args(argv):
+    """(PR, BODYFILE, update_only, head or None) from `argv`, or `::error::` usage."""
+    usage = "::error::usage: upsert-comment PR BODYFILE [--update-only] [--head SHA]"
+    if len(argv) < 2:
+        sys.exit(usage)
+    pr, path, rest = argv[0], argv[1], argv[2:]
+    update_only, head = False, None
+    while rest:
+        if rest[0] == "--update-only" and not update_only:
+            update_only, rest = True, rest[1:]
+        elif rest[0] == "--head" and head is None and len(rest) > 1:
+            head, rest = rest[1], rest[2:]
+        else:
+            sys.exit(usage)
+    if head is not None and not is_head_sha(head):
+        sys.exit(f"::error::--head must be a 40-char lowercase hex SHA (got: {head})")
+    return pr, path, update_only, head
+
+
+def _head_stop(repo, pr, head):
+    """None when `head` is None or still the pull request's head; else `moved`, or `head-failed`
+    with gh's error on one stderr line."""
+    if head is None:
+        return None
+    try:
+        current = run(["gh", "api", f"repos/{repo}/pulls/{pr}", "--jq", ".head.sha"]).strip()
+    except SystemExit as exc:
+        print(one_line(exc.code), file=sys.stderr)
+        return "head-failed"
+    return None if current == head else "moved"
+
+
 def main():
-    args = sys.argv[1:]
-    if len(args) not in (2, 3) or args[2:] not in ([], ["--update-only"]):
-        sys.exit("::error::usage: upsert-comment PR BODYFILE [--update-only]")
-    pr, path = args[0], args[1]
+    pr, path, update_only, head = _args(sys.argv[1:])
     # Bound into the API path.
     if not is_pr_number(pr):
         sys.exit(f"::error::PR must be a pull request number (got: {pr})")
@@ -80,11 +124,15 @@ def main():
     try:
         cid = find_existing(repo, pr, marker)
     except SystemExit as exc:
-        print(exc.code, file=sys.stderr)
+        print(one_line(exc.code), file=sys.stderr)
         print("list-failed")
         return
-    if cid is None and args[2:]:
+    if cid is None and update_only:
         print("skipped")
+        return
+    stop = _head_stop(repo, pr, head)
+    if stop:
+        print(stop)
         return
     if cid is None:
         argv, word = ["gh", "api", f"repos/{repo}/issues/{pr}/comments"], "created"

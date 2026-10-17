@@ -25,9 +25,6 @@ _RUNNER = (
     "Re-run the job, which clears a transient hosted-runner disk failure, or fix a self-hosted "
     "runner's openssl or disk."
 )
-_REPLAN = (
-    "comment shipmate plan or push, or after the merge open a new pull request touching the stack."
-)
 #: Hand-written, never read from the module.
 _HEADER = b"shipmate-crypt-v1\n"
 _OPENSSL_ARGV = [
@@ -76,26 +73,6 @@ def _unauthenticated(kind, path):
         "environment's key. tofu was not run. docs/troubleshooting.md section `state cache entry "
         "... failed authentication` tells the causes apart. Fix a passphrase with the secret: "
         "deleting an intact entry loses the state it holds."
-    )
-
-
-def _no_header(kind, path, repo=" --repo ship-iac/sample"):
-    if kind == "plan":
-        return (
-            f"::error::plan artifact `{path}` is not a shipmate-crypt-v1 artifact: it was uploaded "
-            "unencrypted or encrypted by an earlier engine release. Nothing was applied. "
-            f"Re-plan: {_REPLAN}"
-        )
-    return (
-        "::error::state cache entry `state/app-net/dev-eu/123-1` is not a shipmate-crypt-v1 "
-        "entry: it was saved unencrypted or by an earlier engine release. Delete every entry "
-        f"under its prefix: `gh cache list{repo} --key state/app-net/dev-eu/ --limit "
-        f"1000 --json id --jq '.[].id' | xargs -n1 gh cache delete{repo}` (the restore matches by "
-        "prefix, so deleting only `state/app-net/dev-eu/123-1` restores the next-older entry, "
-        "which is no shipmate-crypt-v1 entry either). Deleting discards that state: OpenTofu no "
-        "longer tracks the resources it recorded, and a plan of the stack in this environment "
-        "re-creates them. A plan or drift cell can then be re-run; never re-run a refused "
-        "apply or deploy."
     )
 
 
@@ -315,54 +292,24 @@ def test_the_openssl_key_reaches_only_the_child_environment(tmp_path, monkeypatc
         assert not any(key in a for a in args)
 
 
-def _pre_v1_ciphertext(tmp_path):
-    """An earlier release's artifact: openssl's own output, with no shipmate header."""
-    src = tmp_path / "plain.bin"
-    src.write_bytes(PLAIN)
-    return subprocess.run(
-        ["openssl", "enc", "-aes-256-ctr", "-pbkdf2", "-iter", "600000", "-md", "sha256", "-salt"]
-        + ["-in", str(src), "-pass", "env:PLAN_PASSPHRASE"],
-        stdout=subprocess.PIPE,
-        env={**os.environ, "PLAN_PASSPHRASE": NON_ASCII},
-        check=True,
-    ).stdout
-
-
 @pytest.mark.parametrize("kind", KINDS)
-@pytest.mark.parametrize("case", ["zip", "state", "envelope", "salted", "earlier-release"])
-def test_a_file_without_the_v1_header_refuses_as_pre_v1(tmp_path, monkeypatch, kind, case):
-    """Mutations: drop the `Salted__` prefix from `_is_pre_v1`; drop its zip prefix; make its
-    JSON branch `return False`."""
+@pytest.mark.parametrize("case", ["zip", "state", "envelope", "salted"])
+def test_a_file_without_the_v1_header_fails_authentication(tmp_path, monkeypatch, kind, case):
+    """Plaintext and foreign ciphertext refuse before openssl runs. Mutation: make both
+    authentication checks in `_decrypt` pass."""
     data = {
         "zip": PLAIN,
         "state": STATE,
         "envelope": ENVELOPE,
-        "salted": b"Salted__\x01\x02",
-        "earlier-release": _pre_v1_ciphertext(tmp_path),
+        "salted": b"Salted__" + bytes(range(64)),
     }[case]
     f = _write(tmp_path, data)
     monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
     calls = _record_openssl(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _decrypt(kind, f)
-    assert (exc.value.code, calls) == (_no_header(kind, f), [])
+    assert (exc.value.code, calls) == (_unauthenticated(kind, f), [])
     assert f.read_bytes() == data
-
-
-@pytest.mark.parametrize(("repository", "flag"), [("ship-iac/sample", None), (None, "")])
-def test_the_state_purge_command_names_the_repository_when_known(
-    tmp_path, monkeypatch, repository, flag
-):
-    """Mutations: always emit `--repo` (reddens the unset case); drop `--repo` from the `gh cache
-    delete` half of the command."""
-    if repository is None:
-        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
-    f = _write(tmp_path, STATE)
-    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
-    with pytest.raises(SystemExit) as exc:
-        pcx.decrypt_state(str(f), KEY)
-    expected = _no_header("state", f) if flag is None else _no_header("state", f, repo=flag)
-    assert exc.value.code == expected
 
 
 def _damaged(kind, whole):
@@ -400,19 +347,15 @@ def _damaged(kind, whole):
         "cut-tag-byte",
     ],
 )
-def test_a_cut_or_damaged_v1_file_fails_authentication_not_the_purge(
-    tmp_path, monkeypatch, kind, damage
-):
-    """Anything that is not a whole, verified v1 file is an authentication failure, never the
-    pre-v1 purge.
+def test_a_cut_or_damaged_v1_file_fails_authentication(tmp_path, monkeypatch, kind, damage):
+    """Anything that is not a whole, verified v1 file is an authentication failure.
 
     A file shorter than a v1 file with an empty body, or one without the v1 header, refuses
     before the key derivation. Only cut-tag-byte, whose header is intact and whose length is at
     least the minimum, derives a key; magic-byte and magic-brace keep the whole length and derive
     none.
 
-    Mutations: `if not data.startswith(MAGIC): raise SystemExit(no_header)` in place of
-    `_is_pre_v1` in `_decrypt` (reddens empty, cut-in-magic, magic-byte and magic-brace); drop
+    Mutations: drop
     `len(data) < MIN_LEN or` (reddens cut-at-salt, cut-in-salt, cut-at-body, cut-in-body and
     one-below-minimum); drop `or not data.startswith(MAGIC)` (reddens magic-byte and
     magic-brace).

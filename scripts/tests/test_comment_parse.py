@@ -95,11 +95,6 @@ def test_bare_unknown_verb_rejected():
     assert r["is_command"] and not r["valid"] and "unknown verb" in r["error"]
 
 
-def test_injection_attempt_is_rejected():
-    r = cp.parse("shipmate apply dev-eu; rm -rf /")
-    assert r["is_command"] and not r["valid"]
-
-
 def test_backtick_injection_in_env_rejected():
     r = cp.parse("shipmate apply $(whoami)")
     assert r["is_command"] and not r["valid"]

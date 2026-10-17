@@ -287,7 +287,7 @@ The verbs:
 | `create` / `update` / `set` / `delete` | the write it just performed. |
 | `created` | the workflow file it just wrote to `.github/workflows/`. |
 | `deferred` | the gate ruleset is not created yet, because `.github/workflows/shipmate.yml` is not on the remote default branch, or the token cannot read it (a private repository answers 404 for both), and no pull request could produce `shipmate / gate`. Merge the pull request that adds the file, then run the script again. Not drift; it does not affect the exit code. |
-| `pin-only` | the file matches except for the engine pin. Not drift, and it does not affect the exit code — move every engine ref to this engine's SHA in one commit ([`releasing.md`](releasing.md) § Re-pin a consumer). |
+| `pin-only` | the file matches except for the engine pin. Not drift, and it does not affect the exit code — move every engine ref to this engine's release in one commit with `scripts/repin` ([`releasing.md`](releasing.md) § Re-pin a consumer). |
 | `would …` | `--dry-run`: the write that a real run would perform. |
 | `differs` | it found something it will not change on your behalf. Every one exits the run 2. |
 
@@ -307,8 +307,8 @@ mandate. Each one names what to do.
 | `gate ruleset` — `shipmate / gate` is required under another `integration_id` | the gate is required, but not pinned to the shipmate App, so a status of that name from any other identity satisfies it. Set `integration_id` to `SHIPMATE_APP_ID`. |
 | `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
 | `gate ruleset` — `shipmate / gate` is already required, but `.github/workflows/shipmate.yml` is not on `<branch>` yet | the gate is required while the workflow file is not on the default branch, or this token cannot read it and GitHub answered 404. `pull_request_target` runs the default branch's copy, so the pull request adding the file cannot produce the gate. Disable the gate rule until that pull request merges, or merge it through a bypass actor. |
-| `shipmate.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which the re-pin in [`releasing.md`](releasing.md) cannot move. Delete the file and run the script again. |
-| `shipmate.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. Diff it against the fence on the page that publishes it and reconcile by hand, or delete it and run again to take the published one. |
+| `shipmate.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `scripts/repin` ([`releasing.md`](releasing.md) § Re-pin a consumer) cannot move. Delete the file and run the script again. |
+| `shipmate.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. The line is followed by the diff from the published fence to the file, pins masked and indented four spaces: reconcile the file by hand, or delete it and run again to take the published one. |
 
 The closing checklist marks each item with one of three verdicts. None of them
 affects the exit code: every item is yours to do, so a first run exits 0 over
@@ -318,7 +318,7 @@ its `todo` items.
 | --- | --- |
 | `ok` | what the run read already satisfies the item. |
 | `todo` | the item is not done; what to do follows. |
-| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, `shipmate-engine`'s custom deployment protection rules could not be listed, and `drift sweeps` cannot compute coverage (see below). Confirm it by hand. |
+| `cannot check` | the run cannot read it: the App installation needs an App JWT, whether `CODEOWNERS` entries cover the IaC, the workflows, `/.github/shipmate-config.yml` and `/.github/CODEOWNERS` is GitHub's matching, `shipmate-engine`'s custom deployment protection rules could not be listed, `drift sweeps` cannot compute coverage (see below), and a read of the repository's Actions settings failed. Confirm it by hand. |
 
 `custom deployment protection rules on shipmate-engine` appears only when the
 environment exists and has an enabled custom deployment protection rule, or its
@@ -459,9 +459,10 @@ before any wave starts.
 
 A plan cell fails on its very first step, before `terramate` runs, so the cell
 produces no plan and its `shipmate / <stack> / <env>` check does not go green.
-The failing
-plan job leaves `shipmate / gate` held red with `plan incomplete (plan job:
-failure)` — a hold, not an absence (§`shipmate / gate` never goes green, "The
+The failing plan job leaves `shipmate / gate` held red with
+`shipmate / <stack> / <env> has no plan summary; fix its plan or re-plan`, or
+`plan incomplete (plan job: failure); fix the failing plan checks before merging`
+when no cell without a summary is known or its name does not fit — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
 That run publishes no apply check. Checks an earlier plan run of the same head
 published stay; on a head with none, a `shipmate apply` replies "no reviewed plan
@@ -778,16 +779,6 @@ each drift file's `drift` job. A secret on `shipmate-engine` or on one half of a
 split environment alone reaches the wrong cells
 ([`getting-started.md`](getting-started.md) lists each placement).
 
-### `plan artifact ... is not a shipmate-crypt-v1 artifact`
-
-An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
-before any apply step, and its `apply / <stack> / <env>` check stays pending.
-The artifact does not start with the shipmate-crypt-v1 header
-([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption): it was uploaded
-unencrypted, or encrypted by an earlier engine release. Re-plan: comment
-`shipmate plan` or push on an open pull request; after the merge, open a new
-pull request touching the stack.
-
 ### `plan artifact ... failed authentication`
 
 An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
@@ -814,8 +805,9 @@ The apply cell could not open its reviewed plan artifact; the error at
 the end of the message says why. Nothing was applied.
 
 - **The artifact downloaded without `stack.otplan`.** No earlier step reports
-  it. Re-plan, as in §`plan artifact ... is not a shipmate-crypt-v1 artifact`;
-  a re-run downloads the same artifact.
+  it. Re-plan: comment `shipmate plan` or push on an open pull request; after
+  the merge, open a new pull request touching the stack. A re-run downloads the
+  same artifact.
 - **The runner's disk failed.** The refusal comes before any apply step, so a
   re-run of the job is safe; a self-hosted runner needs its disk fixed.
 
@@ -976,21 +968,6 @@ other case, re-plan and reconcile against the provider:
    replaced resource as a create rather than a replace.
 9. Once applied, delete the `import` and `removed` blocks in a later pull
    request.
-
-### `state cache entry ... is not a shipmate-crypt-v1 entry`
-
-A local backend's restore matched a cache entry saved unencrypted or by an
-earlier engine release, and refused before tofu read it. Every older entry
-under its prefix was saved the same way, and no secret change helps. The
-message gives the command that deletes every entry under the prefix; the
-restore matches by prefix, so deleting only the named entry restores the
-next-older one.
-
-Deleting discards that state: OpenTofu no longer tracks the resources it
-recorded, and a plan of the stack in that environment re-creates them. A
-plan or drift cell can be re-run; never re-run a refused apply cell or deploy.
-For a real resource, applying that plan duplicates or collides with the
-existing object.
 
 ### `state cache entry ... cannot be read`
 
@@ -1171,18 +1148,21 @@ checks, reading "plan run <id> holds this gate while it publishes; re-plan
 (comment shipmate plan or push) if that run has ended". That hold stays when the
 run ends before its final gate write (a failed or cancelled summary job, or a
 cancelled plan job after the summary downloaded a cell summary). A sticky plan
-comment that could not be listed or written fails the summary job before that
-write too; the error is in the job's annotation for a failed write and in the
-step log for a failed listing. After such a failure, a publish hold the run wrote
-stays, and a run that planned no cell wrote none, so the head keeps the gate it
-had, or no `shipmate / gate` status, which a required gate also blocks. The
+comment that could not be listed or written, or whose pull request head could
+not be read ("could not read the head of pull request #<n>"), fails the summary
+job before that write too, and before any apply check is published; the error
+is in the job's annotation for a failed write and in the step log for a failed
+listing or head read. A held run's comment write, which only explains the red
+gate, warns on those failures instead, and the gate is still written. What a
+summary job that fails part way leaves on the comment is in
+[`CONTRACT.md`](../CONTRACT.md) §Plan comment. The
 summary job also holds the gate when it cannot read the head's gate statuses or
 apply checks, or cannot build the checks to publish (a cell summary missing a key),
 whether or not it downloaded a cell summary: a failed download leaves none over
 planned cells. That hold reads "re-plan this pull request (comment shipmate plan
-or push): its plan run ended before writing a final gate". Its final write
-refuses, writing nothing and keeping the gate as it stands, when a newer plan
-run of the same head holds the gate by then. A plan run whose `summary` job was
+or push): its plan run ended before writing a final gate". Its apply-check
+publish and its final write each refuse, writing nothing and keeping the gate
+as it stands, when a newer plan run of the same head holds the gate by then. A plan run whose `summary` job was
 cancelled before it ran, because a later gate writer on the same head queued
 behind it (`CONTRACT.md` §Comment-ops, "The aggregate gate"), holds the gate
 from its `gate-hold` job, reading "its plan summary was cancelled before it

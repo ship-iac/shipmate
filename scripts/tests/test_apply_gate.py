@@ -17,101 +17,82 @@ def _run(name, status, conclusion, started_at="2026-07-18T10:00:00Z", run_id=1):
     }
 
 
-def test_all_applies_succeeded():
-    runs = [
-        _run("apply / stacks/app / dev-eu", "completed", "success"),
-        _run("apply / stacks/app / dev-us", "completed", "success"),
-    ]
-    assert ag.verdict(runs) == "complete"
+_EU = "apply / stacks/app / dev-eu"
+_US = "apply / stacks/app / dev-us"
 
 
-def test_one_apply_still_queued():
-    runs = [
-        _run("apply / stacks/app / dev-eu", "completed", "success"),
-        _run("apply / stacks/app / dev-us", "queued", None),
-    ]
-    assert ag.verdict(runs) == "pending"
-
-
-def test_failed_apply_does_not_complete_gate():
-    runs = [
-        _run("apply / stacks/app / dev-eu", "completed", "failure"),
-        _run("apply / stacks/app / dev-us", "completed", "success"),
-    ]
-    assert ag.verdict(runs) == "pending"
-
-
-def test_neutral_no_change_apply_counts_as_done():
-    # plan-cell completes a no-changes cell's apply check with conclusion=neutral.
-    runs = [
-        _run("apply / stacks/app / dev-eu", "completed", "neutral"),
-        _run("apply / stacks/app / dev-us", "completed", "success"),
-    ]
-    assert ag.verdict(runs) == "complete"
-
-
-def test_latest_run_per_name_wins():
-    # A re-created check, a plan rerun superseding an older pending one for instance, must be
-    # judged by its newest run, picked by check-run id, which is creation order.
-    runs = [
-        _run(
-            "apply / stacks/app / dev-eu",
-            "queued",
-            None,
-            started_at="2026-07-18T10:00:00Z",
-            run_id=1,
+@pytest.mark.parametrize(
+    ("runs", "expected"),
+    [
+        pytest.param(
+            [_run(_EU, "completed", "success"), _run(_US, "completed", "success")],
+            "complete",
+            id="all_applies_succeeded",
         ),
-        _run(
-            "apply / stacks/app / dev-eu",
-            "completed",
-            "success",
-            started_at="2026-07-18T11:00:00Z",
-            run_id=2,
+        pytest.param(
+            [_run(_EU, "completed", "success"), _run(_US, "queued", None)],
+            "pending",
+            id="one_apply_still_queued",
         ),
-    ]
-    assert ag.verdict(runs) == "complete"
-
-
-def test_stale_completed_run_does_not_mask_newer_pending():
-    runs = [
-        _run(
-            "apply / stacks/app / dev-eu",
-            "completed",
-            "success",
-            started_at="2026-07-18T10:00:00Z",
-            run_id=1,
+        pytest.param(
+            [_run(_EU, "completed", "failure"), _run(_US, "completed", "success")],
+            "pending",
+            id="failed_apply_does_not_complete_gate",
         ),
-        _run(
-            "apply / stacks/app / dev-eu",
-            "queued",
-            None,
-            started_at="2026-07-18T11:00:00Z",
-            run_id=2,
+        # plan-cell completes a no-changes cell's apply check with conclusion=neutral.
+        pytest.param(
+            [_run(_EU, "completed", "neutral"), _run(_US, "completed", "success")],
+            "complete",
+            id="neutral_no_change_apply_counts_as_done",
         ),
-    ]
-    assert ag.verdict(runs) == "pending"
-
-
-def test_non_apply_checks_ignored():
-    runs = [
-        _run("stacks/app / dev-eu", "completed", "success"),
-        _run("shipmate / gate", "queued", None),
-        _run("apply / stacks/app / dev-eu", "completed", "success"),
-    ]
-    assert ag.verdict(runs) == "complete"
-
-
-def test_no_apply_checks_at_all_is_pending():
-    """`all([])` is True, so an empty listing must not read complete.
-
-    Mutation: drop `latest and` from `verdict` -- the empty listing reads `complete`."""
-    runs = [_run("stacks/app / dev-eu", "completed", "success")]
-    assert ag.verdict(runs) == "pending"
-
-
-def test_cancelled_apply_stays_pending():
-    runs = [_run("apply / stacks/app / dev-eu", "completed", "cancelled")]
-    assert ag.verdict(runs) == "pending"
+        # A re-created check, a plan rerun superseding an older pending one for instance, must
+        # be judged by its newest run, picked by check-run id, which is creation order.
+        pytest.param(
+            [
+                _run(_EU, "queued", None, started_at="2026-07-18T10:00:00Z", run_id=1),
+                _run(_EU, "completed", "success", started_at="2026-07-18T11:00:00Z", run_id=2),
+            ],
+            "complete",
+            id="latest_run_per_name_wins",
+        ),
+        pytest.param(
+            [
+                _run(_EU, "completed", "success", started_at="2026-07-18T10:00:00Z", run_id=1),
+                _run(_EU, "queued", None, started_at="2026-07-18T11:00:00Z", run_id=2),
+            ],
+            "pending",
+            id="stale_completed_run_does_not_mask_newer_pending",
+        ),
+        pytest.param(
+            [
+                _run("stacks/app / dev-eu", "completed", "success"),
+                _run("shipmate / gate", "queued", None),
+                _run(_EU, "completed", "success"),
+            ],
+            "complete",
+            id="non_apply_checks_ignored",
+        ),
+        # `all([])` is True, so an empty listing must not read complete. Mutation: drop
+        # `latest and` from `verdict` -- the empty listing reads `complete`.
+        pytest.param(
+            [_run("stacks/app / dev-eu", "completed", "success")],
+            "pending",
+            id="no_apply_checks_at_all_is_pending",
+        ),
+        pytest.param(
+            [_run(_EU, "completed", "cancelled")],
+            "pending",
+            id="cancelled_apply_stays_pending",
+        ),
+        pytest.param(
+            [{"name": _EU, "status": "completed", "conclusion": "success"}],
+            "complete",
+            id="verdict_does_not_crash_on_runs_missing_started_at_and_id",
+        ),
+    ],
+)
+def test_verdict(runs, expected):
+    assert ag.verdict(runs) == expected
 
 
 def test_done_names_excludes_completed_failure():
@@ -220,11 +201,6 @@ def test_latest_by_name_newer_queued_null_started_at_beats_older_completed():
     latest = ag.latest_by_name([older_completed, newer_queued_null])
     assert latest["apply / stacks/app / dev-eu"]["id"] == 2
     assert ag.done_names([older_completed, newer_queued_null]) == set()
-
-
-def test_verdict_does_not_crash_on_runs_missing_started_at_and_id():
-    runs = [{"name": "apply / stacks/app / dev-eu", "status": "completed", "conclusion": "success"}]
-    assert ag.verdict(runs) == "complete"
 
 
 def test_parse_jsonl_truncates_long_offending_line():
@@ -471,18 +447,14 @@ def test_plan_records_zero_pull_request_reads_as_none():
 
 
 def _plan_runs_stdout(monkeypatch, capsys, *lines):
-    # GITHUB_OUTPUT is deliberately unset: a gate verdict written in this mode would be a
-    # decision the caller never asked for, and would abort on the missing variable instead.
-    monkeypatch.setattr(ag.sys, "argv", ["apply-gate", "--plan-runs"])
     monkeypatch.setattr(ag.sys, "stdin", io.StringIO("\n".join(lines)))
     monkeypatch.setenv("SHIPMATE_APP_ID", "999")
-    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     ag.main()
     return capsys.readouterr().out
 
 
-def test_plan_runs_mode_prints_the_run_projection_and_writes_no_verdict(monkeypatch, capsys):
-    """comment-ops' reviewed-plan lookup is this mode, read by authorize as PLAN_RUN_JSON; its
+def test_main_prints_the_run_projection(monkeypatch, capsys):
+    """comment-ops' reviewed-plan lookup is `main`'s output, read by authorize as PLAN_RUN_JSON; its
     bytes are compared whole. Mutation: project every record, `None` runs included -- the
     record without a plan run prints as `null`, red. Mutation: project only records carrying a
     `pr` -- `stacks/web`, recorded before pull requests were, drops out, red."""
@@ -499,8 +471,8 @@ def test_plan_runs_mode_prints_the_run_projection_and_writes_no_verdict(monkeypa
     assert out == '{"apply / stacks/app / dev-eu": "777", "apply / stacks/web / dev-eu": "778"}\n'
 
 
-def test_plan_runs_mode_is_identical_with_and_without_a_digest(monkeypatch, capsys):
-    """authorize reads the `--plan-runs` membership; a name must not drop out of it because
+def test_main_is_identical_with_and_without_a_digest(monkeypatch, capsys):
+    """authorize reads `main`'s membership; a name must not drop out of it because
     its record carries no digest, or an operator is told their plan does not exist. Both
     outputs are compared whole against the same hand-written literal. Mutation: project only
     records carrying both a run and a digest -- the digest-less one prints `{}`, red."""
@@ -509,12 +481,3 @@ def test_plan_runs_mode_is_identical_with_and_without_a_digest(monkeypatch, caps
     without_hash = _ext("apply / stacks/app / dev-eu", 1, _record())
     assert _plan_runs_stdout(monkeypatch, capsys, with_hash) == expected
     assert _plan_runs_stdout(monkeypatch, capsys, without_hash) == expected
-
-
-def test_an_unrecognized_argument_fails_loud(monkeypatch):
-    # A typo'd flag must not fall through to the verdict path, which would write a gate
-    # decision where the caller asked for the mapping.
-    monkeypatch.setattr(ag.sys, "argv", ["apply-gate", "--plan-run"])
-    with pytest.raises(SystemExit) as exc:
-        ag.main()
-    assert "--plan-run" in str(exc.value)

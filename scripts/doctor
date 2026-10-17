@@ -70,10 +70,13 @@ from _shipmate import (
     first_codeowners,
     gate_check,
     is_head_sha,
+    is_run_id,
     load_workflow_text,
     review_count,
     run,
+    run_annotated,
     utf8_output,
+    write_outputs,
     yaml_error_text,
 )
 from _shipmate import gh_json as _gh_json
@@ -975,11 +978,11 @@ def _contents_ref(ctx):
     read reports the pin stale on the very PR that fixes it. "No commit" is
     therefore a reason to SKIP the probe, not to read something else.
 
-    Anything that is not a 40-char hex SHA counts as absent rather than being
-    interpolated into the request path (same guard as apply-detect's) — a probe
-    must not be able to retarget a `gh api` URL, however it was configured."""
-    sha = ctx.get("head_sha") or ""
-    return f"?ref={sha}" if _SHA40.fullmatch(sha) else None
+    Anything that is not a head SHA (`is_head_sha`) counts as absent rather than being
+    interpolated into the request path — a probe must not be able to retarget a `gh api`
+    URL, however it was configured."""
+    sha = ctx.get("head_sha")
+    return f"?ref={sha}" if is_head_sha(sha) else None
 
 
 def _workflow_names(base):
@@ -999,17 +1002,6 @@ def _workflow_names(base):
         for e in listing
         if e["name"].endswith((".yml", ".yaml")) and e.get("type") == "file"
     ], True
-
-
-def _contents_text(path):
-    """`env-config`'s contents-API read, bound to this module's `_gh_json`. `None` when the
-    file cannot be read, which every caller here degrades on rather than failing — see
-    `_unverified` for why.
-
-    The binding is what keeps this module's tests intercepting the read: they patch
-    `_gh_json`, which a call reaching `gh` through `env-config` would bypass.
-    """
-    return ec.contents_text(path, fetch=_gh_json)
 
 
 def _workflow_doc(text, name):
@@ -1044,7 +1036,9 @@ def _workflow_file(ctx, name, ref):
     parse (`_workflow_doc`)."""
     cache = ctx.setdefault("workflow_reads", {})
     if (name, ref) not in cache:
-        text = _contents_text(f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}/{name}{ref}")
+        text = ec.contents_text(
+            f"repos/{ctx['repo']}/contents/{_WORKFLOWS_DIR}/{name}{ref}", fetch=_gh_json
+        )
         parsed = (None, None) if text is None else _workflow_doc(text, name)
         cache[(name, ref)] = (text, *parsed)
     return cache[(name, ref)]
@@ -1058,7 +1052,7 @@ def _scan_workflow_docs(ctx, ref, per_file, unreadable):
     (permissions, a bad ref, an API outage) applies to the rest of the directory.
 
     KNOWN GAP, not a guarantee: files after that one are never examined, so a
-    caller accumulating state across files (`_pins_in_workflows`' `seen`) hands
+    caller accumulating state across files (`_pin_warnings`' `pins`) hands
     its own caller a PARTIAL result that reads as complete. `unreadable` is the
     only signal, and it is a NOTICE, so a pin-freshness report can name stale
     pins in the files it read while saying nothing about the rest.
@@ -1170,29 +1164,6 @@ def _pin_findings(doc, fname, ctx, seen):
     return out
 
 
-def _pins_in_workflows(ctx):
-    """(warnings, {(file, sha)}) for every engine action pin found in
-    the consumer's workflow files at the commit under examination. The engine's
-    owner/repo comes from `ctx["engine_repo"]`, which the step that runs this action
-    passes in from `job.workflow_repository` — shipmate never hardcodes an org. Either
-    precondition missing, or an unreadable listing or file, degrades to a NOTICE
-    rather than an error; the preconditions are checked before any API call,
-    since without them no read could be interpreted anyway."""
-    seen = set()
-    if not ctx["engine_repo"]:
-        return [PIN_NO_ENGINE], seen
-    ref = _contents_ref(ctx)
-    if ref is None:
-        return [PIN_NO_COMMIT], seen
-    out = _scan_workflow_docs(
-        ctx,
-        ref,
-        lambda doc, name: _pin_findings(doc, name, ctx, seen),
-        PIN_UNREADABLE,
-    )
-    return out, seen
-
-
 def _latest_release_sha(slug):
     """(tag, sha) of `slug`'s latest release; (None, None) when unreadable.
 
@@ -1212,7 +1183,25 @@ def _latest_release_sha(slug):
 
 
 def _pin_warnings(ctx):
-    out, pins = _pins_in_workflows(ctx)
+    """Engine action pins in the consumer's workflow files at the commit under examination
+    that differ from the engine's latest release. The engine's owner/repo comes from
+    `ctx["engine_repo"]`, which the step that runs this action passes in from
+    `job.workflow_repository` — shipmate never hardcodes an org. Either precondition
+    missing, or an unreadable listing, file or release, degrades to a NOTICE rather than an
+    error; the preconditions are checked before any API call, since without them no read
+    could be interpreted anyway."""
+    if not ctx["engine_repo"]:
+        return [PIN_NO_ENGINE]
+    ref = _contents_ref(ctx)
+    if ref is None:
+        return [PIN_NO_COMMIT]
+    pins = set()
+    out = _scan_workflow_docs(
+        ctx,
+        ref,
+        lambda doc, name: _pin_findings(doc, name, ctx, pins),
+        PIN_UNREADABLE,
+    )
     if not pins:
         return out
     slug = ctx["engine_repo"]
@@ -1900,7 +1889,7 @@ def _config_table(ctx):
     ref = _contents_ref(ctx)
     if ref is None:
         return None, [CONFIG_NO_COMMIT], []
-    text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}{ref}")
+    text = ec.contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}{ref}", fetch=_gh_json)
     if text is None:
         return None, [CONFIG_UNREADABLE], []
     try:
@@ -1987,7 +1976,7 @@ def _default_branch_table(ctx):
     Read once per run and kept on `ctx`, so every probe judges the same copy.
     """
     if "default_branch_table" not in ctx:
-        text = _contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}")
+        text = ec.contents_text(f"repos/{ctx['repo']}/contents/{CONFIG_PATH}", fetch=_gh_json)
         table = None
         if text is not None:
             with contextlib.suppress(SystemExit):
@@ -2288,16 +2277,6 @@ def harvest_pending(lines, app_id=""):
     return False
 
 
-def _write_step_output(name, value):
-    """Append `name=<value>` to the calling action step's GITHUB_OUTPUT, a bool as
-    `true`/`false`."""
-    path = os.environ["GITHUB_OUTPUT"]
-    if isinstance(value, bool):
-        value = "true" if value else "false"
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(f"{name}={value}\n")
-
-
 #: The check-runs listing's jq projection: every field `latest_check_ids`, `harvest_pending`
 #: and `ag.plan_records` read, the nested `app.id` included.
 _CHECK_RUNS_JQ = (
@@ -2338,7 +2317,7 @@ def _harvest(repo, head, app_id):
     else:
         try:
             ids = latest_check_ids(lines, app_id)
-            _write_step_output("harvest_pending", harvest_pending(lines, app_id))
+            write_outputs(harvest_pending=harvest_pending(lines, app_id))
         except (Exception, SystemExit) as e:  # noqa: BLE001 - doctor degrades, never fails
             _degrade(e, "doctor check-ids reduction failed; doctor reports settings probes only")
             ids, failed = [], True
@@ -2373,9 +2352,7 @@ def _download_cells(repo, lines, app_id):
         )
         records = {}
     # The id reaches a `gh` argv and a directory name, so only a decimal string passes.
-    run_ids = sorted(
-        {r for r, _, _ in records.values() if isinstance(r, str) and re.fullmatch(r"[0-9]+", r)}
-    )
+    run_ids = sorted({r for r, _, _ in records.values() if isinstance(r, str) and is_run_id(r)})
     pathlib.Path("doctor-cells").mkdir(exist_ok=True)
     for rid in run_ids:
         # -R: this job checks out nothing, so gh has no remote to infer the repo from. One
@@ -2414,13 +2391,12 @@ def check_ids():
     head = _head_sha(repo)
     if not is_head_sha(head):
         print("::warning::could not read the PR head SHA; doctor reports settings probes only")
-        for name, value in (("head_sha", ""), ("plan_run_ids", ""), ("harvest_failed", True)):
-            _write_step_output(name, value)
+        write_outputs(head_sha="", plan_run_ids="", harvest_failed=True)
         return
-    _write_step_output("head_sha", head)
+    write_outputs(head_sha=head)
     lines, failed = _harvest(repo, head, app_id)
-    _write_step_output("harvest_failed", failed)
-    _write_step_output("plan_run_ids", " ".join(_download_cells(repo, lines, app_id)))
+    write_outputs(harvest_failed=failed)
+    write_outputs(plan_run_ids=" ".join(_download_cells(repo, lines, app_id)))
 
 
 def load_annotations(ctx):
@@ -2627,6 +2603,13 @@ def _verdict(findings, sections, ctx):
     return circle, f"{circle} {', '.join(t for _, t in tokens)} {sha}"
 
 
+#: Not a finding: in `warnings()` it would suppress the all-clear and annotate every plan run.
+NOT_CHECKED = (
+    "_Not checked: the repository's Actions settings (docs/hardening.md rows 10 to 12 and 20), "
+    "which no token a workflow can obtain reads. `scripts/onboard` checks rows 10, 12 and 20._"
+)
+
+
 def _report_head(ctx, verdict):
     """Shared by both render paths -- the marker is this comment's identity (the
     upsert PATCHes by it), so neither path can drift out of marker compliance."""
@@ -2639,6 +2622,8 @@ def _report_head(ctx, verdict):
         _plan_runs_line(ctx),
         "",
         "#### repository settings",
+        "",
+        NOT_CHECKED,
         "",
     ]
 
@@ -2760,4 +2745,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)

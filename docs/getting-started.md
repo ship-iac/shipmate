@@ -178,24 +178,25 @@ ruleset to an App and a ruleset pinned to one the workflows do not use blocks th
 default branch. So does a run without `--key` while
 `shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
-It then prints a checklist of what it cannot set, because those values are
-yours: `SHIPMATE_PLAN_PASSPHRASE`, the table with the
-cloud role, region and env identity your layout injects,
-adding the repository to the App installation, an approving review before apply,
-a `CODEOWNERS` entry, a git-tracked `.terraform.lock.hcl` in each stack, and
+It then prints a checklist of what it does not set, because those values are
+yours: `SHIPMATE_PLAN_PASSPHRASE`, the table with the cloud role, region and env
+identity your layout injects, adding the repository to the App installation, an
+approving review before apply, a `CODEOWNERS` entry, a git-tracked
+`.terraform.lock.hcl` in each stack, the repository's Actions settings
+([`hardening.md`](hardening.md) §10–12 and 20 lists the rows it checks), and
 the pull request carrying the workflow file. Three items check the whole tree
 before a run does: `unmanaged stacks` names the stacks with no `env/*` tag,
 `stack tags` the tag refusals a plan would raise and the workload tags that
-disagree with the table, and `drift sweeps` the cells no drift file sweeps. It marks
-each item `ok`, `todo` or `cannot check` from what the run read, and only a
-`todo` prints what to do. Four items can be `cannot check`: the App
+disagree with the table, and `drift sweeps` the cells no drift file sweeps. It
+marks each item `ok`, `todo` or `cannot check` from what the run read, and only
+a `todo` prints what to do. The items that can be `cannot check` are: the App
 installation, which only an App JWT can read; the custom deployment protection
 rules on `shipmate-engine`, when they cannot be listed; once a `CODEOWNERS` file
 exists, whether its entries cover the IaC, the workflows,
 `/.github/shipmate-config.yml` and `/.github/CODEOWNERS`, which is GitHub's
-matching; and `drift sweeps`, when a drift file's `tags` query cannot be read,
-or a stack carrying two `workload/*` tags or two stack paths that slug alike
-leave no whole tree to cover
+matching; `drift sweeps`, when a drift file's `tags` query cannot be read, or a
+stack carrying two `workload/*` tags or two stack paths that slug alike leave no
+whole tree to cover; and an Actions-settings item whose read failed
 ([`troubleshooting.md`](troubleshooting.md) §What `scripts/onboard` reports).
 
 The checklist reads the working tree: stack tags, `.github/shipmate-config.yml` and
@@ -263,81 +264,122 @@ creates all of them, including `shipmate-engine` and its branch policy:
   environment can have no protection at all, so anyone who can push a branch
   can reach whatever role a plan cell resolves; what refuses it is that role's
   own trust-policy claim condition ([`hardening.md`](hardening.md) §7–9).
-- **The environment identity your layout injects comes from the environment
-  table**, `.github/shipmate-config.yml` on your repository's default branch
-  ([`../CONTRACT.md`](../CONTRACT.md) §Environment table). It is required: a
-  repository without one has nothing for its cells to run as, and every run
-  refuses. `layout` is the discriminator — `tf_vars` derives `TF_VAR_env` and
-  `TF_VAR_region` from each environment's key and its region, `workspace`
-  derives `TF_WORKSPACE`, and `folder` derives nothing, its leaves fixing env
-  and region by path. `scripts/env-inject` is the cell's one writer of the job
-  environment: it writes what the table resolved under the names OpenTofu reads,
-  and composes your own variables and secrets (§Variables and secrets your stacks
-  need) into the same write, refusing any name two channels supply.
-  [`../CONTRACT.md`](../CONTRACT.md) §Env model is the per-layout table;
-  [`concepts.md`](concepts.md) explains where they land.
 
-  ```yaml
-  # .github/shipmate-config.yml
-  layout: tf_vars
+`.github/shipmate-config.yml` names these environments and what each cell runs
+as: §The table.
 
-  identities:
-    dev:
-      aws:
-        plan: arn:aws:iam::9817:role/shipmate-plan
-        apply: arn:aws:iam::9817:role/shipmate-apply
+### The table
 
-  environments:
-    dev-eu:
-      region: eu-west-1
-      identity: dev
-  ```
+Use `layout: tf_vars` when one stack configuration is deployed once per environment,
+its state path built from `${var.env}` and `${var.region}`
+([`../CONTRACT.md`](../CONTRACT.md) §Env model). `workspace` and `folder` exist for
+repositories already laid out by OpenTofu workspace or by one directory per
+environment and region.
 
-  Give the plan and apply paths separate roles: the plan path is reachable from
-  any branch ([`hardening.md`](hardening.md) §7–9).
-  [`../CONTRACT.md`](../CONTRACT.md) §Environment table has the schema,
-  including identities, per-workload roles, `workloads` and the order in which
-  to add one, and [`aws.md`](aws.md) §"The environment table" has a
-  per-workload example.
+Across both tiers each environment needs two GitHub Environments, `<env>-plan` and
+`<env>-apply`, or one bare `<env>` for an entry holding `shared: true`, and the
+repository needs `shipmate-engine` once: four split environments need nine. Under
+`tf_vars`, a stack tagged into an environment with no entry, or with an entry that has
+no region, is refused; under `workspace` or `folder` an `env/<name>` stack tag alone
+makes an environment.
 
-  The OIDC subject names only the environment (`environment:<env>-apply`, or
-  the bare `<env>` when shared), never the workload, so every workload role
-  whose trust policy accepts that subject is reachable from every apply cell of
-  that environment, and for a shared environment from every plan cell too.
-  Choose how finely to split environments before writing those trust policies
-  ([`hardening.md`](hardening.md) §7–9).
+The environment identity your layout injects comes from the environment table,
+`.github/shipmate-config.yml` on your repository's default branch
+([`../CONTRACT.md`](../CONTRACT.md) §Environment table). It is required: a
+repository without one has nothing for its cells to run as, and every run
+refuses. `layout` is the discriminator — `tf_vars` derives `TF_VAR_env` and
+`TF_VAR_region` from each environment's key and its region, `workspace`
+derives `TF_WORKSPACE`, and `folder` derives nothing, its leaves fixing env
+and region by path. `scripts/env-inject` is the cell's one writer of the job
+environment: it writes what the table resolved under the names OpenTofu reads,
+and composes your own variables and secrets (§Variables and secrets your stacks
+need) into the same write, refusing any name two channels supply.
+[`../CONTRACT.md`](../CONTRACT.md) §Env model is the per-layout table;
+[`concepts.md`](concepts.md) explains where they land.
 
-  An environment applies without an approving review through `gated: false`
-  on its own `environments.<name>` entry (§"Applying chosen environments
-  without an approving review").
+```yaml
+# .github/shipmate-config.yml
+layout: tf_vars
 
-  **A value can come from a GitHub variable.** Write `{vars: NAME}` in
-  place of any string, list items included (`apply: {vars: PROD_APPLY_ROLE}`),
-  except `shared`, `explicit`, `gated` and `max_parallel`
-  ([`../CONTRACT.md`](../CONTRACT.md) §Variable references), and define the
-  name as a repository or organization variable. A resolved value is printed in job
-  outputs and logs, so reference variables only, never secrets. Never define it
-  on `shipmate-engine`: comment-ops and the plan summary bind that Environment,
-  so a variable of the same name there shadows the repository value in those
-  two jobs only. Run `shipmate doctor` on the pull request that adds a
-  reference. [`../CONTRACT.md`](../CONTRACT.md) §Variable references has the
-  scope, the shadowing rule and what a changed value does to a pending apply.
+identities:
+  dev:
+    aws:
+      plan: arn:aws:iam::9817:role/shipmate-plan
+      apply: arn:aws:iam::9817:role/shipmate-apply
 
-  **The table has to be on the default branch before your first plan run.** The
-  engine reads it from the default branch, so a pull request that only adds the
-  table is refused by the branch it is compared against. Put it in the same
-  pull request as the workflow file. That pull request must change no stack:
-  its merge pushes to the default branch and runs `deploy`, and a changed stack
-  there has no plan run to apply from, so that deploy fails. The pull request
-  merges normally, because no ruleset requires `shipmate / gate`
-  yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
-  then `shipmate doctor` reports that no active ruleset requires the gate.
+environments:
+  dev-eu:
+    region: eu-west-1
+    identity: dev
+```
+
+Give the plan and apply paths separate roles: the plan path is reachable from
+any branch ([`hardening.md`](hardening.md) §7–9).
+[`../CONTRACT.md`](../CONTRACT.md) §Environment table has the schema,
+including identities, per-workload roles, `workloads` and the order in which
+to add one, and [`aws.md`](aws.md) §"The environment table" has a
+per-workload example.
+
+The OIDC subject names only the environment (`environment:<env>-apply`, or
+the bare `<env>` when shared), never the workload, so every workload role
+whose trust policy accepts that subject is reachable from every apply cell of
+that environment, and for a shared environment from every plan cell too.
+Choose how finely to split environments before writing those trust policies
+([`hardening.md`](hardening.md) §7–9).
+
+**A value can come from a GitHub variable.** Write `{vars: NAME}` in
+place of any string, list items included (`apply: {vars: PROD_APPLY_ROLE}`),
+except `shared`, `explicit`, `gated` and `max_parallel`
+([`../CONTRACT.md`](../CONTRACT.md) §Variable references), and define the
+name as a repository or organization variable. A resolved value is printed in job
+outputs and logs, so reference variables only, never secrets. Never define it
+on `shipmate-engine`: comment-ops and the plan summary bind that Environment,
+so a variable of the same name there shadows the repository value in those
+two jobs only. Run `shipmate doctor` on the pull request that adds a
+reference. [`../CONTRACT.md`](../CONTRACT.md) §Variable references has the
+scope, the shadowing rule and what a changed value does to a pending apply.
+
+**The table has to be on the default branch before your first plan run.** The
+engine reads it from the default branch, so a pull request that only adds the
+table is refused by the branch it is compared against. Put it in the same
+pull request as the workflow file. That pull request must change no stack:
+its merge pushes to the default branch and runs `deploy`, and a changed stack
+there has no plan run to apply from, so that deploy fails. The pull request
+merges normally, because no ruleset requires `shipmate / gate`
+yet. Re-run `scripts/onboard` after merging to create the gate ruleset; until
+then `shipmate doctor` reports that no active ruleset requires the gate.
 
 The top-level `max_parallel` key (default 10), beside `layout`, `identities`
 and `environments`, caps how many cells one plan or drift sweep runs at once ([`../CONTRACT.md`](../CONTRACT.md)
 §Environment table). Each plan and drift sweep running at the same time takes
 up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
 §"What it costs").
+
+**What each environment and ordering key does.** Four are keys of an `environments` entry;
+`after` is a Terramate stack attribute (`after = [...]` in the stack block). In the
+review column, approving review is the branch ruleset's `reviewDecision`, and
+environment reviewers are the GitHub Environment's required reviewers, a different
+control. `—` means the key has no effect there.
+
+| Key (default) | Holds back | Bare `shipmate apply` | `shipmate apply <env>` | Merge deploy | Review | Gives up |
+| --- | --- | --- | --- | --- | --- | --- |
+| `gated: false` (`true`) | — | On `REVIEW_REQUIRED`, applies it and holds the gated environments | Authorized on `REVIEW_REQUIRED` | — | Approving review not required; `CHANGES_REQUESTED` and an unknown or absent decision still refuse. Environment reviewers untouched | The approving review before a pre-merge apply |
+| `explicit: true` (`false`) | The environment from a bare apply | Skips it: its checks and the gate stay pending | — | Applies it: environment reviewers are this path's control, and a shared environment has none | — | A bare apply does not complete the pull request: the gate stays pending until `shipmate apply <env>` names it |
+| `shared: true` (`false`) | — | Binds the bare `<env>` | Binds the bare `<env>` | Binds the bare `<env>` | Environment reviewers would stall its plans and drift sweeps too | The reviewer gate and the plan/apply OIDC subject split |
+| `needs: [<env>]` (none) | Its applies, until the earlier env-levels complete (bare apply and deploy) | Env-levels in order; a failure skips the later levels | One env-level, not ordered by `needs`; `needs` still picks which upstream cells a cell waits on | Env-levels in order; a failure skips the later levels | — | Later levels wait for every earlier one; at most four levels |
+| `after = [...]` (none) | A cell, until its upstream cells apply | Stack waves; a cell after a pending cell not applying in the run waits | Stack waves; a cell after a pending cell of another environment waits | Stack waves | — | A dependent that reads its upstream's change takes two pull requests: plans do not follow `after` |
+
+On a bare apply, an environment held for review, excluded as `explicit`, or holding a
+waiting cell skips the environments ordered after it by `needs`, an ungated one
+included, and its cells that do not apply in the run make the cells ordered `after` them
+wait, which can skip more; §Env apply order computes the whole set.
+
+Sources: [`../CONTRACT.md`](../CONTRACT.md) §Comment-ops for `gated` and `explicit`,
+§Env model for `shared`, §Env apply order for `needs` and the waiting cells, §Fan-out for
+`after`'s waves. The four table keys are read from the default branch
+(§Environment table, §Env model), so a pull request cannot change its own; a deploy
+re-run reads `after` from the merged commit (§Env apply order). §"Applying chosen
+environments without an approving review" has the `gated` setup.
 
 ### The workflow file
 
@@ -402,12 +444,13 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
 Only the `plan` job and each drift file's `drift` job accept a `runs_on:`
-input. Behind every other call the engine's detect jobs and cells run on
-`ubuntu-latest`, and its control jobs, `plan.yml`'s `facts` and `gate-hold` included, run on
-`ubuntu-slim` ([`aws.md`](aws.md) §Runner choice). The fences below omit it, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
-`ubuntu-latest` too. Pass it only for a different label your plan actually
-offers; one it does not leaves every job of that call waiting for a runner that
-never arrives.
+input. The jobs those two calls reach take the input, except `plan.yml`'s
+`facts` and `gate-hold`; every other engine job's runner is fixed.
+[`aws.md`](aws.md) §Runner choice lists them. The fences below omit
+`runs_on:`, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
+`ubuntu-latest`. Pass it only for a different label your plan actually
+offers; one it does not leaves that call waiting for a runner that never
+arrives.
 
 ```yaml
 name: shipmate

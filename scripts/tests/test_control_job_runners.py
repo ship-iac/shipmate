@@ -1,12 +1,15 @@
 """Every engine job's `runs-on:`, whole map.
 
-The control jobs run no `tofu` and no `terramate`, so they take the 1-CPU `ubuntu-slim` image.
+The control jobs run no `tofu` and no `terramate`, so they take the 1-CPU `ubuntu-slim` image,
+except `comment-ops.yml`'s `ops`: its `doctor`, `apply` and `unlock` routes parse YAML, and
+`ubuntu-latest`'s `python3` ships PyYAML where slim would apt-install it on each such comment.
 Detect jobs run `terramate` and cells run `tofu`: they stay on `ubuntu-latest`. `plan.yml` and
 `drift.yml` take the consumer's `runs_on:` input, except `plan.yml`'s `facts` and `gate-hold`.
 `summary` stays on the input: doctor installs and parses YAML there, an apt install on slim. A new
 job, a moved job or a flipped label fails here. Mutations: `apply-env-level.yml` `complete` to
 `ubuntu-latest`; `plan.yml` `summary` to `ubuntu-slim`; `plan.yml` `facts` to
-`${{ inputs.runs_on }}`; the `apply-env-level.yml` `wave0` cell to `ubuntu-slim`.
+`${{ inputs.runs_on }}`; the `apply-env-level.yml` `wave0` cell to `ubuntu-slim`;
+`comment-ops.yml` `ops` back to `ubuntu-slim`.
 """
 
 from _loader import WORKFLOWS, workflow_yaml
@@ -24,7 +27,7 @@ EXPECTED = {
     ("apply.yml", "detect"): LATEST,
     ("apply.yml", "summary"): SLIM,
     ("ci.yml", "lint-test"): LATEST,
-    ("comment-ops.yml", "ops"): SLIM,
+    ("comment-ops.yml", "ops"): LATEST,
     ("deploy.yml", "detect"): LATEST,
     ("deploy.yml", "summary"): SLIM,
     ("drift.yml", "detect"): INPUT,

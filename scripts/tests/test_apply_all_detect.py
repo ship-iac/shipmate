@@ -11,9 +11,11 @@ from _detect_fixtures import (
     answering_run_graph,
     check_run,
     forbid_shared_runner,
+    foreign_message,
     run_graph_capture,
     spy_env_config,
     stub_read_table,
+    wave_cells,
 )
 from _loader import github_outputs, load_script
 
@@ -117,7 +119,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
             check_run(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
         ],
     )
-    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
 
 
 def test_membership_is_read_over_the_whole_tree_with_no_other_keyword(tmp_path, monkeypatch):
@@ -139,7 +141,7 @@ def test_reuses_single_sourced_helpers():
     assert aad.cells_for_env is not None
     assert aad.with_plan_runs is not None
     assert aad.wv.env_level_waves is not None
-    assert aad.wv.write_env_level_waves is not None
+    assert aad.wv.env_level_outputs is not None
     assert not hasattr(aad, "dd")
     assert not hasattr(aad, "cells_from_artifacts")
 
@@ -293,18 +295,8 @@ def _run_main(
     return github_outputs(out)
 
 
-def _wave_cells(parsed):
-    return [
-        c
-        for lvl in range(aad.wv.MAX_ENV_LEVELS)
-        for w in [json.loads(parsed[f"envlevel{lvl}_waves"])]
-        for i in range(aad.wv.MAX_WAVES)
-        for c in w[f"wave{i}"]
-    ]
-
-
 def _wave_envs(parsed):
-    return sorted(c["environment"] for c in _wave_cells(parsed))
+    return sorted(c["environment"] for c in wave_cells(aad.wv, parsed))
 
 
 def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
@@ -356,7 +348,7 @@ def test_main_reads_the_head_listing_and_makes_no_artifact_lookup(tmp_path, monk
     can disagree about a check that changed mid-run."""
     urls = []
     parsed = _run_main(tmp_path, monkeypatch, envs=["dev-eu"], decision="APPROVED", urls=urls)
-    assert len(_wave_cells(parsed)) == 1  # Not vacuous: a cell exists.
+    assert len(wave_cells(aad.wv, parsed)) == 1  # Not vacuous: a cell exists.
     assert urls == [CHECK_RUNS_URL]
 
 
@@ -372,7 +364,7 @@ def test_main_never_enrols_a_slug_alike_stack(tmp_path, monkeypatch):
         tags={"a/b": [], "a-b": []},
         checks=[_apply_check("a-b", "dev-eu")],
     )
-    assert [c["stack"] for c in _wave_cells(parsed)] == ["a-b"]
+    assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["a-b"]
 
 
 def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeypatch):
@@ -389,7 +381,7 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
             _apply_check("stacks/app", "dev-us", plan_run="222"),
         ],
     )
-    assert sorted((c["environment"], c["plan_run_id"]) for c in _wave_cells(parsed)) == [
+    assert sorted((c["environment"], c["plan_run_id"]) for c in wave_cells(aad.wv, parsed)) == [
         ("dev-eu", "111"),
         ("dev-us", "222"),
     ]
@@ -506,7 +498,7 @@ def test_main_keeps_a_failed_apply_check_re_appliable(tmp_path, monkeypatch):
             )
         ],
     )
-    assert [c["stack"] for c in _wave_cells(parsed)] == ["stacks/app"]
+    assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["stacks/app"]
 
 
 def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypatch):
@@ -865,15 +857,6 @@ def test_main_emits_the_apply_all_detect_notice_named_by_the_held_remedy(
     assert "apply-all-detect notice" in load_script("apply-comment")._HELD_REMEDY
 
 
-def _foreign_message(listed):
-    return (
-        f"::error::apply aborted: the plan recorded for {listed} was not made on pull request "
-        "#8, so this apply is refused. Re-plan on this pull request (push or comment `shipmate "
-        "plan`), then apply again; if another open pull request shares this head commit, the "
-        "newest plan decides which one may apply."
-    )
-
-
 def test_main_refuses_a_runnable_cell_recorded_for_another_pull_request(tmp_path, monkeypatch):
     """Mutation: pass `pr_number=None` to `with_plan_runs` in `bare_main` -- red."""
     with pytest.raises(SystemExit) as exc_info:
@@ -884,7 +867,7 @@ def test_main_refuses_a_runnable_cell_recorded_for_another_pull_request(tmp_path
             decision="APPROVED",
             checks=[_apply_check("stacks/app", "dev-eu", pr="7")],
         )
-    assert str(exc_info.value) == _foreign_message("apply / stacks/app / dev-eu (pull request #7)")
+    assert str(exc_info.value) == foreign_message("apply / stacks/app / dev-eu (pull request #7)")
 
 
 def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
@@ -910,7 +893,7 @@ def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
             _apply_check("stacks/app", "prod-eu", pr="7"),
         ],
     )
-    assert [(c["stack"], c["environment"]) for c in _wave_cells(parsed)] == [
+    assert [(c["stack"], c["environment"]) for c in wave_cells(aad.wv, parsed)] == [
         ("stacks/app", "dev-eu")
     ]
     assert json.loads(parsed["review_held_envs"]) == ["dev-us", "prod-eu"]
@@ -959,7 +942,7 @@ def _cross_env(tmp_path, monkeypatch, checks, **kw):
 
 
 def _applied(parsed):
-    return [(c["stack"], c["environment"]) for c in _wave_cells(parsed)]
+    return [(c["stack"], c["environment"]) for c in wave_cells(aad.wv, parsed)]
 
 
 def test_main_holds_only_the_cell_whose_upstream_is_held(tmp_path, monkeypatch):

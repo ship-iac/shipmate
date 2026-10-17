@@ -33,7 +33,9 @@ from _shipmate import (
     _run,
     check_runs,
     current_run_url,
+    is_run_id,
     run,
+    run_annotated,
     validate_head_sha,
 )
 
@@ -108,7 +110,7 @@ def newer_hold(sha):
     failed read, must not hide a newer run's earlier one. Only plan runs write a `failure` gate
     before a merge, so a newer one is a newer plan of the same head."""
     this_run = os.environ.get("GITHUB_RUN_ID", "")
-    if not re.fullmatch(r"[0-9]+", this_run):
+    if not is_run_id(this_run):
         raise SystemExit(f"::error::GITHUB_RUN_ID must be a decimal run id (got: {this_run!r})")
     runs = [
         int(run)
@@ -215,4 +217,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1:])
+    run_annotated(main, sys.argv[1:])

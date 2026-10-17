@@ -39,6 +39,7 @@ EXPECTED_SUMMARY_WITH = {
     "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "plan-result": "${{ needs.plan.result }}",
     "planned-cells": "${{ needs.detect.outputs.count }}",
+    "planned-cell-names": "${{ needs.detect.outputs.cells }}",
     "on-demand": "${{ needs.facts.outputs.on-demand }}",
     "is-draft": "${{ needs.facts.outputs.is-draft }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
@@ -47,7 +48,8 @@ EXPECTED_SUMMARY_WITH = {
     "unmanaged-stacks": "${{ needs.detect.outputs.unmanaged }}",
     "lost-env-tags": "${{ needs.detect.outputs.lost }}",
 }
-#: `detect`'s whole outputs map: `unmanaged` and `refusal` are what the `with:` above passes on.
+#: `detect`'s whole outputs map: `unmanaged`, `refusal` and `cells` are what the `with:` above
+#: passes on.
 EXPECTED_DETECT_OUTPUTS = {
     "matrix": "${{ steps.matrix.outputs.matrix }}",
     "empty": "${{ steps.matrix.outputs.empty }}",
@@ -56,6 +58,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
     "lost": "${{ steps.matrix.outputs.lost }}",
     "refusal": "${{ steps.matrix.outputs.refusal }}",
+    "cells": "${{ steps.matrix.outputs.cells }}",
 }
 EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary", "gate-hold"]
 
@@ -108,7 +111,8 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop `detect`'s `unmanaged` output -> the same, silently.
     Mutation: drop the `lost-env-tags:` line -> the comment never names a lost pair.
     Mutation: drop the action's `lost-env-tags` input -> its input names differ.
-    Mutation: drop `detect`'s `refusal` output -> the gate never names a detect error."""
+    Mutation: drop `detect`'s `refusal` output -> the gate never names a detect error.
+    Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1

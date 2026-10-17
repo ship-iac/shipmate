@@ -12,9 +12,9 @@ switch for their console output. It also holds the pull-request number check tha
 ``reply-comment`` and ``upsert-comment`` share, the head-SHA check and the one check-runs
 listing every reader of a head's checks uses, the ruleset, environment and ``CODEOWNERS``
 readers and the names ``doctor`` and ``onboard`` share, reads the per-cell ``cell.json``
-summaries, builds this run's page link and joins a capped list of names. It parses YAML: the
-strings-only config loader and the YAML 1.2 workflow loader, both importing PyYAML only when
-first called.
+summaries, builds this run's page link, joins a capped list of names and parses a list of cell
+names. It parses YAML: the strings-only config loader and the YAML 1.2 workflow loader, both
+importing PyYAML only when first called.
 """
 
 import functools
@@ -190,8 +190,8 @@ def is_refusal(code) -> TypeGuard[str]:
     return isinstance(code, str) and code.startswith("::error::")
 
 
-def run_annotated(main):
-    """Call `main`; print an `::error::` exit as one escaped workflow command per error.
+def run_annotated(main, *args):
+    """Call `main(*args)`; print an `::error::` exit as one escaped workflow command per error.
 
     The runner parses workflow commands per line, so a raw multi-line refusal annotates only its
     first line. The code splits into lines with `splitlines`, as `build-matrix`'s `refusal`
@@ -203,7 +203,7 @@ def run_annotated(main):
     Producers stay raw: this is the one print site of an annotated script's refusal.
     """
     try:
-        main()
+        main(*args)
     except SystemExit as exc:
         code = exc.code
         if not is_refusal(code):
@@ -229,6 +229,16 @@ def gh_json(path, run=None):
     Homed beside `_run` for the same reason.
     """
     return json.loads((run or _run)(["gh", "api", path]))
+
+
+def write_outputs(**pairs):
+    """Append each `name=value` pair to the calling step's `GITHUB_OUTPUT`, a bool as
+    `true`/`false`. A value holding CR or LF would end its line early."""
+    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+        for name, value in pairs.items():
+            if isinstance(value, bool):
+                value = "true" if value else "false"
+            fh.write(f"{name}={value}\n")
 
 
 def utf8_output():
@@ -313,6 +323,23 @@ def named(items, cap):
     if len(items) > cap:
         listed += f", and {len(items) - cap} more"
     return listed
+
+
+def cell_names(raw):
+    """`raw` as a JSON list of `{stack, environment}` objects with string values, each reduced to
+    those two keys, or None when it is anything else (empty included)."""
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(value, list) or not all(
+        isinstance(c, dict)
+        and isinstance(c.get("stack"), str)
+        and isinstance(c.get("environment"), str)
+        for c in value
+    ):
+        return None
+    return [{"stack": c["stack"], "environment": c["environment"]} for c in value]
 
 
 def current_run_url(run_id=None):

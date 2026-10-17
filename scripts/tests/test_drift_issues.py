@@ -179,7 +179,10 @@ def test_drifted_with_no_existing_issue_creates_one(monkeypatch):
     di.upsert_or_close(cell, {}, "url")
     assert len(rec.calls) == 1
     assert rec.calls[0][:3] == ["gh", "issue", "create"]
-    assert label_calls, "expected the label to be (best-effort) created"
+    assert [c[0] for c in label_calls] == [
+        ["gh", "label", "create", "drift", "--color", "FBCA04"]
+        + ["--description", "shipmate drift", "--force"]
+    ]
 
 
 def test_two_new_issues_create_the_label_once(monkeypatch):
@@ -244,8 +247,9 @@ def test_existing_issue_numbers_keeps_the_lowest_on_a_title_collision(monkeypatc
 def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, capsys):
     """A rate limit on one cell must not leave every later cell unprocessed: a stack that has
     gone clean would keep an open Issue saying it drifts. The run still fails, naming every
-    cell that failed, and annotates the failed cell. Mutation: delete the per-cell
-    `::error::drift issue update failed` print in `main()`."""
+    cell that failed, and annotates the failed cell with one escaped command holding gh's
+    stderr, its own `::error::` prefix dropped. Mutations: delete the per-cell
+    `_update_failed` call in `main()`; print the raw `{exc}` text instead."""
     for name in ("a", "b", "c"):
         _write_cell(tmp_path, name, _cell(stack=f"stacks/{name}", drifted=True))
     _main_env(monkeypatch, tmp_path, [("dev-eu", f"stacks/{n}") for n in ("a", "b", "c")])
@@ -256,7 +260,7 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
             return "[]"
         title = args[args.index("--title") + 1]
         if title.endswith("/ stacks/b"):
-            raise SystemExit("::error::command failed (1): gh issue create")
+            raise SystemExit("::error::command failed (1): gh issue create\nHTTP 403: rate limit")
         created.append(title)
         return ""
 
@@ -270,7 +274,7 @@ def test_one_cells_failure_does_not_abandon_the_rest(tmp_path, monkeypatch, caps
     assert capsys.readouterr().out == (
         "loaded 3 drift cell summaries\n"
         "::error::drift issue update failed for dev-eu / stacks/b: "
-        "::error::command failed (1): gh issue create\n"
+        "command failed (1): gh issue create%0AHTTP 403: rate limit\n"
     )
 
 
@@ -487,7 +491,7 @@ def test_a_failing_removed_cell_close_is_collected_and_fails_the_run(tmp_path, m
     assert capsys.readouterr().out == (
         "loaded 0 drift cell summaries\n"
         "::error::drift issue update failed for dev-eu / stacks/a: "
-        "::error::command failed (1): gh issue close\n"
+        "command failed (1): gh issue close\n"
     )
 
 

@@ -125,9 +125,20 @@ def test_step_line_of_a_changed_plan_without_a_tally_is_underivable(tmp_path, mo
     assert line == "🟡 stacks/&lt;app&gt; (dev-eu): +? ~? -?"
 
 
+def test_step_line_argument_prints_the_line_and_writes_no_cell_json(tmp_path, monkeypatch, capsys):
+    """Mutations: drop the `return` after `print(step_line())`; misspell `--step-line` in
+    `main` -- each red."""
+    line = _step_line(tmp_path, monkeypatch, "No changes.\n", "false")
+    pcs.main(["--step-line"])
+    assert capsys.readouterr().out == f"{line}\n"
+    assert not (tmp_path / "cell.json").exists()
+
+
 def test_any_other_argument_is_refused_before_cell_json_is_written(tmp_path):
-    """A mistyped flag must not fall through to writing cell.json. Mutation: drop the `elif args`
-    refusal, so any argument runs `main()`."""
+    """A mistyped flag must not fall through to writing cell.json. Mutation: drop `main`'s
+    `if args` refusal, so any argument writes cell.json. The refusal is one line, so its bytes are
+    the same raised raw or through `run_annotated`; `test_scripts_print_annotated` pins the
+    routing."""
     (tmp_path / "fingerprint.txt").write_text("fp\n", encoding="utf-8")
     env = {
         **os.environ,

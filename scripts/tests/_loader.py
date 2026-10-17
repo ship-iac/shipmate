@@ -1,14 +1,14 @@
 """Shared test-side helpers: load a ``scripts/`` helper, read an engine YAML file or a docs code
 fence, or run a shipped shell body.
 
-Five jobs: ``load_script`` for the extension-less helpers; ``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus
+Six jobs: ``load_script`` for the extension-less helpers; ``ENGINE``/``ACTIONS``/``WORKFLOWS`` plus
 ``action_yaml``, ``workflow_yaml``, ``action_steps``, ``step_by``, ``workflow_jobs``, ``step_using``
 and ``strings`` for the YAML-shape guards; ``doc_fences`` and ``assert_every_fence_discovered`` for
 the docs fence guards; ``bash_only``, ``run_step``, ``write_python3_shim`` and
-``run_with_gh_recorder`` for the tests that execute a step's bash; and ``github_outputs`` for
-reading back what a helper or step wrote to ``GITHUB_OUTPUT``. The YAML parser behind
-``action_yaml`` and ``workflow_yaml`` is load-bearing, because a guard that silently parses to
-``[]`` asserts nothing, so it has one definition.
+``run_with_gh_recorder`` for the tests that execute a step's bash; ``github_outputs`` for
+reading back what a helper or step wrote to ``GITHUB_OUTPUT``; and ``jsonl`` for a ``gh``
+listing's stdout. The YAML parser behind ``action_yaml`` and ``workflow_yaml`` is load-bearing,
+because a guard that silently parses to ``[]`` asserts nothing, so it has one definition.
 
 Loading a helper script
 -----------------------
@@ -26,6 +26,7 @@ mode.
 
 import copy
 import functools
+import json
 import os
 import pathlib
 import shutil
@@ -53,7 +54,6 @@ def local_action(name):
 
 _APP_KEY = {"SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"}
 _CONSUMER_SECRETS = {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
-_APP_KEY_AND_SECRETS = {**_APP_KEY, **_CONSUMER_SECRETS}
 _APP_KEY_AND_PASSPHRASE = {
     "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
     "SHIPMATE_PLAN_PASSPHRASE": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
@@ -317,14 +317,20 @@ def write_python3_shim(bin_dir):
 
 #: A bash ``gh`` for ``run_with_gh_recorder``: it appends each call's argv to ``$CALLS``, one line
 #: per argument and ``--`` after each call, answers a ``--paginate`` listing with
-#: ``$FAKE_LISTING`` and exit ``$FAKE_LIST_RC``, and any other call with JSON and
-#: ``$FAKE_WRITE_RC``, after printing ``$FAKE_WRITE_STDERR`` (empty when unset) to stderr.
+#: ``$FAKE_LISTING``, ``$FAKE_LIST_STDERR`` on stderr and exit ``$FAKE_LIST_RC``, a ``--jq
+#: .head.sha`` read with ``$FAKE_HEAD`` and exit ``$FAKE_HEAD_RC``, and any other call with JSON
+#: and ``$FAKE_WRITE_RC``, after printing ``$FAKE_WRITE_STDERR`` (empty when unset) to stderr.
 _GH_RECORDER = """\
 #!/bin/bash
 printf '%s\\n' "$@" -- >> "$CALLS"
 if [ "$2" = "--paginate" ]; then
   printf '%s' "${FAKE_LISTING:-}"
+  printf '%s' "${FAKE_LIST_STDERR:-}" >&2
   exit "${FAKE_LIST_RC:-0}"
+fi
+if [ "$3 $4" = "--jq .head.sha" ]; then
+  printf '%s\\n' "${FAKE_HEAD:-}"
+  exit "${FAKE_HEAD_RC:-0}"
 fi
 echo '{"id": 99}'
 printf '%s' "${FAKE_WRITE_STDERR:-}" >&2
@@ -346,14 +352,26 @@ def read_calls(path):
 
 
 def run_with_gh_recorder(
-    tmp_path, body, env, *, listing="", list_rc=0, write_rc=0, write_stderr=""
+    tmp_path,
+    body,
+    env,
+    *,
+    listing="",
+    list_rc=0,
+    list_stderr="",
+    write_rc=0,
+    write_stderr="",
+    head="",
+    head_rc=0,
 ):
     """``run_step`` ``body`` with ``write_python3_shim``'s ``python3`` and a recording ``gh`` first
     on PATH; return (process, the argv after ``gh`` of each call, in order).
 
-    ``listing`` is what a ``--paginate`` call prints before exiting ``list_rc``; every other call
-    prints ``write_stderr`` to stderr and exits ``write_rc``. ``env`` is extended, not replaced,
-    with PATH and the stub's variables.
+    ``listing`` is what a ``--paginate`` call prints, with ``list_stderr`` on stderr, before
+    exiting ``list_rc``; ``head`` is what a
+    ``--jq .head.sha`` read prints before exiting ``head_rc``; every other call prints
+    ``write_stderr`` to stderr and exits ``write_rc``. ``env`` is extended, not replaced, with PATH
+    and the stub's variables.
     """
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -367,8 +385,11 @@ def run_with_gh_recorder(
         "CALLS": str(calls),
         "FAKE_LISTING": listing,
         "FAKE_LIST_RC": str(list_rc),
+        "FAKE_LIST_STDERR": list_stderr,
         "FAKE_WRITE_RC": str(write_rc),
         "FAKE_WRITE_STDERR": write_stderr,
+        "FAKE_HEAD": head,
+        "FAKE_HEAD_RC": str(head_rc),
     }
     proc = run_step(tmp_path, body, env)
     return proc, read_calls(calls)
@@ -409,10 +430,17 @@ def github_outputs(path):
     return dict(ln.split("=", 1) for ln in path.read_text(encoding="utf-8").splitlines())
 
 
+def jsonl(*rows):
+    """``rows`` as JSON lines, each newline-terminated, as a ``gh api --paginate --jq`` listing
+    prints them."""
+    return "".join(json.dumps(r) + "\n" for r in rows)
+
+
 #: A bash ``gh`` for ``run_with_gate_gh``, keyed on the whole argv of the three listings and the
 #: write ``scripts/gate-status`` makes; any other call prints to stderr and exits 1. It records
 #: each call's argv as ``run_with_gh_recorder``'s stub does. The statuses listing answers
 #: ``$FAKE_PAGE1$FAKE_PAGE2`` when paginated and ``$FAKE_PAGE1`` alone when not, as GitHub would.
+#: The check-runs listing also prints ``$FAKE_CHECKS_STDERR`` (empty when unset) to stderr.
 _GATE_GH = """\
 #!/bin/bash
 printf '%s\n' "$@" -- >> "$CALLS"
@@ -421,6 +449,7 @@ checks="$head/check-runs?filter=all&per_page=100 --jq $FAKE_CHECKS_JQ"
 statuses="$head/statuses?per_page=100 --jq $FAKE_STATUSES_JQ"
 if [ "$*" = "api --paginate $checks" ]; then
   printf '%s' "$FAKE_CHECKS"
+  printf '%s' "${FAKE_CHECKS_STDERR:-}" >&2
   exit "${FAKE_CHECKS_RC:-0}"
 elif [ "$*" = "api --paginate $statuses" ]; then
   printf '%s%s' "$FAKE_PAGE1" "$FAKE_PAGE2"

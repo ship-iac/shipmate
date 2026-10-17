@@ -25,9 +25,10 @@ hosted runner), so it cannot attribute a run, and a caller that could see it
 would eventually render it as if it could.
 """
 
-import os
 import re
 import sys
+
+from _shipmate import run_annotated, write_outputs
 
 _ERROR_LINE = "Error acquiring the state lock"
 _BLOCK_START = "Lock Info:"
@@ -125,13 +126,11 @@ def parse(text):
 
 def main():
     lock = parse(sys.stdin.read())
-    with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-        fh.write(f"held={'true' if lock else 'false'}\n")
-        if lock:
-            fh.write(f"lock_id={lock['id']}\n")
-            fh.write(f"lock_created={lock['created']}\n")
-            fh.write(f"lock_operation={lock['operation']}\n")
+    write_outputs(held=bool(lock))
     if lock:
+        write_outputs(
+            lock_id=lock["id"], lock_created=lock["created"], lock_operation=lock["operation"]
+        )
         print(
             f"::notice title=lock-info::state lock held: id={lock['id']} "
             f"created={lock['created']} operation={lock['operation']}"
@@ -141,4 +140,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    run_annotated(main)
