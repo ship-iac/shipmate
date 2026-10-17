@@ -10,9 +10,12 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
-### Changed
+### Fixed
 
 - **A plan or drift cell whose `tofu plan` fails annotates its check with OpenTofu's first `Error:` diagnostic, colour removed and cut at 1,000 characters, instead of only `Process completed with exit code 1.`; `shipmate doctor` lists it under its warnings. The sticky plan comment's `no plan summary read` line is unchanged and links that check.**
+
+### Changed
+
 - **`docs/getting-started.md` §The table's `gated` row says that at 0 required approving reviews `gated` changes nothing.**
 
 ## [0.47.0] — 2026-10-17
