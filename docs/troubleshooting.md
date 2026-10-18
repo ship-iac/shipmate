@@ -516,6 +516,44 @@ cell's plan run read from an App-authored apply check on that same head — stil
 holds, and a repository sees this error only for a plan run that binding
 accepted.
 
+### `apply aborted: plan run`
+
+The apply, or the post-merge deploy, stopped at `detect` before any cell job
+started. The apply checks the plan run it names published do not match the cells
+it planned. Three causes produce this:
+
+- Its summary job failed partway through publishing them.
+- A "Re-run all jobs" attempt of that run planned a different cell set and
+  published checks beside the first attempt's.
+- Its checks were published before shipmate recorded a planned cell count on
+  them.
+
+The message says what it found: `published <n> apply checks for <m> planned
+cells` (fewer or more checks than cells), `records no planned cell count`, or
+`records disagreeing planned cell counts`. `holding back` names the cells this
+apply would have run.
+
+Applying the published checks could lose an `after` ordering to a cell the apply
+cannot see, so the apply is refused ([`../CONTRACT.md`](../CONTRACT.md)
+§Apply-match fingerprint). When the summary job failed partway, its gate hold
+stays too, so the pull request cannot merge over the missing checks.
+
+If the plan run's summary job failed, re-run that run's failed jobs, then apply
+again: the re-run keeps the run id, and its summary job publishes only the apply
+checks the run has not yet published. Do not use "Re-run all jobs", which can
+plan a different cell set and over-count.
+
+Otherwise, or if the refusal remains, push a commit to the pull request: the new
+head's plan run plans and publishes every cell afresh, and the apply proceeds
+once it completes. If the pull request has already merged, open a new pull
+request touching these stacks; it plans and applies them.
+
+A `shipmate plan` comment re-plans the same head and may not clear this. If the
+re-plan no longer plans a cell of the partial run, that cell's newest apply check
+still names the partial run, and an apply that includes that cell refuses again.
+
+Nothing has been applied: the refusal runs before any wave.
+
 ### `no plan-text digest recorded for`, or `the stored plan does not render to the plan text that was reviewed`
 
 An apply is refused over the plan text a reviewer read, at one of three points.

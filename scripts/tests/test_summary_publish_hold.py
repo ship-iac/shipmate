@@ -35,11 +35,14 @@ from _loader import (
     ACTIONS,
     action_steps,
     bash_only,
+    load_script,
     read_calls,
     run_step,
     step_by,
     write_python3_shim,
 )
+
+ag = load_script("apply-gate")
 
 HEAD_SHA = "a" * 40
 RUN_ID = "42"
@@ -176,8 +179,9 @@ def _write_cells(tmp_path, *slugs):
         (d / "plan.txt").write_bytes(b"plan\n")
 
 
-def _check_post(slug):
-    """The whole POST argv and body pending-checks emits for a changed cell `slug`."""
+def _check_post(slug, cells):
+    """The whole POST argv and body pending-checks emits for a changed cell `slug` of a run that
+    planned `cells` cells."""
     body = {
         "name": f"apply / stacks/{slug} / dev",
         "head_sha": HEAD_SHA,
@@ -189,6 +193,7 @@ def _check_post(slug):
                 # sha256 of b"plan\n", computed once off the tree.
                 "plan_sha256": "1b4025dc7b8d27cf38df85e77b20ed44a00851a2c28b338560560d85deded8e3",
                 "pr": "7",
+                "cells": cells,
             }
         ),
         "output": {
@@ -289,8 +294,8 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
         APPLY_LIST,
         PUBLISH_HOLD_POST,
         STATUSES_LIST,
-        _check_post("a"),
-        _check_post("b"),
+        _check_post("a", 2),
+        _check_post("b", 2),
     ]
 
 
@@ -316,9 +321,32 @@ def test_a_failed_check_post_fails_the_step_and_stops_publishing(tmp_path):
         APPLY_LIST,
         PUBLISH_HOLD_POST,
         STATUSES_LIST,
-        _check_post("a"),
-        _check_post("b"),
+        _check_post("a", 3),
+        _check_post("b", 3),
     ]
+
+
+@bash_only
+def test_a_post_failing_mid_publish_leaves_a_run_the_apply_refuses(tmp_path):
+    """Two cells, the second POST fails: the one published check, read back as a listing
+    returns it, makes run 42 incomplete. The failed POST is recorded too, so it is dropped.
+    Mutation: drop `cells` from `pending-checks`' `body` record -> `(1, ())`."""
+    _write_cells(tmp_path, "a", "b")
+    codes, calls, _, _ = _run(tmp_path, fail_check=2)
+    assert codes == [0, 1]
+    posts = [json.loads(c[-1]) for c in calls if c[:2] == ["api", "repos/acme/demo/check-runs"]]
+    listing = [
+        json.dumps(
+            {
+                "name": p["name"],
+                "id": i,
+                "app": {"id": int(APP_ID)},
+                "external_id": p["external_id"],
+            }
+        )
+        for i, p in enumerate(posts[:-1], 1)
+    ]
+    assert ag.incomplete_runs(listing, APP_ID) == {"42": (1, (2,), False)}
 
 
 @bash_only
@@ -368,7 +396,7 @@ def test_the_final_gate_write_replaces_the_hold_and_skips_the_refresh(tmp_path):
         APPLY_LIST,
         PUBLISH_HOLD_POST,
         STATUSES_LIST,
-        _check_post("a"),
+        _check_post("a", 1),
         STATUSES_LIST,
         _status_post("pending", "waiting"),
     ]

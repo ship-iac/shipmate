@@ -55,24 +55,28 @@ def check_run(**kw):
     return base
 
 
-def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER):
+def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, cells=1):
     """An `external_id` record as pending-checks writes it. `plan_sha256=None` omits the
-    digest, `pr=None` the pull request."""
+    digest, `pr=None` the pull request, `cells=None` the run's planned cell count."""
     record = {"fingerprint": "a" * 64, "plan_run": plan_run}
     if plan_sha256 is not None:
         record["plan_sha256"] = plan_sha256
     if pr is not None:
         record["pr"] = pr
+    if cells is not None:
+        record["cells"] = cells
     return json.dumps(record)
 
 
-def _apply_check(stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, pr=PR_NUMBER, **kw):
+def _apply_check(
+    stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, pr=PR_NUMBER, cells=1, **kw
+):
     """A pending App-authored apply check carrying its plan-run record."""
     return check_run(
         name=f"apply / {stack} / {env}",
         status="queued",
         conclusion=None,
-        external_id=_record(plan_run, plan_sha256, pr),
+        external_id=_record(plan_run, plan_sha256, pr, cells),
         **kw,
     )
 
@@ -85,6 +89,20 @@ def foreign_message(listed):
         "#8, so this apply is refused. Re-plan on this pull request (push or comment `shipmate "
         "plan`), then apply again; if another open pull request shares this head commit, the "
         "newest plan decides which one may apply."
+    )
+
+
+def partial_message(listed, *, several=False):
+    """The refusal a detect raises when the runs and held-back cells `listed` name published
+    only part of a run's apply checks; `several` when `listed` names more than one run."""
+    it, runs = ("they", "runs") if several else ("it", "run")
+    return (
+        f"::error::apply aborted: {listed}: the published apply checks do not match the cells "
+        f"{it} planned, so an ordering among them can be lost. Re-run the failed jobs of the "
+        f"plan {runs} (not all jobs), then apply again; if the refusal remains, push a commit to "
+        "the pull request, which plans and publishes every cell afresh, then apply again; if "
+        "that pull request has already merged, a new pull request touching these stacks plans "
+        "and applies them."
     )
 
 

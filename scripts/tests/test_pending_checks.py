@@ -60,7 +60,7 @@ def _emit(cells_dir):
 
 
 def test_changed_cell_yields_queued_body(tmp_path):
-    """Mutation: omit `"pr"` from the record -- red."""
+    """Mutations: omit `"pr"` from the record -- red; omit `"cells"` from the record -- red."""
     _write_cell(
         tmp_path,
         "dev-eu",
@@ -77,6 +77,7 @@ def test_changed_cell_yields_queued_body(tmp_path):
         "plan_run": RUN_ID,
         "plan_sha256": SHA_A,
         "pr": PR,
+        "cells": 1,
     }
     assert body == {
         "name": "apply / stacks/app / dev-eu",
@@ -110,6 +111,7 @@ def test_unchanged_cell_yields_completed_neutral_body(tmp_path):
         "plan_run": RUN_ID,
         "plan_sha256": SHA_B,
         "pr": PR,
+        "cells": 1,
     }
 
 
@@ -177,6 +179,7 @@ def test_plan_run_comes_from_the_environment(tmp_path, monkeypatch):
         "plan_run": "409181227",
         "plan_sha256": SHA_A,
         "pr": "31",
+        "cells": 1,
     }
 
 
@@ -438,9 +441,9 @@ def test_a_newer_runs_record_on_any_cell_refuses_before_anything_is_emitted(monk
 
 
 def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monkeypatch, capsys):
-    """The evidence count is every parsed cell, published or not. Mutations: emit every cell
-    (`done = set()`) -> the published cell is printed; `cell_count=len(todo)` -> nothing is
-    printed."""
+    """The evidence count is every parsed cell, published or not, and so is the record's
+    `cells`. Mutations: emit every cell (`done = set()`) -> the published cell is printed;
+    `cell_count=len(todo)` -> nothing is printed; `body(..., len(todo))` -> `cells` is 1."""
     for slug, fingerprint in (("stacks-app", "1"), ("stacks-dns", "2")):
         _write_cell(
             tmp_path,
@@ -462,8 +465,19 @@ def test_main_reads_the_listing_and_the_app_from_the_environment(tmp_path, monke
     monkeypatch.setenv("SHIPMATE_PLAN_RESULT", "success")
     monkeypatch.setenv("SHIPMATE_PLANNED_CELLS", "2")
     pc.main()
-    printed = [json.loads(line)["name"] for line in capsys.readouterr().out.splitlines()]
-    assert printed == ["apply / stacks/dns / dev-eu"]
+    printed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [(b["name"], json.loads(b["external_id"])) for b in printed] == [
+        (
+            "apply / stacks/dns / dev-eu",
+            {
+                "fingerprint": "2" * 64,
+                "plan_run": RUN_ID,
+                "plan_sha256": SHA_A,
+                "pr": PR,
+                "cells": 2,
+            },
+        )
+    ]
 
 
 PLAN_FAILED = "plan incomplete (plan job: failure); fix the failing plan checks before merging"

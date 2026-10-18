@@ -29,12 +29,22 @@ the run refuses.
 import json
 import os
 
-from _shipmate import _load, _run, check_runs, run_annotated, validate_head_sha, write_outputs
+from _shipmate import (
+    _load,
+    _run,
+    check_runs,
+    named,
+    run_annotated,
+    validate_head_sha,
+    write_outputs,
+)
 
 bm = _load("build-matrix")
 wv = _load("waves")
 ag = _load("apply-gate")
 az = _load("authorize")
+
+_NAMED = 10
 
 
 def paths_with_checks(env, candidate_paths, check_names):
@@ -83,25 +93,33 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
     check that exists. It refuses rather than applying unverified because an
     accepted absence is a guard the plan cell switches off by omitting a file.
 
-    The run and digest refusals are shared by all three detects, so they are
-    worded for both paths: deploy's candidates come from the git diff rather
-    than from the checks, so a cell here may have no apply check whatsoever, and
-    its pull request is already merged — a remedy phrased as "re-plan on this
-    pull request" would send a post-merge operator to a pull request that no
-    longer accepts commits.
+    The run, digest and partial-run refusals are shared by all three detects, so
+    they are worded for both paths: deploy's candidates come from the git diff
+    rather than from the checks, so a cell here may have no apply check
+    whatsoever, and its pull request is already merged — a remedy phrased as
+    "re-plan on this pull request" would send a post-merge operator to a pull
+    request that no longer accepts commits.
 
     `pr_number` binds each record to the dispatching pull request, and only the
     pre-merge paths pass one: a cell whose check records another pull request,
     or none, refuses with a re-plan remedy. Deploy passes None, which skips the
     check, because its pull request comes from `commits/{sha}/pulls` on the
-    merged head rather than from a dispatch input."""
+    merged head rather than from a dispatch input.
+
+    With at least one cell to apply, a run that published only part of its apply
+    checks refuses last (`refuse_incomplete`): a cell recording it, or the head's
+    newest run being it, means a cell that run planned may be missing from this
+    apply's view, and with it an ordering. It follows the pull-request binding so
+    that a cell planned on another pull request is refused as that, not over the
+    other pull request's run. With no cell to apply nothing is read, so a fully
+    applied pull request whose records predate the count never refuses."""
     records = ag.plan_records(check_run_lines, app_id)
-    named = []
+    rows = []
     for c in cells:
         name = ag.check_name(c["stack"], c["environment"])
         run, digest, pr = records.get(name, (None, None, None))
-        named.append((c, name, run, digest, pr))
-    missing = [name for _, name, run, _, _ in named if not run]
+        rows.append((c, name, run, digest, pr))
+    missing = [name for _, name, run, _, _ in rows if not run]
     if missing:
         raise SystemExit(
             f"::error::apply aborted: no plan run recorded for {', '.join(missing)}: the "
@@ -110,7 +128,7 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
             "request, then apply again; if that pull request has already merged, a new pull "
             "request touching them plans and applies them afresh."
         )
-    unbound = [name for _, name, _, digest, _ in named if not digest]
+    unbound = [name for _, name, _, digest, _ in rows if not digest]
     if unbound:
         raise SystemExit(
             f"::error::apply aborted: no plan-text digest recorded for {', '.join(unbound)}: "
@@ -121,7 +139,7 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
         )
     foreign = [
         f"{name} ({'pull request #' + pr if pr else 'records no pull request'})"
-        for _, name, _, _, pr in named
+        for _, name, _, _, pr in rows
         if pr_number is not None and pr != pr_number
     ]
     if foreign:
@@ -131,7 +149,48 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
             "request (push or comment `shipmate plan`), then apply again; if another open pull "
             "request shares this head commit, the newest plan decides which one may apply."
         )
-    return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest, _ in named]
+    if cells:
+        refuse_incomplete(rows, records, ag.incomplete_runs(check_run_lines, app_id))
+    return [{**c, "plan_run_id": run, "plan_sha256": digest} for c, _, run, digest, _ in rows]
+
+
+def _fact(published, counts, uncounted):
+    if uncounted:
+        return f"records no planned cell count on {'some of ' if counts else ''}its apply checks"
+    if len(counts) == 1:
+        return f"published {_n(published, 'apply check')} for {_n(counts[0], 'planned cell')}"
+    listed = ", ".join(map(str, counts))
+    return f"records disagreeing planned cell counts ({listed}) on its apply checks"
+
+
+def _n(count, noun):
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+def refuse_incomplete(rows, records, incomplete):
+    """Refuse when a run that a cell to apply records, or the head's newest run, published only
+    part of its apply checks (`apply-gate.incomplete_runs`). Each such run is named with its
+    fact and the cells it holds back: the cells recording it, or every cell to apply when no
+    cell records it (the newest run). Runs compare as integers, so `10` is newer than `9`.
+    Called only with at least one cell, each recording a run, so the newest run exists."""
+    runs = {run for _, _, run, _, _ in rows}
+    runs.add(max((run for run, _, _ in records.values() if run), key=int))
+    found = []
+    for run in sorted(runs & incomplete.keys(), key=int):
+        held = [name for _, name, r, _, _ in rows if r == run] or [name for _, name, *_ in rows]
+        found.append(
+            f"plan run {run} {_fact(*incomplete[run])}, holding back {named(held, _NAMED)}"
+        )
+    if found:
+        it, runs = ("it", "run") if len(found) == 1 else ("they", "runs")
+        raise SystemExit(
+            f"::error::apply aborted: {'; '.join(found)}: the published apply checks do not "
+            f"match the cells {it} planned, so an ordering among them can be lost. Re-run the "
+            f"failed jobs of the plan {runs} (not all jobs), then apply again; if the refusal "
+            "remains, push a commit to the pull request, which plans and publishes every cell "
+            "afresh, then apply again; if that pull request has already merged, a new pull "
+            "request touching these stacks plans and applies them."
+        )
 
 
 def cells_from_checks(check_names, stacks_by_env, tags_by_stack):

@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **A plan run whose summary job published only some apply checks no longer lets an apply take the published subset; the apply refuses until the plan run's failed jobs are re-run or a pushed commit plans every cell afresh.** Apply checks published before this release carry no planned cell count, so push a commit to each open pull request after re-pinning. A pull request planned before the re-pin and merged after it with cells still pending has a deploy that refuses; a new pull request touching those stacks plans and applies them.
+
 ## [0.48.0] — 2026-10-18
 
 Tags `b60c376`.
