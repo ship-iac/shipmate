@@ -516,6 +516,32 @@ cell's plan run read from an App-authored apply check on that same head — stil
 holds, and a repository sees this error only for a plan run that binding
 accepted.
 
+### `apply aborted: plan run`
+
+The apply, or the post-merge deploy, stopped at `detect` before any cell job
+started. The plan run it names published only some of the apply checks for the
+cells it planned: its summary job failed partway through publishing them, or its
+checks were published before shipmate recorded a planned cell count on them. The
+message says which: `published <n> apply checks for <m> planned cells`,
+`records no planned cell count`, or `records disagreeing planned cell counts`.
+`holding back` names the cells this apply would have run.
+
+Applying the published subset could lose an `after` ordering to a cell the apply
+cannot see, so the apply is refused ([`../CONTRACT.md`](../CONTRACT.md)
+§Apply-match fingerprint). When the summary job failed partway, its gate hold
+stays too, so the pull request cannot merge over the missing checks.
+
+Push a commit to the pull request: the new head's plan run plans and publishes
+every cell afresh, and the apply proceeds once it completes. If the pull request
+has already merged, open a new pull request touching these stacks; it plans and
+applies them.
+
+A `shipmate plan` comment re-plans the same head and may not clear this. If the
+re-plan no longer plans a cell of the partial run, that cell's newest apply check
+still names the partial run, and every apply on that head refuses again.
+
+Nothing has been applied: the refusal runs before any wave.
+
 ### `no plan-text digest recorded for`, or `the stored plan does not render to the plan text that was reviewed`
 
 An apply is refused over the plan text a reviewer read, at one of three points.

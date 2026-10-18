@@ -162,11 +162,8 @@ def plan_records(check_run_lines, app_id):
     message."""
     out = {}
     for name, run in latest_by_name(app_runs(check_run_lines, app_id)).items():
-        try:
-            record = json.loads(run.get("external_id") or "")
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(record, dict):
+        record = _decoded(run)
+        if record is None:
             continue
         plan_run = record.get("plan_run")
         digest = record.get("plan_sha256")
@@ -185,11 +182,11 @@ def incomplete_runs(check_run_lines, app_id):
 
     A run's names are every App-authored `apply / ` check, of any status, whose decodable
     record names it; its declared counts are the records' `cells` values that are an int and
-    not a bool. The run is complete only when those counts are exactly `{len(names)}`: an
-    empty tuple (no record declares a count) or two or more counts (they disagree) are
-    incomplete, as is a single count larger or smaller than the names. Records are decoded with
-    `plan_records`' tolerance: one that is undecodable, not an object, or has no valid
-    `plan_run` counts for no run.
+    not a bool. The run is complete only when every record declares a count and those counts
+    are exactly `{len(names)}`: a record with no valid count (even beside a sibling that has
+    one), two or more counts (they disagree), or a single count larger or smaller than the
+    names makes it incomplete. Records are decoded with `plan_records`' tolerance: one that is
+    undecodable, not an object, or has no valid `plan_run` counts for no run.
 
     Every check run is read, not only the newest per name, so a same-head re-plan that no
     longer plans a cell leaves the older run's names still counted, rather than making that
@@ -200,22 +197,29 @@ def incomplete_runs(check_run_lines, app_id):
     for run in app_runs(check_run_lines, app_id):
         if not run["name"].startswith(APPLY_PREFIX):
             continue
-        try:
-            record = json.loads(run.get("external_id") or "")
-        except json.JSONDecodeError:
-            continue
-        plan_run = record.get("plan_run") if isinstance(record, dict) else None
+        record = _decoded(run)
+        plan_run = record.get("plan_run") if record is not None else None
         if not (isinstance(plan_run, str) and is_run_id(plan_run)):
             continue
         names.setdefault(plan_run, set()).add(run["name"])
         cells = record.get("cells")
         valid = isinstance(cells, int) and not isinstance(cells, bool)
-        counts.setdefault(plan_run, set()).update([cells] if valid else [])
+        counts.setdefault(plan_run, set()).add(cells if valid else None)
     return {
-        run: (len(named), tuple(sorted(counts[run])))
+        run: (len(named), tuple(sorted(c for c in counts[run] if c is not None)))
         for run, named in names.items()
         if counts[run] != {len(named)}
     }
+
+
+def _decoded(run):
+    """The object `run`'s `external_id` decodes to, or None when it is empty, not JSON, or not
+    an object. No JSONDecodeError escapes."""
+    try:
+        record = json.loads(run.get("external_id") or "")
+    except json.JSONDecodeError:
+        return None
+    return record if isinstance(record, dict) else None
 
 
 def verdict(check_runs):

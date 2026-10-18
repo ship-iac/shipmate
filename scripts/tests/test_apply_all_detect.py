@@ -12,6 +12,7 @@ from _detect_fixtures import (
     check_run,
     forbid_shared_runner,
     foreign_message,
+    partial_message,
     run_graph_capture,
     spy_env_config,
     stub_read_table,
@@ -166,7 +167,7 @@ def test_main_holds_per_the_review_decision(tmp_path, monkeypatch, decision, exp
     -- REVIEW_REQUIRED holds dev-eu and dev-us too; `if not az._review_reason(...)` --
     every row inverts; `sorted(..., reverse=True)` -- the multi-env rows reorder."""
     parsed = _run_main(
-        tmp_path, monkeypatch, envs=ALL_PENDING, ungated="dev-eu,dev-us", decision=decision
+        tmp_path, monkeypatch, envs=ALL_PENDING, cells=3, ungated="dev-eu,dev-us", decision=decision
     )
     assert json.loads(parsed["review_held_envs"]) == expected
 
@@ -191,7 +192,7 @@ def test_main_holds_everything_unreviewed_when_no_env_is_ungated(
 ):
     """Mutations: `if not az._review_reason(...)` -- every row inverts;
     `sorted(..., reverse=True)` -- the multi-env rows reorder."""
-    parsed = _run_main(tmp_path, monkeypatch, envs=ALL_PENDING, decision=decision)
+    parsed = _run_main(tmp_path, monkeypatch, envs=ALL_PENDING, cells=3, decision=decision)
     assert json.loads(parsed["review_held_envs"]) == expected
 
 
@@ -229,11 +230,13 @@ def _run_main(
     membership=None,
     deps=None,
     dot=None,
+    cells=1,
 ):
     """main() with an empty SHIPMATE_ENV, which is bare_main(), over the head's apply checks,
     with everything the script reaches from GitHub or Terramate stubbed. Defaults to one
-    pending `stacks/app` check per env in `envs`. Returns parsed GITHUB_OUTPUT, and appends
-    each `gh api` path requested to `urls` when one is given.
+    pending `stacks/app` check per env in `envs`, all of one plan run that declares `cells`.
+    Returns parsed GITHUB_OUTPUT, and appends each `gh api` path requested to `urls` when one is
+    given.
 
     `order`, `explicit` and `ungated` are folded into the stubbed table rather than stubbed
     on `wv`: all three are fields of the mapping this path loads, so a double on any reader
@@ -264,7 +267,7 @@ def _run_main(
         gated["environments"] = entries
         table = gated
     if checks is None:
-        checks = [_apply_check("stacks/app", e) for e in envs]
+        checks = [_apply_check("stacks/app", e, cells=cells) for e in envs]
     jsonl = "\n".join(json.dumps(c) for c in checks)
     requested = [] if urls is None else urls
 
@@ -441,6 +444,23 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
     )
 
 
+def test_main_refuses_a_run_that_published_part_of_its_checks(tmp_path, monkeypatch):
+    """Through this detect's own entry point. Mutation: delete the `refuse_incomplete` call in
+    `with_plan_runs` -- dev-eu applies, red."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            envs=["dev-eu"],
+            decision="APPROVED",
+            checks=[_apply_check("stacks/app", "dev-eu", plan_run="42", cells=2)],
+        )
+    assert str(exc_info.value) == partial_message(
+        "plan run 42 published 1 apply checks for 2 planned cells, holding back "
+        "apply / stacks/app / dev-eu"
+    )
+
+
 def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
     """dev-us is applied and its completed check carries a bare-hex record. Only cells still to
     be applied need a plan run, so the attachment runs after the pending filter."""
@@ -511,6 +531,7 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "dev-us", "prod-eu"],
+        cells=3,
         order={"dev-us": ["prod-eu"]},
         ungated="dev-eu,dev-us",
         decision="REVIEW_REQUIRED",
@@ -533,6 +554,7 @@ def test_main_skips_only_the_successors_of_a_pending_explicit_env(tmp_path, monk
         tmp_path,
         monkeypatch,
         envs=["after-sbx", "dev-eu", "prod-eu", "stage-eu"],
+        cells=4,
         order={"prod-eu": ["stage-eu"], "after-sbx": ["sbx-eu"]},
         explicit=["sbx-eu", "stage-eu"],
         decision="APPROVED",
@@ -570,6 +592,7 @@ def test_main_takes_the_exemption_from_the_entry_flag(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
+        cells=2,
         table={"layout": "folder", "environments": {"dev-eu": {"gated": False}}},
         decision="REVIEW_REQUIRED",
     )
@@ -590,6 +613,7 @@ def test_an_explicit_flag_holds_the_env_back_however_it_is_quoted(tmp_path, monk
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod"],
+        cells=2,
         table=aad.bm.ec.parse_table(text, {}),
         decision="APPROVED",
     )
@@ -602,6 +626,7 @@ def test_main_reports_every_env_applied_when_all_of_them_are_listed(tmp_path, mo
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
+        cells=2,
         ungated="dev-eu,prod-eu",
         decision="REVIEW_REQUIRED",
     )
@@ -617,6 +642,7 @@ def test_main_omits_a_listed_explicit_env_from_the_applied_report(tmp_path, monk
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "dev-us"],
+        cells=2,
         explicit=["dev-us"],
         ungated="dev-eu,dev-us",
         decision="REVIEW_REQUIRED",
@@ -642,6 +668,7 @@ def test_main_names_the_gated_envs_applied_with_no_review_required(
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "dev-us", "prod-eu"],
+        cells=3,
         explicit=["prod-eu"],
         ungated="dev-us",
         decision=decision,
@@ -661,6 +688,7 @@ def test_main_labels_only_the_ungated_envs_applied_unreviewed(tmp_path, monkeypa
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "dev-us"],
+        cells=2,
         ungated="dev-us",
         decision="REVIEW_REQUIRED",
     )
@@ -705,6 +733,7 @@ def test_main_applies_every_env_on_an_approved_pr_with_no_variable(tmp_path, mon
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
+        cells=2,
         decision="APPROVED",
     )
     assert _wave_envs(parsed) == ["dev-eu", "prod-eu"]
@@ -719,6 +748,7 @@ def test_main_claims_nothing_applied_ungated_on_a_reviewed_pull_request(tmp_path
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
+        cells=2,
         ungated="dev-eu,prod-eu",
         decision="APPROVED",
     )
@@ -757,6 +787,7 @@ def test_main_takes_ordering_and_exclusions_from_the_loaded_table(tmp_path, monk
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "dev-us", "prod-eu"],
+        cells=3,
         order={"dev-us": ["dev-eu"]},
         explicit=["prod-eu"],
         decision="APPROVED",
@@ -780,6 +811,7 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "dev-us"],
+        cells=2,
         order={"dev-us": ["dev-eu"]},
         explicit=["dev-us"],
         decision="APPROVED",
@@ -800,7 +832,10 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
         decision="APPROVED",
         tree={"dev-eu": ["stacks/a", "stacks/b"]},
         tags={"stacks/a": [], "stacks/b": []},
-        checks=[_apply_check("stacks/a", "dev-eu"), _apply_check("stacks/b", "dev-eu")],
+        checks=[
+            _apply_check("stacks/a", "dev-eu", cells=2),
+            _apply_check("stacks/b", "dev-eu", cells=2),
+        ],
         deps={"stacks/a": set(), "stacks/b": {"stacks/a"}},
     )
     assert (
@@ -826,7 +861,7 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
             decision="APPROVED",
             tree={"dev-eu": stacks},
             tags={s: [] for s in stacks},
-            checks=[_apply_check(s, "dev-eu") for s in stacks],
+            checks=[_apply_check(s, "dev-eu", cells=9) for s in stacks],
             deps={s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)},
         )
     assert capsys.readouterr().out.splitlines() == [
@@ -887,10 +922,10 @@ def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
             "prod-eu": ["stacks/app"],
         },
         checks=[
-            _apply_check("stacks/app", "dev-eu"),
+            _apply_check("stacks/app", "dev-eu", cells=3),
             check_run(name="apply / stacks/dns / dev-eu", external_id=_record("42", pr="7")),
-            _apply_check("stacks/app", "dev-us", pr="7"),
-            _apply_check("stacks/app", "prod-eu", pr="7"),
+            _apply_check("stacks/app", "dev-us", pr="7", cells=3),
+            _apply_check("stacks/app", "prod-eu", pr="7", cells=3),
         ],
     )
     assert [(c["stack"], c["environment"]) for c in wave_cells(aad.wv, parsed)] == [
@@ -955,9 +990,9 @@ def test_main_holds_only_the_cell_whose_upstream_is_held(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         [
-            _apply_check("stacks/platform", "dev-eu"),
-            _apply_check("stacks/workers", "dev-eu"),
-            _apply_check("stacks/dns", "dev-us"),
+            _apply_check("stacks/platform", "dev-eu", cells=3),
+            _apply_check("stacks/workers", "dev-eu", cells=3),
+            _apply_check("stacks/dns", "dev-us", cells=3),
         ],
         ungated="dev-eu",
         decision="REVIEW_REQUIRED",
@@ -1057,8 +1092,8 @@ def test_main_never_refuses_over_a_completed_dependent(tmp_path, monkeypatch):
         monkeypatch,
         [
             check_run(name="apply / stacks/platform / dev-eu"),
-            _apply_check("stacks/workers", "dev-eu"),
-            _apply_check("stacks/dns", "dev-us"),
+            _apply_check("stacks/workers", "dev-eu", cells=2),
+            _apply_check("stacks/dns", "dev-us", cells=2),
         ],
         order={"dev-us": ["dev-eu"]},
         decision="APPROVED",
@@ -1113,7 +1148,7 @@ def test_main_never_refuses_over_a_cell_of_an_env_settle_skips(tmp_path, monkeyp
             "stacks/app": {"stacks/db"},
             "stacks/db": set(),
         },
-        checks=[_apply_check(s, e) for e, stacks in tree.items() for s in stacks],
+        checks=[_apply_check(s, e, cells=5) for e, stacks in tree.items() for s in stacks],
         order={"stg-eu": ["dev-eu"], "prd-eu": ["stg-eu"]},
         explicit=["dev-us"],
         decision="APPROVED",

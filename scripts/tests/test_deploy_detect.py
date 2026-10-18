@@ -7,6 +7,7 @@ from _detect_fixtures import (
     _apply_check,
     answering_run_graph,
     forbid_shared_runner,
+    partial_message,
     run_graph_capture,
     spy_env_config,
     stub_read_table,
@@ -304,6 +305,26 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, m
     )
 
 
+def test_main_refuses_a_run_that_declares_more_cells_than_it_published(tmp_path, monkeypatch):
+    """Each diff cell has its check, so the missing-run refusal stays silent; run 42 declares a
+    third cell this deploy cannot see. Mutation: delete the `refuse_incomplete` call in
+    `with_plan_runs` -- both cells deploy, red."""
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            cells=[_cell("stacks/app"), _cell("stacks/dns")],
+            checks=[
+                _apply_check("stacks/app", plan_run="42", cells=3),
+                _apply_check("stacks/dns", plan_run="42", cells=3, id=2),
+            ],
+        )
+    assert str(exc_info.value) == partial_message(
+        "plan run 42 published 2 apply checks for 3 planned cells, holding back "
+        "apply / stacks/app / dev-eu, apply / stacks/dns / dev-eu"
+    )
+
+
 def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypatch):
     # The loud refusal this path most needs: nobody is watching a post-merge run, so a default
     # would apply a cell from nowhere and a skip would leave the check pending with nothing
@@ -415,7 +436,7 @@ def test_main_prints_the_dag_shape_notice_before_an_over_depth_refusal(
             tmp_path,
             monkeypatch,
             cells=[_cell(s) for s in stacks],
-            checks=[_apply_check(s) for s in stacks],
+            checks=[_apply_check(s, cells=9) for s in stacks],
             deps={s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)},
         )
     assert capsys.readouterr().out.splitlines() == [
@@ -435,7 +456,10 @@ def test_main_takes_the_ordering_map_from_the_loaded_table(tmp_path, monkeypatch
         tmp_path,
         monkeypatch,
         cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
-        checks=[_apply_check("stacks/app", "dev-eu"), _apply_check("stacks/app", "dev-us")],
+        checks=[
+            _apply_check("stacks/app", "dev-eu", cells=2),
+            _apply_check("stacks/app", "dev-us", cells=2),
+        ],
         order={"dev-us": ["dev-eu"]},
     )
     assert [c["environment"] for c in json.loads(parsed["envlevel0_waves"])["wave0"]] == ["dev-eu"]
@@ -454,7 +478,10 @@ def test_main_loads_the_environment_table_exactly_once(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
-        checks=[_apply_check("stacks/app", "dev-eu"), _apply_check("stacks/app", "dev-us")],
+        checks=[
+            _apply_check("stacks/app", "dev-eu", cells=2),
+            _apply_check("stacks/app", "dev-us", cells=2),
+        ],
         order={"dev-us": ["dev-eu"]},
         reads=reads,
     )
@@ -660,7 +687,7 @@ def test_main_skips_an_open_check_on_a_stack_the_scan_does_not_cover(tmp_path, m
         tmp_path,
         monkeypatch,
         cells=[],
-        checks=[_apply_check("stacks/app"), _apply_check("stacks/other")],
+        checks=[_apply_check("stacks/app", cells=2), _apply_check("stacks/other", cells=2)],
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
@@ -675,7 +702,10 @@ def test_a_name_whose_rest_is_no_env_name_is_not_the_stack_s_check(tmp_path, mon
         tmp_path,
         monkeypatch,
         cells=[],
-        checks=[_apply_check("stacks/app"), _apply_check("stacks/app / x", "dev-eu")],
+        checks=[
+            _apply_check("stacks/app", cells=2),
+            _apply_check("stacks/app / x", "dev-eu", cells=2),
+        ],
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
@@ -717,7 +747,7 @@ def _run_probe(tmp_path, monkeypatch, order):
         tmp_path,
         monkeypatch,
         cells=_PROBE_CELLS,
-        checks=[_apply_check(c["stack"], c["environment"]) for c in _PROBE_CELLS],
+        checks=[_apply_check(c["stack"], c["environment"], cells=5) for c in _PROBE_CELLS],
         deps=_PROBE_DEPS,
         order=order,
     )
@@ -775,7 +805,7 @@ def test_main_refuses_a_cycle_before_an_inversion_naming_the_pending_cells(tmp_p
             tmp_path,
             monkeypatch,
             cells=_AB_CELLS,
-            checks=[_apply_check(c["stack"], c["environment"]) for c in _AB_CELLS],
+            checks=[_apply_check(c["stack"], c["environment"], cells=2) for c in _AB_CELLS],
             order={"dev-us": ["dev-eu"]},
             dot=run_graph_capture("cycle-two"),
         )

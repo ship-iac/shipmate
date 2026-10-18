@@ -12,6 +12,7 @@ from _detect_fixtures import (
     answering_run_graph,
     forbid_shared_runner,
     foreign_message,
+    partial_message,
     run_graph_capture,
 )
 from _detect_fixtures import check_run as _check
@@ -438,7 +439,7 @@ def test_main_refuses_a_cyclic_run_graph_naming_the_cycle(monkeypatch, tmp_path)
     _stub_apply(
         monkeypatch,
         {"stacks/a": {"stacks/b"}, "stacks/b": {"stacks/a"}},
-        [_apply_check("stacks/a"), _apply_check("stacks/b")],
+        [_apply_check("stacks/a", cells=2), _apply_check("stacks/b", cells=2)],
     )
     with pytest.raises(SystemExit) as exc:
         ad.main()
@@ -486,7 +487,7 @@ def test_main_refuses_a_change_deeper_than_max_waves(monkeypatch, tmp_path, caps
     deps = {s: ({stacks[i - 1]} if i else set()) for i, s in enumerate(stacks)}
     out = _apply_env(monkeypatch, tmp_path)
     out.touch()  # The runner creates GITHUB_OUTPUT before the step runs.
-    _stub_apply(monkeypatch, deps, [_apply_check(s) for s in stacks])
+    _stub_apply(monkeypatch, deps, [_apply_check(s, cells=9) for s in stacks])
 
     with pytest.raises(SystemExit, match="dependency levels"):
         ad.main()
@@ -856,7 +857,7 @@ def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
     _stub_apply(
         monkeypatch,
         {"stacks/a": set(), "stacks/b": {"stacks/a"}},
-        [_apply_check("stacks/a"), _apply_check("stacks/b")],
+        [_apply_check("stacks/a", cells=2), _apply_check("stacks/b", cells=2)],
     )
     ad.main()
     assert (
@@ -870,7 +871,9 @@ def test_a_record_for_another_or_no_pull_request_refuses_naming_each():
     """`stacks/app` records PR 7 and `stacks/dns` records none; both are named with what they
     record. Mutation: skip records without `pr` (`and pr and pr != pr_number`) -- the
     `stacks/dns` entry drops, red."""
-    lines = _lines(_apply_check("stacks/app", pr="7"), _apply_check("stacks/dns", pr=None))
+    lines = _lines(
+        _apply_check("stacks/app", pr="7", cells=2), _apply_check("stacks/dns", pr=None, cells=2)
+    )
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number="8")
     assert str(exc_info.value) == foreign_message(
@@ -921,9 +924,136 @@ def test_a_pull_request_number_is_compared_whole(recorded, dispatched):
         )
 
 
+_APP = "apply / stacks/app / dev-eu"
+_DNS = "apply / stacks/dns / dev-eu"
+
+
+def test_a_run_that_published_part_of_its_checks_refuses():
+    """Run 42 planned two cells and published one check. Mutation: delete the
+    `refuse_incomplete` call in `with_plan_runs` -- the cell applies, red."""
+    lines = _lines(_apply_check("stacks/app", plan_run="42", cells=2))
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == partial_message(
+        f"plan run 42 published 1 apply checks for 2 planned cells, holding back {_APP}"
+    )
+
+
+def test_a_run_whose_records_declare_no_count_refuses():
+    """A record published before the count existed. Mutation: count an empty declared tuple
+    as complete in `apply-gate.incomplete_runs` (`counts[run] not in ({len(named)}, {None})`)
+    -- the cell applies, red."""
+    lines = _lines(_apply_check("stacks/app", plan_run="42", cells=None))
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == partial_message(
+        f"plan run 42 records no planned cell count on its apply checks, holding back {_APP}"
+    )
+
+
+def test_a_run_whose_records_disagree_on_the_count_refuses():
+    """Mutation: always word the fact as `published <n> apply checks for <m> planned cells`
+    -- this message changes and the no-count test above raises `IndexError`, both red."""
+    lines = _lines(
+        _apply_check("stacks/app", plan_run="42", cells=2),
+        _apply_check("stacks/dns", plan_run="42", cells=3, id=2),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == partial_message(
+        "plan run 42 records disagreeing planned cell counts (2, 3) on its apply checks, "
+        f"holding back {_APP}, {_DNS}"
+    )
+
+
+def test_a_same_head_re_plan_that_drops_a_cell_does_not_deadlock():
+    """Run 41 published three checks; run 42, on the same head, planned two of those cells
+    again. The third cell's newest check is still run 41's, and run 41 counts all three of its
+    checks across every check run, so nothing refuses. Mutation: read only the newest check
+    run per name in `apply-gate.incomplete_runs` (`latest_by_name(app_runs(...)).values()`)
+    -- run 41 shows one name of three and refuses, red."""
+    lines = _lines(
+        _apply_check("stacks/app", plan_run="41", cells=3, id=1),
+        _apply_check("stacks/dns", plan_run="41", cells=3, id=2),
+        _apply_check("stacks/c", plan_run="41", cells=3, id=3),
+        _apply_check("stacks/app", plan_run="42", cells=2, id=4),
+        _apply_check("stacks/dns", plan_run="42", cells=2, id=5),
+    )
+    cells = [*_TWO_CELLS, {"stack": "stacks/c", "environment": "dev-eu"}]
+    assert ad.with_plan_runs(cells, lines, APP_ID, pr_number=PR_NUMBER) == [
+        {
+            "stack": "stacks/app",
+            "environment": "dev-eu",
+            "plan_run_id": "42",
+            "plan_sha256": PLAN_SHA,
+        },
+        {
+            "stack": "stacks/dns",
+            "environment": "dev-eu",
+            "plan_run_id": "42",
+            "plan_sha256": PLAN_SHA,
+        },
+        {
+            "stack": "stacks/c",
+            "environment": "dev-eu",
+            "plan_run_id": "41",
+            "plan_sha256": PLAN_SHA,
+        },
+    ]
+
+
+def test_a_missing_plan_run_refuses_before_an_incomplete_one():
+    """`stacks/app` has no check and `stacks/dns` is the one check of a two-cell run. Mutation:
+    move the `refuse_incomplete` call above the missing-run refusal -- the partial-run message
+    speaks first, red."""
+    lines = _lines(_apply_check("stacks/dns", plan_run="42", cells=2))
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == (
+        f"::error::apply aborted: no plan run recorded for {_APP}: the apply check names no "
+        "plan run to apply from (post-merge, the cell may have no apply check at all), so the "
+        "apply is refused. Re-plan these stacks on their pull request, then apply again; if "
+        "that pull request has already merged, a new pull request touching them plans and "
+        "applies them afresh."
+    )
+
+
+def test_a_newer_incomplete_run_refuses_a_cell_of_an_older_complete_one():
+    """Run 9 published `stacks/app` and `stacks/dns` (complete); run 10 re-planned `stacks/app`
+    as a no-change cell and published nothing else of its two cells. `stacks/dns` records run
+    9, yet run 10 is the head's newest run and is incomplete, so the apply refuses and holds
+    `stacks/dns` back. Mutations: drop the newest-run clause from `refuse_incomplete` -- the
+    cell applies, red; compare runs as strings (`max(..., key=str)`), so `"9"` beats `"10"` --
+    the cell applies, red."""
+    lines = _lines(
+        _apply_check("stacks/app", plan_run="9", cells=2, id=1),
+        _apply_check("stacks/dns", plan_run="9", cells=2, id=2),
+        _check(
+            name=_APP,
+            status="completed",
+            conclusion="neutral",
+            id=3,
+            external_id=_record("10", cells=2),
+        ),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS[1:], lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == partial_message(
+        f"plan run 10 published 1 apply checks for 2 planned cells, holding back {_DNS}"
+    )
+
+
+def test_no_cell_to_apply_never_reads_the_counts():
+    """A fully applied pull request whose records predate the count: nothing to apply, so
+    nothing refuses. Mutation: call `refuse_incomplete` with no cell to apply (drop
+    `if cells:`) -- run 42 is the newest run and has no count, red."""
+    lines = _lines(_check(name=_APP, external_id=_record("42", cells=None)))
+    assert ad.with_plan_runs([], lines, APP_ID, pr_number=PR_NUMBER) == []
+
+
 def test_records_for_this_pull_request_pass():
     """Mutation: refuse unconditionally -- red."""
-    lines = _lines(_apply_check("stacks/app"), _apply_check("stacks/dns"))
+    lines = _lines(_apply_check("stacks/app", cells=2), _apply_check("stacks/dns", cells=2))
     assert [
         c["stack"] for c in ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
     ] == ["stacks/app", "stacks/dns"]

@@ -492,7 +492,8 @@ def _counted(name, id, plan_run, cells=_MISSING, status="queued", app_id=999):
     record = {"fingerprint": "a" * 64, "plan_run": plan_run, "pr": "8"}
     if cells is not _MISSING:
         record["cells"] = cells
-    run = _run_obj(name, status=status, conclusion=None, id=id, app_id=app_id)
+    conclusion = "success" if status == "completed" else None
+    run = _run_obj(name, status=status, conclusion=conclusion, id=id, app_id=app_id)
     run["external_id"] = json.dumps(record)
     return json.dumps(run)
 
@@ -508,6 +509,11 @@ _A, _B, _C = "apply / a / dev", "apply / b / dev", "apply / c / dev"
         pytest.param([_counted(_A, 1, "7")], {"7": (1, ())}, id="missing"),
         pytest.param([_counted(_A, 1, "7", "1")], {"7": (1, ())}, id="string"),
         pytest.param([_counted(_A, 1, "7", True)], {"7": (1, ())}, id="true"),
+        pytest.param(
+            [_counted(_A, 1, "7", 2), _counted(_B, 2, "7")],
+            {"7": (2, (2,))},
+            id="uncounted-sibling",
+        ),
         pytest.param(
             [_counted(_A, 1, "7", 2), _counted(_B, 2, "7", 3)],
             {"7": (2, (2, 3))},
@@ -562,5 +568,6 @@ def test_incomplete_runs(lines, expected):
     (other-app); drop `not isinstance(cells, bool)` (true); `int(cells)` for a digit string
     (string); skip `completed` checks (completed); `len(named) >= max(counts)` for the equality
     (over-count); `len(named) <= min(counts)` for the equality (partial); compare only the
-    first declared count (disagreeing)."""
+    first declared count (disagreeing); skip a record with no valid count instead of marking
+    its run (uncounted-sibling)."""
     assert ag.incomplete_runs(lines, "999") == expected
