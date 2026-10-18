@@ -1,9 +1,8 @@
 """Every engine job's `runs-on:`, whole map.
 
 Jobs that run `terramate` or `tofu`, `plan.yml`'s `summary` and `comment-ops.yml`'s `ops` (both
-parse YAML), and every `drift.yml` job take the consumer's `runs_on:` input. `drift.yml`'s
-`issues` runs neither tool and parses no YAML; it follows the file's one runner by choice. The
-other control jobs take the 1-CPU `ubuntu-slim` image.
+parse YAML) take the consumer's `runs_on:` input. The control jobs, `drift.yml`'s `issues`
+among them, run neither tool and parse no YAML; they take the 1-CPU `ubuntu-slim` image.
 Engine CI (`ci.yml`,
 `manifest-load.yml`) stays on `ubuntu-latest`. A new job, a moved job or a flipped label fails
 here. Mutations: `apply-env-level.yml` `complete` to `${{ inputs.runs_on }}`; `plan.yml`
@@ -32,7 +31,7 @@ EXPECTED = {
     ("deploy.yml", "summary"): SLIM,
     ("drift.yml", "detect"): INPUT,
     ("drift.yml", "drift"): INPUT,
-    ("drift.yml", "issues"): INPUT,
+    ("drift.yml", "issues"): SLIM,
     ("manifest-load.yml", "load"): LATEST,
     ("plan.yml", "facts"): SLIM,
     ("plan.yml", "detect"): INPUT,

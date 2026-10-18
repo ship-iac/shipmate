@@ -1999,13 +1999,14 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml` and
   `comment-ops.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
   `apply.yml` and `deploy.yml` pass it to `apply-env-level.yml`, where it is
-  required. It sets the runner of every engine job but nine, which run on
+  required. It sets the runner of every engine job but ten, which run on
   `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `facts` and `gate-hold`,
+  `drift.yml`'s `issues`,
   `apply.yml`'s `guard`, `review` and `summary`, `deploy.yml`'s `summary`,
   `apply-env-level.yml`'s `snapshot` and `complete`, and `unlock.yml`'s
   `guard`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
   `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
-  for a runner. An account that cannot use `ubuntu-slim` leaves the nine
+  for a runner. An account that cannot use `ubuntu-slim` leaves the ten
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the

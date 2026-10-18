@@ -83,7 +83,7 @@ jobs:
     # error fails drift-issues' download; a missing artifact is not detected here, since a
     # zero-match pattern download succeeds.
     if: ${{ always() && needs.detect.outputs.empty == 'false' && github.ref == format('refs/heads/{0}', needs.detect.outputs.default_branch) }}
-    runs-on: ${{ inputs.runs_on }}
+    runs-on: ubuntu-slim
     environment: { name: shipmate-engine, deployment: false }
     permissions: { actions: read, contents: read }
     steps:

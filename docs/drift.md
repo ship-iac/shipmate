@@ -42,10 +42,11 @@ workflow file), under any name in `.github/workflows/`. Two things reach it:
 that file's `schedule` trigger, and a `workflow_dispatch` of that file
 (`gh workflow run <drift-file>.yml`), which takes no input.
 
-The engine's jobs run on the `drift` job's `runs_on:` input, `ubuntu-26.04-arm`
-in the published fence and by default. Set it to a label your account offers,
-such as `ubuntu-latest` for x64; one it does not offer leaves every job waiting
-for a runner that never arrives.
+The engine's `detect` and `drift` jobs run on the `drift` job's `runs_on:`
+input, `ubuntu-26.04-arm` in the published fence and by default; `issues`
+runs on `ubuntu-slim`. Set the input to a label your account offers, such as
+`ubuntu-latest` for x64; one it does not offer leaves those jobs waiting for a
+runner that never arrives.
 [`aws.md`](aws.md) §Runner choice covers the choice.
 
 **The state path is read from `tofu init`, not configured.** A local backend's

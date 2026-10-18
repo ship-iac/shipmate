@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Changed
+
+- **`drift.yml`'s `issues` job runs on `ubuntu-slim` whatever `runs_on` the caller passes: it runs neither `tofu` nor `terramate` and parses no YAML.**
+
 ## [0.48.0] — 2026-10-18
 
 Tags `b60c376`.
