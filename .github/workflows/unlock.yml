@@ -4,6 +4,7 @@ on:
     inputs:
       environment: { required: true, type: string }
       ref: { required: true, type: string }
+      runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     # Unlock's first and only secret. It carries no engine credential -- unlock reads no plan
     # artifact and mints no App token -- but `unlock-cell` runs `tofu init`, so a consumer
     # whose backend configuration reads a plain TF_VAR_* needs the envelope here too.
@@ -29,7 +30,7 @@ jobs:
 
   detect:
     needs: [guard]
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     permissions: { contents: read, checks: read, actions: read }
     outputs:
       cells: ${{ steps.d.outputs.cells }}
@@ -65,7 +66,7 @@ jobs:
     # skipped `detect` reads its outputs as empty strings -- which `!= '[]'` reads as a queue.
     needs: [guard, detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.cells != '[]' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     # No PR comment, deliberately -- do not "fix" it: it needs pull-requests: write, which the
     # consumer's job does not grant. comment-ops' reaction acknowledges acceptance, step summaries
     # carry per-cell detail, and a failure reds the run and notifies the actor.

@@ -38,7 +38,7 @@ _CELL_ENV = "${{ matrix.env_binding }}"
 def test_the_workflow_call_inputs_are_exactly_these():
     """`tags` is an input so each drift file carries its own query. Mutation: drop `tags`."""
     assert workflow_yaml(WF)["on"]["workflow_call"]["inputs"] == {
-        "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
+        "runs_on": {"required": False, "default": "ubuntu-26.04-arm", "type": "string"},
         "tags": {"required": False, "default": "", "type": "string"},
     }
 

@@ -1691,7 +1691,7 @@ triggers, and five jobs each gated on the event with an `if:` and each calling
 one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
 declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY`,
 `SHIPMATE_PLAN_PASSPHRASE` and `SHIPMATE_SECRETS` by name (never
-`secrets: inherit`) and no input.
+`secrets: inherit`) and one input, `runs_on`.
 Everything a `uses:` line reaches is engine-owned,
 SHA-pinned YAML.
 
@@ -1979,22 +1979,33 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 - shipmate's actions are composite actions: their steps run under `bash`
   and call Python scripts, `git`, `curl`, `jq`, `openssl`, and the `gh` CLI. A
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
-  PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and GNU
-  coreutils (`setup` hashes the Terramate download with `sha256sum`).
+  PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and a
+  coreutils `sha256sum`, GNU or uutils (`setup` hashes the Terramate download
+  with it; `apply-cell` hashes the rendered plan from stdin and reads the first
+  field). The Ubuntu 26.04 images ship uutils (probed 2026-10-17 on
+  `ubuntu-26.04`, x64, and 2026-10-18 on `ubuntu-26.04-arm`).
 - Every GitHub-hosted Ubuntu image from 24.04 on, `ubuntu-slim` included,
   provides these tools other than PyYAML. PyYAML differs per image: the
-  `ubuntu-24.04` and `ubuntu-26.04` x64 images ship it (probed 2026-10-15), and
-  `ubuntu-slim` has none, so there it arrives through the install step below.
+  `ubuntu-24.04` and `ubuntu-26.04` x64 images ship it (probed 2026-10-15), the
+  `ubuntu-26.04-arm` image ships Python 3.14.4 and PyYAML 6.0.3 (probed
+  2026-10-18), and `ubuntu-slim` has none, so there it arrives through the
+  install step below.
   The `ubuntu-slim` image's
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. The CLI is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and several `ubuntu-slim` jobs on the plan, apply and deploy paths
   call `gh api`. Self-hosted runners must preinstall these tools.
-- `docs/aws.md` §Runner choice names the calls that take `runs_on` and lists
-  the fixed runner of every other job a consumer's calls reach. `plan.yml`'s
-  `facts` and `gate-hold` run on `ubuntu-slim` whatever `runs_on` the `plan`
-  caller passes. An account that cannot use `ubuntu-slim` leaves the
+- `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml` and
+  `comment-ops.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
+  `apply.yml` and `deploy.yml` pass it to `apply-env-level.yml`, where it is
+  required. It sets the runner of every engine job but nine, which run on
+  `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `facts` and `gate-hold`,
+  `apply.yml`'s `guard`, `review` and `summary`, `deploy.yml`'s `summary`,
+  `apply-env-level.yml`'s `snapshot` and `complete`, and `unlock.yml`'s
+  `guard`. `docs/aws.md` §Runner choice lists the jobs per workflow. A
+  `runs_on` label the account lacks leaves the jobs that take `runs_on` waiting
+  for a runner. An account that cannot use `ubuntu-slim` leaves the nine
   `ubuntu-slim` jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
@@ -3180,10 +3191,10 @@ apply path as `.github/workflows/apply.yml` (detect → env-levels 0..3 via
 `apply-env-level.yml` → gate refresh + result comment; a targeted apply is one
 env-level, a bare one every pending environment in `needs` order), and the unlock path
 as `.github/workflows/unlock.yml` (guard → single-env detect → one flat unlock
-matrix; it takes `environment` and `ref` only, and declares `SHIPMATE_SECRETS`
+matrix; it takes `environment`, `ref` and `runs_on` only, and declares `SHIPMATE_SECRETS`
 and no engine secret). A
 consuming repo reaches all three from `shipmate.yml`: the `deploy` job (on
-`push` to the default branch; passes secrets and no input), the `apply` job (dispatched
+`push` to the default branch; passes secrets and one input, `runs_on`), the `apply` job (dispatched
 `apply`, with or without an `environment`) and the `unlock` job
 (dispatched `unlock`; a `secrets:` block naming
 `SHIPMATE_SECRETS` alone). All three grant `id-token: write` (§AWS OIDC).

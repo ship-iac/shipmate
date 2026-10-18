@@ -3984,14 +3984,17 @@ def test_the_dispatch_probe_accepts_any_spelling_of_the_option_list(options):
 
 
 def test_a_workflow_file_that_calls_no_engine_plan_workflow_is_reported_once(monkeypatch):
-    """The fail-open leg: the published file without its `plan` job is dispatchable, so the
-    run starts with nothing in it that plans. The routing finding's zero count is the one
+    """The fail-open leg: the published file whose `plan` job calls a local workflow instead
+    of the engine's is dispatchable, so the run starts with nothing in it that plans. The job
+    stays, because it holds the fence's anchors. The routing finding's zero count is the one
     report; the job-name finder has no call to name.
 
     Mutation: restore the dispatch finding's own "does not call the engine's plan workflow"
     warning, and the list gains a second entry."""
+    engine_plan = "uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>"
     fence = _documented_workflow_file()
-    text = fence[: fence.index("  plan:\n")] + fence[fence.index("  comment-ops:\n") :]
+    assert fence.count(engine_plan) == 1
+    text = fence.replace(engine_plan, "uses: ./.github/workflows/plan.yml")
     responses = _fork_responses({"shipmate.yml": text})
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     assert doctor._shipmate_yml_warnings(_ctx(engine_repo=_PUBLISHED_ENGINE)) == [

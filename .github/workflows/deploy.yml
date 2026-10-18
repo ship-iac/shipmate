@@ -1,6 +1,8 @@
 name: deploy
 on:
   workflow_call:
+    inputs:
+      runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     secrets:
       # Consumers pass this by name: `vars` reach a called workflow automatically, secrets do not,
       # and no environment supplies it (the waves bind the env's apply environment). Without it
@@ -12,7 +14,7 @@ on:
       SHIPMATE_SECRETS: { required: false }
 jobs:
   detect:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     permissions: { contents: read, checks: read, actions: read, pull-requests: read }
     outputs:
       envlevel0_waves: ${{ steps.d.outputs.envlevel0_waves }}
@@ -50,6 +52,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
     # Named, never inherit: see the envlevel0 job in apply.yml.
     secrets: &envlevel-secrets
       # Declare a new secret in apply-env-level.yml first: see the envlevel0 job in apply.yml.
@@ -66,6 +69,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -77,6 +81,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -88,6 +93,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
     secrets: *envlevel-secrets
 
   summary:

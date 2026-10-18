@@ -443,14 +443,14 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: apply` | `apply` | `apply.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
-Only the `plan` job and each drift file's `drift` job accept a `runs_on:`
-input. The jobs those two calls reach take the input, except `plan.yml`'s
-`facts` and `gate-hold`; every other engine job's runner is fixed.
-[`aws.md`](aws.md) §Runner choice lists them. The fences below omit
-`runs_on:`, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
-`ubuntu-latest`. Pass it only for a different label your plan actually
-offers; one it does not leaves that call waiting for a runner that never
-arrives.
+Every job below passes a `runs_on:` input, which sets the runner of every
+engine job except nine that run neither `terramate` nor `tofu` and stay on
+`ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
+`ubuntu-26.04-arm` by default, and the other four repeat it with `*runner`.
+The drift fence writes the label itself, because an anchor cannot cross
+files. Set both to a label your account offers, such as `ubuntu-latest` for
+x64; one it does not leaves those jobs waiting for a runner that never
+arrives. [`aws.md`](aws.md) §Runner choice lists the jobs on each runner.
 
 ```yaml
 name: shipmate
@@ -515,13 +515,17 @@ jobs:
       contents: read
       pull-requests: read
       id-token: write
-    secrets:
+    secrets: &engine-secrets
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       # Not a no-op when you hold no repository secret of that name: the envelope normally
       # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
       # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+    # Runner for this file's engine jobs except the nine on ubuntu-slim (docs/aws.md §Runner
+    # choice); each `*runner` repeats it, drift files set their own. ubuntu-latest selects x64.
+    with:
+      runs_on: &runner ubuntu-26.04-arm
   comment-ops:
     name: shipmate
     # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
@@ -535,6 +539,8 @@ jobs:
       actions: read
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
+    with:
+      runs_on: *runner
   deploy:
     # Display only: the run's job path reads
     # `shipmate / post-merge / L<n> / apply / <stack> / <env>`.
@@ -545,22 +551,19 @@ jobs:
       cancel-in-progress: false
     uses: ship-iac/shipmate/.github/workflows/deploy.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, pull-requests: read, actions: read, id-token: write }
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+    secrets: *engine-secrets
+    with:
+      runs_on: *runner
   apply:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'apply'
     uses: ship-iac/shipmate/.github/workflows/apply.yml@<engine-sha>  # see the latest release
     permissions: { contents: read, checks: read, actions: read, id-token: write }
-    secrets:
-      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
-      SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+    secrets: *engine-secrets
     with:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
       pr_number: ${{ inputs.pr_number }}
+      runs_on: *runner
   unlock:
     if: github.event_name == 'workflow_dispatch' && inputs.verb == 'unlock'
     uses: ship-iac/shipmate/.github/workflows/unlock.yml@<engine-sha>  # see the latest release
@@ -570,6 +573,7 @@ jobs:
     with:
       environment: ${{ inputs.environment }}
       ref: ${{ inputs.ref }}
+      runs_on: *runner
 ```
 
 On a repository whose default branch is not `main`, change `branches: [main]`
@@ -600,6 +604,8 @@ jobs:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
+    with:
+      runs_on: ubuntu-26.04-arm
 ```
 
 **The `permissions:` block on each calling job is not optional.** A called
