@@ -1983,19 +1983,26 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   coreutils (`setup` hashes the Terramate download with `sha256sum`).
 - Every GitHub-hosted Ubuntu image from 24.04 on, `ubuntu-slim` included,
   provides these tools other than PyYAML. PyYAML differs per image: the
-  `ubuntu-24.04` and `ubuntu-26.04` x64 images ship it (probed 2026-10-15), and
-  `ubuntu-slim` has none, so there it arrives through the install step below.
+  `ubuntu-24.04` and `ubuntu-26.04` x64 images ship it (probed 2026-10-15), the
+  `ubuntu-26.04-arm` image ships Python 3.14.4 and PyYAML 6.0.3 (probed
+  2026-10-18), and `ubuntu-slim` has none, so there it arrives through the
+  install step below.
   The `ubuntu-slim` image's
   [included-software list](https://github.com/actions/runner-images/blob/066b3201a74f4551f70c221a71c49746d02c0864/images/ubuntu-slim/ubuntu-slim-Readme.md)
   names the GitHub CLI. The CLI is load-bearing: the default-branch probe in
   engine `drift.yml`'s `detect` job calls `gh api` before that job's `setup`
   step, and several `ubuntu-slim` jobs on the plan, apply and deploy paths
   call `gh api`. Self-hosted runners must preinstall these tools.
-- `docs/aws.md` §Runner choice names the calls that take `runs_on` and lists
-  the fixed runner of every other job a consumer's calls reach. `plan.yml`'s
-  `facts` and `gate-hold` run on `ubuntu-slim` whatever `runs_on` the `plan`
-  caller passes. An account that cannot use `ubuntu-slim` leaves the
-  `ubuntu-slim` jobs waiting for a runner.
+- `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml`, `unlock.yml` and
+  `comment-ops.yml` take a `runs_on` input, default `ubuntu-26.04-arm`;
+  `apply.yml` and `deploy.yml` pass it to `apply-env-level.yml`, where it is
+  required. It sets the runner of every engine job but nine, which run on
+  `ubuntu-slim` whatever `runs_on` the caller passes: `plan.yml`'s `facts` and `gate-hold`,
+  `apply.yml`'s `guard`, `review` and `summary`, `deploy.yml`'s `summary`,
+  `apply-env-level.yml`'s `snapshot` and `complete`, and `unlock.yml`'s
+  `guard`. `docs/aws.md` §Runner choice lists the jobs per workflow. An
+  account that lacks the `runs_on` label, or cannot use `ubuntu-slim`, leaves
+  those jobs waiting for a runner.
 - PyYAML is the scripts' one third-party dependency; they parse the config
   and workflow files with it. Before the first step that parses YAML, the
   engine's `python-yaml` action checks that `python3` imports it and, when it

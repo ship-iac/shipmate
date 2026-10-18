@@ -1081,7 +1081,7 @@ def _lock_files_item(ctx):
         ]
     lines += [
         "In each, run `tofu init -backend=false`, then",
-        "`tofu providers lock -platform=linux_amd64`, and commit the file.",
+        "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, and commit the file.",
     ]
     return "todo", item, lines
 

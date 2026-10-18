@@ -48,11 +48,12 @@ does with that wiring.
   [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards states the rule.
 - **Each stack's `.terraform.lock.hcl` committed.** It pins provider versions,
   and without it every cell downloads its providers. Write it with `tofu init -backend=false`,
-  then `tofu providers lock -platform=linux_amd64`, in each stack (no backend credentials
-  needed). A CLI configuration setting `plugin_cache_may_break_dependency_lock_file = true`
-  makes `tofu init` record only your platform's `h1:` hash, which the runner's cache cannot
-  use; `tofu providers lock` reads the OpenTofu registry whatever the cache holds. A lock from
-  Terraform, or from a provider mirror on another platform, does not serve the cache either.
+  then `tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, in each stack
+  (no backend credentials needed). A CLI configuration setting
+  `plugin_cache_may_break_dependency_lock_file = true` makes `tofu init` record only your
+  platform's `h1:` hash, which the runner's cache cannot use; `tofu providers lock` reads
+  the OpenTofu registry whatever the cache holds. A lock from Terraform, or from a provider
+  mirror on another platform, does not serve the cache either.
   [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Lock files and the provider
   cache", has the conditions and the reasoning.
 
@@ -443,14 +444,14 @@ Which trigger reaches which job, and which engine workflow it calls:
 | `verb: apply` | `apply` | `apply.yml` |
 | `verb: unlock` | `unlock` | `unlock.yml` |
 
-Only the `plan` job and each drift file's `drift` job accept a `runs_on:`
-input. The jobs those two calls reach take the input, except `plan.yml`'s
-`facts` and `gate-hold`; every other engine job's runner is fixed.
-[`aws.md`](aws.md) §Runner choice lists them. The fences below omit
-`runs_on:`, as `repo-example-stacks-aws` does, so `plan` and `drift` run on
-`ubuntu-latest`. Pass it only for a different label your plan actually
-offers; one it does not leaves that call waiting for a runner that never
-arrives.
+Every job below passes a `runs_on:` input, which sets the runner of every
+engine job except nine that run neither `terramate` nor `tofu` and stay on
+`ubuntu-slim`. The `plan` job sets it once as the `&runner` anchor,
+`ubuntu-26.04-arm` by default, and the other four repeat it with `*runner`.
+The drift fence writes the label itself, because an anchor cannot cross
+files. Set both to a label your account offers, such as `ubuntu-latest` for
+x64; one it does not leaves those jobs waiting for a runner that never
+arrives. [`aws.md`](aws.md) §Runner choice lists the jobs on each runner.
 
 ```yaml
 name: shipmate

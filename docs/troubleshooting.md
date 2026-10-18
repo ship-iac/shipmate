@@ -1503,6 +1503,21 @@ this; `scripts/onboard --app-id <id> --dry-run` does, with the command that
 removes the rule. List the rules with
 `gh api repos/<owner>/<repo>/environments/shipmate-engine/deployment_protection_rules`.
 
+### Engine jobs stay queued with no runner
+
+The run starts, but `detect`, the cells or `ops` stay queued and never start,
+while any `ubuntu-slim` job in the run completes. No step of the queued jobs
+runs, so nothing reports it.
+
+The `runs_on` label is one the account or the self-hosted runner pool lacks.
+The default, `ubuntu-26.04-arm`, is a GitHub-hosted arm64 label. Set the
+`&runner` anchor on `shipmate.yml`'s `plan` job, or the drift file's
+`runs_on:`, to a label the account has, such as `ubuntu-latest` for x64.
+Cancel the queued run and start a new one once the change is on the default
+branch: a re-run reads the workflow file of the original run's commit, so it
+keeps the old label. [`aws.md`](aws.md) §Runner choice lists the jobs each
+label reaches.
+
 ### An apply check never completes after a successful apply
 
 The apply itself succeeded, but the `apply / <stack> / <env>` check stays

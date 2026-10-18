@@ -8,6 +8,13 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Changed
+
+- **The heavy engine jobs (`detect`, the cells and `summary` in `plan.yml`, `detect`, `drift` and `issues` in `drift.yml`, `detect` and the apply cells in `apply.yml` and `deploy.yml`, `detect` and `unlock` in `unlock.yml`, and `ops` in `comment-ops.yml`) run on a `runs_on` input that defaults to `ubuntu-26.04-arm`. A consumer that passes none moves from `ubuntu-latest` to arm64. `apply.yml`, `deploy.yml`, `unlock.yml` and `comment-ops.yml` now take `runs_on`; no input is removed. The `shipmate.yml` fence sets the label once with `runs_on: &runner ubuntu-26.04-arm` on `plan`, and shares `plan`'s secrets with `deploy` and `apply` through `&engine-secrets`. A self-hosted or x64-only account sets the anchor, and each drift file's `runs_on:`, to its own label. `scripts/repin` prints the fence diff and exits 2 for a `shipmate.yml` without the anchors.**
+- **`scripts/onboard`'s lock remedy and `docs/getting-started.md` name both platforms: `tofu providers lock -platform=linux_amd64 -platform=linux_arm64`.**
+
 ## [0.47.1] — 2026-10-18
 
 Tags `73caa27`.

@@ -260,24 +260,43 @@ prefix.
 
 ## Runner choice
 
-Only `shipmate.yml`'s `plan` job and each drift file's `drift` job accept
-`runs_on:`. The documented fences in [`getting-started.md`](getting-started.md)
-pass none, so those jobs run on
-the `ubuntu-latest` default. Outside them the
-runner is fixed:
+Every engine workflow a consumer calls takes a `runs_on:` input whose default
+is `ubuntu-26.04-arm`. GitHub publishes no `ubuntu-latest`-style alias for
+arm64, so the default is a pinned label. The input sets the runner of the jobs
+that run `terramate` or `tofu`, and of `ops`:
 
-- `ubuntu-slim`: `guard`, `review` and `summary` in `apply.yml`, `snapshot`
-  and `complete` in `apply-env-level.yml`, `summary` in `deploy.yml`, `guard`
-  in `unlock.yml`, and `facts` and `gate-hold` in `plan.yml`. The `plan` job's
-  `runs_on:` does not reach `facts` or `gate-hold`.
-- `ubuntu-latest`: `detect` in `apply.yml`, `deploy.yml` and `unlock.yml`,
-  which runs `terramate`; the apply cells in `apply-env-level.yml` and `unlock`
-  in `unlock.yml`, which run `tofu`; and `ops` in `comment-ops.yml`. Every
-  `ops` run takes `ubuntu-latest`, whatever the comment says; only a
-  `doctor`, `apply` or `unlock` comment from a commenter with write access
-  needs PyYAML there, which `ubuntu-slim` would install with `apt-get`.
+- `plan.yml`: `detect`, `plan` and `summary`.
+- `drift.yml`: `detect`, `drift` and `issues`.
+- `apply.yml` and `deploy.yml`: `detect`, and the apply cells, which both pass
+  `runs_on` to `apply-env-level.yml`.
+- `unlock.yml`: `detect` and `unlock`.
+- `comment-ops.yml`: `ops`.
 
-Neither the nine `ubuntu-slim` jobs nor `ops` runs `tofu` or `terramate`.
+The input does not reach nine jobs, which run on `ubuntu-slim` and run neither
+`tofu` nor `terramate`: `facts` and `gate-hold` in `plan.yml`; `guard`,
+`review` and `summary` in `apply.yml`; `summary` in `deploy.yml`; `snapshot`
+and `complete` in `apply-env-level.yml`; and `guard` in `unlock.yml`.
+
+The `shipmate.yml` fence in [`getting-started.md`](getting-started.md) §The
+workflow file sets the label once, as `runs_on: &runner ubuntu-26.04-arm` on
+the `plan` job, and the other four jobs repeat it with `runs_on: *runner`. A
+YAML anchor cannot cross files, so the drift fence writes the label on its
+`drift` job. To choose x64, set the anchor and each drift file's `runs_on:` to
+`ubuntu-latest`; for a self-hosted runner, set them to its label. A label the
+account or runner pool lacks leaves every job that takes it queued, waiting
+for a runner that never arrives.
+
+Mixing architectures is safe. A plan made on arm64 applied on x64 (probed
+2026-10-18), provided each stack's committed `.terraform.lock.hcl` holds the
+`h1:` hash of both platforms: `tofu providers lock -platform=linux_amd64
+-platform=linux_arm64` writes both. `scripts/onboard` reports a lock without
+the registry's `zh:` hashes, the signature of a lock that holds one platform's
+`h1:` only. The provider cache key carries the runner's architecture, so
+an arm64 cell and an x64 cell keep separate cache entries.
+
+GitHub's standard arm64 runners have 4 vCPU on a public repository. On
+2026-10-18 they also ran on a private repository of a Free-plan organization,
+with 2 vCPU.
 
 The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
 `drift`; their cells download only `hashicorp/random`. An AWS repository's
@@ -286,10 +305,9 @@ cells pull `hashicorp/aws`. The provider cache serves a stack once its
 §Terramate safeguards, "Lock files and the provider cache") and a drift or
 apply cell has saved an entry for the same provider addresses and versions;
 plan cells never save. Without a committed lock, every `init -reconfigure`
-downloads the provider again. Before passing `runs_on: ubuntu-slim` to `plan`
-or `drift`, weigh two costs: the provider download, and the PyYAML install
-with `apt-get` it adds to `plan.yml`'s `detect` and `summary` and
-`drift.yml`'s `detect`.
+downloads the provider again. Before setting `runs_on:` to `ubuntu-slim`,
+weigh two costs: the provider download, and the PyYAML install with `apt-get`
+it adds to every job that parses YAML, since `ubuntu-slim` ships no PyYAML.
 
 ## The sample's workload
 
