@@ -2,9 +2,8 @@ name: plan
 on:
   workflow_call:
     inputs:
-      # The three local samples run a slimmer image than the apply path's ubuntu-latest cells.
       # `detect`, the plan cells and `summary` take it; `facts` and `gate-hold` run on ubuntu-slim.
-      runs_on: { required: false, default: ubuntu-latest, type: string }
+      runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     secrets:
       # Both `required: false`, for apply.yml's reason: the `summary` job binds
       # `shipmate-engine` and the cells bind `<env>-plan`, so a required declaration would fail

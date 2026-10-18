@@ -49,17 +49,19 @@ APPLY = "apply.yml"
 UNLOCK = "unlock.yml"
 
 #: The whole `workflow_call.inputs` mapping of each file, hand-written. `mode` is absent from
-#: the apply side and never existed on the unlock side. On the unlock side this set is also the
-#: dispatch contract: an input the body sends that this file does not declare kills the run at
-#: startup with no job, no check-run and no retrievable log.
+#: the apply side and never existed on the unlock side. On the unlock side the required inputs
+#: are also the dispatch contract: an input the body sends that this file does not declare kills
+#: the run at startup with no job, no check-run and no retrievable log.
 APPLY_INPUTS = {
     "environment": {"required": False, "type": "string", "default": ""},
     "ref": {"required": True, "type": "string"},
     "pr_number": {"required": True, "type": "string"},
+    "runs_on": {"required": False, "default": "ubuntu-26.04-arm", "type": "string"},
 }
 UNLOCK_INPUTS = {
     "environment": {"required": True, "type": "string"},
     "ref": {"required": True, "type": "string"},
+    "runs_on": {"required": False, "default": "ubuntu-26.04-arm", "type": "string"},
 }
 
 #: The whole job-id set of each file. The apply side is listed so pasting an `unlock` job back
@@ -231,8 +233,8 @@ def test_the_unlock_workflow_declares_exactly_the_dispatch_body():
     got = _inputs(UNLOCK)
     assert got == UNLOCK_INPUTS, (
         f"{UNLOCK}'s workflow_call inputs are {got!r}, not {UNLOCK_INPUTS!r} -- the "
-        "dispatch body is exactly ref and environment, and an input this file declares "
-        "that the body does not fill (or the reverse) is a load-time rejection with no "
+        "dispatch body is exactly ref and environment, and a required input this file "
+        "declares that the body does not fill (or the reverse) is a load-time rejection with no "
         "job, no check-run and no retrievable log"
     )
 

@@ -7,6 +7,7 @@ on:
       environment: { required: false, type: string, default: "" }
       ref: { required: true, type: string }
       pr_number: { required: true, type: string }
+      runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     # A callee's `environment:` resolves in the CALLER's repository, and the environment's value
     # wins over whatever the caller passed, empty included -- `summary` binds `shipmate-engine`.
     secrets:
@@ -104,7 +105,7 @@ jobs:
     # refuse a failed `review`, and this one says so.
     needs: [guard, review]
     if: ${{ !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     permissions: { contents: read, checks: read, actions: read }
     # An unwritten `_empty` reads '', runs its level and dies at fromJSON.
     outputs:
@@ -155,6 +156,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel0_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
     # Named, never `inherit`: `inherit` is evaluated against the consumer's run, so a cross-org
     # consumer's `complete` job would hold no key, its applies would execute, and their apply
     # checks would strand pending forever.
@@ -175,6 +177,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel1_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
     secrets: *envlevel-secrets
 
   envlevel2:
@@ -186,6 +189,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel2_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
     secrets: *envlevel-secrets
 
   envlevel3:
@@ -197,6 +201,7 @@ jobs:
     with:
       waves_json: ${{ needs.detect.outputs.envlevel3_waves }}
       head_sha: ${{ needs.detect.outputs.head_sha }}
+      runs_on: ${{ inputs.runs_on }}
     secrets: *envlevel-secrets
 
   summary:

@@ -1,6 +1,8 @@
 name: comment-ops
 on:
   workflow_call:
+    inputs:
+      runs_on: { required: false, default: ubuntu-26.04-arm, type: string }
     secrets:
       # `required: false`, as drift.yml and the apply path declare it: the job binds
       # `shipmate-engine`, so a required declaration would fail at load time for every consumer
@@ -14,7 +16,7 @@ jobs:
     # so a consumer cannot drop it. `contains` is looser than the parser on purpose: a command
     # can follow other lines.
     if: ${{ github.event.issue.pull_request && !endsWith(github.event.comment.user.login, '[bot]') && contains(github.event.comment.body, 'shipmate') }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     environment: { name: shipmate-engine, deployment: false }
     permissions:
       contents: read

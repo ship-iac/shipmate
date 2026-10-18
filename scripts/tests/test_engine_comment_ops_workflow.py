@@ -20,11 +20,13 @@ from _loader import (
 WF = WORKFLOWS / "comment-ops.yml"
 
 
-def test_the_workflow_declares_no_inputs_and_one_secret():
-    """Mutation: add any `workflow_call` input, or make the secret `required: true` -- which
-    fails at load time for every consumer scoping the key to an environment."""
+def test_the_workflow_declares_one_optional_input_and_one_secret():
+    """Mutation: add any other `workflow_call` input, or make the secret `required: true` --
+    which fails at load time for every consumer scoping the key to an environment."""
     call = workflow_yaml(WF)["on"]["workflow_call"]
-    assert call.get("inputs") is None
+    assert call["inputs"] == {
+        "runs_on": {"required": False, "default": "ubuntu-26.04-arm", "type": "string"}
+    }
     assert call["secrets"] == {"SHIPMATE_APP_PRIVATE_KEY": {"required": False}}
 
 

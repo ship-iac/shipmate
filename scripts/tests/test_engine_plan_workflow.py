@@ -19,7 +19,7 @@ WF = WORKFLOWS / "plan.yml"
 def test_the_workflow_call_inputs_are_exactly_these():
     """Mutation: re-declare `state_suffix: { required: true, type: string }`."""
     assert workflow_yaml(WF)["on"]["workflow_call"]["inputs"] == {
-        "runs_on": {"required": False, "default": "ubuntu-latest", "type": "string"},
+        "runs_on": {"required": False, "default": "ubuntu-26.04-arm", "type": "string"},
     }
 
 

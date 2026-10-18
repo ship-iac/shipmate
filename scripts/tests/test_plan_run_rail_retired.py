@@ -14,15 +14,15 @@ from _loader import WORKFLOWS, workflow_yaml
 #: inputs is listed as `{}`, so a new workflow reaching for the retired rail cannot dodge the
 #: comparison.
 EXPECTED_INPUTS = {
-    "apply-env-level.yml": {"workflow_call": ["head_sha", "waves_json"]},
-    "apply.yml": {"workflow_call": ["environment", "pr_number", "ref"]},
+    "apply-env-level.yml": {"workflow_call": ["head_sha", "runs_on", "waves_json"]},
+    "apply.yml": {"workflow_call": ["environment", "pr_number", "ref", "runs_on"]},
     "ci.yml": {},
-    "comment-ops.yml": {},
-    "deploy.yml": {},
+    "comment-ops.yml": {"workflow_call": ["runs_on"]},
+    "deploy.yml": {"workflow_call": ["runs_on"]},
     "drift.yml": {"workflow_call": ["runs_on", "tags"]},
     "manifest-load.yml": {},
     "plan.yml": {"workflow_call": ["runs_on"]},
-    "unlock.yml": {"workflow_call": ["environment", "ref"]},
+    "unlock.yml": {"workflow_call": ["environment", "ref", "runs_on"]},
 }
 
 #: The wave fan-out `apply-env-level.yml` pre-declares. Hand-written, so a deleted wave job

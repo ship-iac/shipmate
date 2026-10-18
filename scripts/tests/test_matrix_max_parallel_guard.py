@@ -47,6 +47,7 @@ EXPECTED_ENVLEVEL_WITH = {
     (workflow, f"envlevel{n}"): {
         "waves_json": f"${{{{ needs.detect.outputs.envlevel{n}_waves }}}}",
         "head_sha": "${{ needs.detect.outputs.head_sha }}",
+        "runs_on": "${{ inputs.runs_on }}",
     }
     for workflow in ("apply.yml", "deploy.yml")
     for n in range(4)
@@ -90,6 +91,7 @@ def test_apply_env_level_takes_no_cap():
     assert inputs == {
         "waves_json": {"required": True, "type": "string"},
         "head_sha": {"required": True, "type": "string"},
+        "runs_on": {"required": True, "type": "string"},
     }
 
 

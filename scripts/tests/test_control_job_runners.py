@@ -1,15 +1,12 @@
 """Every engine job's `runs-on:`, whole map.
 
-The control jobs run no `tofu` and no `terramate`, so they take the 1-CPU `ubuntu-slim` image,
-except `comment-ops.yml`'s `ops`: its `doctor`, `apply` and `unlock` routes parse YAML, and
-`ubuntu-latest`'s `python3` ships PyYAML where slim would apt-install it on each such comment.
-Detect jobs run `terramate` and cells run `tofu`: they stay on `ubuntu-latest`. `plan.yml` and
-`drift.yml` take the consumer's `runs_on:` input, except `plan.yml`'s `facts` and `gate-hold`.
-`summary` stays on the input: doctor installs and parses YAML there, an apt install on slim. A new
-job, a moved job or a flipped label fails here. Mutations: `apply-env-level.yml` `complete` to
-`ubuntu-latest`; `plan.yml` `summary` to `ubuntu-slim`; `plan.yml` `facts` to
-`${{ inputs.runs_on }}`; the `apply-env-level.yml` `wave0` cell to `ubuntu-slim`;
-`comment-ops.yml` `ops` back to `ubuntu-slim`.
+Jobs that run `terramate` or `tofu`, plus `plan.yml`'s `summary` and `comment-ops.yml`'s `ops`
+(both parse YAML), take the consumer's `runs_on:` input. The control jobs run neither tool and take
+the 1-CPU `ubuntu-slim` image. Engine CI (`ci.yml`, `manifest-load.yml`) stays on `ubuntu-latest`.
+A new job, a moved job or a flipped label fails here. Mutations: `apply-env-level.yml` `complete`
+to `${{ inputs.runs_on }}`; `plan.yml` `summary` to `ubuntu-slim`; `plan.yml` `facts` to
+`${{ inputs.runs_on }}`; the `apply-env-level.yml` `wave0` cell to `ubuntu-latest`;
+`comment-ops.yml` `ops` to `ubuntu-slim`; `unlock.yml` `unlock` to `ubuntu-latest`.
 """
 
 from _loader import WORKFLOWS, workflow_yaml
@@ -20,15 +17,15 @@ INPUT = "${{ inputs.runs_on }}"
 
 EXPECTED = {
     ("apply-env-level.yml", "snapshot"): SLIM,
-    **{("apply-env-level.yml", f"wave{n}"): LATEST for n in range(8)},
+    **{("apply-env-level.yml", f"wave{n}"): INPUT for n in range(8)},
     ("apply-env-level.yml", "complete"): SLIM,
     ("apply.yml", "guard"): SLIM,
     ("apply.yml", "review"): SLIM,
-    ("apply.yml", "detect"): LATEST,
+    ("apply.yml", "detect"): INPUT,
     ("apply.yml", "summary"): SLIM,
     ("ci.yml", "lint-test"): LATEST,
-    ("comment-ops.yml", "ops"): LATEST,
-    ("deploy.yml", "detect"): LATEST,
+    ("comment-ops.yml", "ops"): INPUT,
+    ("deploy.yml", "detect"): INPUT,
     ("deploy.yml", "summary"): SLIM,
     ("drift.yml", "detect"): INPUT,
     ("drift.yml", "drift"): INPUT,
@@ -40,8 +37,8 @@ EXPECTED = {
     ("plan.yml", "summary"): INPUT,
     ("plan.yml", "gate-hold"): SLIM,
     ("unlock.yml", "guard"): SLIM,
-    ("unlock.yml", "detect"): LATEST,
-    ("unlock.yml", "unlock"): LATEST,
+    ("unlock.yml", "detect"): INPUT,
+    ("unlock.yml", "unlock"): INPUT,
 }
 
 
