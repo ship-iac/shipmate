@@ -165,11 +165,10 @@ def plan_records(check_run_lines, app_id):
         record = _decoded(run)
         if record is None:
             continue
-        plan_run = record.get("plan_run")
         digest = record.get("plan_sha256")
         pr = record.get("pr")
         out[name] = (
-            plan_run if isinstance(plan_run, str) and is_run_id(plan_run) else None,
+            _plan_run(record),
             digest if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) else None,
             pr if isinstance(pr, str) and is_pr_number(pr) else None,
         )
@@ -178,7 +177,8 @@ def plan_records(check_run_lines, app_id):
 
 def incomplete_runs(check_run_lines, app_id):
     """Map each plan run that published only part of its apply checks to `(distinct names
-    published, sorted distinct declared counts)`. Complete runs are absent.
+    published, sorted distinct declared counts, whether any record has no valid count)`.
+    Complete runs are absent.
 
     A run's names are every App-authored `apply / ` check, of any status, whose decodable
     record names it; its declared counts are the records' `cells` values that are an int and
@@ -190,23 +190,28 @@ def incomplete_runs(check_run_lines, app_id):
 
     Every check run is read, not only the newest per name, so a same-head re-plan that no
     longer plans a cell leaves the older run's names still counted, rather than making that
-    run incomplete for good. The wider scan cannot inflate a run's names: only run R's own
-    summary job writes a record naming R, and on a re-run pending-checks' `published` emits
-    only the names R has not yet published, so every match is a check R itself published."""
+    run incomplete for good. Within one attempt of run R the wider scan cannot inflate R's
+    names: only R's summary job writes a record naming R. A "Re-run all jobs" attempt that
+    plans a different cell set can add names under the same run id, and then R is incomplete
+    (it fails closed)."""
     names, counts = {}, {}
     for run in app_runs(check_run_lines, app_id):
         if not run["name"].startswith(APPLY_PREFIX):
             continue
         record = _decoded(run)
-        plan_run = record.get("plan_run") if record is not None else None
-        if not (isinstance(plan_run, str) and is_run_id(plan_run)):
+        plan_run = _plan_run(record) if record is not None else None
+        if plan_run is None:
             continue
         names.setdefault(plan_run, set()).add(run["name"])
         cells = record.get("cells")
         valid = isinstance(cells, int) and not isinstance(cells, bool)
         counts.setdefault(plan_run, set()).add(cells if valid else None)
     return {
-        run: (len(named), tuple(sorted(c for c in counts[run] if c is not None)))
+        run: (
+            len(named),
+            tuple(sorted(c for c in counts[run] if c is not None)),
+            None in counts[run],
+        )
         for run, named in names.items()
         if counts[run] != {len(named)}
     }
@@ -220,6 +225,13 @@ def _decoded(run):
     except json.JSONDecodeError:
         return None
     return record if isinstance(record, dict) else None
+
+
+def _plan_run(record):
+    """The decimal-digit `plan_run` of decoded `record`, or None when it carries no such
+    string."""
+    plan_run = record.get("plan_run")
+    return plan_run if isinstance(plan_run, str) and is_run_id(plan_run) else None
 
 
 def verdict(check_runs):

@@ -935,7 +935,7 @@ def test_a_run_that_published_part_of_its_checks_refuses():
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == partial_message(
-        f"plan run 42 published 1 apply checks for 2 planned cells, holding back {_APP}"
+        f"plan run 42 published 1 apply check for 2 planned cells, holding back {_APP}"
     )
 
 
@@ -952,8 +952,8 @@ def test_a_run_whose_records_declare_no_count_refuses():
 
 
 def test_a_run_whose_records_disagree_on_the_count_refuses():
-    """Mutation: always word the fact as `published <n> apply checks for <m> planned cells`
-    -- this message changes and the no-count test above raises `IndexError`, both red."""
+    """Mutation: `if counts:` for `if len(counts) == 1:` in `_fact` -- the fact reads
+    `published 2 apply checks for 2 planned cells`, red."""
     lines = _lines(
         _apply_check("stacks/app", plan_run="42", cells=2),
         _apply_check("stacks/dns", plan_run="42", cells=3, id=2),
@@ -964,6 +964,50 @@ def test_a_run_whose_records_disagree_on_the_count_refuses():
         "plan run 42 records disagreeing planned cell counts (2, 3) on its apply checks, "
         f"holding back {_APP}, {_DNS}"
     )
+
+
+def test_a_run_with_one_uncounted_record_says_so():
+    """Run 42's two records: one declares 2 cells, one no count. Mutations: drop the
+    uncounted branch from `_fact` -- `published 2 apply checks for 2 planned cells`, red; drop
+    `'some of '` -- red."""
+    lines = _lines(
+        _apply_check("stacks/app", plan_run="42", cells=2),
+        _apply_check("stacks/dns", plan_run="42", cells=None, id=2),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == partial_message(
+        "plan run 42 records no planned cell count on some of its apply checks, "
+        f"holding back {_APP}, {_DNS}"
+    )
+
+
+def test_two_incomplete_runs_are_named_in_the_plural():
+    """Run 41 published one check of two cells; run 42 published two of one. Mutations:
+    always render `it` and `run` in `refuse_incomplete` -- red; drop the singular from `_n` --
+    `1 planned cells`, red."""
+    lines = _lines(
+        _apply_check("stacks/app", plan_run="41", cells=2, id=1),
+        _apply_check("stacks/dns", plan_run="42", cells=1, id=2),
+        _apply_check("stacks/c", plan_run="42", cells=1, id=3),
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == partial_message(
+        f"plan run 41 published 1 apply check for 2 planned cells, holding back {_APP}; "
+        f"plan run 42 published 2 apply checks for 1 planned cell, holding back {_DNS}",
+        several=True,
+    )
+
+
+def test_another_pull_requests_record_refuses_before_an_incomplete_run():
+    """`stacks/app` records pull request #7 and is the one check of a two-cell run. Mutation:
+    move the `refuse_incomplete` call in `with_plan_runs` above the pull-request refusal --
+    the partial-run message speaks first, red."""
+    lines = _lines(_apply_check("stacks/app", plan_run="42", pr="7", cells=2))
+    with pytest.raises(SystemExit) as exc_info:
+        ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=PR_NUMBER)
+    assert str(exc_info.value) == foreign_message(f"{_APP} (pull request #7)")
 
 
 def test_a_same_head_re_plan_that_drops_a_cell_does_not_deadlock():
@@ -1039,7 +1083,7 @@ def test_a_newer_incomplete_run_refuses_a_cell_of_an_older_complete_one():
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS[1:], lines, APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == partial_message(
-        f"plan run 10 published 1 apply checks for 2 planned cells, holding back {_DNS}"
+        f"plan run 10 published 1 apply check for 2 planned cells, holding back {_DNS}"
     )
 
 
@@ -1122,7 +1166,10 @@ def _zigzag(monkeypatch, tmp_path, checks, table=None):
 def test_a_cell_waits_on_a_pending_upstream_in_another_environment(monkeypatch, tmp_path):
     """Mutation: build `all_pending` from `env`'s cells only -- `dns/dev-us` is no blocker and
     `platform` applies."""
-    checks = [_apply_check("stacks/platform"), _apply_check("stacks/dns", "dev-us")]
+    checks = [
+        _apply_check("stacks/platform", cells=2),
+        _apply_check("stacks/dns", "dev-us", cells=2),
+    ]
     assert _zigzag(monkeypatch, tmp_path, checks) == ([], _PLATFORM_WAITS)
 
 
@@ -1140,7 +1187,10 @@ def test_a_needs_order_added_after_the_plan_still_makes_the_cell_wait(monkeypatc
 
     Mutation: return `below` alone from `waves._reach` (no instances at a dead end) --
     `platform` applies."""
-    checks = [_apply_check("stacks/platform"), _apply_check("stacks/dns", "dev-us")]
+    checks = [
+        _apply_check("stacks/platform", cells=2),
+        _apply_check("stacks/dns", "dev-us", cells=2),
+    ]
     table = {"layout": "folder", "environments": {"dev-us": {"needs": ["dev-eu"]}}}
     assert _zigzag(monkeypatch, tmp_path, checks, table=table) == ([], _PLATFORM_WAITS)
 
@@ -1160,7 +1210,10 @@ def test_a_waiting_cell_whose_check_records_no_plan_run_does_not_refuse(monkeypa
 def test_main_notice_counts_a_waiting_cell_as_pending(monkeypatch, tmp_path, capsys):
     """`pending=` counts before the waiting drop, as on the bare form; `waiting=` counts the
     drop. Mutation: print `len(runnable)` for `pending=` -- `pending=0`."""
-    checks = [_apply_check("stacks/platform"), _apply_check("stacks/dns", "dev-us")]
+    checks = [
+        _apply_check("stacks/platform", cells=2),
+        _apply_check("stacks/dns", "dev-us", cells=2),
+    ]
     _zigzag(monkeypatch, tmp_path, checks)
     assert (
         f"::notice title=apply-detect::env=dev-eu head={'a' * 40} "

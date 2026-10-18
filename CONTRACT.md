@@ -2371,8 +2371,9 @@ plan job skipped with no cell planned is the empty matrix and is not held.
 `gate-state` holds the one rule for both decisions. The newer-run refusal above
 runs first, before any cell summary is read. Apply checks an earlier plan run of
 the same head published stay, and a pre-merge `shipmate apply` applies those
-when that run published every one of its checks (§Apply-match fingerprint); on
-a head with none it names no plan run and is refused (§Comment-ops, "undiverged").
+when that run published every one of its checks and the head's newest plan run
+did too (§Apply-match fingerprint); on a head with none it names no plan run and
+is refused (§Comment-ops, "undiverged").
 
 ## Apply result comment
 
@@ -2692,22 +2693,28 @@ too, at detect; the remedy is a re-plan. `tofu show` of a stored plan renders
 identically on any runner at one tofu version, and both `show` and `apply`
 refuse a plan file from another version, so the record carries no version field.
 
-A fourth field, `cells`, binds each apply check to the rest of its plan run: the
-number of cells that run planned. The summary job publishes its apply checks one
-at a time, so a job that fails partway leaves a run with fewer apply checks than
-cells, and an apply of the published subset can lose an `after` ordering to a
-cell it cannot see. A run is complete only when every App-authored
-`apply / <stack> / <env>` check whose record names it, across all of the head's
-check runs and of any status, declares one `cells` integer and that integer equals
-the number of distinct check names. A record with no `cells`, written before the
-field existed, makes its run incomplete. The targeted apply, the bare apply and
-the deploy refuse at detect, after the absent-run and absent-digest refusals,
-when a cell they would apply records an incomplete run or the head's newest plan
-run is incomplete; with no cell to apply, nothing is read. The remedy is a
-pushed commit, whose plan run plans and publishes every cell afresh; post-merge,
-a new pull request touching those stacks. A `shipmate plan` comment on the same
-head is not the remedy: a re-plan that no longer plans a cell of the partial run
-leaves that cell's newest check on the incomplete run.
+The record's `cells` field binds each apply check to the rest of its plan run:
+the number of cells that run planned. The summary job publishes its apply checks
+one at a time, so a job that fails partway leaves a run with fewer apply checks
+than cells. A "Re-run all jobs" attempt of the same run that plans a different
+cell set adds checks beside the first attempt's, so the run has more checks than
+one count, or records that disagree on it. Either way an apply of the published
+checks can lose an `after` ordering to a cell it cannot see. A run is complete
+only when every App-authored `apply / <stack> / <env>` check whose record names it,
+across all of the head's check runs and of any status, declares one `cells`
+integer and that integer equals the number of distinct check names. A record
+with no `cells`, written before the field existed, makes its run incomplete. The
+targeted apply, the bare apply and the deploy refuse at detect, after the
+absent-run, absent-digest and pull-request refusals, when a cell they would
+apply records an incomplete run or the head's newest plan run is incomplete;
+with no cell to apply, nothing is read. When the summary job failed partway, the
+first remedy is re-running the plan run's failed jobs: the re-run keeps the run
+id, and its summary job publishes only the checks the run has not yet published.
+The remedy that always works is a pushed commit, whose plan run plans and
+publishes every cell afresh; post-merge, a new pull request touching those
+stacks. A `shipmate plan` comment on the same head is not the remedy: a re-plan
+that no longer plans a cell of the partial run leaves that cell's newest check
+on the incomplete run.
 
 ## Consumer variables and secrets
 

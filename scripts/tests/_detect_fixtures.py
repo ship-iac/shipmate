@@ -92,14 +92,17 @@ def foreign_message(listed):
     )
 
 
-def partial_message(listed):
+def partial_message(listed, *, several=False):
     """The refusal a detect raises when the runs and held-back cells `listed` name published
-    only part of a run's apply checks."""
+    only part of a run's apply checks; `several` when `listed` names more than one run."""
+    it, runs = ("they", "runs") if several else ("it", "run")
     return (
-        f"::error::apply aborted: {listed}: the cells it planned are not all visible to this "
-        "apply, so an ordering among them can be lost. Push a commit to the pull request, which "
-        "plans and publishes every cell afresh, then apply again; if that pull request has "
-        "already merged, a new pull request touching these stacks plans and applies them."
+        f"::error::apply aborted: {listed}: the published apply checks do not match the cells "
+        f"{it} planned, so an ordering among them can be lost. Re-run the failed jobs of the "
+        f"plan {runs} (not all jobs), then apply again; if the refusal remains, push a commit to "
+        "the pull request, which plans and publishes every cell afresh, then apply again; if "
+        "that pull request has already merged, a new pull request touching these stacks plans "
+        "and applies them."
     )
 
 

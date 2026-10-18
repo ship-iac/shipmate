@@ -346,7 +346,7 @@ def test_a_post_failing_mid_publish_leaves_a_run_the_apply_refuses(tmp_path):
         )
         for i, p in enumerate(posts[:-1], 1)
     ]
-    assert ag.incomplete_runs(listing, APP_ID) == {"42": (1, (2,))}
+    assert ag.incomplete_runs(listing, APP_ID) == {"42": (1, (2,), False)}
 
 
 @bash_only

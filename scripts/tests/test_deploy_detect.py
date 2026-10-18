@@ -543,7 +543,10 @@ def test_main_refuses_a_cyclic_needs_before_sorting_env_levels(tmp_path, monkeyp
             tmp_path,
             monkeypatch,
             cells=[_cell("stacks/app", "a"), _cell("stacks/app", "b")],
-            checks=[_apply_check("stacks/app", "a"), _apply_check("stacks/app", "b")],
+            checks=[
+                _apply_check("stacks/app", "a", cells=2),
+                _apply_check("stacks/app", "b", cells=2),
+            ],
             order={"a": ["b"], "b": ["a"]},
         )
     assert str(exc.value) == (
@@ -561,7 +564,10 @@ def test_the_earliest_refusal_still_writes_the_head_sha(tmp_path, monkeypatch):
             tmp_path,
             monkeypatch,
             cells=[_cell("stacks/app", "a"), _cell("stacks/app", "b")],
-            checks=[_apply_check("stacks/app", "a"), _apply_check("stacks/app", "b")],
+            checks=[
+                _apply_check("stacks/app", "a", cells=2),
+                _apply_check("stacks/app", "b", cells=2),
+            ],
             order={"a": ["b"], "b": ["a"]},
         )
     assert str(exc.value).startswith("::error::needs is cyclic")
@@ -597,9 +603,9 @@ def test_main_refuses_a_pending_apply_check_on_an_unmanaged_stack(tmp_path, monk
             monkeypatch,
             cells=[],
             checks=[
-                _apply_check("stacks/app"),
-                _apply_check("stacks/gone", "dev-eu"),
-                _apply_check("stacks/gone", "dev-us"),
+                _apply_check("stacks/app", cells=3),
+                _apply_check("stacks/gone", "dev-eu", cells=3),
+                _apply_check("stacks/gone", "dev-us", cells=3),
                 _check(name="apply / stacks/gone / prod"),
             ],
             stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
@@ -624,7 +630,7 @@ def test_the_refusal_names_a_pending_cell_that_has_no_apply_check(tmp_path, monk
             tmp_path,
             monkeypatch,
             cells=[],
-            checks=[_apply_check("stacks/app"), _apply_check("stacks/gone")],
+            checks=[_apply_check("stacks/app", cells=2), _apply_check("stacks/gone", cells=2)],
             stacks={"stacks/app": ["env/dev-eu"], "stacks/new": ["env/dev-eu"], "stacks/gone": []},
             deps={"stacks/app": set(), "stacks/new": set(), "stacks/gone": set()},
         )
@@ -672,7 +678,10 @@ def test_main_refuses_an_open_check_for_an_env_the_stack_no_longer_tags(tmp_path
             tmp_path,
             monkeypatch,
             cells=[],
-            checks=[_apply_check("stacks/app"), _apply_check("stacks/app", "prod")],
+            checks=[
+                _apply_check("stacks/app", cells=2),
+                _apply_check("stacks/app", "prod", cells=2),
+            ],
             stacks={"stacks/app": ["env/dev-eu"]},
             deps={"stacks/app": set()},
         )

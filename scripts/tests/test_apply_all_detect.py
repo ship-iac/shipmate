@@ -456,7 +456,7 @@ def test_main_refuses_a_run_that_published_part_of_its_checks(tmp_path, monkeypa
             checks=[_apply_check("stacks/app", "dev-eu", plan_run="42", cells=2)],
         )
     assert str(exc_info.value) == partial_message(
-        "plan run 42 published 1 apply checks for 2 planned cells, holding back "
+        "plan run 42 published 1 apply check for 2 planned cells, holding back "
         "apply / stacks/app / dev-eu"
     )
 
@@ -575,6 +575,7 @@ def test_main_reports_a_held_explicit_env_as_excluded_too(tmp_path, monkeypatch)
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
+        cells=2,
         explicit=["prod-eu"],
         decision="REVIEW_REQUIRED",
     )
@@ -703,6 +704,7 @@ def test_main_holds_every_env_unreviewed_when_the_list_is_unset(tmp_path, monkey
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
+        cells=2,
         decision="REVIEW_REQUIRED",
     )
     assert _wave_envs(parsed) == []
@@ -719,6 +721,7 @@ def test_main_holds_every_env_when_the_decision_variable_is_absent(tmp_path, mon
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "prod-eu"],
+        cells=2,
         decision=None,
     )
     assert _wave_envs(parsed) == []
@@ -762,6 +765,7 @@ def test_main_without_the_variable_holds_every_env_on_changes_requested(tmp_path
         tmp_path,
         monkeypatch,
         envs=["dev-eu", "dev-us", "prod-eu"],
+        cells=3,
         order={"dev-us": ["prod-eu"]},
         decision="CHANGES_REQUESTED",
     )
@@ -1013,9 +1017,9 @@ def test_main_skips_the_needs_successor_of_an_env_with_a_waiting_cell(tmp_path, 
         tmp_path,
         monkeypatch,
         [
-            _apply_check("stacks/platform", "dev-eu"),
-            _apply_check("stacks/dns", "dev-us"),
-            _apply_check("stacks/box", "prod-eu"),
+            _apply_check("stacks/platform", "dev-eu", cells=3),
+            _apply_check("stacks/dns", "dev-us", cells=3),
+            _apply_check("stacks/box", "prod-eu", cells=3),
         ],
         order={"prod-eu": ["dev-eu"]},
         explicit=["dev-us"],
@@ -1038,7 +1042,10 @@ def test_main_refuses_a_cell_after_a_held_upstream_on_a_later_env_level(tmp_path
         _cross_env(
             tmp_path,
             monkeypatch,
-            [_apply_check("stacks/platform", "dev-eu"), _apply_check("stacks/dns", "dev-us")],
+            [
+                _apply_check("stacks/platform", "dev-eu", cells=2),
+                _apply_check("stacks/dns", "dev-us", cells=2),
+            ],
             order={"dev-us": ["dev-eu"]},
             ungated="dev-eu",
             decision="REVIEW_REQUIRED",
@@ -1069,7 +1076,7 @@ def test_main_refuses_a_cycle_before_an_inversion(tmp_path, monkeypatch):
             envs=[],
             tree={"dev-eu": ["a"], "dev-us": ["b"]},
             tags={"a": ["env/dev-eu"], "b": ["env/dev-us"]},
-            checks=[_apply_check("a", "dev-eu"), _apply_check("b", "dev-us")],
+            checks=[_apply_check("a", "dev-eu", cells=2), _apply_check("b", "dev-us", cells=2)],
             order={"dev-us": ["dev-eu"]},
             decision="APPROVED",
             dot=run_graph_capture("cycle-two"),
@@ -1181,7 +1188,11 @@ def test_main_holds_a_cell_after_a_cell_that_waits_through_a_dead_end(
             "c": ["env/ex", "env/e1"],
         },
         deps={"r": {"b"}, "b": {"a"}, "a": {"c"}, "c": set()},
-        checks=[_apply_check("r", "e1"), _apply_check("b", "e0"), _apply_check("c", "ex")],
+        checks=[
+            _apply_check("r", "e1", cells=3),
+            _apply_check("b", "e0", cells=3),
+            _apply_check("c", "ex", cells=3),
+        ],
         order={"e1": ["ez"], "e2": ["e1"]},
         explicit=["ex"],
         decision="APPROVED",

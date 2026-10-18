@@ -505,23 +505,23 @@ _A, _B, _C = "apply / a / dev", "apply / b / dev", "apply / c / dev"
     ("lines", "expected"),
     [
         pytest.param([_counted(_A, 1, "7", 2), _counted(_B, 2, "7", 2)], {}, id="complete"),
-        pytest.param([_counted(_A, 1, "7", 2)], {"7": (1, (2,))}, id="partial"),
-        pytest.param([_counted(_A, 1, "7")], {"7": (1, ())}, id="missing"),
-        pytest.param([_counted(_A, 1, "7", "1")], {"7": (1, ())}, id="string"),
-        pytest.param([_counted(_A, 1, "7", True)], {"7": (1, ())}, id="true"),
+        pytest.param([_counted(_A, 1, "7", 2)], {"7": (1, (2,), False)}, id="partial"),
+        pytest.param([_counted(_A, 1, "7")], {"7": (1, (), True)}, id="missing"),
+        pytest.param([_counted(_A, 1, "7", "1")], {"7": (1, (), True)}, id="string"),
+        pytest.param([_counted(_A, 1, "7", True)], {"7": (1, (), True)}, id="true"),
         pytest.param(
             [_counted(_A, 1, "7", 2), _counted(_B, 2, "7")],
-            {"7": (2, (2,))},
+            {"7": (2, (2,), True)},
             id="uncounted-sibling",
         ),
         pytest.param(
             [_counted(_A, 1, "7", 2), _counted(_B, 2, "7", 3)],
-            {"7": (2, (2, 3))},
+            {"7": (2, (2, 3), False)},
             id="disagreeing",
         ),
         pytest.param(
             [_counted(_A, 1, "7", 2), _counted(_B, 2, "7", 2), _counted(_C, 3, "7", 2)],
-            {"7": (3, (2,))},
+            {"7": (3, (2,), False)},
             id="over-count",
         ),
         pytest.param(
@@ -569,5 +569,5 @@ def test_incomplete_runs(lines, expected):
     (string); skip `completed` checks (completed); `len(named) >= max(counts)` for the equality
     (over-count); `len(named) <= min(counts)` for the equality (partial); compare only the
     first declared count (disagreeing); skip a record with no valid count instead of marking
-    its run (uncounted-sibling)."""
+    its run (uncounted-sibling); `False` for `None in counts[run]` (uncounted-sibling)."""
     assert ag.incomplete_runs(lines, "999") == expected
