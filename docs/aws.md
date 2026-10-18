@@ -278,12 +278,9 @@ The input does not reach nine jobs, which run on `ubuntu-slim` and run neither
 and `complete` in `apply-env-level.yml`; and `guard` in `unlock.yml`.
 
 `issues` in `drift.yml` runs neither tool too, yet stays on the `runs_on`
-runner because an `ubuntu-slim` job stops at 15 minutes. It makes one or more
-Issue calls per swept cell that is drifted or has an open Issue, plus one close
-per open Issue of a cell that left the repository, so its runtime grows with
-those counts, up to 256 cells per sweep, and a large sweep can pass 15 minutes.
-A sweep stopped there fails, and the later cells' Issues and closes wait for the
-next sweep.
+runner because an `ubuntu-slim` job stops at 15 minutes and the work of
+`issues` is not fixed: it grows with the sweep's drifted cells and with the
+repository's open drift Issues.
 
 The `shipmate.yml` fence in [`getting-started.md`](getting-started.md) §The
 workflow file sets the label once, as `runs_on: &runner ubuntu-26.04-arm` on
