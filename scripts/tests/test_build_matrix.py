@@ -815,7 +815,12 @@ def test_a_plan_refuses_changed_cells_whose_after_edge_needs_inverts(monkeypatch
     )
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
         "refusal=needs order inverted, fix default-branch needs or tags: stacks/platform / "
-        "dev-eu before stacks/dns / dev-us, which it runs after\n"
+        "dev-eu before stacks/dns / dev-us, which it runs after "
+        "- stacks/platform / dev-eu (env-level 0) after stacks/dns / dev-us (env-level 1); "
+        "dev-us's level comes from dev-eu -> dev-us "
+        "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
+        "in that chain on the default branch, or retag the stacks so the edge stays inside "
+        "environments that order it.\n"
     )
 
 
@@ -1657,7 +1662,7 @@ def test_a_refusal_reaches_the_refusal_output_and_still_fails_the_step(
     )
 
 
-def test_a_multi_line_refusal_writes_its_first_line_only(monkeypatch, tmp_path, capsys):
+def test_a_multi_error_refusal_writes_its_first_error_only(monkeypatch, tmp_path, capsys):
     """A second line would end the output's value and start a malformed one; the annotation
     still carries both errors.
 

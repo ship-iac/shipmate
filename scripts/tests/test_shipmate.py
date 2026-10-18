@@ -4,6 +4,7 @@ import subprocess
 import sys
 import types
 
+import _shipmate
 import pytest
 from _loader import ENGINE
 from _shipmate import (
@@ -301,9 +302,8 @@ def test_run_annotated_prints_a_refusal_as_one_escaped_command(capsys):
 
 
 def test_run_annotated_ends_a_line_at_cr_lf_and_crlf(capsys):
-    """The `refusal` output takes the first line with `splitlines`, so the annotation splits
-    the same way: its first line is the gate description's. Mutation: split
-    on `"\\n"` only -- `%0D` appears."""
+    """The `refusal` output splits lines with the same `splitlines`, so the two surfaces agree
+    on where a line ends. Mutation: split on `"\\n"` only -- `%0D` appears."""
     main = _raising("::error::first\r\nsecond\rthird")
     assert _annotated(main, capsys) == (1, "::error::first%0Asecond%0Athird\n")
 
@@ -353,37 +353,61 @@ def test_run_annotated_passes_its_arguments_to_main():
 
 
 def _refusal_output(monkeypatch, tmp_path, main, **switch):
-    """(exit code, `GITHUB_OUTPUT` text) of `run_annotated(main, **switch)`."""
+    """(exit code, `GITHUB_OUTPUT` bytes) of `run_annotated(main, **switch)`. Bytes, because a
+    text read would turn a CR into a line end and hide one written into the value; only the
+    platform's own line end (`write_outputs` writes in text mode) is read back as LF."""
     out = tmp_path / "out.txt"
-    out.write_text("", encoding="utf-8")
+    out.write_bytes(b"")
     monkeypatch.setenv("GITHUB_OUTPUT", str(out))
     with pytest.raises(SystemExit) as exc:
         run_annotated(main, **switch)
-    return exc.value.code, out.read_text(encoding="utf-8")
+    return exc.value.code, out.read_bytes().replace(os.linesep.encode(), b"\n")
 
 
-def test_run_annotated_writes_the_first_errors_first_line_as_the_refusal_output(
-    monkeypatch, tmp_path
+def test_run_annotated_writes_the_whole_first_error_as_the_refusal_output(monkeypatch, tmp_path):
+    """Joined errors share one output: the first error, prefix removed, its lines stripped and
+    joined by a space. Mutations: drop the `write_outputs` call -- empty; keep only the first
+    line -- `first`; write the last error -- `second`."""
+    main = _raising("::error::first\n  more \n\n::error::second")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
+        1,
+        b"refusal=first more\n",
+    )
+
+
+def test_run_annotated_keeps_a_failed_commands_stderr_in_the_refusal_output(monkeypatch, tmp_path):
+    """A `_run` failure's cause is on the lines under its first. Mutation: keep only the first
+    line -- the `HTTP 404` cause is lost."""
+    main = _raising("::error::command failed (1): gh api x\nHTTP 404\nnot found")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
+        1,
+        b"refusal=command failed (1): gh api x HTTP 404 not found\n",
+    )
+
+
+def test_run_annotated_ends_a_refusal_output_line_at_cr_lf_and_crlf(monkeypatch, tmp_path):
+    """The output splits lines as the annotation does, so no CR reaches the value. Mutation:
+    split on `"\\n"` only -- a CR stays inside it."""
+    main = _raising("::error::first\r\nsecond\rthird\n::error::x")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
+        1,
+        b"refusal=first second third\n",
+    )
+
+
+def test_run_annotated_prints_the_annotation_before_it_writes_the_refusal_output(
+    monkeypatch, capsys
 ):
-    """Joined errors share one output: the first error's first line, prefix removed, as the
-    gate description and the apply comment name it. Mutations: drop the `write_outputs` call
-    -- empty; write `errors[-1][-1]` -- `second`."""
-    main = _raising("::error::first\nmore\n::error::second")
-    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
-        1,
-        "refusal=first\n",
-    )
+    """A write that fails (`GITHUB_OUTPUT` unset, an `OSError`) cannot cost the annotation.
+    Mutation: write the output before printing -- the annotation is missing."""
 
+    def fail(**pairs):
+        raise OSError("GITHUB_OUTPUT not writable")
 
-def test_run_annotated_ends_the_refusal_output_at_a_crlf(monkeypatch, tmp_path):
-    """`refusal` takes the first line with `splitlines`, as the annotation splits, so the gate
-    description and the annotation's first line agree. Mutation: split on `"\\n"` only -- a CR
-    ends the value."""
-    main = _raising("::error::first\r\nsecond")
-    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
-        1,
-        "refusal=first\n",
-    )
+    monkeypatch.setattr(_shipmate, "write_outputs", fail)
+    with pytest.raises(OSError):
+        run_annotated(_raising("::error::first\nmore"), refusal_output=True)
+    assert capsys.readouterr().err == "::error::first%0Amore\n"
 
 
 @pytest.mark.parametrize("code", [1, "plain"])
@@ -391,10 +415,10 @@ def test_run_annotated_writes_no_refusal_output_for_another_exit(monkeypatch, tm
     """A crash or a non-refusal exit leaves the comment as it is without a refusal. Mutation:
     write the output before the `is_refusal` check -- red."""
     main = _raising(code)
-    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (code, "")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (code, b"")
 
 
 def test_run_annotated_writes_no_refusal_output_without_the_switch(monkeypatch, tmp_path):
     """Mutation: write the output whatever `refusal_output` says -- red."""
     main = _raising("::error::first")
-    assert _refusal_output(monkeypatch, tmp_path, main) == (1, "")
+    assert _refusal_output(monkeypatch, tmp_path, main) == (1, b"")

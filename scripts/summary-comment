@@ -305,24 +305,24 @@ def verdict(cells, head_sha, run_url):
     return f"{circle} {n} of {len(cells)} cells change {provenance(head_sha, run_url)}"
 
 
-#: The held comment's reason is cut here, so its body stays far under `HARD_CAP` with every cell
-#: line it can carry.
-HELD_REASON_CAP = 4000
+#: A fenced reason is cut here, so a comment carrying one stays far under `HARD_CAP` with every
+#: cell line it can carry.
+REASON_CAP = 4000
 #: The most cell lines the held comment names before it counts the rest.
 HELD_CELL_NAMES = 10
 
 
 def reason_fence(text):
-    """`text` cut to `HELD_REASON_CAP` characters in a plain fence sized by `_fence_of`. For a
-    detect or gate reason, which can name author-controlled stack paths: the fence shows it
-    verbatim, where `_md_name`'s mention guard would show as written."""
-    text = text[:HELD_REASON_CAP]
+    """`text` cut to `REASON_CAP` characters in a plain fence sized by `_fence_of`, so
+    author-controlled text such as a stack path shows verbatim, where `_md_name`'s mention guard
+    would show as written."""
+    text = text[:REASON_CAP]
     return fence(text, _fence_of(text), lang="")
 
 
 def held_comment(reason, missing, checks, run_url, head_sha):
     """The comment of a held gate: marker, header, `🔴 the gate is held` and `provenance`, then
-    `reason` (the gate description before its 140-character cut, at most `HELD_REASON_CAP`
+    `reason` (the gate description before its 140-character cut, at most `REASON_CAP`
     characters) in a plain fence, then one line per cell of `missing` (`{stack, environment}`
     pairs) linking its plan check, then `FOOTER_HINT`. At most `HELD_CELL_NAMES` cell lines,
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,

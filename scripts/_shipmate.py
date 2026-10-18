@@ -201,9 +201,10 @@ def run_annotated(main, *args, refusal_output=False):
     path verbatim. Exits 1 after printing. Any other `SystemExit` passes through unchanged.
     Producers stay raw: this is the one print site of an annotated script's refusal.
 
-    With `refusal_output`, a refusal also writes the step output `refusal`: the first line of
-    the first error, raw, for a gate description or a pull-request comment to name. This is the
-    one writer of that output.
+    With `refusal_output`, a refusal also writes the step output `refusal`: the first error on
+    one line, each of its lines stripped and joined by a space, unescaped, so a failed command
+    keeps the stderr cause under its first line. It is written after the annotations, so a
+    failing write cannot cost them. This is the one writer of that output.
     """
     try:
         main(*args)
@@ -217,13 +218,13 @@ def run_annotated(main, *args, refusal_output=False):
                 errors.append([line.removeprefix("::error::")])
             else:
                 errors[-1].append(line)
-        if refusal_output:
-            # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
-            write_outputs(refusal=errors[0][0])
         for lines in errors:
             message = "\n".join(lines).rstrip("\n")
             sys.stderr.write(f"::error::{command_data(message)}\n")
         sys.stderr.flush()
+        if refusal_output:
+            # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
+            write_outputs(refusal=" ".join(line.strip() for line in errors[0] if line.strip()))
         raise SystemExit(1) from None
 
 

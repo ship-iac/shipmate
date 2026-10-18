@@ -373,6 +373,12 @@ place. Re-run with `--key <path to the App's PEM private key>`.
 
 ## Common failures
 
+When a `shipmate apply` fails at `detect` with an `::error::` (a refusal or a
+failed tool or API call), its comment shows the message's first error on one
+line, in a fence under the `🔴 failed` verdict: search this page for its text.
+The post-merge deploy posts no apply comment, so a deploy's `detect` error is
+only in that run's `detect` annotation.
+
 ### `Saved plan is stale`, or `does not match the reviewed plan's fingerprint`
 
 An apply cell fails at or before `tofu apply` and its
@@ -553,10 +559,6 @@ re-plan no longer plans a cell of the partial run, that cell's newest apply chec
 still names the partial run, and an apply that includes that cell refuses again.
 
 Nothing has been applied: the refusal runs before any wave.
-
-The `shipmate apply` comment shows the refusal's first line in a fence under
-its `🔴 failed` verdict. The post-merge deploy posts no comment: its refusal is
-only in the `detect` job's annotation on the deploy run.
 
 ### `no plan-text digest recorded for`, or `the stored plan does not render to the plan text that was reviewed`
 
@@ -1348,7 +1350,8 @@ Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` e
 A stack is `after` a stack in another environment, and `needs` puts that other
 environment on a later env-level, so no order meets both. The plan, a bare
 `shipmate apply` or the merge deploy refused before anything applied; a plan
-refusal holds the gate with the first line as its description, and a deploy
+refusal holds the gate with the message, flattened and cut to 140 characters, as
+its description, and a deploy
 refusal turns the merged head's gate to `failure`. Each `- ` line names one
 inverted pair and the `needs` chain that sets the later level.
 

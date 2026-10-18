@@ -2389,14 +2389,15 @@ turned draft since the comment) posts no comment and writes no gate: the red run
 is the signal. The started-run reply may link it (§Comment-ops says when).
 
 Structure, in order, blank lines between the parts, each part present only when
-it has content: the header, the verdict line, one line or fold-out per row, the
-notes, the footer lines, and, under any verdict but 🟢, the help hint
-``Comment `shipmate help` for the available commands.`` A 🟢 comment has no
-footer. A run with no rows to render is the header, the verdict line, the
-footer lines and, under any verdict but 🟢, the hint. When `detect` refused
-the run, the first line of its `::error::` follows the verdict line in a plain
-code fence, cut at 4,000 characters and fenced longer than any backtick run in
-it; a `detect` that failed without one renders no fence.
+it has content: the header, the verdict line, the detect error fence, one line
+or fold-out per row, the notes, the footer lines, and, under any verdict but 🟢,
+the help hint ``Comment `shipmate help` for the available commands.`` A 🟢
+comment has no footer. A run with no rows to render is the header, the verdict
+line, the detect error fence, the footer lines and, under any verdict but 🟢,
+the hint. The detect error fence shows when `detect` failed with an `::error::`
+(a refusal or a failed tool or API call): its first error on one line, in a
+plain code fence, cut at 4,000 characters and fenced longer than any backtick
+run in it. A `detect` that failed without an `::error::` renders no fence.
 
 - **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
   apply` for a bare one; the row lines and the footer lines name the
@@ -3166,7 +3167,8 @@ One `- ` line per inverted pair. Three paths refuse, each over its own cells:
 | bare `shipmate apply` | pending cells of every environment neither held, explicit nor skipped by `needs`, the skips a waiting cell causes included; waiting cells count | every pending cell, held and explicit ones included |
 | merge deploy | every pending cell | every pending cell |
 
-A plan refusal holds the gate, and the gate description carries its first line.
+A plan refusal holds the gate, and the gate description carries its first error,
+flattened and cut to 140 characters.
 The refusal reads only the run's cells, never the whole tree: a pull request
 that only changes `needs` plans no cell and passes, and the inversion surfaces
 on the first pull request that changes both ends. The deploy refusal applies

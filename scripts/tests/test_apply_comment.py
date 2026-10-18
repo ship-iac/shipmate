@@ -2009,7 +2009,7 @@ def test_a_detect_refusal_sits_in_a_fence_under_the_failed_verdict():
 
 @pytest.mark.parametrize("refusal", ["", None])
 def test_an_empty_detect_refusal_leaves_the_failed_comment_unchanged(refusal):
-    """A detect that crashed without an `::error::`, or a deploy, passes no refusal: the body is
+    """A detect that crashed without an `::error::` passes no refusal: the body is
     byte for byte the comment without one. Mutation: render the fence when `refusal` is empty
     -- an empty fence appears."""
     kw = {} if refusal is None else {"refusal": refusal}
@@ -2043,7 +2043,7 @@ def test_a_detect_refusal_holding_a_backtick_run_gets_a_longer_fence():
 
 
 def test_a_long_detect_refusal_is_cut_at_the_held_reason_cap():
-    """Mutation: drop the `HELD_REASON_CAP` cut from `reason_fence` -- red."""
+    """Mutation: drop the `REASON_CAP` cut from `reason_fence` -- red."""
     body = ac.build_comment(
         [], [], RUN_URL, [], [], "dev-eu", "failure", head_sha=SHA, refusal="x" * 4000 + "yz"
     )

@@ -729,8 +729,9 @@ def build_comment(
     """Assemble the comment under SIZE_BUDGET: header, verdict, every row in order (a fold-out
     for an applied, failed or unrecorded row with output, else its bare line), the notes, the
     footer lines, and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it
-    is header, verdict, footer lines and footer. A non-empty `refusal`, the first line of the
-    `::error::` that failed detect, sits in `sc.reason_fence` directly under the verdict.
+    is header, verdict, footer lines and footer. A non-empty `refusal`, the first error of the
+    `::error::` that failed detect on one line, sits in `sc.reason_fence` directly under the
+    verdict.
 
     Every row is guaranteed its bare line: the space all remaining rows' bare lines need is
     reserved up front, together, so an early giant apply.txt cannot starve a later row. When

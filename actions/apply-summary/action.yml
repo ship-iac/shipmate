@@ -49,7 +49,7 @@ inputs:
     required: false
     default: "[]"
   detect-refusal:
-    description: "apply-detect's `refusal` output: the first line of the `::error::` message that failed detect, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
+    description: "apply-detect's `refusal` output: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
     required: false
     default: ""
   results:
