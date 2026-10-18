@@ -522,8 +522,8 @@ jobs:
       # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
       # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    # The runner for every engine job in this file, arm64 by default; each `*runner` repeats
-    # it. Set a label your account has, such as ubuntu-latest for x64.
+    # Runner for the engine jobs that run tofu, terramate or the comment handler, arm64 by
+    # default; each `*runner` repeats it. Set a label you have, such as ubuntu-latest for x64.
     with:
       runs_on: &runner ubuntu-26.04-arm
   comment-ops:

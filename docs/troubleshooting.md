@@ -1506,7 +1506,7 @@ removes the rule. List the rules with
 ### Engine jobs stay queued with no runner
 
 The run starts, but `detect`, the cells or `ops` stay queued and never start,
-while any `ubuntu-slim` job in the run completes. No step of the queued jobs
+while the run's `ubuntu-slim` jobs, if it has any, complete. No step of the queued jobs
 runs, so nothing reports it.
 
 The `runs_on` label is one the account or the self-hosted runner pool lacks.

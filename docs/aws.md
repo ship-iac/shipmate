@@ -286,10 +286,11 @@ YAML anchor cannot cross files, so the drift fence writes the label on its
 account or runner pool lacks leaves every job that takes it queued, waiting
 for a runner that never arrives.
 
-Mixing architectures is safe. A plan made on arm64 applied on x64 (probed
-2026-10-18), provided each stack's committed `.terraform.lock.hcl` holds the
-`h1:` hash of both platforms: `tofu providers lock -platform=linux_amd64
--platform=linux_arm64` writes both. `scripts/onboard` reports a lock without
+A plan made on one architecture applies on the other, provided each stack's
+committed `.terraform.lock.hcl` holds every platform's `h1:` hash (arm64 to
+x64 probed 2026-10-18). `tofu providers lock -platform=linux_amd64` writes
+them: it records every platform's `h1:` and `zh:` hashes, not only the named
+platform's. `scripts/onboard` reports a lock without
 the registry's `zh:` hashes, the signature of a lock that holds one platform's
 `h1:` only. The provider cache key carries the runner's architecture, so
 an arm64 cell and an x64 cell keep separate cache entries.
