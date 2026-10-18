@@ -2042,7 +2042,7 @@ def test_a_detect_refusal_holding_a_backtick_run_gets_a_longer_fence():
     )
 
 
-def test_a_long_detect_refusal_is_cut_at_the_held_reason_cap():
+def test_a_long_detect_refusal_is_cut_at_the_reason_cap():
     """Mutation: drop the `REASON_CAP` cut from `reason_fence` -- red."""
     body = ac.build_comment(
         [], [], RUN_URL, [], [], "dev-eu", "failure", head_sha=SHA, refusal="x" * 4000 + "yz"

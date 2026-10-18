@@ -385,9 +385,10 @@ def test_run_annotated_keeps_a_failed_commands_stderr_in_the_refusal_output(monk
     )
 
 
-def test_run_annotated_ends_a_refusal_output_line_at_cr_lf_and_crlf(monkeypatch, tmp_path):
-    """The output splits lines as the annotation does, so no CR reaches the value. Mutation:
-    split on `"\\n"` only -- a CR stays inside it."""
+def test_run_annotated_ends_a_refusal_output_line_at_a_lone_cr(monkeypatch, tmp_path):
+    """The output splits lines as the annotation does, so no CR reaches the value. A CRLF and an
+    LF end a line too, but their split cannot differ after the strip; the lone CR is what pins
+    `splitlines`. Mutation: split on `"\\n"` only -- `second\\rthird` stays inside the value."""
     main = _raising("::error::first\r\nsecond\rthird\n::error::x")
     assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
         1,
@@ -408,6 +409,16 @@ def test_run_annotated_prints_the_annotation_before_it_writes_the_refusal_output
     with pytest.raises(OSError):
         run_annotated(_raising("::error::first\nmore"), refusal_output=True)
     assert capsys.readouterr().err == "::error::first%0Amore\n"
+
+
+def test_run_annotated_cuts_the_refusal_output_at_the_reason_cap(monkeypatch, tmp_path):
+    """An env var holding the value must stay under Linux's 128 KiB per-string limit, or the
+    step reading it fails at exec. Mutation: drop the `REASON_CAP` cut -- red."""
+    main = _raising("::error::" + "x" * 3998 + "\nyz tail")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
+        1,
+        b"refusal=" + b"x" * 3998 + b" y\n",
+    )
 
 
 @pytest.mark.parametrize("code", [1, "plain"])

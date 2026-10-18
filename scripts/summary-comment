@@ -37,6 +37,7 @@ import re
 import sys
 
 from _shipmate import (
+    REASON_CAP,
     _load,
     cell_names,
     cell_summaries,
@@ -305,9 +306,6 @@ def verdict(cells, head_sha, run_url):
     return f"{circle} {n} of {len(cells)} cells change {provenance(head_sha, run_url)}"
 
 
-#: A fenced reason is cut here, so a comment carrying one stays far under `HARD_CAP` with every
-#: cell line it can carry.
-REASON_CAP = 4000
 #: The most cell lines the held comment names before it counts the rest.
 HELD_CELL_NAMES = 10
 

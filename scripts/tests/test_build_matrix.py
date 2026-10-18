@@ -1663,8 +1663,8 @@ def test_a_refusal_reaches_the_refusal_output_and_still_fails_the_step(
 
 
 def test_a_multi_error_refusal_writes_its_first_error_only(monkeypatch, tmp_path, capsys):
-    """A second line would end the output's value and start a malformed one; the annotation
-    still carries both errors.
+    """The output carries the first error, its own lines joined; a second error is dropped,
+    and the annotation still carries both.
 
     Mutation: write the whole code as the `refusal` line in `run_annotated` -- the gap line
     follows it."""

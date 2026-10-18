@@ -184,6 +184,11 @@ def command_data(s):
     return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
 
+#: A refusal output and a fenced reason are cut here: a comment carrying one stays far under its
+#: 65,536-character cap, and an env var holding one far under Linux's 128 KiB per-string limit.
+REASON_CAP = 4000
+
+
 def is_refusal(code) -> TypeGuard[str]:
     """True when a `SystemExit` code is an `::error::` refusal: a `str` starting `::error::`."""
     return isinstance(code, str) and code.startswith("::error::")
@@ -202,9 +207,10 @@ def run_annotated(main, *args, refusal_output=False):
     Producers stay raw: this is the one print site of an annotated script's refusal.
 
     With `refusal_output`, a refusal also writes the step output `refusal`: the first error on
-    one line, each of its lines stripped and joined by a space, unescaped, so a failed command
-    keeps the stderr cause under its first line. It is written after the annotations, so a
-    failing write cannot cost them. This is the one writer of that output.
+    one line, each of its lines stripped and joined by a space, unescaped and cut at `REASON_CAP`
+    characters, so a failed command keeps the stderr cause under its first line. It is written
+    after the annotations, so a failing write cannot cost them. This is the one writer of that
+    output.
     """
     try:
         main(*args)
@@ -224,7 +230,7 @@ def run_annotated(main, *args, refusal_output=False):
         sys.stderr.flush()
         if refusal_output:
             # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
-            write_outputs(refusal=" ".join(line.strip() for line in errors[0] if line.strip()))
+            write_outputs(refusal=" ".join(filter(None, map(str.strip, errors[0])))[:REASON_CAP])
         raise SystemExit(1) from None
 
 
