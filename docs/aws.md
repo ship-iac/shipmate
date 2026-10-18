@@ -262,13 +262,13 @@ prefix.
 
 Every engine workflow a consumer calls takes a `runs_on:` input whose default
 is `ubuntu-26.04-arm`. GitHub publishes no `ubuntu-latest`-style alias for
-arm64, so the default is a pinned label. The input sets the runner of the jobs
-that run `terramate` or `tofu`, and of `ops`:
+arm64, so the default is a pinned label. The input sets the runner of every
+engine job but nine:
 
 - `plan.yml`: `detect`, `plan` and `summary`.
 - `drift.yml`: `detect`, `drift` and `issues`.
-- `apply.yml` and `deploy.yml`: `detect`, and the apply cells, which both pass
-  `runs_on` to `apply-env-level.yml`.
+- `apply.yml` and `deploy.yml`: `detect`, and the apply cells in
+  `apply-env-level.yml`, to which both pass `runs_on`.
 - `unlock.yml`: `detect` and `unlock`.
 - `comment-ops.yml`: `ops`.
 
