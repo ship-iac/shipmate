@@ -300,8 +300,8 @@ GitHub's standard arm64 runners have 4 vCPU on a public repository. On
 2026-10-18 they also ran on a private repository of a Free-plan organization,
 with 2 vCPU.
 
-The three credential-free samples pass `runs_on: ubuntu-slim` to `plan` and
-`drift`; their cells download only `hashicorp/random`. An AWS repository's
+The three credential-free samples run on the fence's `ubuntu-26.04-arm` label;
+their cells download only `hashicorp/random`. An AWS repository's
 cells pull `hashicorp/aws`. The provider cache serves a stack once its
 `.terraform.lock.hcl` is committed ([`../CONTRACT.md`](../CONTRACT.md)
 §Terramate safeguards, "Lock files and the provider cache") and a drift or
