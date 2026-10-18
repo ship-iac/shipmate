@@ -14,6 +14,11 @@ section below names the SHA the release tags.
 
 - **A `shipmate apply` refused at `detect` names the refusal in its pull-request comment: the first line of the `::error::`, in a code fence under the `🔴 failed` verdict, instead of the verdict alone. The post-merge deploy still posts no comment; its refusal stays in the `detect` annotation.**
 
+### Changed
+
+- **`docs/aws.md` §Runner choice says why the drift `issues` job stays on the `runs_on` runner: an `ubuntu-slim` job stops at 15 minutes, and `issues` makes one Issue call per drifted cell, up to 256 per sweep.**
+- **`docs/getting-started.md` says what the strict required check costs: each merge puts every other open pull request behind the base, and updating one re-plans it, so each merge costs it one plan run; an already-applied pull request re-plans with no changes and its gate goes `success` without another apply.**
+
 ## [0.49.0] — 2026-10-18
 
 Tags `8496be2`.

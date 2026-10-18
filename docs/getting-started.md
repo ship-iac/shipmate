@@ -1000,8 +1000,11 @@ Properties that fall out of the existing gate semantics:
   apply-before-merge guarantee; it only removes the final click.
 - **Stale bases don't sneak through the merge.** With "require branches up to
   date" (strict), a base moved since the plans ran blocks the auto-merge until
-  the branch is updated — and updating re-runs the plan on the new head, which
-  resets gate to pending until the fresh plans are applied. The
+  the branch is updated. Each merge puts every other open pull request behind
+  the base, and updating one re-plans it on the new head. A pull request
+  already applied re-plans with no changes, and its gate goes `success`
+  without another apply; one with changes goes `pending` until they are
+  applied. So each merge costs every other open pull request one plan run. The
   exact-plan invariant is preserved.
 
   Strict gates the merge and nothing else, so it does not protect the apply:
