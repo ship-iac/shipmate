@@ -522,8 +522,8 @@ jobs:
       # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
       # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    # Runner for every engine job except the control jobs, which stay on ubuntu-slim; arm64
-    # by default, each `*runner` repeats it. Set a label you have, such as ubuntu-latest for x64.
+    # Runner for this file's engine jobs except the nine on ubuntu-slim (docs/aws.md §Runner
+    # choice); each `*runner` repeats it, drift files set their own. ubuntu-latest selects x64.
     with:
       runs_on: &runner ubuntu-26.04-arm
   comment-ops:
