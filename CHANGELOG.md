@@ -19,7 +19,7 @@ Tags `7b52512`.
 ### Changed
 
 - **The plan gate's `detect failed:` description and the held comment's reason carry the whole first error of a `detect` failure, its continuation lines included (for example `gh`'s error output), not only its first line.**
-- **`docs/aws.md` §Runner choice says why the drift `issues` job stays on the `runs_on` runner: an `ubuntu-slim` job stops at 15 minutes, and `issues` makes Issue calls per drifted cell, per cell with an open Issue and per Issue of a removed cell, under secondary rate limits, so its runtime has no bound.**
+- **`docs/aws.md` §Runner choice says why the drift `issues` job stays on the `runs_on` runner: an `ubuntu-slim` job stops at 15 minutes, and `issues` has no fixed amount of work: it grows with the sweep's drifted cells and the repository's open drift Issues.**
 - **`docs/getting-started.md` says what the strict required check costs: each merge puts every other open pull request behind the base, and each update re-plans it, one plan run per update; an already-applied pull request whose stacks nothing else touched usually re-plans with no changes and its gate goes `success` without another apply, otherwise `pending` until applied again.**
 
 ## [0.49.0] — 2026-10-18
