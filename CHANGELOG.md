@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.49.1] — 2026-10-18
 
+Tags `7b52512`.
+
 ### Fixed
 
 - **A `shipmate apply` refused at `detect` names the refusal in its pull-request comment: the first error of the `::error::` on one line, a failed tool or API call included, in a code fence under the `🔴 failed` verdict, instead of the verdict alone. The post-merge deploy still posts no comment; its refusal stays in the `detect` annotation.**
