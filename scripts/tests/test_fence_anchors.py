@@ -41,8 +41,11 @@ def test_the_runner_is_chosen_once_through_an_anchor():
 
 
 def test_engine_secrets_are_chosen_once_and_unlock_keeps_its_own():
-    """Mutations: `apply`'s block written out without `SHIPMATE_SECRETS`; `unlock` aliased to
-    `*engine-secrets`."""
+    """Mutations: `apply`'s block written out in full, which parses the same; `apply`'s block
+    written out without `SHIPMATE_SECRETS`; `unlock` aliased to `*engine-secrets`."""
+    text = _fence_text("shipmate")
+    assert text.count("secrets: &engine-secrets\n") == 1
+    assert text.count("secrets: *engine-secrets\n") == 2
     jobs = _jobs("shipmate")
     assert jobs["plan"]["secrets"] == ENGINE_SECRETS
     assert jobs["deploy"]["secrets"] == ENGINE_SECRETS

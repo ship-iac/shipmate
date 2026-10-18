@@ -1,12 +1,13 @@
 """Every engine job's `runs-on:`, whole map.
 
 Jobs that run `terramate` or `tofu`, plus `plan.yml`'s `summary` and `comment-ops.yml`'s `ops`
-(both parse YAML), take the consumer's `runs_on:` input. The control jobs run neither tool and take
-the 1-CPU `ubuntu-slim` image. Engine CI (`ci.yml`, `manifest-load.yml`) stays on `ubuntu-latest`.
-A new job, a moved job or a flipped label fails here. Mutations: `apply-env-level.yml` `complete`
-to `${{ inputs.runs_on }}`; `plan.yml` `summary` to `ubuntu-slim`; `plan.yml` `facts` to
-`${{ inputs.runs_on }}`; the `apply-env-level.yml` `wave0` cell to `ubuntu-latest`;
-`comment-ops.yml` `ops` to `ubuntu-slim`; `unlock.yml` `unlock` to `ubuntu-latest`.
+(both parse YAML) and `drift.yml`'s `issues`, take the consumer's `runs_on:` input. The control
+jobs run neither tool and take the 1-CPU `ubuntu-slim` image. Engine CI (`ci.yml`,
+`manifest-load.yml`) stays on `ubuntu-latest`. A new job, a moved job or a flipped label fails
+here. Mutations: `apply-env-level.yml` `complete` to `${{ inputs.runs_on }}`; `plan.yml`
+`summary` to `ubuntu-slim`; `plan.yml` `facts` to `${{ inputs.runs_on }}`; the
+`apply-env-level.yml` `wave0` cell to `ubuntu-latest`; `comment-ops.yml` `ops` to `ubuntu-slim`;
+`unlock.yml` `unlock` to `ubuntu-latest`.
 """
 
 from _loader import WORKFLOWS, workflow_yaml
