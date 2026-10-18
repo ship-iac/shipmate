@@ -2198,7 +2198,7 @@ todo          Provider lock files
     file first, since git refuses to add an ignored path:
       stacks/app
     In each, run `tofu init -backend=false`, then
-    `tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, and commit the file.
+    `tofu providers lock -platform=linux_amd64`, and commit the file.
 
 ok            unmanaged stacks
 ok            stack tags
@@ -3075,10 +3075,7 @@ def test_the_lock_item_names_each_stack_without_a_tracked_lock(monkeypatch, tmp_
             "  a",
             "  c",
             "In each, run `tofu init -backend=false`, then",
-            (
-                "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, "
-                "and commit the file."
-            ),
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -3107,10 +3104,7 @@ def test_the_lock_item_names_ten_stacks_and_counts_the_rest(monkeypatch, tmp_pat
             "  s09",
             "  and 2 more",
             "In each, run `tofu init -backend=false`, then",
-            (
-                "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, "
-                "and commit the file."
-            ),
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -3134,10 +3128,7 @@ def test_the_lock_item_resolves_stacks_against_the_working_directory(monkeypatch
             "file first, since git refuses to add an ignored path:",
             "  app",
             "In each, run `tofu init -backend=false`, then",
-            (
-                "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, "
-                "and commit the file."
-            ),
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -3175,7 +3166,7 @@ CACHE_WRITTEN_LINES = [
     "the runner's provider cache cannot use it:",
     "  b",
     "In each, run `tofu init -backend=false`, then",
-    "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, and commit the file.",
+    "`tofu providers lock -platform=linux_amd64`, and commit the file.",
 ]
 
 
@@ -3246,10 +3237,7 @@ def test_a_missing_lock_and_a_cache_written_one_get_one_sentence_each(monkeypatc
             "the runner's provider cache cannot use it:",
             "  b",
             "In each, run `tofu init -backend=false`, then",
-            (
-                "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, "
-                "and commit the file."
-            ),
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -3281,10 +3269,7 @@ def test_a_stack_in_two_environments_is_counted_once(monkeypatch, tmp_path, caps
             "  a",
             "  b",
             "In each, run `tofu init -backend=false`, then",
-            (
-                "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, "
-                "and commit the file."
-            ),
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 
@@ -3305,10 +3290,7 @@ def test_the_lock_item_names_managed_stacks_only(monkeypatch, tmp_path, capsys):
             "file first, since git refuses to add an ignored path:",
             "  a",
             "In each, run `tofu init -backend=false`, then",
-            (
-                "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, "
-                "and commit the file."
-            ),
+            "`tofu providers lock -platform=linux_amd64`, and commit the file.",
         ],
     )
 

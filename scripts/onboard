@@ -1026,8 +1026,8 @@ def _codeowners_item(ctx):
 def _cache_written(lock):
     """True when a `provider` block of the lock text carries no `zh:` hash. A registry read
     records `zh:` for every provider; a `tofu init` through a plugin cache or a mirror
-    records only the local platform's `h1:`, and nothing here can tell which `h1:` is
-    `linux_amd64`'s, so a block without `zh:` is the observable signature."""
+    records only the local platform's `h1:` and no `zh:`, and an `h1:` does not name its
+    platform, so a block without `zh:` is the observable signature."""
     return any('"zh:' not in block for block in lock.split('provider "')[1:])
 
 
@@ -1081,7 +1081,7 @@ def _lock_files_item(ctx):
         ]
     lines += [
         "In each, run `tofu init -backend=false`, then",
-        "`tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, and commit the file.",
+        "`tofu providers lock -platform=linux_amd64`, and commit the file.",
     ]
     return "todo", item, lines
 

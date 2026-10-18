@@ -48,12 +48,11 @@ does with that wiring.
   [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards states the rule.
 - **Each stack's `.terraform.lock.hcl` committed.** It pins provider versions,
   and without it every cell downloads its providers. Write it with `tofu init -backend=false`,
-  then `tofu providers lock -platform=linux_amd64 -platform=linux_arm64`, in each stack
-  (no backend credentials needed). A CLI configuration setting
-  `plugin_cache_may_break_dependency_lock_file = true` makes `tofu init` record only your
-  platform's `h1:` hash, which the runner's cache cannot use; `tofu providers lock` reads
-  the OpenTofu registry whatever the cache holds. A lock from Terraform, or from a provider
-  mirror on another platform, does not serve the cache either.
+  then `tofu providers lock -platform=linux_amd64`, in each stack (no backend credentials
+  needed). A CLI configuration setting `plugin_cache_may_break_dependency_lock_file = true`
+  makes `tofu init` record only your platform's `h1:` hash, which the runner's cache cannot
+  use; `tofu providers lock` reads the OpenTofu registry whatever the cache holds. A lock from
+  Terraform, or from a provider mirror on another platform, does not serve the cache either.
   [`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Lock files and the provider
   cache", has the conditions and the reasoning.
 
