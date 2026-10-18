@@ -503,4 +503,4 @@ def main():
 
 
 if __name__ == "__main__":
-    run_annotated(main)
+    run_annotated(main, refusal_output=True)

@@ -554,6 +554,10 @@ still names the partial run, and an apply that includes that cell refuses again.
 
 Nothing has been applied: the refusal runs before any wave.
 
+The `shipmate apply` comment shows the refusal's first line in a fence under
+its `🔴 failed` verdict. The post-merge deploy posts no comment: its refusal is
+only in the `detect` job's annotation on the deploy run.
+
 ### `no plan-text digest recorded for`, or `the stored plan does not render to the plan text that was reviewed`
 
 An apply is refused over the plan text a reviewer read, at one of three points.

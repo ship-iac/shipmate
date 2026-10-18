@@ -185,22 +185,25 @@ def command_data(s):
 
 
 def is_refusal(code) -> TypeGuard[str]:
-    """True when a `SystemExit` code is an `::error::` refusal: a `str` starting `::error::`.
-    The one test `run_annotated` and `build-matrix`'s `refusal` output share."""
+    """True when a `SystemExit` code is an `::error::` refusal: a `str` starting `::error::`."""
     return isinstance(code, str) and code.startswith("::error::")
 
 
-def run_annotated(main, *args):
+def run_annotated(main, *args, refusal_output=False):
     """Call `main(*args)`; print an `::error::` exit as one escaped workflow command per error.
 
     The runner parses workflow commands per line, so a raw multi-line refusal annotates only its
-    first line. The code splits into lines with `splitlines`, as `build-matrix`'s `refusal`
-    output takes its first line, so CR, LF and CRLF each end a line on both surfaces. A new
+    first line. The code splits into lines with `splitlines`, so CR, LF and CRLF each end a
+    line on both surfaces: the annotation and the `refusal` output. A new
     error starts at each line starting `::error::` (joined refusals keep one annotation each),
     every other line stays with the error above it, trailing empty lines are dropped, and each
     error prints through `command_data`, which also keeps a literal `%0A` or `%25` in a stack
     path verbatim. Exits 1 after printing. Any other `SystemExit` passes through unchanged.
     Producers stay raw: this is the one print site of an annotated script's refusal.
+
+    With `refusal_output`, a refusal also writes the step output `refusal`: the first line of
+    the first error, raw, for a gate description or a pull-request comment to name. This is the
+    one writer of that output.
     """
     try:
         main(*args)
@@ -214,6 +217,9 @@ def run_annotated(main, *args):
                 errors.append([line.removeprefix("::error::")])
             else:
                 errors[-1].append(line)
+        if refusal_output:
+            # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
+            write_outputs(refusal=errors[0][0])
         for lines in errors:
             message = "\n".join(lines).rstrip("\n")
             sys.stderr.write(f"::error::{command_data(message)}\n")

@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Fixed
+
+- **A `shipmate apply` refused at `detect` names the refusal in its pull-request comment: the first line of the `::error::`, in a code fence under the `🔴 failed` verdict, instead of the verdict alone. The post-merge deploy still posts no comment; its refusal stays in the `detect` annotation.**
+
 ## [0.49.0] — 2026-10-18
 
 Tags `8496be2`.

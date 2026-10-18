@@ -724,11 +724,13 @@ def build_comment(
     held=(),
     head_sha="",
     waiting=(),
+    refusal="",
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, every row in order (a fold-out
     for an applied, failed or unrecorded row with output, else its bare line), the notes, the
     footer lines, and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it
-    is header, verdict, footer lines and footer.
+    is header, verdict, footer lines and footer. A non-empty `refusal`, the first line of the
+    `::error::` that failed detect, sits in `sc.reason_fence` directly under the verdict.
 
     Every row is guaranteed its bare line: the space all remaining rows' bare lines need is
     reserved up front, together, so an early giant apply.txt cannot starve a later row. When
@@ -737,6 +739,8 @@ def build_comment(
     names the cause."""
     circle, verdict = _verdict(rows, _results_failed(results_csv), held, head_sha, run_url, waiting)
     head = f"{sc.header('apply', env_name)}\n\n{verdict}"
+    if refusal:
+        head = f"{head}\n\n{sc.reason_fence(refusal)}"
     hint = sc.footer_hint(circle)
     notes = (
         _lock_note(rows, env_name),
@@ -804,6 +808,7 @@ def main():
         json.loads(os.environ.get("SHIPMATE_REVIEW_HELD_ENVS") or "[]"),
         os.environ.get("SHIPMATE_HEAD_SHA", ""),
         json.loads(os.environ.get("SHIPMATE_WAITING_CELLS") or "[]"),
+        os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

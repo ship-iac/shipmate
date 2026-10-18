@@ -301,8 +301,8 @@ def test_run_annotated_prints_a_refusal_as_one_escaped_command(capsys):
 
 
 def test_run_annotated_ends_a_line_at_cr_lf_and_crlf(capsys):
-    """`build-matrix`'s `refusal` output takes the first line with `splitlines`, so the
-    annotation splits the same way: its first line is the gate description's. Mutation: split
+    """The `refusal` output takes the first line with `splitlines`, so the annotation splits
+    the same way: its first line is the gate description's. Mutation: split
     on `"\\n"` only -- `%0D` appears."""
     main = _raising("::error::first\r\nsecond\rthird")
     assert _annotated(main, capsys) == (1, "::error::first%0Asecond%0Athird\n")
@@ -350,3 +350,51 @@ def test_run_annotated_passes_its_arguments_to_main():
     calls = []
     assert run_annotated(lambda *a: calls.append(a), ["refresh", "x"], "y") is None
     assert calls == [(["refresh", "x"], "y")]
+
+
+def _refusal_output(monkeypatch, tmp_path, main, **switch):
+    """(exit code, `GITHUB_OUTPUT` text) of `run_annotated(main, **switch)`."""
+    out = tmp_path / "out.txt"
+    out.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+    with pytest.raises(SystemExit) as exc:
+        run_annotated(main, **switch)
+    return exc.value.code, out.read_text(encoding="utf-8")
+
+
+def test_run_annotated_writes_the_first_errors_first_line_as_the_refusal_output(
+    monkeypatch, tmp_path
+):
+    """Joined errors share one output: the first error's first line, prefix removed, as the
+    gate description and the apply comment name it. Mutations: drop the `write_outputs` call
+    -- empty; write `errors[-1][-1]` -- `second`."""
+    main = _raising("::error::first\nmore\n::error::second")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
+        1,
+        "refusal=first\n",
+    )
+
+
+def test_run_annotated_ends_the_refusal_output_at_a_crlf(monkeypatch, tmp_path):
+    """`refusal` takes the first line with `splitlines`, as the annotation splits, so the gate
+    description and the annotation's first line agree. Mutation: split on `"\\n"` only -- a CR
+    ends the value."""
+    main = _raising("::error::first\r\nsecond")
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (
+        1,
+        "refusal=first\n",
+    )
+
+
+@pytest.mark.parametrize("code", [1, "plain"])
+def test_run_annotated_writes_no_refusal_output_for_another_exit(monkeypatch, tmp_path, code):
+    """A crash or a non-refusal exit leaves the comment as it is without a refusal. Mutation:
+    write the output before the `is_refusal` check -- red."""
+    main = _raising(code)
+    assert _refusal_output(monkeypatch, tmp_path, main, refusal_output=True) == (code, "")
+
+
+def test_run_annotated_writes_no_refusal_output_without_the_switch(monkeypatch, tmp_path):
+    """Mutation: write the output whatever `refusal_output` says -- red."""
+    main = _raising("::error::first")
+    assert _refusal_output(monkeypatch, tmp_path, main) == (1, "")

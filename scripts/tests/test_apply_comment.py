@@ -1983,3 +1983,87 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
         "",
         HINT,
     ]
+
+
+_REFUSAL = (
+    "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
+    "(or dismiss the review), then re-run `shipmate apply`."
+)
+
+
+def test_a_detect_refusal_sits_in_a_fence_under_the_failed_verdict():
+    """A run refused at detect has no rows; the comment names the refusal, which can carry
+    author-controlled stack paths, only inside a fence. Mutation: render the refusal outside a
+    fence -- red."""
+    body = ac.build_comment(
+        [], [], RUN_URL, [], [], "dev-eu", "success,success,failure", head_sha=SHA, refusal=_REFUSAL
+    )
+    assert body == (
+        f"### shipmate apply dev-eu\n\n🔴 failed {AT}\n\n"
+        "```\n"
+        "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
+        "(or dismiss the review), then re-run `shipmate apply`.\n"
+        "```\n\n" + HINT
+    )
+
+
+@pytest.mark.parametrize("refusal", ["", None])
+def test_an_empty_detect_refusal_leaves_the_failed_comment_unchanged(refusal):
+    """A detect that crashed without an `::error::`, or a deploy, passes no refusal: the body is
+    byte for byte the comment without one. Mutation: render the fence when `refusal` is empty
+    -- an empty fence appears."""
+    kw = {} if refusal is None else {"refusal": refusal}
+    body = ac.build_comment(
+        [], [], RUN_URL, [], [], "dev-eu", "success,success,failure", head_sha=SHA, **kw
+    )
+    assert body == f"### shipmate apply dev-eu\n\n🔴 failed {AT}\n\n" + HINT
+
+
+def test_a_failed_cell_with_no_detect_refusal_renders_no_fence():
+    """Detect succeeded and a cell failed: the rows carry the failure and no refusal block shows.
+    Mutation: render the fence when `refusal` is empty -- an empty fence appears under the
+    verdict."""
+    rows = [_row(status="failed", stack="app", environment="dev-eu", apply_text="")]
+    body = ac.build_comment(rows, [], RUN_URL, [], [], "dev-eu", "failure", head_sha=SHA)
+    assert body == (
+        f"### shipmate apply dev-eu\n\n🔴 1 failed {AT}\n\n"
+        f'<details><summary>🔴 app (dev-eu): failed <a href="{RUN_URL}">logs</a></summary>\n\n'
+        "```\n\n```\n</details>\n\n" + HINT
+    )
+
+
+def test_a_detect_refusal_holding_a_backtick_run_gets_a_longer_fence():
+    """Mutation: size the fence at three backticks in `reason_fence` -- red."""
+    body = ac.build_comment(
+        [], [], RUN_URL, [], [], "dev-eu", "failure", head_sha=SHA, refusal="stacks/a```b"
+    )
+    assert body == (
+        f"### shipmate apply dev-eu\n\n🔴 failed {AT}\n\n````\nstacks/a```b\n````\n\n" + HINT
+    )
+
+
+def test_a_long_detect_refusal_is_cut_at_the_held_reason_cap():
+    """Mutation: drop the `HELD_REASON_CAP` cut from `reason_fence` -- red."""
+    body = ac.build_comment(
+        [], [], RUN_URL, [], [], "dev-eu", "failure", head_sha=SHA, refusal="x" * 4000 + "yz"
+    )
+    assert body == (
+        f"### shipmate apply dev-eu\n\n🔴 failed {AT}\n\n```\n" + "x" * 4000 + "\n```\n\n" + HINT
+    )
+
+
+def test_main_renders_the_detect_refusal_from_the_render_step_env(monkeypatch, tmp_path):
+    """Mutation: drop the `SHIPMATE_DETECT_REFUSAL` argument from `main`'s `build_comment` call
+    -- no fence, red."""
+    cells = tmp_path / "cells"
+    cells.mkdir()
+    _main_env(monkeypatch, tmp_path, cells, "", str(tmp_path / "absent.jsonl"))
+    monkeypatch.setenv("SHIPMATE_RESULTS", "success,success,failure")
+    monkeypatch.setenv("SHIPMATE_DETECT_REFUSAL", _REFUSAL)
+    assert _main_body(tmp_path) == (
+        f"### shipmate apply dev-eu\n\n🔴 failed {_MAIN_AT}\n\n"
+        "```\n"
+        "not authorized: changes were requested on this PR; resolve them and get a fresh approval "
+        "(or dismiss the review), then re-run `shipmate apply`.\n"
+        "```\n\n" + HINT
+    )

@@ -48,6 +48,10 @@ inputs:
     description: "JSON list of cells left pending because a cell they run after is pending and not applying this run, each with that cell (both forms); the comment names each cell's blocker and its remedy."
     required: false
     default: "[]"
+  detect-refusal:
+    description: "apply-detect's `refusal` output: the first line of the `::error::` message that failed detect, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
+    required: false
+    default: ""
   results:
     description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
     required: true
@@ -150,6 +154,7 @@ runs:
         SHIPMATE_APPLIED_UNGATED_ENVS: ${{ inputs.applied-ungated-envs }}
         SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
         SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}
+        SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}

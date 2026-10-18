@@ -2393,7 +2393,10 @@ it has content: the header, the verdict line, one line or fold-out per row, the
 notes, the footer lines, and, under any verdict but 🟢, the help hint
 ``Comment `shipmate help` for the available commands.`` A 🟢 comment has no
 footer. A run with no rows to render is the header, the verdict line, the
-footer lines and, under any verdict but 🟢, the hint.
+footer lines and, under any verdict but 🟢, the hint. When `detect` refused
+the run, the first line of its `::error::` follows the verdict line in a plain
+code fence, cut at 4,000 characters and fenced longer than any backtick run in
+it; a `detect` that failed without one renders no fence.
 
 - **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
   apply` for a bare one; the row lines and the footer lines name the

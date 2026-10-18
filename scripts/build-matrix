@@ -15,7 +15,7 @@ import os
 import posixpath
 import re
 
-from _shipmate import _load, _run, command_data, is_refusal, named, run_annotated, write_outputs
+from _shipmate import _load, _run, command_data, named, run_annotated, write_outputs
 
 ec = _load("env-config")
 wv = _load("waves")
@@ -549,7 +549,7 @@ def check_cells(cells, table):
     """`cells` stamped with the plan tier's resolved fields, after the table's per-cell
     refusals: `stamp_rows`, then `refuse_workload_gaps` over the stamped rows.
 
-    The second half of the sweep chain, shared by `_detect` and onboard's drift-sweep item;
+    The second half of the sweep chain, shared by `main` and onboard's drift-sweep item;
     `select_cells` is the first. A refusal that reads the table belongs in here; it runs on
     every plan and drift detect and on onboard's drift-sweep item, not only on sweeps."""
     rows = stamp_rows(cells, table, "plan")
@@ -704,20 +704,6 @@ def tag_filter_error(tags, sweep: bool):
 
 
 def main():
-    """`_detect`, and on a `::error::` exit (a refusal or a failed tool or API call) also the
-    `refusal` output: its first line without the prefix, which the summary job writes into the
-    gate description. The exit re-raises, so the step still fails."""
-    try:
-        _detect()
-    except SystemExit as exc:
-        if is_refusal(exc.code):
-            refusal = exc.code.splitlines()[0].removeprefix("::error::")
-            # A `GITHUB_OUTPUT` line written before the step fails still reaches the job outputs.
-            write_outputs(refusal=refusal)
-        raise
-
-
-def _detect():
     sweep = os.environ.get("SHIPMATE_SWEEP", "") == "true"
     base = os.environ.get("SHIPMATE_BASE_SHA", "")
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
@@ -774,4 +760,4 @@ def _detect():
 
 
 if __name__ == "__main__":
-    run_annotated(main)
+    run_annotated(main, refusal_output=True)
