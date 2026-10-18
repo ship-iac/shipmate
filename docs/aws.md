@@ -288,8 +288,9 @@ for a runner that never arrives.
 
 A plan made on one architecture applies on the other, provided each stack's
 committed `.terraform.lock.hcl` holds every platform's `h1:` hash (arm64 to
-x64 probed 2026-10-18). `tofu providers lock -platform=linux_amd64` writes
-them: it records every platform's `h1:` and `zh:` hashes, not only the named
+x64 probed 2026-10-18). In each stack, run `tofu init -backend=false`, then
+`tofu providers lock -platform=linux_amd64`, and commit the file: the lock
+records every platform's `h1:` and `zh:` hashes, not only the named
 platform's. `scripts/onboard` reports a lock without
 the registry's `zh:` hashes, the signature of a lock that holds one platform's
 `h1:` only. The provider cache key carries the runner's architecture, so

@@ -1,7 +1,8 @@
 """Every engine job's `runs-on:`, whole map.
 
 Jobs that run `terramate` or `tofu`, plus `plan.yml`'s `summary` and `comment-ops.yml`'s `ops`
-(both parse YAML) and `drift.yml`'s `issues`, take the consumer's `runs_on:` input. The control
+(both parse YAML) and `drift.yml`'s `issues` (every `drift.yml` job takes the caller's runner),
+take the consumer's `runs_on:` input. The control
 jobs run neither tool and take the 1-CPU `ubuntu-slim` image. Engine CI (`ci.yml`,
 `manifest-load.yml`) stays on `ubuntu-latest`. A new job, a moved job or a flipped label fails
 here. Mutations: `apply-env-level.yml` `complete` to `${{ inputs.runs_on }}`; `plan.yml`

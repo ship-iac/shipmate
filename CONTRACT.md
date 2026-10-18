@@ -1981,7 +1981,9 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   runner must therefore provide: `bash`, `python3` (Python ≥ 3.12, with
   PyYAML ≥ 6 importable by it), `git`, `curl` ≥ 7.71, `jq`, `openssl`, `gh`, and a
   coreutils `sha256sum`, GNU or uutils (`setup` hashes the Terramate download
-  with it; the Ubuntu 26.04 images ship uutils).
+  with it; `apply-cell` hashes the rendered plan from stdin and reads the first
+  field). The Ubuntu 26.04 images ship uutils (probed 2026-10-17 on
+  `ubuntu-26.04`, x64, and 2026-10-18 on `ubuntu-26.04-arm`).
 - Every GitHub-hosted Ubuntu image from 24.04 on, `ubuntu-slim` included,
   provides these tools other than PyYAML. PyYAML differs per image: the
   `ubuntu-24.04` and `ubuntu-26.04` x64 images ship it (probed 2026-10-15), the
