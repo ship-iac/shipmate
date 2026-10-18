@@ -19,6 +19,7 @@ from _detect_fixtures import (
     wave_cells,
 )
 from _loader import github_outputs, load_script
+from _shipmate import run_annotated
 
 aad = load_script("apply-detect")
 
@@ -412,6 +413,40 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, m
         "this apply is refused rather than run unverified. Re-plan these stacks on their pull "
         "request, then apply again; if that pull request has already merged, a new pull "
         "request touching them plans and applies them afresh."
+    )
+
+
+def test_a_refused_bare_apply_writes_the_refusal_output_whole(tmp_path, monkeypatch, capsys):
+    """The apply comment names a refused bare `shipmate apply` from this output. Mutations:
+    drop the `write_outputs` call from `run_annotated` -- no output; write the code unsplit --
+    the `::error::` prefix stays."""
+    main = aad.main
+    monkeypatch.setattr(aad, "main", lambda: run_annotated(main, refusal_output=True))
+    with pytest.raises(SystemExit) as exc_info:
+        _run_main(
+            tmp_path,
+            monkeypatch,
+            envs=["dev-eu", "dev-us"],
+            decision="APPROVED",
+            checks=[
+                _apply_check("stacks/app", "dev-eu", plan_run="42"),
+                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None),
+            ],
+        )
+    assert exc_info.value.code == 1
+    assert capsys.readouterr().err == (
+        "::error::apply aborted: no plan-text digest recorded for apply / stacks/app / dev-us: "
+        "the reviewed plan text cannot be checked against the plan that would be applied, so "
+        "this apply is refused rather than run unverified. Re-plan these stacks on their pull "
+        "request, then apply again; if that pull request has already merged, a new pull "
+        "request touching them plans and applies them afresh.\n"
+    )
+    assert (tmp_path / "out").read_text(encoding="utf-8") == (
+        "refusal=apply aborted: no plan-text digest recorded for apply / stacks/app / dev-us: "
+        "the reviewed plan text cannot be checked against the plan that would be applied, so "
+        "this apply is refused rather than run unverified. Re-plan these stacks on their pull "
+        "request, then apply again; if that pull request has already merged, a new pull "
+        "request touching them plans and applies them afresh.\n"
     )
 
 

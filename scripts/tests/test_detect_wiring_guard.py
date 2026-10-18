@@ -100,6 +100,7 @@ _APPLY_DETECT_OUTPUTS = {
     "applied_ungated_envs": "${{ steps.d.outputs.applied_ungated_envs }}",
     "review_not_required_envs": "${{ steps.d.outputs.review_not_required_envs }}",
     "waiting_cells": "${{ steps.d.outputs.waiting_cells }}",
+    "refusal": "${{ steps.d.outputs.refusal }}",
 }
 
 #: Every (workflow, job, step) that carries `toJSON(vars)`: five detect steps, eleven cell steps,
@@ -187,7 +188,8 @@ def test_the_deploy_detect_checkout_takes_the_full_history():
 
 
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
-    """Mutation: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`."""
+    """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
+    `refusal`, so the apply comment never names a detect refusal."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -283,9 +285,20 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.waiting_cells }}",
     },
+    "refusal": {
+        "description": (
+            "The first error of the `::error::` message that failed the step (a refusal or a "
+            "failed tool or API call), without the prefix, its lines joined into one; empty when "
+            "the step raised none. Set "
+            "although the step fails, and read by the apply result comment. Branch-controlled "
+            "text (it can name a stack path), so a reader passes it through `env:`."
+        ),
+        "value": "${{ steps.d.outputs.refusal }}",
+    },
 }
 
 
 def test_the_apply_detect_action_declares_exactly_these_outputs():
-    """Mutation: delete the `waiting_cells` output from `actions/apply-detect/action.yml`."""
+    """Mutations: delete the `waiting_cells` output from `actions/apply-detect/action.yml`;
+    delete its `refusal` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS

@@ -2,7 +2,8 @@ import subprocess
 
 import pytest
 from _loader import SCRIPTS as _dir
-from _loader import load_script
+from _loader import github_outputs, load_script
+from _shipmate import run_annotated
 
 w = load_script("waves")
 
@@ -482,14 +483,25 @@ def test_the_zigzag_with_no_needs_refuses_nothing():
     assert w.inversions(_PROBE_CELLS, _PROBE_PRESENT, _PROBE_DEPS, _PROBE_TAGS, level) == []
 
 
-def test_the_gate_description_keeps_the_inversion_remedy_over_a_long_pair():
-    """`gate-state`'s `main` cuts `detect failed: <first line>` to 140 characters, and these
-    paths run past it: the cut drops the pair's tail, never the remedy. Mutation: put the pair
-    first and the remedy last on the first line -- the remedy is cut."""
+def test_the_gate_description_keeps_the_inversion_remedy_over_a_long_pair(monkeypatch, tmp_path):
+    """`gate-state`'s `main` cuts `detect failed: <refusal>` to 140 characters, where `refusal`
+    is the `run_annotated` output: the whole first error, its lines joined. These paths run past
+    the cut, which drops the pair's tail, never the remedy. Mutation: put the pair first and the
+    remedy last on the first line -- the remedy is cut."""
     pairs = [(("stacks/platform/network", "prod-eu"), ("stacks/dns/zones", "prod-us"))]
     order = {"prod-us": ["prod-eu"]}
-    first = w.inversion_error(pairs, order, {"prod-eu": 0, "prod-us": 1}).splitlines()[0]
-    gap = load_script("gate-state")._detect_gap("failure", first.removeprefix("::error::"))[:140]
+    code = w.inversion_error(pairs, order, {"prod-eu": 0, "prod-us": 1})
+    out = tmp_path / "out.txt"
+    out.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
+
+    def refuse():
+        raise SystemExit(code)
+
+    with pytest.raises(SystemExit):
+        run_annotated(refuse, refusal_output=True)
+    refusal = github_outputs(out)["refusal"]
+    gap = load_script("gate-state")._detect_gap("failure", refusal)[:140]
     assert gap == (
         "detect failed: needs order inverted, fix default-branch needs or tags: "
         "stacks/platform/network / prod-eu before stacks/dns/zones / prod-us, "

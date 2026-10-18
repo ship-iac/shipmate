@@ -136,6 +136,7 @@ _RENDER_ENV = {
     "SHIPMATE_APPLIED_UNGATED_ENVS": "${{ inputs.applied-ungated-envs }}",
     "SHIPMATE_REVIEW_NOT_REQUIRED_ENVS": "${{ inputs.review-not-required-envs }}",
     "SHIPMATE_WAITING_CELLS": "${{ inputs.waiting-cells }}",
+    "SHIPMATE_DETECT_REFUSAL": "${{ inputs.detect-refusal }}",
     "SHIPMATE_CHECKS": "checks.jsonl",
     "SHIPMATE_APP_ID": "${{ inputs.app-id }}",
     "SHIPMATE_HEAD_SHA": "${{ inputs.head-sha }}",
@@ -154,7 +155,9 @@ def test_render_step_env_block_matches_the_expected_mapping():
     Mutation: drop `SHIPMATE_HEAD_SHA` from the render step, so every verdict reads `at an
     unknown commit` -- red.
     Mutation: drop `SHIPMATE_WAITING_CELLS` from the render step, so a fully waiting run
-    reads `🟢 no pending applies` -- red."""
+    reads `🟢 no pending applies` -- red.
+    Mutation: drop `SHIPMATE_DETECT_REFUSAL` from the render step, so a refused apply's comment
+    never names the refusal -- red."""
     render_step = _find_step(
         action_yaml("apply-summary")["runs"]["steps"], run_contains="scripts/apply-comment"
     )
@@ -374,6 +377,7 @@ _APPLY_SUMMARY_WITH = {
     "applied-ungated-envs": "${{ needs.detect.outputs.applied_ungated_envs }}",
     "review-not-required-envs": "${{ needs.detect.outputs.review_not_required_envs }}",
     "waiting-cells": "${{ needs.detect.outputs.waiting_cells }}",
+    "detect-refusal": "${{ needs.detect.outputs.refusal }}",
     "results": "${{ join(needs.*.result, ',') }}",
     "app-id": "${{ vars.SHIPMATE_APP_ID }}",
     "private-key": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
@@ -389,7 +393,23 @@ def test_apply_passes_apply_summary_exactly_this_with():
     Mutation: drop `environment:` from the step's `with:` -- red.
     Mutation: wire `applied_ungated_envs` into `review-not-required-envs` -- red.
     Mutation: drop `waiting-cells:` from the step's `with:`, so the input defaults to `[]`
-    -- red."""
+    -- red.
+    Mutation: drop `detect-refusal:` from the step's `with:` -- red."""
     steps = workflow_yaml("apply.yml")["jobs"]["summary"]["steps"]
     step = _find_step(steps, uses_contains="actions/apply-summary")
     assert step["with"] == _APPLY_SUMMARY_WITH
+
+
+def test_the_detect_refusal_input_is_optional_and_empty_by_default():
+    """`deploy.yml` posts no apply comment and passes no refusal, and an empty value renders the
+    comment unchanged. Mutation: set the input `required: true` -- red."""
+    assert action_yaml("apply-summary")["inputs"]["detect-refusal"] == {
+        "description": (
+            "apply-detect's `refusal` output: the first error of the `::error::` message that "
+            "failed detect (a refusal or a failed tool or API call) on one line, empty when "
+            "detect raised none. Non-empty, the comment shows it in a "
+            "code fence under the verdict line; empty leaves the comment unchanged."
+        ),
+        "required": False,
+        "default": "",
+    }

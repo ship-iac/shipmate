@@ -17,6 +17,7 @@ from _detect_fixtures import (
 )
 from _detect_fixtures import check_run as _check
 from _loader import github_outputs, load_script
+from _shipmate import run_annotated
 
 ad = load_script("apply-detect")
 
@@ -706,6 +707,21 @@ def test_main_refuses_before_it_reads_any_check(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value).startswith("::error::not authorized")
+
+
+def test_a_refused_targeted_apply_writes_the_refusal_output_whole(monkeypatch, tmp_path):
+    """The apply comment names a refused `shipmate apply <env>` from this output. Mutations:
+    drop the `write_outputs` call from `run_annotated` -- no output; write the code unsplit --
+    the `::error::` prefix stays."""
+    out = _apply_env(monkeypatch, tmp_path, SHIPMATE_REVIEW_DECISION="CHANGES_REQUESTED")
+    _boom_on_the_workset(monkeypatch)
+    with pytest.raises(SystemExit) as exc_info:
+        run_annotated(ad.main, refusal_output=True)
+    assert exc_info.value.code == 1
+    assert out.read_text(encoding="utf-8") == (
+        "refusal=not authorized: changes were requested on this PR; resolve them and get a "
+        "fresh approval (or dismiss the review), then re-run `shipmate apply`.\n"
+    )
 
 
 def test_main_refuses_when_the_decision_variable_is_absent(monkeypatch, tmp_path):

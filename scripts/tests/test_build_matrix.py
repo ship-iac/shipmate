@@ -6,6 +6,7 @@ import sys
 import pytest
 from _detect_fixtures import answering_run_graph, run_graph_capture, spy_env_config
 from _loader import action_yaml, github_outputs, load_script, record_calls
+from _shipmate import run_annotated
 
 bm = load_script("build-matrix")
 
@@ -783,10 +784,18 @@ def _run_inverted(monkeypatch, tmp_path, env, cells, graph=None, head_sha="cafe1
     )
 
 
-def test_a_plan_refuses_changed_cells_whose_after_edge_needs_inverts(monkeypatch, tmp_path):
+def _annotated(monkeypatch):
+    """`bm.main` as the script's entry runs it: through `run_annotated` with the `refusal`
+    output, so a refusal exits 1 and prints its annotation to stderr."""
+    main = bm.main
+    monkeypatch.setattr(bm, "main", lambda: run_annotated(main, refusal_output=True))
+
+
+def test_a_plan_refuses_changed_cells_whose_after_edge_needs_inverts(monkeypatch, tmp_path, capsys):
     """Both ends of the inverted edge changed: the plan refuses, and the gate description's
     `refusal` output names the pair and the short remedy. Mutation: drop the inversion check
-    from `_detect`. Mutation: put the pair before the remedy on the first line -- red."""
+    from `main`. Mutation: put the pair before the remedy on the first line -- red."""
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_inverted(
             monkeypatch,
@@ -794,18 +803,24 @@ def test_a_plan_refuses_changed_cells_whose_after_edge_needs_inverts(monkeypatch
             _PR_ENV,
             (("stacks/platform", "dev-eu"), ("stacks/dns", "dev-us")),
         )
-    assert exc.value.code == (
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == (
         "::error::needs order inverted, fix default-branch needs or tags: stacks/platform / "
-        "dev-eu before stacks/dns / dev-us, which it runs after\n"
+        "dev-eu before stacks/dns / dev-us, which it runs after%0A"
         "- stacks/platform / dev-eu (env-level 0) after stacks/dns / dev-us (env-level 1); "
-        "dev-us's level comes from dev-eu -> dev-us\n"
+        "dev-us's level comes from dev-eu -> dev-us%0A"
         "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
         "in that chain on the default branch, or retag the stacks so the edge stays inside "
-        "environments that order it."
+        "environments that order it.\n"
     )
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
         "refusal=needs order inverted, fix default-branch needs or tags: stacks/platform / "
-        "dev-eu before stacks/dns / dev-us, which it runs after\n"
+        "dev-eu before stacks/dns / dev-us, which it runs after "
+        "- stacks/platform / dev-eu (env-level 0) after stacks/dns / dev-us (env-level 1); "
+        "dev-us's level comes from dev-eu -> dev-us "
+        "Env-levels apply in order, so `after` cannot be met. Drop or reverse a `needs` entry "
+        "in that chain on the default branch, or retag the stacks so the edge stays inside "
+        "environments that order it.\n"
     )
 
 
@@ -865,9 +880,11 @@ _CYCLE = (
 )
 
 
-def _assert_cycle_refusal(exc, tmp_path, stacks):
+def _assert_cycle_refusal(exc, capsys, tmp_path, stacks):
+    """`stacks` holds no `%`, CR or LF, so the annotation is the message unescaped."""
     message = _CYCLE.format(stacks)
-    assert exc.value.code == message
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == f"{message}\n"
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
         f"refusal={message.removeprefix('::error::')}\n"
     )
@@ -920,13 +937,14 @@ _ONE_ENV = {"layout": "folder", "environments": {"dev-eu": {}}}
     ("shape", "stacks"), [("cycle-self", ("a",)), ("cycle-three", ("a", "b", "c"))]
 )
 def test_a_plan_without_needs_refuses_a_cycle_through_its_cells(
-    monkeypatch, tmp_path, shape, stacks
+    monkeypatch, tmp_path, capsys, shape, stacks
 ):
     """The table orders no environment, and the plan still reads and sorts the run-graph.
     Fixtures as `test_run_graph_deps_refuses_a_cycle`; `_run` answers the run-graph argv, so
     `run_graph_deps` is real.
 
-    Mutation: re-gate the read behind `any(order.values())` in `_detect` (both red)."""
+    Mutation: re-gate the read behind `any(order.values())` in `main` (both red)."""
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
             monkeypatch,
@@ -938,14 +956,15 @@ def test_a_plan_without_needs_refuses_a_cycle_through_its_cells(
             tag_map={s: ["env/dev-eu"] for s in stacks},
             dot=run_graph_capture(shape),
         )
-    _assert_cycle_refusal(exc, tmp_path, ", ".join(stacks))
+    _assert_cycle_refusal(exc, capsys, tmp_path, ", ".join(stacks))
 
 
-def test_a_plan_with_no_cell_refuses_a_cycle(monkeypatch, tmp_path):
+def test_a_plan_with_no_cell_refuses_a_cycle(monkeypatch, tmp_path, capsys):
     """A pull request can close a loop and plan nothing, for example with an `after` on a stack
     that has no `env/*` tag. Fixture as `test_run_graph_deps_refuses_a_cycle`.
 
-    Mutation: add `cells and` to the read's guard in `_detect`."""
+    Mutation: add `cells and` to the read's guard in `main`."""
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
             monkeypatch,
@@ -957,7 +976,7 @@ def test_a_plan_with_no_cell_refuses_a_cycle(monkeypatch, tmp_path):
             tag_map={},
             dot=run_graph_capture("cycle-two"),
         )
-    _assert_cycle_refusal(exc, tmp_path, "a, b")
+    _assert_cycle_refusal(exc, capsys, tmp_path, "a, b")
 
 
 _DNS_PLATFORM_LOOP = (
@@ -970,13 +989,14 @@ _DNS_PLATFORM_LOOP = (
 )
 
 
-def test_a_cycle_refuses_before_an_inversion(monkeypatch, tmp_path):
+def test_a_cycle_refuses_before_an_inversion(monkeypatch, tmp_path, capsys):
     """`stacks/platform` and `stacks/dns` are each `after` the other, and dev-us needs dev-eu,
     so the pair also inverts. The DOT is hand-built for these two stack names in the shape of
     the raw 0.17.1 captures (tab indent, red cycle edges).
 
     Mutation: drop the `stack_levels` call from `run_graph_deps` (the inversion message
     appears)."""
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
             monkeypatch,
@@ -988,15 +1008,15 @@ def test_a_cycle_refuses_before_an_inversion(monkeypatch, tmp_path):
             tag_map=_INVERTED_TAGS,
             dot=_DNS_PLATFORM_LOOP,
         )
-    _assert_cycle_refusal(exc, tmp_path, "stacks/dns, stacks/platform")
+    _assert_cycle_refusal(exc, capsys, tmp_path, "stacks/dns, stacks/platform")
 
 
-def test_the_refusal_output_keeps_a_percent_sequence_in_a_stack_path(monkeypatch, tmp_path):
+def test_the_refusal_output_keeps_a_percent_sequence_in_a_stack_path(monkeypatch, tmp_path, capsys):
     """The gate description is JSON, never workflow-command data, so `refusal` carries a literal
-    `%0A` or `%25` in a stack path verbatim. The DOT is hand-built in the shape of the raw 0.17.1
-    captures: none of them holds such a name.
+    `%0A` or `%25` in a stack path verbatim, while the annotation escapes it. The DOT is
+    hand-built in the shape of the raw 0.17.1 captures: none of them holds such a name.
 
-    Mutation: write `refusal=` through `command_data` in `main` -- red."""
+    Mutation: write `refusal=` through `command_data` in `run_annotated` -- red."""
     dot = (
         "digraph  {\n\t\n"
         '\tn1[label="/stacks/a%0Ab"];\n'
@@ -1005,6 +1025,7 @@ def test_the_refusal_output_keeps_a_percent_sequence_in_a_stack_path(monkeypatch
         '\tn2->n1[color="red"];\n'
         "\t\n}\n"
     )
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
             monkeypatch,
@@ -1016,10 +1037,11 @@ def test_the_refusal_output_keeps_a_percent_sequence_in_a_stack_path(monkeypatch
             tag_map={},
             dot=dot,
         )
-    assert exc.value.code == (
-        "::error::stack ordering cycle through stacks/a%0Ab, stacks/c100%25: a stack ordered "
-        "after itself, directly or through other stacks, has no first wave. Remove one `after` "
-        "or `before` entry on that loop in the stack configuration."
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == (
+        "::error::stack ordering cycle through stacks/a%250Ab, stacks/c100%2525: a stack "
+        "ordered after itself, directly or through other stacks, has no first wave. Remove one "
+        "`after` or `before` entry on that loop in the stack configuration.\n"
     )
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
         "refusal=stack ordering cycle through stacks/a%0Ab, stacks/c100%25: a stack ordered "
@@ -1028,25 +1050,9 @@ def test_the_refusal_output_keeps_a_percent_sequence_in_a_stack_path(monkeypatch
     )
 
 
-def test_the_refusal_output_ends_its_line_at_a_crlf(monkeypatch, tmp_path):
-    """`refusal` takes the first line with `splitlines`, as `run_annotated` splits the annotation,
-    so the gate description and the annotation's first line agree. Mutation: take the first line
-    with `split("\\n")` in `main` -- a CR ends the value."""
-    out = tmp_path / "out.txt"
-    monkeypatch.setenv("GITHUB_OUTPUT", str(out))
-
-    def refuse():
-        raise SystemExit("::error::first\r\nsecond")
-
-    monkeypatch.setattr(bm, "_detect", refuse)
-    with pytest.raises(SystemExit):
-        bm.main()
-    assert out.read_text(encoding="utf-8") == "refusal=first\n"
-
-
 def test_a_drift_sweep_reads_no_run_graph(monkeypatch, tmp_path):
     """A sweep applies nothing, and refusing a cycle there would blank drift for every stack off
-    the loop. Mutation: drop `not sweep` from the read's guard in `_detect`; it also reddens
+    the loop. Mutation: drop `not sweep` from the read's guard in `main`; it also reddens
     `test_a_drift_sweep_does_not_refuse_an_inverted_edge`, which proves no inversion refuses a
     sweep, while this one proves a sweep never reads the run-graph at all."""
 
@@ -1603,7 +1609,7 @@ def test_a_row_without_a_usable_binding_refuses(monkeypatch, binding, shown):
     )
 
 
-def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
+def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path, capsys):
     """The refusal lands before the matrix is written, so no half-written matrix reaches a job
     that would bind it; only the refusal line is.
 
@@ -1615,8 +1621,15 @@ def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
         "GITHUB_REPOSITORY": "acme/iac",
         "SHIPMATE_HEAD_REPO": "acme/iac",
     }
-    with pytest.raises(SystemExit):
+    _annotated(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, tmp_path, env, head_sha="cafe1234")
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == (
+        "::error::stacks/app in dev-eu resolved env_binding '', which names no GitHub "
+        "Environment. A job bound to it would run outside every environment control, so no "
+        "matrix is written.\n"
+    )
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
         "refusal=stacks/app in dev-eu resolved env_binding '', which names no GitHub "
         "Environment. A job bound to it would run outside every environment control, so no "
@@ -1624,14 +1637,24 @@ def test_main_writes_no_matrix_when_a_binding_refuses(monkeypatch, tmp_path):
     )
 
 
-def test_a_refusal_reaches_the_refusal_output_and_still_fails_the_step(monkeypatch, tmp_path):
-    """Mutation: drop the `raise` in `main`'s handler -- no `SystemExit` reaches the test."""
+def test_a_refusal_reaches_the_refusal_output_and_still_fails_the_step(
+    monkeypatch, tmp_path, capsys
+):
+    """Mutation: drop `raise SystemExit(1) from None` from `run_annotated` -- no `SystemExit`
+    reaches the test."""
     tree = {"stacks/a": ["env/dev", "workload/net", "workload/web"]}
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
-            monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40, table=_CORE_ONLY, stacks=tree
+            monkeypatch,
+            tmp_path,
+            _PLAN_ENV,
+            head_sha="a" * 40,
+            table=_CORE_ONLY,
+            stacks=tree,
         )
-    assert exc.value.code == _TWO_TAG_A
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == f"{_TWO_TAG_A}\n"
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
         "refusal=stack 'stacks/a' carries 2 workload tags (workload/net, workload/web), and a "
         "stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` and "
@@ -1639,18 +1662,35 @@ def test_a_refusal_reaches_the_refusal_output_and_still_fails_the_step(monkeypat
     )
 
 
-def test_a_multi_line_refusal_writes_its_first_line_only(monkeypatch, tmp_path):
-    """A second line would end the output's value and start a malformed one.
+def test_a_multi_error_refusal_writes_its_first_error_only(monkeypatch, tmp_path, capsys):
+    """The output carries the first error, its own lines joined; a second error is dropped,
+    and the annotation still carries both.
 
-    Mutation: write the whole message as the `refusal` line -- the gap line follows it."""
+    Mutation: write the whole code as the `refusal` line in `run_annotated` -- the gap line
+    follows it."""
     tree = {
         "stacks/a": ["env/dev", "workload/net", "workload/web"],
         "stacks/c": ["env/dev", "workload/app"],
     }
-    with pytest.raises(SystemExit):
+    _annotated(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
         _run_main(
-            monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40, table=_CORE_ONLY, stacks=tree
+            monkeypatch,
+            tmp_path,
+            _PLAN_ENV,
+            head_sha="a" * 40,
+            table=_CORE_ONLY,
+            stacks=tree,
         )
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == (
+        f"{_TWO_TAG_A}\n"
+        "::error::1 cell(s) carry a workload tag their environment's workloads list does not "
+        "name: stacks/c in dev (workload/app; dev lists core). A listed workload is the only one "
+        "the default branch grants a role to. Retag the stack, or add the workload to "
+        "environments.<env>.workloads in .github/shipmate-config.yml on the default branch, "
+        "which is where this table is read from: merge it there on its own pull request first.\n"
+    )
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == (
         "refusal=stack 'stacks/a' carries 2 workload tags (workload/net, workload/web), and a "
         "stack carries at most one `workload/<name>` tag. Keep one in the stack's `tags` and "
@@ -1658,7 +1698,7 @@ def test_a_multi_line_refusal_writes_its_first_line_only(monkeypatch, tmp_path):
     )
 
 
-def test_a_runner_without_pyyaml_reaches_the_refusal_output(monkeypatch, tmp_path):
+def test_a_runner_without_pyyaml_reaches_the_refusal_output(monkeypatch, tmp_path, capsys):
     """The default branch's file is read through the real parser on a runner without PyYAML,
     and the gate must name the prerequisite rather than a generic detect failure.
 
@@ -1670,6 +1710,7 @@ def test_a_runner_without_pyyaml_reaches_the_refusal_output(monkeypatch, tmp_pat
         "(Debian or Ubuntu) or PyYAML >= 6 for this runner's python3; CONTRACT.md section "
         "Runner prerequisites lists it."
     )
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(
             monkeypatch,
@@ -1678,20 +1719,24 @@ def test_a_runner_without_pyyaml_reaches_the_refusal_output(monkeypatch, tmp_pat
             head_sha="a" * 40,
             read_table=lambda: bm.ec.parse_table("layout: folder\n"),
         )
-    assert exc.value.code == f"::error::{refusal}"
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == f"::error::{refusal}\n"
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == f"refusal={refusal}\n"
 
 
-def test_an_exit_that_is_not_a_refusal_writes_no_refusal(monkeypatch, tmp_path):
-    """Mutation: drop the `isinstance` check -- `int.startswith` raises `AttributeError`."""
+def test_an_exit_that_is_not_a_refusal_writes_no_refusal(monkeypatch, tmp_path, capsys):
+    """Mutation: drop the `isinstance` check from `is_refusal` -- `int.startswith` raises
+    `AttributeError`."""
 
     def exit_one(repository, head_repo, sweep):
         raise SystemExit(1)
 
     monkeypatch.setattr(bm, "fork_pr_error", exit_one)
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40)
     assert exc.value.code == 1
+    assert capsys.readouterr().err == ""
     assert (tmp_path / "out.txt").read_text(encoding="utf-8") == ""
 
 
@@ -2145,12 +2190,12 @@ def test_a_one_env_query_plans_that_env_and_outputs_the_whole_tree(monkeypatch, 
 
 
 def test_a_detect_runs_the_shared_sweep_chain_once_each(monkeypatch, tmp_path):
-    """`compute_cells` selects through `select_cells` and `_detect` checks through
+    """`compute_cells` selects through `select_cells` and `main` checks through
     `check_cells`, each once, so a refusal added inside either helper reaches detect and
     onboard's drift-sweep item alike. `test_onboard.py` pins onboard's side.
 
     Mutations: inline `cap_cells(filter_cells(...))` back into `compute_cells` -- no
-    `select_cells` call; inline `stamp_rows` and `refuse_workload_gaps` back into `_detect` --
+    `select_cells` call; inline `stamp_rows` and `refuse_workload_gaps` back into `main` --
     no `check_cells` call.
     """
     calls = record_calls(monkeypatch, bm, "select_cells", "check_cells")
@@ -2609,7 +2654,7 @@ def _warnings(capsys):
 
 def test_detect_warns_about_a_stack_that_lost_its_last_env_tag(monkeypatch, tmp_path, capsys):
     """`stacks/app`, in the tree, changed without touching a tag. Mutations: drop the call in
-    `_detect`; let the pair warning include unmanaged stacks -- `stacks/gone / dev` is named
+    `main`; let the pair warning include unmanaged stacks -- `stacks/gone / dev` is named
     too."""
     _run_main(
         monkeypatch,
@@ -2843,6 +2888,7 @@ def test_a_refused_max_parallel_writes_no_matrix(monkeypatch, tmp_path):
         raise SystemExit("::error::max_parallel is '0'; refused")
 
     monkeypatch.setattr(bm.ec, "max_parallel", refuse)
+    _annotated(monkeypatch)
     with pytest.raises(SystemExit):
         _run_main(monkeypatch, tmp_path, _PLAN_ENV, head_sha="a" * 40)
     assert github_outputs(tmp_path / "out.txt") == {

@@ -277,6 +277,14 @@ The input does not reach nine jobs, which run on `ubuntu-slim` and run neither
 `review` and `summary` in `apply.yml`; `summary` in `deploy.yml`; `snapshot`
 and `complete` in `apply-env-level.yml`; and `guard` in `unlock.yml`.
 
+`issues` in `drift.yml` runs neither tool too, yet stays on the `runs_on`
+runner because an `ubuntu-slim` job stops at 15 minutes. It makes one or more
+Issue calls per swept cell that is drifted or has an open Issue, plus one close
+per open Issue of a cell that left the repository, under GitHub's secondary
+rate limits, so its runtime has no bound. A sweep stopped partway
+would skip the later cells' Issues and the closes of Issues whose cell left the
+repository.
+
 The `shipmate.yml` fence in [`getting-started.md`](getting-started.md) §The
 workflow file sets the label once, as `runs_on: &runner ubuntu-26.04-arm` on
 the `plan` job, and the other four jobs repeat it with `runs_on: *runner`. A

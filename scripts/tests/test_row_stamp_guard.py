@@ -33,7 +33,7 @@ from _loader import SCRIPTS, github_outputs
 #: the tree by `test_the_table_names_every_script_that_can_emit_rows` -- a seventh detect script
 #: reddens that test rather than going unstamped and unnoticed.
 _PRODUCERS = {
-    "build-matrix": ("_detect",),
+    "build-matrix": ("main",),
     "deploy-detect": ("main",),
     "apply-detect": ("main", "bare_main"),
     "unlock-detect": ("main",),
@@ -87,7 +87,7 @@ def test_the_table_names_every_script_that_can_emit_rows():
 
 
 def test_the_plan_matrix_resolves_the_plan_tier(monkeypatch, tmp_path):
-    """Call site 1: `build-matrix` _detect(). The plan workflow reads the plan credential, and a
+    """Call site 1: `build-matrix` main(). The plan workflow reads the plan credential, and a
     cell that resolved `aws.apply` here would hand a pull request's plan the role that
     mutates infrastructure.
 

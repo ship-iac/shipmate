@@ -37,6 +37,7 @@ import re
 import sys
 
 from _shipmate import (
+    REASON_CAP,
     _load,
     cell_names,
     cell_summaries,
@@ -305,26 +306,30 @@ def verdict(cells, head_sha, run_url):
     return f"{circle} {n} of {len(cells)} cells change {provenance(head_sha, run_url)}"
 
 
-#: The held comment's reason is cut here, so its body stays far under `HARD_CAP` with every cell
-#: line it can carry.
-HELD_REASON_CAP = 4000
 #: The most cell lines the held comment names before it counts the rest.
 HELD_CELL_NAMES = 10
 
 
+def reason_fence(text):
+    """`text` cut to `REASON_CAP` characters in a plain fence sized by `_fence_of`, so
+    author-controlled text such as a stack path shows verbatim, where `_md_name`'s mention guard
+    would show as written."""
+    text = text[:REASON_CAP]
+    return fence(text, _fence_of(text), lang="")
+
+
 def held_comment(reason, missing, checks, run_url, head_sha):
     """The comment of a held gate: marker, header, `🔴 the gate is held` and `provenance`, then
-    `reason` (the gate description before its 140-character cut, at most `HELD_REASON_CAP`
+    `reason` (the gate description before its 140-character cut, at most `REASON_CAP`
     characters) in a plain fence, then one line per cell of `missing` (`{stack, environment}`
     pairs) linking its plan check, then `FOOTER_HINT`. At most `HELD_CELL_NAMES` cell lines,
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
     and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `no
     plan summary read`: its plan matrix job did not succeed or the summary download failed."""
-    reason = reason[:HELD_REASON_CAP]
     parts = [
         f"{MARKER}\n{header('plan')}",
         f"🔴 the gate is held {provenance(head_sha, run_url)}",
-        fence(reason, _fence_of(reason), lang=""),
+        reason_fence(reason),
     ]
     if missing:
         lines = [

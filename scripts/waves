@@ -265,8 +265,8 @@ def inversion_error(pairs, order, level, remedy=""):
     appended after one space.
 
     The first line carries the short form of the last line's remedy, then one whole pair: a gate
-    description shows only that line, cut at 125 characters, so the remedy leads and a long
-    pair loses its tail."""
+    description shows the message's first 125 characters, its lines joined, so the remedy leads
+    and a long pair loses its tail."""
     (vs, ve), (us, ue) = pairs[0]
     lines = [
         (

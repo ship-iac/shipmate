@@ -54,6 +54,8 @@ SCRIPTS_EXPECTED = [
 MAIN_BLOCK = "if __name__ == '__main__':\n    run_annotated(main)"
 #: Hand-written: each block that is not `MAIN_BLOCK`.
 BLOCKS = {
+    "apply-detect": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
+    "build-matrix": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "gate-status": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
     "plan-classify": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",
     "plan-crypt": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",

@@ -124,6 +124,7 @@ jobs:
       applied_ungated_envs: ${{ steps.d.outputs.applied_ungated_envs }}
       review_not_required_envs: ${{ steps.d.outputs.review_not_required_envs }}
       waiting_cells: ${{ steps.d.outputs.waiting_cells }}
+      refusal: ${{ steps.d.outputs.refusal }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { ref: "${{ inputs.ref }}" }
@@ -248,6 +249,7 @@ jobs:
           applied-ungated-envs: ${{ needs.detect.outputs.applied_ungated_envs }}
           review-not-required-envs: ${{ needs.detect.outputs.review_not_required_envs }}
           waiting-cells: ${{ needs.detect.outputs.waiting_cells }}
+          detect-refusal: ${{ needs.detect.outputs.refusal }}
           results: ${{ join(needs.*.result, ',') }}
           app-id: ${{ vars.SHIPMATE_APP_ID }}
           private-key: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}

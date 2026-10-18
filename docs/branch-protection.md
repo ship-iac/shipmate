@@ -29,7 +29,7 @@ resolves to:
 
 | State | gate | Merge |
 |-------|-----------|-------|
-| `detect` failed with an `::error::` line (a refusal or a failed tool or API call) | `failure` — "detect failed: <the first line of the `::error::` refusal message>", cut to 140 characters | blocked |
+| `detect` failed with an `::error::` line (a refusal or a failed tool or API call) | `failure` — "detect failed: <the first error of the `::error::` message, its lines joined by spaces>", cut to 140 characters | blocked |
 | `detect` failed without an `::error::` line (a fmt or codegen failure, a crash with none) | `failure` — "change detection did not succeed" | blocked |
 | A plan cell failed | `failure` — "shipmate / <stack> / <env> has no plan summary; fix its plan or re-plan", "shipmate / <stack> / <env> and <N> more have no plan summary; fix their plans or re-plan", or, when no cell without a summary is known or the named text passes 140 characters, "plan incomplete (plan job: failure); fix the failing plan checks before merging" | blocked |
 | The plan job was cancelled | no final gate: the summary's publish hold (`failure` — "plan run <id> holds this gate while it publishes; re-plan (comment shipmate plan or push) if that run has ended") stays when it downloaded any cell summary; otherwise the head keeps its earlier gate | blocked by the hold; otherwise as the earlier gate allows (none: blocked, the required check never arrives) |
