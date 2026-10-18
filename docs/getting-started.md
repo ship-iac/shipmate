@@ -1001,11 +1001,11 @@ Properties that fall out of the existing gate semantics:
 - **Stale bases don't sneak through the merge.** With "require branches up to
   date" (strict), a base moved since the plans ran blocks the auto-merge until
   the branch is updated. Each merge puts every other open pull request behind
-  the base, and updating one re-plans it on the new head. A pull request
-  already applied re-plans with no changes, and its gate goes `success`
-  without another apply; one with changes goes `pending` until they are
-  applied. So each merge costs every other open pull request one plan run. The
-  exact-plan invariant is preserved.
+  the base, and updating one re-plans it on the new head: one plan run per
+  update. A pull request already applied usually re-plans with no changes,
+  when nothing merged since touched its stacks, and its gate goes `success`
+  without another apply. Otherwise its gate goes `pending` until the fresh
+  plans are applied. The exact-plan invariant is preserved.
 
   Strict gates the merge and nothing else, so it does not protect the apply:
   a `shipmate apply <env>` from a stale branch applies the plan as reviewed, and

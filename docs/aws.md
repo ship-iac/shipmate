@@ -278,9 +278,10 @@ The input does not reach nine jobs, which run on `ubuntu-slim` and run neither
 and `complete` in `apply-env-level.yml`; and `guard` in `unlock.yml`.
 
 `issues` in `drift.yml` runs neither tool too, yet stays on the `runs_on`
-runner because an `ubuntu-slim` job stops at 15 minutes. It makes one Issue create,
-edit or close call per drifted cell, up to 256 per sweep, under GitHub's
-secondary rate limits, so its runtime has no bound. A sweep stopped partway
+runner because an `ubuntu-slim` job stops at 15 minutes. It makes one or more
+Issue calls per swept cell that is drifted or has an open Issue, plus one close
+per open Issue of a cell that left the repository, under GitHub's secondary
+rate limits, so its runtime has no bound. A sweep stopped partway
 would skip the later cells' Issues and the closes of Issues whose cell left the
 repository.
 

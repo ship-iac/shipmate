@@ -16,8 +16,8 @@ section below names the SHA the release tags.
 
 ### Changed
 
-- **`docs/aws.md` §Runner choice says why the drift `issues` job stays on the `runs_on` runner: an `ubuntu-slim` job stops at 15 minutes, and `issues` makes one Issue call per drifted cell, up to 256 per sweep.**
-- **`docs/getting-started.md` says what the strict required check costs: each merge puts every other open pull request behind the base, and updating one re-plans it, so each merge costs it one plan run; an already-applied pull request re-plans with no changes and its gate goes `success` without another apply.**
+- **`docs/aws.md` §Runner choice says why the drift `issues` job stays on the `runs_on` runner: an `ubuntu-slim` job stops at 15 minutes, and `issues` makes Issue calls per drifted cell, per cell with an open Issue and per Issue of a removed cell, under secondary rate limits, so its runtime has no bound.**
+- **`docs/getting-started.md` says what the strict required check costs: each merge puts every other open pull request behind the base, and each update re-plans it, one plan run per update; an already-applied pull request whose stacks nothing else touched usually re-plans with no changes and its gate goes `success` without another apply, otherwise `pending` until applied again.**
 
 ## [0.49.0] — 2026-10-18
 
