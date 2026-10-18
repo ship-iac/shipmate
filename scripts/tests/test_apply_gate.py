@@ -481,3 +481,86 @@ def test_main_is_identical_with_and_without_a_digest(monkeypatch, capsys):
     without_hash = _ext("apply / stacks/app / dev-eu", 1, _record())
     assert _plan_runs_stdout(monkeypatch, capsys, with_hash) == expected
     assert _plan_runs_stdout(monkeypatch, capsys, without_hash) == expected
+
+
+_MISSING = object()
+
+
+def _counted(name, id, plan_run, cells=_MISSING, status="queued", app_id=999):
+    """An App-authored check whose record names `plan_run` and declares `cells`, or no
+    `cells` key when left out."""
+    record = {"fingerprint": "a" * 64, "plan_run": plan_run, "pr": "8"}
+    if cells is not _MISSING:
+        record["cells"] = cells
+    run = _run_obj(name, status=status, conclusion=None, id=id, app_id=app_id)
+    run["external_id"] = json.dumps(record)
+    return json.dumps(run)
+
+
+_A, _B, _C = "apply / a / dev", "apply / b / dev", "apply / c / dev"
+
+
+@pytest.mark.parametrize(
+    ("lines", "expected"),
+    [
+        pytest.param([_counted(_A, 1, "7", 2), _counted(_B, 2, "7", 2)], {}, id="complete"),
+        pytest.param([_counted(_A, 1, "7", 2)], {"7": (1, (2,))}, id="partial"),
+        pytest.param([_counted(_A, 1, "7")], {"7": (1, ())}, id="missing"),
+        pytest.param([_counted(_A, 1, "7", "1")], {"7": (1, ())}, id="string"),
+        pytest.param([_counted(_A, 1, "7", True)], {"7": (1, ())}, id="true"),
+        pytest.param(
+            [_counted(_A, 1, "7", 2), _counted(_B, 2, "7", 3)],
+            {"7": (2, (2, 3))},
+            id="disagreeing",
+        ),
+        pytest.param(
+            [_counted(_A, 1, "7", 2), _counted(_B, 2, "7", 2), _counted(_C, 3, "7", 2)],
+            {"7": (3, (2,))},
+            id="over-count",
+        ),
+        pytest.param(
+            [
+                _counted(_A, 1, "7", 3),
+                _counted(_B, 2, "7", 3),
+                _counted(_C, 3, "7", 3),
+                _counted(_A, 4, "8", 2),
+                _counted(_B, 5, "8", 2),
+            ],
+            {},
+            id="superseded",
+        ),
+        pytest.param(
+            [_counted(_A, 1, "7", 2, status="completed"), _counted(_B, 2, "7", 2)],
+            {},
+            id="completed",
+        ),
+        pytest.param(
+            [
+                _counted(_A, 1, "7", 2),
+                _counted(_B, 2, "7", 2),
+                _counted("shipmate / c / dev", 3, "7", 2),
+            ],
+            {},
+            id="mirror",
+        ),
+        pytest.param(
+            [
+                _counted(_A, 1, "7", 2),
+                _counted(_B, 2, "7", 2),
+                _counted(_C, 3, "7", 2, app_id=15368),
+            ],
+            {},
+            id="other-app",
+        ),
+    ],
+)
+def test_incomplete_runs(lines, expected):
+    """A run is complete only when its declared counts are exactly {distinct names}, counted
+    over every App-authored apply check, of any status, whose record names it. Mutations, each
+    red on its row: `latest_by_name(app_runs(...))` for `app_runs(...)` (superseded); drop the
+    `APPLY_PREFIX` filter (mirror); `parse_jsonl(check_run_lines)` for `app_runs(...)`
+    (other-app); drop `not isinstance(cells, bool)` (true); `int(cells)` for a digit string
+    (string); skip `completed` checks (completed); `len(named) >= max(counts)` for the equality
+    (over-count); `len(named) <= min(counts)` for the equality (partial); compare only the
+    first declared count (disagreeing)."""
+    assert ag.incomplete_runs(lines, "999") == expected

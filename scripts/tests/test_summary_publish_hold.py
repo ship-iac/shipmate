@@ -176,8 +176,9 @@ def _write_cells(tmp_path, *slugs):
         (d / "plan.txt").write_bytes(b"plan\n")
 
 
-def _check_post(slug):
-    """The whole POST argv and body pending-checks emits for a changed cell `slug`."""
+def _check_post(slug, cells):
+    """The whole POST argv and body pending-checks emits for a changed cell `slug` of a run that
+    planned `cells` cells."""
     body = {
         "name": f"apply / stacks/{slug} / dev",
         "head_sha": HEAD_SHA,
@@ -189,6 +190,7 @@ def _check_post(slug):
                 # sha256 of b"plan\n", computed once off the tree.
                 "plan_sha256": "1b4025dc7b8d27cf38df85e77b20ed44a00851a2c28b338560560d85deded8e3",
                 "pr": "7",
+                "cells": cells,
             }
         ),
         "output": {
@@ -289,8 +291,8 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
         APPLY_LIST,
         PUBLISH_HOLD_POST,
         STATUSES_LIST,
-        _check_post("a"),
-        _check_post("b"),
+        _check_post("a", 2),
+        _check_post("b", 2),
     ]
 
 
@@ -316,8 +318,8 @@ def test_a_failed_check_post_fails_the_step_and_stops_publishing(tmp_path):
         APPLY_LIST,
         PUBLISH_HOLD_POST,
         STATUSES_LIST,
-        _check_post("a"),
-        _check_post("b"),
+        _check_post("a", 3),
+        _check_post("b", 3),
     ]
 
 
@@ -368,7 +370,7 @@ def test_the_final_gate_write_replaces_the_hold_and_skips_the_refresh(tmp_path):
         APPLY_LIST,
         PUBLISH_HOLD_POST,
         STATUSES_LIST,
-        _check_post("a"),
+        _check_post("a", 1),
         STATUSES_LIST,
         _status_post("pending", "waiting"),
     ]

@@ -179,6 +179,45 @@ def plan_records(check_run_lines, app_id):
     return out
 
 
+def incomplete_runs(check_run_lines, app_id):
+    """Map each plan run that published only part of its apply checks to `(distinct names
+    published, sorted distinct declared counts)`. Complete runs are absent.
+
+    A run's names are every App-authored `apply / ` check, of any status, whose decodable
+    record names it; its declared counts are the records' `cells` values that are an int and
+    not a bool. The run is complete only when those counts are exactly `{len(names)}`: an
+    empty tuple (no record declares a count) or two or more counts (they disagree) are
+    incomplete, as is a single count larger or smaller than the names. Records are decoded with
+    `plan_records`' tolerance: one that is undecodable, not an object, or has no valid
+    `plan_run` counts for no run.
+
+    Every check run is read, not only the newest per name, so a same-head re-plan that no
+    longer plans a cell leaves the older run's names still counted, rather than making that
+    run incomplete for good. The wider scan cannot inflate a run's names: only run R's own
+    summary job writes a record naming R, and on a re-run pending-checks' `published` emits
+    only the names R has not yet published, so every match is a check R itself published."""
+    names, counts = {}, {}
+    for run in app_runs(check_run_lines, app_id):
+        if not run["name"].startswith(APPLY_PREFIX):
+            continue
+        try:
+            record = json.loads(run.get("external_id") or "")
+        except json.JSONDecodeError:
+            continue
+        plan_run = record.get("plan_run") if isinstance(record, dict) else None
+        if not (isinstance(plan_run, str) and is_run_id(plan_run)):
+            continue
+        names.setdefault(plan_run, set()).add(run["name"])
+        cells = record.get("cells")
+        valid = isinstance(cells, int) and not isinstance(cells, bool)
+        counts.setdefault(plan_run, set()).update([cells] if valid else [])
+    return {
+        run: (len(named), tuple(sorted(counts[run])))
+        for run, named in names.items()
+        if counts[run] != {len(named)}
+    }
+
+
 def verdict(check_runs):
     """The gate verdict over `check_runs`, which must already be `app_runs` output: this does
     not filter by App identity."""
