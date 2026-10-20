@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Annotate a failed `tofu plan` with OpenTofu's first error diagnostic.
+"""Annotate a failed `tofu plan` or `tofu init` with OpenTofu's first error diagnostic.
 
-Reads the plan's combined output on stdin and prints one `::error::` with the
+Reads the command's combined output on stdin and prints one `::error::` with the
 first diagnostic box (`╷`) whose title is `Error:`, up to its closing `╵`, colour and box
 prefix removed (`lock-info`'s `_strip`), cut at `CAP` characters. Prints nothing
 when the output holds no such box, so a failure outside OpenTofu keeps the
 runner's own "Process completed with exit code" annotation and nothing else.
+
+`tofu-error cache-entry <key>` reads a failed init's output instead and prints the remedy for a
+corrupt restored provider cache entry `<key>` in `$GITHUB_REPOSITORY`, only when the first
+diagnostic's title is exactly `INSTALL_FAILED`, and nothing otherwise: a backend or credential
+failure is not the cache's, and its own diagnostic names the cause. Other arguments are refused.
 
 The text is author-controlled (a stack's config and provider output), so it
 prints only through `command_data`: a raw newline would start a second workflow
 command.
 """
 
+import os
 import sys
 
 from _shipmate import _load, command_data, run_annotated
@@ -20,6 +26,9 @@ li = _load("lock-info")
 
 #: Annotation messages are shown whole in the check run; the cut keeps one bounded.
 CAP = 1000
+
+#: The title of the diagnostic a cached provider package that fails to install produces.
+INSTALL_FAILED = "Error: Failed to install provider"
 
 
 def first_error(text):
@@ -42,12 +51,24 @@ def first_error(text):
     return "\n".join(block).strip()[:CAP]
 
 
-def main():
+def main(argv=()):
+    if argv and (len(argv) != 2 or argv[0] != "cache-entry"):
+        raise SystemExit(f"::error::usage: tofu-error [cache-entry <key>] (got {list(argv)})")
     # Provider output is not guaranteed UTF-8; a strict decode would lose the annotation.
     error = first_error(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
-    if error:
-        print(f"::error::{command_data(error)}")
+    if not argv:
+        if error:
+            print(f"::error::{command_data(error)}")
+        return
+    if error.partition("\n")[0] == INSTALL_FAILED:
+        key, repo = argv[1], os.environ["GITHUB_REPOSITORY"]
+        remedy = (
+            f"OpenTofu's init failed after restoring provider cache entry {key}. If the log above"
+            " says a cached package does not match the content of the downloaded package, delete"
+            f" the entry with gh cache delete {key} --repo {repo} and re-run."
+        )
+        print(f"::error::{command_data(remedy)}")
 
 
 if __name__ == "__main__":
-    run_annotated(main)
+    run_annotated(main, sys.argv[1:])

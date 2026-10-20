@@ -30,7 +30,7 @@ import hashlib
 import os
 
 import pytest
-from _loader import action_steps, action_yaml, bash_only, run_step, step_by
+from _loader import ACTIONS, action_steps, action_yaml, bash_only, run_step, step_by
 
 #: The four steps the apply half of the cell is split across, in the order the runner executes
 #: them, each as (action, step id). The three ahead of the apply each carry a blocked reason of
@@ -106,10 +106,12 @@ def _run_step(
     The script runs in its own empty directory, standing in for the consumer's checkout: the
     action must leave nothing at its root, and pytest's own cwd is the engine tree.
     """
-    # The four step bodies concatenated in runner order. They are separate steps so that each
-    # refusal carries its own blocked reason, but composite-action steps share one workspace and
-    # run in sequence, so one script under one set of stubs is what they amount to at runtime.
-    run = "\n".join(step_by(action, id=step_id)["run"] for action, step_id in _STEP_IDS)
+    # The four step bodies in runner order, each in its own subshell under `set -e`, as the runner
+    # runs each step in its own `bash -e`: a body's `exit` ends that step, and a non-zero one ends
+    # the sequence. Not `( ... ) || exit $?`, which would switch off errexit inside every body.
+    run = "set -e\n" + "".join(
+        f"(\n{step_by(action, id=step_id)['run']}\n)\n" for action, step_id in _STEP_IDS
+    )
     # `terramate_body` ends in `exit`, which dies in a subshell inside the apply pipeline but would
     # kill this whole script on a plain line, so the stub dispatches on the tofu subcommand.
     harness = (
@@ -131,6 +133,8 @@ def _run_step(
         "RUNNER_TEMP": str(runner_temp),
         "PLAN_SHA256": plan_sha256,
         "ENV": "dev-eu",
+        # The init body names `tofu-error` through it under `set -u`.
+        "GITHUB_ACTION_PATH": str(ACTIONS / "cell-init"),
     }
     return run_step(tmp_path, harness, env, cwd=checkout)
 
@@ -175,24 +179,20 @@ def test_failed_apply_and_failed_tee_still_fails_the_step(tmp_path):
 
 @bash_only
 def test_failed_init_fails_the_step_before_the_apply(tmp_path):
-    """init runs outside the pipeline, and errexit must stop the step there rather than fall
-    through to an apply of a plan against an uninitialized directory. On the runner errexit comes
-    from `shell: bash` (`bash -e`); in this harness, from digest-input's `set -euo pipefail`.
-    Mutation: append `|| true` to `cell-init`'s one-line init `run:`.
-
-    The stub uses `return 5`, not `exit 5`: the init line is a plain function call in the current
-    shell, so an `exit` body terminates the script whatever the init line says, and this test
-    could then not fail on that mutation. Returning leaves errexit to do the work."""
+    """A failed init must end the sequence rather than fall through to an apply of a plan
+    against an uninitialized directory. The init step exits on tofu's own status, taken from
+    `PIPESTATUS[0]` past its `tee`. Mutation: `cell-init`'s init `exit "$status"` becomes
+    `exit 0`."""
     r = _run_step(
         tmp_path,
         terramate_body="echo applied ; exit 0",
-        tee_body='echo TEE_RAN >&2 ; cat > "$1" ; exit 0',
+        tee_body='[ "${1##*/}" = apply.txt ] && echo TEE_RAN >&2 ; cat > "$1" ; exit 0',
         init_body="echo init boom >&2 ; return 5",
     )
     assert r.returncode == 5, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     # The apply is piped into tee, whose stub swallows that output into apply.txt, so
     # `"applied" not in r.stdout` holds even when the pipeline did run. tee's own stderr escapes
-    # the pipe, and tee runs if and only if the pipeline did.
+    # the pipe, and the stub marks only the apply's tee, not the init's.
     assert "TEE_RAN" not in r.stderr, f"apply ran despite a failed init: {r.stderr!r}"
 
 

@@ -24,7 +24,10 @@ _JSON = '{"format_version":"1.2"}\n'
 #: open until the sleep ends and hide an early return. `FAIL=both` reverses the timing, so the
 #: json error is written first.
 _STUBS = r"""
-terramate() { while [ "$1" != -- ] ; do shift ; done ; shift ; "$@" ; }
+terramate() {
+  while [ $# -gt 0 ] && [ "$1" != -- ] ; do shift ; done
+  [ $# -gt 0 ] || return 97 ; shift ; "$@"
+}
 tofu() {
   case "$*" in
     *-no-color*) [ "$FAIL" = both ] && { sleep 1 ; printf 'text error\n' >&2 ; return 3 ; } ;

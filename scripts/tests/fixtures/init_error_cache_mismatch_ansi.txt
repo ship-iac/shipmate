@@ -1,0 +1,23 @@
+terramate: Entering stack in /stacks/dns
+terramate: Executing command "tofu init -input=false -reconfigure"
+
+[0m[1mInitializing the backend...[0m
+[0m[32m
+Successfully configured the backend "local"! OpenTofu will automatically
+use this backend unless the backend configuration changes.[0m
+
+[0m[1mInitializing provider plugins...[0m
+- terraform.io/builtin/terraform is built in to OpenTofu
+- Reusing previous version of hashicorp/random from the dependency lock file
+- Installing hashicorp/random v3.9.1 to the shared cache directory...
+[31m╷[0m[0m
+[31m│[0m [0m[1m[31mError: [0m[0m[1mFailed to install provider[0m
+[31m│[0m [0m
+[31m│[0m [0m[0mError while installing hashicorp/random v3.9.1: existing cached package at
+[31m│[0m [0m/home/runner/work/_temp/plugin-cache-corrupt/registry.opentofu.org/hashicorp/random/3.9.1/windows_amd64
+[31m│[0m [0mdoes not match the content of the downloaded package; does it contain local
+[31m│[0m [0mmodifications?
+[31m╵[0m[0m
+
+Error: one or more commands failed
+> execution failed: running /home/runner/work/_temp\tofu113\tofu.exe init -input=false -reconfigure (in /stacks/dns): exit status 1

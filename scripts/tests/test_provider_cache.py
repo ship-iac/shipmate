@@ -12,8 +12,9 @@ it reuses the restore step's key, computed before `init -reconfigure` can rewrit
 lock: a key computed after it could name a lock no restore reads. The cells read both through
 `cell-init`'s outputs. In `apply-cell` both steps follow `Save state` with no status function in
 their `if:`, so a failed apply saves nothing, and carry `continue-on-error: true`, so a failed save
-cannot fail an applied cell. When `init` fails after a restore that hit, `cell-init` names the
-restored entry in one `::error::`, so a corrupt entry can be deleted by key.
+cannot fail an applied cell. When `init` fails installing a provider after a restore that hit,
+`cell-init` names the restored entry in one `::error::`, so a corrupt entry can be deleted by key;
+any other init failure (a backend or credentials) gets no cache remedy.
 
 Threat model: accidental regression of an engine file that is SHA-pinned and reviewed, such as a
 save added to another cell, a dropped guard or a widened key. Each value is compared whole
@@ -34,6 +35,7 @@ the `cache-primary-key` output deleted, `cache-hit` mapped to `steps.provider-ca
 """
 
 import os
+import pathlib
 
 import pytest
 from _loader import (
@@ -45,9 +47,11 @@ from _loader import (
     run_step,
     step_by,
     workflow_yaml,
+    write_python3_shim,
 )
 
 _INIT_ACTION = "cell-init"
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
 _KEY_STEP = {
     "name": "Provider cache key",
@@ -74,8 +78,15 @@ _INIT_STEP = {
     "id": "init",
     "shell": "bash",
     "env": {"STACK": "${{ inputs.stack }}"},
-    "run": "terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "
-    '"$STACK" -- tofu init -input=false -reconfigure',
+    "run": "set -euo pipefail\n"
+    "set +e\n"
+    "terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "
+    '"$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"\n'
+    "status=${PIPESTATUS[0]}\n"
+    "set -e\n"
+    '[ "$status" -eq 0 ] || python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" '
+    '< "$RUNNER_TEMP/init.txt" || true\n'
+    'exit "$status"\n',
 }
 
 #: What each cell reads back. `init-outcome` is init's own outcome, not the composite's: a failed
@@ -285,15 +296,45 @@ def test_the_entry_is_named_only_when_init_fails_after_a_hit():
 
 
 @bash_only
-def test_the_annotation_names_the_key_and_the_delete_command(tmp_path):
-    """Mutation: drop `--repo $GITHUB_REPOSITORY` from the delete command."""
+@pytest.mark.parametrize(
+    ("fixture", "expected"),
+    [
+        (
+            "init_error_cache_mismatch_ansi.txt",
+            (
+                "::error::OpenTofu's init failed after restoring provider cache entry "
+                "tofu-providers-Linux-X64-abc123. If the log above says a cached package does not "
+                "match the content of the downloaded package, delete the entry with gh cache "
+                "delete tofu-providers-Linux-X64-abc123 --repo o/r and re-run.\n"
+            ),
+        ),
+        ("init_error_backend_ansi.txt", ""),
+    ],
+    ids=["cache-mismatch", "backend"],
+)
+def test_the_annotation_names_the_key_only_for_a_provider_install_failure(
+    tmp_path, fixture, expected
+):
+    """The step body runs `tofu-error cache-entry` over init's teed output: a backend failure
+    after a cache hit gets no cache remedy. Mutation: restore the unconditional `echo` of the
+    annotation (reds `backend`)."""
     body = step_by(_INIT_ACTION, name="Name the restored provider cache entry")["run"]
-    key = "tofu-providers-Linux-X64-abc123"
-    r = run_step(tmp_path, body, {**os.environ, "KEY": key, "GITHUB_REPOSITORY": "o/r"})
+    runner_temp = tmp_path / "rt"
+    runner_temp.mkdir()
+    (runner_temp / "init.txt").write_bytes((FIXTURES / fixture).read_bytes())
+    # Git Bash's `python3` on Windows is the Store alias: it would red the cache case and pass
+    # the empty one vacuously.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    write_python3_shim(bin_dir)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        "KEY": "tofu-providers-Linux-X64-abc123",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_ACTION_PATH": str(ACTIONS / _INIT_ACTION),
+        "RUNNER_TEMP": str(runner_temp),
+    }
+    r = run_step(tmp_path, body, env)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert r.stdout == (
-        "::error::OpenTofu's init failed after restoring provider cache entry "
-        "tofu-providers-Linux-X64-abc123. If the log above says a cached package does not "
-        "match the content of the downloaded package, delete the entry with gh cache delete "
-        "tofu-providers-Linux-X64-abc123 --repo o/r and re-run.\n"
-    )
+    assert r.stdout == expected

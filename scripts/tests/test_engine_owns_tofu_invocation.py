@@ -41,6 +41,19 @@ _WRAPPER = [
     "--",
 ]
 _INIT = [*_WRAPPER, "tofu", "init", "-input=false", "-reconfigure"]
+#: cell-init's init, teed to RUNNER_TEMP for `tofu-error`, which annotates a failed init with its
+#: first error. The unlock cell runs its own un-teed `_INIT`.
+_INIT_TEED = [
+    *_WRAPPER,
+    "tofu",
+    "init",
+    "-input=false",
+    "-reconfigure",
+    "2>&1",
+    "|",
+    "tee",
+    "$RUNNER_TEMP/init.txt",
+]
 #: Reads the init record inside the wrapper, so it sees the TF_DATA_DIR and TF_WORKSPACE tofu saw.
 _LOCATE = [*_WRAPPER, "python3", "$GITHUB_ACTION_PATH/../../scripts/state-path"]
 #: Teed to RUNNER_TEMP for `tofu-error`, which annotates a failed plan with its first error.
@@ -101,7 +114,7 @@ _SHOW_JSON = [*_WRAPPER, "tofu", "show", "-json", "stack.otplan"]
 
 #: Every `terramate run` each cell is expected to make, in order.
 _EXPECTED = {
-    "cell-init": [_INIT, _LOCATE],
+    "cell-init": [_INIT_TEED, _LOCATE],
     "plan-cell": [
         _PLAN,
         [*_SHOW_TEXT, ">", "plan.txt", "2>", "show-text.err", "&"],
@@ -218,7 +231,8 @@ def test_each_cell_runs_exactly_the_engines_own_terramate_run_invocations():
     whole-line comments are stripped by `_command_lines`. Do not re-add `comments=True` to clear
     such a red.
 
-    Mutation: add a second `tofu init` line to plan-cell's Plan step.
+    Mutations: add a second `tofu init` line to plan-cell's Plan step; tee cell-init's init to
+    `$RUNNER_TEMP/init-run.txt`.
     """
     for cell, expected in _EXPECTED.items():
         lines = [ln for ln in _command_lines(cell) if re.search(r"terramate\s+run\b", ln)]

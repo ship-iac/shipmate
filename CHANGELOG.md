@@ -10,13 +10,14 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
-### Changed
-
-- **OpenTofu 1.13.1 replaces 1.12.4.** A plan made on 1.12.4 is refused at apply, so push a commit to each open pull request to re-plan it.
-
 ### Fixed
 
 - **Plan, apply and drift cells run `tofu show` inside `terramate run`, so a `run.env` `TF_DATA_DIR` reaches it.**
+- **A failed `tofu init` is annotated with OpenTofu's first error, and the `gh cache delete` remedy only for a provider install failure after a cache hit.**
+
+### Changed
+
+- **OpenTofu 1.13.1 replaces 1.12.4.** A plan made on 1.12.4 is refused at apply, so push a commit to each open pull request to re-plan it.
 
 ## [0.49.1] — 2026-10-18
 

@@ -2185,13 +2185,13 @@ the publish hold (below). In order, blank lines between the parts:
   head has none. At most ten, then `and N more cells have no plan summary`. The
   cells are `detect`'s planned `cells` the run read no summary for: a cell whose
   plan matrix job did not succeed and a cell whose summary download failed read
-  the same. When `tofu plan` failed with an `Error:` diagnostic, the cell's plan
-  job carries an `::error::` annotation with the first one, colour removed and
-  cut at 1,000 characters. For the autoplan that job is the linked check and
-  `shipmate doctor` harvests it. An on-demand `shipmate plan` keeps it on its
-  own run: `doctor` reads only the autoplan's cell checks and the App-mirrored
-  head check carries no annotations. A drift cell's failed plan annotates the
-  same way;
+  the same. When `tofu init` or `tofu plan` failed with an `Error:` diagnostic,
+  the cell's plan job carries an `::error::` annotation with the first one,
+  colour removed and cut at 1,000 characters. For the autoplan that job is the
+  linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
+  keeps it on its own run: `doctor` reads only the autoplan's cell checks and
+  the App-mirrored head check carries no annotations. A drift or apply cell's
+  failed init, and a drift cell's failed plan, annotate the same way;
 - the help hint ``Comment `shipmate help` for the available commands.``
 
 The held body only explains a red gate, so it degrades: a failed render,
@@ -3093,7 +3093,10 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   downloads.
 - The lock verifies every cached package at every reader. A cached package that
   does not match fails `init` with `does not match the content of the downloaded
-  package` ([`docs/troubleshooting.md`](docs/troubleshooting.md)).
+  package` ([`docs/troubleshooting.md`](docs/troubleshooting.md)). When the first
+  init error is `Failed to install provider` after a restore that hit, the cell
+  also annotates the restored entry's key and its `gh cache delete` command; any
+  other failed init carries only OpenTofu's first error.
 
 A lock serves the cache only when, for each provider, it names the address
 OpenTofu resolves the stack's `source` to (`registry.opentofu.org/hashicorp/aws`
