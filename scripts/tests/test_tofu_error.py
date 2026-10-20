@@ -16,6 +16,7 @@ AWS `RequestID` became `00000000-0000-0000-0000-000000000000`.
 """
 
 import io
+import json
 import pathlib
 
 import pytest
@@ -192,28 +193,32 @@ def test_names_no_cache_entry_for_any_other_failure(monkeypatch, capsys, text):
     [
         (
             ("cache-entry",),
-            "::error::usage: tofu-error [cache-entry <key>] (got ['cache-entry'])",
+            "::error::usage: tofu-error [cache-entry <key> | cell-error] (got ['cache-entry'])",
         ),
         (
             ("cache-entry", KEY, "x"),
             (
-                "::error::usage: tofu-error [cache-entry <key>] "
+                "::error::usage: tofu-error [cache-entry <key> | cell-error] "
                 "(got ['cache-entry', 'tofu-providers-Linux-X64-abc123', 'x'])"
             ),
         ),
         (
             ("cache", KEY),
             (
-                "::error::usage: tofu-error [cache-entry <key>] "
+                "::error::usage: tofu-error [cache-entry <key> | cell-error] "
                 "(got ['cache', 'tofu-providers-Linux-X64-abc123'])"
             ),
         ),
+        (
+            ("cell-error", "x"),
+            "::error::usage: tofu-error [cache-entry <key> | cell-error] (got ['cell-error', 'x'])",
+        ),
     ],
-    ids=["one", "three", "cache"],
+    ids=["one", "three", "cache", "cell-error-two"],
 )
 def test_refuses_any_other_arguments(monkeypatch, capsys, argv, code):
     """Mutations: drop the `argv[0] != "cache-entry"` clause (reds `cache`); change the usage
-    text (reds all three)."""
+    text (reds all four); match `cell-error` on `argv[0]` alone (reds `cell-error-two`)."""
     with pytest.raises(SystemExit) as exc:
         _run(monkeypatch, capsys, b"", argv)
     assert exc.value.code == code
@@ -235,3 +240,84 @@ def test_the_init_step_annotates_before_its_exit_and_never_masks_the_status():
     assert lines[init + 1] == "status=${PIPESTATUS[0]}"
     assert lines.count(ANNOTATE_INIT) == 1
     assert lines.index(ANNOTATE_INIT) < lines.index('exit "$status"')
+
+
+CLEAN_INIT = "OpenTofu has been successfully initialized!\n"
+PLAN_ERROR = "╷\n│ Error: plan broke\n│ \n│ on main.tf line 1\n╵\n"
+
+
+def _cell_error(tmp_path, monkeypatch, init, plan, outcome):
+    monkeypatch.chdir(tmp_path)
+    temp = tmp_path / "temp"
+    temp.mkdir()
+    (temp / "init.txt").write_bytes(init)
+    if plan is not None:
+        (temp / "plan-run.txt").write_bytes(plan)
+    monkeypatch.setenv("RUNNER_TEMP", str(temp))
+    monkeypatch.setenv("STACK", "stacks/a")
+    monkeypatch.setenv("ENV", "dev")
+    monkeypatch.setenv("PLAN_OUTCOME", outcome)
+    te.main(["cell-error"])
+    out = tmp_path / "cell-error.json"
+    return out.read_text(encoding="utf-8") if out.exists() else None
+
+
+def test_cell_error_reads_the_plan_that_failed_after_a_clean_init(tmp_path, monkeypatch):
+    """Mutations: read `init.txt` whatever `PLAN_OUTCOME` holds -- no file; swap `stack` and
+    `environment` -- red; write `command_data(error)` -- red."""
+    got = _cell_error(tmp_path, monkeypatch, CLEAN_INIT.encode(), PLAN_ERROR.encode(), "failure")
+    assert got == (
+        '{"stack": "stacks/a", "environment": "dev", '
+        '"error": "Error: plan broke\\n\\non main.tf line 1"}'
+    )
+
+
+def test_cell_error_reads_the_init_when_the_plan_never_ran(tmp_path, monkeypatch):
+    """Mutation: read `plan-run.txt` whatever `PLAN_OUTCOME` holds -- FileNotFoundError."""
+    got = _cell_error(tmp_path, monkeypatch, _fixture("init_error_backend_ansi.txt"), None, "")
+    error = BACKEND.removeprefix("::error::").removesuffix("\n")
+    assert got == json.dumps({"stack": "stacks/a", "environment": "dev", "error": error})
+
+
+def test_cell_error_writes_no_file_without_a_diagnostic(tmp_path, monkeypatch):
+    """Mutation: write the file when `first_error` is empty -- an empty `error`."""
+    assert _cell_error(tmp_path, monkeypatch, b"terramate: stack not found\n", None, "") is None
+
+
+#: Hand-written: plan-cell's whole cell-error steps.
+FAILED = (
+    "${{ failure() && (steps.init.outputs.init-outcome == 'failure'"
+    " || steps.plan-run.outcome == 'failure') }}"
+)
+WRITE_CELL_ERROR = {
+    "name": "Write cell error",
+    "if": FAILED,
+    "shell": "bash",
+    "env": {
+        "STACK": "${{ inputs.stack }}",
+        "ENV": "${{ inputs.env }}",
+        "PLAN_OUTCOME": "${{ steps.plan-run.outcome }}",
+    },
+    "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" cell-error',
+}
+UPLOAD_CELL_ERROR = {
+    "name": "Upload cell error",
+    "if": FAILED,
+    "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+    "with": {
+        "name": "cell-error.${{ inputs.env }}.${{ steps.ids.outputs.slug }}",
+        "path": "cell-error.json",
+        "if-no-files-found": "ignore",
+        "retention-days": 7,
+    },
+}
+
+
+def test_plan_cell_writes_and_uploads_its_error_only_after_its_init_or_plan_failed():
+    """Mutations: drop `failure() &&` -- red (GitHub then adds `success()`, so neither step
+    runs after a failure); drop the init clause -- red; rename the artifact
+    `cell-error.<slug>.<env>` -- red; drop `if-no-files-found: ignore` -- red; drop
+    `id: plan-run` -- the `Plan` id differs."""
+    assert step_by("plan-cell", name="Write cell error") == WRITE_CELL_ERROR
+    assert step_by("plan-cell", name="Upload cell error") == UPLOAD_CELL_ERROR
+    assert step_by("plan-cell", name="Plan")["id"] == "plan-run"

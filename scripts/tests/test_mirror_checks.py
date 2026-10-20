@@ -205,6 +205,7 @@ EXPECTED_STEP_NAMES = [
     "Doctor: settings-drift warnings (annotations only, never blocks)",
     "Build comment + gate state",
     "Decide gate state and comment mode",
+    "Download cell errors",
     "Upsert sticky comment",
     "Create apply checks (pending / no-changes)",
     "Create/refresh gate",

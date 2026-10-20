@@ -1239,13 +1239,13 @@ def test_held_comment_caps_its_cell_lines_and_its_reason():
     assert lines[-3] == "and 2 more cells have no plan summary"
 
 
-def _held_main(tmp_path, monkeypatch, mode):
+def _held_main(tmp_path, monkeypatch, mode, missing=(_A_DEV,)):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
     monkeypatch.setenv("HEAD_SHA", SHA)
     monkeypatch.setenv("SHIPMATE_COMMENT_MODE", mode)
     monkeypatch.setenv("SHIPMATE_HOLD_REASON", "the reason")
-    monkeypatch.setenv("SHIPMATE_MISSING", json.dumps([_A_DEV]))
+    monkeypatch.setenv("SHIPMATE_MISSING", json.dumps(list(missing)))
     listing = '{"name": "shipmate / stacks/a / dev", "html_url": "https://gh/c/a", "id": 1}\n'
     monkeypatch.setattr(sc.sys, "stdin", io.StringIO(listing))
     sc.main()
@@ -1262,6 +1262,92 @@ def test_main_held_mode_writes_only_the_held_body(tmp_path, monkeypatch):
         '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>\n\n' + HINT
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == ["held.md"]
+
+
+def _cell_error(path, stack, environment, error):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"stack": stack, "environment": environment, "error": error}
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+_HELD_TOP = HEAD + f"🔴 the gate is held {MAIN_AT}\n\n```\nthe reason\n```\n\n"
+_ROW_A_DEV = '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>'
+
+
+def test_main_held_mode_shows_a_cell_error_under_its_row(tmp_path, monkeypatch, capsys):
+    """One matching artifact downloads with no per-artifact folder, so the file sits at the top.
+    Mutations: read the errors from `cells` -- no fence; fence the error before the row -- red."""
+    _cell_error(tmp_path / "cell-errors" / "cell-error.json", "stacks/a", "dev", "Error: boom")
+    _held_main(tmp_path, monkeypatch, "held")
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        _HELD_TOP + f"{_ROW_A_DEV}\n```\nError: boom\n```\n\n" + HINT
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_main_held_mode_shows_each_environment_its_own_error(tmp_path, monkeypatch):
+    """The same stack failing in two environments, one folder per artifact. Mutation: key
+    `cell_errors` on the stack only -- both rows show one error."""
+    errors = tmp_path / "cell-errors"
+    _cell_error(errors / "cell-error.dev.stacks-a" / "cell-error.json", "stacks/a", "dev", "E1")
+    _cell_error(errors / "cell-error.prod.stacks-a" / "cell-error.json", "stacks/a", "prod", "E2")
+    _held_main(tmp_path, monkeypatch, "held", [_A_DEV, {**_A_DEV, "environment": "prod"}])
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        _HELD_TOP
+        + f"{_ROW_A_DEV}\n```\nE1\n```\n"
+        + '🔴 stacks/a (prod): no plan summary read <a href="https://gh/o/r/actions/runs/1">plan</a>\n'
+        + "```\nE2\n```\n\n"
+        + HINT
+    )
+
+
+def test_held_comment_fences_an_error_past_its_longest_backtick_run():
+    """Mutations: a fixed three-backtick fence -- the error closes it; cut at `REASON_CAP`
+    instead of `tofu-error`'s `CAP` -- 4,000 characters."""
+    error = "Error: x`````y" + "z" * 5000
+    body = sc.held_comment("r", [_A_DEV], {}, RUN_URL, SHA, {("stacks/a", "dev"): error})
+    assert body.split("\n\n")[3:] == [
+        (
+            f'🔴 stacks/a (dev): no plan summary read <a href="{RUN_URL}">plan</a>\n'
+            f"``````\n{error[:1000]}\n``````"
+        ),
+        HINT,
+    ]
+
+
+def test_the_held_body_with_every_error_at_its_cap_stays_under_hard_cap():
+    """Ten cells, each error and the reason one backtick run at its cap, so each fence is twice
+    its text. Mutation: drop the `te.CAP` cut -- ten 20,000-character runs."""
+    missing = [{"stack": f"stacks/s{i:02}", "environment": "dev"} for i in range(12)]
+    errors = {(c["stack"], "dev"): "`" * 20_000 for c in missing}
+    body = sc.held_comment("`" * 20_000, missing, {}, RUN_URL, SHA, errors)
+    assert len(body) < sc.HARD_CAP
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "not json",
+        "[]",
+        '{"stack": "stacks/a", "environment": "dev", "error": 1}',
+        '{"stack": "stacks/a", "environment": "dev"}',
+        '{"stack": "stacks/a", "environment": "dev", "error": "E", "extra": "x"}',
+    ],
+    ids=["not-json", "list", "int-error", "two-keys", "four-keys"],
+)
+def test_a_malformed_cell_error_is_skipped_with_one_warning(tmp_path, capsys, raw):
+    """A well-formed sibling still reads. Mutations: drop the key-set check -- `two-keys`
+    raises, `four-keys` reads; drop the string check -- `int-error` reads; catch no
+    `ValueError` -- `not-json` raises; warn per file -- two warnings."""
+    for d in ("x", "y"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "cell-error.json").write_text(raw, encoding="utf-8")
+    _cell_error(tmp_path / "z" / "cell-error.json", "stacks/b", "prod", "E")
+    assert sc.cell_errors(str(tmp_path)) == {("stacks/b", "prod"): "E"}
+    assert capsys.readouterr().out == (
+        "::warning::a cell error file is not a JSON object of stack, environment and error "
+        "strings; the held plan comment shows no error for its cell\n"
+    )
 
 
 def test_main_refuses_an_unknown_comment_mode(tmp_path, monkeypatch):

@@ -141,3 +141,20 @@ def test_the_summary_action_always_downloads_and_tolerates_a_failed_download():
     `if: ${{ inputs.planned-cells != '0' }}`.
     """
     assert step_by("summary", name="Download plan cell summaries") == EXPECTED_DOWNLOAD_STEP
+
+
+#: The whole cell-error download step, as parsed.
+EXPECTED_CELL_ERROR_DOWNLOAD_STEP = {
+    "name": "Download cell errors",
+    "if": "${{ steps.hold.outputs.superseded != 'true' }}",
+    "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+    "continue-on-error": True,
+    "with": {"pattern": "cell-error.*", "path": "cell-errors"},
+}
+
+
+def test_the_summary_action_downloads_cell_errors_where_the_held_render_reads_them():
+    """Reviewer-facing only, so a failed download continues: the gate reads none of it. `path` is
+    `cell_errors`' default directory. Mutations: drop `continue-on-error`; change `path`;
+    change `pattern` to `cell-summary.*`."""
+    assert step_by("summary", name="Download cell errors") == EXPECTED_CELL_ERROR_DOWNLOAD_STEP

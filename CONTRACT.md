@@ -2187,8 +2187,11 @@ the publish hold (below). In order, blank lines between the parts:
   cells are `detect`'s planned `cells` the run read no summary for: a cell whose
   plan matrix job did not succeed and a cell whose summary download failed read
   the same. When `tofu init` or `tofu plan` failed with an `Error:` diagnostic,
-  the cell's plan job carries an `::error::` annotation with the first one,
-  colour removed and cut at 1,000 characters. For the autoplan that job is the
+  the cell's line is followed by the first one (from `init` or `plan`), colour
+  removed and cut at 1,000 characters, in a plain backtick fence longer than any
+  backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it;
+  a cell whose artifact did not arrive shows its line alone. The cell's plan job
+  also carries an `::error::` annotation with it. For the autoplan that job is the
   linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
   keeps it on its own run: `doctor` reads only the autoplan's cell checks and
   the App-mirrored head check carries no annotations. A drift or apply cell's

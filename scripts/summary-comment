@@ -9,7 +9,8 @@ GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned ce
 cell summary, empty unless detect succeeded and `planned-cell-names` is a valid list.
 
 With `SHIPMATE_COMMENT_MODE=held` it writes the held comment (`held_comment`) to held.md instead,
-reads no cell summary and writes nothing to GITHUB_OUTPUT; any other non-empty value refuses. The
+reads no cell summary but the `cell-error.json` files under $CELL_ERRORS (default `cell-errors`) and
+writes nothing to GITHUB_OUTPUT; any other non-empty value refuses. The
 mode is read in `main`, so loading this module stays free of side effects.
 
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
@@ -28,6 +29,7 @@ and shows only where the reader has something to do: under a refusal or a failur
 apply or doctor verdict that is not 🟢. A plan comment carries it only when the gate is held.
 """
 
+import glob
 import html
 import itertools
 import json
@@ -49,6 +51,7 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
+te = _load("tofu-error")
 
 MARKER = "<!-- shipmate:summary -->"
 # Phrased so the line does not itself match the comment grammar (`^shipmate <verb>`), which
@@ -312,39 +315,39 @@ def verdict(cells, head_sha, run_url):
 HELD_CELL_NAMES = 10
 
 
-def reason_fence(text):
-    """`text` cut to `REASON_CAP` characters in a plain fence sized by `_fence_of`, so
+def reason_fence(text, cap=REASON_CAP):
+    """`text` cut to `cap` characters in a plain fence sized by `_fence_of`, so
     author-controlled text such as a stack path shows verbatim, where `_md_name`'s mention guard
     would show as written."""
-    text = text[:REASON_CAP]
+    text = text[:cap]
     return fence(text, _fence_of(text), lang="")
 
 
-def held_comment(reason, missing, checks, run_url, head_sha):
+def held_comment(reason, missing, checks, run_url, head_sha, errors=None):
     """The comment of a held gate: marker, header, `🔴 the gate is held` and `provenance`, then
     `reason` (the gate description before its 140-character cut, at most `REASON_CAP`
     characters) in a plain fence, then one line per cell of `missing` (`{stack, environment}`
     pairs) linking its plan check, then `FOOTER_HINT`. At most `HELD_CELL_NAMES` cell lines,
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
     and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `no
-    plan summary read`: its plan matrix job did not succeed or the summary download failed."""
+    plan summary read`: its plan matrix job did not succeed or the summary download failed. A
+    cell's entry in `errors` (`cell_errors`), its first OpenTofu error, follows its line in a
+    plain fence cut at `tofu-error`'s `CAP`."""
+    errors = errors or {}
     parts = [
         f"{MARKER}\n{header('plan')}",
         f"🔴 the gate is held {provenance(head_sha, run_url)}",
         reason_fence(reason),
     ]
     if missing:
-        lines = [
-            cell_line(
-                "🔴",
-                c["stack"],
-                c["environment"],
-                "no plan summary read",
-                check_url(c, checks, run_url),
-                "plan",
+        lines = []
+        for c in missing[:HELD_CELL_NAMES]:
+            url = check_url(c, checks, run_url)
+            lines.append(
+                cell_line("🔴", c["stack"], c["environment"], "no plan summary read", url, "plan")
             )
-            for c in missing[:HELD_CELL_NAMES]
-        ]
+            if error := errors.get((c["stack"], c["environment"])):
+                lines.append(reason_fence(error, te.CAP))
         if len(missing) > HELD_CELL_NAMES:
             more = len(missing) - HELD_CELL_NAMES
             lines.append(f"and {more} more cells have no plan summary")
@@ -583,6 +586,37 @@ def _named_output(raw, input_name, key, noun):
     return None
 
 
+CELL_ERROR_KEYS = {"stack", "environment", "error"}
+
+
+def cell_errors(errors_dir):
+    """`{(stack, environment): error}` from every `cell-error.json` under `errors_dir`, which
+    plan-cell writes for a cell whose `tofu init` or `tofu plan` failed with an `Error:`
+    diagnostic. Recursive, as `cell_summaries`. The errors are reviewer-facing only, so a file
+    that is not a JSON object of exactly those three strings is skipped, with one warning."""
+    out, bad = {}, False
+    for p in sorted(glob.glob(os.path.join(errors_dir, "**", "cell-error.json"), recursive=True)):
+        try:
+            with open(p, encoding="utf-8") as fh:
+                e = json.load(fh)
+        except (OSError, ValueError):
+            e = None
+        if (
+            isinstance(e, dict)
+            and set(e) == CELL_ERROR_KEYS
+            and all(type(v) is str for v in e.values())
+        ):
+            out[(e["stack"], e["environment"])] = e["error"]
+        else:
+            bad = True
+    if bad:
+        print(
+            "::warning::a cell error file is not a JSON object of stack, environment and error "
+            "strings; the held plan comment shows no error for its cell"
+        )
+    return out
+
+
 def _held_main(checks, url):
     body = held_comment(
         os.environ.get("SHIPMATE_HOLD_REASON", ""),
@@ -590,6 +624,7 @@ def _held_main(checks, url):
         checks,
         url,
         os.environ.get("HEAD_SHA", ""),
+        cell_errors(os.environ.get("CELL_ERRORS", "cell-errors")),
     )
     with open("held.md", "w", encoding="utf-8") as fh:
         fh.write(body)

@@ -33,6 +33,8 @@ _EXPECTED = {
         "Stack slug",
         "Initialize the stack",
         "Plan",
+        "Write cell error",
+        "Upload cell error",
         "Render + classify plan",
         "Encrypt plan artifact at rest",
         "Step summary (plan text, 64KiB cap)",

@@ -536,6 +536,7 @@ LATER_STEP_IFS = {
     "Doctor: settings-drift warnings (annotations only, never blocks)": NOT_SUPERSEDED,
     "Build comment + gate state": NOT_SUPERSEDED,
     "Decide gate state and comment mode": NOT_SUPERSEDED,
+    "Download cell errors": NOT_SUPERSEDED,
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_SUPERSEDED,
     GATE: NOT_SUPERSEDED,
@@ -545,8 +546,8 @@ LATER_STEP_IFS = {
 def test_a_superseded_run_skips_every_later_step():
     """The hold step's `exit 0` does not end the composite, so each later step reads `superseded`
     itself and a superseded run writes nothing.
-    Mutations: drop the guard from Mirror, Upsert, `Create apply checks` or `Create/refresh gate`
-    -> red each."""
+    Mutations: drop the guard from Mirror, `Download cell errors`, Upsert, `Create apply checks` or
+    `Create/refresh gate` -> red each."""
     steps = action_steps("summary")
     later = steps[steps.index(step_by("summary", id="hold")) + 1 :]
     assert {s.get("name") or s["uses"]: s.get("if") for s in later} == LATER_STEP_IFS
