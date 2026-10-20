@@ -1228,7 +1228,7 @@ whose `cancel-in-progress: true` cancels a newer run in flight, or the newer run
 cancels it. A re-run summary publishes no apply check its own run already
 published, so it leaves alone a check an apply completed or is completing. It
 refuses before writing anything when a newer plan run holds the gate or published
-apply checks on the head. A re-run of a plan job whose artifact upload succeeded
+apply checks on the head, and ends green with that refusal as a notice. A re-run of a plan job whose artifact upload succeeded
 fails, because the uploads are not `overwrite:` and 409.
 
 `gate-refresh` refuses to green a held gate from apply checks alone: the apply
@@ -1517,6 +1517,18 @@ run — with the expression to write, unless what it found was a job count other
 than one — and the run is in the Actions tab, linked from the dispatch reply on
 the pull request when that reply carries a link. Reconcile the job against the
 fence in [`getting-started.md`](getting-started.md) §The workflow file.
+
+### A cancelled autoplan left red checks on the pull request
+
+A newer plan run of the same pull request cancelled the autoplan, and the
+autoplan's checks (`shipmate / detect`, `shipmate / summary`,
+`shipmate / gate-hold`, the `shipmate / <stack> / <env>` matrix check) stay red
+or cancelled on the head.
+
+Re-run the cancelled run: `gh run rerun <id>`. Its `summary` finds the newer
+run, writes nothing, and ends green with a notice naming that run ("plan run
+<id> holds the gate of <sha> and is newer than this run", or "plan run <id>,
+newer than this run (<id>), published apply checks on this head").
 
 ### Fork pull request refused
 

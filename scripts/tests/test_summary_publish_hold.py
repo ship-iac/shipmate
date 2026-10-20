@@ -9,7 +9,9 @@ green the gate and merge the unpublished ones. `Hold the gate while apply checks
 
 Before that hold it refuses, writing nothing, when a newer plan run of the head holds the gate
 anywhere in its status history or published an apply check, so an older run (a first attempt or a
-re-run) never replaces a newer run's gate or checks. A failed read of either, or a failed
+re-run) never replaces a newer run's gate or checks. That refusal ends the step green with a notice
+and sets `superseded`, which every later step's `if:` reads, so a re-run of a cancelled autoplan
+clears its checks. A failed read of either, or a failed
 `pending-checks`, holds whether or not a cell summary was downloaded: a hold is always safe, and a
 failed download leaves no cell summary over planned cells.
 
@@ -37,6 +39,7 @@ from _loader import (
     bash_only,
     load_script,
     read_calls,
+    run_lines,
     run_step,
     step_by,
     write_python3_shim,
@@ -250,6 +253,7 @@ def _run(
         "GITHUB_REPOSITORY": "acme/demo",
         "GITHUB_SERVER_URL": "https://github.com",
         "GITHUB_RUN_ID": RUN_ID,
+        "GITHUB_OUTPUT": str(tmp_path / "github_output"),
         "GITHUB_ACTION_PATH": str(ACTIONS / "summary"),
         "CALLS": str(calls),
         "COUNT": str(tmp_path / "count"),
@@ -285,10 +289,12 @@ def test_the_hold_is_written_before_any_apply_check(tmp_path):
     `refuse-newer` read -> the statuses listing is missing; drop `external_id` from the
     projection -> an unexpected listing call; pass the publish hold `"$ended"`, or drop
     `$GITHUB_RUN_ID` from its text -> every publish-hold test red; post `pending` from
-    `gate-status hold` -> every hold test red."""
+    `gate-status hold` -> every hold test red; write `superseded=true` on every path -> an
+    output file appears."""
     _write_cells(tmp_path, "a", "b")
     codes, calls, _, _ = _run(tmp_path)
     assert codes == [0, 0]
+    assert not (tmp_path / "github_output").exists()
     assert calls == [
         STATUSES_LIST,
         APPLY_LIST,
@@ -479,16 +485,19 @@ NEWER_CHECK = (
 @bash_only
 @pytest.mark.parametrize("newest", ["pending", "success"])
 def test_a_newer_runs_apply_check_refuses_before_any_write(tmp_path, newest):
-    """A newer run published a check but its gate reads `pending` or `success`, no hold.
+    """A newer run published a check but its gate reads `pending` or `success`, no hold. The step
+    ends green with the refusal as a notice and sets `superseded`.
     Mutations: write the publish hold before `pending-checks` -> a hold POST; exit pending-checks'
-    refusal 1 (`NEWER_RUN = 1`) -> a hold POST."""
+    refusal 1 (`NEWER_RUN = 1`) -> a hold POST; `superseded pending.err` -> `exit 1` -> `[1]`."""
     _write_cells(tmp_path, "a")
     codes, calls, stderr, _ = _run(
         tmp_path,
         statuses=_lines(_gate(newest, 50)),
         apply_checks=_lines(_record(1, "a", "50")),
+        steps=(HOLD,),
     )
-    assert (codes, calls, stderr) == ([1], [STATUSES_LIST, APPLY_LIST], NEWER_CHECK)
+    assert (codes, calls, stderr) == ([0], [STATUSES_LIST, APPLY_LIST], _notice(NEWER_CHECK))
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "superseded=true\n"
 
 
 @bash_only
@@ -502,11 +511,59 @@ def test_a_newer_runs_apply_check_refuses_before_any_write(tmp_path, newest):
     ids=["newer-hold", "behind-own-hold"],
 )
 def test_a_newer_runs_hold_refuses_before_any_write(tmp_path, statuses):
-    """Mutations: read only the newest gate in `newer_hold` -> `behind-own-hold` publishes;
-    `[ "$rc" = 4 ]` -> `[ "$rc" = 3 ]` -> both hold (a status POST)."""
+    """The step ends green with the refusal as a notice and sets `superseded`.
+    Mutations: read only the newest gate in `newer_hold` -> `behind-own-hold` publishes;
+    `[ "$rc" = 4 ]` -> `[ "$rc" = 3 ]` -> both hold (a status POST); `superseded refuse.err` ->
+    `exit 1` -> `[1]`."""
     _write_cells(tmp_path, "a")
-    codes, calls, stderr, _ = _run(tmp_path, statuses=statuses)
-    assert (codes, calls, stderr) == ([1], [STATUSES_LIST], REFUSED)
+    codes, calls, stderr, _ = _run(tmp_path, statuses=statuses, steps=(HOLD,))
+    assert (codes, calls, stderr) == ([0], [STATUSES_LIST], _notice(REFUSED))
+    assert (tmp_path / "github_output").read_text(encoding="utf-8") == "superseded=true\n"
+
+
+def _notice(error):
+    assert error.startswith("::error::")
+    return "::notice::" + error.removeprefix("::error::")
+
+
+NOT_SUPERSEDED = "${{ steps.hold.outputs.superseded != 'true' }}"
+#: Every step after the hold, by name (or `uses` for the unnamed one), to its whole `if:`.
+LATER_STEP_IFS = {
+    "Mirror this run's per-cell plan checks onto the head": (
+        "${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true' }}"
+    ),
+    "$/actions/python-yaml": NOT_SUPERSEDED,
+    "Doctor: settings-drift warnings (annotations only, never blocks)": NOT_SUPERSEDED,
+    "Build comment + gate state": NOT_SUPERSEDED,
+    "Decide gate state and comment mode": NOT_SUPERSEDED,
+    UPSERT: NOT_SUPERSEDED,
+    CREATE: NOT_SUPERSEDED,
+    GATE: NOT_SUPERSEDED,
+}
+
+
+def test_a_superseded_run_skips_every_later_step():
+    """The hold step's `exit 0` does not end the composite, so each later step reads `superseded`
+    itself and a superseded run writes nothing.
+    Mutations: drop the guard from Mirror, Upsert, `Create apply checks` or `Create/refresh gate`
+    -> red each."""
+    steps = action_steps("summary")
+    later = steps[steps.index(step_by("summary", id="hold")) + 1 :]
+    assert {s.get("name") or s["uses"]: s.get("if") for s in later} == LATER_STEP_IFS
+
+
+def test_the_hold_step_ends_a_superseded_run_green():
+    """Mutations: `if [ "$rc" = 4 ]; then exit 1; fi` back -> red; drop `exit 0` from
+    `superseded` -> red."""
+    lines = run_lines(step_by("summary", name=HOLD))
+    for line in [
+        "sed 's/^::error::/::notice::/' \"$1\" >&2",
+        'echo "superseded=true" >> "$GITHUB_OUTPUT"',
+        "exit 0",
+        'if [ "$rc" = 4 ]; then superseded refuse.err; fi',
+        'if [ "$rc" = 3 ]; then superseded pending.err; fi',
+    ]:
+        assert line in lines
 
 
 @bash_only

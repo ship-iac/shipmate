@@ -116,6 +116,7 @@ runs:
         permission-environments: read
 
     - name: Hold the gate while apply checks publish
+      id: hold
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -128,14 +129,22 @@ runs:
         set -euo pipefail
         gate_status="$GITHUB_ACTION_PATH/../../scripts/gate-status"
         hold() { python3 "$gate_status" hold "$SHIPMATE_HEAD_SHA" "$1"; }
+        # A composite step's `exit 0` does not end the composite, so every later step's `if:` reads
+        # `superseded`. The run ends green, so a re-run of a cancelled autoplan clears its checks.
+        superseded() {
+          sed 's/^::error::/::notice::/' "$1" >&2
+          echo "superseded=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        }
         ended="re-plan this pull request (comment shipmate plan or push): its plan run ended before writing a final gate"
         # A failed read holds, which is always safe: a failed artifact download leaves `cells/`
         # empty over planned cells, so no cell summary is no proof of no work. A newer run's hold or
         # checks refuse without a write, so an older run never overwrites that run's gate or checks.
         rc=0
-        python3 "$gate_status" refuse-newer "$SHIPMATE_HEAD_SHA" || rc=$?
+        python3 "$gate_status" refuse-newer "$SHIPMATE_HEAD_SHA" 2>refuse.err || rc=$?
         # Exit 4 is refuse-newer's newer-run refusal, which writes nothing.
-        if [ "$rc" = 4 ]; then exit 1; fi
+        if [ "$rc" = 4 ]; then superseded refuse.err; fi
+        cat refuse.err >&2
         if [ "$rc" != 0 ]; then
           hold "$ended"
           exit 1
@@ -151,9 +160,10 @@ runs:
         fi
         rc=0
         SHIPMATE_CHECK_RUNS=apply-check-runs.jsonl \
-          python3 "$GITHUB_ACTION_PATH/../../scripts/pending-checks" > bodies.jsonl || rc=$?
+          python3 "$GITHUB_ACTION_PATH/../../scripts/pending-checks" > bodies.jsonl 2>pending.err || rc=$?
         # Exit 3 is pending-checks' newer-run refusal, which writes nothing.
-        if [ "$rc" = 3 ]; then exit 1; fi
+        if [ "$rc" = 3 ]; then superseded pending.err; fi
+        cat pending.err >&2
         if [ "$rc" != 0 ]; then
           hold "$ended"
           exit 1
@@ -166,7 +176,7 @@ runs:
         fi
 
     - name: Mirror this run's per-cell plan checks onto the head
-      if: ${{ inputs.on-demand == 'true' }}
+      if: ${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -198,8 +208,10 @@ runs:
         done < mirror.jsonl
 
     - uses: $/actions/python-yaml
+      if: ${{ steps.hold.outputs.superseded != 'true' }}
 
     - name: "Doctor: settings-drift warnings (annotations only, never blocks)"
+      if: ${{ steps.hold.outputs.superseded != 'true' }}
       id: doctor
       shell: bash
       env:
@@ -230,6 +242,7 @@ runs:
         fi
 
     - name: Build comment + gate state
+      if: ${{ steps.hold.outputs.superseded != 'true' }}
       id: build
       shell: bash
       env:
@@ -256,6 +269,7 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/summary-comment" < check-runs.jsonl
 
     - name: Decide gate state and comment mode
+      if: ${{ steps.hold.outputs.superseded != 'true' }}
       id: gate
       shell: bash
       env:
@@ -273,6 +287,7 @@ runs:
         python3 "$GITHUB_ACTION_PATH/../../scripts/gate-state"
 
     - name: Upsert sticky comment
+      if: ${{ steps.hold.outputs.superseded != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -344,6 +359,7 @@ runs:
         fi
 
     - name: Create apply checks (pending / no-changes)
+      if: ${{ steps.hold.outputs.superseded != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}
@@ -363,6 +379,7 @@ runs:
         done < bodies.jsonl
 
     - name: Create/refresh gate
+      if: ${{ steps.hold.outputs.superseded != 'true' }}
       shell: bash
       env:
         GH_TOKEN: ${{ steps.token.outputs.token }}

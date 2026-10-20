@@ -220,8 +220,11 @@ _MIRROR = "Mirror this run's per-cell plan checks onto the head"
 
 def test_the_mirror_runs_only_for_an_on_demand_plan():
     """Unconditional would put a second producer behind every plan check name on a pull-request
-    run, where those checks are already on the head."""
-    assert step_by("summary", name=_MIRROR)["if"] == "${{ inputs.on-demand == 'true' }}"
+    run, where those checks are already on the head. A superseded run mirrors nothing.
+    Mutation: drop `inputs.on-demand == 'true' &&` -> red."""
+    assert step_by("summary", name=_MIRROR)["if"] == (
+        "${{ inputs.on-demand == 'true' && steps.hold.outputs.superseded != 'true' }}"
+    )
 
 
 def test_the_action_declares_the_on_demand_input_it_decides_on():
