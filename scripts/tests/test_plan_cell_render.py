@@ -4,8 +4,9 @@ Each render is awaited by its own `wait "$pid" || rc=1` before the step exits. A
 returns 0 whatever the renders did, and a `wait "$pid"` without `|| rc=1` exits under errexit at
 the first failure while the other render is still writing into the workspace.
 
-The step body runs unmodified, with `tofu` and `python3` replaced by bash functions: bash resolves
-a function before PATH, and a function behind `&` runs in a subshell like the binary would.
+The step body runs unmodified, with `terramate`, `tofu` and `python3` replaced by bash functions:
+bash resolves a function before PATH, and a function behind `&` runs in a subshell like the binary
+would. The `terramate` stub drops the wrapper's arguments up to `--` and runs the rest.
 """
 
 import os
@@ -23,6 +24,7 @@ _JSON = '{"format_version":"1.2"}\n'
 #: open until the sleep ends and hide an early return. `FAIL=both` reverses the timing, so the
 #: json error is written first.
 _STUBS = r"""
+terramate() { while [ "$1" != -- ] ; do shift ; done ; shift ; "$@" ; }
 tofu() {
   case "$*" in
     *-no-color*) [ "$FAIL" = both ] && { sleep 1 ; printf 'text error\n' >&2 ; return 3 ; } ;

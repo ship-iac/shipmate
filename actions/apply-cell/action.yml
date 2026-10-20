@@ -165,9 +165,9 @@ runs:
         set -euo pipefail
         # Binds the reviewed plan text to the plan about to run. `tofu show` is byte-identical
         # across runners at one tofu version (another tofu version refuses the plan file), so a
-        # difference is a content mismatch. Needs the providers `init` installs: runs after it.
+        # difference is a content mismatch. Runs after `init` and before the apply.
         rendered="$RUNNER_TEMP/rendered-plan.txt"
-        tofu -chdir="$STACK" show -no-color stack.otplan > "$rendered"
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -no-color stack.otplan > "$rendered"
         # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
         # prefixes the whole line with one, which would never equal the recorded digest.
         actual=$(sha256sum < "$rendered" | cut -d' ' -f1)

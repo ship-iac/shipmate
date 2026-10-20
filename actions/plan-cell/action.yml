@@ -115,9 +115,9 @@ runs:
         set -euo pipefail
         # plan.txt must stay `show -no-color` output: apply-cell re-renders the stored plan with
         # this command, and the digest of that text binds the apply.
-        tofu -chdir="$STACK" show -no-color stack.otplan > plan.txt 2> show-text.err &
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -no-color stack.otplan > plan.txt 2> show-text.err &
         text_pid=$!
-        tofu -chdir="$STACK" show -json stack.otplan > plan.json 2> show-json.err &
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -json stack.otplan > plan.json 2> show-json.err &
         json_pid=$!
         rc=0
         wait "$text_pid" || rc=1

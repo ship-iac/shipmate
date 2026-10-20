@@ -92,32 +92,34 @@ _PROBE = [
 _FORCE_UNLOCK = [*_WRAPPER, "tofu", "force-unlock", "-force", "$LOCK_ID"]
 
 
-#: Every `terramate run` each cell is expected to make, in order.
-_EXPECTED = {
-    "cell-init": [_INIT, _LOCATE],
-    "plan-cell": [_PLAN],
-    "drift-cell": [_PLAN],
-    "apply-cell": [_APPLY],
-    "unlock-cell": [_INIT, _PROBE, _FORCE_UNLOCK],
-}
 #: The plan-text render, one constant for the two sides of the plan-text binding: plan-cell writes
 #: the reviewed plan.txt with it, and apply-cell re-renders the stored plan with it before the
 #: apply and refuses a difference. The binding holds only while the two are the same command, so
 #: neither is written out separately here.
-_SHOW_TEXT = ["tofu", "-chdir=$STACK", "show", "-no-color", "stack.otplan"]
-_SHOW_JSON = ["tofu", "-chdir=$STACK", "show", "-json", "stack.otplan"]
+_SHOW_TEXT = [*_WRAPPER, "tofu", "show", "-no-color", "stack.otplan"]
+_SHOW_JSON = [*_WRAPPER, "tofu", "show", "-json", "stack.otplan"]
 
-#: Every bare `tofu` line each cell is expected to run -- the ones outside a `terramate run`
-#: wrapper, which `_EXPECTED` does not claim. Rendering a stored plan needs no wrapper: it reads a
-#: file and touches neither state nor the stack graph.
-_EXPECTED_BARE = {
-    "cell-init": [],
+#: Every `terramate run` each cell is expected to make, in order.
+_EXPECTED = {
+    "cell-init": [_INIT, _LOCATE],
     "plan-cell": [
+        _PLAN,
         [*_SHOW_TEXT, ">", "plan.txt", "2>", "show-text.err", "&"],
         [*_SHOW_JSON, ">", "plan.json", "2>", "show-json.err", "&"],
     ],
-    "drift-cell": [[*_SHOW_JSON, ">", "plan.json"]],
-    "apply-cell": [[*_SHOW_TEXT, ">", "$rendered"]],
+    "drift-cell": [_PLAN, [*_SHOW_JSON, ">", "plan.json"]],
+    "apply-cell": [[*_SHOW_TEXT, ">", "$rendered"], _APPLY],
+    "unlock-cell": [_INIT, _PROBE, _FORCE_UNLOCK],
+}
+
+#: Every bare `tofu` line each cell may run: none. A `tofu` call outside the `terramate run`
+#: wrapper misses every `run.env` name, so a `run.env` `TF_DATA_DIR` sends it to a data directory
+#: `init` never populated and fails to find the providers `init` installed.
+_EXPECTED_BARE = {
+    "cell-init": [],
+    "plan-cell": [],
+    "drift-cell": [],
+    "apply-cell": [],
     "unlock-cell": [],
 }
 
@@ -225,12 +227,14 @@ def test_each_cell_runs_exactly_the_engines_own_terramate_run_invocations():
 
 
 def test_each_cell_runs_exactly_the_engines_own_bare_tofu_invocations():
-    """The `tofu` lines outside a `terramate run` wrapper, whole and in order.
+    """No cell runs a `tofu` line outside a `terramate run` wrapper.
 
-    `_EXPECTED`'s selector sees only wrapped invocations, so before this every bare `tofu` line in
-    the tree was pinned by nothing. That matters most for the plan-text render: the binding
-    apply-cell enforces holds only while its render is byte-for-byte the command plan-cell used to
-    write the reviewed plan.txt, and a flag added to one side alone would refuse every apply.
+    `_EXPECTED`'s selector sees only wrapped invocations, so a bare `tofu` line is pinned by this
+    test alone. A bare line misses every `run.env` name: with a `run.env` `TF_DATA_DIR`, a bare
+    `tofu show` looked for providers in a data directory `init` never wrote and failed the cell.
+
+    Mutation: restore drift-cell's render as `tofu -chdir="$STACK" show -json stack.otplan >
+    plan.json`.
     """
     assert set(_EXPECTED_BARE) == set(_EXPECTED), (
         "the two expectation tables disagree about which actions are cells: "
