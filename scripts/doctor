@@ -348,8 +348,9 @@ def _no_review_findings(ctx, branch, code_owner, last_push):
     None are named when that table cannot be read or is invalid: which environments are
     exempt is then unknown, and naming all of them would warn about ones the file exempts.
 
-    A NOTICE while code-owner review is on: a warning forces a plan comment on every no-op
-    plan, which a sole maintainer cannot silence. A WARNING while it is off. With no gated
+    A NOTICE while code-owner review is on: count 0 with code-owner review is the documented
+    sole-maintainer posture (docs/branch-protection.md), not a misconfiguration. A WARNING
+    while it is off. With no gated
     environment, the sole-maintainer note is omitted while code-owner review is off or
     last-push approval is on. The names are not escaped here: `_finding_row` escapes the
     whole finding.

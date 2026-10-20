@@ -1269,8 +1269,8 @@ too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
 plenty.
 
-The plan comment carries no doctor findings, only their count (see §Plan
-comment). Instead,
+The plan comment carries no doctor findings; the plan body carries only their
+count (see §Plan comment). Instead,
 `actions/summary` runs `scripts/doctor` on every plan run and emits its
 findings as workflow-command annotations, verbatim:
 
@@ -2224,10 +2224,10 @@ findings do not trigger the exception: they are informational, and would put a
 comment on every quiet run. Nor do warnings from the repository-settings probes
 (the gate ruleset, the review rule and `CODEOWNERS`): they hold until an admin
 changes the settings, so they would put a comment on every quiet pull request.
-`shipmate doctor` and the run page still report them. A run whose comment carries the unmanaged line also
-posts: a pull request that changes only stacks with no `env/*` tag plans nothing,
-and the comment is where it says so. When the line is left out for size (below),
-this exception does not apply.
+`shipmate doctor` and the run page still report them. A run whose comment
+carries the unmanaged line also posts: a pull request that changes only stacks
+with no `env/*` tag plans nothing, and the comment is where it says so. When
+the line is left out for size (below), this exception does not apply.
 
 An existing comment is edited in place on every plan run but a draft autoplan, a
 cancelled plan job and a run whose pull request moved to a newer head (comment
