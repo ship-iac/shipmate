@@ -1025,13 +1025,10 @@ warning:
   and before `tofu apply`.
 
 `tofu show` of a stored plan renders the same bytes on any runner at one tofu
-version and one `run.env`. Every other measured way for the two to differ is one
-tofu itself refuses: it rejects a plan file from another version, and an apply
-under drifted providers fails on the dependency lock. The render runs inside
-`terramate run`, and Terramate 0.17.1 writes its own lines to stderr only
-(measured), so the digested stdout is tofu's alone. A `run.env` value that
-differs between the plan and apply jobs changes the render and refuses the
-apply.
+version and one `run.env` (`CONTRACT.md` §Engine-owned tofu invocation). Every
+other measured way for the two to differ is one tofu itself refuses: it rejects
+a plan file from another version, and an apply under drifted providers fails on
+the dependency lock.
 
 What this binds is agreement, not honesty. A privileged author still authors
 both the plan text and the `.otplan`; what they cannot do is have the two

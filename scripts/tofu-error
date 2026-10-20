@@ -71,10 +71,12 @@ def main(argv=()):
     lines = _lines(text)
     if any(lines[i].startswith(INSTALL_FAILED) for i in _titles(lines)):
         key, repo = argv[1], os.environ.get("GITHUB_REPOSITORY", "")
+        # Without `--repo`, gh resolves the repository from the clone it runs in.
+        flag = f" --repo {repo}" if repo else ""
         remedy = (
             f"OpenTofu's init failed after restoring provider cache entry {key}. If the log above"
             " says a cached package does not match the content of the downloaded package, delete"
-            f" the entry with gh cache delete {key} --repo {repo} and re-run."
+            f" the entry with gh cache delete {key}{flag} and re-run."
         )
         print(f"::error::{command_data(remedy)}")
 

@@ -138,12 +138,13 @@ REMEDY_NO_REPO = (
     "::error::OpenTofu's init failed after restoring provider cache entry "
     "tofu-providers-Linux-X64-abc123. If the log above says a cached package does not "
     "match the content of the downloaded package, delete the entry with gh cache delete "
-    "tofu-providers-Linux-X64-abc123 --repo  and re-run.\n"
+    "tofu-providers-Linux-X64-abc123 and re-run.\n"
 )
 
 
 def test_the_remedy_prints_without_github_repository(monkeypatch, capsys):
-    """Mutation: read `os.environ["GITHUB_REPOSITORY"]` (KeyError, no remedy)."""
+    """Mutations: read `os.environ["GITHUB_REPOSITORY"]` (KeyError, no remedy); always emit
+    `--repo`."""
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
     out = _run(monkeypatch, capsys, _fixture("init_error_cache_mismatch_ansi.txt"), CACHE_ENTRY)
     assert out == REMEDY_NO_REPO

@@ -6,8 +6,9 @@ the first failure while the other render is still writing into the workspace.
 
 The step body runs unmodified, with `terramate`, `tofu` and `python3` replaced by bash functions:
 bash resolves a function before PATH, and a function behind `&` runs in a subshell like the binary
-would. The `terramate` stub writes a line of its own to stderr, as terramate does, drops the
-wrapper's arguments up to `--` and runs the rest.
+would. The `terramate` stub writes terramate's two routine stderr lines (as in
+`fixtures/init_error_backend_ansi.txt`), drops the wrapper's arguments up to `--` and runs the
+rest.
 """
 
 import os
@@ -19,6 +20,7 @@ from _loader import bash_only, load_script, run_step, step_by
 
 _TEXT = "plan text\n"
 _JSON = '{"format_version":"1.2"}\n'
+_TM = 'terramate: Entering stack in /stacks/app\nterramate: Executing command "tofu show"\n'
 
 #: The `-json` arm sleeps before writing, so a step that returns without awaiting it leaves
 #: plan.json incomplete. It drops its stderr first: an inherited pipe would hold subprocess.run
@@ -26,14 +28,15 @@ _JSON = '{"format_version":"1.2"}\n'
 #: json error is written first.
 _STUBS = r"""
 terramate() {
-  printf 'tm\n' >&2
+  printf 'terramate: Entering stack in /stacks/app\nterramate: Executing command "tofu show"\n' >&2
   while [ $# -gt 0 ] && [ "$1" != -- ] ; do shift ; done
   [ $# -gt 0 ] || return 97 ; shift ; "$@"
 }
 tofu() {
   case "$*" in
     *-no-color*) [ "$FAIL" = both ] && { sleep 1 ; printf 'text error\n' >&2 ; return 3 ; } ;
-      [ "$FAIL" = text ] && { printf 'text error\n' >&2 ; return 3 ; } ; printf 'plan text\n' ;;
+      [ "$FAIL" = text ] && { printf 'text error\n' >&2 ; return 3 ; } ;
+      [ "$FAIL" = warn ] && printf 'Warning: deprecated\n' >&2 ; printf 'plan text\n' ;;
     *-json*) [ "$FAIL" = both ] && { printf 'json error\n' >&2 ; return 4 ; } ;
       exec 2>/dev/null ; sleep 1 ; [ "$FAIL" = json ] && return 4 ;
       printf '{"format_version":"1.2"}\n' ;;
@@ -63,14 +66,24 @@ def _read(tmp_path, name):
 
 @bash_only
 def test_both_renders_succeed_and_plan_txt_is_the_text_render_whole(tmp_path):
-    """Mutations: swap `plan.txt` and `plan.json` in the two render lines; print the `.err` files
-    whatever `rc` is (terramate's own lines reach stderr)."""
+    """Mutations: swap `plan.txt` and `plan.json` in the two render lines; `cat` the `.err` files
+    on success (terramate's routine lines reach stderr); drop `|| [ $? -eq 1 ]` (grep prints
+    nothing and fails the step)."""
     r = _run(tmp_path, "")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stderr == ""
     assert _read(tmp_path, "plan.txt") == _TEXT
     assert _read(tmp_path, "plan.json") == _JSON
     assert (tmp_path / "rt" / "classified").exists()
+
+
+@bash_only
+def test_a_clean_render_prints_a_warning_without_terramate_routine_lines(tmp_path):
+    """Mutations: drop the success-path `grep` (the warning never prints); drop either `-e`
+    pattern (a routine line prints)."""
+    r = _run(tmp_path, "warn")
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stderr == "Warning: deprecated\n"
 
 
 @bash_only
@@ -88,7 +101,7 @@ def test_a_failing_text_render_fails_the_step_after_the_json_render_finished(tmp
     (the text error never prints)."""
     r = _run(tmp_path, "text")
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert r.stderr == "tm\ntext error\ntm\n"
+    assert r.stderr == _TM + "text error\n" + _TM
     assert _read(tmp_path, "plan.json") == _JSON
     assert not (tmp_path / "rt" / "classified").exists()
 
@@ -99,7 +112,7 @@ def test_two_failing_renders_print_their_errors_text_first(tmp_path):
     `cat` -- neither error prints."""
     r = _run(tmp_path, "both")
     assert r.returncode != 0
-    assert r.stderr == "tm\ntext error\ntm\njson error\n"
+    assert r.stderr == _TM + "text error\n" + _TM + "json error\n"
 
 
 pcs = load_script("plan-cell-summary")
