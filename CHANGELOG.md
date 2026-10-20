@@ -8,6 +8,12 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Changed
+
+- **OpenTofu 1.13.1 replaces 1.12.4.** A plan made on 1.12.4 is refused at apply, so push a commit to each open pull request to re-plan it.
+
 ## [0.49.1] — 2026-10-18
 
 Tags `7b52512`.
