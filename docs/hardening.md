@@ -1029,8 +1029,8 @@ version and one `run.env` (`CONTRACT.md` §Engine-owned tofu invocation says
 what the wrapper adds). Every other measured way for the two to differ is one
 tofu itself refuses: it rejects a plan file from another version, and an apply
 under drifted providers fails on the dependency lock. A `run.env` value that
-differs between the plan and the apply job changes the render and refuses the
-apply.
+differs between the plan and the apply job can change the render, and a changed
+render refuses the apply.
 
 What this binds is agreement, not honesty. A privileged author still authors
 both the plan text and the `.otplan`; what they cannot do is have the two

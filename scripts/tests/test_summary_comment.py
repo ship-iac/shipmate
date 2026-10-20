@@ -273,10 +273,26 @@ def test_footer_with_and_without_the_help_hint():
     assert sc.footer(RUN_URL, hint=False) == "[run](https://gh/run/1)"
 
 
+def test_verdict_of_zero_cells_is_nothing_planned():
+    """Mutation: dropping the empty-cells branch in `verdict` renders `🟢 no changes`."""
+    assert sc.verdict([], SHA, RUN_URL) == (
+        "⚪ nothing planned at [0123456](https://gh/o/r/commit/"
+        "0123456789abcdef0123456789abcdef01234567) in [run #7](https://gh/run/1)"
+    )
+
+
+def test_verdict_of_one_unchanged_cell_is_no_changes():
+    """Mutation: `if not cells` -> `if not any(c["changed"] for c in cells)` renders
+    `⚪ nothing planned`."""
+    assert sc.verdict([_cell(changed=False)], SHA, RUN_URL) == (
+        "🟢 no changes at [0123456](https://gh/o/r/commit/"
+        "0123456789abcdef0123456789abcdef01234567) in [run #7](https://gh/run/1)"
+    )
+
+
 def test_verdict_reads_the_cells_only():
     """Mutation: counting every cell as changing (`n = len(cells)`) renders `3 of 3`."""
     unchanged = _cell(changed=False)
-    assert sc.verdict([], SHA, RUN_URL) == f"🟢 no changes {AT}"
     assert sc.verdict([unchanged, unchanged], SHA, RUN_URL) == f"🟢 no changes {AT}"
     assert (
         sc.verdict([unchanged, _cell(), unchanged], SHA, RUN_URL) == f"🟡 1 of 3 cells change {AT}"
@@ -357,7 +373,7 @@ def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
 
 def test_zero_cells_render_header_and_verdict_only():
     """Mutation: appending `footer(run_url)` reddens it."""
-    assert sc.build_comment([], {}, RUN_URL, SHA)[0] == HEAD + f"🟢 no changes {AT}"
+    assert sc.build_comment([], {}, RUN_URL, SHA)[0] == HEAD + f"⚪ nothing planned {AT}"
 
 
 def _bare(i):
@@ -446,7 +462,7 @@ def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verd
 
     Mutation: dropping the line when `cells` is empty reddens it."""
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/[new]")) == (
-        HEAD + f"🟢 no changes {AT}\n\n" + _LEAD.format(1) + ": stacks/&#91;new&#93;",
+        HEAD + f"⚪ nothing planned {AT}\n\n" + _LEAD.format(1) + ": stacks/&#91;new&#93;",
         True,
         False,
     )
@@ -467,7 +483,7 @@ def test_the_lost_pairs_line_follows_the_unmanaged_line_and_mentions_nobody():
     lost = {"count": 12, "pairs": ["@acme/ops/y / prod", *(f"s{i:02} / dev" for i in range(9))]}
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "@acme/admins/x"), lost) == (
         HEAD
-        + f"🟢 no changes {AT}\n\n"
+        + f"⚪ nothing planned {AT}\n\n"
         + _LEAD.format(1)
         + ": @<!-- -->acme/admins/x\n\n"
         + _LOST_LEAD.format(12)
@@ -994,7 +1010,7 @@ def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
     assert capsys.readouterr().out == out
     line = "\n\n" + _LEAD.format(1) + ": stacks/x" if flag == "true" else ""
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
-    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + line
+    assert body == HEAD + f"⚪ nothing planned {MAIN_AT}" + line
 
 
 _BAD_LOST = (
@@ -1028,7 +1044,7 @@ def test_main_names_the_lost_pairs_without_touching_the_gate_outputs(
     assert capsys.readouterr().out == out
     line = "\n\n" + _LOST_LEAD.format(1) + ": stacks/x / dev" if flag == "true" else ""
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
-    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + line
+    assert body == HEAD + f"⚪ nothing planned {MAIN_AT}" + line
 
 
 def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monkeypatch, capsys):

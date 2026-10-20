@@ -2245,15 +2245,18 @@ hint. The doctor step records its decision once, as its
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
 
-- **Verdict line.** `🟢 no changes` when no cell changes (zero cells
-  included), else `🟡 N of M cells change`, then
+- **Verdict line.** `⚪ nothing planned` when the run planned no cell,
+  `🟢 no changes` when no cell changes, else `🟡 N of M cells change`, then
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)`. `<sha7>` is the first
   seven characters of the planned head commit and `<commit url>` is
   `<server>/<owner>/<repo>/commit/<sha>`; `<n>` is the run number and
   `<run url>` the run's page. When that commit is not a 40-character lowercase
   hex SHA the line ends `at an unknown commit in [run #<n>](<run url>)`. The
   line reads the cells only: every failed plan job holds the gate, and a held
-  gate posts the held body instead.
+  gate posts the held body instead. With no cell, the skipped `plan` matrix
+  job's check shows its name expression literally
+  (`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped), a
+  platform behaviour no `if:` or `name:` change removes.
 - **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
   managed by shipmate: <paths>`, naming at most ten paths within 1,000
   characters, then `, and M more`. When not even the first path fits, it ends
@@ -2993,7 +2996,7 @@ and `plan-cell`'s text render and `apply-cell`'s are the same command, which the
 plan-text binding (§Apply-match fingerprint) rests on. Terramate 0.17.1 writes
 its own lines to stderr only (measured), so a render's stdout is tofu's alone,
 but the render depends on `run.env`: a value that differs between the plan and
-apply jobs changes the render and refuses the apply.
+apply jobs can change the render, and a changed render refuses the apply.
 
 A consumer repository therefore needs no `script` blocks and no
 `terramate.config.experiments = ["scripts"]`. `init` always passes

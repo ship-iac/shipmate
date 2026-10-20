@@ -296,9 +296,11 @@ def render_section(line, plan_text, url, limit):
 
 
 def verdict(cells, head_sha, run_url):
-    """The line under the header: `🟢 no changes` when no cell changes (zero cells included),
-    else `🟡 N of M cells change`, then `provenance`. It reads the cells only: every failed
-    plan job holds the gate, and a held gate posts `held_comment` instead."""
+    """The line under the header: `⚪ nothing planned` for zero cells, `🟢 no changes` when no
+    cell changes, else `🟡 N of M cells change`, then `provenance`. It reads the cells only:
+    every failed plan job holds the gate, and a held gate posts `held_comment` instead."""
+    if not cells:
+        return f"⚪ nothing planned {provenance(head_sha, run_url)}"
     circle = worst(emoji(c) for c in cells)
     if circle == "🟢":
         return f"🟢 no changes {provenance(head_sha, run_url)}"

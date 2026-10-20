@@ -18,6 +18,7 @@ section below names the SHA the release tags.
 ### Changed
 
 - **OpenTofu 1.13.1 replaces 1.12.4.** A plan made on 1.12.4 is refused at apply, so push a commit to each open pull request to re-plan it.
+- **A plan comment for a run that planned no cell headlines `⚪ nothing planned` instead of `🟢 no changes`.**
 
 ## [0.49.1] — 2026-10-18
 

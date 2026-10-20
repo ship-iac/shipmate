@@ -1479,7 +1479,10 @@ No `shipmate / <stack> / <env>` checks appear, no plan comment is posted — unl
 there is
 already a plan comment to keep current, `doctor` raised a warning on that
 run, or the pull request changes a stack with no `env/*` tag, any of which still
-posts one — and the gate goes green over no work.
+posts one, headlined `⚪ nothing planned` — and the gate goes green over no work.
+The skipped plan job's one check shows its name expression literally,
+`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped; GitHub
+renders a skipped matrix job that way.
 
 Change detection is `terramate list --changed`, so a pull request that touches
 no stack's own files and changes no generated `.tf` — an engine-pin bump, a docs
