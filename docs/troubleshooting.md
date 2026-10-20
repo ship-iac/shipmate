@@ -1525,10 +1525,14 @@ autoplan's checks (`shipmate / detect`, `shipmate / summary`,
 `shipmate / gate-hold`, the `shipmate / <stack> / <env>` matrix check) stay red
 or cancelled on the head.
 
-Re-run the cancelled run: `gh run rerun <id>`. Its `summary` finds the newer
-run, writes nothing, and ends green with a notice naming that run ("plan run
-<id> holds the gate of <sha> and is newer than this run", or "plan run <id>,
-newer than this run (<id>), published apply checks on this head").
+After the newer plan run has finished, re-run the cancelled run:
+`gh run rerun <id>`. Not before: the re-run re-enters the `plan-<pr>`
+concurrency group, whose `cancel-in-progress: true` cancels a newer run still in
+flight. The re-run's `summary` ends green either way. When the newer run holds
+the gate or published apply checks on the head, it writes nothing and ends with
+a notice naming that run ("plan run <id> holds the gate of <sha> and is newer
+than this run", or "plan run <id>, newer than this run (<id>), published apply
+checks on this head").
 
 ### Fork pull request refused
 

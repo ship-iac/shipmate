@@ -2369,7 +2369,7 @@ this run") or published apply checks there ("plan run <id>, newer than this run
 a newer run's gate or checks. That refusal is a notice, and the `summary` job
 ends green and runs none of its later steps, so a re-run of a cancelled autoplan
 clears its checks. Its apply-check publish and its final gate write
-each read the statuses again and refuse the same way, writing nothing, when a
+each read the statuses again and refuse, writing nothing and failing the job, when a
 newer run of the same head holds the gate by then (that run's `summary` was
 evicted, and `gate-hold` writes outside the job's concurrency group); a failed
 read writes nothing either, so the publish hold stands. A final `pending` gate is followed

@@ -552,18 +552,25 @@ def test_a_superseded_run_skips_every_later_step():
     assert {s.get("name") or s["uses"]: s.get("if") for s in later} == LATER_STEP_IFS
 
 
+SUPERSEDED_FUNCTION = [
+    "superseded() {",
+    "sed 's/^::error::/::notice::/' \"$1\" >&2",
+    'echo "superseded=true" >> "$GITHUB_OUTPUT"',
+    "exit 0",
+    "}",
+]
+
+
 def test_the_hold_step_ends_a_superseded_run_green():
     """Mutations: `if [ "$rc" = 4 ]; then exit 1; fi` back -> red; drop `exit 0` from
     `superseded` -> red."""
     lines = run_lines(step_by("summary", name=HOLD))
-    for line in [
-        "sed 's/^::error::/::notice::/' \"$1\" >&2",
-        'echo "superseded=true" >> "$GITHUB_OUTPUT"',
-        "exit 0",
+    start = lines.index(SUPERSEDED_FUNCTION[0])
+    assert lines[start : start + len(SUPERSEDED_FUNCTION)] == SUPERSEDED_FUNCTION
+    assert [ln for ln in lines if ln.startswith('if [ "$rc" = ')] == [
         'if [ "$rc" = 4 ]; then superseded refuse.err; fi',
         'if [ "$rc" = 3 ]; then superseded pending.err; fi',
-    ]:
-        assert line in lines
+    ]
 
 
 @bash_only
