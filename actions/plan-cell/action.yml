@@ -122,9 +122,12 @@ runs:
         rc=0
         wait "$text_pid" || rc=1
         wait "$json_pid" || rc=1
-        # Shared stderr would interleave two failures line by line.
-        cat show-text.err show-json.err >&2
-        [ "$rc" -eq 0 ] || exit "$rc"
+        # Shared stderr would interleave two failures line by line; a clean render's stderr holds
+        # only terramate's own lines.
+        if [ "$rc" -ne 0 ]; then
+          cat show-text.err show-json.err >&2
+          exit "$rc"
+        fi
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify"
 
     - name: Encrypt plan artifact at rest

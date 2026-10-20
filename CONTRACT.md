@@ -2691,11 +2691,16 @@ shows; it binds the file, not the excerpt.
 `apply-cell` re-renders the stored plan with `terramate run
 --disable-safeguards=git-out-of-sync --no-recursive -C <stack> -- tofu show
 -no-color stack.otplan`, the command that produced the file, and refuses unless
-the digest matches. The comparison runs after `init` and
-before `tofu apply`, so a refusal applies nothing. An absent digest is refused
+the digest matches. The comparison runs after `init`, because the render reads the
+data directory `init` wrote (`TF_DATA_DIR` from the stack's `run.env`) and, where
+the plan file lacks schemas, the providers it installed; and before `tofu apply`,
+so a refusal applies nothing. An absent digest is refused
 too, at detect; the remedy is a re-plan. `tofu show` of a stored plan renders
-identically on any runner at one tofu version, and both `show` and `apply`
-refuse a plan file from another version, so the record carries no version field.
+identically on any runner at one tofu version and one `run.env`, and both `show`
+and `apply` refuse a plan file from another version, so the record carries no
+version field. The render runs inside `terramate run`, and Terramate 0.17.1 writes its own lines to stderr only
+(measured), so the digested stdout is tofu's alone. A `run.env` value that differs
+between the plan and apply jobs changes the render and refuses the apply.
 
 The record's `cells` field binds each apply check to the rest of its plan run:
 the number of cells that run planned. The summary job publishes its apply checks
@@ -2987,7 +2992,10 @@ directory, its `run.env`, and the safeguard policy only:
 
 Every `tofu` call runs inside that wrapper, so the stack's `run.env` reaches it,
 and `plan-cell`'s text render and `apply-cell`'s are the same command, which the
-plan-text binding (§Apply-match fingerprint) rests on.
+plan-text binding (§Apply-match fingerprint) rests on. Terramate 0.17.1 writes its
+own lines to stderr only (measured), so a render's stdout is tofu's alone; the
+render still depends on `run.env`, and a value that differs between the plan and
+apply jobs changes it and refuses the apply.
 
 A consumer repository therefore needs no `script` blocks and no
 `terramate.config.experiments = ["scripts"]`. `init` always passes
@@ -3093,8 +3101,8 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   downloads.
 - The lock verifies every cached package at every reader. A cached package that
   does not match fails `init` with `does not match the content of the downloaded
-  package` ([`docs/troubleshooting.md`](docs/troubleshooting.md)). When the first
-  init error is `Failed to install provider` after a restore that hit, the cell
+  package` ([`docs/troubleshooting.md`](docs/troubleshooting.md)). When any init
+  error's title starts with `Failed to install provider` after a restore that hit, the cell
   also annotates the restored entry's key and its `gh cache delete` command; any
   other failed init carries only OpenTofu's first error.
 

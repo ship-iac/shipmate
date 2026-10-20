@@ -8,8 +8,8 @@ when the output holds no such box, so a failure outside OpenTofu keeps the
 runner's own "Process completed with exit code" annotation and nothing else.
 
 `tofu-error cache-entry <key>` reads a failed init's output instead and prints the remedy for a
-corrupt restored provider cache entry `<key>` in `$GITHUB_REPOSITORY`, only when the first
-diagnostic's title is exactly `INSTALL_FAILED`, and nothing otherwise: a backend or credential
+corrupt restored provider cache entry `<key>` in `$GITHUB_REPOSITORY`, only when any `Error:`
+diagnostic's title starts with `INSTALL_FAILED`, and nothing otherwise: a backend or credential
 failure is not the cache's, and its own diagnostic names the cause. Other arguments are refused.
 
 The text is author-controlled (a stack's config and provider output), so it
@@ -27,20 +27,28 @@ li = _load("lock-info")
 #: Annotation messages are shown whole in the check run; the cut keeps one bounded.
 CAP = 1000
 
-#: The title of the diagnostic a cached provider package that fails to install produces.
+#: The title prefix of the diagnostic a cached provider package that fails to install produces.
 INSTALL_FAILED = "Error: Failed to install provider"
 
 
-def first_error(text):
-    """The first `Error:` diagnostic in `text`, stripped and joined with newlines, or "".
+def _lines(text):
+    return [li._strip(ln) for ln in text.splitlines()]
+
+
+def _titles(lines):
+    """Indices of the `Error:` diagnostic titles in `lines`, in order.
 
     Only a title right after a box opener counts: an `Error: ` inside a warning's detail or in
     terramate's log is not a diagnostic."""
-    lines = [li._strip(ln) for ln in text.splitlines()]
-    start = next(
-        (i for i in range(1, len(lines)) if lines[i - 1] == "╷" and lines[i].startswith("Error: ")),
-        None,
+    return (
+        i for i in range(1, len(lines)) if lines[i - 1] == "╷" and lines[i].startswith("Error: ")
     )
+
+
+def first_error(text):
+    """The first `Error:` diagnostic in `text`, stripped and joined with newlines, or ""."""
+    lines = _lines(text)
+    start = next(_titles(lines), None)
     if start is None:
         return ""
     block = []
@@ -55,13 +63,14 @@ def main(argv=()):
     if argv and (len(argv) != 2 or argv[0] != "cache-entry"):
         raise SystemExit(f"::error::usage: tofu-error [cache-entry <key>] (got {list(argv)})")
     # Provider output is not guaranteed UTF-8; a strict decode would lose the annotation.
-    error = first_error(sys.stdin.buffer.read().decode("utf-8", errors="replace"))
+    text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     if not argv:
-        if error:
+        if error := first_error(text):
             print(f"::error::{command_data(error)}")
         return
-    if error.partition("\n")[0] == INSTALL_FAILED:
-        key, repo = argv[1], os.environ["GITHUB_REPOSITORY"]
+    lines = _lines(text)
+    if any(lines[i].startswith(INSTALL_FAILED) for i in _titles(lines)):
+        key, repo = argv[1], os.environ.get("GITHUB_REPOSITORY", "")
         remedy = (
             f"OpenTofu's init failed after restoring provider cache entry {key}. If the log above"
             " says a cached package does not match the content of the downloaded package, delete"

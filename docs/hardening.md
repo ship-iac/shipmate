@@ -1019,13 +1019,19 @@ warning:
   arrives empty; accepting it would skip the comparison silently. The remedy is
   a re-pin, not a re-plan, and the cell says so.
 - A digest that disagrees with what the stored plan renders to fails the cell
-  with nothing applied. That comparison sits after `tofu init` and before
-  `tofu apply`.
+  with nothing applied. That comparison sits after `tofu init`, because the
+  render reads the data directory `init` wrote (`TF_DATA_DIR` from the stack's
+  `run.env`) and, where the plan file lacks schemas, the providers it installed;
+  and before `tofu apply`.
 
 `tofu show` of a stored plan renders the same bytes on any runner at one tofu
-version, and every measured way for the two to differ is one tofu itself
-refuses: it rejects a plan file from another version, and an apply under drifted
-providers fails on the dependency lock.
+version and one `run.env`. Every other measured way for the two to differ is one
+tofu itself refuses: it rejects a plan file from another version, and an apply
+under drifted providers fails on the dependency lock. The render runs inside
+`terramate run`, and Terramate 0.17.1 writes its own lines to stderr only
+(measured), so the digested stdout is tofu's alone. A `run.env` value that
+differs between the plan and apply jobs changes the render and refuses the
+apply.
 
 What this binds is agreement, not honesty. A privileged author still authors
 both the plan text and the `.otplan`; what they cannot do is have the two

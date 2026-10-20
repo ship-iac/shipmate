@@ -6,7 +6,8 @@ the first failure while the other render is still writing into the workspace.
 
 The step body runs unmodified, with `terramate`, `tofu` and `python3` replaced by bash functions:
 bash resolves a function before PATH, and a function behind `&` runs in a subshell like the binary
-would. The `terramate` stub drops the wrapper's arguments up to `--` and runs the rest.
+would. The `terramate` stub writes a line of its own to stderr, as terramate does, drops the
+wrapper's arguments up to `--` and runs the rest.
 """
 
 import os
@@ -25,13 +26,14 @@ _JSON = '{"format_version":"1.2"}\n'
 #: json error is written first.
 _STUBS = r"""
 terramate() {
+  printf 'tm\n' >&2
   while [ $# -gt 0 ] && [ "$1" != -- ] ; do shift ; done
   [ $# -gt 0 ] || return 97 ; shift ; "$@"
 }
 tofu() {
   case "$*" in
     *-no-color*) [ "$FAIL" = both ] && { sleep 1 ; printf 'text error\n' >&2 ; return 3 ; } ;
-      [ "$FAIL" = text ] && return 3 ; printf 'plan text\n' ;;
+      [ "$FAIL" = text ] && { printf 'text error\n' >&2 ; return 3 ; } ; printf 'plan text\n' ;;
     *-json*) [ "$FAIL" = both ] && { printf 'json error\n' >&2 ; return 4 ; } ;
       exec 2>/dev/null ; sleep 1 ; [ "$FAIL" = json ] && return 4 ;
       printf '{"format_version":"1.2"}\n' ;;
@@ -61,9 +63,11 @@ def _read(tmp_path, name):
 
 @bash_only
 def test_both_renders_succeed_and_plan_txt_is_the_text_render_whole(tmp_path):
-    """Mutation: swap `plan.txt` and `plan.json` in the two render lines."""
+    """Mutations: swap `plan.txt` and `plan.json` in the two render lines; print the `.err` files
+    whatever `rc` is (terramate's own lines reach stderr)."""
     r = _run(tmp_path, "")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stderr == ""
     assert _read(tmp_path, "plan.txt") == _TEXT
     assert _read(tmp_path, "plan.json") == _JSON
     assert (tmp_path / "rt" / "classified").exists()
@@ -80,9 +84,11 @@ def test_a_failing_json_render_fails_the_step(tmp_path):
 @bash_only
 def test_a_failing_text_render_fails_the_step_after_the_json_render_finished(tmp_path):
     """Mutations: replace both `wait` lines with one bare `wait` (exit 0); drop `|| rc=1` from the
-    first `wait` (the step exits at the text failure with plan.json still empty)."""
+    first `wait` (the step exits at the text failure with plan.json still empty); drop the `cat`
+    (the text error never prints)."""
     r = _run(tmp_path, "text")
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stderr == "tm\ntext error\ntm\n"
     assert _read(tmp_path, "plan.json") == _JSON
     assert not (tmp_path / "rt" / "classified").exists()
 
@@ -93,7 +99,7 @@ def test_two_failing_renders_print_their_errors_text_first(tmp_path):
     `cat` -- neither error prints."""
     r = _run(tmp_path, "both")
     assert r.returncode != 0
-    assert r.stderr == "text error\njson error\n"
+    assert r.stderr == "tm\ntext error\ntm\njson error\n"
 
 
 pcs = load_script("plan-cell-summary")
