@@ -8,9 +8,10 @@ when the output holds no such box, so a failure outside OpenTofu keeps the
 runner's own "Process completed with exit code" annotation and nothing else.
 
 `tofu-error cache-entry <key>` reads a failed init's output instead and prints the remedy for a
-corrupt restored provider cache entry `<key>` in `$GITHUB_REPOSITORY`, only when any `Error:`
-diagnostic's title starts with `INSTALL_FAILED`, and nothing otherwise: a backend or credential
-failure is not the cache's, and its own diagnostic names the cause. Other arguments are refused.
+corrupt restored provider cache entry `<key>`, naming the repository when `GITHUB_REPOSITORY` is
+set, only when any `Error:` diagnostic's title starts with `INSTALL_FAILED`, and nothing
+otherwise: a backend or credential failure is not the cache's, and its own diagnostic names the
+cause. Other arguments are refused.
 
 The text is author-controlled (a stack's config and provider output), so it
 prints only through `command_data`: a raw newline would start a second workflow

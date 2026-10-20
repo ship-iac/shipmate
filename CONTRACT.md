@@ -2695,10 +2695,10 @@ the digest matches. The comparison runs after `init`, because the render reads
 the data directory `init` wrote (`TF_DATA_DIR` from the stack's `run.env`) and,
 where the plan file lacks schemas, the providers it installed; and before
 `tofu apply`, so a refusal applies nothing. An absent digest is refused too, at
-detect; the remedy is a re-plan. `tofu show` of a stored plan renders
-identically on any runner at one tofu version and one `run.env` (§Engine-owned
-tofu invocation), and both `show` and `apply` refuse a plan file from another
-version, so the record carries no version field.
+detect; the remedy is a re-plan. `tofu show` of a stored plan renders the
+same bytes on any runner at one tofu version and one `run.env` (§Engine-owned
+tofu invocation says what the wrapper adds); both `show` and `apply` refuse a
+plan file from another version, so the record carries no version field.
 
 The record's `cells` field binds each apply check to the rest of its plan run:
 the number of cells that run planned. The summary job publishes its apply checks
