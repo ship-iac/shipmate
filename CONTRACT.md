@@ -1269,7 +1269,8 @@ too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
 plenty.
 
-The plan comment carries no doctor findings (see §Plan comment). Instead,
+The plan comment carries no doctor findings, only their count (see §Plan
+comment). Instead,
 `actions/summary` runs `scripts/doctor` on every plan run and emits its
 findings as workflow-command annotations, verbatim:
 
@@ -2217,10 +2218,13 @@ applies that no longer exist. With no comment yet, none is posted — a docs-onl
 or engine-pin-bump pull request carries no shipmate comment — with two
 exceptions. A run where `doctor` emitted a warning still posts: doctor's
 findings are annotations with no file/line, so they render only on the run page
-(see §Comment-ops), and this comment's verdict links that run from the
+(see §Comment-ops), and this comment's doctor line links that run from the
 pull request. `::notice::`
 findings do not trigger the exception: they are informational, and would put a
-comment on every quiet run. A run whose comment carries the unmanaged line also
+comment on every quiet run. Nor do warnings from the repository-settings probes
+(the gate ruleset, the review rule and `CODEOWNERS`): they hold until an admin
+changes the settings, so they would put a comment on every quiet pull request.
+`shipmate doctor` and the run page still report them. A run whose comment carries the unmanaged line also
 posts: a pull request that changes only stacks with no `env/*` tag plans nothing,
 and the comment is where it says so. When the line is left out for size (below),
 this exception does not apply.
@@ -2234,14 +2238,18 @@ App name, which a consumer org may have had to slug differently than
 trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
-line, the verdict line, a blank line, the unmanaged line and a blank line when
+line, the verdict line, a blank line, the doctor line and a blank line when
+`doctor` counted a warning, the unmanaged line and a blank line when
 the pull request changes an unmanaged stack, the lost pairs line and a blank
 line when it untags a stack / environment pair, one line or fold-out per planned
 stack × environment, sorted by environment then stack. The plan body has no
 footer and no help hint, whether or not `doctor` warned: both verdicts are
 normal results and the verdict links the run. The held body above ends with the
-hint. The doctor step records its decision once, as its
-`warned` output, which the post-or-skip rule reads; the build step records
+hint. `doctor` records its decision once, as its `warned` output, which the
+post-or-skip rule reads, and its `warnings` output, the count the doctor line
+shows: both leave out the repository-settings probes' warnings, and count a
+probe that could not run when its note is a warning. When `doctor` fails, the
+doctor step writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
 
@@ -2257,6 +2265,9 @@ and `lost` outputs, which the same rule reads.
   job's check shows its name expression literally
   (`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped), a
   platform behaviour no `if:` or `name:` change removes.
+- **Doctor line.** `⚠️ shipmate doctor found N warning(s) in this run: see
+  [the run](<run url>)`, under any verdict. When the cell lines leave it no room
+  under the 65,536-character cap, it is left out with a warning.
 - **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
   managed by shipmate: <paths>`, naming at most ten paths within 1,000
   characters, then `, and M more`. When not even the first path fits, it ends

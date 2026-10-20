@@ -4511,8 +4511,8 @@ def test_a_commented_out_drift_call_draws_the_missing_drift_notice(monkeypatch):
     assert _drift_probe(monkeypatch, {"shipmate-drift.yml": commented}) == [_NO_DRIFT_FILE]
 
 
-def test_annotate_mode_emits_the_missing_drift_file_as_a_notice_line(monkeypatch, capsys):
-    """Through `main()`, so the plan path's `warned` grep (`^::warning`) never sees it.
+def test_annotate_mode_emits_the_missing_drift_file_as_a_notice_line(monkeypatch, capsys, tmp_path):
+    """Through `main()`, so the plan path's `warned` output stays false.
 
     Mutation: restore `DRIFT_FILE_MISSING`'s level to WARNING."""
     responses = _fork_responses({"shipmate.yml": _SHIPMATE_WF})
@@ -4520,12 +4520,68 @@ def test_annotate_mode_emits_the_missing_drift_file_as_a_notice_line(monkeypatch
     monkeypatch.setattr(doctor, "ctx_from_env", _ctx)
     monkeypatch.setattr(doctor, "PROBES", (doctor._drift_file_warnings,))
     monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "annotate")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
     doctor.main()
     assert capsys.readouterr().out == (
         "::notice title=shipmate doctor::no workflow file calls the engine's `drift.yml`, so no "
         "stack is ever checked for drift. Add a drift workflow file to check for drift "
         "(docs/drift.md).\n"
     )
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "warned=false\nwarnings=0\n"
+
+
+def test_exactly_the_three_repository_settings_probes_are_marked_settings():
+    """Their warnings do not force a plan comment that changes nothing.
+
+    Mutation: drop `settings` from `_codeowners_warnings` -- red."""
+    assert tuple(p.__name__ for p in doctor.PROBES if getattr(p, "settings", False)) == (
+        "_gate_rule_warnings",
+        "_review_rule_warnings",
+        "_codeowners_warnings",
+    )
+
+
+def _settings_probe(ctx):
+    return [(doctor.WARNING, "settings")]
+
+
+_settings_probe.settings = True  # ty: ignore[unresolved-attribute]
+
+
+def _other_probe(ctx):
+    return [(doctor.WARNING, "other"), (doctor.NOTICE, "note")]
+
+
+def _failing_settings_probe(ctx):
+    raise RuntimeError("boom")
+
+
+_failing_settings_probe.settings = True  # ty: ignore[unresolved-attribute]
+
+
+@pytest.mark.parametrize(
+    ("probes", "outputs"),
+    [
+        ((_settings_probe,), "warned=false\nwarnings=0\n"),
+        ((_settings_probe, _other_probe), "warned=true\nwarnings=1\n"),
+        ((_settings_probe, _failing_settings_probe), "warned=true\nwarnings=1\n"),
+    ],
+)
+def test_annotate_mode_counts_warnings_outside_the_settings_probes(
+    monkeypatch, capsys, tmp_path, probes, outputs
+):
+    """`warned`/`warnings` count WARNING findings of probes not marked `settings`, and every
+    WARNING degrade: a settings probe that raises verified nothing.
+
+    Mutation: count settings warnings in N -- red (first two cases).
+    Mutation: count a degrade only for a probe not marked `settings` -- red (third case)."""
+    monkeypatch.setattr(doctor, "ctx_from_env", _ctx)
+    monkeypatch.setattr(doctor, "PROBES", probes)
+    monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "annotate")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
+    doctor.main()
+    capsys.readouterr()
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == outputs
 
 
 def test_a_failing_drift_probe_degrades_to_a_notice(monkeypatch):

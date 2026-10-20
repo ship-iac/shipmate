@@ -3,7 +3,8 @@
 
 Three modes, selected via SHIPMATE_DOCTOR_MODE:
 - annotate: run the probes and emit GitHub workflow-command annotations
-  (::warning::/::notice::) on stdout, one line per finding. Used by
+  (::warning::/::notice::) on stdout, one line per finding, then `warned` and
+  `warnings` (the count `warnings_and_count` returns) to GITHUB_OUTPUT. Used by
   actions/summary right after a plan run. NEVER fails the run: a probe
   error becomes a 'could not verify' note — doctor guards onboarding, it
   must not take down the plan path.
@@ -225,6 +226,11 @@ def _gate_rule_warnings(ctx):
     return out
 
 
+# Repository-settings probes: their warnings do not post a plan comment that changes nothing
+# (`warnings_and_count`).
+_gate_rule_warnings.settings = True
+
+
 def _review_rule_warnings(ctx):
     """Code-owner review on the default-branch ruleset (`docs/hardening.md`
     #3–5) — with #6's `<env>-apply` reviewers, the controls a holder of the App
@@ -282,6 +288,7 @@ def _review_rule_warnings(ctx):
 
 
 _review_rule_warnings.parses_yaml = True
+_review_rule_warnings.settings = True
 
 
 def no_code_owners(path, place, branch):
@@ -331,6 +338,7 @@ def _codeowners_warnings(ctx):
 
 
 _codeowners_warnings.label = "CODEOWNERS"
+_codeowners_warnings.settings = True
 
 
 def _no_review_findings(ctx, branch, code_owner, last_push):
@@ -2117,8 +2125,14 @@ def _degrade_reason(e):
 
 
 def warnings(ctx):
-    """Every probe's findings, in `PROBES` order; a probe that raises becomes one degrade
-    line at its `degrade_level` (WARNING by default).
+    """`warnings_and_count`'s findings."""
+    return warnings_and_count(ctx)[0]
+
+
+def warnings_and_count(ctx):
+    """`(findings, n)`: every probe's findings, in `PROBES` order, and `n`, the WARNING-level
+    findings of probes not marked `settings`. A probe that raises becomes one degrade line at
+    its `degrade_level` (WARNING by default), counted whatever the probe.
 
     A runner whose python3 lacks PyYAML gets that refusal once, as a NOTICE, in place of every
     probe marked `parses_yaml`: each would otherwise degrade on its own, or report the
@@ -2128,26 +2142,32 @@ def warnings(ctx):
     no_yaml = importlib.util.find_spec("yaml") is None
     refusal = (ec.runner_refusal() or "").removeprefix("::error::")
     out = [(NOTICE, refusal)] if no_yaml else []
+    n = 0
     for probe in PROBES:
         if no_yaml and getattr(probe, "parses_yaml", False):
             continue
         try:
-            out.extend(probe(ctx))
+            found = probe(ctx)
+            out.extend(found)
+            if not getattr(probe, "settings", False):
+                n += sum(1 for lvl, _ in found if lvl == WARNING)
         # noqa: BLE001 - doctor must never fail the run. `_gh_json` raises
         # SystemExit, not a plain Exception, so both are caught -- but never
         # bare BaseException, so KeyboardInterrupt still propagates.
         except (Exception, SystemExit) as e:  # noqa: BLE001
             ec.log_failure(e, f"{_probe_label(probe)} probe")
+            level = getattr(probe, "degrade_level", WARNING)
+            n += level == WARNING
             out.append(
                 (
-                    getattr(probe, "degrade_level", WARNING),
+                    level,
                     (
                         f"doctor could not verify the {_probe_label(probe)} settings "
                         f"({_degrade_reason(e)}): probe skipped."
                     ),
                 )
             )
-    return out
+    return out, n
 
 
 def render_annotations(findings):
@@ -2736,10 +2756,12 @@ def main():
         check_ids()
         return
     ctx = ctx_from_env()
-    found = warnings(ctx)
+    found, n = warnings_and_count(ctx)
     if mode == "annotate":
         for line in render_annotations(found):
             print(line)
+        # Last, so a doctor that dies earlier leaves both unset and the action writes its own.
+        write_outputs(warned=n > 0, warnings=n)
         return
     print(render_report(found, load_annotations(ctx), ctx, config_status(ctx)))
 

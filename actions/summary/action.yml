@@ -219,19 +219,15 @@ runs:
         set -euo pipefail
         # Findings are annotations on this run, harvested onto the pull request by `shipmate
         # doctor`. doctor writes whole ::warning::/::notice:: lines, catted through unmodified so
-        # no shell reconstruction can mangle them.
+        # no shell reconstruction can mangle them. doctor writes `warned` and `warnings` itself;
+        # the comment counts `warnings` and the upsert takes `warned`.
         if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.txt; then
           cat doctor.txt
         else
           echo "::warning::doctor probes errored; settings-drift check skipped"
+          echo "warned=false" >> "$GITHUB_OUTPUT"
+          echo "warnings=0" >> "$GITHUB_OUTPUT"
         fi
-        # Warnings (actionable misconfiguration) only: a `::notice::` finding is informational.
-        # The one reading of doctor's result: the upsert takes `warned`.
-        warned=false
-        if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then
-          warned=true
-        fi
-        echo "warned=$warned" >> "$GITHUB_OUTPUT"
 
     - name: Build comment + gate state
       id: build
@@ -247,6 +243,7 @@ runs:
         # failure still carries a full list.
         SHIPMATE_PLANNED_CELLS_NAMES: ${{ inputs.planned-cell-names }}
         SHIPMATE_DETECT_RESULT: ${{ inputs.detect-result }}
+        SHIPMATE_DOCTOR_WARNINGS: ${{ steps.doctor.outputs.warnings }}
       run: |
         set -euo pipefail
         # Reviewer-facing only (cosmetic links), so a failure degrades to an empty listing and links
@@ -324,8 +321,9 @@ runs:
           exit 0
         fi
         # Nothing changed: only an existing comment is kept current, or it would keep showing
-        # applies that no longer exist. A doctor warning (the comment links the run page its
-        # annotations live on), an unmanaged stacks line or a lost pairs line still posts.
+        # applies that no longer exist. A doctor warning outside the repository-settings probes
+        # (the comment links the run page its annotations live on), an unmanaged stacks line or a
+        # lost pairs line still posts.
         args=("$PR" comment.md --head "$HEAD_SHA")
         if [ "$MODE" = "nothing-changed" ] && [ "$DOCTOR_WARNED" != "true" ] && [ "$UNMANAGED" != "true" ] && [ "$LOST" != "true" ]; then
           args+=(--update-only)

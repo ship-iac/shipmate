@@ -1475,11 +1475,10 @@ record's pull request.
 
 ### A pull request planned zero cells
 
-No `shipmate / <stack> / <env>` checks appear, no plan comment is posted — unless
-there is
-already a plan comment to keep current, `doctor` raised a warning on that
-run, or the pull request changes a stack with no `env/*` tag, any of which still
-posts one, headlined `⚪ nothing planned` — and the gate goes green over no work.
+No per-cell `shipmate / <stack> / <env>` checks appear, no plan comment is
+posted — unless there is already a plan comment to keep current, `doctor` raised
+a warning on that run outside the repository-settings probes, or the pull
+request changes a stack with no `env/*` tag, any of which still posts one, headlined `⚪ nothing planned` — and the gate goes green over no work.
 The skipped plan job's one check shows its name expression literally,
 `shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped; GitHub
 renders a skipped matrix job that way.

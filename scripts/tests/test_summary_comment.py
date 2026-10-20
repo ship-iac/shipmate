@@ -468,6 +468,52 @@ def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verd
     )
 
 
+def test_the_doctor_line_sits_under_the_verdict_above_the_unmanaged_line():
+    """Mutation: put the line after the unmanaged line -- red."""
+    assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/x"), None, 2) == (
+        HEAD
+        + f"⚪ nothing planned {AT}\n\n"
+        + "⚠️ shipmate doctor found 2 warning(s) in this run: see [the run](https://gh/run/1)\n\n"
+        + _LEAD.format(1)
+        + ": stacks/x",
+        True,
+        False,
+    )
+
+
+def test_the_doctor_line_yields_to_cell_lines_near_the_hard_cap(capsys):
+    """Mutation: leave the doctor line out of the HARD_CAP pre-check -- the refusal raises."""
+    cells = [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(130)]
+    pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
+    cells[0][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    capsys.readouterr()
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, None, None, 1) == (without, False, False)
+    assert capsys.readouterr().out == (
+        "::warning::the plan comment's cell lines leave no room under the 65,536-char comment "
+        "cap for the shipmate doctor warnings line; it was left out\n"
+    )
+
+
+@pytest.mark.parametrize(("raw", "line"), [("", False), ("0", False), ("x", False), ("3", True)])
+def test_main_renders_the_doctor_line_from_the_doctor_warnings_count(
+    tmp_path, monkeypatch, raw, line
+):
+    """Anything but a positive count renders no line.
+
+    Mutation: render the line when the count is 0 -- red (the empty and `0` cases).
+    Mutation: `int(warnings)` without the `isdecimal` guard -- red (`x` crashes)."""
+    monkeypatch.setenv("SHIPMATE_DOCTOR_WARNINGS", raw)
+    _run_main(tmp_path, monkeypatch, [])
+    doctor = (
+        "\n\n⚠️ shipmate doctor found 3 warning(s) in this run: see "
+        "[the run](https://gh/o/r/actions/runs/1)"
+    )
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        HEAD + f"⚪ nothing planned {MAIN_AT}" + (doctor if line else "")
+    )
+
+
 _LOST_LEAD = (
     "⚪ {} stack / environment pair(s) lost their env/* tag in this pull request and are no "
     "longer planned or deployed"
@@ -871,29 +917,26 @@ def test_the_upsert_step_maps_exactly_these_env_vars():
     }
 
 
-#: The doctor step's whole shell body, hand-written: doctor's result is read here once, as the
-#: `warned` output, and warnings count while notices do not.
+#: The doctor step's whole shell body, hand-written: doctor writes `warned` and `warnings`
+#: itself, and the step writes them only when doctor fails.
 _DOCTOR_RUN = [
     "set -euo pipefail",
     'if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.txt; then',
     "cat doctor.txt",
     "else",
     'echo "::warning::doctor probes errored; settings-drift check skipped"',
+    'echo "warned=false" >> "$GITHUB_OUTPUT"',
+    'echo "warnings=0" >> "$GITHUB_OUTPUT"',
     "fi",
-    "warned=false",
-    "if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then",
-    "warned=true",
-    "fi",
-    'echo "warned=$warned" >> "$GITHUB_OUTPUT"',
 ]
 
 
-def test_doctor_runs_before_the_upsert_and_records_warned_once():
-    """The upsert reads `warned` to post a comment with nothing planned, so the doctor step must
-    run before it, under the id it names.
+def test_doctor_runs_before_the_build_and_the_upsert():
+    """The build reads `warnings` and the upsert reads `warned`, so the doctor step must run
+    before both, under the id they name.
 
-    Mutation: grep `^::notice` instead of `^::warning` -- red.
-    Mutation: move the doctor step after `Upsert sticky comment` -- red.
+    Mutation: drop the `warnings=0` echo -- red.
+    Mutation: move the doctor step after `Build comment + gate state` -- red.
     Mutation: rename the step's `id: doctor` -- red."""
     doctor = step_by(
         "summary", name="Doctor: settings-drift warnings (annotations only, never blocks)"
@@ -901,7 +944,7 @@ def test_doctor_runs_before_the_upsert_and_records_warned_once():
     assert doctor["id"] == "doctor"
     assert run_lines(doctor) == _DOCTOR_RUN
     names = [s.get("name") for s in action_steps("summary")]
-    assert names.index(doctor["name"]) < names.index("Upsert sticky comment")
+    assert names.index(doctor["name"]) < names.index("Build comment + gate state")
 
 
 def _run_main(tmp_path, monkeypatch, cells, stdin=""):
@@ -947,7 +990,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         run_lines(build)
     )
     # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`. Mutation:
-    # binding `SHIPMATE_DOCTOR_WARNED` again -- a plan comment reads nothing from doctor.
+    # binding `SHIPMATE_DOCTOR_WARNINGS` to `steps.doctor.outputs.warned` -- no line renders.
     # Mutation: mapping `unmanaged-stacks` or `lost-env-tags` to another env name. Mutation:
     # dropping `SHIPMATE_PLANNED_CELLS_NAMES` or `SHIPMATE_DETECT_RESULT` -- `missing` is always
     # empty.
@@ -958,6 +1001,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "SHIPMATE_LOST_ENV_TAGS": "${{ inputs.lost-env-tags }}",
         "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
+        "SHIPMATE_DOCTOR_WARNINGS": "${{ steps.doctor.outputs.warnings }}",
     }
     # Mutation: `required: true` on any of the three (GitHub does not enforce it, but it
     # misdocuments a draft run).
