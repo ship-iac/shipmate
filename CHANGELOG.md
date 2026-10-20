@@ -13,7 +13,7 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **Plan, apply and drift cells run `tofu show` inside `terramate run`, so a `run.env` `TF_DATA_DIR` reaches it.**
-- **A failed `tofu init` is annotated with OpenTofu's first error, and the `gh cache delete` remedy only for a provider install failure after a cache hit.**
+- **A failed `tofu init` is annotated with OpenTofu's first error; the `gh cache delete` remedy appears only for a provider install failure after a cache hit.**
 
 ### Changed
 

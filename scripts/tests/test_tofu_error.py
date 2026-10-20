@@ -154,12 +154,35 @@ def test_names_no_cache_entry_for_any_other_failure(monkeypatch, capsys, text):
 
 
 @pytest.mark.parametrize(
-    "argv", [("cache-entry",), ("cache-entry", KEY, "x"), ("cache", KEY)], ids=str
+    ("argv", "code"),
+    [
+        (
+            ("cache-entry",),
+            "::error::usage: tofu-error [cache-entry <key>] (got ['cache-entry'])",
+        ),
+        (
+            ("cache-entry", KEY, "x"),
+            (
+                "::error::usage: tofu-error [cache-entry <key>] "
+                "(got ['cache-entry', 'tofu-providers-Linux-X64-abc123', 'x'])"
+            ),
+        ),
+        (
+            ("cache", KEY),
+            (
+                "::error::usage: tofu-error [cache-entry <key>] "
+                "(got ['cache', 'tofu-providers-Linux-X64-abc123'])"
+            ),
+        ),
+    ],
+    ids=["one", "three", "cache"],
 )
-def test_refuses_any_other_arguments(monkeypatch, capsys, argv):
-    """Mutation: drop the `argv[0] != "cache-entry"` clause (reds `cache`)."""
-    with pytest.raises(SystemExit):
+def test_refuses_any_other_arguments(monkeypatch, capsys, argv, code):
+    """Mutations: drop the `argv[0] != "cache-entry"` clause (reds `cache`); change the usage
+    text (reds all three)."""
+    with pytest.raises(SystemExit) as exc:
         _run(monkeypatch, capsys, b"", argv)
+    assert exc.value.code == code
 
 
 #: Hand-written: the line `cell-init`'s init step runs after a failed init.
