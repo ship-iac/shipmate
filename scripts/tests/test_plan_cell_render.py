@@ -4,8 +4,12 @@ Each render is awaited by its own `wait "$pid" || rc=1` before the step exits. A
 returns 0 whatever the renders did, and a `wait "$pid"` without `|| rc=1` exits under errexit at
 the first failure while the other render is still writing into the workspace.
 
-The step body runs unmodified, with `tofu` and `python3` replaced by bash functions: bash resolves
-a function before PATH, and a function behind `&` runs in a subshell like the binary would.
+The step body runs unmodified, with `terramate`, `tofu` and `python3` replaced by bash functions:
+bash resolves a function before PATH, and a function behind `&` runs in a subshell like the binary
+would. The `terramate` stub drops the wrapper's arguments up to `--`, writes terramate's two
+routine stderr lines and runs the rest. The lines are copied from a raw capture of
+`terramate run ... -- tofu show -no-color stack.otplan` stderr (Terramate 0.17.1, OpenTofu
+1.13.1, Windows, redirected to a file); the `-json` render's second line names its own command.
 """
 
 import os
@@ -17,17 +21,33 @@ from _loader import bash_only, load_script, run_step, step_by
 
 _TEXT = "plan text\n"
 _JSON = '{"format_version":"1.2"}\n'
+_TM_TEXT = (
+    "terramate: Entering stack in /stacks/dns\n"
+    'terramate: Executing command "tofu show -no-color stack.otplan"\n'
+)
+_TM_JSON = (
+    "terramate: Entering stack in /stacks/dns\n"
+    'terramate: Executing command "tofu show -json stack.otplan"\n'
+)
 
 #: The `-json` arm sleeps before writing, so a step that returns without awaiting it leaves
 #: plan.json incomplete. It drops its stderr first: an inherited pipe would hold subprocess.run
 #: open until the sleep ends and hide an early return. `FAIL=both` reverses the timing, so the
 #: json error is written first.
 _STUBS = r"""
+terramate() {
+  while [ $# -gt 0 ] && [ "$1" != -- ] ; do shift ; done
+  [ $# -gt 0 ] || return 97 ; shift
+  printf 'terramate: Entering stack in /stacks/dns\nterramate: Executing command "%s"\n' "$*" >&2
+  "$@"
+}
 tofu() {
   case "$*" in
     *-no-color*) [ "$FAIL" = both ] && { sleep 1 ; printf 'text error\n' >&2 ; return 3 ; } ;
-      [ "$FAIL" = text ] && return 3 ; printf 'plan text\n' ;;
+      [ "$FAIL" = text ] && { printf 'text error\n' >&2 ; return 3 ; } ;
+      [ "$FAIL" = warn ] && printf 'Warning: bad \377 byte\n' >&2 ; printf 'plan text\n' ;;
     *-json*) [ "$FAIL" = both ] && { printf 'json error\n' >&2 ; return 4 ; } ;
+      [ "$FAIL" = warn ] && printf 'Warning: bad \377 byte\n' >&2 ;
       exec 2>/dev/null ; sleep 1 ; [ "$FAIL" = json ] && return 4 ;
       printf '{"format_version":"1.2"}\n' ;;
   esac
@@ -36,7 +56,7 @@ python3() { touch "$RUNNER_TEMP/classified" ; }
 """
 
 
-def _run(tmp_path, fail):
+def _run(tmp_path, fail, text=True):
     body = _STUBS + step_by("plan-cell", id="plan")["run"]
     runner_temp = tmp_path / "rt"
     runner_temp.mkdir()
@@ -46,8 +66,10 @@ def _run(tmp_path, fail):
         "RUNNER_TEMP": str(runner_temp),
         "GITHUB_ACTION_PATH": str(tmp_path),
         "FAIL": fail,
+        # A runner's locale; under C, grep reads every byte as text and `-a` goes unpinned.
+        "LC_ALL": "C.UTF-8",
     }
-    return run_step(tmp_path, body, env)
+    return run_step(tmp_path, body, env, text=text)
 
 
 def _read(tmp_path, name):
@@ -56,12 +78,26 @@ def _read(tmp_path, name):
 
 @bash_only
 def test_both_renders_succeed_and_plan_txt_is_the_text_render_whole(tmp_path):
-    """Mutation: swap `plan.txt` and `plan.json` in the two render lines."""
+    """Mutations: swap `plan.txt` and `plan.json` in the two render lines; `cat` the `.err` files
+    on success (terramate's routine lines reach stderr); drop `|| [ $? -eq 1 ]` (grep prints
+    nothing and fails the step)."""
     r = _run(tmp_path, "")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stderr == ""
     assert _read(tmp_path, "plan.txt") == _TEXT
     assert _read(tmp_path, "plan.json") == _JSON
     assert (tmp_path / "rt" / "classified").exists()
+
+
+@bash_only
+def test_a_clean_render_prints_a_warning_once_without_terramate_routine_lines(tmp_path):
+    """Both renders write the same warning, with a byte that is not UTF-8. Mutations: drop the
+    success-path `grep` (the warning never prints); drop either `-e` pattern (a routine line
+    prints); filter `show-json.err` too (the warning prints twice); drop `-a` (grep reports a
+    binary match instead of the line)."""
+    r = _run(tmp_path, "warn", text=False)
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stderr == b"Warning: bad \xff byte\n"
 
 
 @bash_only
@@ -75,9 +111,11 @@ def test_a_failing_json_render_fails_the_step(tmp_path):
 @bash_only
 def test_a_failing_text_render_fails_the_step_after_the_json_render_finished(tmp_path):
     """Mutations: replace both `wait` lines with one bare `wait` (exit 0); drop `|| rc=1` from the
-    first `wait` (the step exits at the text failure with plan.json still empty)."""
+    first `wait` (the step exits at the text failure with plan.json still empty); drop the `cat`
+    (the text error never prints)."""
     r = _run(tmp_path, "text")
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.stderr == _TM_TEXT + "text error\n" + _TM_JSON
     assert _read(tmp_path, "plan.json") == _JSON
     assert not (tmp_path / "rt" / "classified").exists()
 
@@ -88,7 +126,7 @@ def test_two_failing_renders_print_their_errors_text_first(tmp_path):
     `cat` -- neither error prints."""
     r = _run(tmp_path, "both")
     assert r.returncode != 0
-    assert r.stderr == "text error\njson error\n"
+    assert r.stderr == _TM_TEXT + "text error\n" + _TM_JSON + "json error\n"
 
 
 pcs = load_script("plan-cell-summary")

@@ -1132,6 +1132,11 @@ entry is deleted
 ([`../CONTRACT.md`](../CONTRACT.md) §Terramate safeguards, "Lock files and the
 provider cache").
 
+This failure also carries the cell's `OpenTofu's init failed after restoring
+provider cache entry <key>` annotation when the restore hit. Any failed init
+that OpenTofu itself reports carries its first error as an annotation, naming
+the cause: the backend, credentials or the configuration.
+
 1. Read the key from the cell's error annotation, `OpenTofu's init failed
    after restoring provider cache entry <key>`, or from the line
    `Cache restored from key: <key>` in its `Initialize the stack` step log.

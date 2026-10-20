@@ -1000,7 +1000,8 @@ same cell. So the two are bound to each other rather than trusted individually:
 the trusted `summary` job takes `sha256` over the whole `plan.txt` it downloaded
 and records the digest on each apply check, and the apply re-renders the stored
 plan with the command that wrote the file
-(`tofu -chdir=<stack> show -no-color stack.otplan`) and refuses any difference.
+(`terramate run --disable-safeguards=git-out-of-sync --no-recursive -C <stack>
+-- tofu show -no-color stack.otplan`) and refuses any difference.
 The digest covers the file, not the excerpt: the comment embeds a capped prefix
 (`CONTRACT.md` §Plan comment), so on a large plan a reviewer sees less than what
 is bound.
@@ -1018,13 +1019,18 @@ warning:
   arrives empty; accepting it would skip the comparison silently. The remedy is
   a re-pin, not a re-plan, and the cell says so.
 - A digest that disagrees with what the stored plan renders to fails the cell
-  with nothing applied. That comparison sits after `tofu init` — the render needs
-  the providers `init` installs — and before `tofu apply`.
+  with nothing applied. That comparison sits after `tofu init`, because the
+  render reads the data directory `init` wrote (`TF_DATA_DIR` from the stack's
+  `run.env`) and, where the plan file lacks schemas, the providers it installed;
+  and before `tofu apply`.
 
 `tofu show` of a stored plan renders the same bytes on any runner at one tofu
-version, and every measured way for the two to differ is one tofu itself
-refuses: it rejects a plan file from another version, and an apply under drifted
-providers fails on the dependency lock.
+version and one `run.env` (`CONTRACT.md` §Engine-owned tofu invocation says
+what the wrapper adds). Every other measured way for the two to differ is one
+tofu itself refuses: it rejects a plan file from another version, and an apply
+under drifted providers fails on the dependency lock. A `run.env` value that
+differs between the plan and the apply job changes the render and refuses the
+apply.
 
 What this binds is agreement, not honesty. A privileged author still authors
 both the plan text and the `.otplan`; what they cannot do is have the two

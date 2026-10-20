@@ -56,15 +56,21 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+      run: |
+        set -euo pipefail
+        set +e
+        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"
+        status=${PIPESTATUS[0]}
+        set -e
+        [ "$status" -eq 0 ] || python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" < "$RUNNER_TEMP/init.txt" || true
+        exit "$status"
 
     - name: Name the restored provider cache entry
       if: ${{ failure() && steps.init.outcome == 'failure' && steps.provider-cache.outputs.cache-hit == 'true' }}
       shell: bash
       env:
         KEY: ${{ steps.provider-cache.outputs.cache-primary-key }}
-      run: |
-        echo "::error::OpenTofu's init failed after restoring provider cache entry $KEY. If the log above says a cached package does not match the content of the downloaded package, delete the entry with gh cache delete $KEY --repo $GITHUB_REPOSITORY and re-run."
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" cache-entry "$KEY" < "$RUNNER_TEMP/init.txt"
 
     - name: Locate state
       id: locate-state

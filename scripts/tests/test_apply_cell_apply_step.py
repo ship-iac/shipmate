@@ -30,7 +30,7 @@ import hashlib
 import os
 
 import pytest
-from _loader import action_steps, action_yaml, bash_only, run_step, step_by
+from _loader import ACTIONS, action_steps, action_yaml, bash_only, run_step, step_by
 
 #: The four steps the apply half of the cell is split across, in the order the runner executes
 #: them, each as (action, step id). The three ahead of the apply each carry a blocked reason of
@@ -71,9 +71,10 @@ def test_apply_step_captures_pipestatus_and_exits_on_it():
     assert last_line in ('exit "$status"', "exit $status")
 
 
-#: The plan text the `tofu` stub renders, and its digest. Computed rather than hand-written: it is
-#: the fixture the step is fed, not a property under test. The hand-written constant is `_RENDER`
-#: in test_engine_owns_tofu_invocation.py, which pins the command that produces such text.
+#: The plan text the stubbed `tofu show` renders, and its digest. Computed rather than
+#: hand-written: it is the fixture the step is fed, not a property under test. The hand-written
+#: constant is `_SHOW_TEXT` in test_engine_owns_tofu_invocation.py, which pins the command that
+#: produces such text.
 _PLAN_TEXT = b"plan text\n"
 _PLAN_SHA256 = hashlib.sha256(_PLAN_TEXT).hexdigest()
 
@@ -87,15 +88,15 @@ def _run_step(
     tofu_body="printf 'plan text\\n'",
     plan_sha256=_PLAN_SHA256,
 ):
-    """Execute the real, unmodified step script from action.yml with `terramate`, `tofu` and `tee`
+    """Execute the real, unmodified step script from action.yml with `terramate` and `tee`
     replaced by bash functions. Bash resolves a function before searching PATH, so this needs no
     fake executables and no exec bits, which are fragile to set up portably on a Windows dev
     box.
 
-    The step reaches tofu two ways -- through `terramate run` for init and apply, and directly for
-    the plan-text re-render -- so both names are stubbed. Each `terramate` arm touches a marker
-    before running its body, because "init never ran" and "the apply never ran" are the orderings
-    the refusal tests turn on, and an exit code alone shows neither.
+    Every tofu call goes through `terramate run`, so the `terramate` stub has one arm per tofu
+    subcommand -- init, the plan-text re-render, apply -- and refuses any other call. The init and
+    apply arms touch a marker before running their body, because "init never ran" and "the apply
+    never ran" are the orderings the refusal tests turn on, and an exit code alone shows neither.
 
     `PLAN_SHA256`, `ENV` and `STACK` are exported for every caller: under `set -u` an unset
     one aborts the script before it reaches the behaviour under test, which would green a refusal
@@ -105,17 +106,21 @@ def _run_step(
     The script runs in its own empty directory, standing in for the consumer's checkout: the
     action must leave nothing at its root, and pytest's own cwd is the engine tree.
     """
-    # The four step bodies concatenated in runner order. They are separate steps so that each
-    # refusal carries its own blocked reason, but composite-action steps share one workspace and
-    # run in sequence, so one script under one set of stubs is what they amount to at runtime.
-    run = "\n".join(step_by(action, id=step_id)["run"] for action, step_id in _STEP_IDS)
-    # The step calls terramate twice: a plain `init` line, then the teed apply. `terramate_body`
-    # ends in `exit`, which dies in a subshell inside the pipeline but would kill this whole
-    # script on the init line, so the stub dispatches on the tofu subcommand.
+    # The four step bodies in runner order, each in its own subshell under `set -e`, as the runner
+    # runs each step in its own `bash -e`: a body's `exit` ends that step, and a non-zero one ends
+    # the sequence. Not `( ... ) || exit $?`, which would switch off errexit inside every body.
+    run = "set -e\n" + "".join(
+        f"(\n{step_by(action, id=step_id)['run']}\n)\n" for action, step_id in _STEP_IDS
+    )
+    # `terramate_body` ends in `exit`, which dies in a subshell inside the apply pipeline but would
+    # kill this whole script on a plain line, so the stub dispatches on the tofu subcommand.
     harness = (
-        f'terramate() {{ case "$*" in *"tofu apply"*) touch "$RUNNER_TEMP/apply-ran" ; '
-        f'{terramate_body} ;; *) touch "$RUNNER_TEMP/init-ran" ; {init_body} ;; esac ; }}\n'
-        f"tofu() {{ {tofu_body} ; }}\n"
+        'terramate() { case "$*" in\n'
+        f'  *"-- tofu init "*) touch "$RUNNER_TEMP/init-ran" ; {init_body} ;;\n'
+        f'  *"-- tofu show "*) {tofu_body} ;;\n'
+        f'  *"-- tofu apply "*) touch "$RUNNER_TEMP/apply-ran" ; {terramate_body} ;;\n'
+        '  *) echo "unstubbed terramate call: $*" >&2 ; return 98 ;;\n'
+        "esac ; }\n"
         f"tee() {{ {tee_body} ; }}\n"
     ) + run
     runner_temp = tmp_path / "rt"
@@ -128,6 +133,8 @@ def _run_step(
         "RUNNER_TEMP": str(runner_temp),
         "PLAN_SHA256": plan_sha256,
         "ENV": "dev-eu",
+        # The init body names `tofu-error` through it under `set -u`.
+        "GITHUB_ACTION_PATH": str(ACTIONS / "cell-init"),
     }
     return run_step(tmp_path, harness, env, cwd=checkout)
 
@@ -172,24 +179,20 @@ def test_failed_apply_and_failed_tee_still_fails_the_step(tmp_path):
 
 @bash_only
 def test_failed_init_fails_the_step_before_the_apply(tmp_path):
-    """init runs outside the pipeline, and errexit must stop the step there rather than fall
-    through to an apply of a plan against an uninitialized directory. On the runner errexit comes
-    from `shell: bash` (`bash -e`); in this harness, from digest-input's `set -euo pipefail`.
-    Mutation: append `|| true` to `cell-init`'s one-line init `run:`.
-
-    The stub uses `return 5`, not `exit 5`: the init line is a plain function call in the current
-    shell, so an `exit` body terminates the script whatever the init line says, and this test
-    could then not fail on that mutation. Returning leaves errexit to do the work."""
+    """A failed init must end the sequence rather than fall through to an apply of a plan
+    against an uninitialized directory. The init step exits on tofu's own status, taken from
+    `PIPESTATUS[0]` past its `tee`. Mutation: `cell-init`'s init `exit "$status"` becomes
+    `exit 0`."""
     r = _run_step(
         tmp_path,
         terramate_body="echo applied ; exit 0",
-        tee_body='echo TEE_RAN >&2 ; cat > "$1" ; exit 0',
+        tee_body='[ "${1##*/}" = apply.txt ] && echo TEE_RAN >&2 ; cat > "$1" ; exit 0',
         init_body="echo init boom >&2 ; return 5",
     )
     assert r.returncode == 5, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     # The apply is piped into tee, whose stub swallows that output into apply.txt, so
     # `"applied" not in r.stdout` holds even when the pipeline did run. tee's own stderr escapes
-    # the pipe, and tee runs if and only if the pipeline did.
+    # the pipe, and the stub marks only the apply's tee, not the init's.
     assert "TEE_RAN" not in r.stderr, f"apply ran despite a failed init: {r.stderr!r}"
 
 
@@ -250,15 +253,23 @@ def test_a_matching_render_reaches_the_apply(tmp_path):
 @bash_only
 def test_a_mismatched_render_refuses_and_never_applies(tmp_path):
     """The stored plan renders to text other than the reviewed one. Nothing may be applied: a
-    warning here would be this step's only fail-open check."""
+    warning here would be this step's only fail-open check. The refusal names the digest of the
+    render the stub produced, so it is the wrapped `tofu show` that was compared and refused.
+    Mutation: drop the stub's `tofu show` arm (the render then fails as an unstubbed call)."""
     r = _run_step(
         tmp_path,
         terramate_body="echo applied ; exit 0",
         tee_body='cat > "$1"',
-        tofu_body="printf 'a different plan\n'",
+        tofu_body="printf 'a different plan\\n'",
     )
-    assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    assert r.returncode == 1, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert not _ran(tmp_path, "apply-ran"), "applied a plan whose text was never reviewed"
+    actual = hashlib.sha256(b"a different plan\n").hexdigest()
+    assert (
+        "::error::apply aborted for dev-eu/stacks/app: the stored plan does not render to the plan"
+        f" text that was reviewed (expected {_PLAN_SHA256}, got {actual}). Nothing has been"
+        " applied. Re-plan this stack on its pull request and review the fresh plan."
+    ) in r.stdout.splitlines()
 
 
 @bash_only

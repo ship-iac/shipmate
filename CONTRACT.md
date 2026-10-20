@@ -2185,13 +2185,13 @@ the publish hold (below). In order, blank lines between the parts:
   head has none. At most ten, then `and N more cells have no plan summary`. The
   cells are `detect`'s planned `cells` the run read no summary for: a cell whose
   plan matrix job did not succeed and a cell whose summary download failed read
-  the same. When `tofu plan` failed with an `Error:` diagnostic, the cell's plan
-  job carries an `::error::` annotation with the first one, colour removed and
-  cut at 1,000 characters. For the autoplan that job is the linked check and
-  `shipmate doctor` harvests it. An on-demand `shipmate plan` keeps it on its
-  own run: `doctor` reads only the autoplan's cell checks and the App-mirrored
-  head check carries no annotations. A drift cell's failed plan annotates the
-  same way;
+  the same. When `tofu init` or `tofu plan` failed with an `Error:` diagnostic,
+  the cell's plan job carries an `::error::` annotation with the first one,
+  colour removed and cut at 1,000 characters. For the autoplan that job is the
+  linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
+  keeps it on its own run: `doctor` reads only the autoplan's cell checks and
+  the App-mirrored head check carries no annotations. A drift or apply cell's
+  failed init, and a drift cell's failed plan, annotate the same way;
 - the help hint ``Comment `shipmate help` for the available commands.``
 
 The held body only explains a red gate, so it degrades: a failed render,
@@ -2688,14 +2688,17 @@ computed there, never copied from the cell — and writes it as the record's
 embeds at most the first 60 000 characters of that file and may truncate further or
 show only the cell's line, so on a large plan the digest covers more than the comment
 shows; it binds the file, not the excerpt.
-`apply-cell` re-renders the stored plan with `tofu -chdir=<stack> show
+`apply-cell` re-renders the stored plan with `terramate run
+--disable-safeguards=git-out-of-sync --no-recursive -C <stack> -- tofu show
 -no-color stack.otplan`, the command that produced the file, and refuses unless
-the digest matches. The comparison runs after `init`, which the render needs for
-its providers, and
-before `tofu apply`, so a refusal applies nothing. An absent digest is refused
-too, at detect; the remedy is a re-plan. `tofu show` of a stored plan renders
-identically on any runner at one tofu version, and both `show` and `apply`
-refuse a plan file from another version, so the record carries no version field.
+the digest matches. The comparison runs after `init`, because the render reads
+the data directory `init` wrote (`TF_DATA_DIR` from the stack's `run.env`) and,
+where the plan file lacks schemas, the providers it installed; and before
+`tofu apply`, so a refusal applies nothing. An absent digest is refused too, at
+detect; the remedy is a re-plan. `tofu show` of a stored plan renders the
+same bytes on any runner at one tofu version and one `run.env` (§Engine-owned
+tofu invocation says what the wrapper adds); both `show` and `apply` refuse a
+plan file from another version, so the record carries no version field.
 
 The record's `cells` field binds each apply check to the rest of its plan run:
 the number of cells that run planned. The summary job publishes its apply checks
@@ -2976,21 +2979,21 @@ The engine names the `tofu` command every cell runs; a consumer repository
 supplies stacks, generated `.tf`, and Terramate metadata, never the command
 line. Cells call `terramate run --disable-safeguards=git-out-of-sync
 --no-recursive -C <stack> -- tofu …`, so Terramate contributes the stack working
-directory and the safeguard policy only:
+directory, its `run.env`, and the safeguard policy only:
 
 | Cell | Commands |
 |---|---|
-| `plan-cell`, `drift-cell` | `tofu init -input=false -reconfigure`; `tofu plan -input=false -lock=false -out=stack.otplan` |
-| `apply-cell` | `tofu init -input=false -reconfigure`; `tofu apply -input=false stack.otplan` |
+| `plan-cell` | `tofu init -input=false -reconfigure`; `tofu plan -input=false -lock=false -out=stack.otplan`; `tofu show -no-color stack.otplan`; `tofu show -json stack.otplan` |
+| `drift-cell` | `tofu init -input=false -reconfigure`; `tofu plan -input=false -lock=false -out=stack.otplan`; `tofu show -json stack.otplan` |
+| `apply-cell` | `tofu init -input=false -reconfigure`; `tofu show -no-color stack.otplan`; `tofu apply -input=false stack.otplan` |
 | `unlock-cell` | `tofu init -input=false -reconfigure`; `tofu plan -input=false -refresh=false`; `tofu force-unlock -force <id>` |
 
-Four `tofu show` invocations sit outside that wrapper, invoked directly:
-`plan-cell` renders both the reviewed plan text and its JSON form, `drift-cell`
-renders the JSON form, and `apply-cell` re-renders the plan text to compare
-against the recorded digest (§Apply-match fingerprint). Rendering a stored plan
-reads a file and touches neither state nor the stack graph, so it needs no
-wrapper. `plan-cell`'s text render and `apply-cell`'s stay byte-identical to
-each other; that equality is what the plan-text binding rests on.
+Every `tofu` call runs inside that wrapper, so the stack's `run.env` reaches it,
+and `plan-cell`'s text render and `apply-cell`'s are the same command, which the
+plan-text binding (§Apply-match fingerprint) rests on. Terramate 0.17.1 writes
+its own lines to stderr only (measured), so a render's stdout is tofu's alone,
+but the render depends on `run.env`: a value that differs between the plan and
+apply jobs changes the render and refuses the apply.
 
 A consumer repository therefore needs no `script` blocks and no
 `terramate.config.experiments = ["scripts"]`. `init` always passes
@@ -3096,7 +3099,11 @@ The cache is `TF_PLUGIN_CACHE_DIR`, set by `actions/setup`:
   downloads.
 - The lock verifies every cached package at every reader. A cached package that
   does not match fails `init` with `does not match the content of the downloaded
-  package` ([`docs/troubleshooting.md`](docs/troubleshooting.md)).
+  package` ([`docs/troubleshooting.md`](docs/troubleshooting.md)). When any init
+  error's title starts with `Failed to install provider` after a restore that
+  hit, the cell also annotates the restored entry's key and its
+  `gh cache delete` command; any other failed init carries only OpenTofu's first
+  error.
 
 A lock serves the cache only when, for each provider, it names the address
 OpenTofu resolves the stack's `source` to (`registry.opentofu.org/hashicorp/aws`
