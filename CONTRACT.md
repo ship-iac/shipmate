@@ -81,16 +81,18 @@ two source-derived tests, `test_apply_comment.py::test_wave_job_name_matches_the
 `test_apply_comment.py::test_every_env_level_job_is_named_for_its_level` (every
 `L<n>` name in `apply.yml` and `deploy.yml`), because a rename of either would degrade
 every link to the run URL silently — that fallback being the designed behaviour, no
-observable would fail — and leave every apply check pending.
+observable would fail. A rename that leaves no wave job matching also fails
+`apply-complete`, which retries the listing and then fails the run.
 
 `scripts/apply-complete` is the second reader: given the pre-flight snapshot of
 check ids a run may complete, it reads each snapshotted `apply / <stack> / <env>`
 check name back to its stack and environment (`apply-gate.parse_check_name`; an
 environment name holds no ` / `) and matches that cell's wave job in the same
 run's job-name listing with the same matcher, to decide which cells the run's
-own job conclusions actually earned. A rename of the apply-env-level job's
-`name:` would silently break this reader too — not degrading to a fallback URL,
-but leaving already-snapshotted checks pending forever.
+own job conclusions actually earned. When some cells still match, a rename of
+the apply-env-level job's `name:` would silently break this reader too — not
+degrading to a fallback URL, but leaving the unmatched cells' snapshotted checks
+pending forever.
 
 Job display names in the apply/deploy path nest: a called reusable workflow's
 job displays as `<caller job> / <callee job>`, applied at every level, and GHA
