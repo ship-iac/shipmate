@@ -1538,7 +1538,8 @@ newer than this run", or "plan run <id>, newer than this run (<id>), published
 apply checks on this head"). A newer run that takes the gate while the re-run
 is publishing still fails the re-run's
 `Create apply checks (pending / no-changes)` or `Create/refresh gate` step.
-That red is harmless: the newer run owns the gate.
+The gate stays correct, because the newer run owns it, but that red `summary`
+stays on the head until the head changes or the run is re-run again.
 
 ### Fork pull request refused
 
