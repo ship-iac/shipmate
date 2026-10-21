@@ -8,21 +8,21 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
-## Unreleased
+## [0.51.0] — 2026-10-21
 
 ### Added
 
-- `scripts/repin --write-fence` writes the release's fence over a differing `shipmate.yml`, keeping its trigger branch.
-- `command_hints: true` in `.github/shipmate-config.yml` ends each plan comment with a changed cell with a folded `shipmate commands` section.
+- **`python <engine>/scripts/repin <consumer> <tag> --write-fence` writes the release's fence over a differing `shipmate.yml`, after printing the diff of what it replaces.** It keeps the file's push branch and replaces every other differing line, a changed `runs_on` or secret mapping included. When `shipmate.yml` is absent, or differs and its push trigger holds anything but one plain branch, it re-pins every workflow file but does not overwrite `shipmate.yml`, and exits 2. `scripts/onboard`'s `differs beyond its pin` line names the flag.
+- **`command_hints: true` in `.github/shipmate-config.yml` ends a plan comment with a folded `shipmate commands` section.** Only on a plan comment whose gate is not held, with a changed cell, on a pull request that is not a draft, and when the section fits the comment budget without shrinking a cell. Off by default; read from the default branch, so re-pin to `v0.51.0` before adding it: an older engine refuses the key.
 
 ### Changed
 
-- The fence's `plan` job no longer cancels a run in flight when the pull request is marked ready for review; the ready run queues behind it. Re-pin `shipmate.yml` with `scripts/repin <consumer> vX.Y.Z --write-fence`, which takes the new fence.
+- **The fence's `plan` job no longer cancels a run in flight when the pull request is marked ready for review; the ready run queues behind it.** Re-pin `shipmate.yml` with `python <engine>/scripts/repin <consumer> v0.51.0 --write-fence` after reading the diff it prints, or reconcile the two lines by hand (the `cancel-in-progress` line and the comment above it).
 
 ### Fixed
 
-- A plan's `detect` that fails on unformatted HCL or stale generated code annotates each file with its remedy, and the held gate and comment name the files and the command to run instead of "change detection did not succeed".
-- Cells run terramate with `--quiet`, so its `Entering stack` and `Executing command` lines no longer open the apply result comment's log or the job log.
+- **A plan's `detect` names why its formatting and codegen checks failed instead of "change detection did not succeed".** Unformatted HCL and stale generated code annotate up to nine files with their remedy (`run terramate fmt`, `run terramate generate`); the held comment names the first failing check's files (fmt's first), up to ten, and the command to run, and the gate as much of that as its 140 characters hold. An evaluation error names `terramate generate`'s first error; a tool that exits otherwise names its output, and one that does not start names the OS error.
+- **Every cell's `terramate run`, its `run.env` check included, runs with `--quiet`, so terramate's `Entering stack` and `Executing command` lines leave the job logs and the apply result comment's log.**
 
 ## [0.50.0] — 2026-10-21
 
