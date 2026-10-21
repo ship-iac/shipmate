@@ -1941,13 +1941,13 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 
 - Consuming repositories and workflows pin every shipmate reusable workflow by
   commit SHA, never by a tag or branch name (for example,
-  `uses: <owner>/shipmate/.github/workflows/plan.yml@<full-commit-sha>`, not
+  `uses: ship-iac/shipmate/.github/workflows/plan.yml@<full-commit-sha>`, not
   `@v1` or `@main`). This guarantees that a workflow's behavior cannot change
   without an explicit, reviewed bump of the pinned SHA in the consuming
   repository.
 - A pinned SHA may carry a trailing `# vX.Y.Z` comment naming the release
   that SHA belongs to
-  (`uses: <owner>/shipmate/.github/workflows/plan.yml@<sha> # v0.1.0`).
+  (`uses: ship-iac/shipmate/.github/workflows/plan.yml@<sha> # v0.1.0`).
   The comment is for human readers and for Dependabot's own bookkeeping; the ref
   that resolves is always the SHA. shipmate applies the same convention to the
   third-party actions it pins internally.
@@ -1969,7 +1969,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   of record for a release is named in that release's section of `CHANGELOG.md`.
 - A release tag may be annotated, so `git/ref/tags/<tag>` can return the tag object's SHA,
   which a workflow cannot check out. Resolve a tag with
-  `gh api repos/<owner>/shipmate/commits/<tag> --jq .sha`, or locally
+  `gh api repos/ship-iac/shipmate/commits/<tag> --jq .sha`, or locally
   `git rev-parse <tag>^{commit}`; both resolve an annotated and a lightweight tag alike.
 - shipmate publishes a GitHub Release per release SHA. `shipmate doctor` reports a pin that
   differs from the latest release; a pin at an untagged commit has no release to compare

@@ -1854,8 +1854,8 @@ def test_an_unrecognised_ruleset_post_failure_propagates(monkeypatch):
     assert "HTTP 500" in str(e.value)
 
 
-#: Owner-agnostic, like the docs guard's selector: the pages publish `<owner>/shipmate/...`
-#: as well as this organization's own spelling.
+#: Owner-agnostic, like the docs guard's selector: one keyed on one owner silently stops
+#: checking a fence that spells another.
 _CALL_PATH = "/shipmate/.github/workflows/"
 
 _EXPECTED_CALLEES = {

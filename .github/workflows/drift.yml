@@ -35,11 +35,11 @@ jobs:
           set -euo pipefail
           # An empty value fails the branch gate, which skips every sweep job green.
           if ! branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch); then
-            echo "::error::Could not read the default branch of $GITHUB_REPOSITORY; gh's error is above. The sweep needs it to gate its jobs."
+            echo "::error::Could not read the default branch of $GITHUB_REPOSITORY; gh's error is above. The sweep needs it to gate its jobs. Re-run the sweep."
             exit 1
           fi
           if [ -z "$branch" ]; then
-            echo "::error::The API returned an empty default branch for $GITHUB_REPOSITORY. The sweep needs it to gate its jobs."
+            echo "::error::The API returned an empty default branch for $GITHUB_REPOSITORY. The sweep needs it to gate its jobs. Re-run the sweep."
             exit 1
           fi
           echo "default_branch=$branch" >> "$GITHUB_OUTPUT"

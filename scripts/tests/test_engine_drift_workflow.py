@@ -213,12 +213,12 @@ _DEFAULT_BRANCH_STEP = {
         "# An empty value fails the branch gate, which skips every sweep job green.\n"
         'if ! branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch); then\n'
         "  echo \"::error::Could not read the default branch of $GITHUB_REPOSITORY; gh's error is"
-        ' above. The sweep needs it to gate its jobs."\n'
+        ' above. The sweep needs it to gate its jobs. Re-run the sweep."\n'
         "  exit 1\n"
         "fi\n"
         'if [ -z "$branch" ]; then\n'
         '  echo "::error::The API returned an empty default branch for $GITHUB_REPOSITORY. The'
-        ' sweep needs it to gate its jobs."\n'
+        ' sweep needs it to gate its jobs. Re-run the sweep."\n'
         "  exit 1\n"
         "fi\n"
         'echo "default_branch=$branch" >> "$GITHUB_OUTPUT"\n'
@@ -264,14 +264,14 @@ def test_the_default_branch_step_is_exactly_this():
             ),
             (
                 "::error::Could not read the default branch of acme/demo; gh's error is above. The"
-                " sweep needs it to gate its jobs."
+                " sweep needs it to gate its jobs. Re-run the sweep."
             ),
         ),
         (
             "exit 0\n",
             (
                 "::error::The API returned an empty default branch for acme/demo. The sweep"
-                " needs it to gate its jobs."
+                " needs it to gate its jobs. Re-run the sweep."
             ),
         ),
     ],

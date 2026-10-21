@@ -710,7 +710,7 @@ Settings → Actions → General:
   verified-creator actions not, and these patterns:
 
   ```
-  <owner>/shipmate/*@*
+  ship-iac/shipmate/*@*
   opentofu/setup-opentofu@*
   aws-actions/configure-aws-credentials@*
   ```
@@ -736,20 +736,20 @@ Settings → Actions → General:
   list was observed empty until the second call, so a shipmate run in between
   stops at "Set up job". `scripts/onboard` prints both calls in that order.
 
-  `<owner>/shipmate/*@*` covers every shape the engine is referenced in.
-  Consumers reference only `<owner>/shipmate/.github/workflows/*.yml@<sha>`; the
+  `ship-iac/shipmate/*@*` covers every shape the engine is referenced in.
+  Consumers reference only `ship-iac/shipmate/.github/workflows/*.yml@<sha>`; the
   engine runs its actions through `$/`, and `manifest-load.yml` is its
   one `@main` self-reference. The pattern is stated in that width because GitHub
   does not document whether a pattern reaches an action stored in a
   *subdirectory*. Measured under that single pattern: a subdirectory action, a
   reusable-workflow call
-  (`<owner>/shipmate/.github/workflows/unlock.yml@<sha>`), and the engine
+  (`ship-iac/shipmate/.github/workflows/unlock.yml@<sha>`), and the engine
   repository referencing its own actions at `@main`, all resolved.
 
   The cost is that this list is a second place pins live: a third-party action
   the engine adds has to be added here too, in every repository, or the next run
   stops at "Set up job" — loudly, naming the action it refused. Engine actions
-  are `$/` references, which pass with the `<owner>/shipmate/*@*` entry the
+  are `$/` references, which pass with the `ship-iac/shipmate/*@*` entry the
   reusable workflows already need, measured.
 
   This is supply-chain hygiene; it does not constrain `run:` steps.

@@ -533,7 +533,7 @@ jobs:
     with:
       runs_on: *runner
   deploy:
-    # Display name: `shipmate / deploy / L<n> / <env> / <stack>`.
+    # Display only: the job path reads `shipmate / deploy / L<n> / <env> / <stack>`.
     name: deploy
     if: github.event_name == 'push'
     concurrency:
