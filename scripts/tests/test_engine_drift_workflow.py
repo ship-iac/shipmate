@@ -8,11 +8,17 @@ the question the gate must not depend on. And the `issues` job's `if:` skips an 
 the App key is never minted for a run with no cell to report.
 """
 
+import os
+
+import pytest
 import yaml
 from _loader import (
     ENGINE_ENVIRONMENT,
     WORKFLOWS,
+    bash_only,
+    github_outputs,
     local_action,
+    run_step,
     step_using,
     workflow_jobs,
     workflow_yaml,
@@ -194,3 +200,93 @@ def test_the_cell_passes_this_whole_with_block():
         "stack": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",
     }
+
+
+#: The default-branch step, hand-written. Reading the branch inline into the output line writes
+#: `default_branch=` when `gh` fails or answers empty, and every gated job then skips green.
+_DEFAULT_BRANCH_STEP = {
+    "id": "default_branch",
+    "shell": "bash",
+    "env": {"GH_TOKEN": "${{ github.token }}"},
+    "run": (
+        "set -euo pipefail\n"
+        "# An empty value fails the branch gate, which skips every sweep job green.\n"
+        'if ! branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch); then\n'
+        "  echo \"::error::Could not read the default branch of $GITHUB_REPOSITORY; gh's error is"
+        ' above. The sweep needs it to gate its jobs."\n'
+        "  exit 1\n"
+        "fi\n"
+        'if [ -z "$branch" ]; then\n'
+        '  echo "::error::The API returned an empty default branch for $GITHUB_REPOSITORY. The'
+        ' sweep needs it to gate its jobs."\n'
+        "  exit 1\n"
+        "fi\n"
+        'echo "default_branch=$branch" >> "$GITHUB_OUTPUT"\n'
+    ),
+}
+
+
+def _default_branch_step():
+    return workflow_jobs(WF)["detect"]["steps"][0]
+
+
+def _run_default_branch_step(tmp_path, stub):
+    """Run the shipped step with a `gh` whose body is `stub`; returns (process, output file)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "gh").write_text("#!/bin/bash\n" + stub, encoding="utf-8", newline="\n")
+    (bin_dir / "gh").chmod(0o755)
+    out = tmp_path / "out"
+    out.write_text("")
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+        "GITHUB_REPOSITORY": "acme/demo",
+        "GITHUB_OUTPUT": str(out),
+    }
+    return run_step(tmp_path, _default_branch_step()["run"], env), out
+
+
+def test_the_default_branch_step_is_exactly_this():
+    """Mutation: restore `echo "default_branch=$(gh api ...)" >> "$GITHUB_OUTPUT"`."""
+    assert _default_branch_step() == _DEFAULT_BRANCH_STEP
+
+
+@bash_only
+@pytest.mark.parametrize(
+    ("stub", "error"),
+    [
+        (
+            (
+                'echo \'{"message":"Not Found","status":"404"}\'\n'
+                'echo "gh: Not Found (HTTP 404)" >&2\n'
+                "exit 1\n"
+            ),
+            (
+                "::error::Could not read the default branch of acme/demo; gh's error is above. The"
+                " sweep needs it to gate its jobs."
+            ),
+        ),
+        (
+            "exit 0\n",
+            (
+                "::error::The API returned an empty default branch for acme/demo. The sweep"
+                " needs it to gate its jobs."
+            ),
+        ),
+    ],
+    ids=["gh-fails", "gh-answers-empty"],
+)
+def test_the_default_branch_step_refuses_a_failed_or_empty_read(tmp_path, stub, error):
+    """The real `gh` prints an HTTP error body on stdout and exits 1. Mutation: restore the
+    inline `echo "default_branch=$(gh api ...)"` form, which exits 0 and writes
+    `default_branch=`."""
+    proc, out = _run_default_branch_step(tmp_path, stub)
+    assert (proc.returncode, proc.stdout.strip(), out.read_text()) == (1, error, "")
+
+
+@bash_only
+def test_the_default_branch_step_writes_the_branch(tmp_path):
+    """Mutation: write `default_branch=$GITHUB_REPOSITORY`."""
+    proc, out = _run_default_branch_step(tmp_path, "echo trunk\n")
+    assert (proc.returncode, github_outputs(out)) == (0, {"default_branch": "trunk"})

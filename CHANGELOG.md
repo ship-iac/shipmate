@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
+- **A drift sweep fails its `detect` job when it cannot read the default branch or reads it empty, instead of skipping every sweep job green.**
 - **Plan, apply and drift cells run `tofu show` inside `terramate run`, so a `run.env` `TF_DATA_DIR` reaches it.**
 - **A failed `tofu init` is annotated with OpenTofu's first error; the `gh cache delete` remedy appears only for a provider install failure after a cache hit.**
 - **A plan run whose `summary` finds that a newer plan run holds the gate ends green at its hold step with the newer-run refusal as a notice, so re-running a cancelled autoplan clears its checks; a newer run that takes the gate while the re-run publishes can still fail it.**

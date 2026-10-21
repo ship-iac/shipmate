@@ -33,7 +33,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          echo "default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" >> "$GITHUB_OUTPUT"
+          # An empty value fails the branch gate, which skips every sweep job green.
+          if ! branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch); then
+            echo "::error::Could not read the default branch of $GITHUB_REPOSITORY; gh's error is above. The sweep needs it to gate its jobs."
+            exit 1
+          fi
+          if [ -z "$branch" ]; then
+            echo "::error::The API returned an empty default branch for $GITHUB_REPOSITORY. The sweep needs it to gate its jobs."
+            exit 1
+          fi
+          echo "default_branch=$branch" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: $/actions/setup
         with: { tofu: "false" }
