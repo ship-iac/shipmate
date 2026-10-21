@@ -704,7 +704,7 @@ def test_a_failed_dispatch_posts_the_shared_failure_reply(tmp_path):
         "### shipmate apply dev-eu\n\n"
         "🔴 failed: the command was authorized, but dispatching its workflow failed, so no run "
         "started. The error is in this run's log.\n\n"
-        f"[run]({_RUN_URL}). Comment `shipmate help` for the available commands."
+        f"[comment run]({_RUN_URL}). Comment `shipmate help` for the available commands."
     )
 
 
@@ -768,7 +768,7 @@ def test_a_started_run_gets_a_reply_linking_it(tmp_path, verb, environment, head
         f"the reply must be posted with the workflow token, gh saw: {argv!r}"
     )
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
-        f"{header}\n\n⚪ started [the {verb} run]({_STARTED_URL})\n\n[run]({_RUN_URL})"
+        f"{header}\n\n⚪ started [the {verb} run]({_STARTED_URL})\n\n[comment run]({_RUN_URL})"
     )
 
 
@@ -800,7 +800,7 @@ def test_a_started_run_without_a_usable_id_gets_a_reply_without_a_link(tmp_path,
     assert (tmp_path / "body.txt").read_text(encoding="utf-8") == (
         "### shipmate apply dev-eu\n\n"
         "⚪ started the apply run; it is listed in this repository's Actions tab\n\n"
-        f"[run]({_RUN_URL})"
+        f"[comment run]({_RUN_URL})"
     )
     assert (tmp_path / "run_id.txt").read_text(encoding="utf-8") == passed_id
 

@@ -880,7 +880,7 @@ def test_authorize_step_receives_the_resolved_ungated_envs():
 
 
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
-_FOOTER = f"[run]({_RUN_URL}). Comment `shipmate help` for the available commands."
+_FOOTER = f"[comment run]({_RUN_URL}). Comment `shipmate help` for the available commands."
 _PARSED_VERB = "${{ steps.parse.outputs.verb }}"
 _PARSED_ENV = "${{ steps.parse.outputs.env }}"
 
@@ -1190,7 +1190,7 @@ def test_the_exemption_report_claims_permission_never_completion(tmp_path):
         "⚪ dev-eu: ungated, permitted to apply without an approving review "
         "(`gated: false` in `.github/shipmate-config.yml`). The apply result comment shows what "
         "applied.\n\n"
-        f"[run]({_RUN_URL})"
+        f"[comment run]({_RUN_URL})"
     )
 
 

@@ -1180,9 +1180,9 @@ comment-handling run that posted the reply, never the run a dispatch started.
 A refusal or a failure asks the commenter to act, so its
 footer carries the help hint:
 
-``[run](<run url>). Comment `shipmate help` for the available commands.``
+``[comment run](<run url>). Comment `shipmate help` for the available commands.``
 
-A notice asks nothing, so its footer is `[run](<run url>)` alone.
+A notice asks nothing, so its footer is `[comment run](<run url>)` alone.
 
 The verdict line is `🔴 refused: <reason>` when the engine decided not to run
 the command (grammar, authorization, an unresolvable `.github/shipmate-config.yml`),
@@ -1237,7 +1237,7 @@ markers below, `<!-- shipmate:help -->` is not an upsert key — nothing reads
 it back: `shipmate help` posts a fresh comment every time, and the marker
 only labels the output as shipmate's own. The list sits under the header
 `### shipmate help`, carries no verdict line (it examines nothing), and ends with
-`[run](<run url>)` alone, without the help hint.
+`[comment run](<run url>)` alone, without the help hint.
 
 `shipmate doctor` posts a consolidated, sticky report — one comment per pull
 request, identified by the HTML marker `<!-- shipmate:doctor -->` (distinct

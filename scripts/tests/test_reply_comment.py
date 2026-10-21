@@ -11,7 +11,7 @@ from _shipmate import run_annotated
 rc = load_script("reply-comment")
 
 _RUN_URL = "https://github.com/org/repo/actions/runs/7777"
-_FOOTER = f"[run]({_RUN_URL}). Comment `shipmate help` for the available commands."
+_FOOTER = f"[comment run]({_RUN_URL}). Comment `shipmate help` for the available commands."
 
 
 def _main(**reply):
@@ -52,7 +52,7 @@ def test_a_failure_says_failed_not_refused():
 def test_a_notice_carries_the_white_circle_and_no_hint():
     """Mutations: give `notice` the 🔴 circle; pass `hint=True` for every outcome."""
     assert rc.body("apply", "dev-eu", "notice", "dev-eu: ungated", _RUN_URL) == (
-        f"### shipmate apply dev-eu\n\n⚪ dev-eu: ungated\n\n[run]({_RUN_URL})"
+        f"### shipmate apply dev-eu\n\n⚪ dev-eu: ungated\n\n[comment run]({_RUN_URL})"
     )
 
 
@@ -208,7 +208,7 @@ def test_a_started_run_without_a_run_id_names_no_link(monkeypatch, run_id):
 def test_a_started_run_carries_the_white_circle_and_no_hint():
     """Mutation: give `started` the help hint (`hint=outcome != "notice"`)."""
     assert rc.body("plan", "", "started", "started x", _RUN_URL) == (
-        f"### shipmate plan\n\n⚪ started x\n\n[run]({_RUN_URL})"
+        f"### shipmate plan\n\n⚪ started x\n\n[comment run]({_RUN_URL})"
     )
 
 
@@ -221,7 +221,7 @@ def test_main_posts_the_started_text_and_ignores_the_reply_text(monkeypatch):
     code, calls = _post(monkeypatch, outcome="started")
     body = (
         f"### shipmate apply dev-eu\n\n⚪ started [the apply run]({_STARTED_RUN})"
-        f"\n\n[run]({_RUN_URL})"
+        f"\n\n[comment run]({_RUN_URL})"
     )
     assert code == 0
     assert calls == [

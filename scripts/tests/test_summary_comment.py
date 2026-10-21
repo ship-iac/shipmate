@@ -186,7 +186,7 @@ def test_check_url_ignores_an_unprefixed_check_and_falls_back_to_the_run_url():
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 HINT = "Comment `shipmate help` for the available commands."
-FOOT = f"[run](https://gh/run/1). {HINT}"
+FOOT = f"[comment run](https://gh/run/1). {HINT}"
 #: `provenance(SHA)` under `_run_context`, hand-written.
 AT = (
     "at [0123456](https://gh/o/r/commit/0123456789abcdef0123456789abcdef01234567) "
@@ -287,7 +287,7 @@ def test_footer_hint_shows_under_every_circle_but_green():
 
 def test_footer_with_and_without_the_help_hint():
     assert sc.footer(RUN_URL) == FOOT
-    assert sc.footer(RUN_URL, hint=False) == "[run](https://gh/run/1)"
+    assert sc.footer(RUN_URL, hint=False) == "[comment run](https://gh/run/1)"
 
 
 def test_verdict_of_zero_cells_is_nothing_planned():

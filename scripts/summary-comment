@@ -256,10 +256,10 @@ def provenance(sha, run_url):
 
 
 def footer(run_url, hint=True):
-    """`[run](<run_url>)`, then `. ` and `FOOTER_HINT` when `hint`: the footer of a comment whose
-    verdict carries no `provenance`. `hint` is off for the help reply, which is the command list,
-    and for a notice, which asks nothing of the reader."""
-    return f"[run]({run_url}). {FOOTER_HINT}" if hint else f"[run]({run_url})"
+    """`[comment run](<run_url>)`, then `. ` and `FOOTER_HINT` when `hint`: the footer of a
+    comment whose verdict carries no `provenance`. `hint` is off for the help reply, which is the
+    command list, and for a notice, which asks nothing of the reader."""
+    return f"[comment run]({run_url}). {FOOTER_HINT}" if hint else f"[comment run]({run_url})"
 
 
 def footer_hint(circle):
