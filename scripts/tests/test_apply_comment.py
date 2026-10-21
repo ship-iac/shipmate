@@ -154,7 +154,7 @@ def test_an_import_and_forget_capture_renders_its_whole_fold_out(tmp_path):
     the hint, red."""
     rows = _capture(tmp_path, "import-forget.apply.txt")
     assert ac.build_comment(rows, [], RUN_URL, [], [], "dev-eu", "success", head_sha=SHA) == (
-        f"### shipmate apply dev-eu\n\n🟢 1 applied {AT}\n\n#### dev-eu: 1 cells, 1 applied\n\n"
+        f"### shipmate apply dev-eu\n\n🟢 1 applied {AT}\n\n#### dev-eu: 1 cell, 1 applied\n\n"
         "<details><summary>🟢 stacks/app: +1 ~0 -0, 1 import, 1 forget "
         '<a href="https://gh/run/1">logs</a></summary>\n\n```\n'
         "random_id.c: Importing... [id=p-9hUg]\n"
@@ -195,7 +195,7 @@ def test_a_blocked_reason_renders_escaped_on_its_bare_line():
     Mutation: drop `_md_escape` on the reason in `_state` -- the raw `<a href>` renders, red."""
     row = _row(status="blocked", reason='<a href="https://evil">x</a>', apply_text=None)
     assert _comment([row]) == (
-        f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n#### dev-eu: 1 cells, 1 blocked\n\n"
+        f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n#### dev-eu: 1 cell, 1 blocked\n\n"
         '⚪ stacks/app: blocked: &lt;a href="https://evil"&gt;x&lt;/a&gt; '
         '<a href="https://gh/run/1">logs</a>\n\n' + HINT
     )
@@ -209,7 +209,7 @@ def test_a_stack_name_mentions_nobody_in_the_apply_comment():
     Mutation: the same in `_lock_cell` -- the lock cell pings."""
     row = _row(stack="@acme/ops/y", status="blocked", reason="r", apply_text=None)
     assert _comment([row]) == (
-        f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n#### dev-eu: 1 cells, 1 blocked\n\n"
+        f"### shipmate apply dev-eu\n\n⚪ 1 blocked {AT}\n\n#### dev-eu: 1 cell, 1 blocked\n\n"
         '⚪ @<!-- -->acme/ops/y: blocked: r <a href="https://gh/run/1">logs</a>\n\n' + HINT
     )
     rows = [_row(stack="@acme/ops/y", status="unrecorded")]
@@ -315,9 +315,9 @@ def test_apply_environments_follow_the_env_order():
     ]
     assert _comment(rows, env="", order=["staging", "live"]) == (
         f"### shipmate apply\n\n🟢 2 applied {AT}\n\n"
-        "#### staging: 1 cells, 1 applied\n\n"
+        "#### staging: 1 cell, 1 applied\n\n"
         '🟢 stacks/app: applied <a href="https://gh/run/1">logs</a>\n\n'
-        "#### live: 1 cells, 1 applied\n\n"
+        "#### live: 1 cell, 1 applied\n\n"
         '🟢 stacks/app: applied <a href="https://gh/run/1">logs</a>'
     )
 
@@ -766,7 +766,7 @@ def test_apply_headings_are_reserved_before_a_fold_out_is_sized():
     body = _comment(rows)
     assert len(body) <= ac.sc.SIZE_BUDGET
     assert body.endswith(
-        '#### e299: 1 cells, 1 applied\n\n🟢 s: applied <a href="https://gh/run/1">logs</a>'
+        '#### e299: 1 cell, 1 applied\n\n🟢 s: applied <a href="https://gh/run/1">logs</a>'
     )
 
 
@@ -1769,7 +1769,7 @@ def test_main_folds_checks_jsonl_into_the_rendered_comment(monkeypatch, tmp_path
     _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟠 1 not recorded {_MAIN_AT}\n\n"
-        "#### dev-eu: 1 cells, 1 not recorded\n\n"
+        "#### dev-eu: 1 cell, 1 not recorded\n\n"
         f'🟠 stacks/app: applied, not recorded <a href="{_MAIN_RUN}">logs</a>\n\n'
         "not recorded: **stacks/app (dev-eu)**. The apply succeeded but its apply check is not "
         "recorded as complete (it failed, was cancelled, or a newer plan re-created it), so "
@@ -1790,7 +1790,7 @@ def test_main_promotes_a_missing_artifact_whose_check_is_done(monkeypatch, tmp_p
     _main_env(monkeypatch, tmp_path, cells, waves, str(checks))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
-        "#### dev-eu: 1 cells, 1 applied\n\n"
+        "#### dev-eu: 1 cell, 1 applied\n\n"
         f'🟢 stacks/app: applied <a href="{_MAIN_RUN}">logs</a>'
     )
 
@@ -1806,7 +1806,7 @@ def test_main_without_checks_file_renders_the_artifact_only_comment(monkeypatch,
     _main_env(monkeypatch, tmp_path, cells, waves, str(tmp_path / "absent.jsonl"))
     assert _main_body(tmp_path) == (
         f"### shipmate apply dev-eu\n\n🟢 1 applied {_MAIN_AT}\n\n"
-        "#### dev-eu: 1 cells, 1 applied\n\n"
+        "#### dev-eu: 1 cell, 1 applied\n\n"
         f'🟢 stacks/app: applied <a href="{_MAIN_RUN}">logs</a>'
     )
 
@@ -1855,8 +1855,8 @@ def test_main_orders_environments_by_the_env_order_input(monkeypatch, tmp_path):
     monkeypatch.setenv("SHIPMATE_ENV_ORDER", '["staging", "live"]')
     body = _main_body(tmp_path)
     assert [line for line in body.splitlines() if line.startswith("#### ")] == [
-        "#### staging: 1 cells, 1 not attempted",
-        "#### live: 1 cells, 1 not attempted",
+        "#### staging: 1 cell, 1 not attempted",
+        "#### live: 1 cell, 1 not attempted",
     ]
 
 
@@ -1879,7 +1879,7 @@ def _all_envs_main_env(monkeypatch, tmp_path, row_env, ungated, no_review):
 
 def _all_envs_body(row_env):
     return (
-        f"### shipmate apply\n\n🟢 1 applied {_MAIN_AT}\n\n#### {row_env}: 1 cells, 1 applied\n\n"
+        f"### shipmate apply\n\n🟢 1 applied {_MAIN_AT}\n\n#### {row_env}: 1 cell, 1 applied\n\n"
         f'🟢 stacks/app: applied <a href="{_MAIN_RUN}">logs</a>\n\n'
         "🟡 sbx: left pending (explicit), comment `shipmate apply sbx`\n"
         "⚪ stg: skipped, ordered after an environment not fully applying this run\n"
@@ -1952,7 +1952,7 @@ def test_a_partly_applied_run_with_waiting_cells_is_never_green():
     Mutation: drop `circles.append("⚪")` -- 🟢, red."""
     assert _comment([_row(apply_text=None)], waiting=[_PLATFORM_WAITS]) == (
         f"### shipmate apply dev-eu\n\n⚪ 1 applied, 1 waiting {AT}\n\n"
-        "#### dev-eu: 1 cells, 1 applied\n\n"
+        "#### dev-eu: 1 cell, 1 applied\n\n"
         '🟢 stacks/app: applied <a href="https://gh/run/1">logs</a>\n\n'
         "⚪ stacks/platform / dev-eu: waits on stacks/dns / dev-us, not applied yet; apply it "
         "first with `shipmate apply dev-us`\n\n" + HINT
@@ -2119,7 +2119,7 @@ def test_a_failed_cell_with_no_detect_refusal_renders_no_fence():
     rows = [_row(status="failed", stack="app", environment="dev-eu", apply_text="")]
     body = ac.build_comment(rows, [], RUN_URL, [], [], "dev-eu", "failure", head_sha=SHA)
     assert body == (
-        f"### shipmate apply dev-eu\n\n🔴 1 failed {AT}\n\n#### dev-eu: 1 cells, 1 failed\n\n"
+        f"### shipmate apply dev-eu\n\n🔴 1 failed {AT}\n\n#### dev-eu: 1 cell, 1 failed\n\n"
         f'<details><summary>🔴 app: failed <a href="{RUN_URL}">logs</a></summary>\n\n'
         "```\n\n```\n</details>\n\n" + HINT
     )

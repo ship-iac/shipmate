@@ -2133,7 +2133,8 @@ def warnings(ctx):
 def warnings_and_count(ctx):
     """`(findings, n)`: every probe's findings, in `PROBES` order, and `n`, the WARNING-level
     findings of probes not marked `settings`. A probe that raises becomes one degrade line at
-    its `degrade_level` (WARNING by default), counted whatever the probe.
+    its `degrade_level` (WARNING by default), counted like the probe's own warnings: not for a
+    `settings` probe.
 
     A runner whose python3 lacks PyYAML gets that refusal once, as a NOTICE, in place of every
     probe marked `parses_yaml`: each would otherwise degrade on its own, or report the
@@ -2158,7 +2159,8 @@ def warnings_and_count(ctx):
         except (Exception, SystemExit) as e:  # noqa: BLE001
             ec.log_failure(e, f"{_probe_label(probe)} probe")
             level = getattr(probe, "degrade_level", WARNING)
-            n += level == WARNING
+            if not getattr(probe, "settings", False):
+                n += level == WARNING
             out.append(
                 (
                     level,

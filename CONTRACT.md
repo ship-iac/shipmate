@@ -2190,7 +2190,9 @@ the publish hold (below). In order, blank lines between the parts:
   the cell's line is followed by the first one (from `init` or `plan`), colour
   removed and cut at 1,000 characters, in a plain backtick fence longer than any
   backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it;
-  a cell whose artifact did not arrive shows its line alone. The cell's plan job
+  a cell whose artifact did not arrive, or whose failure printed no `Error:`
+diagnostic (its artifact then carries an empty error, so a re-run's upload
+replaces an earlier attempt's), shows its line alone. The cell's plan job
   also carries an `::error::` annotation with it. For the autoplan that job is the
   linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
   keeps it on its own run: `doctor` reads only the autoplan's cell checks and
@@ -2256,8 +2258,9 @@ footer and no help hint, whether or not `doctor` warned: both verdicts are
 normal results and the verdict links the run. The held body above ends with the
 hint. `doctor` records its decision once, as its `warned` output, which the
 post-or-skip rule reads, and its `warnings` output, the count the doctor line
-shows: both leave out the repository-settings probes' warnings, and count a
-probe that could not run when its note is a warning. When `doctor` fails, the
+shows: both leave out the repository-settings probes' warnings, a settings
+probe that could not run included, and count any other probe that could not
+run when its note is a warning. When `doctor` fails, the
 doctor step writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
@@ -2274,8 +2277,9 @@ and `lost` outputs, which the same rule reads.
   job's check shows its name expression literally
   (`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped), a
   platform behaviour no `if:` or `name:` change removes.
-- **Doctor line.** `⚠️ shipmate doctor found N warning(s) in this run: see
-  [the run](<run url>)`, under any verdict. When the cell lines leave it no room
+- **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
+  settings in this run: see [the run](<run url>)`, under any verdict. `N`
+  leaves out the repository-settings warnings the linked run also shows. When the cell lines leave it no room
   under the 65,536-character cap, it is left out with a warning.
 - **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
   managed by shipmate: <paths>`, naming at most ten paths within 1,000
@@ -2290,8 +2294,8 @@ and `lost` outputs, which the same rule reads.
   too long to list here.` A drift sweep and a run with no pull-request base
   have no such line. On both lines each name is escaped like a cell line's
   stack, `@` included.
-- **Environment heading.** `#### <env>: N cells, M change`, with a blank line
-  on both sides, `<env>` escaped like a cell line's.
+- **Environment heading.** `#### <env>: N cells, M changed` (`1 cell` for one),
+  with a blank line on both sides, `<env>` escaped like a cell line's.
 - **Cell line.** `<circle> <stack>: <state> <a href="<url>">plan</a>`, under its
   environment's heading; the held body's lines and a plan cell's own step
   summary line name the environment, `<circle> <stack> (<env>): <state>`.
@@ -2449,9 +2453,9 @@ run in it. A `detect` that failed without an `::error::` renders no fence.
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
-- **Environment heading.** `#### <env>: N cells, <counts>`, `<counts>` the
-  verdict line's counts for that environment's rows, with a blank line on both
-  sides, one per environment in the plan comment's order, from `apply-detect`'s
+- **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
+  `<counts>` the verdict line's counts for that environment's rows, with a
+  blank line on both sides, one per environment in the plan comment's order, from `apply-detect`'s
   `env_order` output (a bare apply orders every environment with an apply
   check on the head, a targeted one names its environment).
 - **Row line.** `<circle> <stack>: <state> <a href="<url>">logs</a>`, one per

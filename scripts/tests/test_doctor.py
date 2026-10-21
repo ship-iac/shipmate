@@ -4559,22 +4559,28 @@ def _failing_settings_probe(ctx):
 _failing_settings_probe.settings = True  # ty: ignore[unresolved-attribute]
 
 
+def _failing_other_probe(ctx):
+    raise RuntimeError("boom")
+
+
 @pytest.mark.parametrize(
     ("probes", "outputs"),
     [
         ((_settings_probe,), "warned=false\nwarnings=0\n"),
         ((_settings_probe, _other_probe), "warned=true\nwarnings=1\n"),
-        ((_settings_probe, _failing_settings_probe), "warned=true\nwarnings=1\n"),
+        ((_settings_probe, _failing_settings_probe), "warned=false\nwarnings=0\n"),
+        ((_settings_probe, _failing_other_probe), "warned=true\nwarnings=1\n"),
     ],
 )
 def test_annotate_mode_counts_warnings_outside_the_settings_probes(
     monkeypatch, capsys, tmp_path, probes, outputs
 ):
-    """`warned`/`warnings` count WARNING findings of probes not marked `settings`, and every
-    WARNING degrade: a settings probe that raises verified nothing.
+    """`warned`/`warnings` count WARNING findings and WARNING degrades of probes not marked
+    `settings`: a settings probe that raises is a settings warning, which does not force a comment.
 
     Mutation: count settings warnings in N -- red (first two cases).
-    Mutation: count a degrade only for a probe not marked `settings` -- red (third case)."""
+    Mutation: count every WARNING degrade, whatever the probe -- red (third case).
+    Mutation: count no degrade -- red (fourth case)."""
     monkeypatch.setattr(doctor, "ctx_from_env", _ctx)
     monkeypatch.setattr(doctor, "PROBES", probes)
     monkeypatch.setenv("SHIPMATE_DOCTOR_MODE", "annotate")

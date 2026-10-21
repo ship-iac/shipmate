@@ -15,8 +15,9 @@ cause.
 
 `tofu-error cell-error` writes `$RUNNER_TEMP/cell-error.json`, `{stack, environment, error}` from
 `STACK`, `ENV` and the first diagnostic of `$RUNNER_TEMP/plan-run.txt` when `PLAN_OUTCOME` is
-`failure`, else of `$RUNNER_TEMP/init.txt`, unescaped. No diagnostic writes no file. The held plan
-comment shows it under the cell's row. Other arguments are refused.
+`failure`, else of `$RUNNER_TEMP/init.txt`, unescaped. No diagnostic writes an empty `error`, so
+a re-run's upload replaces an earlier attempt's error. The held plan comment shows a non-empty one
+under the cell's row. Other arguments are refused.
 
 The text is author-controlled (a stack's config and provider output), so it
 prints only through `command_data`: a raw newline would start a second workflow
@@ -76,11 +77,10 @@ def cell_error():
     temp = pathlib.Path(os.environ["RUNNER_TEMP"])
     log = "plan-run.txt" if os.environ.get("PLAN_OUTCOME") == "failure" else "init.txt"
     error = first_error(_decode((temp / log).read_bytes()))
-    if error:
-        cell = {"stack": os.environ["STACK"], "environment": os.environ["ENV"], "error": error}
-        # Outside the workspace: a `cell-error.json` the pull request commits must not upload.
-        with open(temp / "cell-error.json", "w", encoding="utf-8") as fh:
-            json.dump(cell, fh)
+    cell = {"stack": os.environ["STACK"], "environment": os.environ["ENV"], "error": error}
+    # Outside the workspace: a `cell-error.json` the pull request commits must not upload.
+    with open(temp / "cell-error.json", "w", encoding="utf-8") as fh:
+        json.dump(cell, fh)
 
 
 def main(argv=()):

@@ -753,7 +753,7 @@ def build_comment(
     dispositions = (excluded, skipped, held, waiting)
     parts = _footer_parts(*dispositions)
     tail = _tail(notes, parts, hint)
-    # (bare line, row, url); a heading has no row.
+    # Each entry is a bare line, its row and its url; a heading's row and url are None.
     entries = []
     for env, group in sc.by_env(rows, order, lambda r: r["status"] != "not_attempted"):
         tally = ", ".join(_tally_tokens(collections.Counter(r["status"] for r in group)))

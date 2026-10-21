@@ -240,8 +240,12 @@ def test_cell_line_without_an_env_names_none():
 
 
 def test_env_heading_names_the_env_its_cell_count_and_tally():
-    """Mutation: `_md_escape` for `_md_name` -- a live `@v`."""
-    assert sc.env_heading("e@v<x>", 3, "1 change") == "#### e@<!-- -->v&lt;x&gt;: 3 cells, 1 change"
+    """Mutations: `_md_escape` for `_md_name` -- a live `@v`; always `cells` -- the one-cell
+    case, red."""
+    assert sc.env_heading("e@v<x>", 3, "1 changed") == (
+        "#### e@<!-- -->v&lt;x&gt;: 3 cells, 1 changed"
+    )
+    assert sc.env_heading("dev", 1, "0 changed") == "#### dev: 1 cell, 0 changed"
 
 
 def test_cell_line_names_mention_nobody():
@@ -355,7 +359,7 @@ def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
     ]
     assert sc.build_comment(cells, CHECKS, RUN_URL, SHA)[0] == (
         HEAD + f"🟡 1 of 3 cells change {AT}\n\n"
-        "#### dev-eu: 3 cells, 1 change\n\n"
+        "#### dev-eu: 3 cells, 1 changed\n\n"
         f"<details><summary>{_bare_app('https://ck/app-eu')}</summary>\n\n```diff\n+   one\n```\n"
         "</details>\n\n"
         '🟢 stacks/db: no changes <a href="https://gh/run/1">plan</a>\n'
@@ -382,9 +386,9 @@ def test_without_an_env_order_environments_sort_by_name(tmp_path):
     body = sc.build_comment(cells, checks, RUN_URL, SHA)[0]
     assert body == (
         HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
-        "#### dev: 1 cells, 0 change\n\n"
+        "#### dev: 1 cell, 0 changed\n\n"
         '🟢 stacks/db: no changes <a href="https://gh/run/1">plan</a>\n\n'
-        "#### prod: 1 cells, 1 change\n\n"
+        "#### prod: 1 cell, 1 changed\n\n"
         '<details><summary>🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-prod">plan</a>'
         "</summary>\n\n```diff\n+   resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n```\n"
         "</details>"
@@ -405,11 +409,11 @@ def test_environments_follow_the_env_order_not_their_names():
     body = sc.build_comment(cells, {}, RUN_URL, SHA, order=["staging", "live"])[0]
     assert body == (
         HEAD + f"🟢 no changes {AT}\n\n"
-        "#### staging: 1 cells, 0 change\n\n"
+        "#### staging: 1 cell, 0 changed\n\n"
         '🟢 stacks/c: no changes <a href="https://gh/run/1">plan</a>\n\n'
-        "#### live: 1 cells, 0 change\n\n"
+        "#### live: 1 cell, 0 changed\n\n"
         '🟢 stacks/a: no changes <a href="https://gh/run/1">plan</a>\n\n'
-        "#### extra: 1 cells, 0 change\n\n"
+        "#### extra: 1 cell, 0 changed\n\n"
         '🟢 stacks/b: no changes <a href="https://gh/run/1">plan</a>'
     )
 
@@ -424,7 +428,7 @@ def test_a_changed_cell_leads_its_environment():
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert body == (
         HEAD + f"🟡 1 of 4 cells change {AT}\n\n"
-        "#### dev-eu: 4 cells, 1 change\n\n"
+        "#### dev-eu: 4 cells, 1 changed\n\n"
         '🟡 stacks/d: +1 ~0 -0 <a href="https://gh/run/1">plan</a>\n'
         '🟢 stacks/a: no changes <a href="https://gh/run/1">plan</a>\n'
         '🟢 stacks/b: no changes <a href="https://gh/run/1">plan</a>\n'
@@ -484,7 +488,7 @@ def test_a_256_cell_fan_out_of_oversized_plans_keeps_every_cell_line():
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
     rows, rest = _fold_out_rows(
-        body, f"🟡 256 of 256 cells change {AT}", "#### dev-eu: 256 cells, 256 change"
+        body, f"🟡 256 of 256 cells change {AT}", "#### dev-eu: 256 cells, 256 changed"
     )
     assert set(rows) == {"+   r"}
     assert rest == "\n\n" + "\n".join(_bare(i) for i in range(1, 256))
@@ -501,7 +505,7 @@ def test_an_early_giant_plan_cannot_drop_a_later_cells_line():
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
     rows, rest = _fold_out_rows(
-        body, f"🟡 2 of 3 cells change {AT}", "#### dev-eu: 3 cells, 2 change"
+        body, f"🟡 2 of 3 cells change {AT}", "#### dev-eu: 3 cells, 2 changed"
     )
     assert set(rows) == {"+   r"}
     assert rest == ("\n\n" + _bare(1) + '\n🟢 s002: no changes <a href="https://gh/run/1">plan</a>')
@@ -518,7 +522,7 @@ def test_headings_are_reserved_before_a_fold_out_is_sized():
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
     assert body.endswith(
-        '#### e299: 1 cells, 0 change\n\n🟢 s: no changes <a href="https://gh/run/1">plan</a>'
+        '#### e299: 1 cell, 0 changed\n\n🟢 s: no changes <a href="https://gh/run/1">plan</a>'
     )
 
 
@@ -576,7 +580,7 @@ def test_the_doctor_line_sits_under_the_verdict_above_the_unmanaged_line():
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/x"), None, 2) == (
         HEAD
         + f"⚪ nothing planned {AT}\n\n"
-        + "⚠️ shipmate doctor found 2 warning(s) in this run: see [the run](https://gh/run/1)\n\n"
+        + "⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: see [the run](https://gh/run/1)\n\n"
         + _LEAD.format(1)
         + ": stacks/x",
         True,
@@ -609,7 +613,7 @@ def test_main_renders_the_doctor_line_from_the_doctor_warnings_count(
     monkeypatch.setenv("SHIPMATE_DOCTOR_WARNINGS", raw)
     _run_main(tmp_path, monkeypatch, [])
     doctor = (
-        "\n\n⚠️ shipmate doctor found 3 warning(s) in this run: see "
+        "\n\n⚠️ shipmate doctor found 3 warning(s) beyond repository settings in this run: see "
         "[the run](https://gh/o/r/actions/runs/1)"
     )
     assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
@@ -703,7 +707,7 @@ def test_the_unmanaged_line_is_counted_before_a_fold_out_is_sized():
     body = sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged"))[0]
     line = _LEAD.format(1) + ": stacks/unmanaged"
     assert body.startswith(
-        HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n#### dev-eu: 1 cells, 1 change\n\n"
+        HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n#### dev-eu: 1 cell, 1 changed\n\n"
         "<details>"
     )
     assert len(without) <= sc.SIZE_BUDGET and len(body) <= sc.SIZE_BUDGET
@@ -1414,6 +1418,24 @@ def test_main_held_mode_shows_a_cell_error_under_its_row(tmp_path, monkeypatch, 
     assert capsys.readouterr().out == ""
 
 
+def test_main_held_mode_shows_no_fence_for_an_empty_cell_error(tmp_path, monkeypatch, capsys):
+    """A failed cell with no `Error:` diagnostic uploads an empty error, so a re-run replaces an
+    earlier attempt's. Mutation: fence an error whenever the cell has an entry
+    (`is not None`) -- an empty fence under the row, red."""
+    _cell_error(tmp_path / "cell-errors" / "cell-error.json", "stacks/a", "dev", "")
+    _held_main(tmp_path, monkeypatch, "held")
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        _HELD_TOP + f"{_ROW_A_DEV}\n\n" + HINT
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_the_cell_error_cap_is_tofu_errors():
+    """`tofu-error` writes a cell error at most `CAP` long; the held body cuts at the same length.
+    Mutation: `CELL_ERROR_CAP = 4000` -- red."""
+    assert sc.CELL_ERROR_CAP == load_script("tofu-error").CAP == 1000
+
+
 def test_main_held_mode_shows_each_environment_its_own_error(tmp_path, monkeypatch):
     """The same stack failing in two environments, one folder per artifact. Mutation: key
     `cell_errors` on the stack only -- both rows show one error."""
@@ -1432,7 +1454,7 @@ def test_main_held_mode_shows_each_environment_its_own_error(tmp_path, monkeypat
 
 def test_held_comment_fences_an_error_past_its_longest_backtick_run():
     """Mutations: a fixed three-backtick fence -- the error closes it; cut at `REASON_CAP`
-    instead of `tofu-error`'s `CAP` -- 4,000 characters."""
+    instead of `CELL_ERROR_CAP` -- 4,000 characters."""
     error = "Error: x`````y" + "z" * 5000
     body = sc.held_comment("r", [_A_DEV], {}, RUN_URL, SHA, {("stacks/a", "dev"): error})
     assert body.split("\n\n")[3:] == [
@@ -1446,7 +1468,7 @@ def test_held_comment_fences_an_error_past_its_longest_backtick_run():
 
 def test_the_held_body_with_every_error_at_its_cap_stays_under_hard_cap():
     """Ten cells, each error and the reason one backtick run at its cap, so each fence is twice
-    its text. Mutation: drop the `te.CAP` cut -- ten 20,000-character runs."""
+    its text. Mutation: drop the `CELL_ERROR_CAP` cut -- ten 20,000-character runs."""
     missing = [{"stack": f"stacks/s{i:02}", "environment": "dev"} for i in range(12)]
     errors = {(c["stack"], "dev"): "`" * 20_000 for c in missing}
     body = sc.held_comment("`" * 20_000, missing, {}, RUN_URL, SHA, errors)
@@ -1518,7 +1540,7 @@ def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     run = "https://gh/o/r/actions/runs/1"
     assert body == (
-        HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n#### dev-eu: 1 cells, 1 change\n\n"
+        HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n#### dev-eu: 1 cell, 1 changed\n\n"
         f"<details><summary>{_bare_app(run)}</summary>\n\n```diff\n+   resource added\n\n"
         "Plan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>"
     )
@@ -1530,8 +1552,8 @@ def test_main_orders_environments_by_the_env_order_input(tmp_path, monkeypatch):
     _run_main(tmp_path, monkeypatch, [_cell(environment="live"), _cell(environment="staging")])
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     assert [line for line in body.splitlines() if line.startswith("#### ")] == [
-        "#### staging: 1 cells, 1 change",
-        "#### live: 1 cells, 1 change",
+        "#### staging: 1 cell, 1 changed",
+        "#### live: 1 cell, 1 changed",
     ]
 
 

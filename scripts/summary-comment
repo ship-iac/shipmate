@@ -51,7 +51,6 @@ from _shipmate import (
 )
 
 ag = _load("apply-gate")
-te = _load("tofu-error")
 
 MARKER = "<!-- shipmate:summary -->"
 # Phrased so the line does not itself match the comment grammar (`^shipmate <verb>`), which
@@ -196,9 +195,9 @@ def cell_line(circle, stack, env, state, url=None, text=""):
 
 
 def env_heading(env, n, tally):
-    """`#### <env>: N cells, <tally>`: the line above an environment's cell lines, `env`
-    `_md_name`d."""
-    return f"#### {_md_name(env)}: {n} cells, {tally}"
+    """`#### <env>: 1 cell, <tally>` or `#### <env>: N cells, <tally>`: the line above an
+    environment's cell lines, `env` `_md_name`d."""
+    return f"#### {_md_name(env)}: {n} cell{'' if n == 1 else 's'}, {tally}"
 
 
 def env_order(raw):
@@ -355,6 +354,9 @@ def verdict(cells, head_sha, run_url):
 
 #: The most cell lines the held comment names before it counts the rest.
 HELD_CELL_NAMES = 10
+#: `tofu-error`'s `CAP`, the length a cell error is written at; a longer one is cut here too, so
+#: the held body stays under HARD_CAP. Kept equal by `test_the_cell_error_cap_is_tofu_errors`.
+CELL_ERROR_CAP = 1000
 
 
 def reason_fence(text, cap=REASON_CAP):
@@ -373,8 +375,8 @@ def held_comment(reason, missing, checks, run_url, head_sha, errors=None):
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
     and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `no
     plan summary read`: its plan matrix job did not succeed or the summary download failed. A
-    cell's entry in `errors` (`cell_errors`), its first OpenTofu error, follows its line in a
-    plain fence cut at `tofu-error`'s `CAP`."""
+    cell's non-empty entry in `errors` (`cell_errors`), its first OpenTofu error, follows its
+    line in a plain fence cut at `CELL_ERROR_CAP`."""
     errors = errors or {}
     parts = [
         f"{MARKER}\n{header('plan')}",
@@ -389,7 +391,7 @@ def held_comment(reason, missing, checks, run_url, head_sha, errors=None):
                 cell_line("🔴", c["stack"], c["environment"], "no plan summary read", url, "plan")
             )
             if error := errors.get((c["stack"], c["environment"])):
-                lines.append(reason_fence(error, te.CAP))
+                lines.append(reason_fence(error, CELL_ERROR_CAP))
         if len(missing) > HELD_CELL_NAMES:
             more = len(missing) - HELD_CELL_NAMES
             lines.append(f"and {more} more cells have no plan summary")
@@ -431,7 +433,10 @@ def doctor_line(warnings, run_url):
     on; empty when there are none."""
     if not warnings:
         return ""
-    return f"⚠️ shipmate doctor found {warnings} warning(s) in this run: see [the run]({run_url})"
+    return (
+        f"⚠️ shipmate doctor found {warnings} warning(s) beyond repository settings in this run: "
+        f"see [the run]({run_url})"
+    )
 
 
 _BLOCKS = ("<details>", "#### ")
@@ -455,7 +460,7 @@ def _entries(cells, order, checks, run_url):
     entries = []
     for env, group in by_env(cells, order, lambda c: c["changed"], cell=lambda ct: ct[0]):
         n = sum(1 for c, _ in group if c["changed"])
-        entries.append((env_heading(env, len(group), f"{n} change"), None, None, None))
+        entries.append((env_heading(env, len(group), f"{n} changed"), None, None, None))
         for c, text in group:
             url = check_url(c, checks, run_url)
             entries.append((_plan_line(c, url), c, text, url))
