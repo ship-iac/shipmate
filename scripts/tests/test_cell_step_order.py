@@ -33,8 +33,6 @@ _EXPECTED = {
         "Stack slug",
         "Initialize the stack",
         "Plan",
-        "Write cell error",
-        "Upload cell error",
         "Render + classify plan",
         "Encrypt plan artifact at rest",
         "Step summary (plan text, 64KiB cap)",
@@ -42,6 +40,8 @@ _EXPECTED = {
         "Upload plan artifact",
         "Write cell summary",
         "Upload cell summary",
+        "Write cell error",
+        "Upload cell error",
     ],
     "drift-cell": [
         "Inject identity variables",

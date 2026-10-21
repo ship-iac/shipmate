@@ -1379,7 +1379,6 @@ def _held_main(tmp_path, monkeypatch, mode, missing=(_A_DEV,)):
     monkeypatch.setenv("SHIPMATE_COMMENT_MODE", mode)
     monkeypatch.setenv("SHIPMATE_HOLD_REASON", "the reason")
     monkeypatch.setenv("SHIPMATE_MISSING", json.dumps(list(missing)))
-    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     listing = '{"name": "shipmate / stacks/a / dev", "html_url": "https://gh/c/a", "id": 1}\n'
     monkeypatch.setattr(sc.sys, "stdin", io.StringIO(listing))
     sc.main()
@@ -1398,9 +1397,9 @@ def test_main_held_mode_writes_only_the_held_body(tmp_path, monkeypatch):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["held.md"]
 
 
-def _cell_error(path, stack, environment, error, attempt="2"):
+def _cell_error(path, stack, environment, error):
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {"stack": stack, "environment": environment, "error": error, "attempt": attempt}
+    data = {"stack": stack, "environment": environment, "error": error}
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
@@ -1428,17 +1427,6 @@ def test_main_held_mode_shows_no_fence_for_an_empty_cell_error(tmp_path, monkeyp
         _HELD_TOP + f"{_ROW_A_DEV}\n\n" + HINT
     )
     assert capsys.readouterr().out == ""
-
-
-def test_main_held_mode_shows_no_error_an_earlier_attempt_recorded(tmp_path, monkeypatch):
-    """Attempt 2 failed before writing its own file, so only attempt 1's artifact arrives; its
-    error is not this attempt's. Mutation: drop the `attempt` comparison in `cell_errors` -- the
-    stale fence renders, red."""
-    _cell_error(tmp_path / "cell-errors" / "cell-error.json", "stacks/a", "dev", "Error: old", "1")
-    _held_main(tmp_path, monkeypatch, "held")
-    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
-        _HELD_TOP + f"{_ROW_A_DEV}\n\n" + HINT
-    )
 
 
 def test_main_held_mode_shows_each_environment_its_own_error(tmp_path, monkeypatch):
@@ -1472,8 +1460,9 @@ def test_held_comment_fences_an_error_past_its_longest_backtick_run():
 
 
 def test_the_held_body_with_every_error_at_its_cap_stays_under_hard_cap():
-    """Ten cells, each error and the reason one backtick run at its cap, so each fence is twice
-    its text. Mutation: drop the `CELL_ERROR_CAP` cut -- ten 20,000-character runs."""
+    """Ten cells, each error and the reason one backtick run at its cap, so each renders as about
+    three times its text (a fence of n + 1 backticks on each side). Mutation: drop the
+    `CELL_ERROR_CAP` cut -- ten 20,000-character runs."""
     missing = [{"stack": f"stacks/s{i:02}", "environment": "dev"} for i in range(12)]
     errors = {(c["stack"], "dev"): "`" * 20_000 for c in missing}
     body = sc.held_comment("`" * 20_000, missing, {}, RUN_URL, SHA, errors)
@@ -1485,25 +1474,24 @@ def test_the_held_body_with_every_error_at_its_cap_stays_under_hard_cap():
     [
         "not json",
         "[]",
-        '{"stack": "stacks/a", "environment": "dev", "error": 1, "attempt": "2"}',
-        '{"stack": "stacks/a", "environment": "dev", "error": "E", "attempt": 2}',
+        '{"stack": "stacks/a", "environment": "dev", "error": 1}',
         '{"stack": "stacks/a", "environment": "dev"}',
-        '{"stack": "stacks/a", "environment": "dev", "error": "E", "attempt": "2", "extra": "x"}',
+        '{"stack": "stacks/a", "environment": "dev", "error": "E", "extra": "x"}',
     ],
-    ids=["not-json", "list", "int-error", "int-attempt", "two-keys", "five-keys"],
+    ids=["not-json", "list", "int-error", "two-keys", "four-keys"],
 )
 def test_a_malformed_cell_error_is_skipped_with_one_warning(tmp_path, capsys, raw):
     """A well-formed sibling still reads. Mutations: drop the key-set check -- `two-keys`
-    raises, `five-keys` reads; drop the string check -- `int-error` reads; catch no
+    raises, `four-keys` reads; drop the string check -- `int-error` reads; catch no
     `ValueError` -- `not-json` raises; warn per file -- two warnings."""
     for d in ("x", "y"):
         (tmp_path / d).mkdir()
         (tmp_path / d / "cell-error.json").write_text(raw, encoding="utf-8")
     _cell_error(tmp_path / "z" / "cell-error.json", "stacks/b", "prod", "E")
-    assert sc.cell_errors(str(tmp_path), "2") == {("stacks/b", "prod"): "E"}
+    assert sc.cell_errors(str(tmp_path)) == {("stacks/b", "prod"): "E"}
     assert capsys.readouterr().out == (
-        "::warning::a cell error file is not a JSON object of stack, environment, error and "
-        "attempt strings; the held plan comment shows no error for its cell\n"
+        "::warning::a cell error file is not a JSON object of stack, environment and error "
+        "strings; the held plan comment shows no error for its cell\n"
     )
 
 

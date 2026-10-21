@@ -246,18 +246,19 @@ CLEAN_INIT = "OpenTofu has been successfully initialized!\n"
 PLAN_ERROR = "╷\n│ Error: plan broke\n│ \n│ on main.tf line 1\n╵\n"
 
 
-def _cell_error(tmp_path, monkeypatch, init, plan, outcome):
+def _cell_error(tmp_path, monkeypatch, init, plan):
+    """`cell-error` over a `RUNNER_TEMP` holding `init` and `plan` as the two logs, each absent
+    when None."""
     monkeypatch.chdir(tmp_path)
     temp = tmp_path / "temp"
     temp.mkdir()
-    (temp / "init.txt").write_bytes(init)
+    if init is not None:
+        (temp / "init.txt").write_bytes(init)
     if plan is not None:
         (temp / "plan-run.txt").write_bytes(plan)
     monkeypatch.setenv("RUNNER_TEMP", str(temp))
     monkeypatch.setenv("STACK", "stacks/a")
     monkeypatch.setenv("ENV", "dev")
-    monkeypatch.setenv("PLAN_OUTCOME", outcome)
-    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     te.main(["cell-error"])
     assert not (tmp_path / "cell-error.json").exists()
     out = temp / "cell-error.json"
@@ -266,38 +267,40 @@ def _cell_error(tmp_path, monkeypatch, init, plan, outcome):
 
 def test_cell_error_reads_the_plan_that_failed_after_a_clean_init(tmp_path, monkeypatch):
     """Written under `RUNNER_TEMP`, never the workspace a pull request controls. Mutations: write
-    to the working directory -- red; read `init.txt` whatever `PLAN_OUTCOME` holds -- an empty
-    `error`; swap `stack` and `environment` -- red; write `command_data(error)` -- red; drop
-    `attempt` -- red."""
-    got = _cell_error(tmp_path, monkeypatch, CLEAN_INIT.encode(), PLAN_ERROR.encode(), "failure")
+    to the working directory -- red; read `init.txt` before `plan-run.txt` -- an empty `error`;
+    swap `stack` and `environment` -- red; write `command_data(error)` -- red."""
+    got = _cell_error(tmp_path, monkeypatch, CLEAN_INIT.encode(), PLAN_ERROR.encode())
     assert got == (
         '{"stack": "stacks/a", "environment": "dev", '
-        '"error": "Error: plan broke\\n\\non main.tf line 1", "attempt": "2"}'
+        '"error": "Error: plan broke\\n\\non main.tf line 1"}'
     )
 
 
 def test_cell_error_reads_the_init_when_the_plan_never_ran(tmp_path, monkeypatch):
-    """Mutation: read `plan-run.txt` whatever `PLAN_OUTCOME` holds -- FileNotFoundError."""
-    got = _cell_error(tmp_path, monkeypatch, _fixture("init_error_backend_ansi.txt"), None, "")
+    """Mutation: read `plan-run.txt` without checking it exists -- FileNotFoundError."""
+    got = _cell_error(tmp_path, monkeypatch, _fixture("init_error_backend_ansi.txt"), None)
     error = BACKEND.removeprefix("::error::").removesuffix("\n")
-    assert got == json.dumps(
-        {"stack": "stacks/a", "environment": "dev", "error": error, "attempt": "2"}
-    )
+    assert got == json.dumps({"stack": "stacks/a", "environment": "dev", "error": error})
 
 
 def test_a_failed_cell_without_a_diagnostic_writes_an_empty_error(tmp_path, monkeypatch):
     """A failed cell always writes its file, empty without an `Error:` diagnostic.
 
     Mutation: skip writing when `first_error` is empty -- no file, red."""
-    got = _cell_error(tmp_path, monkeypatch, b"terramate: stack not found\n", None, "")
-    assert got == '{"stack": "stacks/a", "environment": "dev", "error": "", "attempt": "2"}'
+    got = _cell_error(tmp_path, monkeypatch, b"terramate: stack not found\n", None)
+    assert got == '{"stack": "stacks/a", "environment": "dev", "error": ""}'
+
+
+def test_a_re_run_failing_before_init_writes_an_empty_error(tmp_path, monkeypatch):
+    """No log in this job's `RUNNER_TEMP`: the empty error replaces the earlier attempt's.
+
+    Mutation: read `init.txt` without checking it exists -- FileNotFoundError, red."""
+    got = _cell_error(tmp_path, monkeypatch, None, None)
+    assert got == '{"stack": "stacks/a", "environment": "dev", "error": ""}'
 
 
 #: Hand-written: plan-cell's whole cell-error steps.
-FAILED = (
-    "${{ failure() && (steps.init.outputs.init-outcome == 'failure'"
-    " || steps.plan-run.outcome == 'failure') }}"
-)
+FAILED = "${{ failure() }}"
 WRITE_CELL_ERROR = {
     "name": "Write cell error",
     "if": FAILED,
@@ -305,7 +308,6 @@ WRITE_CELL_ERROR = {
     "env": {
         "STACK": "${{ inputs.stack }}",
         "ENV": "${{ inputs.env }}",
-        "PLAN_OUTCOME": "${{ steps.plan-run.outcome }}",
     },
     "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" cell-error',
 }
@@ -323,12 +325,12 @@ UPLOAD_CELL_ERROR = {
 }
 
 
-def test_plan_cell_writes_and_uploads_its_error_only_after_its_init_or_plan_failed():
-    """Mutations: drop `failure() &&` -- red (GitHub then adds `success()`, so neither step
-    runs after a failure); drop the init clause -- red; rename the artifact
-    `cell-error.<slug>.<env>` -- red; drop `if-no-files-found: ignore` or `overwrite: true` --
-    red; upload `cell-error.json` from the workspace -- red; drop
-    `id: plan-run` -- the `Plan` id differs."""
+def test_plan_cell_writes_and_uploads_its_error_after_any_failure():
+    """Any failed attempt, at any step, replaces the cell's earlier error, a failure before init
+    included. Mutations: restore the outcome-gated `if:` (`failure() && (init failed || plan
+    failed)`) -- red; drop `failure()` -- red (GitHub then adds `success()`, so neither step
+    runs after a failure); rename the artifact `cell-error.<slug>.<env>` -- red; drop
+    `if-no-files-found: ignore` or `overwrite: true` -- red; upload `cell-error.json` from the
+    workspace -- red."""
     assert step_by("plan-cell", name="Write cell error") == WRITE_CELL_ERROR
     assert step_by("plan-cell", name="Upload cell error") == UPLOAD_CELL_ERROR
-    assert step_by("plan-cell", name="Plan")["id"] == "plan-run"

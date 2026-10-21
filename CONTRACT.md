@@ -2190,11 +2190,11 @@ the publish hold (below). In order, blank lines between the parts:
   the cell's line is followed by the first one (from `init` or `plan`), colour
   removed and cut at 1,000 characters, in a plain backtick fence longer than any
   backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it;
-  every failed cell uploads one, its error empty when the failure printed no
-  `Error:` diagnostic, with the run attempt that wrote it. An error shows only
-  when this run attempt recorded it, so a re-run never shows an earlier
-  attempt's; a cell whose artifact did not arrive or carries an empty error
-  shows its line alone. The cell's plan job
+  every failed attempt of a cell, at any step, uploads one, its error empty
+  when the attempt printed no `Error:` diagnostic, and replaces the previous.
+  An error shows when the cell's latest failed attempt recorded one; a cell
+  that did not re-run keeps its own. A cell whose artifact did not arrive or
+  carries an empty error shows its line alone. The cell's plan job
   also carries an `::error::` annotation with it. For the autoplan that job is the
   linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
   keeps it on its own run: `doctor` reads only the autoplan's cell checks and

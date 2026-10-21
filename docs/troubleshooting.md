@@ -1534,7 +1534,8 @@ with a notice naming that run ("plan run <id> holds the gate of <sha> and is
 newer than this run", or "plan run <id>, newer than this run (<id>), published
 apply checks on this head"). A newer run that takes the gate while the re-run
 is publishing still fails the re-run's
-`Create apply checks (pending / no-changes)` or `Create/refresh gate` step. That red is harmless: the newer run owns the gate.
+`Create apply checks (pending / no-changes)` or `Create/refresh gate` step.
+That red is harmless: the newer run owns the gate.
 
 ### Fork pull request refused
 
