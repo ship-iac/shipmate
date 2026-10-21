@@ -27,6 +27,9 @@ apply-comment and doctor already load this module.
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface,
 and shows only where the reader has something to do: under a refusal or a failure, under an
 apply or doctor verdict that is not 🟢. A plan comment carries it only when the gate is held.
+With `command_hints: true` in the table, a plan comment with a changed cell on a pull request
+that is not a draft ends with the `COMMANDS` section, when the body has room for it under
+SIZE_BUDGET; it never shrinks a cell.
 """
 
 import glob
@@ -57,6 +60,13 @@ MARKER = "<!-- shipmate:summary -->"
 # would make the comment a command. It names no doctor output, so no comment carrying it gains a
 # coupling to doctor; the module docstring says where the hint shows.
 FOOTER_HINT = "Comment `shipmate help` for the available commands."
+#: Hand-written once. No line starts with `shipmate`, so the section is not itself a command.
+COMMANDS = (
+    "<details><summary>shipmate commands</summary>\n\n"
+    "Comment `shipmate apply` to apply this plan.\n\n"
+    "Comment `shipmate help` for every command.\n\n"
+    "</details>"
+)
 SIZE_BUDGET = 60_000
 HARD_CAP = 65_536
 MIN_PLAN_CHARS = 500
@@ -473,18 +483,20 @@ def _entries(cells, order, checks, run_url):
 
 
 def build_comment(
-    cells, checks, run_url, head_sha, unmanaged=None, lost=None, warnings=0, order=()
+    cells, checks, run_url, head_sha, unmanaged=None, lost=None, warnings=0, order=(), hints=False
 ):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, `doctor_line` of
     `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line of `lost` when
     each count is not zero, then per environment in `by_env` order of `order` its `env_heading`
     (`N cells, M change`) and its cells, changed first (a fold-out for a changed cell with plan
     text, else its bare line, which names no environment). No footer: the verdict links the
-    run, and neither plan verdict asks anything. Every cell is guaranteed its bare line: the
-    space all headings and remaining cells' bare lines need is reserved up front, so an early
-    giant plan cannot starve a later cell. Each of the three lines yields, with a warning, when
-    the headings and bare lines leave it no room under HARD_CAP. Returns `(body,
-    unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
+    run, and neither plan verdict asks anything. With `hints`, a body with a changed cell ends
+    with `COMMANDS` when the whole body stays within SIZE_BUDGET, and leaves it out silently
+    otherwise, after every cell is sized, so it never shrinks one. Every cell is guaranteed its
+    bare line: the space all headings and remaining cells' bare lines need is reserved up
+    front, so an early giant plan cannot starve a later cell. Each of the three lines yields,
+    with a warning, when the headings and bare lines leave it no room under HARD_CAP. Returns
+    `(body, unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
     entries = _entries(cells, order, checks, run_url)
@@ -517,6 +529,8 @@ def build_comment(
         sections.append(section)
         used += len(section) + 2
     body = "\n\n".join(p for p in (head, _join(sections)) if p)
+    if hints and any(c["changed"] for c in meta) and len(body) + 2 + len(COMMANDS) <= SIZE_BUDGET:
+        body = f"{body}\n\n{COMMANDS}"
     # Past SIZE_BUDGET every cell is already its bare line, the smallest body there is.
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
@@ -737,6 +751,9 @@ def main():
         lost,
         int(warnings) if warnings.isdecimal() else 0,
         env_order(os.environ.get("SHIPMATE_ENV_ORDER", "")),
+        # `shipmate apply` refuses a draft, so an on-demand plan of one must not invite it.
+        hints=os.environ.get("SHIPMATE_COMMAND_HINTS") == "true"
+        and os.environ.get("SHIPMATE_IS_DRAFT") != "true",
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

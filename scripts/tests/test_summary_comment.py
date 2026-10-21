@@ -367,6 +367,65 @@ def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
     )
 
 
+#: The command section, hand-written: never `sc.COMMANDS`, which would pass whatever the
+#: module says.
+COMMANDS = (
+    "<details><summary>shipmate commands</summary>\n\n"
+    "Comment `shipmate apply` to apply this plan.\n\n"
+    "Comment `shipmate help` for every command.\n\n"
+    "</details>"
+)
+_ONE_CHANGED = [(_cell(), "  + one"), (_cell(changed=False, stack="stacks/db"), None)]
+_ONE_CHANGED_BODY = (
+    HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
+    "#### dev-eu: 2 cells, 1 changed\n\n"
+    f"<details><summary>{_bare_app('https://ck/app-eu')}</summary>\n\n```diff\n+   one\n```\n"
+    "</details>\n\n"
+    '🟢 stacks/db: no changes <a href="https://gh/run/1">plan</a>'
+)
+
+
+def test_the_command_section_ends_a_plan_body_with_a_changed_cell():
+    """Mutation: put the section ahead of the cells instead of after them -- red."""
+    assert sc.build_comment(_ONE_CHANGED, CHECKS, RUN_URL, SHA, hints=True) == (
+        _ONE_CHANGED_BODY + "\n\n" + COMMANDS,
+        False,
+        False,
+    )
+
+
+def test_the_command_section_needs_hints():
+    """Mutation: drop `hints` from the condition -- the section shows, red."""
+    assert sc.build_comment(_ONE_CHANGED, CHECKS, RUN_URL, SHA)[0] == _ONE_CHANGED_BODY
+
+
+def test_a_plan_body_with_no_changed_cell_carries_no_command_section():
+    """Nothing to apply, so nothing to invite. Mutation: drop the changed-cell condition -- the
+    section shows, red."""
+    cells = [(_cell(changed=False), None)]
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, hints=True)[0] == (
+        HEAD + f"🟢 no changes {AT}\n\n"
+        "#### dev-eu: 1 cell, 0 changed\n\n"
+        '🟢 stacks/app: no changes <a href="https://gh/run/1">plan</a>'
+    )
+
+
+def test_the_command_section_yields_silently_near_the_size_budget(capsys):
+    """A body 10 characters under SIZE_BUDGET has no room for the section, which leaves no
+    warning and shrinks no cell.
+
+    Mutation: measure against `HARD_CAP` instead of `SIZE_BUDGET` -- the section shows, red."""
+    cells = [(_cell(), None)]
+    cells += [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(125)]
+    pad = sc.SIZE_BUDGET - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
+    cells[1][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert len(without) == sc.SIZE_BUDGET - 10
+    capsys.readouterr()
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, hints=True) == (without, False, False)
+    assert capsys.readouterr().out == ""
+
+
 def test_without_an_env_order_environments_sort_by_name(tmp_path):
     """Mutation: dropping `sorted` from the environments `order` does not name -- `prod`, the
     first read, comes first."""
@@ -536,10 +595,12 @@ def test_the_footer_hint_points_at_the_command_list_and_not_at_doctor():
 def test_no_line_of_the_comment_is_itself_a_shipmate_command():
     """The comment ships on every plan run. A line matching the command grammar would make it a
     shipmate command; the `[bot]` loop guard would ignore it, but relying on that alone is one
-    deletion away from a retrigger loop."""
+    deletion away from a retrigger loop.
+
+    Mutation: start a line of `COMMANDS` with `shipmate apply` -- red."""
     cp = load_script("comment-parse")
     cells = [(_cell(), "  + one"), (_cell(changed=False, stack="b"), None)]
-    for line in sc.build_comment(cells, {}, RUN_URL, SHA)[0].splitlines():
+    for line in sc.build_comment(cells, {}, RUN_URL, SHA, hints=True)[0].splitlines():
         assert not cp._SHIPMATE_LINE.match(line.strip()), line
 
 
@@ -1125,20 +1186,29 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
     # binding `SHIPMATE_DOCTOR_WARNINGS` to `steps.doctor.outputs.warned` -- no line renders.
     # Mutation: mapping `unmanaged-stacks` or `lost-env-tags` to another env name. Mutation:
     # dropping `SHIPMATE_PLANNED_CELLS_NAMES` or `SHIPMATE_DETECT_RESULT` -- `missing` is always
-    # empty.
+    # empty. Mutation: dropping `SHIPMATE_COMMAND_HINTS` or `SHIPMATE_IS_DRAFT` -- the command
+    # section never shows, or shows on a draft.
     assert build["env"] == {
         "GH_TOKEN": "${{ steps.token.outputs.token }}",
         "HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_UNMANAGED": "${{ inputs.unmanaged-stacks }}",
         "SHIPMATE_LOST_ENV_TAGS": "${{ inputs.lost-env-tags }}",
         "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
+        "SHIPMATE_COMMAND_HINTS": "${{ inputs.command-hints }}",
+        "SHIPMATE_IS_DRAFT": "${{ inputs.is-draft }}",
         "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
         "SHIPMATE_DOCTOR_WARNINGS": "${{ steps.doctor.outputs.warnings }}",
     }
-    # Mutation: `required: true` on any of the four (GitHub does not enforce it, but it
+    # Mutation: `required: true` on any of the five (GitHub does not enforce it, but it
     # misdocuments a draft run).
-    for name in ("unmanaged-stacks", "lost-env-tags", "planned-cell-names", "env-order"):
+    for name in (
+        "unmanaged-stacks",
+        "lost-env-tags",
+        "planned-cell-names",
+        "env-order",
+        "command-hints",
+    ):
         decl = load_workflow_text(src)["inputs"][name]
         assert {k: v for k, v in decl.items() if k != "description"} == {
             "required": False,
@@ -1398,6 +1468,18 @@ def test_main_held_mode_writes_only_the_held_body(tmp_path, monkeypatch):
     assert sorted(p.name for p in tmp_path.iterdir()) == ["held.md"]
 
 
+def test_the_held_body_carries_no_command_section(tmp_path, monkeypatch):
+    """The held body already ends with its hint, and a held gate has nothing to apply.
+
+    Mutation: `_held_main` appending `COMMANDS` when `SHIPMATE_COMMAND_HINTS` is `true` -- red."""
+    monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
+    _held_main(tmp_path, monkeypatch, "held")
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        HEAD + f"🔴 the gate is held {MAIN_AT}\n\n```\nthe reason\n```\n\n"
+        '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>\n\n' + HINT
+    )
+
+
 def _cell_error(path, stack, environment, error, attempt="2"):
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"stack": stack, "environment": environment, "error": error, "attempt": attempt}
@@ -1562,6 +1644,31 @@ def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(
         f"<details><summary>{_bare_app(run)}</summary>\n\n```diff\n+   resource added\n\n"
         "Plan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>"
     )
+
+
+_MAIN_BODY = (
+    HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n#### dev-eu: 1 cell, 1 changed\n\n"
+    f"<details><summary>{_bare_app('https://gh/o/r/actions/runs/1')}</summary>\n\n```diff\n"
+    "+   resource added\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>"
+)
+
+
+def test_main_ends_the_comment_with_the_command_section_when_hints_are_on(tmp_path, monkeypatch):
+    """Mutation: `main` never passes `hints` -- no section, red."""
+    monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert body == _MAIN_BODY + "\n\n" + COMMANDS
+
+
+def test_main_shows_no_command_section_on_a_draft(tmp_path, monkeypatch):
+    """`shipmate apply` refuses a draft, so an on-demand plan of one does not invite it.
+
+    Mutation: drop the `SHIPMATE_IS_DRAFT` condition from `main` -- the section shows, red."""
+    monkeypatch.setenv("SHIPMATE_COMMAND_HINTS", "true")
+    monkeypatch.setenv("SHIPMATE_IS_DRAFT", "true")
+    _run_main(tmp_path, monkeypatch, [_cell()])
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == _MAIN_BODY
 
 
 def test_main_orders_environments_by_the_env_order_input(tmp_path, monkeypatch):

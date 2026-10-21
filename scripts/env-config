@@ -65,8 +65,9 @@ def load_config(text):
     `true` or `false` becomes a bool here, before any reference resolves; one holding a
     variable reference anywhere in it refuses here, and so does a `layout` that is neither a
     string nor a reference, so the refusals that quote those values never quote a resolved
-    one. `max_parallel` holding a reference anywhere in it refuses here for the same reason.
-    Any other value stays as written for `validate_structure` to refuse.
+    one. `max_parallel` and `command_hints` holding a reference anywhere in them refuse here for
+    the same reason, and `command_hints` holding exactly `true` or `false` becomes a bool. Any
+    other value stays as written for `validate_structure` to refuse.
     """
     refusal = runner_refusal()
     if refusal:
@@ -86,16 +87,29 @@ def load_config(text):
         )
     if "layout" in parsed and not _is_reference(parsed["layout"]):
         _string(parsed["layout"], "layout")
-    if any(_is_reference(node) for _, node in _walk(parsed.get("max_parallel"), "max_parallel")):
-        raise SystemExit(
-            "::error::max_parallel holds a variable reference, and it accepts none. Write the "
-            "number into the file."
-        )
+    _normalise_settings(parsed)
     environments = parsed.get("environments")
     for env, entry in environments.items() if isinstance(environments, dict) else ():
         if isinstance(entry, dict):
             _normalise_flags(env, entry)
     return parsed
+
+
+#: The top-level settings that accept no variable reference, each with its refusal's remedy.
+_UNREFERENCED = {
+    "max_parallel": "Write the number into the file.",
+    "command_hints": "Write true or false into the file.",
+}
+
+
+def _normalise_settings(parsed):
+    for key, remedy in _UNREFERENCED.items():
+        if any(_is_reference(node) for _, node in _walk(parsed.get(key), key)):
+            raise SystemExit(
+                f"::error::{key} holds a variable reference, and it accepts none. {remedy}"
+            )
+    if parsed.get("command_hints") in ("true", "false"):
+        parsed["command_hints"] = parsed["command_hints"] == "true"
 
 
 def _normalise_flags(env, entry):
@@ -317,7 +331,7 @@ _ACCOUNT_ID = re.compile(r"[0-9]{12}")
 _RESERVED_WORKLOADS = ("vars", "role", "region")
 
 #: Everything the file may declare at its top level.
-_TOP_KEYS = ("layout", "identities", "environments", "max_parallel")
+_TOP_KEYS = ("layout", "identities", "environments", "max_parallel", "command_hints")
 
 #: The cell jobs one plan or drift matrix runs at once when the table sets no
 #: `max_parallel`. Apply waves and unlock are not capped.
@@ -458,6 +472,23 @@ def _check_max_parallel(table, errors):
         errors.append(
             f"::error::max_parallel is {value!r}; it must be a whole number from 1 to 256 (the "
             "most cell jobs a plan or drift matrix runs at once)."
+        )
+
+
+def command_hints(table):
+    """Whether the plan comment ends with its command section: the table's `command_hints`,
+    else `False`. A non-bool value refuses here too, with `validate_structure`'s message."""
+    errors = []
+    _check_command_hints(table, errors)
+    if errors:
+        raise SystemExit(errors[0])
+    return table.get("command_hints", False)
+
+
+def _check_command_hints(table, errors):
+    if "command_hints" in table and not isinstance(table["command_hints"], bool):
+        errors.append(
+            f"::error::command_hints must be true or false, got {table['command_hints']!r}."
         )
 
 
@@ -1029,6 +1060,7 @@ def validate_structure(table):
             f"::error::layout is {table['layout']!r}; it must be one of {', '.join(_LAYOUTS)}."
         )
     _check_max_parallel(table, errors)
+    _check_command_hints(table, errors)
     identities = table.get("identities", {})
     with _gather(errors) as shape:
         _mapping(identities, "identities")

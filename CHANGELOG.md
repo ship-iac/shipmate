@@ -13,6 +13,7 @@ section below names the SHA the release tags.
 ### Added
 
 - `scripts/repin --write-fence` writes the release's fence over a differing `shipmate.yml`, keeping its trigger branch.
+- `command_hints: true` in `.github/shipmate-config.yml` ends each plan comment with a changed cell with a folded `shipmate commands` section.
 
 ### Fixed
 

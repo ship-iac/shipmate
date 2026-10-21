@@ -145,10 +145,10 @@ live probes.
   substituted by it, so a malformed or misplaced setting is reported on the pull
   request that introduces it rather than after it merges. A missing or unreadable
   file is a note saying so, never an all-clear. Only the checks a file can be judged
-  on by itself run here — the top-level keys, `layout`, `max_parallel` and the
-  environment entries; `tf_vars`-layout coverage and unused entries need a plan
-  matrix or a whole-tree environment scan, and the verdict names them as
-  unchecked. A valid file also gets its `needs`, `explicit` and `max_parallel`
+  on by itself run here — the top-level keys, `layout`, `max_parallel`,
+  `command_hints` and the environment entries; `tf_vars`-layout coverage and
+  unused entries need a plan matrix or a whole-tree environment scan, and the
+  verdict names them as unchecked. A valid file also gets its `needs`, `explicit` and `max_parallel`
   values read back, absent ones included: `explicit` set on no entry is
   legitimate configuration that no validator can question, and it means a bare
   `shipmate apply` applies production too. Each variable reference is resolved
@@ -671,9 +671,11 @@ branch's** copy of the file — that is the only copy execution reads.
 | `the engine needs Python 3.12 or later; this runner has …` | the `runs_on:` image is older than the floor `../CONTRACT.md` §Runner prerequisites states — `ubuntu-22.04` ships 3.10. Name a newer image |
 | `the engine needs PyYAML for python3 and this runner has none` | the runner's `python3` cannot import PyYAML; see §`could not install python3-yaml`, or `the engine needs PyYAML` below |
 | `declares no layout` | either the key is genuinely absent, or it is indented under another key — see the indentation trap below |
-| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities`, `environments` and `max_parallel` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
+| `<key> is not a setting this engine implements` | a top-level key this engine does not have, most often a misspelled `environments`. Only `layout`, `identities`, `environments`, `max_parallel` and `command_hints` are accepted — the message lists them. A key a newer release introduces refuses here until the repository's pin moves to that release |
 | `max_parallel is …; it must be a whole number from 1 to 256` | `max_parallel` takes a bare whole number, quoted or not: no sign, space, decimal point or leading zero. GitHub runs a matrix with `max-parallel: 0` unbounded, so 0 is refused; remove the key for the default of 10 |
 | `max_parallel holds a variable reference, and it accepts none` | the cap is written into the file, so what bounds the plan and drift matrices stays a merged commit. Write the number |
+| `command_hints must be true or false, got …` | `command_hints` holds `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise read as set and resolve as unset |
+| `command_hints holds a variable reference, and it accepts none` | `command_hints` is written into the file, like the flags. Write `true` or `false` |
 | `environments.<env>.<key> must be true or false, got …` | `shared`, `explicit` and `gated` hold `true` or `false`, bare or quoted. `yes`, `True` or a number would otherwise resolve to the default |
 | `environments.<env>.<key> holds a variable reference; a flag accepts no variable reference` | `shared`, `explicit` and `gated` are written into the file, so which environments are shared, held back or ungated stays a merged commit. Write `true` or `false` |
 | `environment <env>: region is empty` | `region:` with nothing after it, or `region: #eu-west-1`, which YAML reads as a comment. Write the region, or remove the key |
@@ -718,8 +720,8 @@ warns. `shipmate doctor` echoes all three on every report for exactly this reaso
 read them before merging.
 
 **Editing them on a branch does not change what that branch applies.**
-`needs`, `explicit` and `max_parallel` are read from the default branch with
-the rest of the file. Validate the change with `shipmate doctor` on the pull
+`needs`, `explicit`, `max_parallel` and `command_hints` are read from the default
+branch with the rest of the file. Validate the change with `shipmate doctor` on the pull
 request, then merge it — that is what makes it take effect.
 
 ### A cell fails with no AWS credential

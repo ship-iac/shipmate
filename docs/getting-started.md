@@ -329,7 +329,7 @@ Choose how finely to split environments before writing those trust policies
 
 **A value can come from a GitHub variable.** Write `{vars: NAME}` in
 place of any string, list items included (`apply: {vars: PROD_APPLY_ROLE}`),
-except `shared`, `explicit`, `gated` and `max_parallel`
+except `shared`, `explicit`, `gated`, `max_parallel` and `command_hints`
 ([`../CONTRACT.md`](../CONTRACT.md) §Variable references), and define the
 name as a repository or organization variable. A resolved value is printed in job
 outputs and logs, so reference variables only, never secrets. Never define it
@@ -354,6 +354,8 @@ and `environments`, caps how many cells one plan or drift sweep runs at once ([`
 §Environment table). Each plan and drift sweep running at the same time takes
 up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
 §"What it costs").
+`command_hints: true` ends each plan comment with a changed cell with a folded
+section naming `shipmate apply` and `shipmate help`; it is off when absent.
 
 **What each environment and ordering key does.** Four are keys of an `environments` entry;
 `after` is a Terramate stack attribute (`after = [...]` in the stack block). In the

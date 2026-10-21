@@ -408,22 +408,24 @@ def test_a_misspelled_top_level_key_refuses():
     """
     assert _refusal({"layout": "folder", "enviroments": {}}) == (
         "::error::enviroments is not a setting this engine implements. "
-        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel."
+        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel, "
+        "command_hints."
     )
 
 
 def test_every_allowed_top_level_key_is_accepted():
-    """The other half of the strict-key rule: the four names are the whole allowed set, so a
-    table using all four must validate. Compared against a hand-written table, never against
+    """The other half of the strict-key rule: the five names are the whole allowed set, so a
+    table using all five must validate. Compared against a hand-written table, never against
     the module's own constant.
 
-    Mutation: remove a name from the allowed set -- one of these four then refuses.
+    Mutation: remove a name from the allowed set -- one of these five then refuses.
     """
     table = {
         "layout": "folder",
         "identities": {},
         "environments": {},
         "max_parallel": "5",
+        "command_hints": True,
     }
     assert env_config.validate(table, ()) == table
 
@@ -513,6 +515,70 @@ def test_a_referenced_max_parallel_refuses_before_the_variable_is_read(written):
     assert str(excinfo.value) == (
         "::error::max_parallel holds a variable reference, and it accepts none. Write the "
         "number into the file."
+    )
+
+
+# --- command_hints ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("written", "value"), [("true", True), ("false", False)])
+def test_command_hints_reads_the_table(written, value):
+    """Mutation: drop `command_hints` from `_TOP_KEYS` -- both rows refuse as an unknown key;
+    drop the bool conversion in `load_config` -- both rows refuse; return `False` unconditionally
+    -- "true" reads False."""
+    table = env_config.validate_structure(
+        env_config.parse_table(f"layout: folder\ncommand_hints: {written}\n")
+    )
+    assert env_config.command_hints(table) is value
+
+
+def test_command_hints_defaults_to_false():
+    """Mutation: default to `True` -- it reads True."""
+    assert env_config.command_hints({}) is False
+
+
+@pytest.mark.parametrize("written", ["yes", "1", "[true]"])
+def test_a_non_bool_command_hints_refuses(written):
+    """Only the two YAML spellings turn into a bool; anything else reads as set to a person and
+    would resolve as unset.
+
+    Mutation: accept a string in `_check_command_hints` (`isinstance(..., (bool, str))`) -- the
+    two string rows pass; drop `_check_command_hints` from `validate_structure` -- every row
+    passes."""
+    value = env_config.load_config(f"layout: folder\ncommand_hints: {written}\n")["command_hints"]
+    assert _refusal({"layout": "folder", "command_hints": value}) == (
+        f"::error::command_hints must be true or false, got {value!r}."
+    )
+
+
+def test_command_hints_refuses_an_unvalidated_bad_value():
+    """A reader that skips `validate_structure` must not read the string "false" as on.
+
+    Mutation: drop the `_check_command_hints` call in `command_hints` -- it returns "false",
+    which is truthy."""
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.command_hints({"command_hints": "false"})
+    assert str(excinfo.value) == "::error::command_hints must be true or false, got 'false'."
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["{vars: HINTS}", "[{vars: HINTS}]", "{a: {vars: HINTS}}"],
+    ids=["direct", "in-a-list", "in-a-mapping"],
+)
+def test_a_referenced_command_hints_refuses_before_the_variable_is_read(written):
+    """`command_hints` is read from the default branch's file alone, so a reference anywhere in
+    it refuses before it resolves.
+
+    Mutation: delete the reference refusal in `load_config` -- "direct" resolves to the string
+    "true" and refuses quoting it, the nested rows quote the resolved value.
+    """
+    text = f"layout: folder\ncommand_hints: {written}\n"
+    with pytest.raises(SystemExit) as excinfo:
+        env_config.validate_structure(env_config.parse_table(text, {"HINTS": "true"}))
+    assert str(excinfo.value) == (
+        "::error::command_hints holds a variable reference, and it accepts none. Write true or "
+        "false into the file."
     )
 
 
@@ -907,11 +973,11 @@ def test_the_lines_come_in_check_order():
     table = {"colour": 1, "lyout": "folder", "environments": {"dev": {"regoin": "eu-west-1"}}}
     assert _structural(table) == (
         "::error::colour is not a setting this engine implements. "
-        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel.\n"
+        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel, "
+        "command_hints.\n"
         "::error::lyout is not a setting this engine implements. "
-        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel.\n"
-        + NO_LAYOUT
-        + "\n"
+        ".github/shipmate-config.yml holds layout, identities, environments, max_parallel, "
+        "command_hints.\n" + NO_LAYOUT + "\n"
         "::error::environment dev: regoin is not a key this engine implements. An environment "
         "holds region, tf_vars, identity, workloads, shared, needs, explicit, gated."
     )

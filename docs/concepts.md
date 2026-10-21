@@ -57,6 +57,9 @@ table in [`CONTRACT.md`](../CONTRACT.md) §Comment-ops is the same list, with
 each verb's arguments and authorization. A refused or failed command's reply,
 and an apply or `doctor` comment whose verdict is not 🟢, end by pointing at
 `shipmate help`, so the commands are discoverable from the pull request itself.
+With `command_hints: true` in `.github/shipmate-config.yml`, a plan comment with
+a changed cell on a pull request that is not a draft shows them too, in a folded
+`shipmate commands` section.
 
 ## Dynamic environments
 

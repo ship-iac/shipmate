@@ -418,9 +418,9 @@ nothing for its cells to run as. The two absences refuse at the same site,
 `scripts/env-config` (§Refusals) — a file absent from the default branch, and a
 file that parses but declares no `layout`.
 
-The file holds four top-level settings and no others: `layout`,
-`identities`, `environments`, `max_parallel`. Any other top-level key refuses,
-naming the offending key and the four that are allowed. An engine refuses a key
+The file holds five top-level settings and no others: `layout`,
+`identities`, `environments`, `max_parallel`, `command_hints`. Any other top-level
+key refuses, naming the offending key and the five that are allowed. An engine refuses a key
 it does not implement, so a repository moves its pin before it adds a key a newer
 release introduces.
 
@@ -438,10 +438,11 @@ it plans; changing any of those takes a merge to the default branch. The read
 names `GITHUB_REPOSITORY`, which is the base repository under both pull-request
 events, and a fork pull request is still refused in `detect` before it plans.
 
-**`needs`, `explicit`, `gated` and `max_parallel` come from the default branch
-too.** They are read from the same parsed mapping as the environment table, and a
-branch therefore cannot reorder its own apply waves, drop its own production
-exclusion, exempt itself from the review requirement or raise its own fan-out.
+**`needs`, `explicit`, `gated`, `max_parallel` and `command_hints` come from the
+default branch too.** They are read from the same parsed mapping as the environment
+table, and a branch therefore cannot reorder its own apply waves, drop its own
+production exclusion, exempt itself from the review requirement, raise its own
+fan-out or change what its own plan comment shows.
 
 **The file must reach the default branch before the first plan run.** A pull
 request that only *adds* it is refused, because the branch its plan is compared
@@ -465,6 +466,7 @@ keeps a leading `0`. Indentation is the one structure rule.
 # .github/shipmate-config.yml
 layout: tf_vars                    # tf_vars | workspace | folder
 max_parallel: 10                   # cell jobs one plan or drift matrix runs at once
+# command_hints: true              # end a plan comment with a changed cell with its commands
 
 identities:
   dev:
@@ -502,6 +504,12 @@ as one bare `<env>` on both paths instead of the `<env>-plan` / `<env>-apply` pa
 `shipmate apply`, and `gated: false` exempts it from the review requirement
 (§Comment-ops). The three hold `true` or `false`, bare or quoted; `shared` and
 `explicit` default to `false`, `gated` to `true`.
+
+**`command_hints: true` ends the plan comment with its commands.** It holds
+`true` or `false`, bare or quoted, and is `false` when absent. When it is `true`,
+a plan comment with a changed cell on a pull request that is not a draft ends
+with a folded `shipmate commands` section naming `shipmate apply` and `shipmate
+help` (§Plan comment). It changes no plan or apply.
 
 **`max_parallel` caps the plan and drift matrices.** It is a whole number from
 1 to 256, and 10 when absent: each plan matrix and drift sweep runs at most that
@@ -628,8 +636,8 @@ would stop describing environment identity.
 
 ### Variable references
 
-Any string value in the file except `shared`, `explicit`, `gated` and
-`max_parallel` may instead name a GitHub variable:
+Any string value in the file except `shared`, `explicit`, `gated`,
+`max_parallel` and `command_hints` may instead name a GitHub variable:
 
 ```yaml
 # .github/shipmate-config.yml
@@ -652,7 +660,7 @@ environments:
 - **Shape.** Exactly `{vars: NAME}`, in flow or block form: a mapping with one
   key, `vars`, holding a string, named after GitHub's `vars` context. It is valid at every
   string position, list items and an identity map's values included, except
-  `shared`, `explicit`, `gated` and `max_parallel` (see Values),
+  `shared`, `explicit`, `gated`, `max_parallel` and `command_hints` (see Values),
   and it replaces the whole string before `{workload}` is filled. Any other
   mapping is ordinary data for the checks in §Refusals.
 - **Resolution.** Every reader of the file replaces each reference with the
@@ -667,7 +675,7 @@ environments:
   bind `shipmate-engine`, so a variable of the same name on that Environment
   shadows the repository value in those two jobs, and nowhere else.
 - **Values.** A resolved value is always a string. `shared`, `explicit`,
-  `gated` and `max_parallel` accept no reference: one refuses before it
+  `gated`, `max_parallel` and `command_hints` accept no reference: one refuses before it
   resolves, so the refusal never quotes the variable's value. A referenced
   `layout` whose value is not a layout refuses naming the variable, not the
   value. The name is
@@ -736,7 +744,8 @@ variable rows depend on the run as well as the file, so they are not structural.
 | `aws.account` that is not 12 digits | an AWS account id is exactly 12 digits, a leading `0` included |
 | A brace in a role outside `{workload}` | `{workload}` is the only placeholder |
 | `max_parallel` that is not a whole number from 1 to 256, or holds a variable reference | GitHub runs a matrix with `max-parallel: 0` unbounded and fails the run on an empty or non-numeric value; the cap is written into the file, like the flags |
-| A top-level key other than `layout`, `identities`, `environments`, `max_parallel` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
+| `command_hints` that is not `true` or `false`, or holds a variable reference | anything else reads as set to a person and would resolve as unset; the setting is written into the file, like the flags |
+| A top-level key other than `layout`, `identities`, `environments`, `max_parallel`, `command_hints` | catches a misspelled `environments`, which would otherwise yield zero environments and skip every cell's credentials step |
 | Malformed `needs` | one entry point validates every field, so an ordering error refuses at detect rather than when an apply finally reads it |
 | A cycle across `needs`, a self-edge included | an ordering with no first environment sorts into no levels at all, and the refusal is decidable from the file alone, so it lands with the other structural checks rather than at the apply that topologically sorts it |
 | A reference to a variable that is unset or empty, whose name holds a lowercase letter, or a name that is not a GitHub variable name | §Variable references; the refusal names the key path and the variable, never a value |
@@ -2270,7 +2279,8 @@ line, the verdict line, a blank line, the doctor line and a blank line when
 `doctor` counted a warning, the unmanaged line and a blank line when
 the pull request changes an unmanaged stack, the lost pairs line and a blank
 line when it untags a stack / environment pair, then per environment its
-heading and one line or fold-out per planned stack in it. The environments
+heading and one line or fold-out per planned stack in it, then a blank line
+and the command section when it shows (below). The environments
 follow `detect`'s `env_order` output, apply order: the env-levels of the
 table's `needs`, ties broken by name. An environment the output does not name
 follows them by name, and an empty or invalid output (the invalid one warns)
@@ -2278,8 +2288,22 @@ orders every environment by name. In each environment the changed cells come
 first, then the rest, each group sorted by stack, so the fold-outs sit together
 above the unchanged lines. The plan body has no
 footer and no help hint, whether or not `doctor` warned: both verdicts are
-normal results and the verdict links the run. The held body above ends with the
-hint. `doctor` records its decision once, as its `warned` output, which the
+normal results and the verdict links the run. The one exception is the command
+section, which shows only when the table's `command_hints` is `true`, a cell
+changed and the pull request is not a draft (`shipmate apply` refuses a draft):
+
+```
+<details><summary>shipmate commands</summary>
+
+Comment `shipmate apply` to apply this plan.
+
+Comment `shipmate help` for every command.
+
+</details>
+```
+
+The held body and a body with no changed cell never carry it. The held body
+above ends with the hint. `doctor` records its decision once, as its `warned` output, which the
 post-or-skip rule reads, and its `warnings` output, the count the doctor line
 shows: both leave out the repository-settings probes' warnings, a settings
 probe that could not run included, and count any other probe that could not
@@ -2350,7 +2374,9 @@ plan → truncated plan (cut at a line boundary, with a link to the check run
 carrying the full text) → the cell's bare line. The space every remaining
 cell's bare line and every environment heading need is reserved up front, so
 an early giant plan cannot starve a later cell, and every cell keeps its line
-and its link. If even the bare lines alone cannot fit the cap, the summary
+and its link. The command section is left out before any of these steps: it is
+added after every cell is sized, only when the whole body with it stays within
+the budget, and never shrinks a cell; leaving it out warns nothing. If even the bare lines alone cannot fit the cap, the summary
 fails loud rather than posting
 a truncated comment. Plan text is emitted only inside a backtick
 fence computed to be longer than any backtick run in the text —
