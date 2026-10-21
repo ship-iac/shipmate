@@ -77,11 +77,14 @@ def plan_check_name(stack, env):
 
 
 def is_cell_job(job_name, stack, env):
-    """Whether the listed job `job_name` is the cell's: its whole name, or a suffix after a
-    ` / ` boundary, since every caller level prepends its own name and the levels differ per
-    route. The boundary keeps env `eu` from matching a job of env `dev-eu`."""
-    own = cell_job_name(stack, env)
-    return job_name == own or job_name.endswith(f" / {own}")
+    """Whether the listed job `job_name` is the cell's wave job, `L<n> / <env> / <stack>`
+    (`apply.yml` and `deploy.yml` name their env-level jobs `L<n>`), whole or after a ` / `
+    boundary, since the consumer's calling job prepends its own name. The `L<n>` segment
+    keeps out any other job ending in ` / <env> / <stack>` (`apply / detect` for env `apply`
+    and root stack `detect`), and the boundary keeps env `eu` from matching a job of env
+    `dev-eu`."""
+    pattern = rf"(?:.* / )?L[0-9]+ / {re.escape(cell_job_name(stack, env))}"
+    return re.fullmatch(pattern, job_name) is not None
 
 
 def app_runs(check_run_lines, app_id):

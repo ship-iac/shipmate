@@ -23,10 +23,11 @@ _US = "apply / stacks/app / dev-us"
 
 def test_the_cell_names_are_these_whole_values():
     """Mutations: `parse_check_name` returns `(env, stack)` or keeps the `apply / ` prefix;
-    `plan_check_name` drops `CALLER_PREFIX`; `is_cell_job` rejects the bare job name."""
+    `plan_check_name` drops `CALLER_PREFIX`; `is_cell_job` rejects the level job without a
+    caller prefix."""
     assert ag.parse_check_name("apply / stacks/app / dev-eu") == ("stacks/app", "dev-eu")
     assert ag.plan_check_name("stacks/app", "dev-eu") == "plan / dev-eu / stacks/app"
-    assert ag.is_cell_job("dev-eu / stacks/app", "stacks/app", "dev-eu")
+    assert ag.is_cell_job("L0 / dev-eu / stacks/app", "stacks/app", "dev-eu")
 
 
 @pytest.mark.parametrize(

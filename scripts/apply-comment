@@ -425,7 +425,7 @@ def _cell_line(row, url, env=None):
 
 def _job_url(row, jobs, run_url):
     """Per-cell log link: the job `apply-gate.is_cell_job` matches to the row's
-    cell, by its FORWARD-built `<env> / <stack>` name. No match -> the
+    cell, by its FORWARD-built `L<n> / <env> / <stack>` name. No match -> the
     workflow-run URL."""
     url = None
     for job in jobs:

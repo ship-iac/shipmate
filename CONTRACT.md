@@ -21,7 +21,11 @@ environment name and the Terramate stack path (as emitted by
 `plan / staging / stacks/network` and
 `apply / stacks/network / staging`). Both lead with their verb. The plan check
 is a job's name and ends in the stack, so the cells of one environment differ in
-their last segment; the apply check is not a job's name. The check name uses
+their last segment, and every cell job name (plan, drift, apply wave, unlock)
+follows the same `<env> / <stack>` order. The apply check keeps
+`apply / <stack> / <env>` on purpose: it is the App's own check, built by
+`apply-gate.check_name`, not a job's name, so the two orders differ by design.
+The check name uses
 the stack path, never a display name — so the code that *creates* the apply
 check (`pending-checks`, run by `actions/summary`),
 *completes* it (`scripts/apply-complete`, run by `actions/apply-complete` in
@@ -64,8 +68,11 @@ queue by the `apply / ` prefix, from ever picking up a plan check.
 
 The apply-env-level wave job is named like the plan cell job, `<env> / <stack>`,
 and two scripts find a cell's wave job by that name: `apply-gate.is_cell_job`
-matches `cell_job_name` as the whole job name or as a suffix after a ` / `
-boundary, since every caller level prepends its own name. `scripts/apply-comment`
+matches `L<n> / <env> / <stack>`, the env-level job of `apply.yml` or
+`deploy.yml` and its cell job, as the whole job name or as a suffix after a
+` / ` boundary, since the consumer's calling job prepends its own name. The
+`L<n>` segment keeps out any other job whose name ends in ` / <env> / <stack>`,
+such as `apply / detect` for env `apply` and root stack `detect`. `scripts/apply-comment`
 (see Apply result comment, below) resolves each cell line's log link this way,
 building the name forward from the row's stack and environment. No match falls
 back to the workflow-run URL. The wave names and the matcher are locked together
@@ -91,9 +98,9 @@ calling job supplies the verb as the outermost segment (`deploy` on the deploy
 path, `apply` on a dispatched apply). Its file is named `shipmate`, so the
 pull request's checks UI renders that workflow name and then the job path
 (`shipmate / plan / facts`); the check-run names the engine matches on start
-after the workflow name. Only the leaf is
-load-bearing — the intermediate names are display-only, and the job ids
-they belong to are what `needs:` refers to.
+after the workflow name. The leaf and the `L<n>` level name are
+load-bearing (`is_cell_job` requires both); the outermost name is
+display-only, and the job ids are what `needs:` refers to.
 
 In addition to the per-unit checks, one aggregate commit status rolls up
 the full fan-out into a single required status, named verbatim:

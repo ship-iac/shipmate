@@ -234,8 +234,8 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
     Mutation: append a `gate: pending until every environment is applied` line to
     `_footer_parts` -- red."""
     jobs = [
-        _job("wave0 / dev-eu / stacks/app", "https://gh/job/app-eu"),
-        _job("wave0 / dev-eu / stacks/db", "https://gh/job/db-eu"),
+        _job("apply / L0 / dev-eu / stacks/app", "https://gh/job/app-eu"),
+        _job("apply / L0 / dev-eu / stacks/db", "https://gh/job/db-eu"),
     ]
     rows = [
         _row(),
@@ -828,7 +828,7 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
                 apply_text=None,
             )
         )
-        jobs.append(_job(f"wave0 / {env} / {path}", _JOB_URL.format(23456789000 + i)))
+        jobs.append(_job(f"apply / L0 / {env} / {path}", _JOB_URL.format(23456789000 + i)))
     body = ac.build_comment(rows, jobs, RUN_URL, [], [], env, "failure", head_sha=SHA)
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
@@ -876,7 +876,7 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
     explicit = [f"explicit-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
-        _job(f"wave0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
+        _job(f"apply / L0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
     ]
     body = ac.build_comment(
@@ -1190,22 +1190,22 @@ def test_load_cells_reads_apply_text_only_when_present(tmp_path):
 
 def test_job_url_suffix_match_against_caller_prefixed_job_name():
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("wave0 (matrix) / dev-eu / stacks/app", "https://gh/job/1")]
+    jobs = [_job("apply / L0 / dev-eu / stacks/app", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
 def test_job_url_falls_back_to_run_url_when_no_job_matches():
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("wave0 / dev-us / stacks/db", "https://gh/job/1")]
+    jobs = [_job("apply / L0 / dev-us / stacks/db", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
 def test_job_url_does_not_false_match_on_bare_endswith():
-    """A job named "wave0 / dev-eu / stacks/app" must not match env `eu`'s cell job
+    """A job named "apply / L0 / dev-eu / stacks/app" must not match env `eu`'s cell job
     "eu / stacks/app" through a naive str.endswith; only a ` / `-boundary suffix counts.
-    Mutation: `apply-gate.is_cell_job` drops the ` / ` before the suffix."""
+    Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
     row = _row(environment="eu", stack="stacks/app")
-    jobs = [_job("wave0 / dev-eu / stacks/app", "https://gh/job/should-not-match")]
+    jobs = [_job("apply / L0 / dev-eu / stacks/app", "https://gh/job/should-not-match")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
@@ -2035,7 +2035,7 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
     explicit = [f"explicit-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
-        _job(f"wave0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
+        _job(f"apply / L0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
     ]
     waiting = [

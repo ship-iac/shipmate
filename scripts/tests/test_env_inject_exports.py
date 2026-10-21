@@ -333,8 +333,17 @@ def test_shipmate_vars_is_lifted_out_of_the_enumeration():
                 "example with gh secret set SHIPMATE_ENCRYPTION_KEY."
             ),
         ),
+        (
+            "SHIPMATE_PLAN_PASSPHRASE",
+            (
+                "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable. Its value is "
+                "readable by anyone who can see the repository. Delete the variable, and if "
+                "SHIPMATE_ENCRYPTION_KEY holds that value, choose a new encryption key and set "
+                "it with gh secret set SHIPMATE_ENCRYPTION_KEY."
+            ),
+        ),
     ],
-    ids=["secrets", "app-key", "encryption-key"],
+    ids=["secrets", "app-key", "encryption-key", "plan-passphrase"],
 )
 def test_a_secret_set_as_a_variable_is_refused(name, expected):
     """`SHIPMATE_SECRETS` is a secret and `SHIPMATE_VARS` a variable, same shape and adjacent

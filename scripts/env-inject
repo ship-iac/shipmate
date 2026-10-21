@@ -34,7 +34,8 @@ _VARS = "SHIPMATE_VARS"
 _SECRETS = "SHIPMATE_SECRETS"
 
 #: Secrets a consumer can mistakenly set as GitHub variables, each with the refusal
-#: `filter_enumeration` raises for it.
+#: `filter_enumeration` raises for it. `SHIPMATE_PLAN_PASSPHRASE` is no engine secret, but a
+#: variable of that name can hold the live encryption key in plain sight.
 _NEVER_VARIABLES = {
     _SECRETS: (
         f"::error::{_SECRETS} is set as a GitHub variable, and it must be a secret. "
@@ -53,6 +54,12 @@ _NEVER_VARIABLES = {
         "secret, not a variable. Its value is readable by anyone who can see the repository. "
         "Delete the variable, choose a new encryption key, and set it as a secret, for example "
         "with gh secret set SHIPMATE_ENCRYPTION_KEY."
+    ),
+    "SHIPMATE_PLAN_PASSPHRASE": (
+        "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable. Its value is readable "
+        "by anyone who can see the repository. Delete the variable, and if "
+        "SHIPMATE_ENCRYPTION_KEY holds that value, choose a new encryption key and set it with "
+        "gh secret set SHIPMATE_ENCRYPTION_KEY."
     ),
 }
 
