@@ -2709,8 +2709,9 @@ variable names only — never values.
 The same shape carries the planned commit. `plan-cell` reads
 `git rev-parse HEAD` before any step that runs repository content, refuses an
 `expected-head` input that is empty or that it did not check out, and ships the
-observed commit as `planned-head.txt` inside `plan.<env>.<slug>`. The file is materialised from the captured step output
-immediately before upload rather than when it is read: between the two,
+observed commit as `planned-head.txt` inside `plan.<env>.<slug>`. The file is
+materialised from the captured step output immediately before upload rather
+than when it is read: between the two,
 `terramate` executes author-controlled HCL and provider binaries, which can
 rewrite a file at repo root but not an emitted step output. `apply-cell` moves
 the record out of the consumer's checkout into `$RUNNER_TEMP` before reading it
