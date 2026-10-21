@@ -18,8 +18,9 @@ STATE = b'{"version":4,"serial":1}'
 KEY = "state/app-net/dev-eu/123-1"
 NON_ASCII = "korrekt hæst ✓"
 UNSET = (
-    "::error::SHIPMATE_ENCRYPTION_KEY is not set; it is required to encrypt and decrypt plan "
-    "artifacts and local state. Set the secret and forward it to the shipmate workflows."
+    "::error::SHIPMATE_ENCRYPTION_KEY is not set or is empty; it is required to encrypt and "
+    "decrypt plan artifacts and local state. Set the secret and forward it to the shipmate "
+    "workflows."
 )
 _RUNNER = (
     "Re-run the job, which clears a transient hosted-runner disk failure, or fix a self-hosted "
@@ -493,6 +494,15 @@ def test_decrypt_state_without_encryption_key_refuses(tmp_path, monkeypatch):
 def test_cli_require_without_encryption_key_refuses(monkeypatch):
     """Mutation: delete main's `require` branch, and it prints the usage error instead."""
     monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
+    with pytest.raises(SystemExit) as exc:
+        pcx.main(["plan-crypt", "require"])
+    assert exc.value.code == UNSET
+
+
+def test_cli_require_with_an_empty_encryption_key_refuses(monkeypatch):
+    """A secret that resolves empty at the caller arrives set to ''. Mutation: make
+    `_require_encryption_key` test `ENV_VAR not in os.environ`."""
+    monkeypatch.setenv("ENCRYPTION_KEY", "")
     with pytest.raises(SystemExit) as exc:
         pcx.main(["plan-crypt", "require"])
     assert exc.value.code == UNSET

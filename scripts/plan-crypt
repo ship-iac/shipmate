@@ -124,8 +124,8 @@ def _replace(path, transform, failure):
 def _require_encryption_key():
     if not _encryption_key():
         raise SystemExit(
-            "::error::SHIPMATE_ENCRYPTION_KEY is not set; it is required to encrypt and "
-            "decrypt plan artifacts and local state. Set the secret and forward it to the "
+            "::error::SHIPMATE_ENCRYPTION_KEY is not set or is empty; it is required to encrypt "
+            "and decrypt plan artifacts and local state. Set the secret and forward it to the "
             "shipmate workflows."
         )
 

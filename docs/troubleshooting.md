@@ -804,13 +804,13 @@ Two locks this verb does not reach:
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
 
-### `SHIPMATE_ENCRYPTION_KEY is not set`, or `SHIPMATE_ENCRYPTION_KEY is empty`
+### `SHIPMATE_ENCRYPTION_KEY is not set or is empty`, or `SHIPMATE_ENCRYPTION_KEY is empty`
 
 The cell received no encryption key. It encrypts every plan artifact and a local
 backend's cached state, so nothing proceeds without it
 ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
-- `SHIPMATE_ENCRYPTION_KEY is not set` comes from `scripts/plan-crypt`: a plan
+- `SHIPMATE_ENCRYPTION_KEY is not set or is empty` comes from `scripts/plan-crypt`: a plan
   cell at `Require the encryption key`, before it initializes the stack, or an
   apply cell at `Decrypt reviewed plan artifact`.
 - `shipmate/actions/state: SHIPMATE_ENCRYPTION_KEY is empty` comes from a local

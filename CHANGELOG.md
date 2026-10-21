@@ -17,6 +17,7 @@ section below names the SHA the release tags.
 
 ### Fixed
 
+- **The missing-encryption-key refusal reads `SHIPMATE_ENCRYPTION_KEY is not set or is empty`, since it also fires on an empty value.**
 - **A drift sweep fails its `detect` job when it cannot read the default branch or reads it empty, instead of skipping every sweep job green.**
 - **Plan, apply and drift cells run `tofu show` inside `terramate run`, so a `run.env` `TF_DATA_DIR` reaches it.**
 - **A failed `tofu init` is annotated with OpenTofu's first error; the `gh cache delete` remedy appears only for a provider install failure after a cache hit.**
