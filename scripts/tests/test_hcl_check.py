@@ -269,22 +269,36 @@ def test_generate_exit_2_with_nothing_parsed_still_fails(monkeypatch, tmp_path, 
     assert result == (1, f"::error::{first}%0Asomething else\n", f"{first} something else")
 
 
-#: `detect`'s whole step list, each step without its `with:` (pinned beside the rest of
-#: `plan.yml` in `test_engine_plan_workflow.py`). `checks` has no `if:`: it runs only when
-#: `matrix`, which holds the fork refusal, succeeded.
+#: `detect`'s whole step list. `checks` has no `if:`: it runs only when `matrix`, which holds
+#: the fork refusal, succeeded. PyYAML gives the int 0 for `fetch-depth`.
 DETECT_STEPS = [
-    {"uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"},
-    {"uses": "$/actions/setup"},
-    {"id": "matrix", "uses": "$/actions/build-matrix"},
+    {
+        "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "with": {
+            "ref": "${{ needs.facts.outputs.head-sha }}",
+            "fetch-depth": 0,
+            "filter": "blob:none",
+        },
+    },
+    {"uses": "$/actions/setup", "with": {"tofu": "false"}},
+    {
+        "id": "matrix",
+        "uses": "$/actions/build-matrix",
+        "with": {
+            "base-sha": "${{ needs.facts.outputs.base-sha }}",
+            "head-repo": "${{ needs.facts.outputs.head-repo }}",
+            "head-sha": "${{ needs.facts.outputs.head-sha }}",
+            "github-vars": "${{ toJSON(vars) }}",
+        },
+    },
     {"id": "checks", "uses": "$/actions/hcl-check"},
 ]
 
 
 def test_detect_runs_hcl_check_after_build_matrix():
     """Mutations: swap `matrix` and `checks`; restore `plan.yml`'s `fmt check` step; add
-    `if: always()` to `checks` -- each red."""
-    steps = workflow_jobs("plan.yml")["detect"]["steps"]
-    assert [{k: v for k, v in s.items() if k != "with"} for s in steps] == DETECT_STEPS
+    `if: always()` to `checks`; set setup's `tofu` to "true" -- each red."""
+    assert workflow_jobs("plan.yml")["detect"]["steps"] == DETECT_STEPS
 
 
 def test_the_action_runs_the_script_and_outputs_its_refusal():

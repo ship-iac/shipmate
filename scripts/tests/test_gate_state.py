@@ -90,7 +90,7 @@ def test_a_detect_refusal_names_itself_in_the_gate():
 
 
 def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
-    """A fmt or codegen failure writes no refusal.
+    """A crash with no `::error::` line writes no refusal.
 
     Mutation: write `detect failed: ` for an empty refusal -- the description changes."""
     got = d(detect_result="failure", refusal="")

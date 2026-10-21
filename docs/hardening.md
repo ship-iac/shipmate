@@ -1149,8 +1149,8 @@ in `build-matrix`. Engine `plan.yml`'s `detect` therefore
 runs that step before the `hcl-check` step, which runs `terramate fmt --check`
 and `terramate generate`, so a fork is turned away before either evaluates the
 tree it wrote. Keep that order: reversed, the `hcl-check` step evaluates (and
-generates from) fork-authored HCL first. What the reversed order would cost is bounded — `detect` holds
-`contents: read` and no App key, binds no environment, runs no `tofu`, and only
+generates from) fork-authored HCL first. What the reversed order would cost is
+bounded — `detect` holds `contents: read` and no App key, binds no environment, runs no `tofu`, and only
 a commenter with `write` or `admin` permission can start the run at all — but
 the outer guard reaching one step less far is exactly the kind of difference
 worth not having. The two legs are not identical, and that is the measured
