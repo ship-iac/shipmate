@@ -95,7 +95,7 @@ compares all five of those expressions, whole, against the fence `getting-starte
 | 9 | OIDC with an `environment:` claim condition instead of static keys | Cloud IdP | Long-lived credential theft — and, since every cell-running job (plan, drift, apply, unlock) mints OIDC tokens unconditionally, this claim condition is the only thing that decides which role any of them may assume (see §7–9). In shared mode it separates nothing: both tokens carry the same `environment:` claim |
 | 10 | Default `GITHUB_TOKEN` = read-only; Actions may not approve PRs | Settings → Actions | Token privilege creep |
 | 11 | Require approval for all outside collaborators' workflow runs | Settings → Actions | Drive-by fork execution |
-| 12 | Allowed-actions list (this engine + the third-party actions the engine itself pulls in, not only the ones your own workflows name) | Settings → Actions | Supply chain |
+| 12 | Allowed-actions list (this engine, `ship-iac/shipmate/*@*` as `onboard` prints it, + the third-party actions the engine itself pulls in, not only the ones your own workflows name) | Settings → Actions | Supply chain |
 | 13 | One App per trust domain; key as a per-repository `shipmate-engine` environment secret | App registration | Cross-repo blast radius |
 | 14 | Rotate the App key when push access is revoked | Runbook | Ex-member with a copied PEM |
 | 15 | Shorten Actions retention | Settings → Actions | `shipmate doctor` report disclosure |
