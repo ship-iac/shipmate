@@ -24,9 +24,10 @@ The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `env_heading`
 `by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `_join`) lives here because
 apply-comment and doctor already load this module.
 
-`FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface,
-and shows only where the reader has something to do: under a refusal or a failure, under an
-apply or doctor verdict that is not 🟢. A plan comment carries it only when the gate is held.
+`FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface
+unless `command_hints` is on, and shows only where the reader has something to do: under a
+refusal or a failure, under an apply or doctor verdict that is not 🟢. A plan comment carries it
+only when the gate is held.
 With `command_hints: true` in the table, a plan comment with a changed cell on a pull request
 that is not a draft ends with the `COMMANDS` section, when the body has room for it under
 SIZE_BUDGET; it never shrinks a cell.

@@ -426,6 +426,18 @@ def test_the_command_section_yields_silently_near_the_size_budget(capsys):
     assert capsys.readouterr().out == ""
 
 
+def test_the_command_section_never_shrinks_a_cut_plan():
+    """A plan cut against SIZE_BUDGET keeps every character it has without hints, and the
+    section yields to it.
+
+    Mutation: add `len(COMMANDS) + 2` to `reserve` when `hints` -- the plan is cut shorter and
+    the section shows, red."""
+    cells = [(_cell(), "\n".join(f"  + r{i:04}{'x' * 20}" for i in range(3000)))]
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert "_Truncated, [full plan in the check run]" in without
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, hints=True) == (without, False, False)
+
+
 def test_without_an_env_order_environments_sort_by_name(tmp_path):
     """Mutation: dropping `sorted` from the environments `order` does not name -- `prod`, the
     first read, comes first."""
