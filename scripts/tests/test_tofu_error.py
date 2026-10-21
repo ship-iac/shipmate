@@ -258,13 +258,15 @@ def _cell_error(tmp_path, monkeypatch, init, plan, outcome):
     monkeypatch.setenv("ENV", "dev")
     monkeypatch.setenv("PLAN_OUTCOME", outcome)
     te.main(["cell-error"])
-    out = tmp_path / "cell-error.json"
+    assert not (tmp_path / "cell-error.json").exists()
+    out = temp / "cell-error.json"
     return out.read_text(encoding="utf-8") if out.exists() else None
 
 
 def test_cell_error_reads_the_plan_that_failed_after_a_clean_init(tmp_path, monkeypatch):
-    """Mutations: read `init.txt` whatever `PLAN_OUTCOME` holds -- no file; swap `stack` and
-    `environment` -- red; write `command_data(error)` -- red."""
+    """Written under `RUNNER_TEMP`, never the workspace a pull request controls. Mutations: write
+    to the working directory -- red; read `init.txt` whatever `PLAN_OUTCOME` holds -- no file;
+    swap `stack` and `environment` -- red; write `command_data(error)` -- red."""
     got = _cell_error(tmp_path, monkeypatch, CLEAN_INIT.encode(), PLAN_ERROR.encode(), "failure")
     assert got == (
         '{"stack": "stacks/a", "environment": "dev", '
@@ -306,9 +308,10 @@ UPLOAD_CELL_ERROR = {
     "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
     "with": {
         "name": "cell-error.${{ inputs.env }}.${{ steps.ids.outputs.slug }}",
-        "path": "cell-error.json",
+        "path": "${{ runner.temp }}/cell-error.json",
         "if-no-files-found": "ignore",
         "retention-days": 7,
+        "overwrite": True,
     },
 }
 
@@ -316,7 +319,8 @@ UPLOAD_CELL_ERROR = {
 def test_plan_cell_writes_and_uploads_its_error_only_after_its_init_or_plan_failed():
     """Mutations: drop `failure() &&` -- red (GitHub then adds `success()`, so neither step
     runs after a failure); drop the init clause -- red; rename the artifact
-    `cell-error.<slug>.<env>` -- red; drop `if-no-files-found: ignore` -- red; drop
+    `cell-error.<slug>.<env>` -- red; drop `if-no-files-found: ignore` or `overwrite: true` --
+    red; upload `cell-error.json` from the workspace -- red; drop
     `id: plan-run` -- the `Plan` id differs."""
     assert step_by("plan-cell", name="Write cell error") == WRITE_CELL_ERROR
     assert step_by("plan-cell", name="Upload cell error") == UPLOAD_CELL_ERROR

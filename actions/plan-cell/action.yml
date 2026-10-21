@@ -123,9 +123,11 @@ runs:
       # error under it, and nothing on the gate path reads it.
       with:
         name: cell-error.${{ inputs.env }}.${{ steps.ids.outputs.slug }}
-        path: cell-error.json
+        path: ${{ runner.temp }}/cell-error.json
         if-no-files-found: ignore
         retention-days: 7
+        # A re-run of the failed cell replaces the first attempt's error instead of a 409 or a stale one.
+        overwrite: true
 
     - name: Render + classify plan
       id: plan

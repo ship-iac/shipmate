@@ -536,7 +536,10 @@ LATER_STEP_IFS = {
     "Doctor: settings-drift warnings (annotations only, never blocks)": NOT_SUPERSEDED,
     "Build comment + gate state": NOT_SUPERSEDED,
     "Decide gate state and comment mode": NOT_SUPERSEDED,
-    "Download cell errors": NOT_SUPERSEDED,
+    "Download cell errors": (
+        "${{ steps.hold.outputs.superseded != 'true'"
+        " && steps.gate.outputs.comment_mode == 'held' }}"
+    ),
     UPSERT: NOT_SUPERSEDED,
     CREATE: NOT_SUPERSEDED,
     GATE: NOT_SUPERSEDED,

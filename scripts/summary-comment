@@ -9,9 +9,9 @@ GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned ce
 cell summary, empty unless detect succeeded and `planned-cell-names` is a valid list.
 
 With `SHIPMATE_COMMENT_MODE=held` it writes the held comment (`held_comment`) to held.md instead,
-reads no cell summary but the `cell-error.json` files under $CELL_ERRORS (default `cell-errors`) and
-writes nothing to GITHUB_OUTPUT; any other non-empty value refuses. The
-mode is read in `main`, so loading this module stays free of side effects.
+reads no cell summary, only the `cell-error.json` files under $CELL_ERRORS (default
+`cell-errors`), and writes nothing to GITHUB_OUTPUT; any other non-empty value refuses. The mode is
+read in `main`, so loading this module stays free of side effects.
 
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
 leaves headroom below that cap; each changed cell's fold-out degrades
