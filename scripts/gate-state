@@ -132,11 +132,10 @@ def evidence_gap(*, plan_result, planned_cells, cell_count, missing=()):
 def _detect_gap(detect_result, refusal):
     """The hold description for a `detect` that did not succeed.
 
-    A `detect` that failed with a `::error::` line (a refusal or a failed tool or API call) is
-    named by its first error, its lines joined into one: `main` cuts the description, and the held
-    comment shows all of it.
-    An empty one (a fmt or codegen failure, a crash with no `::error::` line) keeps the generic
-    text."""
+    A `detect` that failed with a `::error::` line (a refusal, a fmt or codegen failure, or a
+    failed tool or API call) is named by its first error, its lines joined into one: `main` cuts
+    the description, and the held comment shows all of it.
+    An empty one (a crash with no `::error::` line) keeps the generic text."""
     if refusal:
         return f"detect failed: {refusal}"
     return (
@@ -174,8 +173,8 @@ def decide(
     It returns before `planned_cells` is read, because a skipped `detect` reports
     no count.
 
-    `refusal` is the first error of the `::error::` message `build-matrix` failed with, on one
-    line (`_detect_gap`). `missing` goes to `evidence_gap`.
+    `refusal` is the first error of the `::error::` message `build-matrix` or `hcl-check` failed
+    with, on one line (`_detect_gap`). `missing` goes to `evidence_gap`.
     """
     if detect_result == "skipped" and is_draft and not on_demand:
         return "pending", DRAFT_DESCRIPTION, _DRAFT

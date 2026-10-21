@@ -1117,8 +1117,8 @@ pair.
 
 Every plan's `detect` still runs `terramate fmt --check` and
 `terramate generate --detailed-exit-code` over the whole repository, unmanaged
-stacks included. Keep an unmanaged stack formatted and its generated code
-current, or every plan's `detect` fails.
+stacks included, in its `hcl-check` step. Keep an unmanaged stack formatted and
+its generated code current, or every plan's `detect` fails, naming the files.
 
 The stack's open drift Issues close on the next sweep that plans at least one
 cell and planned the default branch's current head, as Issues of a cell no
@@ -2158,9 +2158,12 @@ verbatim:
   `result` (one of `applied`, `failed`, `blocked`), `reason` (which fail-safe
   blocked it, or why an earlier step failed first; the empty string for
   `applied`/`failed`).
-- `apply.txt` — the apply step's combined stdout+stderr, present only when
-  the apply step actually ran (absent for a cell blocked before then, a failed
-  init and a plan text that did not match what was reviewed included).
+- `apply.txt` — the apply step's combined stdout+stderr. The cells run
+  terramate with `--quiet`, so its routine lines (`terramate: Entering stack in`
+  and `terramate: Executing command`) never appear; its `Error:` lines do.
+  Present only when the apply step actually ran (absent for a cell blocked
+  before then, a failed init and a plan text that did not match what was
+  reviewed included).
 
 `apply-cell` (writer) and `scripts/apply-comment` (reader, via
 `actions/apply-summary`) are pinned by the same SHA in the consumer's
@@ -2753,7 +2756,7 @@ computed there, never copied from the cell — and writes it as the record's
 embeds at most the first 60 000 characters of that file and may truncate further or
 show only the cell's line, so on a large plan the digest covers more than the comment
 shows; it binds the file, not the excerpt.
-`apply-cell` re-renders the stored plan with `terramate run
+`apply-cell` re-renders the stored plan with `terramate run --quiet
 --disable-safeguards=git-out-of-sync --no-recursive -C <stack> -- tofu show
 -no-color stack.otplan`, the command that produced the file, and refuses unless
 the digest matches. The comparison runs after `init`, because the render reads
@@ -2919,11 +2922,12 @@ marking is the mechanism.
 
 Both text surfaces shipmate publishes — the rendered plan `plan.txt` in the
 sticky plan comment and the job step summary, and `apply.txt` in the apply
-result comment — carry whatever the tool wrote: shipmate never redacts
-either, and neither is covered by GitHub's log secret masking. (The published
-text is not byte-identical — escape sequences are stripped, undecodable bytes
-become replacement characters, and over-cap sections are truncated, per Plan
-comment and Apply result comment above — but none of that removes a secret.)
+result comment — carry whatever the tool wrote (the cells run terramate with
+`--quiet`, so its routine lines never appear): shipmate never redacts either,
+and neither is covered by GitHub's log secret masking. (The published text is
+not byte-identical — escape sequences are stripped, undecodable bytes become
+replacement characters, and over-cap sections are truncated, per Plan comment
+and Apply result comment above — but none of that removes a secret.)
 
 Masking applies to the log stream the runner consumes. Both files are written
 out of the tool's own stdout (`tofu show > plan.txt`,
@@ -3046,7 +3050,7 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
 The engine names the `tofu` command every cell runs; a consumer repository
 supplies stacks, generated `.tf`, and Terramate metadata, never the command
-line. Cells call `terramate run --disable-safeguards=git-out-of-sync
+line. Cells call `terramate run --quiet --disable-safeguards=git-out-of-sync
 --no-recursive -C <stack> -- tofu …`, so Terramate contributes the stack working
 directory, its `run.env`, and the safeguard policy only:
 

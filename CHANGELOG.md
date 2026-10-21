@@ -8,6 +8,17 @@ by tag (see `CONTRACT.md`), so a release only reaches a repository when that
 repository re-pins — and every engine reference must move in one change. Each
 section below names the SHA the release tags.
 
+## Unreleased
+
+### Added
+
+- `scripts/repin --write-fence` writes the release's fence over a differing `shipmate.yml`, keeping its trigger branch.
+
+### Fixed
+
+- A plan's `detect` that fails on unformatted HCL or stale generated code annotates each file with its remedy, and the held gate and comment name the files and the command to run instead of "change detection did not succeed".
+- Cells run terramate with `--quiet`, so its `Entering stack` and `Executing command` lines no longer open the apply result comment's log or the job log.
+
 ## [0.50.0] — 2026-10-21
 
 Tags `5e8bde1`.

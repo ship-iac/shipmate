@@ -25,7 +25,7 @@ pin and table, so the edits take effect together at merge.
 1. Rewrite every engine ref. `<engine>` is an engine clone that holds the tag:
 
    ```bash
-   python <engine>/scripts/repin <consumer> vX.Y.Z
+   python <engine>/scripts/repin <consumer> vX.Y.Z [--write-fence]
    ```
 
    It fetches `origin/main` and checks, before it writes anything:
@@ -54,12 +54,14 @@ pin and table, so the edits take effect together at merge.
 2. Read its output. The first line is `vX.Y.Z -> <sha>`, the commit the run resolved; on
    exit 0 or 2 every ref names it. The end is the diff from the tag's fence to
    `shipmate.yml`, pins masked. A non-empty diff means the release changed the fence, or the
-   file carries a local edit: reconcile `shipmate.yml` in the same commit. The exit code says
-   the same:
+   file carries a local edit. Reconcile `shipmate.yml` by hand in the same commit, or take the
+   fence whole with `--write-fence`: it keeps the file's push branch and replaces every other
+   differing line, so the diff it prints is what it replaced. It writes nothing unless the
+   push trigger holds one plain branch and nothing else. The exit code says the same:
 
    | Exit | Meaning |
    | --- | --- |
-   | 0 | every engine ref pinned to the tag, and `shipmate.yml` matches the fence |
+   | 0 | every engine ref pinned to the tag, and `shipmate.yml` matches the fence or `--write-fence` wrote it |
    | 1 | a refusal or a usage error; nothing written |
    | 2 | every engine ref pinned to the tag, and `shipmate.yml` differs from the fence or is absent |
 
@@ -207,7 +209,8 @@ the release commit, from `repo-example-stacks-aws`:
    `<release-sha>` is the full lowercase 40-hex commit, `main`'s tip. § Re-pin a consumer
    covers the script's checks and output. When it exits 1 listing refs or missing workflows,
    fix those on the scratch branch and run its line alone again. When it exits 2, reconcile
-   `shipmate.yml` with the diff it prints; that is not a failure. Any other refusal of the
+   `shipmate.yml` with the diff it prints, by hand or by running the line again with
+   `--write-fence`; that is not a failure. Any other refusal of the
    script is a stop, below. Then commit the re-pin on `smoke/vX.Y.Z` as one commit and push
    it; step 2 dispatches that pushed branch:
 

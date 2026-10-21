@@ -1,0 +1,13 @@
+name: shipmate hcl-check
+description: Fail when the checkout's HCL is unformatted or its generated code stale, annotating each file with its remedy.
+outputs:
+  refusal:
+    description: The first error of the `::error::` message that failed the step (unformatted files, stale generated files, or a terramate failure), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it names repository paths), so a reader passes it through `env:`.
+    value: ${{ steps.check.outputs.refusal }}
+runs:
+  using: composite
+  steps:
+    - name: Check formatting and generated code
+      id: check
+      shell: bash
+      run: python3 "$GITHUB_ACTION_PATH/../../scripts/hcl-check"

@@ -178,7 +178,7 @@ def test_an_empty_stack_refuses():
 
 
 def test_the_child_runs_the_engine_command_under_the_cells_environment():
-    """Mutations: drop `--no-recursive`; drop `**pairs` from the child environment.
+    """Mutations: drop `--no-recursive`; drop `--quiet`; drop `**pairs` from the child environment.
 
     `sys.executable` is absolute, so a `run.env` rewriting `PATH` cannot swap the interpreter.
     """
@@ -189,6 +189,7 @@ def test_the_child_runs_the_engine_command_under_the_cells_environment():
             "args": [
                 "terramate",
                 "run",
+                "--quiet",
                 "--disable-safeguards=git-out-of-sync",
                 "--no-recursive",
                 "-C",

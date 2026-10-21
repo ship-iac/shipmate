@@ -39,7 +39,7 @@ runs:
         STACK: ${{ inputs.stack }}
       run: |
         set -euo pipefail
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
+        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure
 
     - name: Probe the state lock
       id: probe
@@ -57,7 +57,7 @@ runs:
         set +e
         # `-refresh=false` keeps the probe from touching a single provider on the way there, and
         # there is no `-out` -- nothing here ever applies what this plans.
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -refresh=false 2>&1 | tee "$RUNNER_TEMP/probe.txt"
+        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu plan -input=false -refresh=false 2>&1 | tee "$RUNNER_TEMP/probe.txt"
         status="${PIPESTATUS[0]}"
         set -e
         echo "::endgroup::"
@@ -107,7 +107,7 @@ runs:
         # `-force` is mandatory: without it OpenTofu asks for confirmation, and no cell has a
         # TTY. The id comes from the probe's own output via env and reaches an argv, which is
         # why lock-info charset-pins it.
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu force-unlock -force "$LOCK_ID"
+        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu force-unlock -force "$LOCK_ID"
         msg="released state lock $LOCK_ID for $STACK / $ENV"
         # `created` and `operation` are rendered only when non-empty: lock-info blanks a value
         # that fails its charset guard rather than rejecting an otherwise-usable lock, so

@@ -1000,7 +1000,7 @@ same cell. So the two are bound to each other rather than trusted individually:
 the trusted `summary` job takes `sha256` over the whole `plan.txt` it downloaded
 and records the digest on each apply check, and the apply re-renders the stored
 plan with the command that wrote the file
-(`terramate run --disable-safeguards=git-out-of-sync --no-recursive -C <stack>
+(`terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C <stack>
 -- tofu show -no-color stack.otplan`) and refuses any difference.
 The digest covers the file, not the excerpt: the comment embeds a capped prefix
 (`CONTRACT.md` §Plan comment), so on a large plan a reviewer sees less than what
@@ -1049,11 +1049,12 @@ only engine `drift.yml` passes it. Both values are set in engine-owned,
 SHA-pinned YAML, so there is nothing a consumer can wire wrong and nothing a
 pull request author can edit. A fork's plan is refused before any stack is
 enumerated and before any `tofu` process starts — and before `detect`'s own
-`terramate` steps: the `actions/build-matrix` step precedes
-`terramate fmt --check` and `terramate generate --detailed-exit-code`, so
-neither evaluates the fork's Terramate HCL — globals, `tm_*` functions and
-generate blocks included. Measured on the dispatch leg, 2026-08-29:
-`build-matrix` failed and both terramate steps were skipped.
+`terramate` checks: the `actions/build-matrix` step precedes the
+`actions/hcl-check` step, which runs `terramate fmt --check` and
+`terramate generate --detailed-exit-code`, so neither evaluates the fork's
+Terramate HCL — globals, `tm_*` functions and generate blocks included.
+Measured on the dispatch leg, 2026-08-29, when the two commands were still
+separate steps: `build-matrix` failed and both terramate steps were skipped.
 
 **Two things keep a fork out of a plan cell, in this order.** First,
 `actions/checkout` itself refuses to check out a fork's head under
@@ -1145,17 +1146,17 @@ key on, so on this leg the fork's head checks out and the inner refusal in
 `build-matrix` is the only one left — measured 2026-08-29: a dispatched plan
 naming a real fork's pull request checked that fork's head out and then failed
 in `build-matrix`. Engine `plan.yml`'s `detect` therefore
-runs that step before `terramate fmt --check` and `terramate generate`, so a
-fork is turned away before either evaluates the tree it wrote. Keep that order:
-reversed, the two terramate steps evaluate (and generate from) fork-authored HCL
-first. What the reversed order would cost is bounded — `detect` holds
-`contents: read` and no App key, binds no environment, runs no `tofu`, and only
-a commenter with `write` or `admin` permission can start the run at all — but
-the outer guard reaching one step less far is exactly the kind of difference
-worth not having. The two legs are not identical, and that is the measured
-shape: on the autoplan leg `actions/checkout` refused and `build-matrix` never
-ran; on the dispatch leg the checkout succeeded and `build-matrix` did the
-refusing.
+runs that step before the `hcl-check` step, which runs `terramate fmt --check`
+and `terramate generate`, so a fork is turned away before either evaluates the
+tree it wrote. Keep that order: reversed, the `hcl-check` step evaluates (and
+generates from) fork-authored HCL first. What the reversed order would cost is
+bounded — `detect` holds `contents: read` and no App key, binds no
+environment, runs no `tofu`, and only a commenter with `write` or `admin`
+permission can start the run at all — but the outer guard reaching one step
+less far is exactly the kind of difference worth not having. The two legs are
+not identical, and that is the measured shape: on the autoplan leg
+`actions/checkout` refused and `build-matrix` never ran; on the dispatch leg
+the checkout succeeded and `build-matrix` did the refusing.
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job

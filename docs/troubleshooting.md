@@ -308,7 +308,7 @@ mandate. Each one names what to do.
 | `gate ruleset` — it does not require branches to be up to date (strict) | plans can go stale against the base before merge. Turn on "Require branches to be up to date before merging". |
 | `gate ruleset` — `shipmate / gate` is already required, but `.github/workflows/shipmate.yml` is not on `<branch>` yet | the gate is required while the workflow file is not on the default branch, or this token cannot read it and GitHub answered 404. `pull_request_target` runs the default branch's copy, so the pull request adding the file cannot produce the gate. Disable the gate rule until that pull request merges, or merge it through a bypass actor. |
 | `shipmate.yml` — the published fence, never pinned | the file holds the `@<engine-sha>` placeholder from the docs rather than a pin, which `scripts/repin` ([`releasing.md`](releasing.md) § Re-pin a consumer) cannot move. Delete the file and run the script again. |
-| `shipmate.yml` — differs beyond its pin, not overwritten | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. The line is followed by the diff from the published fence to the file, pins masked and indented four spaces: reconcile the file by hand, or delete it and run again to take the published one. |
+| `shipmate.yml` — differs beyond its pin, not overwritten; reconcile it by hand, or take the published fence with scripts/repin --write-fence (docs/troubleshooting.md) | the file differs from what this engine release publishes by more than its pin — a local edit, or a fence this release changed while the file stayed on an older one. The line is followed by the diff from the published fence to the file, pins masked and indented four spaces. Reconcile the file by hand; or run `scripts/repin <consumer> <tag> --write-fence`, which writes the published fence over it but keeps its push branch, so when the only difference is a push branch other than the default branch, edit that line by hand; or delete the file and run `onboard` again. |
 
 The closing checklist marks each item with one of three verdicts. None of them
 affects the exit code: every item is yours to do, so a first run exits 0 over
@@ -1146,6 +1146,32 @@ the cause: the backend, credentials or the configuration.
 2. Delete the entry: `gh cache delete <key> --repo <owner>/<repo>`.
 3. Re-run the failed jobs. The cells download their providers, and the next
    drift or apply cell saves a fresh entry.
+
+### `detect failed: <n> file(s) not formatted`, or `<n> generated file(s) stale`
+
+The held plan comment reads one of these, and the gate's description its first
+140 characters:
+
+```text
+detect failed: 2 file(s) not formatted; run terramate fmt and commit the result: stacks/app/globals.tm.hcl, stacks/dns/globals.tm.hcl
+detect failed: 2 generated file(s) stale; run terramate generate and commit the result: stacks/app/_variables.tf, stacks/dns/_variables.tf
+```
+
+The plan's `detect` job runs `terramate fmt --check` and
+`terramate generate --detailed-exit-code` over the whole repository, unmanaged
+stacks included, and the pull request's head failed one or both. The message
+names the first ten files. Each file also carries its own annotation on the
+`detect` job. GitHub keeps ten error annotations per step and each failing
+command's summary takes one, so at most nine files are annotated, eight when
+both commands fail.
+
+1. Run `terramate fmt` or `terramate generate` (or both) at the repository root.
+2. Commit the result and push. The push re-plans.
+
+When `terramate` itself fails, the message is `terramate fmt exited <code>` or
+`terramate generate exited <code>` with the tool's output, `terramate generate
+failed` with its first error, or `terramate <command> did not start` with the
+error that stopped it. Run the command locally to see the whole output.
 
 ### `shipmate / gate` never goes green
 

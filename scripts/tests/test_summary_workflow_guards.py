@@ -58,7 +58,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "max_parallel": "${{ steps.matrix.outputs.max_parallel }}",
     "unmanaged": "${{ steps.matrix.outputs.unmanaged }}",
     "lost": "${{ steps.matrix.outputs.lost }}",
-    "refusal": "${{ steps.matrix.outputs.refusal }}",
+    "refusal": "${{ steps.matrix.outputs.refusal || steps.checks.outputs.refusal }}",
     "cells": "${{ steps.matrix.outputs.cells }}",
     "env_order": "${{ steps.matrix.outputs.env_order }}",
 }
@@ -114,6 +114,7 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop the `lost-env-tags:` line -> the comment never names a lost pair.
     Mutation: drop the action's `lost-env-tags` input -> its input names differ.
     Mutation: drop `detect`'s `refusal` output -> the gate never names a detect error.
+    Mutation: swap the operands of `detect`'s `refusal` output -> its expression differs.
     Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named.
     Mutation: drop the `env-order:` line -> the comment orders environments by name."""
     job, _ = _summary_job()

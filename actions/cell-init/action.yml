@@ -59,7 +59,7 @@ runs:
       run: |
         set -euo pipefail
         set +e
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"
+        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"
         status=${PIPESTATUS[0]}
         set -e
         [ "$status" -eq 0 ] || python3 "$GITHUB_ACTION_PATH/../../scripts/tofu-error" < "$RUNNER_TEMP/init.txt" || true
@@ -79,7 +79,7 @@ runs:
         STACK: ${{ inputs.stack }}
       # Inside `terramate run` so a consumer's run.env TF_DATA_DIR or TF_WORKSPACE applies, as it
       # did for init.
-      run: terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- python3 "$GITHUB_ACTION_PATH/../../scripts/state-path"
+      run: terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- python3 "$GITHUB_ACTION_PATH/../../scripts/state-path"
 
     - name: Restore state
       id: restore-state

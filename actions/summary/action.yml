@@ -12,9 +12,9 @@ inputs:
     required: true
   detect-refusal:
     description: >-
-      build-matrix's `refusal` output: the first error of the `::error::` message from
-      detect (a refusal or a failed tool or API call) on one line, empty when detect raised
-      none. When
+      detect's `refusal` output, build-matrix's or else hcl-check's: the first error of the
+      `::error::` message from detect (a refusal, a fmt or codegen failure, or a failed tool or
+      API call) on one line, empty when detect raised none. When
       detect-result is not success, gate-state writes it into the gate description; empty
       keeps the generic text.
     required: false

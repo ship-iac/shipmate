@@ -80,7 +80,7 @@ _INIT_STEP = {
     "env": {"STACK": "${{ inputs.stack }}"},
     "run": "set -euo pipefail\n"
     "set +e\n"
-    "terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "
+    "terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "
     '"$STACK" -- tofu init -input=false -reconfigure 2>&1 | tee "$RUNNER_TEMP/init.txt"\n'
     "status=${PIPESTATUS[0]}\n"
     "set -e\n"

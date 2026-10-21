@@ -28,7 +28,7 @@ _LOCATE = {
     "shell": "bash",
     "env": {"STACK": "${{ inputs.stack }}"},
     "run": (
-        "terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "
+        "terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "
         '"$STACK" -- python3 "$GITHUB_ACTION_PATH/../../scripts/state-path"'
     ),
 }

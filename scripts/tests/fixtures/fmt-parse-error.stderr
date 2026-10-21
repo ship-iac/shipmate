@@ -1,0 +1,2 @@
+Error: unable to parse configuration
+> /home/runner/work/ex/ex/stacks/dns/globals.tm.hcl:4,9-10: HCL syntax error: loading from /home/runner/work/ex/ex/stacks: loading from /home/runner/work/ex/ex/stacks/dns: There is no closing brace for this block before the end of the file. This may be caused by incorrect brace nesting elsewhere in this file.

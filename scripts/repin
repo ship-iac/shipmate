@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Re-pin every engine ref of one consumer repository to a release tag.
 
-    python <engine>/scripts/repin <consumer> <tag>
+    python <engine>/scripts/repin <consumer> <tag> [--write-fence]
 
 Run from anywhere: the engine is the checkout holding this script, and `<consumer>` is the
 consumer repository's checkout. Every check runs before the first write, so a refusal leaves
@@ -23,18 +23,30 @@ every file as it was:
    hand. A directory holding no engine ref refuses.
 4. Every engine workflow the directory calls with an `@` ref exists at `<sha>`.
 5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
-   it, on the branch the consumer's `shipmate.yml` push trigger names when its one
-   `    branches: [X]` line holds a single plain branch name, else on `main`, so a list or a
-   wildcard shows in the diff. A single branch other than the default is `onboard`'s to
-   report, not this script's.
+   it, on the branch named by the consumer's `shipmate.yml` line `    branches: [X]` directly
+   under `  push:` when that is the only such line, `X` is a single plain branch name, and
+   the push block holds nothing else. Blank, whitespace-only and comment lines after the
+   `branches:` line are skipped; a comment between `  push:` and that line, or after its `]`,
+   makes the trigger not plain. Any other shape renders on `main`, so a list, a wildcard, a
+   flow mapping or a `paths:` filter shows in the diff. A single branch other than the default
+   is `onboard`'s to report, not this script's.
 
 It then writes each changed file, prints `updated <file>` or `unchanged <file>` for every file
 it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
 It does not commit.
 
-Exit codes: 0 every engine ref pinned to the tag and `shipmate.yml` matches the fence; 2 every
-engine ref pinned and `shipmate.yml` differs or is absent; 1 a refusal or a usage error,
-nothing written. A re-run that writes nothing exits 0 or 2 by the same rule.
+`--write-fence`, in any position, then writes the rendered fence over a differing
+`shipmate.yml`, in its line endings, and prints `wrote shipmate.yml from the <tag> fence`. It
+keeps the file's push branch and replaces every other local edit, a changed `runs_on` or
+secret mapping included, so read the printed diff first. When `shipmate.yml` is absent, or
+differs and its push trigger holds anything but one plain branch, it prints
+`not writing shipmate.yml: <why>` after the `updated`/`unchanged` lines, then the diff (or
+`shipmate.yml absent`), and writes nothing more.
+
+Exit codes: 0 every engine ref pinned to the tag and `shipmate.yml` matches the fence or was
+written from it; 2 every engine ref pinned and `shipmate.yml` differs or is absent; 1 a
+refusal or a usage error, nothing written. A re-run that writes nothing exits 0 or 2 by the
+same rule.
 """
 
 import pathlib
@@ -54,7 +66,13 @@ _PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)({_LABEL})?')
 #: Case-insensitive, unlike `_PIN`: GitHub resolves `Ship-IaC/shipmate` too, so a variant the
 #: rewrite leaves alone still refuses as a leftover.
 _REF = re.compile(rf'(?i:{_SLUG})/([^@ \t"]+)@')
-_TRIGGER = re.compile(r"^    branches: \[([^\]\n]*)\]$", re.M)
+#: The next line that is not blank or a comment sits at indent 2 or less: a `paths:`, `tags:` or
+#: `branches-ignore:` line under `push:` makes the trigger more than one branch.
+_TRIGGER = re.compile(
+    r"^  push:\n    branches: \[([^\]\n]*)\]$(?!\n(?:[ \t]*(?:#[^\n]*)?\n)*[ \t]{3,}[^ \t\n#])",
+    re.M,
+)
+_FLAG = "--write-fence"
 
 
 def _git(*args):
@@ -181,19 +199,27 @@ def _check_callees(texts, sha, tag):
 
 
 def _render(texts, sha, tag):
+    """(the fence rendered for `shipmate.yml`, whether its push trigger is one plain branch and
+    nothing else)."""
     rc, page, err = _git("show", f"{sha}:docs/getting-started.md")
     if rc:
         raise SystemExit(f"cannot read docs/getting-started.md at {tag}:\n{err}")
-    shim = texts.get(SHIM, "").replace("\r\n", "\n")
-    found = _TRIGGER.findall(shim)
-    plain = len(found) == 1 and onboard._BRANCH_RE.fullmatch(found[0])
-    return onboard._render(page, sha, tag, found[0] if plain else "main")
+    found = _TRIGGER.findall(texts.get(SHIM, "").replace("\r\n", "\n"))
+    plain = len(found) == 1 and bool(onboard._BRANCH_RE.fullmatch(found[0]))
+    return onboard._render(page, sha, tag, found[0] if plain else "main"), plain
+
+
+def _args():
+    """(consumer, tag, whether `--write-fence` was given) from `sys.argv`."""
+    flags = {a for a in sys.argv[1:] if a.startswith("-")}
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if len(args) != 2 or flags - {_FLAG}:
+        raise SystemExit(f"usage: python <engine>/scripts/repin <consumer> <tag> [{_FLAG}]")
+    return *args, _FLAG in flags
 
 
 def main():
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: python <engine>/scripts/repin <consumer> <tag>")
-    consumer, tag = sys.argv[1:]
+    consumer, tag, write = _args()
     sha, on_origin = _resolve(tag)
     print(f"{tag} -> {sha}")
     if not on_origin:
@@ -202,7 +228,7 @@ def main():
     new = _rewrite(texts, sha, tag)
     _check_refs(wf, texts, new, sha, tag)
     _check_callees(new, sha, tag)
-    rendered = _render(new, sha, tag)
+    rendered, plain = _render(new, sha, tag)
     for name, text in new.items():
         if text == texts[name]:
             print(f"unchanged {name}")
@@ -210,10 +236,20 @@ def main():
             (wf / name).write_text(text, encoding="utf-8", newline="")
             print(f"updated {name}")
     if SHIM not in new:
+        if write:
+            print(f"not writing {SHIM}: it is absent")
         print(f"{SHIM} absent")
         sys.exit(2)
     diff = onboard.shim_diff(rendered, new[SHIM], SHIM)
+    if write and diff and not plain:
+        print(f"not writing {SHIM}: its push trigger must hold one plain branch and nothing else")
     print(diff or f"{SHIM} matches the {tag} fence\n", end="")
+    if write and diff and plain:
+        crlf = "\r\n" in new[SHIM]
+        text = rendered.replace("\n", "\r\n") if crlf else rendered
+        (wf / SHIM).write_text(text, encoding="utf-8", newline="")
+        print(f"wrote {SHIM} from the {tag} fence; every line above that differed is replaced")
+        sys.exit(0)
     sys.exit(2 if diff else 0)
 
 

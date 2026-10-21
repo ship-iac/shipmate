@@ -2033,7 +2033,14 @@ def test_a_locally_edited_file_is_reported_and_not_overwritten(tmp_path):
     path.write_text(edited, encoding="utf-8", newline="\n")
     onboard._reconcile_shim(_shim_ctx(tmp_path))
     assert onboard.REPORT == [
-        ("differs", "shipmate.yml", "differs beyond its pin, not overwritten")
+        (
+            "differs",
+            "shipmate.yml",
+            (
+                "differs beyond its pin, not overwritten; reconcile it by hand, or take the "
+                "published fence with scripts/repin --write-fence (docs/troubleshooting.md)"
+            ),
+        )
     ]
     assert path.read_text(encoding="utf-8") == edited
     assert onboard._exit_code() == 2
@@ -2078,7 +2085,8 @@ def test_a_locally_edited_file_prints_its_diff_after_the_report_line(tmp_path, c
     )
     onboard._reconcile_shim(ctx(root=tmp_path, engine=tmp_path, sha="c" * 40, version="v9.9.9"))
     assert capsys.readouterr().out == (
-        "differs shipmate.yml: differs beyond its pin, not overwritten\n"
+        "differs shipmate.yml: differs beyond its pin, not overwritten; reconcile it by hand, "
+        "or take the published fence with scripts/repin --write-fence (docs/troubleshooting.md)\n"
         "    --- shipmate.yml (fence)\n"
         "    +++ shipmate.yml\n"
         "    @@ -5,6 +5,7 @@\n"
