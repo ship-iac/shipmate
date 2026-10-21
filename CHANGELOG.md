@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.51.0] — 2026-10-21
 
+Tags `7d46d73`.
+
 ### Added
 
 - **`python <engine>/scripts/repin <consumer> <tag> --write-fence` writes the release's fence over a differing `shipmate.yml`, after printing the diff of what it replaces.** It keeps the file's push branch and replaces every other differing line, a changed `runs_on` or secret mapping included. When `shipmate.yml` is absent, or differs and its push trigger holds anything but one plain branch, it re-pins every workflow file but does not overwrite `shipmate.yml`, and exits 2. `scripts/onboard`'s `differs beyond its pin` line names the flag.
