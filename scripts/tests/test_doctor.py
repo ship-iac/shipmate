@@ -1346,7 +1346,7 @@ _SHIPMATE_WF = (
     "permissions: {}\n"
     "jobs:\n"
     "  plan:\n"
-    "    name: shipmate\n"
+    "    name: plan\n"
     "    if: github.event_name == 'pull_request_target' || (github.event_name == "
     "'workflow_dispatch' && github.event.inputs.verb == 'plan')\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
@@ -1355,11 +1355,11 @@ _SHIPMATE_WF = (
     "      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}\n"
     "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
     "  comment-ops:\n"
-    "    name: shipmate\n"
+    "    name: comment\n"
     "    if: github.event_name == 'issue_comment'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/comment-ops.yml@{_SHA}\n"
     "  deploy:\n"
-    "    name: post-merge\n"
+    "    name: deploy\n"
     "    if: github.event_name == 'push'\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/deploy.yml@{_SHA}\n"
     "  apply:\n"
@@ -1380,7 +1380,7 @@ _SHIPMATE_DRIFT_WF = (
     "permissions: {}\n"
     "jobs:\n"
     "  drift:\n"
-    "    name: shipmate\n"
+    "    name: sweep\n"
     f"    uses: {_ENGINE_REPO}/.github/workflows/drift.yml@{_SHA}\n"
 )
 
@@ -1768,7 +1768,7 @@ def test_app_permission_failure_warned():
     assert "\n" not in out[0][1]
 
 
-def _ann(level="warning", title="t", message="m", check="shipmate · plan / shipmate / detect"):
+def _ann(level="warning", title="t", message="m", check="shipmate · plan / plan / detect"):
     return {
         "annotation_level": level,
         "title": title,
@@ -1804,18 +1804,18 @@ def test_latest_check_ids_keeps_newest_shipmate_run_per_name():
 
 
 def test_mirrored_app_check_does_not_displace_the_annotation_bearing_one():
-    """An on-demand plan's App-authored mirror of `<stack> / <env>` carries no
+    """An on-demand plan's App-authored mirror of `plan / <env> / <stack>` carries no
     annotations, so it must not win the newest-per-name ranking over the
     autoplan's `github-actions` check -- while the App's own `apply / ` rows
     stay harvested."""
     autoplan = (
-        '{"id": 1, "name": "app / dev-eu", "started_at": "2026-07-26T10:00:00Z", '
+        '{"id": 1, "name": "plan / dev-eu / app", "started_at": "2026-07-26T10:00:00Z", '
         '"app_slug": "github-actions", "app": {"id": 15368}}'
     )
     # Later than the autoplan's: the mirror is created after it, and this keeps
     # the guard independent of whether GitHub populates started_at on a create.
     mirror = (
-        '{"id": 2, "name": "app / dev-eu", "started_at": "2026-07-26T11:00:00Z", '
+        '{"id": 2, "name": "plan / dev-eu / app", "started_at": "2026-07-26T11:00:00Z", '
         '"app_slug": "shipmate", "app": {"id": 999}}'
     )
     apply_check = (
@@ -1823,8 +1823,8 @@ def test_mirrored_app_check_does_not_displace_the_annotation_bearing_one():
         '"app_slug": "shipmate", "app": {"id": 999}}'
     )
     assert doctor.latest_check_ids([autoplan, mirror, apply_check], app_id="999") == [
-        (1, "app / dev-eu"),
         (3, "apply / app / dev-eu"),
+        (1, "plan / dev-eu / app"),
     ]
 
 
@@ -1868,7 +1868,7 @@ def test_report_renders_probe_and_harvest_sections():
     assert body.startswith(doctor.DOCTOR_MARKER)
     assert "- 🟠 gate ruleset is missing" in body
     assert "stale codegen" in body
-    assert "shipmate · plan / shipmate / detect" in body
+    assert "shipmate · plan / plan / detect" in body
     assert _ctx()["head_sha"][:7] in body
     assert "1281" in body
 
@@ -2161,7 +2161,7 @@ def test_report_states_when_a_partial_harvest_still_found_warnings():
     body = doctor.render_report([], [_ann(title="real warning")], _ctx(harvest_failed=True))
     assert doctor.HARVEST_INCOMPLETE in body
     assert "real warning" in body
-    assert "shipmate · plan / shipmate / detect" in body
+    assert "shipmate · plan / plan / detect" in body
 
 
 def test_report_all_clear_when_harvest_did_not_fail():
@@ -2236,7 +2236,7 @@ def test_harvest_pending_counts_a_queued_github_actions_apply_job():
         '{"id": 1, "name": "app / dev-eu", "started_at": "t", ' + _COMPLETED,
         _QUEUED_APP_APPLY,
         (
-            '{"id": 4, "name": "wave0 / apply / app / dev-eu", "app_slug": "github-actions", '
+            '{"id": 4, "name": "apply / L0 / dev-eu / app", "app_slug": "github-actions", '
             '"status": "queued"}'
         ),
     ]
@@ -2820,15 +2820,15 @@ def test_the_explicit_row_escapes_the_names_and_keeps_the_engine_placeholder():
 
 def test_the_shim_job_name_row_keeps_the_engine_placeholders():
     """Mutation: escape `_Rendered` text in `_finding_row` too -- `&lt;stack&gt;` shows."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
+    text = _SHIPMATE_WF.replace("    name: plan\n", "    name: terraform\n", 1)
     [(level, finding)] = doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO)
     assert doctor._finding_row(level, finding) == (
         f"- {doctor._LEVEL_EMOJI[doctor.WARNING]} `shipmate.yml`'s calling job is not named "
-        "`shipmate`. GitHub names a called workflow's check runs `<caller job> / <callee job>`, "
-        "so this repository's plan cell checks are not `shipmate / <stack> / <env>`. The plan "
+        "`plan`. GitHub names a called workflow's check runs `<caller job> / <callee job>`, "
+        "so this repository's plan cell checks are not `plan / <env> / <stack>`. The plan "
         "runs and the gate is unaffected; what is lost is every `plan` link in the plan "
         "comment, which falls back to the workflow-run page instead of the cell's own check. "
-        "Rename the job `shipmate` (docs/getting-started.md)."
+        "Rename the job `plan` (docs/getting-started.md)."
     )
 
 
@@ -3074,9 +3074,9 @@ def test_harvest_header_mentions_nobody():
     """A check name carries the stack path, printed in bold outside a code span.
 
     Mutation: `_md_escape` for `sc._md_name` in `_emit_section` -- a live `@acme`."""
-    anns = [_ann(check="shipmate / @acme/ops/y / dev", title="t", message="m")]
+    anns = [_ann(check="plan / dev / @acme/ops/y", title="t", message="m")]
     lines, _ = doctor._harvest_lines(doctor.harvest_sections(anns), anns, budget=10_000)
-    assert lines == ["- **shipmate / @<!-- -->acme/ops/y / dev**", "  - 🟠 t: m"]
+    assert lines == ["- **plan / dev / @<!-- -->acme/ops/y**", "  - 🟠 t: m"]
 
 
 def test_harvest_never_emits_a_dangling_section_header():
@@ -3487,14 +3487,14 @@ def test_fork_trigger_probe_is_registered(monkeypatch):
     assert any("pull_request_target" in t for _, t in out)
 
 
-# The finding's whole text, hand-written and never derived from `doctor`: `shipmate` is
+# The finding's whole text, hand-written and never derived from `doctor`: `plan` is
 # spelled out here, so renaming `doctor._SHIM_JOB_NAME` reddens this rather than following it.
 _WRONG_JOB_NAME_TEXT = (
-    "`shipmate.yml`'s calling job is not named `shipmate`. GitHub names a called workflow's check "
+    "`shipmate.yml`'s calling job is not named `plan`. GitHub names a called workflow's check "
     "runs `<caller job> / <callee job>`, so this repository's plan cell checks are not "
-    "`shipmate / <stack> / <env>`. The plan runs and the gate is unaffected; what is lost is "
+    "`plan / <env> / <stack>`. The plan runs and the gate is unaffected; what is lost is "
     "every `plan` link in the plan comment, which falls back to the workflow-run page instead "
-    "of the cell's own check. Rename the job `shipmate` (docs/getting-started.md)."
+    "of the cell's own check. Rename the job `plan` (docs/getting-started.md)."
 )
 
 
@@ -3506,7 +3506,7 @@ def test_a_shim_whose_job_is_named_something_else_is_reported():
     """Mutation: `_shim_job_name_finding` returning [] unconditionally. This test passes
     vacuously if the probe reports nothing for everything, so it is paired with the silent
     case above."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "    name: terraform\n", 1)
+    text = _SHIPMATE_WF.replace("    name: plan\n", "    name: terraform\n", 1)
     assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
@@ -3514,26 +3514,22 @@ def test_a_shim_whose_job_is_named_something_else_is_reported():
 
 def test_a_shim_with_no_job_name_takes_the_job_id_and_is_silent():
     """GitHub uses the job id as the display name when `name:` is absent, so
-    `jobs: { shipmate: { uses: ... } }` produces the same check names. Mutation: read the
+    `jobs: { plan: { uses: ... } }` produces the same check names. Mutation: read the
     job id as unnamed and this documented-equivalent shape is reported."""
-    text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
-        "    name: shipmate\n", "", 1
-    )
+    text = _SHIPMATE_WF.replace("    name: plan\n", "", 1)
     assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == []
 
 
 def test_a_job_name_beats_a_job_id_that_is_the_contract_name():
     """GitHub displays `name:` when there is one, so the id is read only in its absence. The
     uncovered shape is a consumer who copies the documented file and edits the display name
-    alone: job id `shipmate`, `name: terraform`, and the checks become
-    `terraform / <stack> / <env>`.
+    alone: job id `plan`, `name: terraform`, and the checks become
+    `terraform / <env> / <stack>`.
 
     Mutation: `job_name = <id> if <id> == _SHIM_JOB_NAME else (named[0] if named else <id>)`,
     which every other shape test in this file passes.
     """
-    text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace(
-        "    name: shipmate\n", "    name: terraform\n", 1
-    )
+    text = _SHIPMATE_WF.replace("    name: plan\n", "    name: terraform\n", 1)
     assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
@@ -3541,8 +3537,8 @@ def test_a_job_name_beats_a_job_id_that_is_the_contract_name():
 
 def test_a_job_id_that_is_not_the_contract_name_is_reported():
     """The other half of the job-id fallback: with no `name:` the id IS the display name, so
-    an id that is not `shipmate` produces the wrong check names."""
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1)
+    an id that is not `plan` produces the wrong check names."""
+    text = _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1).replace("    name: plan\n", "", 1)
     assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
     ]
@@ -3555,8 +3551,10 @@ def test_a_name_deeper_in_the_block_is_not_the_jobs_name():
     Mutation: `job.get("name") or _mapping(job.get("with")).get("name") or job_id` in
     `_shim_job_name_finding`."""
     anchor = "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
-    text = _SHIPMATE_WF.replace("    name: shipmate\n", "", 1).replace(
-        anchor, f"{anchor}    with:\n      name: shipmate\n", 1
+    text = (
+        _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1)
+        .replace("    name: plan\n", "", 1)
+        .replace(anchor, f"{anchor}    with:\n      name: plan\n", 1)
     )
     assert doctor._shim_job_name_finding(_doc(text), "shipmate.yml", _ENGINE_REPO) == [
         (doctor.WARNING, _WRONG_JOB_NAME_TEXT)
@@ -3694,7 +3692,7 @@ _GRAPH_JOB = "  graph:\n    runs-on: ubuntu-latest\n    steps:\n"
             id="job-if",
         ),
         pytest.param(
-            lambda wf: wf.replace("    name: shipmate\n", "    name: *a8\n", 1), id="job-name"
+            lambda wf: wf.replace("    name: plan\n", "    name: *a8\n", 1), id="job-name"
         ),
         pytest.param(
             lambda wf: wf + _GRAPH_JOB + "      - with:\n          allow-unsafe-pr-checkout: *a8\n",
@@ -3787,7 +3785,7 @@ def test_the_shipmate_yml_probe_is_registered_and_runs_its_three_finders_in_orde
 
     Mutation: drop any one finder from `_shipmate_yml_warnings` (its finding leaves the list),
     or reorder them."""
-    text = _WF_NO_TRIGGER.replace("    name: shipmate\n", "    name: terraform\n", 1).replace(
+    text = _WF_NO_TRIGGER.replace("    name: plan\n", "    name: terraform\n", 1).replace(
         " && inputs.verb == 'apply'\n", "\n", 1
     )
     responses = {
@@ -4056,7 +4054,7 @@ def test_a_flow_style_on_value_is_silent():
         "pr_number: { required: false, default: '' } } } }\n"
         "jobs:\n"
         "  plan:\n"
-        "    name: shipmate\n"
+        "    name: plan\n"
         f"    uses: {_ENGINE_REPO}/.github/workflows/plan.yml@{_SHA}\n"
     )
     assert doctor._dispatch_wiring_finding(_doc(text), "shipmate.yml") == []
@@ -5238,13 +5236,13 @@ def test_harvest_keeps_an_annotation_that_is_not_doctors():
             "annotation_level": "warning",
             "title": "something else",
             "message": "y",
-            "check_name": "shipmate / detect",
+            "check_name": "plan / detect",
         },
         {
             "annotation_level": "failure",
             "title": "another thing",
             "message": "z",
-            "check_name": "shipmate / detect",
+            "check_name": "plan / detect",
         },
     ]
     sections = doctor.harvest_sections(anns)
@@ -5260,7 +5258,7 @@ def test_harvest_drops_doctors_own_annotation_at_every_level():
             "annotation_level": level,
             "title": doctor.DOCTOR_TITLE,
             "message": "x",
-            "check_name": "shipmate / detect",
+            "check_name": "plan / detect",
         }
         for level in doctor.HARVEST_LEVELS
     ]

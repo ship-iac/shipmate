@@ -414,14 +414,15 @@ A draft pull request's autoplan plans nothing, and `shipmate / gate` goes
 pending with the draft reason. Mark the pull request ready, or comment
 `shipmate plan`, which plans a draft; applies still refuse a draft.
 
-**`name: shipmate` on a calling job is a contract literal, not decoration.**
+**`name: plan` on the `plan` job is a contract literal, not decoration.**
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
-that name is what makes the plan cells `shipmate / <stack> / <env>` and lets the
-plan comment's `plan` links resolve to them. The `plan` and `comment-ops` jobs
-and each drift file's `drift` job carry it. Rename the `plan` job and its run
+that name is what makes the plan cells `plan / <env> / <stack>` and lets the
+plan comment's `plan` links resolve to them. Rename the `plan` job and its run
 still happens, but every one of those links falls back to the workflow-run page
-instead; `shipmate doctor` reports it. Renaming `comment-ops` or `drift` changes
-only their own check-run names: no link resolves through them, and doctor does
+instead; `shipmate doctor` reports it. The other jobs display their verb:
+`comment`, `deploy`, `apply`, `unlock`, and each drift file's `sweep`.
+Renaming one of them changes
+only its own check-run names: no link resolves through them, and doctor does
 not check them.
 
 **The filename is load-bearing too.** `actions/build-matrix` refuses to plan a
@@ -493,11 +494,11 @@ on:
 # loses one gets nothing rather than everything the file granted.
 permissions: {}
 jobs:
-  # `name: shipmate` is not decoration: GitHub names a called workflow's check runs
+  # `name: plan` is not decoration: GitHub names a called workflow's check runs
   # `<caller job> / <callee job>`, so this is what makes the plan cells
-  # `shipmate / <stack> / <env>` — the names the plan comment's links resolve.
+  # `plan / <env> / <stack>` — the names the plan comment's links resolve.
   plan:
-    name: shipmate
+    name: plan
     # `github.event.inputs` is the form readable under either trigger, unlike the `inputs`
     # context, and `plan` also runs under one that is not `workflow_dispatch`; the
     # concurrency group below relies on the same thing. `apply` and `unlock` are
@@ -527,7 +528,7 @@ jobs:
     with:
       runs_on: &runner ubuntu-26.04-arm
   comment-ops:
-    name: shipmate
+    name: comment
     # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
     # this one only has to select the event.
     if: github.event_name == 'issue_comment'
@@ -543,8 +544,8 @@ jobs:
       runs_on: *runner
   deploy:
     # Display only: the run's job path reads
-    # `shipmate / post-merge / L<n> / apply / <stack> / <env>`.
-    name: post-merge
+    # `shipmate / deploy / L<n> / <env> / <stack>`.
+    name: deploy
     if: github.event_name == 'push'
     concurrency:
       group: deploy-main
@@ -594,7 +595,7 @@ on:
 permissions: {}
 jobs:
   drift:
-    name: shipmate
+    name: sweep
     uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
     permissions:
       contents: read
@@ -794,8 +795,8 @@ the file whose `secrets:` block names no engine credential.
 
 The `deploy` job applies, on push to the default branch, every reviewed plan
 whose apply check is still pending — so it no-ops when everything was applied
-pre-merge. Its `name: post-merge` is display only: the run's job path reads
-`shipmate / post-merge / L<n> / apply / <stack> / <env>`.
+pre-merge. Its `name: deploy` is display only: the run's job path reads
+`shipmate / deploy / L<n> / <env> / <stack>`.
 
 ### Why the jobs name their secrets
 

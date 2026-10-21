@@ -424,16 +424,12 @@ def _cell_line(row, url, env=None):
 
 
 def _job_url(row, jobs, run_url):
-    """Per-cell log link: the FORWARD-built `apply / <stack> / <env>`
-    CONTRACT name, matched as a suffix of the listed job name — every caller
-    level prepends its own job name and the prefix differs per route. Matched on
-    a ` / ` boundary, not a bare `endswith`, so `reapply / ...` cannot
-    false-positive. No match -> the workflow-run URL."""
-    target = ag.check_name(row["stack"], row["environment"])
+    """Per-cell log link: the job `apply-gate.is_cell_job` matches to the row's
+    cell, by its FORWARD-built `<env> / <stack>` name. No match -> the
+    workflow-run URL."""
     url = None
     for job in jobs:
-        name = job.get("name", "")
-        if name == target or name.endswith("/ " + target):
+        if ag.is_cell_job(job.get("name", ""), row["stack"], row["environment"]):
             url = job.get("html_url") or url
     return url or run_url
 

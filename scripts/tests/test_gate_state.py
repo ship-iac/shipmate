@@ -32,7 +32,7 @@ def test_all_applied_greens_the_gate():
 
 
 _DETECT_SKIPPED_DESCRIPTION = (
-    "change detection did not succeed (skipped); fix the shipmate / detect job before merging"
+    "change detection did not succeed (skipped); fix the plan / detect job before merging"
 )
 
 
@@ -96,7 +96,7 @@ def test_a_detect_failure_without_a_refusal_keeps_the_generic_text():
     got = d(detect_result="failure", refusal="")
     assert got == (
         "failure",
-        "change detection did not succeed (failure); fix the shipmate / detect job before merging",
+        "change detection did not succeed (failure); fix the plan / detect job before merging",
         "held",
     )
 
@@ -309,7 +309,7 @@ _PLAN_CANCELLED = (
 )
 _A, _B, _C = ({"stack": f"stacks/{s}", "environment": "dev"} for s in ("a", "b", "c"))
 #: The one-cell text around a stack path; 140 characters at `_FITS`.
-_ONE = "shipmate / {} / dev has no plan summary; fix its plan or re-plan"
+_ONE = "plan / dev / {} has no plan summary; fix its plan or re-plan"
 _FITS = "s" * (140 - len(_ONE.format("")))
 
 
@@ -325,7 +325,7 @@ _FITS = "s" * (140 - len(_ONE.format("")))
             "3",
             0,
             [_A, _B, _C],
-            "shipmate / stacks/a / dev and 2 more have no plan summary; fix their plans or re-plan",
+            "plan / dev / stacks/a and 2 more have no plan summary; fix their plans or re-plan",
         ),
         (
             "failure",
@@ -413,7 +413,7 @@ def test_main_reads_the_missing_cells_and_flattens_a_line_break(tmp_path, monkey
         SHIPMATE_CELL_COUNT="2",
         SHIPMATE_MISSING=missing,
     )
-    text = "shipmate / stacks/a  b / dev has no plan summary; fix its plan or re-plan"
+    text = "plan / dev / stacks/a  b has no plan summary; fix its plan or re-plan"
     assert body == {
         "state": "failure",
         "description": text,

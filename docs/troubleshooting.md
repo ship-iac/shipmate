@@ -104,9 +104,9 @@ live probes.
   engine or a wrapper workflow does not count. When that repository could not
   be determined, the job-name, routing and drift-call checks are a note
   saying so, and the dispatch check still runs:
-  - Whether its plan-calling job is named `shipmate`. GitHub names a called
+  - Whether its plan-calling job is named `plan`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
-    makes the plan cell checks `shipmate / <stack> / <env>`. Under another name
+    makes the plan cell checks `plan / <env> / <stack>`. Under another name
     the plan still runs and the gate is unaffected; what is lost is every `plan`
     link in the plan comment, which falls back to the workflow-run page instead
     of the cell's own check. A job with no `name:` is judged by its job id,
@@ -464,9 +464,9 @@ before any wave starts.
 ### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
 
 A plan cell fails before `terramate` runs, so the cell
-produces no plan and its `shipmate / <stack> / <env>` check does not go green.
+produces no plan and its `plan / <env> / <stack>` check does not go green.
 The failing plan job leaves `shipmate / gate` held red with
-`shipmate / <stack> / <env> has no plan summary; fix its plan or re-plan`, or
+`plan / <env> / <stack> has no plan summary; fix its plan or re-plan`, or
 `plan incomplete (plan job: failure); fix the failing plan checks before merging`
 when no cell without a summary is known or its name does not fit — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
@@ -1475,13 +1475,13 @@ record's pull request.
 
 ### A pull request planned zero cells
 
-No per-cell `shipmate / <stack> / <env>` checks appear, no plan comment is
+No per-cell `plan / <env> / <stack>` checks appear, no plan comment is
 posted — unless there is already a plan comment to keep current, `doctor`
 raised a warning on that run outside the repository-settings probes, or the
 pull request changes a stack with no `env/*` tag, any of which still posts one,
 headlined `⚪ nothing planned` — and the gate goes green over no work.
 The skipped plan job's one check shows its name expression literally,
-`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped; GitHub
+`plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped; GitHub
 renders a skipped matrix job that way.
 
 Change detection is `terramate list --changed`, so a pull request that touches
@@ -1521,8 +1521,8 @@ fence in [`getting-started.md`](getting-started.md) §The workflow file.
 ### A cancelled autoplan left red checks on the pull request
 
 A newer plan run of the same pull request cancelled the autoplan, and the
-autoplan's checks (`shipmate / detect`, `shipmate / summary`,
-`shipmate / gate-hold`, the `shipmate / <stack> / <env>` matrix check) stay red
+autoplan's checks (`plan / detect`, `plan / summary`,
+`plan / gate-hold`, the `plan / <env> / <stack>` matrix check) stay red
 or cancelled on the head.
 
 After the newer plan run has finished, re-run the cancelled run:

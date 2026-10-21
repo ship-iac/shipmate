@@ -23,22 +23,26 @@ def job(name, conclusion):
 
 def test_completes_only_cells_whose_wave_job_succeeded():
     jobs = [
-        job("L0 / apply / stacks/dns / dev-eu", "success"),
-        job("L0 / apply / stacks/app / dev-eu", "failure"),
+        job("L0 / dev-eu / stacks/dns", "success"),
+        job("L0 / dev-eu / stacks/app", "failure"),
     ]
     assert apply_complete.to_complete(SNAP, jobs) == ([1], [], [], ["stacks/app / dev-eu"])
 
 
-@pytest.mark.parametrize("caller", ["apply", "post-merge"])
+@pytest.mark.parametrize("caller", ["apply", "deploy"])
 def test_matches_the_nested_reusable_workflow_job_name_suffix(caller):
-    # A called workflow's jobs display as `<caller job> / <called job> / <job>`.
-    jobs = [job(f"{caller} / L0 / apply / stacks/app / dev-eu", "success")]
+    """A called workflow's jobs display as `<caller job> / <called job> / <job>`, and the cell
+    job is named `<env> / <stack>`; the same stack in another env completes nothing.
+    Mutation: `apply-gate.cell_job_name` builds `<stack> / <env>`."""
+    jobs = [job(f"{caller} / L0 / dev-eu / stacks/app", "success")]
     assert apply_complete.to_complete(SNAP, jobs) == ([2, 3], [], ["stacks/dns / dev-eu"], [])
+    jobs = [job(f"{caller} / L0 / dev-us / stacks/app", "success")]
+    assert apply_complete.to_complete(SNAP, jobs)[0] == []
 
 
 def test_a_cancelled_or_missing_job_leaves_the_check_pending():
     jobs = [
-        job("L0 / apply / stacks/dns / dev-eu", "cancelled"),
+        job("L0 / dev-eu / stacks/dns", "cancelled"),
     ]
     assert apply_complete.to_complete(SNAP, jobs) == (
         [],
@@ -50,37 +54,39 @@ def test_a_cancelled_or_missing_job_leaves_the_check_pending():
 
 def test_a_rerun_success_after_a_failure_completes_the_cell():
     jobs = [
-        job("L0 / apply / stacks/dns / dev-eu", "failure"),
-        job("L0 / apply / stacks/dns / dev-eu", "success"),
+        job("L0 / dev-eu / stacks/dns", "failure"),
+        job("L0 / dev-eu / stacks/dns", "success"),
     ]
     assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
 
 
 def test_never_completes_a_cell_that_was_not_snapshotted():
-    jobs = [job("L0 / apply / stacks/rogue / dev-eu", "success")]
+    jobs = [job("L0 / dev-eu / stacks/rogue", "success")]
     assert apply_complete.to_complete(SNAP, jobs)[0] == []
 
 
-def test_a_reapply_job_cannot_complete_the_cell_it_shadows():
-    """A "reapply / stacks/dns / dev-eu" job shares its trailing characters with the target
-    "apply / stacks/dns / dev-eu" but is a different verb, so only a `/`-boundary-respecting
-    suffix may count. Same idiom as scripts/apply-comment's _job_url, pinned in
-    test_apply_comment.py::test_job_url_does_not_false_match_on_bare_endswith."""
-    jobs = [job("reapply / stacks/dns / dev-eu", "success")]
-    assert apply_complete.to_complete(SNAP, jobs)[0] == []
+def test_a_job_of_a_longer_env_name_cannot_complete_the_cell_it_shadows():
+    """A "dev-eu / stacks/dns" job shares its trailing characters with env `eu`'s cell job
+    "eu / stacks/dns" but is another env, so only a ` / `-boundary-respecting suffix may
+    count. Same idiom as scripts/apply-comment's _job_url, pinned in
+    test_apply_comment.py::test_job_url_does_not_false_match_on_bare_endswith.
+    Mutation: `apply-gate.is_cell_job` drops the ` / ` before the suffix."""
+    jobs = [job("L0 / dev-eu / stacks/dns", "success")]
+    assert apply_complete.to_complete({"apply / stacks/dns / eu": [1]}, jobs)[0] == []
 
 
 def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
     """Two real cells, "stacks/app" and a bare "app", plus two decoy jobs sharing a trailing
     substring with each without naming them: a different stack ("stacks/my-app") and a
-    different env ("prod-dev-eu"). None of it may complete anything."""
+    different env ("prod-dev-eu"). None of it may complete anything.
+    Mutation: `apply-gate.is_cell_job` drops the ` / ` before the suffix."""
     snap = {
         "apply / stacks/app / dev-eu": [2, 3],
         "apply / app / dev-eu": [99],
     }
     jobs = [
-        job("L0 / apply / stacks/my-app / dev-eu", "success"),
-        job("L0 / apply / stacks/app / prod-dev-eu", "success"),
+        job("L0 / dev-eu / stacks/my-app", "success"),
+        job("L0 / prod-dev-eu / stacks/app", "success"),
     ]
     assert apply_complete.to_complete(snap, jobs)[0] == []
 
@@ -88,7 +94,7 @@ def test_suffix_collisions_on_similar_stack_and_env_names_never_complete():
 def test_a_job_present_without_a_conclusion_is_unresolved_not_dropped():
     # The listing lagging a finished job is the whole reason for the retry loop: a null
     # conclusion must be reported, never read as "did not run".
-    jobs = [job("L0 / apply / stacks/dns / dev-eu", None)]
+    jobs = [job("L0 / dev-eu / stacks/dns", None)]
     ids, unresolved, _, _ = apply_complete.to_complete(SNAP, jobs)
     assert (ids, unresolved) == ([], ["stacks/dns / dev-eu"])
 
@@ -97,14 +103,14 @@ def test_a_cell_with_no_matching_job_at_all_is_unmatched_not_unresolved():
     # Skip-propagation: an earlier wave failing skips wave1..wave7, and GitHub never expands a
     # skipped job's matrix, so those cells get no job row at all. Retrying cannot help, so they
     # are named rather than retried.
-    jobs = [job("L0 / apply / stacks/dns / dev-eu", "success")]
+    jobs = [job("L0 / dev-eu / stacks/dns", "success")]
     assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
 
 
 def test_skipped_and_failure_are_terminal_and_neither_completes_nor_blocks():
     jobs = [
-        job("L0 / apply / stacks/dns / dev-eu", "skipped"),
-        job("L0 / apply / stacks/app / dev-eu", "failure"),
+        job("L0 / dev-eu / stacks/dns", "skipped"),
+        job("L0 / dev-eu / stacks/app", "failure"),
     ]
     ids, unresolved, unmatched, unsuccessful = apply_complete.to_complete(SNAP, jobs)
     assert (ids, unresolved, unmatched) == ([], [], [])
@@ -121,10 +127,11 @@ LIVE_SNAP = {
 def _live_jobs(stale):
     return [
         job(
-            f"L0 / {key}",
-            None if key == stale else "success",
+            f"L0 / dev-{r} / tenant-{n}",
+            None if f"apply / tenant-{n} / dev-{r}" == stale else "success",
         )
-        for key in LIVE_SNAP
+        for r in ("eu", "us")
+        for n, _ in enumerate("abcd", 1)
     ]
 
 
@@ -159,14 +166,14 @@ def test_main_exits_with_the_retry_code_and_names_the_unresolved_cells():
 def test_main_prints_the_ids_and_exits_zero_when_every_cell_resolved():
     done = _run(
         SNAP,
-        [job(f"L0 / {k}", "success") for k in SNAP],
+        [job("L0 / dev-eu / stacks/dns", "success"), job("L0 / dev-eu / stacks/app", "success")],
     )
     assert done.returncode == 0
     assert done.stdout.split() == ["1", "2", "3"]
 
 
 def test_main_names_the_unmatched_cells_instead_of_dropping_them_silently():
-    done = _run(SNAP, [job("L0 / apply / stacks/dns / dev-eu", "success")])
+    done = _run(SNAP, [job("L0 / dev-eu / stacks/dns", "success")])
     assert done.returncode == 0
     assert done.stdout.split() == ["1"]
     assert "::warning::" in done.stderr
@@ -180,8 +187,8 @@ def test_main_names_the_cells_whose_apply_job_did_not_succeed():
     done = _run(
         SNAP,
         [
-            job("L0 / apply / stacks/dns / dev-eu", "success"),
-            job("L0 / apply / stacks/app / dev-eu", "failure"),
+            job("L0 / dev-eu / stacks/dns", "success"),
+            job("L0 / dev-eu / stacks/app", "failure"),
         ],
     )
     assert done.returncode == 0
@@ -195,7 +202,7 @@ def test_the_zero_match_floor_is_retryable_not_an_immediate_hard_failure():
     a lost, truncated or lagging listing. Completing nothing off it strands every check, so it
     must never exit 0, and the code it exits is the retryable one because the loop exists to
     outlast exactly this lag."""
-    done = _run(SNAP, [job("L0 / apply / stacks/rogue / dev-eu", "success")])
+    done = _run(SNAP, [job("L0 / dev-eu / stacks/rogue", "success")])
     assert done.returncode == apply_complete.UNRESOLVED_EXIT
     assert apply_complete.RETRY_PREFIX in done.stderr
     assert "refusing to complete nothing" in done.stderr
@@ -330,7 +337,7 @@ def _select(tmp_path, listings, snapshot=None):
 
 
 def _all_success(*cells):
-    return jsonl(*(job(f"L0 / apply / {c} / dev-eu", "success") for c in cells))
+    return jsonl(*(job(f"L0 / dev-eu / {c}", "success") for c in cells))
 
 
 @bash_only
@@ -338,9 +345,9 @@ def test_the_listing_is_refetched_on_every_attempt(tmp_path):
     # The property that makes this a retry at all: hoisting the fetch above the `for` re-reads
     # one frozen snapshot on every attempt and sleeps the whole budget over it.
     lagging = jsonl(
-        job("L0 / apply / dns / dev-eu", "success"),
-        job("L0 / apply / app / dev-eu", "success"),
-        job("L0 / apply / web / dev-eu", None),
+        job("L0 / dev-eu / dns", "success"),
+        job("L0 / dev-eu / app", "success"),
+        job("L0 / dev-eu / web", None),
     )
     proc, ids, attempts, _ = _select(
         tmp_path, [lagging, lagging, _all_success("dns", "app", "web")]
@@ -384,9 +391,9 @@ def test_an_id_earned_by_one_attempt_survives_a_staler_later_listing(tmp_path):
     # Replicas differ, so a later read can be missing a row an earlier one had. A later read
     # may add a completion; it may never revoke one.
     first = jsonl(
-        job("L0 / apply / dns / dev-eu", "success"),
-        job("L0 / apply / app / dev-eu", "success"),
-        job("L0 / apply / web / dev-eu", None),
+        job("L0 / dev-eu / dns", "success"),
+        job("L0 / dev-eu / app", "success"),
+        job("L0 / dev-eu / web", None),
     )
     staler = _all_success("web")  # dns and app have vanished from this replica.
     proc, ids, _, _ = _select(tmp_path, [first, staler])
@@ -404,8 +411,8 @@ def test_exhaustion_keeps_the_earned_completions_and_then_fails_naming_only_the_
     Mutations: the first delay 2 -> 10; one later delay 10 -> 20; the last attempt sleeps
     (`set -u` aborts on the missing delay); `attempts` drops its `+ 1`."""
     lagging = jsonl(
-        job("L0 / apply / dns / dev-eu", "success"),
-        job("L0 / apply / web / dev-eu", None),
+        job("L0 / dev-eu / dns", "success"),
+        job("L0 / dev-eu / web", None),
     )
     proc, ids, attempts, env = _select(tmp_path, [lagging])
     assert proc.returncode == 0, proc.stderr

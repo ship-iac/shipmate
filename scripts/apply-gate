@@ -30,10 +30,10 @@ import sys
 from _shipmate import is_pr_number, is_run_id, run_annotated
 
 APPLY_PREFIX = "apply / "
-#: The consumer names its engine-calling job `shipmate`, and GitHub names a called workflow's
+#: The consumer names its plan-calling job `plan`, and GitHub names a called workflow's
 #: check runs `<caller job> / <callee job>`. `shipmate doctor` reports a job carrying another
 #: name, and `CONTRACT.md` §Check names states it.
-CALLER_PREFIX = "shipmate / "
+CALLER_PREFIX = "plan / "
 DONE_CONCLUSIONS = {"success", "neutral"}
 
 
@@ -50,11 +50,38 @@ def env_pr_number():
 
 
 def check_name(stack, env):
-    """The apply check's name, `apply / <stack> / <env>`: built forward. One site parses it
+    """The apply check's name, `apply / <stack> / <env>`: built forward. Two sites read it
     back: `deploy-detect.refuse_stranded_checks`, because after the merge the env a stack lost
-    exists only in its check's name. `stack` is the stack path, so a deploy that knows only
+    exists only in its check's name, and `apply-complete` through `parse_check_name`, because
+    its snapshot is keyed by check name. `stack` is the stack path, so a deploy that knows only
     the path rebuilds it exactly."""
     return f"{APPLY_PREFIX}{stack} / {env}"
+
+
+def parse_check_name(name):
+    """`(stack, env)` of the apply check name `name`. An env name holds no ` / `, so the env
+    is the text after the last one."""
+    stack, _, env = name.removeprefix(APPLY_PREFIX).rpartition(" / ")
+    return stack, env
+
+
+def cell_job_name(stack, env):
+    """A cell job's own name, `<env> / <stack>`, as `plan.yml`, `drift.yml` and
+    `apply-env-level.yml` declare it. GitHub prefixes each caller level's job name."""
+    return f"{env} / {stack}"
+
+
+def plan_check_name(stack, env):
+    """The plan cell's check name, `plan / <env> / <stack>`."""
+    return CALLER_PREFIX + cell_job_name(stack, env)
+
+
+def is_cell_job(job_name, stack, env):
+    """Whether the listed job `job_name` is the cell's: its whole name, or a suffix after a
+    ` / ` boundary, since every caller level prepends its own name and the levels differ per
+    route. The boundary keeps env `eu` from matching a job of env `dev-eu`."""
+    own = cell_job_name(stack, env)
+    return job_name == own or job_name.endswith(f" / {own}")
 
 
 def app_runs(check_run_lines, app_id):
@@ -72,7 +99,7 @@ def latest_by_name(check_runs, prefix=APPLY_PREFIX):
     (nullable -- a freshly-created queued run may carry none) an id is always
     present, so a newer queued duplicate never sorts below an older completed
     run. summary-comment reuses this with prefix="": it resolves plan-check
-    links by an exact `shipmate / <stack> / <env>` lookup, not a prefix filter."""
+    links by an exact `plan_check_name` lookup, not a prefix filter."""
     latest = {}
     for run in check_runs:
         name = run["name"]

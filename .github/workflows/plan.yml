@@ -94,7 +94,7 @@ jobs:
     # Resolved by `scripts/env-config`'s `resolve` from the default branch's table, so branch
     # content cannot choose it. Do not compute a binding here.
     environment: ${{ matrix.env_binding }}
-    name: ${{ matrix.stack }} / ${{ matrix.environment }}
+    name: ${{ matrix.environment }} / ${{ matrix.stack }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

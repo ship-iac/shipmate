@@ -150,8 +150,8 @@ def test_md_escape_neutralizes_an_entity_a_name_spells():
 
 
 CHECKS = {
-    "shipmate / stacks/app / dev-eu": {"html_url": "https://ck/app-eu"},
-    "shipmate / stacks/db / dev-us": {"html_url": "https://ck/db-us"},
+    "plan / dev-eu / stacks/app": {"html_url": "https://ck/app-eu"},
+    "plan / dev-us / stacks/db": {"html_url": "https://ck/db-us"},
 }
 RUN_URL = "https://gh/run/1"
 
@@ -162,26 +162,26 @@ def test_caller_prefix_is_the_shim_job_name():
     Reddens on any edit to apply-gate's `CALLER_PREFIX` -- the whole value is compared against
     a hand-written constant.
     """
-    assert sc.ag.CALLER_PREFIX == "shipmate / "
+    assert sc.ag.CALLER_PREFIX == "plan / "
 
 
 def test_check_url_resolves_by_env_and_stack_with_run_url_fallback():
-    """Reddens on `CALLER_PREFIX = ""` or `"shipmate/"`: the prefixed name misses."""
+    """Reddens on `CALLER_PREFIX = ""` or `"plan/"`: the prefixed name misses."""
     assert sc.check_url(_cell(), CHECKS, RUN_URL) == "https://ck/app-eu"
     assert sc.check_url(_cell(environment="prod"), CHECKS, RUN_URL) == RUN_URL
 
 
 def test_check_url_ignores_an_unprefixed_check_and_falls_back_to_the_run_url():
-    """A shim job named anything but `shipmate` degrades every plan link to the run URL.
+    """A shim job named anything but `plan` degrades every plan link to the run URL.
 
     The old two-segment name is not a match, so this reddens on `CALLER_PREFIX = ""`
     for the reason the constant exists, not on a plain absent-name miss.
     """
     cell = _cell(stack="a", environment="dev")
-    assert sc.check_url(cell, {"shipmate / a / dev": {"html_url": "https://ck/a"}}, RUN_URL) == (
+    assert sc.check_url(cell, {"plan / dev / a": {"html_url": "https://ck/a"}}, RUN_URL) == (
         "https://ck/a"
     )
-    assert sc.check_url(cell, {"a / dev": {"html_url": "https://ck/a"}}, RUN_URL) == RUN_URL
+    assert sc.check_url(cell, {"dev / a": {"html_url": "https://ck/a"}}, RUN_URL) == RUN_URL
 
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -380,7 +380,7 @@ def test_without_an_env_order_environments_sort_by_name(tmp_path):
         _cell(stack="stacks/db", environment="dev", changed=False),
         "No changes. Your infrastructure matches the configuration.\n",
     )
-    checks = {"shipmate / stacks/app / prod": {"html_url": "https://ck/app-prod"}}
+    checks = {"plan / prod / stacks/app": {"html_url": "https://ck/app-prod"}}
     cells = sc.load_cells(str(tmp_path))
     cells.reverse()
     body = sc.build_comment(cells, checks, RUN_URL, SHA)[0]
@@ -1324,11 +1324,11 @@ _HOSTILE = "detect failed: stack 'x`y @team </summary>' carries 2 workload tags"
             + HINT,
         ),
         (
-            "shipmate / stacks/a / dev and 1 more have no plan summary; fix their plans or re-plan",
+            "plan / dev / stacks/a and 1 more have no plan summary; fix their plans or re-plan",
             [_A_DEV, _B_PROD],
             HEAD
             + f"🔴 the gate is held {AT}\n\n"
-            + "```\nshipmate / stacks/a / dev and 1 more have no plan summary; fix their plans "
+            + "```\nplan / dev / stacks/a and 1 more have no plan summary; fix their plans "
             + "or re-plan\n```\n\n"
             + '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>\n'
             + '🔴 stacks/b (prod): no plan summary read <a href="https://gh/run/1">plan</a>\n\n'
@@ -1356,7 +1356,7 @@ def test_held_comment_is_the_whole_held_body(reason, missing, body):
     Mutations: `lang="diff"` -- every case; a fixed three-backtick fence -- `three-backticks`;
     drop `FOOTER_HINT` -- every case; drop `provenance` -- every case; label a cell `plan
     failed` -- `plan-job-failed` and `evidence-gap`."""
-    checks = {"shipmate / stacks/a / dev": {"html_url": "https://gh/c/a"}}
+    checks = {"plan / dev / stacks/a": {"html_url": "https://gh/c/a"}}
     assert sc.held_comment(reason, missing, checks, RUN_URL, SHA) == body
 
 
@@ -1380,7 +1380,7 @@ def _held_main(tmp_path, monkeypatch, mode, missing=(_A_DEV,)):
     monkeypatch.setenv("SHIPMATE_HOLD_REASON", "the reason")
     monkeypatch.setenv("SHIPMATE_MISSING", json.dumps(list(missing)))
     monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
-    listing = '{"name": "shipmate / stacks/a / dev", "html_url": "https://gh/c/a", "id": 1}\n'
+    listing = '{"name": "plan / dev / stacks/a", "html_url": "https://gh/c/a", "id": 1}\n'
     monkeypatch.setattr(sc.sys, "stdin", io.StringIO(listing))
     sc.main()
 
@@ -1598,7 +1598,7 @@ def test_import_and_forget_counts_from_raw_tofu_captures(name, tally, state):
 
 #: The Build step's check-runs projection, hand-written.
 _BUILD_JQ = ".check_runs[] | {name, html_url, id}"
-_BUILD_LISTING = '{"name": "shipmate / a / dev", "html_url": "https://gh/c/1", "id": 1}\n'
+_BUILD_LISTING = '{"name": "plan / dev / a", "html_url": "https://gh/c/1", "id": 1}\n'
 
 
 def _run_build(tmp_path, checks_rc=0):

@@ -13,7 +13,7 @@ else.
 Reads the check-runs of the run's OWN commit as JSON Lines on stdin (as emitted
 by `gh api --paginate ... --jq '.check_runs[]'`) and keeps the COMPLETED ones in
 this run's check suite. `completed` excludes this job's own still-running check,
-and the `shipmate / ` prefix excludes the consumer file's sibling jobs, which
+and the `plan / ` prefix excludes the consumer file's sibling jobs, which
 complete as `skipped` in the same suite. That prefix is the caller job's contract
 name, which `shipmate doctor` reports on and `CONTRACT.md` §Check names states --
 not a name each consumer chooses freely.
@@ -46,7 +46,7 @@ _DECIMAL = re.compile(r"[0-9]+")
 
 
 def bodies(lines, suite_id, head_sha):
-    """One POST body per completed `shipmate / ` check-run of `suite_id`, aimed at
+    """One POST body per completed `plan / ` check-run of `suite_id`, aimed at
     `head_sha`. Both conditions: a completed check named outside that namespace is
     one of the consumer file's skipped router jobs, not a cell.
 
@@ -98,8 +98,8 @@ def main():
         # Never silent: a mirror that copied nothing means the reviewer sees no
         # per-cell checks, and the reason is not visible anywhere else.
         print(
-            "::warning::no `shipmate / ` check completed in this plan run's own check suite, "
-            "so nothing was mirrored onto the pull request head; the pull request shows no "
+            f"::warning::no `{ag.CALLER_PREFIX}` check completed in this plan run's own check "
+            "suite, so nothing was mirrored onto the pull request head; the pull request shows no "
             "per-cell plan checks for this run",
             file=sys.stderr,
         )

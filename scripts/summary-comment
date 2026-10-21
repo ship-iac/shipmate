@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build the sticky plan comment: a verdict line, then per environment a heading and its cells.
 
-Reads the plan matrix jobs' auto check-runs (named `shipmate / <stack> / <env>`) as JSON
+Reads the plan matrix jobs' auto check-runs (named `plan / <env> / <stack>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
 cell summaries plus rendered plan text from the $CELLS directory (cell-summary.*
 artifacts). Writes comment.md, plus pending, count, unmanaged, lost and missing to
@@ -269,13 +269,13 @@ def footer_hint(circle):
 
 
 def check_url(cell, checks, run_url):
-    """Link target for a cell: the latest `shipmate / <stack-path> / <env>` plan-job check run.
+    """Link target for a cell: the latest `plan / <env> / <stack-path>` plan-job check run.
 
     Name is built FORWARD from the cell's (stack, environment) — the CONTRACT check-name
     grammar; never parsed back. Falls back to the workflow-run URL when the name is absent
-    (a consumer file whose plan-calling job is not named `shipmate`).
+    (a consumer file whose plan-calling job is not named `plan`).
     """
-    run = checks.get(f"{ag.CALLER_PREFIX}{cell['stack']} / {cell['environment']}")
+    run = checks.get(ag.plan_check_name(cell["stack"], cell["environment"]))
     return run["html_url"] if run and run.get("html_url") else run_url
 
 
@@ -708,7 +708,7 @@ def main():
         raise SystemExit(f"::error::SHIPMATE_COMMENT_MODE must be empty or held (got: {mode!r})")
     # prefix="" gathers every check-run on the head SHA: plan checks, detect/summary, and earlier
     # runs' apply checks, since this run publishes its own after the comment. Plan check names
-    # carry the calling job's `shipmate / ` prefix, so check_url's lookup is exact.
+    # carry the calling job's `plan / ` prefix, so check_url's lookup is exact.
     checks = ag.latest_by_name(ag.parse_jsonl(sys.stdin), prefix="")
     # This job runs inside the plan run, so this run holds the logs and the
     # artifacts the verdict's run link and the per-cell fallback link promise.

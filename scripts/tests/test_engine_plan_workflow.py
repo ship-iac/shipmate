@@ -121,6 +121,13 @@ def test_the_cell_binds_the_environment_detect_resolved():
     assert workflow_jobs(WF)["plan"]["environment"] == "${{ matrix.env_binding }}"
 
 
+def test_the_cell_job_name_is_the_cell_grammar():
+    """`summary-comment` and `gate-state` name a plan cell's check by
+    `apply-gate.plan_check_name`, `plan / <env> / <stack>`, which exists only while this
+    job's `name:` renders `<env> / <stack>`. Mutation: swap the two matrix keys."""
+    assert workflow_jobs(WF)["plan"]["name"] == "${{ matrix.environment }} / ${{ matrix.stack }}"
+
+
 def test_the_cell_passes_this_whole_with_block():
     """The whole mapping against a hand-written constant, not the keys this file happens to
     reason about elsewhere: a key checked one at a time relocates the hole to whichever key is

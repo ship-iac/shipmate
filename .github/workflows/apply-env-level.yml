@@ -53,7 +53,7 @@ jobs:
     concurrency: &wave-concurrency
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: &wave-name apply / ${{ matrix.stack }} / ${{ matrix.environment }}
+    name: &wave-name ${{ matrix.environment }} / ${{ matrix.stack }}
     # wave1..wave7 alias this list, so an edit here changes all eight waves. A change for one
     # wave needs that wave's `steps:` written out in full instead of `*wave-steps`.
     steps: &wave-steps

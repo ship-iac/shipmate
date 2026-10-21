@@ -58,7 +58,7 @@ def _missing_description(missing):
     failed, so the text names neither."""
     if not missing:
         return None
-    check = f"{ag.CALLER_PREFIX}{missing[0]['stack']} / {missing[0]['environment']}"
+    check = ag.plan_check_name(missing[0]["stack"], missing[0]["environment"])
     if len(missing) == 1:
         text = f"{check} has no plan summary; fix its plan or re-plan"
     else:
@@ -141,7 +141,7 @@ def _detect_gap(detect_result, refusal):
         return f"detect failed: {refusal}"
     return (
         f"change detection did not succeed ({detect_result}); fix the "
-        "shipmate / detect job before merging"
+        f"{ag.CALLER_PREFIX}detect job before merging"
     )
 
 
