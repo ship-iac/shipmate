@@ -124,12 +124,12 @@ runs:
         wait "$text_pid" || rc=1
         wait "$json_pid" || rc=1
         # Shared stderr would interleave two failures line by line. A clean render prints the text
-        # render's warnings once, minus terramate's two routine lines; grep exits 1 on no lines.
+        # render's warnings once, minus terramate's two routine lines.
         if [ "$rc" -ne 0 ]; then
           cat show-text.err show-json.err >&2
           exit "$rc"
         fi
-        grep -av -e '^terramate: Entering stack in ' -e '^terramate: Executing command ' show-text.err >&2 || [ $? -eq 1 ]
+        python3 "$GITHUB_ACTION_PATH/../../scripts/drop-routine-lines" < show-text.err >&2
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify"
 
     - name: Encrypt plan artifact at rest

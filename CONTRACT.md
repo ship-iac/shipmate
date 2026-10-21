@@ -2158,9 +2158,12 @@ verbatim:
   `result` (one of `applied`, `failed`, `blocked`), `reason` (which fail-safe
   blocked it, or why an earlier step failed first; the empty string for
   `applied`/`failed`).
-- `apply.txt` — the apply step's combined stdout+stderr, present only when
-  the apply step actually ran (absent for a cell blocked before then, a failed
-  init and a plan text that did not match what was reviewed included).
+- `apply.txt` — the apply step's combined stdout+stderr minus terramate's
+  two routine lines (`terramate: Entering stack in` and `terramate: Executing
+  command`, dropped by `scripts/drop-routine-lines`; the job log keeps them),
+  present only when the apply step actually ran (absent for a cell blocked
+  before then, a failed init and a plan text that did not match what was
+  reviewed included).
 
 `apply-cell` (writer) and `scripts/apply-comment` (reader, via
 `actions/apply-summary`) are pinned by the same SHA in the consumer's
@@ -2921,9 +2924,10 @@ Both text surfaces shipmate publishes — the rendered plan `plan.txt` in the
 sticky plan comment and the job step summary, and `apply.txt` in the apply
 result comment — carry whatever the tool wrote: shipmate never redacts
 either, and neither is covered by GitHub's log secret masking. (The published
-text is not byte-identical — escape sequences are stripped, undecodable bytes
-become replacement characters, and over-cap sections are truncated, per Plan
-comment and Apply result comment above — but none of that removes a secret.)
+text is not byte-identical — terramate's two routine lines are dropped from
+`apply.txt`, escape sequences are stripped, undecodable bytes become
+replacement characters, and over-cap sections are truncated, per Plan comment
+and Apply result comment above — but none of that removes a secret.)
 
 Masking applies to the log stream the runner consumes. Both files are written
 out of the tool's own stdout (`tofu show > plan.txt`,

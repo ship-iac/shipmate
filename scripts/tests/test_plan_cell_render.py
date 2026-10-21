@@ -6,8 +6,10 @@ the first failure while the other render is still writing into the workspace.
 
 The step body runs unmodified, with `terramate`, `tofu` and `python3` replaced by bash functions:
 bash resolves a function before PATH, and a function behind `&` runs in a subshell like the binary
-would. The `terramate` stub drops the wrapper's arguments up to `--`, writes terramate's two
-routine stderr lines and runs the rest. The lines are copied from a raw capture of
+would. The `python3` stub runs the real `drop-routine-lines` with the interpreter under test,
+touches `classified` for `plan-classify`, and fails any other call. The `terramate` stub drops
+the wrapper's arguments up to `--`, writes terramate's two routine stderr lines and runs the
+rest. The lines are copied from a raw capture of
 `terramate run ... -- tofu show -no-color stack.otplan` stderr (Terramate 0.17.1, OpenTofu
 1.13.1, Windows, redirected to a file); the `-json` render's second line names its own command.
 """
@@ -17,7 +19,7 @@ import pathlib
 import subprocess
 import sys
 
-from _loader import bash_only, load_script, run_step, step_by
+from _loader import ACTIONS, bash_only, load_script, run_lines, run_step, step_by
 
 _TEXT = "plan text\n"
 _JSON = '{"format_version":"1.2"}\n'
@@ -52,7 +54,13 @@ tofu() {
       printf '{"format_version":"1.2"}\n' ;;
   esac
 }
-python3() { touch "$RUNNER_TEMP/classified" ; }
+python3() {
+  case "${1##*/}" in
+    drop-routine-lines) command "$PYTHON" "$@" ;;
+    plan-classify) touch "$RUNNER_TEMP/classified" ;;
+    *) return 97 ;;
+  esac
+}
 """
 
 
@@ -64,10 +72,9 @@ def _run(tmp_path, fail, text=True):
         **os.environ,
         "STACK": "stacks/app",
         "RUNNER_TEMP": str(runner_temp),
-        "GITHUB_ACTION_PATH": str(tmp_path),
+        "GITHUB_ACTION_PATH": str(ACTIONS / "plan-cell"),
+        "PYTHON": sys.executable,
         "FAIL": fail,
-        # A runner's locale; under C, grep reads every byte as text and `-a` goes unpinned.
-        "LC_ALL": "C.UTF-8",
     }
     return run_step(tmp_path, body, env, text=text)
 
@@ -79,8 +86,8 @@ def _read(tmp_path, name):
 @bash_only
 def test_both_renders_succeed_and_plan_txt_is_the_text_render_whole(tmp_path):
     """Mutations: swap `plan.txt` and `plan.json` in the two render lines; `cat` the `.err` files
-    on success (terramate's routine lines reach stderr); drop `|| [ $? -eq 1 ]` (grep prints
-    nothing and fails the step)."""
+    on success (terramate's routine lines reach stderr); delete the `plan-classify` line (nothing
+    is classified)."""
     r = _run(tmp_path, "")
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stderr == ""
@@ -91,13 +98,21 @@ def test_both_renders_succeed_and_plan_txt_is_the_text_render_whole(tmp_path):
 
 @bash_only
 def test_a_clean_render_prints_a_warning_once_without_terramate_routine_lines(tmp_path):
-    """Both renders write the same warning, with a byte that is not UTF-8. Mutations: drop the
-    success-path `grep` (the warning never prints); drop either `-e` pattern (a routine line
-    prints); filter `show-json.err` too (the warning prints twice); drop `-a` (grep reports a
-    binary match instead of the line)."""
+    """Both renders write the same warning, with a byte that is not UTF-8. Mutations: delete the
+    success-path `drop-routine-lines` line (the warning never prints); filter `show-json.err` too
+    (the warning prints twice)."""
     r = _run(tmp_path, "warn", text=False)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stderr == b"Warning: bad \xff byte\n"
+
+
+def test_a_clean_render_filters_the_text_render_stderr_then_classifies():
+    """Mutations: filter `show-json.err` instead; delete the `drop-routine-lines` line; delete the
+    `plan-classify` line -- each red."""
+    assert run_lines(step_by("plan-cell", id="plan"))[-2:] == [
+        'python3 "$GITHUB_ACTION_PATH/../../scripts/drop-routine-lines" < show-text.err >&2',
+        'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify"',
+    ]
 
 
 @bash_only

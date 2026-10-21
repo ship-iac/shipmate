@@ -273,6 +273,19 @@ runs:
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"
 
+    - name: Drop terramate's routine lines from the posted log
+      # Reviewer-facing only: the job log keeps the lines. A step of its own, so a failed filter
+      # cannot change the apply step's status; the posted log then keeps them too.
+      if: always()
+      continue-on-error: true
+      shell: bash
+      run: |
+        set -euo pipefail
+        log="$RUNNER_TEMP/apply.txt"
+        [ -f "$log" ] || exit 0
+        python3 "$GITHUB_ACTION_PATH/../../scripts/drop-routine-lines" < "$log" > "$log.tmp"
+        mv "$log.tmp" "$log"
+
     - name: Upload apply summary
       # Reviewer-facing only (continue-on-error): a failed upload drops the cell's output from the
       # comment rather than stranding its check pending. `overwrite: true` keeps a same-run job

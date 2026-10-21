@@ -1150,13 +1150,13 @@ runs that step before the `hcl-check` step, which runs `terramate fmt --check`
 and `terramate generate`, so a fork is turned away before either evaluates the
 tree it wrote. Keep that order: reversed, the `hcl-check` step evaluates (and
 generates from) fork-authored HCL first. What the reversed order would cost is
-bounded — `detect` holds `contents: read` and no App key, binds no environment, runs no `tofu`, and only
-a commenter with `write` or `admin` permission can start the run at all — but
-the outer guard reaching one step less far is exactly the kind of difference
-worth not having. The two legs are not identical, and that is the measured
-shape: on the autoplan leg `actions/checkout` refused and `build-matrix` never
-ran; on the dispatch leg the checkout succeeded and `build-matrix` did the
-refusing.
+bounded — `detect` holds `contents: read` and no App key, binds no
+environment, runs no `tofu`, and only a commenter with `write` or `admin`
+permission can start the run at all — but the outer guard reaching one step
+less far is exactly the kind of difference worth not having. The two legs are
+not identical, and that is the measured shape: on the autoplan leg
+`actions/checkout` refused and `build-matrix` never ran; on the dispatch leg
+the checkout succeeded and `build-matrix` did the refusing.
 
 The refusal in `detect` is loud (a red step) rather than a quiet empty matrix,
 because a fork pull request could not merge either way: with the `summary` job

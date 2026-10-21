@@ -13,6 +13,7 @@ section below names the SHA the release tags.
 ### Fixed
 
 - A plan's `detect` that fails on unformatted HCL or stale generated code annotates each file with its remedy, and the held gate and comment name the files and the command to run instead of "change detection did not succeed".
+- The apply result comment's log no longer starts with terramate's `Entering stack` and `Executing command` lines; the job log keeps them.
 
 ## [0.50.0] — 2026-10-21
 

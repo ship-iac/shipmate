@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Copy stdin to stdout without terramate's two routine lines.
+
+`terramate run` prints `terramate: Entering stack in <stack>` and `terramate: Executing command
+"<command>"` before the command's own output. A line (split at `\n`, terminator kept) that
+starts with either is dropped; every other byte passes unchanged, so provider output that is not
+UTF-8 survives. `ROUTINE` is the one place the two prefixes are named.
+"""
+
+import sys
+
+from _shipmate import run_annotated
+
+ROUTINE = (b"terramate: Entering stack in ", b"terramate: Executing command ")
+
+
+def main():
+    for line in sys.stdin.buffer:
+        if not line.startswith(ROUTINE):
+            sys.stdout.buffer.write(line)
+
+
+if __name__ == "__main__":
+    run_annotated(main)
