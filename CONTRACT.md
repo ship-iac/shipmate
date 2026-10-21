@@ -90,9 +90,10 @@ check name back to its stack and environment (`apply-gate.parse_check_name`; an
 environment name holds no ` / `) and matches that cell's wave job in the same
 run's job-name listing with the same matcher, to decide which cells the run's
 own job conclusions actually earned. When some cells still match, a rename of
-the apply-env-level job's `name:` would silently break this reader too — not
-degrading to a fallback URL, but leaving the unmatched cells' snapshotted checks
-pending forever.
+the apply-env-level job's `name:` would break this reader too with only a
+`::warning::` naming the unmatched cells (the job stays green) — not degrading to
+a fallback URL, but leaving the unmatched cells' snapshotted checks pending
+forever.
 
 Job display names in the apply/deploy path nest: a called reusable workflow's
 job displays as `<caller job> / <callee job>`, applied at every level, and GHA
