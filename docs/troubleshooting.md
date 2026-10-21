@@ -1535,9 +1535,10 @@ flight. When the newer run holds the gate or published apply checks on the
 head, the re-run's `summary` writes nothing and ends green at its hold step,
 with a notice naming that run ("plan run <id> holds the gate of <sha> and is
 newer than this run", or "plan run <id>, newer than this run (<id>), published
-apply checks on this head"). A plan run that starts while the re-run is in
-flight cancels the re-run, as it cancelled the autoplan; re-run again once that
-plan run has finished.
+apply checks on this head"). A plan run of the same pull request that starts
+while the re-run is in flight cancels the re-run, as it cancelled the autoplan.
+Then comment `shipmate plan` or push rather than re-running again: a second
+re-run fails a plan cell whose artifact the first re-run uploaded (409).
 
 ### Fork pull request refused
 
