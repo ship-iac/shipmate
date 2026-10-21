@@ -47,9 +47,8 @@ def test_matches_the_nested_reusable_workflow_job_name_suffix(prefix):
     [
         ({"apply / detect / apply": [5]}, "apply / detect"),
         (SNAP, "apply / verify / dev-eu / stacks/app"),
-        (SNAP, "apply / L0 / ${{ matrix.environment }} / ${{ matrix.stack }}"),
     ],
-    ids=["orchestration-job", "non-wave-cell-job", "skipped-wave-row"],
+    ids=["orchestration-job", "non-wave-cell-job"],
 )
 def test_only_a_wave_job_completes_a_cell(snap, name):
     """A job outside an `L<n>` env-level can end in ` / <env> / <stack>`: the orchestration

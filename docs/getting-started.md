@@ -908,11 +908,14 @@ line without a comment.
 `SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
 value is readable by anyone who can see the repository and nothing in it reaches
 a cell; the run fails telling you to rotate what it held. A
-`SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_ENCRYPTION_KEY` variable is refused too,
-each with its own message: rotate the key and set it as a secret on
-`shipmate-engine`; choose a new encryption key and set it as a repository or
-organization secret (a new encryption key cannot decrypt cached local state:
-[`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption, "Rotation"). The other direction cannot be
+`SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_ENCRYPTION_KEY` or `SHIPMATE_PLAN_PASSPHRASE`
+variable is refused too, each with its own message: rotate the key and set it as
+a secret on `shipmate-engine`; choose a new encryption key and set it as a
+repository or organization secret; and, because a `SHIPMATE_PLAN_PASSPHRASE`
+variable would expose an encryption key, delete it and choose a new
+`SHIPMATE_ENCRYPTION_KEY` if it holds that value (a new encryption key cannot
+decrypt cached local state: [`../CONTRACT.md`](../CONTRACT.md) §Plan artifact
+encryption, "Rotation"). The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 

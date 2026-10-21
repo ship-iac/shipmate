@@ -43,7 +43,8 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
 
   envlevel0:
-    # Display name only (job id unchanged) -- see apply.yml's `envlevel0` job.
+    # `apply-gate.is_cell_job` matches a wave job as `L<n> / <env> / <stack>`, so this `L<n>` name
+    # is load-bearing: renaming it strands apply checks pending. apply.yml repeats it.
     name: L0
     needs: [detect]
     if: ${{ !failure() && !cancelled() && needs.detect.outputs.envlevel0_empty != 'true' && !contains(join(needs.*.result, ','), 'cancelled') }}

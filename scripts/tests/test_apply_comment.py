@@ -1527,15 +1527,27 @@ def test_check_name_grammar_matches_apply_cells_construction():
     assert rows == [_row(environment="dev-eu", stack="stacks/app", status="unrecorded")]
 
 
+def test_every_env_level_job_is_named_for_its_level():
+    """`apply-gate.is_cell_job` requires the `L<n>` segment, so every env-level job of
+    `apply.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id. Hand-written
+    whole value. Mutation: rename deploy.yml's `name: L0` to `level 0`."""
+    expected = {"envlevel0": "L0", "envlevel1": "L1", "envlevel2": "L2", "envlevel3": "L3"}
+    for wf in ("apply.yml", "deploy.yml"):
+        jobs = workflow_yaml(wf)["jobs"]
+        names = {j: v.get("name") for j, v in jobs.items() if j.startswith("envlevel")}
+        assert names == expected, f"{wf}: {names}"
+
+
 def test_wave_job_name_matches_the_cell_job_grammar():
     """Coupling: `_job_url` and `apply-complete` find a cell's wave job by matching
-    `apply-gate.cell_job_name` as a ` / `-boundary suffix of the run's job names, which works
-    only because every wave job's `name:` renders that grammar. Nothing else enforces it, and a
+    `apply-gate.is_cell_job`'s `L<n> / <env> / <stack>` as the whole job name or a suffix after
+    a ` / ` boundary, which works only because every wave job's `name:` renders `<env> /
+    <stack>` and the env-level job holding it is named `L<n>`. Nothing else enforces it, and a
     rename downgrades every link to the run URL and leaves every apply check pending.
 
     Mutation: swap the two matrix keys on wave0's `name: &wave-name`, or replace one wave's
     `name: *wave-name` or `steps: *wave-steps` with a variant, or feed apply-cell's `stack:` from
-    another matrix key."""
+    another matrix key, or rename deploy.yml's `name: L0` to `level 0`."""
     jobs = workflow_yaml("apply-env-level.yml")["jobs"]
     expected = "${{ matrix.environment }} / ${{ matrix.stack }}"
     # Width from waves.MAX_WAVES, so a bump cannot leave this asserting the old count.
@@ -1561,10 +1573,11 @@ def test_wave_job_name_matches_the_cell_job_grammar():
         "apply-cell builds the check name from those two inputs, so a different source "
         f"for either silently breaks the check-name/job-name match (got: {sorted(set(wired))})"
     )
-    # The reader's half, exercised: a nested-display job name built from that grammar
-    # must resolve, for the row's own stack and environment.
+    # The reader's half, exercised: a nested-display job name built from deploy.yml's own
+    # level name and that grammar must resolve, for the row's own stack and environment.
+    level = workflow_yaml("deploy.yml")["jobs"]["envlevel0"]["name"]
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("deploy / L0 / dev-eu / stacks/app", "https://gh/job/1")]
+    jobs = [_job(f"deploy / {level} / dev-eu / stacks/app", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 

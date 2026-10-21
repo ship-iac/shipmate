@@ -75,10 +75,13 @@ matches `L<n> / <env> / <stack>`, the env-level job of `apply.yml` or
 such as `apply / detect` for env `apply` and root stack `detect`. `scripts/apply-comment`
 (see Apply result comment, below) resolves each cell line's log link this way,
 building the name forward from the row's stack and environment. No match falls
-back to the workflow-run URL. The wave names and the matcher are locked together
-by a source-derived test, because a rename of either would degrade every link to
-the run URL silently — that fallback being the designed behaviour, no observable
-would fail.
+back to the workflow-run URL. The names and the matcher are locked together by
+two source-derived tests, `test_apply_comment.py::test_wave_job_name_matches_the_cell_job_grammar`
+(every wave job's name, and the matcher on a nested name) and
+`test_apply_comment.py::test_every_env_level_job_is_named_for_its_level` (every
+`L<n>` name in `apply.yml` and `deploy.yml`), because a rename of either would degrade
+every link to the run URL silently — that fallback being the designed behaviour, no
+observable would fail.
 
 `scripts/apply-complete` is the second reader: given the pre-flight snapshot of
 check ids a run may complete, it reads each snapshotted `apply / <stack> / <env>`
@@ -2829,13 +2832,16 @@ reaches the process.
   aimed at a cell, and refusing it would fail every run on correct
   configuration. An envelope key is **refused**: writing `TF_WORKSPACE` into
   `SHIPMATE_VARS` is a deliberate act with one meaning, and a silent drop leaves
-  the author debugging the wrong thing. Three enumerated names are **refused**
+  the author debugging the wrong thing. Four enumerated names are **refused**
   rather than skipped: `SHIPMATE_SECRETS`, `SHIPMATE_APP_PRIVATE_KEY` and
-  `SHIPMATE_ENCRYPTION_KEY`, secrets set on the variable surface. Skipping one
+  `SHIPMATE_ENCRYPTION_KEY`, secrets set on the variable surface, and
+  `SHIPMATE_PLAN_PASSPHRASE`, because a variable of that name would expose an
+  encryption key. Skipping one
   would export nothing while its value sat world-readable in the repository UI,
   and the engine's own namespace has no legitimate reading as a consumer
   variable. The refusal says to delete the variable, rotate what it held, and
-  set the secret. A rotated `SHIPMATE_ENCRYPTION_KEY` no longer decrypts a
+  set the secret; for `SHIPMATE_PLAN_PASSPHRASE`, to choose a new
+  `SHIPMATE_ENCRYPTION_KEY` if it holds that value. A rotated `SHIPMATE_ENCRYPTION_KEY` no longer decrypts a
   local backend's cached state (§Plan artifact encryption, "Rotation").
 - **Name validation.** Every envelope key must match `[A-Za-z_][A-Za-z0-9_]*`.
   `$GITHUB_ENV` is written in heredoc form, so a key holding a newline would
