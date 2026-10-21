@@ -1161,7 +1161,9 @@ The plan's `detect` job runs `terramate fmt --check` and
 `terramate generate --detailed-exit-code` over the whole repository, unmanaged
 stacks included, and the pull request's head failed one or both. The message
 names the first ten files. Each file also carries its own annotation on the
-`detect` job, up to the ten GitHub keeps per step.
+`detect` job. GitHub keeps ten error annotations per step and each failing
+command's summary takes one, so at most nine files are annotated, eight when
+both commands fail.
 
 1. Run `terramate fmt` or `terramate generate` (or both) at the repository root.
 2. Commit the result and push. The push re-plans.

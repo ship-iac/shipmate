@@ -673,7 +673,7 @@ def test_write_fence_prints_the_diff_then_writes_the_fence(engine, tmp_path, mon
     assert on_disk(wf) == {"shipmate.yml": fence}
 
 
-def test_write_fence_keeps_the_push_branch(engine, tmp_path, monkeypatch, capsys):
+def test_write_fence_keeps_the_push_branch(engine, tmp_path, monkeypatch):
     """The flag first, a shim on `develop`. Mutation: render on `main` whatever the trigger
     names -- the written file holds `branches: [main]`."""
     wf = consumer(tmp_path, {"shipmate.yml": _edited("develop", "\n")})
@@ -681,7 +681,7 @@ def test_write_fence_keeps_the_push_branch(engine, tmp_path, monkeypatch, capsys
     assert on_disk(wf) == {"shipmate.yml": _fence_shim("develop", f"{engine.sha} # v1.2.3", "\n")}
 
 
-def test_write_fence_keeps_crlf(engine, tmp_path, monkeypatch, capsys):
+def test_write_fence_keeps_crlf(engine, tmp_path, monkeypatch):
     """Mutation: write `rendered` as it is, dropping the CRLF branch -- the file comes back LF."""
     wf = consumer(tmp_path, {"shipmate.yml": _edited("main", "\r\n")})
     assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
@@ -696,7 +696,7 @@ def test_write_fence_refuses_a_wildcard_trigger(engine, tmp_path, monkeypatch, c
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {engine.sha}\n"
         "unchanged shipmate.yml\n"
-        "not writing shipmate.yml: its push trigger is not one plain branch\n"
+        "not writing shipmate.yml: its push trigger must hold one plain branch and nothing else\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
         "@@ -1,7 +1,7 @@\n"
@@ -705,6 +705,32 @@ def test_write_fence_refuses_a_wildcard_trigger(engine, tmp_path, monkeypatch, c
         "   push:\n"
         "-    branches: [main]\n"
         "+    branches: ['**']\n"
+        " jobs:\n"
+        "   plan:\n"
+        f"     uses: {WF}/plan.yml@<pin>\n"
+    )
+    assert on_disk(wf) == {"shipmate.yml": shim}
+
+
+def test_write_fence_refuses_a_trigger_with_a_paths_filter(engine, tmp_path, monkeypatch, capsys):
+    """`branches: [main]` then `paths:` under `push:`. Mutation: drop the lookahead after
+    `branches: [X]` from `_TRIGGER` -- the file is written and loses its `paths:` line."""
+    shim = _fence_shim("main", f"{engine.sha} # v1.2.3", "\n").replace(
+        b"    branches: [main]\n", b"    branches: [main]\n    paths: [infra/**]\n"
+    )
+    wf = consumer(tmp_path, {"shipmate.yml": shim})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\n"
+        "unchanged shipmate.yml\n"
+        "not writing shipmate.yml: its push trigger must hold one plain branch and nothing else\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -2,6 +2,7 @@\n"
+        " on:\n"
+        "   push:\n"
+        "     branches: [main]\n"
+        "+    paths: [infra/**]\n"
         " jobs:\n"
         "   plan:\n"
         f"     uses: {WF}/plan.yml@<pin>\n"
@@ -728,7 +754,7 @@ def test_write_fence_reads_only_the_push_trigger(engine, tmp_path, monkeypatch, 
     assert capsys.readouterr().out == (
         f"v1.2.3 -> {sha}\n"
         "unchanged shipmate.yml\n"
-        "not writing shipmate.yml: its push trigger is not one plain branch\n"
+        "not writing shipmate.yml: its push trigger must hold one plain branch and nothing else\n"
         "--- shipmate.yml (fence)\n"
         "+++ shipmate.yml\n"
         "@@ -1,7 +1,8 @@\n"

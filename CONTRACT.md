@@ -2160,8 +2160,8 @@ verbatim:
   `applied`/`failed`).
 - `apply.txt` — the apply step's combined stdout+stderr minus terramate's
   two routine lines (`terramate: Entering stack in` and `terramate: Executing
-  command`, dropped by `scripts/drop-routine-lines`, kept when the filter step fails;
-  the job log keeps them),
+  command`, dropped by `scripts/drop-routine-lines`, kept when the filter step
+  fails; the job log keeps them),
   present only when the apply step actually ran (absent for a cell blocked
   before then, a failed init and a plan text that did not match what was
   reviewed included).

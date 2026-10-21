@@ -56,8 +56,8 @@ pin and table, so the edits take effect together at merge.
    `shipmate.yml`, pins masked. A non-empty diff means the release changed the fence, or the
    file carries a local edit. Reconcile `shipmate.yml` by hand in the same commit, or take the
    fence whole with `--write-fence`: it keeps the file's push branch and replaces every other
-   differing line, so the diff it prints is what it replaced. It writes nothing when the push
-   trigger is not one plain branch. The exit code says the same:
+   differing line, so the diff it prints is what it replaced. It writes nothing unless the
+   push trigger holds one plain branch and nothing else. The exit code says the same:
 
    | Exit | Meaning |
    | --- | --- |

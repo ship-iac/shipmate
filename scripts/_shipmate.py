@@ -33,6 +33,8 @@ from typing import TypeGuard
 _D = pathlib.Path(__file__).resolve().parent
 
 REDACTED = "***"
+#: GitHub keeps at most 10 annotations per level per step.
+ANNOTATION_CAP = 10
 
 #: A repository slug is interpolated into API paths, URLs and `gh --repo` arguments. Both halves
 #: start alphanumeric, as GitHub logins and repository names do: that forecloses '.' and '..',

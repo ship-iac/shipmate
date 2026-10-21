@@ -24,9 +24,10 @@ every file as it was:
 4. Every engine workflow the directory calls with an `@` ref exists at `<sha>`.
 5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
    it, on the branch named by the consumer's `shipmate.yml` line `    branches: [X]` directly
-   under `  push:` when that is the only such line and `X` is a single plain branch name.
-   Any other shape renders on `main`, so a list, a wildcard or a flow mapping shows in the
-   diff. A single branch other than the default is `onboard`'s to report, not this script's.
+   under `  push:` when that is the only such line, `X` is a single plain branch name, and
+   the push block holds nothing else. Any other shape renders on `main`, so a list, a
+   wildcard, a flow mapping or a `paths:` filter shows in the diff. A single branch other
+   than the default is `onboard`'s to report, not this script's.
 
 It then writes each changed file, prints `updated <file>` or `unchanged <file>` for every file
 it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
@@ -36,8 +37,8 @@ It does not commit.
 `shipmate.yml`, in its line endings, and prints `wrote shipmate.yml from the <tag> fence`. It
 keeps the file's push branch and replaces every other local edit, a changed `runs_on` or
 secret mapping included, so read the printed diff first. When `shipmate.yml` is absent or its
-push trigger is not one plain branch, it prints `not writing shipmate.yml: <why>` before the
-diff and writes nothing more.
+push trigger holds anything but one plain branch, it prints `not writing shipmate.yml: <why>`
+before the rest of the output and writes nothing more.
 
 Exit codes: 0 every engine ref pinned to the tag and `shipmate.yml` matches the fence or was
 written from it; 2 every engine ref pinned and `shipmate.yml` differs or is absent; 1 a
@@ -62,7 +63,9 @@ _PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)({_LABEL})?')
 #: Case-insensitive, unlike `_PIN`: GitHub resolves `Ship-IaC/shipmate` too, so a variant the
 #: rewrite leaves alone still refuses as a leftover.
 _REF = re.compile(rf'(?i:{_SLUG})/([^@ \t"]+)@')
-_TRIGGER = re.compile(r"^  push:\n    branches: \[([^\]\n]*)\]$", re.M)
+#: The next non-blank line sits at indent 2 or less: a `paths:`, `tags:` or `branches-ignore:`
+#: line under `push:` makes the trigger more than one branch.
+_TRIGGER = re.compile(r"^  push:\n    branches: \[([^\]\n]*)\]$(?!\n(?:[ \t]*\n)*   )", re.M)
 _FLAG = "--write-fence"
 
 
@@ -190,7 +193,8 @@ def _check_callees(texts, sha, tag):
 
 
 def _render(texts, sha, tag):
-    """(the fence rendered for `shipmate.yml`, whether its push trigger is one plain branch)."""
+    """(the fence rendered for `shipmate.yml`, whether its push trigger is one plain branch and
+    nothing else)."""
     rc, page, err = _git("show", f"{sha}:docs/getting-started.md")
     if rc:
         raise SystemExit(f"cannot read docs/getting-started.md at {tag}:\n{err}")
@@ -232,7 +236,7 @@ def main():
         sys.exit(2)
     diff = onboard.shim_diff(rendered, new[SHIM], SHIM)
     if write and diff and not plain:
-        print(f"not writing {SHIM}: its push trigger is not one plain branch")
+        print(f"not writing {SHIM}: its push trigger must hold one plain branch and nothing else")
     print(diff or f"{SHIM} matches the {tag} fence\n", end="")
     if write and diff and plain:
         crlf = "\r\n" in new[SHIM]

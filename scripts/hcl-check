@@ -22,10 +22,8 @@ import re
 import subprocess
 import sys
 
-from _shipmate import command_data, command_property, named, run_annotated
+from _shipmate import ANNOTATION_CAP, command_data, command_property, named, run_annotated
 
-#: GitHub keeps at most 10 error annotations per step (`doctor`'s `ANNOTATION_CAP`).
-ANNOTATION_CAP = 10
 FMT = ["terramate", "fmt", "--check"]
 GENERATE = ["terramate", "generate", "--detailed-exit-code"]
 _STACK = re.compile(r"- (/.*)")

@@ -58,9 +58,8 @@ import os
 import pathlib
 import re
 
-from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
-from _shipmate import ENGINE_ENV as _ENGINE_ENV
 from _shipmate import (
+    ANNOTATION_CAP,
     GATE_CONTEXT,
     _load,
     approval_rules,
@@ -80,6 +79,8 @@ from _shipmate import (
     write_outputs,
     yaml_error_text,
 )
+from _shipmate import APP_KEY_NAME as _APP_KEY_NAME
+from _shipmate import ENGINE_ENV as _ENGINE_ENV
 from _shipmate import gh_json as _gh_json
 
 ec = _load("env-config")
@@ -153,7 +154,6 @@ _REVIEW_RULE_UNREADABLE = (
 )
 
 DOCTOR_MARKER = "<!-- shipmate:doctor -->"
-ANNOTATION_CAP = 10  # GitHub keeps at most 10 annotations per level per step
 HARVEST_LEVELS = ("warning", "failure")
 _LEVEL_EMOJI = {WARNING: "🟠", NOTICE: "⚪"}
 # Covers both shapes the gather step reports: nothing read at all, and some read
