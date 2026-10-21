@@ -1538,8 +1538,9 @@ newer than this run", or "plan run <id>, newer than this run (<id>), published
 apply checks on this head"). A newer run that takes the gate while the re-run
 is publishing still fails the re-run's
 `Create apply checks (pending / no-changes)` or `Create/refresh gate` step.
-The gate stays correct, because the newer run owns it, but that red `summary`
-stays on the head until the head changes or the run is re-run again.
+The newer run owns the gate, so the gate stays correct. That red `summary` does
+not block the merge, since `shipmate / gate` is the only required check, and it
+stays on the head until the next push. Another re-run can meet the same race.
 
 ### Fork pull request refused
 
