@@ -257,6 +257,7 @@ def _cell_error(tmp_path, monkeypatch, init, plan, outcome):
     monkeypatch.setenv("STACK", "stacks/a")
     monkeypatch.setenv("ENV", "dev")
     monkeypatch.setenv("PLAN_OUTCOME", outcome)
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     te.main(["cell-error"])
     assert not (tmp_path / "cell-error.json").exists()
     out = temp / "cell-error.json"
@@ -266,12 +267,12 @@ def _cell_error(tmp_path, monkeypatch, init, plan, outcome):
 def test_cell_error_reads_the_plan_that_failed_after_a_clean_init(tmp_path, monkeypatch):
     """Written under `RUNNER_TEMP`, never the workspace a pull request controls. Mutations: write
     to the working directory -- red; read `init.txt` whatever `PLAN_OUTCOME` holds -- an empty
-    `error`;
-    swap `stack` and `environment` -- red; write `command_data(error)` -- red."""
+    `error`; swap `stack` and `environment` -- red; write `command_data(error)` -- red; drop
+    `attempt` -- red."""
     got = _cell_error(tmp_path, monkeypatch, CLEAN_INIT.encode(), PLAN_ERROR.encode(), "failure")
     assert got == (
         '{"stack": "stacks/a", "environment": "dev", '
-        '"error": "Error: plan broke\\n\\non main.tf line 1"}'
+        '"error": "Error: plan broke\\n\\non main.tf line 1", "attempt": "2"}'
     )
 
 
@@ -279,16 +280,17 @@ def test_cell_error_reads_the_init_when_the_plan_never_ran(tmp_path, monkeypatch
     """Mutation: read `plan-run.txt` whatever `PLAN_OUTCOME` holds -- FileNotFoundError."""
     got = _cell_error(tmp_path, monkeypatch, _fixture("init_error_backend_ansi.txt"), None, "")
     error = BACKEND.removeprefix("::error::").removesuffix("\n")
-    assert got == json.dumps({"stack": "stacks/a", "environment": "dev", "error": error})
+    assert got == json.dumps(
+        {"stack": "stacks/a", "environment": "dev", "error": error, "attempt": "2"}
+    )
 
 
-def test_a_re_run_without_a_diagnostic_writes_an_empty_error(tmp_path, monkeypatch):
-    """A re-run that fails with no `Error:` diagnostic still uploads a file, so `overwrite`
-    replaces the first attempt's error instead of leaving it on the held comment.
+def test_a_failed_cell_without_a_diagnostic_writes_an_empty_error(tmp_path, monkeypatch):
+    """A failed cell always writes its file, empty without an `Error:` diagnostic.
 
     Mutation: skip writing when `first_error` is empty -- no file, red."""
     got = _cell_error(tmp_path, monkeypatch, b"terramate: stack not found\n", None, "")
-    assert got == '{"stack": "stacks/a", "environment": "dev", "error": ""}'
+    assert got == '{"stack": "stacks/a", "environment": "dev", "error": "", "attempt": "2"}'
 
 
 #: Hand-written: plan-cell's whole cell-error steps.

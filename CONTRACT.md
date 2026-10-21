@@ -2190,9 +2190,11 @@ the publish hold (below). In order, blank lines between the parts:
   the cell's line is followed by the first one (from `init` or `plan`), colour
   removed and cut at 1,000 characters, in a plain backtick fence longer than any
   backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it;
-  a cell whose artifact did not arrive, or whose failure printed no `Error:`
-diagnostic (its artifact then carries an empty error, so a re-run's upload
-replaces an earlier attempt's), shows its line alone. The cell's plan job
+  every failed cell uploads one, its error empty when the failure printed no
+  `Error:` diagnostic, with the run attempt that wrote it. An error shows only
+  when this run attempt recorded it, so a re-run never shows an earlier
+  attempt's; a cell whose artifact did not arrive or carries an empty error
+  shows its line alone. The cell's plan job
   also carries an `::error::` annotation with it. For the autoplan that job is the
   linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
   keeps it on its own run: `doctor` reads only the autoplan's cell checks and
@@ -2279,8 +2281,9 @@ and `lost` outputs, which the same rule reads.
   platform behaviour no `if:` or `name:` change removes.
 - **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
   settings in this run: see [the run](<run url>)`, under any verdict. `N`
-  leaves out the repository-settings warnings the linked run also shows. When the cell lines leave it no room
-  under the 65,536-character cap, it is left out with a warning.
+  leaves out the repository-settings warnings the linked run also shows. When
+  the cell lines leave it no room under the 65,536-character cap, it is left
+  out with a warning.
 - **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
   managed by shipmate: <paths>`, naming at most ten paths within 1,000
   characters, then `, and M more`. When not even the first path fits, it ends
@@ -2455,9 +2458,10 @@ run in it. A `detect` that failed without an `::error::` renders no fence.
   head, as the plan comment's does.
 - **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
   `<counts>` the verdict line's counts for that environment's rows, with a
-  blank line on both sides, one per environment in the plan comment's order, from `apply-detect`'s
-  `env_order` output (a bare apply orders every environment with an apply
-  check on the head, a targeted one names its environment).
+  blank line on both sides, one per environment in the plan comment's order,
+  from `apply-detect`'s `env_order` output (a bare apply orders every
+  environment with an apply check on the head, a targeted one names its
+  environment).
 - **Row line.** `<circle> <stack>: <state> <a href="<url>">logs</a>`, one per
   expected cell, under its environment's heading. Every row but a not
   attempted one comes first, then the not attempted rows, each group sorted by

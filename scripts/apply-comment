@@ -727,9 +727,10 @@ def build_comment(
     order=(),
 ):
     """Assemble the comment under SIZE_BUDGET: header, verdict, per environment in `sc.by_env`
-    order of `order` its `sc.env_heading` (`N cells, ` and the verdict's counts) and its rows,
-    every row but a not attempted one first (a fold-out for an applied, failed or unrecorded row
-    with output, else its bare line, which names no environment), the notes, the footer lines,
+    order of `order` its `sc.env_heading` (`1 cell, ` or `N cells, `, then the verdict's
+    counts for its rows) and its rows, every row but a not attempted one first (a fold-out for
+    an applied, failed or unrecorded row with output, else its bare line, which names no
+    environment), the notes, the footer lines,
     and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it is header,
     verdict, footer lines and footer. A non-empty `refusal`, the first error of the `::error::`
     that failed detect on one line, sits in `sc.reason_fence` directly under the verdict.

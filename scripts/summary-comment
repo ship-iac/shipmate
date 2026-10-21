@@ -354,8 +354,8 @@ def verdict(cells, head_sha, run_url):
 
 #: The most cell lines the held comment names before it counts the rest.
 HELD_CELL_NAMES = 10
-#: `tofu-error`'s `CAP`, the length a cell error is written at; a longer one is cut here too, so
-#: the held body stays under HARD_CAP. Kept equal by `test_the_cell_error_cap_is_tofu_errors`.
+#: The cell error file is an artifact, and its fence can grow to about three times its text, so
+#: the read side cuts too: ten errors at `REASON_CAP` would pass HARD_CAP.
 CELL_ERROR_CAP = 1000
 
 
@@ -652,14 +652,15 @@ def _named_output(raw, input_name, key, noun):
     return None
 
 
-CELL_ERROR_KEYS = {"stack", "environment", "error"}
+CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
 
 
-def cell_errors(errors_dir):
-    """`{(stack, environment): error}` from every `cell-error.json` under `errors_dir`, which
-    plan-cell writes for a cell whose `tofu init` or `tofu plan` failed with an `Error:`
-    diagnostic. Recursive, as `cell_summaries`. The errors are reviewer-facing only, so a file
-    that is not a JSON object of exactly those three strings is skipped, with one warning."""
+def cell_errors(errors_dir, attempt):
+    """`{(stack, environment): error}` from every `cell-error.json` under `errors_dir` whose
+    `attempt` is `attempt`, this run's attempt: plan-cell writes one for every failed cell, so an
+    error shows only when this run attempt recorded it, never an earlier attempt's. Recursive, as
+    `cell_summaries`. The errors are reviewer-facing only, so a file that is not a JSON object
+    of exactly those four strings is skipped, with one warning."""
     out, bad = {}, False
     for p in sorted(glob.glob(os.path.join(errors_dir, "**", "cell-error.json"), recursive=True)):
         try:
@@ -672,13 +673,14 @@ def cell_errors(errors_dir):
             and set(e) == CELL_ERROR_KEYS
             and all(type(v) is str for v in e.values())
         ):
-            out[(e["stack"], e["environment"])] = e["error"]
+            if e["attempt"] == attempt:
+                out[(e["stack"], e["environment"])] = e["error"]
         else:
             bad = True
     if bad:
         print(
-            "::warning::a cell error file is not a JSON object of stack, environment and error "
-            "strings; the held plan comment shows no error for its cell"
+            "::warning::a cell error file is not a JSON object of stack, environment, error and "
+            "attempt strings; the held plan comment shows no error for its cell"
         )
     return out
 
@@ -690,7 +692,9 @@ def _held_main(checks, url):
         checks,
         url,
         os.environ.get("HEAD_SHA", ""),
-        cell_errors(os.environ.get("CELL_ERRORS", "cell-errors")),
+        cell_errors(
+            os.environ.get("CELL_ERRORS", "cell-errors"), os.environ.get("GITHUB_RUN_ATTEMPT", "")
+        ),
     )
     with open("held.md", "w", encoding="utf-8") as fh:
         fh.write(body)

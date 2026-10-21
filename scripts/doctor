@@ -2133,8 +2133,9 @@ def warnings(ctx):
 def warnings_and_count(ctx):
     """`(findings, n)`: every probe's findings, in `PROBES` order, and `n`, the WARNING-level
     findings of probes not marked `settings`. A probe that raises becomes one degrade line at
-    its `degrade_level` (WARNING by default), counted like the probe's own warnings: not for a
-    `settings` probe.
+    its `degrade_level` (WARNING by default), counted unless the probe is marked `settings`: a
+    transient failure to read the repository settings must not post a plan comment on every pull
+    request, and the run page still shows the degrade.
 
     A runner whose python3 lacks PyYAML gets that refusal once, as a NOTICE, in place of every
     probe marked `parses_yaml`: each would otherwise degrade on its own, or report the
