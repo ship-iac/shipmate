@@ -18,11 +18,11 @@ attempt}` from `STACK`, `ENV`, the first `Error:` diagnostic of `$RUNNER_TEMP/pl
 exists, else of `$RUNNER_TEMP/init.txt` if it exists, unescaped, and `GITHUB_RUN_ATTEMPT`. No log
 or no diagnostic writes an empty `error`. plan-cell runs it when an attempt fails inside
 plan-cell, so the file holds the cell's `init` or `plan` error from its latest such attempt. A
-failure at a later plan-cell step (render, encrypt) records an empty error, and the row shows
-alone. When an attempt uploads no error file — it failed before plan-cell ran (checkout, setup,
-credentials), was cancelled or timed out, or the error step itself failed — the cell keeps the
-error an earlier attempt recorded, if any, shown with that attempt's label. Other arguments are
-refused.
+failure at another plan-cell step (planned commit, passphrase, identity variables, render,
+encrypt) records an empty error. When an attempt uploads no error file (it failed before
+plan-cell ran: checkout, setup, credentials; it was cancelled or timed out; or the error write or
+upload step failed), the cell keeps the error an earlier attempt recorded, if any. Other
+arguments are refused.
 
 The text is author-controlled (a stack's config and provider output), so it
 prints only through `command_data`: a raw newline would start a second workflow

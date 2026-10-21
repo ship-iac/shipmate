@@ -2191,17 +2191,16 @@ the publish hold (below). In order, blank lines between the parts:
   removed and cut at 1,000 characters, in a plain backtick fence longer than any
   backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it:
   the first OpenTofu `Error:` diagnostic in the cell's `init` or `plan` log from
-  its latest attempt that failed inside plan-cell. A failure at a later
-  plan-cell step (render, encrypt) records an empty error, and the row shows
-  alone. When an attempt uploads no error file — it failed before plan-cell ran
-  (checkout, setup, credentials), was cancelled or timed out, or the error step
-  itself failed — the cell keeps the error an earlier attempt recorded, if any,
-  shown with that attempt's label. When an earlier attempt of this run recorded
-  the error, `recorded by attempt <n> of this run` sits between the line and
-  the fence. A cell whose artifact did not arrive or carries an empty error
-  shows its line alone. The cell's plan job also carries an `::error::`
-  annotation with it. For the autoplan that job is the
-  linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
+  its latest attempt that failed inside plan-cell. A failure at another
+  plan-cell step (planned commit, passphrase, identity variables, render,
+  encrypt) records an empty error. When an attempt uploads no error file (it
+  failed before plan-cell ran: checkout, setup, credentials; it was cancelled
+  or timed out; or the error write or upload step failed), the cell keeps the
+  error an earlier attempt recorded, if any. When an earlier attempt of this run
+  recorded the error, `recorded by attempt <n> of this run` sits between the
+  line and the fence. A cell whose artifact did not arrive or carries an empty
+  error shows its line alone. The cell's plan job also carries an `::error::`
+  annotation with it. For the autoplan that job is the linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
   keeps it on its own run: `doctor` reads only the autoplan's cell checks and
   the App-mirrored head check carries no annotations. A drift or apply cell's
   failed init, and a drift cell's failed plan, annotate the same way;
