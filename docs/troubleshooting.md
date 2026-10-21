@@ -1535,10 +1535,10 @@ flight. When the newer run holds the gate or published apply checks on the
 head, the re-run's `summary` writes nothing and ends green at its hold step,
 with a notice naming that run ("plan run <id> holds the gate of <sha> and is
 newer than this run", or "plan run <id>, newer than this run (<id>), published
-apply checks on this head"). A newer run that takes the gate while the re-run
-is publishing still fails the re-run's
-`Create apply checks (pending / no-changes)` or `Create/refresh gate` step.
-That red is harmless: the newer run owns the gate.
+apply checks on this head"). A plan run of the same pull request that starts
+while the re-run is in flight cancels the re-run, as it cancelled the autoplan.
+Whatever the re-run ends with, pushing a commit after the newer plan run has
+finished clears the red checks: a new head carries only fresh checks.
 
 ### Fork pull request refused
 
