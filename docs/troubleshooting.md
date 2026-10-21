@@ -104,9 +104,9 @@ live probes.
   engine or a wrapper workflow does not count. When that repository could not
   be determined, the job-name, routing and drift-call checks are a note
   saying so, and the dispatch check still runs:
-  - Whether its plan-calling job is named `shipmate`. GitHub names a called
+  - Whether its plan-calling job is named `plan`. GitHub names a called
     workflow's check runs `<caller job> / <callee job>`, so that name is what
-    makes the plan cell checks `shipmate / <stack> / <env>`. Under another name
+    makes the plan cell checks `plan / <env> / <stack>`. Under another name
     the plan still runs and the gate is unaffected; what is lost is every `plan`
     link in the plan comment, which falls back to the workflow-run page instead
     of the cell's own check. A job with no `name:` is judged by its job id,
@@ -464,9 +464,9 @@ before any wave starts.
 ### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
 
 A plan cell fails before `terramate` runs, so the cell
-produces no plan and its `shipmate / <stack> / <env>` check does not go green.
+produces no plan and its `plan / <env> / <stack>` check does not go green.
 The failing plan job leaves `shipmate / gate` held red with
-`shipmate / <stack> / <env> has no plan summary; fix its plan or re-plan`, or
+`plan / <env> / <stack> has no plan summary; fix its plan or re-plan`, or
 `plan incomplete (plan job: failure); fix the failing plan checks before merging`
 when no cell without a summary is known or its name does not fit — a hold, not an absence (§`shipmate / gate` never goes green, "The
 gate is deliberately held") — so nothing merges until the plan cells pass.
@@ -544,10 +544,12 @@ cannot see, so the apply is refused ([`../CONTRACT.md`](../CONTRACT.md)
 §Apply-match fingerprint). When the summary job failed partway, its gate hold
 stays too, so the pull request cannot merge over the missing checks.
 
-If the plan run's summary job failed, re-run that run's failed jobs, then apply
-again: the re-run keeps the run id, and its summary job publishes only the apply
-checks the run has not yet published. Do not use "Re-run all jobs", which can
-plan a different cell set and over-count.
+When every run the message names published fewer apply checks than its one
+planned cell count, its summary job stopped partway, and the message says to
+re-run that run's failed jobs, then apply again: the re-run keeps the run id,
+and its summary job publishes only the apply checks the run has not yet
+published. Do not use "Re-run all jobs", which can plan a different cell set and
+over-count.
 
 Otherwise, or if the refusal remains, push a commit to the pull request: the new
 head's plan run plans and publishes every cell afresh, and the apply proceeds
@@ -804,19 +806,19 @@ Two locks this verb does not reach:
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
 
-### `SHIPMATE_PLAN_PASSPHRASE is not set`, or `SHIPMATE_PLAN_PASSPHRASE is empty`
+### The encryption key is missing: `SHIPMATE_ENCRYPTION_KEY is not set or is empty`, `SHIPMATE_ENCRYPTION_KEY is empty`
 
-The cell received no passphrase. It encrypts every plan artifact and a local
+The cell received no encryption key. It encrypts every plan artifact and a local
 backend's cached state, so nothing proceeds without it
 ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
-- `SHIPMATE_PLAN_PASSPHRASE is not set` comes from `scripts/plan-crypt`: a plan
-  cell at `Require the plan passphrase`, before it initializes the stack, or an
-  apply cell at `Decrypt reviewed plan artifact`.
-- `shipmate/actions/state: SHIPMATE_PLAN_PASSPHRASE is empty` comes from a local
+- `SHIPMATE_ENCRYPTION_KEY is not set or is empty` comes from
+  `scripts/plan-crypt`: a plan cell at `Require the encryption key`, before it
+  initializes the stack, or an apply cell at `Decrypt reviewed plan artifact`.
+- `shipmate/actions/state: SHIPMATE_ENCRYPTION_KEY is empty` comes from a local
   backend's state restore or save, which is where a drift cell refuses.
 
-Set `SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret, or as the
+Set `SHIPMATE_ENCRYPTION_KEY` as a repository or organization secret, or as the
 same value on both `<env>-plan` and `<env>-apply`, and map it by name in the
 `secrets:` block of `shipmate.yml`'s `plan`, `deploy` and `apply` jobs and of
 each drift file's `drift` job. A secret on `shipmate-engine` or on one half of a
@@ -828,11 +830,11 @@ split environment alone reaches the wrong cells
 An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
 before openssl or any apply step read it, and its `apply / <stack> / <env>`
 check stays pending. The tag the plan cell wrote does not verify under the
-apply side's passphrase. The engine cannot tell the causes apart:
+apply side's encryption key. The engine cannot tell the causes apart:
 
-- **The passphrase was rotated after the plan.** Re-plan.
+- **The encryption key was rotated after the plan.** Re-plan.
 - **The plan and apply sides read different values**, for example different
-  `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A
+  `SHIPMATE_ENCRYPTION_KEY` secrets on `<env>-plan` and `<env>-apply`. A
   re-plan alone fails the same way. Make the two equal, then re-plan. On a
   local backend, set `<env>-plan`'s value to `<env>-apply`'s and never the
   reverse, because apply cells saved the cached state; on a remote backend
@@ -1032,19 +1034,19 @@ or a full disk.
 
 A local backend's restore matched a cache entry whose tag does not verify, and
 refused before openssl or tofu read it. The refusal names no delete command:
-the engine cannot tell a wrong passphrase from a damaged entry, and deleting an
-intact entry loses the state it holds. A wrong passphrase is fixed by the
+the engine cannot tell a wrong encryption key from a damaged entry, and deleting an
+intact entry loses the state it holds. A wrong encryption key is fixed by the
 secret, never by deleting. Check the causes in this order:
 
-- **The passphrase changed after the entry was saved.** Evidence: a
-  `SHIPMATE_PLAN_PASSPHRASE` placement (organization, repository, `<env>-plan`
+- **The encryption key changed after the entry was saved.** Evidence: a
+  `SHIPMATE_ENCRYPTION_KEY` placement (organization, repository, `<env>-plan`
   or `<env>-apply`) updated after the entry's `createdAt` in
   `gh cache list --key <key> --json key,createdAt`. `gh secret list`, with
   `--org <org>` or `--env <environment>`, shows each placement's update time.
   Every older entry under the prefix was saved with the old value too. Set the
   old value back.
 - **The plan and apply sides read different values.** Evidence: `<env>-plan`
-  and `<env>-apply` each hold their own `SHIPMATE_PLAN_PASSPHRASE`. An apply
+  and `<env>-apply` each hold their own `SHIPMATE_ENCRYPTION_KEY`. An apply
   cell saved the entry and a plan or drift cell restores it. Set
   `<env>-plan`'s value to `<env>-apply`'s, never the reverse, then re-plan or
   re-run the drift sweep.
@@ -1466,7 +1468,8 @@ The same step refuses, also before any wave:
 
 The apply detect refused every cell it would apply whose
 `apply / <stack> / <env>` check records a different pull request, or none, and
-nothing applied. Each check records the pull request its plan run planned; two
+nothing applied. Each cell is named with the plan run and the pull request its
+check records. Each check records the pull request its plan run planned; two
 open pull requests can share one head commit, and only the newest plan on that
 commit decides which of them may apply. Re-plan on this pull request (push, or
 comment `shipmate plan`), then comment the apply again. A cell whose check
@@ -1475,13 +1478,13 @@ record's pull request.
 
 ### A pull request planned zero cells
 
-No per-cell `shipmate / <stack> / <env>` checks appear, no plan comment is
+No per-cell `plan / <env> / <stack>` checks appear, no plan comment is
 posted — unless there is already a plan comment to keep current, `doctor`
 raised a warning on that run outside the repository-settings probes, or the
 pull request changes a stack with no `env/*` tag, any of which still posts one,
 headlined `⚪ nothing planned` — and the gate goes green over no work.
 The skipped plan job's one check shows its name expression literally,
-`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped; GitHub
+`plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped; GitHub
 renders a skipped matrix job that way.
 
 Change detection is `terramate list --changed`, so a pull request that touches
@@ -1521,8 +1524,8 @@ fence in [`getting-started.md`](getting-started.md) §The workflow file.
 ### A cancelled autoplan left red checks on the pull request
 
 A newer plan run of the same pull request cancelled the autoplan, and the
-autoplan's checks (`shipmate / detect`, `shipmate / summary`,
-`shipmate / gate-hold`, the `shipmate / <stack> / <env>` matrix check) stay red
+autoplan's checks (`plan / detect`, `plan / summary`,
+`plan / gate-hold`, the `plan / <env> / <stack>` matrix check) stay red
 or cancelled on the head.
 
 After the newer plan run has finished, re-run the cancelled run:

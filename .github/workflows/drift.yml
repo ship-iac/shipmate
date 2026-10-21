@@ -9,7 +9,7 @@ on:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
-      SHIPMATE_PLAN_PASSPHRASE: { required: false }
+      SHIPMATE_ENCRYPTION_KEY: { required: false }
 # Floor, not a default to inherit from: see plan.yml.
 permissions: {}
 jobs:
@@ -33,7 +33,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          echo "default_branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" >> "$GITHUB_OUTPUT"
+          # An empty value fails the branch gate, which skips every sweep job green.
+          if ! branch=$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch); then
+            echo "::error::Could not read the default branch of $GITHUB_REPOSITORY; gh's error is above. The sweep needs it to gate its jobs. Re-run the sweep."
+            exit 1
+          fi
+          if [ -z "$branch" ]; then
+            echo "::error::The API returned an empty default branch for $GITHUB_REPOSITORY. The sweep needs it to gate its jobs. Re-run the sweep."
+            exit 1
+          fi
+          echo "default_branch=$branch" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: $/actions/setup
         with: { tofu: "false" }
@@ -56,7 +65,7 @@ jobs:
       max-parallel: ${{ fromJSON(needs.detect.outputs.max_parallel) }}
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     environment: ${{ matrix.env_binding }}
-    name: ${{ matrix.stack }} / ${{ matrix.environment }}
+    name: ${{ matrix.environment }} / ${{ matrix.stack }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: $/actions/setup
@@ -71,7 +80,7 @@ jobs:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+          encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
           stack: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
 

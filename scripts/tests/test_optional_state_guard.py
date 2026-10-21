@@ -8,7 +8,7 @@ saves, through `cell-init`'s outputs. The cell's call step is pinned whole in
 test_provider_cache.py.
 
 `actions/state` encrypts the file before every save and decrypts it after every restore that
-matched an entry, with SHIPMATE_PLAN_PASSPHRASE; an empty passphrase refuses both modes.
+matched an entry, with SHIPMATE_ENCRYPTION_KEY; an empty encryption key refuses both modes.
 
 Whole parsed steps compared to hand-written constants, never substrings: an inverted operator, a
 dropped `always()` or a condition moved into a comment must fail these guards.
@@ -45,7 +45,7 @@ _RESTORE = {
         "env": "${{ inputs.env }}",
         "mode": "restore",
         "path": "${{ steps.locate-state.outputs.path }}",
-        "passphrase": "${{ inputs.plan-passphrase }}",
+        "encryption-key": "${{ inputs.encryption-key }}",
     },
 }
 
@@ -62,7 +62,7 @@ _SAVE = {
         "env": "${{ inputs.env }}",
         "mode": "save",
         "path": "${{ steps.init.outputs.state-path }}",
-        "passphrase": "${{ inputs.plan-passphrase }}",
+        "encryption-key": "${{ inputs.encryption-key }}",
     },
 }
 
@@ -76,18 +76,18 @@ def test_locate_state_reads_the_init_record_inside_terramate_run():
 
 def test_restore_state_uses_the_located_path():
     """Mutations: `if: always()` on the restore; `stack-slug: ${{ inputs.stack }}`; drop the
-    `passphrase` line, and every restore of local state refuses."""
+    `encryption-key` line, and every restore of local state refuses."""
     assert step_by(_INIT_ACTION, name="Restore state") == _RESTORE
 
 
 def test_apply_cell_saves_state_to_the_located_path():
-    """Mutations: drop `always()` from the `if`; save with `mode: restore`; drop the `passphrase`
-    line, and every save refuses."""
+    """Mutations: drop `always()` from the `if`; save with `mode: restore`; drop the
+    `encryption-key` line, and every save refuses."""
     assert step_by("apply-cell", name="Save state") == _SAVE
 
 
 _REFUSAL = (
-    "::error::shipmate/actions/state: SHIPMATE_PLAN_PASSPHRASE is empty. Cached local state is "
+    "::error::shipmate/actions/state: SHIPMATE_ENCRYPTION_KEY is empty. Cached local state is "
     "encrypted with it, so every restore and save needs it. Set the secret and forward it to the "
     "shipmate workflows."
 )
@@ -98,7 +98,7 @@ _VALIDATE_RUN = (
     "  *) echo \"::error::shipmate/actions/state: 'mode' must be 'restore' or 'save', got "
     "'$MODE'\"; exit 1 ;;\n"
     "esac\n"
-    'if [ -z "$PASSPHRASE" ]; then\n'
+    'if [ -z "$ENCRYPTION_KEY" ]; then\n'
     f'  echo "{_REFUSAL}"\n'
     "  exit 1\n"
     "fi\n"
@@ -127,7 +127,7 @@ _STATE_STEPS = [
     {
         "name": "Validate mode",
         "shell": "bash",
-        "env": {"MODE": "${{ inputs.mode }}", "PASSPHRASE": "${{ inputs.passphrase }}"},
+        "env": {"MODE": "${{ inputs.mode }}", "ENCRYPTION_KEY": "${{ inputs.encryption-key }}"},
         "run": _VALIDATE_RUN,
     },
     {
@@ -153,7 +153,7 @@ _STATE_STEPS = [
         "if": "${{ inputs.mode == 'restore' && steps.restore.outputs.cache-matched-key != '' }}",
         "shell": "bash",
         "env": {
-            "PLAN_PASSPHRASE": "${{ inputs.passphrase }}",
+            "ENCRYPTION_KEY": "${{ inputs.encryption-key }}",
             "STATE_PATH": "${{ inputs.path }}",
             "KEY": "${{ steps.restore.outputs.cache-matched-key }}",
         },
@@ -168,7 +168,7 @@ _STATE_STEPS = [
         "if": "${{ inputs.mode == 'save' }}",
         "shell": "bash",
         "env": {
-            "PLAN_PASSPHRASE": "${{ inputs.passphrase }}",
+            "ENCRYPTION_KEY": "${{ inputs.encryption-key }}",
             "STATE_PATH": "${{ inputs.path }}",
             "KEY": _KEY,
         },
@@ -202,22 +202,22 @@ def test_the_state_action_is_exactly_these_steps():
     assert steps == _STATE_STEPS
 
 
-def _validate(tmp_path, mode, passphrase):
+def _validate(tmp_path, mode, key):
     body = step_by("state", name="Validate mode")["run"]
-    return run_step(tmp_path, body, {**os.environ, "MODE": mode, "PASSPHRASE": passphrase})
+    return run_step(tmp_path, body, {**os.environ, "MODE": mode, "ENCRYPTION_KEY": key})
 
 
 @bash_only
-def test_an_empty_passphrase_refuses_both_modes(tmp_path):
-    """Mutation: delete the passphrase check."""
+def test_an_empty_encryption_key_refuses_both_modes(tmp_path):
+    """Mutation: delete the encryption key check."""
     for mode in ("restore", "save"):
         r = _validate(tmp_path, mode, "")
         assert (r.returncode, r.stdout, r.stderr) == (1, _REFUSAL + "\n", ""), mode
 
 
 @bash_only
-def test_a_set_passphrase_passes_validation(tmp_path):
-    """Mutation: `[ -n "$PASSPHRASE" ]` in place of `-z`, a check that refuses every caller."""
+def test_a_set_encryption_key_passes_validation(tmp_path):
+    """Mutation: `[ -n "$ENCRYPTION_KEY" ]` in place of `-z`, a check that refuses every caller."""
     r = _validate(tmp_path, "restore", "secret")
     assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
 

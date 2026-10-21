@@ -36,8 +36,8 @@ Probes:
   not.
 - engine action-pin freshness in the consumer's workflow files.
 - `pull_request_target` triggers in the consumer's workflow files.
-- the consumer's `shipmate.yml`: the plan-calling job named `shipmate`, or the plan
-  cell checks are not `shipmate / <stack> / <env>`; the `workflow_dispatch` trigger
+- the consumer's `shipmate.yml`: the plan-calling job named `plan`, or the plan
+  cell checks are not `plan / <env> / <stack>`; the `workflow_dispatch` trigger
   every commented verb needs, with its four inputs; and one job per engine reusable
   workflow, each with the `if:` that selects it — a wrong one sends a verb nowhere
   and its run completes green with every job skipped; and no call of `drift.yml`,
@@ -1351,22 +1351,22 @@ def _fork_trigger_warnings(ctx):
 _fork_trigger_warnings.parses_yaml = True
 
 
-_SHIM_JOB_NAME = "shipmate"
+_SHIM_JOB_NAME = "plan"
 
 
 def _shim_job_name_finding(doc, name, engine):
-    """The calling job's display name, or [] when it is `shipmate` or the file
+    """The calling job's display name, or [] when it is `plan` or the file
     calls the engine's plan workflow nowhere.
 
-    A job not named `shipmate` still plans correctly, and its plan comment loses every
+    A job not named `plan` still plans correctly, and its plan comment loses every
     per-cell deep link. GitHub names a called workflow's check runs `<caller job> / <callee
-    job>`, so the plan cell checks are `shipmate / <stack> / <env>` only when that job
+    job>`, so the plan cell checks are `plan / <env> / <stack>` only when that job
     carries that name. `scripts/summary-comment` resolves each cell line's `plan` link by
     that exact name and falls back to the workflow-run URL on a miss — so the failure is a
     silently degraded comment, not an error anyone sees.
 
     An absent `name:` is not a finding — GitHub displays the job id then, so a job written
-    `jobs:` / `  shipmate:` / `    uses: …` produces the same check names as the documented
+    `jobs:` / `  plan:` / `    uses: …` produces the same check names as the documented
     shape. Only the job's own `name:` is read, so a `name:` under `with:` cannot stand in
     for one.
 
@@ -1385,7 +1385,7 @@ def _shim_job_name_finding(doc, name, engine):
             _Rendered(
                 f"`{name}`'s calling job is not named `{_SHIM_JOB_NAME}`. GitHub names a called "
                 "workflow's check runs `<caller job> / <callee job>`, so this repository's plan "
-                f"cell checks are not `{_SHIM_JOB_NAME} / <stack> / <env>`. The plan runs and "
+                f"cell checks are not `{_SHIM_JOB_NAME} / <env> / <stack>`. The plan runs and "
                 "the gate is unaffected; what is lost is every `plan` link in the plan comment, "
                 "which falls back to the workflow-run page instead of the cell's own check. "
                 f"Rename the job `{_SHIM_JOB_NAME}` (docs/getting-started.md)."
@@ -2256,7 +2256,7 @@ def latest_check_ids(lines, app_id=""):
     annotations to harvest, so ranking it BELOW a completed run is wanted.
 
     Carries the consumer file's skipped router jobs too — they are
-    `github-actions`-authored, so four rows per report (shipmate, post-merge, apply,
+    `github-actions`-authored, so four rows per report (comment, deploy, apply,
     unlock) cost an annotation fetch that returns nothing."""
     newest = {}
     for line in lines:

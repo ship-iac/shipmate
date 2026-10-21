@@ -179,7 +179,7 @@ default branch. So does a run without `--key` while
 `shipmate-engine` holds no `SHIPMATE_APP_PRIVATE_KEY`. `--dry-run` reports every change and performs no write.
 
 It then prints a checklist of what it does not set, because those values are
-yours: `SHIPMATE_PLAN_PASSPHRASE`, the table with the cloud role, region and env
+yours: `SHIPMATE_ENCRYPTION_KEY`, the table with the cloud role, region and env
 identity your layout injects, adding the repository to the App installation, an
 approving review before apply, a `CODEOWNERS` entry, a git-tracked
 `.terraform.lock.hcl` in each stack, the repository's Actions settings
@@ -414,14 +414,15 @@ A draft pull request's autoplan plans nothing, and `shipmate / gate` goes
 pending with the draft reason. Mark the pull request ready, or comment
 `shipmate plan`, which plans a draft; applies still refuse a draft.
 
-**`name: shipmate` on a calling job is a contract literal, not decoration.**
+**`name: plan` on the `plan` job is a contract literal, not decoration.**
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
-that name is what makes the plan cells `shipmate / <stack> / <env>` and lets the
-plan comment's `plan` links resolve to them. The `plan` and `comment-ops` jobs
-and each drift file's `drift` job carry it. Rename the `plan` job and its run
+that name is what makes the plan cells `plan / <env> / <stack>` and lets the
+plan comment's `plan` links resolve to them. Rename the `plan` job and its run
 still happens, but every one of those links falls back to the workflow-run page
-instead; `shipmate doctor` reports it. Renaming `comment-ops` or `drift` changes
-only their own check-run names: no link resolves through them, and doctor does
+instead; `shipmate doctor` reports it. The other jobs display their verb:
+`comment`, `deploy`, `apply`, `unlock`, and each drift file's `sweep`.
+Renaming one of them changes
+only its own check-run names: no link resolves through them, and doctor does
 not check them.
 
 **The filename is load-bearing too.** `actions/build-matrix` refuses to plan a
@@ -468,10 +469,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      # Every input is optional except the verb, and that is deliberate: one schema serves
-      # three verbs, and GitHub reads an empty value for a `required: true` input as not
-      # provided and answers HTTP 422 before the run starts. The engine validates instead —
-      # `pr-facts` refuses a plan with no number, `apply-detect` an apply with no ref.
+      # Only verb is required: one schema serves three verbs, and GitHub answers 422 to an
+      # empty required input. The engine refuses a plan with no number, an apply with no ref.
       verb:
         description: What to run (plan, apply or unlock)
         type: choice
@@ -489,47 +488,39 @@ on:
         description: Pull request number (plan and apply)
         required: false
         default: ''
-# Floor, not a default to inherit: every job below declares its own block, so a job that
-# loses one gets nothing rather than everything the file granted.
+# Deny by default: each job grants its own permissions, so a job that loses its block gets none.
 permissions: {}
 jobs:
-  # `name: shipmate` is not decoration: GitHub names a called workflow's check runs
-  # `<caller job> / <callee job>`, so this is what makes the plan cells
-  # `shipmate / <stack> / <env>` — the names the plan comment's links resolve.
+  # Names the plan checks `plan / <env> / <stack>` (`<caller job> / <callee job>`),
+  # the names the plan comment links to.
   plan:
-    name: shipmate
-    # `github.event.inputs` is the form readable under either trigger, unlike the `inputs`
-    # context, and `plan` also runs under one that is not `workflow_dispatch`; the
-    # concurrency group below relies on the same thing. `apply` and `unlock` are
-    # dispatch-only and keep `inputs.`, because only that form applies a declared default,
-    # which is what makes an omitted `environment` key read as the empty string.
+    name: plan
+    # `github.event.inputs` reads under pull_request_target too, and the concurrency group
+    # relies on it. apply and unlock use `inputs.*`, the only form that applies declared
+    # defaults, so an omitted `environment` reads as ''.
     if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
     concurrency:
-      # `github.event.inputs` is readable under either trigger, unlike the `inputs` context.
       group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
       cancel-in-progress: true
     uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
-    # Not optional — a callee's permissions are capped by this job's, and granting less kills
-    # the run at startup with no job and no log.
+    # Required: the callee is capped by these; fewer kills the run with no log.
     permissions:
       contents: read
       pull-requests: read
       id-token: write
     secrets: &engine-secrets
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
-      # Not a no-op when you hold no repository secret of that name: the envelope normally
-      # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
-      # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
+      # Keep even without a repository secret: it passes the `<env>-plan` / `<env>-apply`
+      # environment's envelope through. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    # Runner for this file's engine jobs except the nine on ubuntu-slim (docs/aws.md §Runner
-    # choice); each `*runner` repeats it, drift files set their own. ubuntu-latest selects x64.
+    # Runner for engine jobs but the nine on ubuntu-slim (docs/aws.md §Runner choice);
+    # `*runner` reuses it, drift files set their own. ubuntu-latest for x64.
     with:
       runs_on: &runner ubuntu-26.04-arm
   comment-ops:
-    name: shipmate
-    # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
-    # this one only has to select the event.
+    name: comment
+    # The engine drops comments on issues; this only selects the event.
     if: github.event_name == 'issue_comment'
     uses: ship-iac/shipmate/.github/workflows/comment-ops.yml@<engine-sha>  # see the latest release
     permissions:
@@ -542,9 +533,8 @@ jobs:
     with:
       runs_on: *runner
   deploy:
-    # Display only: the run's job path reads
-    # `shipmate / post-merge / L<n> / apply / <stack> / <env>`.
-    name: post-merge
+    # Display only: the job path reads `shipmate / deploy / L<n> / <env> / <stack>`.
+    name: deploy
     if: github.event_name == 'push'
     concurrency:
       group: deploy-main
@@ -594,7 +584,7 @@ on:
 permissions: {}
 jobs:
   drift:
-    name: shipmate
+    name: sweep
     uses: ship-iac/shipmate/.github/workflows/drift.yml@<engine-sha>  # see the latest release
     permissions:
       contents: read
@@ -602,7 +592,7 @@ jobs:
       actions: read
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
     with:
       runs_on: ubuntu-26.04-arm
@@ -650,12 +640,12 @@ because the job requests it whether or not the step fires.
 
 **The state path is read from `tofu init`, not configured.** A local backend's
 state is cached at the path `tofu init` records for each stack, encrypted with
-`SHIPMATE_PLAN_PASSPHRASE`, and restored before every plan and saved after
+`SHIPMATE_ENCRYPTION_KEY`, and restored before every plan and saved after
 every apply; a remote backend such as this
 page's S3 example owns its state, and the engine's state steps are skipped
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend).
 
-`SHIPMATE_PLAN_PASSPHRASE` is required: it encrypts every plan artifact and a
+`SHIPMATE_ENCRYPTION_KEY` is required: it encrypts every plan artifact and a
 local backend's cached state, and a cell without it refuses. Generate it with
 `openssl rand -base64 32`: use a random value, not a human passphrase, because
 anyone who can read the repository's Actions runs can download the ciphertext
@@ -667,7 +657,7 @@ fail ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
 - As a variable, every cell refuses it by name.
 - As a secret on `shipmate-engine`, it reaches no cell, so every plan cell
-  refuses at `Require the plan passphrase`, before it initializes the stack.
+  refuses at `Require the encryption key`, before it initializes the stack.
 - As a secret on `<env>-apply` alone, every plan cell in that environment
   refuses the same way.
 - As a secret on `<env>-plan` alone, every apply in that environment refuses at
@@ -794,8 +784,8 @@ the file whose `secrets:` block names no engine credential.
 
 The `deploy` job applies, on push to the default branch, every reviewed plan
 whose apply check is still pending — so it no-ops when everything was applied
-pre-merge. Its `name: post-merge` is display only: the run's job path reads
-`shipmate / post-merge / L<n> / apply / <stack> / <env>`.
+pre-merge. Its `name: deploy` is display only: the run's job path reads
+`shipmate / deploy / L<n> / <env> / <stack>`.
 
 ### Why the jobs name their secrets
 
@@ -818,7 +808,7 @@ Two reasons, and the second one is a hard failure:
 Pass only what each callee declares. `comment-ops.yml` declares
 `SHIPMATE_APP_PRIVATE_KEY` alone — it mints an App token, reads no plan
 artifact, and runs no cell. `plan.yml`, `drift.yml`, `apply.yml` and
-`deploy.yml` declare `SHIPMATE_PLAN_PASSPHRASE` too, because each of them writes
+`deploy.yml` declare `SHIPMATE_ENCRYPTION_KEY` too, because each of them writes
 or reads an encrypted plan artifact or encrypted local state. Every callee that runs a cell —
 `plan.yml`, `drift.yml`, `apply.yml`, `deploy.yml` and `unlock.yml` — also declares
 `SHIPMATE_SECRETS`, which is why `unlock.yml` declares neither engine secret and
@@ -843,7 +833,7 @@ included. A calling job that binds no environment therefore passes
 succeeds, which is why the same fence serves both same-organization and
 cross-organization consumers.
 
-`SHIPMATE_PLAN_PASSPHRASE` is the exception, and it is not affected by the
+`SHIPMATE_ENCRYPTION_KEY` is the exception, and it is not affected by the
 boundary. The wave jobs bind the env's apply environment, not `shipmate-engine`,
 so `shipmate-engine` cannot supply that secret: it travels down the call chain as
 a repository or organization secret you pass by name, or is set as the same
@@ -918,11 +908,14 @@ line without a comment.
 `SHIPMATE_SECRETS` as a variable is refused by name, because as a variable its
 value is readable by anyone who can see the repository and nothing in it reaches
 a cell; the run fails telling you to rotate what it held. A
-`SHIPMATE_APP_PRIVATE_KEY` or `SHIPMATE_PLAN_PASSPHRASE` variable is refused too,
-each with its own message: rotate the key and set it as a secret on
-`shipmate-engine`; choose a new passphrase and set it as a repository or
-organization secret (a new passphrase cannot decrypt cached local state:
-[`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption, "Rotation"). The other direction cannot be
+`SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_ENCRYPTION_KEY` or `SHIPMATE_PLAN_PASSPHRASE`
+variable is refused too, each with its own message: rotate the key and set it as
+a secret on `shipmate-engine`; choose a new encryption key and set it as a
+repository or organization secret; and, because a `SHIPMATE_PLAN_PASSPHRASE`
+variable can hold an encryption key, delete it and choose a new
+`SHIPMATE_ENCRYPTION_KEY` if it holds that value. In both encryption-key cases
+the new key cannot decrypt cached local state ([`../CONTRACT.md`](../CONTRACT.md)
+§Plan artifact encryption, "Rotation"). The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 

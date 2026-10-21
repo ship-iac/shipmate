@@ -138,8 +138,8 @@ def with_plan_runs(cells, check_run_lines, app_id, *, pr_number):
             "new pull request touching them plans and applies them afresh."
         )
     foreign = [
-        f"{name} ({'pull request #' + pr if pr else 'records no pull request'})"
-        for _, name, _, _, pr in rows
+        f"{name} (plan run {run}, {'pull request #' + pr if pr else 'records no pull request'})"
+        for _, name, run, _, pr in rows
         if pr_number is not None and pr != pr_number
     ]
     if foreign:
@@ -167,30 +167,44 @@ def _n(count, noun):
     return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
+def _stopped_publishing(published, counts, uncounted):
+    """Fewer checks than one agreed count: the summary job stopped mid-publish, which fails it,
+    and re-running the run's failed jobs publishes the rest. No other fact says a job failed."""
+    return not uncounted and len(counts) == 1 and published < counts[0]
+
+
 def refuse_incomplete(rows, records, incomplete):
     """Refuse when a run that a cell to apply records, or the head's newest run, published only
     part of its apply checks (`apply-gate.incomplete_runs`). Each such run is named with its
     fact and the cells it holds back: the cells recording it, or every cell to apply when no
     cell records it (the newest run). Runs compare as integers, so `10` is newer than `9`.
-    Called only with at least one cell, each recording a run, so the newest run exists."""
-    runs = {run for _, _, run, _, _ in rows}
-    runs.add(max((run for run, _, _ in records.values() if run), key=int))
+    Called only with at least one cell, each recording a run, so the newest run exists. The
+    remedy offers re-running failed jobs only when every named run `_stopped_publishing`."""
+    candidates = {run for _, _, run, _, _ in rows}
+    candidates.add(max((run for run, _, _ in records.values() if run), key=int))
+    named_runs = sorted(candidates & incomplete.keys(), key=int)
+    if not named_runs:
+        return
     found = []
-    for run in sorted(runs & incomplete.keys(), key=int):
+    for run in named_runs:
         held = [name for _, name, r, _, _ in rows if r == run] or [name for _, name, *_ in rows]
         found.append(
             f"plan run {run} {_fact(*incomplete[run])}, holding back {named(held, _NAMED)}"
         )
-    if found:
-        it, runs = ("it", "run") if len(found) == 1 else ("they", "runs")
-        raise SystemExit(
-            f"::error::apply aborted: {'; '.join(found)}: the published apply checks do not "
-            f"match the cells {it} planned, so an ordering among them can be lost. Re-run the "
-            f"failed jobs of the plan {runs} (not all jobs), then apply again; if the refusal "
-            "remains, push a commit to the pull request, which plans and publishes every cell "
-            "afresh, then apply again; if that pull request has already merged, a new pull "
-            "request touching these stacks plans and applies them."
+    it, runs = ("it", "run") if len(found) == 1 else ("they", "runs")
+    remedy = "Push"
+    if all(_stopped_publishing(*incomplete[run]) for run in named_runs):
+        remedy = (
+            f"Re-run the failed jobs of the plan {runs} (not all jobs), then apply again; if the "
+            "refusal remains, push"
         )
+    raise SystemExit(
+        f"::error::apply aborted: {'; '.join(found)}: the published apply checks do not "
+        f"match the cells {it} planned, so an ordering among them can be lost. {remedy} a "
+        "commit to the pull request, which plans and publishes every cell afresh, then apply "
+        "again; if that pull request has already merged, a new pull request touching these "
+        "stacks plans and applies them."
+    )
 
 
 def cells_from_checks(check_names, stacks_by_env, tags_by_stack):

@@ -74,8 +74,8 @@ def test_yaml_fence_loads_to_a_mapping(page, line, body):
     )
 
 
-# Owner-agnostic: the pages publish `<owner>/shipmate/...` as well as the engine's own
-# organization, and a selector recognizing only one spelling silently stops checking the other.
+# Owner-agnostic: a selector keyed on one owner silently stops checking a fence that spells
+# another.
 _PATH = "/shipmate/.github/workflows/"
 
 

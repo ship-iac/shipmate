@@ -6,7 +6,7 @@ on:
 permissions: {}
 jobs:
   drift:
-    name: shipmate
+    name: sweep
     uses: ship-iac/shipmate/.github/workflows/drift.yml@main
     permissions:
       contents: read

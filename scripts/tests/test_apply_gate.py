@@ -21,6 +21,15 @@ _EU = "apply / stacks/app / dev-eu"
 _US = "apply / stacks/app / dev-us"
 
 
+def test_the_cell_names_are_these_whole_values():
+    """Mutations: `parse_check_name` returns `(env, stack)` or keeps the `apply / ` prefix;
+    `plan_check_name` drops `CALLER_PREFIX`; `is_cell_job` rejects the level job without a
+    caller prefix."""
+    assert ag.parse_check_name("apply / stacks/app / dev-eu") == ("stacks/app", "dev-eu")
+    assert ag.plan_check_name("stacks/app", "dev-eu") == "plan / dev-eu / stacks/app"
+    assert ag.is_cell_job("L0 / dev-eu / stacks/app", "stacks/app", "dev-eu")
+
+
 @pytest.mark.parametrize(
     ("runs", "expected"),
     [
@@ -214,17 +223,17 @@ def test_parse_jsonl_truncates_long_offending_line():
 
 def test_latest_by_name_empty_prefix_gathers_all_latest_per_name():
     """summary-comment calls latest_by_name(prefix="") to gather every check-run on the head
-    SHA, because the plan-link anchor is check_url's exact `shipmate / <stack> / <env>` lookup
+    SHA, because the plan-link anchor is check_url's exact `plan / <env> / <stack>` lookup
     rather than a prefix filter. Latest-id-per-name still applies, and the coexisting apply check
     keeps its distinct `apply / ` name."""
     runs = [
-        {"name": "shipmate / stacks/app / dev-eu", "id": 1, "html_url": "u1"},
-        {"name": "shipmate / stacks/app / dev-eu", "id": 3, "html_url": "u3"},
+        {"name": "plan / dev-eu / stacks/app", "id": 1, "html_url": "u1"},
+        {"name": "plan / dev-eu / stacks/app", "id": 3, "html_url": "u3"},
         {"name": "apply / stacks/app / dev-eu", "id": 2, "html_url": "u2"},
     ]
     latest = ag.latest_by_name(runs, prefix="")
-    assert set(latest) == {"shipmate / stacks/app / dev-eu", "apply / stacks/app / dev-eu"}
-    assert latest["shipmate / stacks/app / dev-eu"]["html_url"] == "u3"
+    assert set(latest) == {"plan / dev-eu / stacks/app", "apply / stacks/app / dev-eu"}
+    assert latest["plan / dev-eu / stacks/app"]["html_url"] == "u3"
 
 
 def test_latest_by_name_default_prefix_unchanged():
@@ -544,7 +553,7 @@ _A, _B, _C = "apply / a / dev", "apply / b / dev", "apply / c / dev"
             [
                 _counted(_A, 1, "7", 2),
                 _counted(_B, 2, "7", 2),
-                _counted("shipmate / c / dev", 3, "7", 2),
+                _counted("plan / dev / c", 3, "7", 2),
             ],
             {},
             id="mirror",

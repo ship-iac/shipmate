@@ -76,7 +76,7 @@ its CI configuration.
 
 Opening, reopening, updating or marking ready a pull request that is not a
 draft, or a `shipmate plan` comment, plans the changed stacks, one cell per
-stack × environment, and each cell is its own `shipmate / <stack> / <env>`
+stack × environment, and each cell is its own `plan / <env> / <stack>`
 check. The shape is the same across repo layouts and across repositories.
 What differs per layout is which identity variables a cell's job environment
 carries (`TF_VAR_env` and `TF_VAR_region`, `TF_WORKSPACE`, or nothing) and
@@ -103,7 +103,7 @@ merge forever.
 
 [`CONTRACT.md`](../CONTRACT.md) §Post-plan topology describes the jobs of the
 plan workflow, the triggers that select it, and the trust decision;
-§Check names holds the `shipmate / ` namespace; §Plan comment holds when a
+§Check names holds the check names; §Plan comment holds when a
 comment is written, and what it says when the gate is held.
 
 To make the gate enforce apply-before-merge, configure branch protection to

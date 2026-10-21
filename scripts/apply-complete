@@ -7,13 +7,15 @@ conclusion is written by GitHub, so one cell cannot claim another applied. A
 cell lying about itself by exiting 0 is irreducible and is the trust level the
 per-cell completion already had.
 
-Job names are matched by suffix because a called workflow's jobs display as
-`<caller job> / <called job> / <matrix job>`, and CONTRACT.md pins the matrix
-job's own name to `apply / <stack> / <env>`. The suffix match requires a
-`/ `-boundary immediately before `apply`, not a bare `str.endswith` -- a job
-named e.g. `reapply / <stack> / <env>` shares the trailing characters but is
-a different verb entirely, and a bare `endswith` would let it complete a
-check its own apply never earned.
+Job names are matched as `L<n> / <env> / <stack>` suffixes
+(`apply-gate.is_cell_job`) because a called workflow's jobs display as
+`<caller job> / <called job> / <matrix job>`: `apply.yml` and `deploy.yml` name
+the level `L<n>`, and CONTRACT.md pins the matrix job's own name to
+`<env> / <stack>`, read from the snapshot's check name with
+`apply-gate.parse_check_name`. Requiring the level and a ` / ` boundary, not a
+bare `str.endswith`, keeps out a job of env `dev-eu` for env `eu` and a non-wave
+job such as `apply / detect` for env `apply` and stack `detect`; either would
+complete a check its own apply never earned.
 
 A cell is therefore classified, not merely filtered, into four states.
 
@@ -36,8 +38,8 @@ of this run; there is no "belongs to another environment" case. What there is
 is skip-propagation: wave1..wave7 carry `if: !failure() && !cancelled()`, and
 `complete` runs on `always()`. GitHub expands a matrix only for a job it
 actually starts, so a skipped wave contributes exactly one row to the
-listing, named with the literal un-interpolated `apply / ${{ matrix.stack }} /
-${{ matrix.environment }}` template — matching no cell. (Observed on a real
+listing, named with the literal un-interpolated `${{ matrix.environment }} /
+${{ matrix.stack }}` template — matching no cell. (Observed on a real
 run whose `snapshot` job failed: all eight wave jobs listed that way, none
 expanded.) Those checks legitimately stay pending -- but a lost or truncated
 listing looks exactly the same, so they are named in a warning rather than
@@ -68,7 +70,7 @@ def to_complete(snapshot, jobs):
     for check, ids in snapshot.items():
         label = check.removeprefix(ag.APPLY_PREFIX)
         matched = [
-            j for j in jobs if (name := j.get("name", "")) == check or name.endswith(f"/ {check}")
+            j for j in jobs if ag.is_cell_job(j.get("name", ""), *ag.parse_check_name(check))
         ]
         if any(j.get("conclusion") == "success" for j in matched):
             out.extend(ids)

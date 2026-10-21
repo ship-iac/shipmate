@@ -11,16 +11,21 @@ comment-ops, tag-based stack selection) and are not free-form prose.
 Every plan and apply unit of work reports as its own GitHub check, using
 these names verbatim:
 
-- plan job check-run: `shipmate / <stack> / <env>`
+- plan job check-run: `plan / <env> / <stack>`
 - apply check-run: `apply / <stack> / <env>`
 
 `<env>` and `<stack>` are placeholders substituted with the actual
 environment name and the Terramate stack path (as emitted by
 `terramate list` / `experimental run-graph --label stack.dir`, e.g.
 `stacks/network`) for that unit of work (for example,
-`shipmate / stacks/network / staging` and
-`apply / stacks/network / staging`). Both grammars lead with one namespace
-segment and then the stack, so a reader scans one column. The check name uses
+`plan / staging / stacks/network` and
+`apply / stacks/network / staging`). Both lead with their verb. The plan check
+is a job's name and ends in the stack, so the cells of one environment differ in
+their last segment, and every cell job name (plan, drift, apply wave, unlock)
+follows the same `<env> / <stack>` order. The apply check keeps
+`apply / <stack> / <env>` on purpose: it is the App's own check, built by
+`apply-gate.check_name`, not a job's name, so the two orders differ by design.
+The check name uses
 the stack path, never a display name — so the code that *creates* the apply
 check (`pending-checks`, run by `actions/summary`),
 *completes* it (`scripts/apply-complete`, run by `actions/apply-complete` in
@@ -29,28 +34,29 @@ check (`pending-checks`, run by `actions/summary`),
 only ever have the path), and *reports it* (`apply-comment`) all reconstruct the identical name
 from the one value they share.
 
-The engine composes the plan check's name nowhere: it is the plan matrix job's own
-auto-generated check-run, whose name is the job's `name:` (`<stack> / <env>`),
+The engine creates no plan check: it is the plan matrix job's own
+auto-generated check-run, whose name is the job's `name:` (`<env> / <stack>`),
 and GitHub names a called workflow's check runs `<caller job> / <callee job>`.
-The consumer's plan-calling job is named `shipmate`, so the check is
-`shipmate / <stack> / <env>`; the same rule makes the engine plan workflow's
-summary job report as `shipmate / summary`. The workflow name does not supply
-the verb.
+The consumer's plan-calling job is named `plan`, so the check is
+`plan / <env> / <stack>`; the same rule makes the engine plan workflow's
+summary job report as `plan / summary`. `scripts/apply-gate` builds the cell
+job name (`cell_job_name`) and the plan check name (`plan_check_name`) for
+every reader that looks one up.
 
 That job name is a contract element a consumer must match. `shipmate doctor`
 reports a plan-calling job carrying another name; until it is fixed,
 `summary-comment` — which resolves each cell line's plan link by an exact
-`shipmate / <stack> / <env>` lookup across every check run on the head SHA —
+`plan / <env> / <stack>` lookup across every check run on the head SHA —
 finds no match and every `plan` link falls back to the workflow-run URL.
 
 The consumer's `shipmate.yml` gates five jobs on the event (§Post-plan
 topology), so every run also carries one one-segment check-run per job that did
-not run, named by that job's display name — `shipmate`, `post-merge`,
-`apply`, `unlock` — with conclusion `skipped`. They are display
+not run, named by that job's display name — `comment`, `deploy`,
+`apply`, `unlock` on a plan run — with conclusion `skipped`. They are display
 artefacts of the file's shape, and nothing functional depends on them:
 `shipmate / gate` is the required check, `scripts/summary-comment` resolves plan
 links by an exact three-segment name, and `scripts/mirror-checks` copies only
-names beginning `shipmate / `. `shipmate doctor`'s annotation harvest is the
+names beginning `plan / `. `shipmate doctor`'s annotation harvest is the
 one reader that does see them — it takes every `github-actions` run on the
 commit — and takes nothing from them: a skipped run carries no annotations, and
 it counts as completed, so it holds no all-clear back.
@@ -60,39 +66,47 @@ The apply check keeps its `apply / ` verb prefix: it is created pending (by
 it is what keeps `apply-gate` / `scripts/gate-status`, which select the pending-apply
 queue by the `apply / ` prefix, from ever picking up a plan check.
 
-This same forward-built string is also the apply-env-level job's own `name:`
-(so the job's display name and the apply check-run name coincide), which
-gives the apply check-run grammar a second consumer: `scripts/apply-comment`
-(see Apply result comment, below) resolves each cell line's log link by
-matching this name as a suffix of the run's job-name listing — never by
-reverse-parsing it. No match falls back to the workflow-run URL. The two sides
-are locked together by a source-derived test, because a rename of either would
-degrade every link to the run URL silently — that fallback being the designed
-behaviour, no observable would fail.
+The apply-env-level wave job is named like the plan cell job, `<env> / <stack>`,
+and two scripts find a cell's wave job by that name: `apply-gate.is_cell_job`
+matches `L<n> / <env> / <stack>`, the env-level job of `apply.yml` or
+`deploy.yml` and its cell job, as the whole job name or as a suffix after a
+` / ` boundary, since the consumer's calling job prepends its own name. The
+`L<n>` segment keeps out any other job whose name ends in ` / <env> / <stack>`,
+such as `apply / detect` for env `apply` and root stack `detect`. `scripts/apply-comment`
+(see Apply result comment, below) resolves each cell line's log link this way,
+building the name forward from the row's stack and environment. No match falls
+back to the workflow-run URL. The names and the matcher are locked together by
+two source-derived tests, `test_apply_comment.py::test_wave_job_name_matches_the_cell_job_grammar`
+(every wave job's name, and the matcher on a nested name) and
+`test_apply_comment.py::test_every_env_level_job_is_named_for_its_level` (every
+`L<n>` name in `apply.yml` and `deploy.yml`), because a rename of either would degrade
+every link to the run URL silently — that fallback being the designed behaviour, no
+observable would fail. A rename that leaves no wave job matching also fails
+`apply-complete`, which retries the listing and then fails the run.
 
-`scripts/apply-complete` is a third consumer of the identical grammar: given
-the pre-flight snapshot of check ids a run may complete, it matches each
-snapshotted `apply / <stack> / <env>` check name against
-the same run's job-name listing (the same `/`-boundary suffix idiom as
-`scripts/apply-comment`'s log-link match, not a second invention) to decide
-which cells the run's own job conclusions actually earned. A rename of the
-apply-env-level job's `name:` would silently break this consumer too — not
-degrading to a fallback URL, but leaving already-snapshotted checks pending
+`scripts/apply-complete` is the second reader: given the pre-flight snapshot of
+check ids a run may complete, it reads each snapshotted `apply / <stack> / <env>`
+check name back to its stack and environment (`apply-gate.parse_check_name`; an
+environment name holds no ` / `) and matches that cell's wave job in the same
+run's job-name listing with the same matcher, to decide which cells the run's
+own job conclusions actually earned. When some cells still match, a rename of
+the apply-env-level job's `name:` would break this reader too with only a
+`::warning::` naming the unmatched cells (the job stays green) — not degrading to
+a fallback URL, but leaving the unmatched cells' snapshotted checks pending
 forever.
 
 Job display names in the apply/deploy path nest: a called reusable workflow's
 job displays as `<caller job> / <callee job>`, applied at every level, and GHA
 cannot suppress a level. The apply leaf is therefore three deep, e.g.
-`post-merge / L0 / apply / <stack> / <env>`. The intermediate names are kept
-short and non-redundant (`L0`..`L3` for env-levels in `apply.yml` /
-`deploy.yml`) rather than
-repeating the verb the leaf already carries; the consumer's calling job supplies the outermost
-segment (`post-merge` on the deploy path). Its file is named `shipmate`, so the
+`deploy / L0 / <env> / <stack>`. The intermediate names are kept short
+(`L0`..`L3` for env-levels in `apply.yml` / `deploy.yml`); the consumer's
+calling job supplies the verb as the outermost segment (`deploy` on the deploy
+path, `apply` on a dispatched apply). Its file is named `shipmate`, so the
 pull request's checks UI renders that workflow name and then the job path
-(`shipmate / shipmate / facts`); the repetition is cosmetic and the check-run
-names the engine matches on are unchanged. Only the leaf is
-load-bearing — the intermediate names are display-only, and the job ids
-they belong to are what `needs:` refers to.
+(`shipmate / plan / facts`); the check-run names the engine matches on start
+after the workflow name. The leaf and the `L<n>` level name are
+load-bearing (`is_cell_job` requires both); the outermost name is
+display-only, and the job ids are what `needs:` refers to.
 
 In addition to the per-unit checks, one aggregate commit status rolls up
 the full fan-out into a single required status, named verbatim:
@@ -103,16 +117,15 @@ Branch protection rules should require `shipmate / gate`, not the
 individual per-unit checks, so that the set of required checks does not
 need to be edited every time a stack or environment is added or removed.
 
-`shipmate / ` is the namespace for shipmate's plan checks and its aggregate,
-non-fan-out surfaces. `shipmate / gate` is the only required member — it is
-matched by exact string in a repository ruleset. The rest of the namespace
-comes from the plan-calling job's name rather than being written anywhere: the
-engine plan workflow's own jobs report as `shipmate / facts`, `shipmate /
-detect` and `shipmate / summary`, so the checks list identifies the tool
-without the consumer naming anything (a job's check run is always created by
-the GitHub Actions app, and its name is the only part that can say which tool
-produced it). These are not required checks, and nothing in the engine
-reconstructs them.
+`shipmate / gate` is the only required check — it is matched by exact string
+in a repository ruleset. The plan checks' names come from the plan-calling
+job's name rather than being written anywhere: the engine plan workflow's own
+jobs report as `plan / facts`, `plan / detect` and `plan / summary`. A job's
+check run is always created by the GitHub Actions app, so its name cannot say
+which tool produced it; the checks list says it by rendering the workflow name
+`shipmate` before every job's check run (`shipmate / plan / detect`), while the
+name the engine matches on starts at `plan / `. These are not required checks,
+and nothing in the engine reconstructs the non-cell ones.
 
 Everything in the check/status namespace is ASCII and slash-delimited, which
 is GitHub's own convention for status contexts (`ci/circleci`), and — for
@@ -850,12 +863,12 @@ the repository root, or none:
 - **A path** — a local backend. The cell restores that path through
   `actions/state` before it plans or applies, and `apply-cell` saves it after the
   apply (`plan-cell` and `drift-cell` restore only; neither writes state). The
-  cached file is encrypted with `SHIPMATE_PLAN_PASSPHRASE` (§Plan artifact
+  cached file is encrypted with `SHIPMATE_ENCRYPTION_KEY` (§Plan artifact
   encryption), because any workflow run, a fork's pull request included, can
-  restore a default-branch cache entry. An empty passphrase refuses the restore
+  restore a default-branch cache entry. An empty encryption key refuses the restore
   and the save. An entry that fails authentication and an openssl
   or disk failure on the runner each fail the restore naming the matched cache
-  key, so tofu never reads it and the cell skips its save. A passphrase
+  key, so tofu never reads it and the cell skips its save. An encryption key
   rotation, different values on `<env>-plan` and `<env>-apply`, a corrupt,
   truncated or altered entry, and one copied under another stack's or
   environment's key each fail authentication; `docs/troubleshooting.md`
@@ -1655,22 +1668,22 @@ check/status/comment/issue that crosses a workflow-run boundary:
   `actions/drift-issues`, which downloads those artifacts and, under an App
   token, opens/updates/closes the drift Issues.
 
-The plan matrix job's own `shipmate / <stack> / <env>` auto check-run is the one
+The plan matrix job's own `plan / <env> / <stack>` auto check-run is the one
 exception: it's the job's own check-run (GitHub creates it for the job
 itself), not something a separate API call authors, so it necessarily stays
 on the `github-actions` identity regardless of App permissions. An on-demand
 plan carries an App-authored *copy* of it: GitHub attaches a dispatched run's
 job checks to the commit of the ref it was dispatched on, never to the pull
 request head, so `actions/summary` mirrors that run's own completed checks
-whose names begin `shipmate / ` — the cells plus `shipmate / facts` and
-`shipmate / detect`, and none of the consumer file's skipped sibling jobs — onto
+whose names begin `plan / ` — the cells plus `plan / facts` and
+`plan / detect`, and none of the consumer file's skipped sibling jobs — onto
 the head as App-authored check-runs holding a fixed line and a link back to the
 original, whose step summary keeps the plan text. They exist so the pull request
 shows the cells, a failed one above all — and because the sticky comment
 resolves each
 cell line's plan link across the checks on the head, which is why the mirror runs
 before the comment is built. No gate or apply queue reads them: neither the
-cell names nor `shipmate / facts` / `shipmate / detect` fall inside the
+cell names nor `plan / facts` / `plan / detect` fall inside the
 `apply / ` namespace those select on. `shipmate doctor`'s annotation harvest is
 the one other reader, and it skips them for the same reason: outside that
 namespace it takes only the `github-actions` rows, because a mirrored copy
@@ -1691,7 +1704,7 @@ The consumer's workflow is one file, `.github/workflows/shipmate.yml`: four
 triggers, and five jobs each gated on the event with an `if:` and each calling
 one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
 declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY`,
-`SHIPMATE_PLAN_PASSPHRASE` and `SHIPMATE_SECRETS` by name (never
+`SHIPMATE_ENCRYPTION_KEY` and `SHIPMATE_SECRETS` by name (never
 `secrets: inherit`) and one input, `runs_on`.
 Everything a `uses:` line reaches is engine-owned,
 SHA-pinned YAML.
@@ -1725,13 +1738,13 @@ issues) is created by a job bound to that fixed GitHub Environment
 (`docs/github-app.md` §Key-exposure boundary), each running at a ref that
 satisfies its default-branch-only policy for a different reason.
 
-**The calling job's name is a contract literal.** `plan` and `comment-ops`
-carry `name: shipmate`, as does a drift file's `drift` job; `deploy` carries
-`name: post-merge`; `apply` and `unlock` carry no `name:` and display as their
-job id.
+**The calling job's name is a contract literal.** Each job displays its verb:
+`plan` carries `name: plan`, `comment-ops` `name: comment`, `deploy`
+`name: deploy`, and a drift file's `drift` job `name: sweep`; `apply` and
+`unlock` carry no `name:` and display as their job id.
 GitHub names a called workflow's check runs `<caller job> / <callee job>`, so
-only a plan job named `shipmate` produces `shipmate / <stack> / <env>` plan
-cells and the `shipmate / summary`, `shipmate / facts` and `shipmate / detect`
+only a plan job named `plan` produces `plan / <env> / <stack>` plan
+cells and the `plan / summary`, `plan / facts` and `plan / detect`
 names beside them. `scripts/summary-comment` resolves each cell line's `plan` link
 by that exact name. A job named anything else plans correctly and every such
 link falls back to the workflow-run page; `shipmate doctor` reports it.
@@ -1780,7 +1793,7 @@ was dispatched on (the default branch), and nothing on the run identifies the
 pull request it was dispatched for. So the checkout's `ref:` is what makes it a
 plan of the pull request there too, and every check-run its own jobs create
 attaches to the dispatch ref rather than to the pull request — which is why the
-`summary` job mirrors this run's completed `shipmate / ` checks onto the head
+`summary` job mirrors this run's completed `plan / ` checks onto the head
 commit on an `on-demand` run.
 
 **Requirement: no job in engine `plan.yml` other than `summary` and `gate-hold`
@@ -1835,7 +1848,7 @@ The five jobs:
   an App token minted inside that environment, publishes the results. This is
   what creates the pending `apply / <stack> / <env>` checks, the sticky plan
   comment, and the `shipmate / gate` status, and — on an `on-demand` run — the
-  mirror of this run's completed `shipmate / ` checks onto the pull request's
+  mirror of this run's completed `plan / ` checks onto the pull request's
   head.
   `pull_request_target` evaluates at the base branch ref and a dispatched run at
   the ref it was dispatched on, either of which satisfies the environment's
@@ -1941,13 +1954,13 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
 
 - Consuming repositories and workflows pin every shipmate reusable workflow by
   commit SHA, never by a tag or branch name (for example,
-  `uses: <owner>/shipmate/.github/workflows/plan.yml@<full-commit-sha>`, not
+  `uses: ship-iac/shipmate/.github/workflows/plan.yml@<full-commit-sha>`, not
   `@v1` or `@main`). This guarantees that a workflow's behavior cannot change
   without an explicit, reviewed bump of the pinned SHA in the consuming
   repository.
 - A pinned SHA may carry a trailing `# vX.Y.Z` comment naming the release
   that SHA belongs to
-  (`uses: <owner>/shipmate/.github/workflows/plan.yml@<sha> # v0.1.0`).
+  (`uses: ship-iac/shipmate/.github/workflows/plan.yml@<sha> # v0.1.0`).
   The comment is for human readers and for Dependabot's own bookkeeping; the ref
   that resolves is always the SHA. shipmate applies the same convention to the
   third-party actions it pins internally.
@@ -1969,7 +1982,7 @@ and `docs/github-app.md` §Key-exposure boundary for a branch-authored workflow.
   of record for a release is named in that release's section of `CHANGELOG.md`.
 - A release tag may be annotated, so `git/ref/tags/<tag>` can return the tag object's SHA,
   which a workflow cannot check out. Resolve a tag with
-  `gh api repos/<owner>/shipmate/commits/<tag> --jq .sha`, or locally
+  `gh api repos/ship-iac/shipmate/commits/<tag> --jq .sha`, or locally
   `git rev-parse <tag>^{commit}`; both resolve an annotated and a lightweight tag alike.
 - shipmate publishes a GitHub Release per release SHA. `shipmate doctor` reports a pin that
   differs from the latest release; a pin at an untagged commit has no release to compare
@@ -2182,7 +2195,7 @@ the publish hold (below). In order, blank lines between the parts:
   it, so a stack path it names shows as written and nothing in it renders;
 - when `detect` succeeded, one line per planned cell that left no cell summary,
   sorted by environment then stack: `🔴 <stack> (<env>): no plan summary read`,
-  linking the cell's `shipmate / <stack> / <env>` check, or the run when the
+  linking the cell's `plan / <env> / <stack>` check, or the run when the
   head has none. At most ten, then `and N more cells have no plan summary`. The
   cells are `detect`'s planned `cells` the run read no summary for: a cell whose
   plan matrix job did not succeed and a cell whose summary download failed read
@@ -2282,7 +2295,7 @@ and `lost` outputs, which the same rule reads.
   line reads the cells only: every failed plan job holds the gate, and a held
   gate posts the held body instead. With no cell, the skipped `plan` matrix
   job's check shows its name expression literally
-  (`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped), a
+  (`plan / ${{ matrix.environment }} / ${{ matrix.stack }}`, skipped), a
   platform behaviour no `if:` or `name:` change removes.
 - **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
   settings in this run: see [the run](<run url>)`, under any verdict. `N`
@@ -2312,7 +2325,7 @@ and `lost` outputs, which the same rule reads.
   counts rather than by a severity colour. `<state>` is `no changes`, or for a
   changed cell `+a ~c -d`, then `, N import` and `, N forget` when either count
   is above zero, or `+? ~? -?` when the counts could not be derived. `<url>` is
-  the cell's `shipmate / <stack> / <env>` plan-job check run, built forward from
+  the cell's `plan / <env> / <stack>` plan-job check run, built forward from
   the cell's `(stack-path, environment)` pair using the check-name grammar
   above; when the check run cannot be resolved, it is the workflow-run URL. The
   link is raw HTML because a Markdown link renders literally inside
@@ -2822,14 +2835,18 @@ reaches the process.
   aimed at a cell, and refusing it would fail every run on correct
   configuration. An envelope key is **refused**: writing `TF_WORKSPACE` into
   `SHIPMATE_VARS` is a deliberate act with one meaning, and a silent drop leaves
-  the author debugging the wrong thing. Three enumerated names are **refused**
+  the author debugging the wrong thing. Four enumerated names are **refused**
   rather than skipped: `SHIPMATE_SECRETS`, `SHIPMATE_APP_PRIVATE_KEY` and
-  `SHIPMATE_PLAN_PASSPHRASE`, secrets set on the variable surface. Skipping one
-  would export nothing while its value sat world-readable in the repository UI,
-  and the engine's own namespace has no legitimate reading as a consumer
-  variable. The refusal says to delete the variable, rotate what it held, and
-  set the secret. A rotated `SHIPMATE_PLAN_PASSPHRASE` no longer decrypts a
-  local backend's cached state (§Plan artifact encryption, "Rotation").
+  `SHIPMATE_ENCRYPTION_KEY`, secrets set on the variable surface, and
+  `SHIPMATE_PLAN_PASSPHRASE`, because a variable of that name can hold an
+  encryption key. Skipping one would export nothing while its value sat
+  world-readable in the repository UI, and the engine's own namespace has no
+  legitimate reading as a consumer variable. The refusal for each of the first
+  three says to delete the variable, rotate what it held and set the secret; for
+  `SHIPMATE_PLAN_PASSPHRASE` it says to delete the variable and, if it holds the
+  current `SHIPMATE_ENCRYPTION_KEY` value, choose a new one. A rotated
+  `SHIPMATE_ENCRYPTION_KEY` no longer decrypts a local backend's cached state
+  (§Plan artifact encryption, "Rotation").
 - **Name validation.** Every envelope key must match `[A-Za-z_][A-Za-z0-9_]*`.
   `$GITHUB_ENV` is written in heredoc form, so a key holding a newline would
   inject further assignments; this is the trust boundary, so a bad key is
@@ -2943,11 +2960,11 @@ engine, and both are equally visible in the plan artifact — the machine plan
 
 The reviewed machine plan file (`stack.otplan`) is encrypted at rest in the
 uploaded artifact. `plan-cell` (in `plan.yml`) encrypts the plan with its
-required `plan-passphrase` input before upload, in the shipmate-crypt-v1 format
+required `encryption-key` input before upload, in the shipmate-crypt-v1 format
 `scripts/plan-crypt` defines: the 18-byte header `shipmate-crypt-v1` and a
 newline, a 16-byte random salt, the output of `openssl enc -aes-256-ctr -pbkdf2
 -iter 1 -md sha256 -nosalt`, and an HMAC-SHA256 tag over the three. One
-PBKDF2-HMAC-SHA256 derivation of 600,000 iterations over the passphrase and the
+PBKDF2-HMAC-SHA256 derivation of 600,000 iterations over the encryption key and the
 salt yields the cipher key, which reaches openssl in its environment and never
 on the command line, and the tag key, each labelled with the file's kind, plan
 or state, so neither authenticates as the other. A state entry's tag also
@@ -2958,11 +2975,11 @@ decrypt verifies the tag before openssl reads the file, and a plan artifact
 that fails refuses at `Decrypt reviewed plan artifact`, before any apply step,
 and a cached state entry at the state restore (§State backend). `apply-cell`
 decrypts the plan after download on every apply path: both paths pass it as
-the `SHIPMATE_PLAN_PASSPHRASE` secret into the
+the `SHIPMATE_ENCRYPTION_KEY` secret into the
 reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
 forms. The same cipher and secret encrypt a local backend's cached state
-(§State backend). Consumers set `SHIPMATE_PLAN_PASSPHRASE` as a repository or
+(§State backend). Consumers set `SHIPMATE_ENCRYPTION_KEY` as a repository or
 organization secret and forward it by name in the `secrets:` block of their
 `shipmate.yml`'s `plan`, `deploy` and `apply` jobs and of each drift file's
 `drift` job. Never `secrets: inherit`: it hands the engine the caller's whole
@@ -2975,8 +2992,8 @@ environment, and a plan cell names its own plan environment. The same value on b
 
 - **As a variable**, every cell refuses it by name (`scripts/env-inject`).
 - **As a secret on `shipmate-engine`**, no plan or apply cell binds that
-  environment, so the passphrase resolves to empty on both sides and every plan
-  cell refuses at `Require the plan passphrase`, before it initializes the
+  environment, so the encryption key resolves to empty on both sides and every plan
+  cell refuses at `Require the encryption key`, before it initializes the
   stack.
 - **As a secret on `<env>-apply` alone**, every plan cell in that environment
   refuses the same way, so no apply ever has a plan.
@@ -2994,12 +3011,12 @@ name one and read it.
 Unlike the App private key, this secret must be readable wherever plans are
 produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
-- **Required.** An empty or unset passphrase refuses: `plan-cell` before it
+- **Required.** An empty or unset encryption key refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
 - **Fail-safe on mismatch.** An artifact that is not a whole shipmate-crypt-v1
   file whose tag verifies fails authentication and refuses naming the causes
-  (another passphrase, a rotated one or different values on `<env>-plan` and
+  (another encryption key, a rotated one or different values on `<env>-plan` and
   `<env>-apply`, or a corrupt, truncated or altered artifact)
   and points to `docs/troubleshooting.md` for each remedy; the engine cannot
   tell them apart. An openssl or disk failure on the runner refuses and tells
@@ -3017,10 +3034,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   published text comes from `sensitive` marking (see Secrets in published output, above).
 - **Both sides must agree.** `plan-cell` (encrypt) and `apply-cell` (decrypt)
   run at the commit of the engine reference that called them, which
-  §Consumption's one-change rule keeps the same on both paths; the passphrase
+  §Consumption's one-change rule keeps the same on both paths; the encryption key
   must match on both too. A mismatch surfaces as the fail-safe above, not a
   silent wrong apply.
-- **Rotation.** A new passphrase cannot decrypt anything the old one encrypted:
+- **Rotation.** A new encryption key cannot decrypt anything the old one encrypted:
   outstanding plans refuse in the apply cell (the fail-safe above), and every
   cached local-state entry refuses its restore. `docs/troubleshooting.md` gives
   the remedies under each refusal's heading.

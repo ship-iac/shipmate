@@ -1854,8 +1854,8 @@ def test_an_unrecognised_ruleset_post_failure_propagates(monkeypatch):
     assert "HTTP 500" in str(e.value)
 
 
-#: Owner-agnostic, like the docs guard's selector: the pages publish `<owner>/shipmate/...`
-#: as well as this organization's own spelling.
+#: Owner-agnostic, like the docs guard's selector: one keyed on one owner silently stops
+#: checking a fence that spells another.
 _CALL_PATH = "/shipmate/.github/workflows/"
 
 _EXPECTED_CALLEES = {
@@ -2150,8 +2150,8 @@ def test_a_file_still_carrying_the_docs_placeholder_is_not_reported_pin_only(tmp
 FRESH_CHECKLIST = f"""
 Still yours, each item marked from what this run read:
 
-todo          SHIPMATE_PLAN_PASSPHRASE repository secret
-    gh secret set SHIPMATE_PLAN_PASSPHRASE
+todo          SHIPMATE_ENCRYPTION_KEY repository secret
+    gh secret set SHIPMATE_ENCRYPTION_KEY
     An organization secret of that name is not visible to this read.
 
 todo          `.github/shipmate-config.yml`
@@ -2221,7 +2221,7 @@ todo          adoption pull request
 CONFIGURED_CHECKLIST = """
 Still yours, each item marked from what this run read:
 
-ok            SHIPMATE_PLAN_PASSPHRASE repository secret
+ok            SHIPMATE_ENCRYPTION_KEY repository secret
 ok            `.github/shipmate-config.yml`
 cannot check  o/r in the App installation's repository selection
     Reading `repos/o/r/installation` needs an App JWT, which this run
@@ -2282,7 +2282,7 @@ def test_the_checklist_of_a_fresh_repository_in_a_dry_run(monkeypatch, tmp_path,
 
     The checkout holds no `.github/workflows/`, so the drift sweeps item asks for a file.
 
-    Mutations: delete the passphrase item from `_checklist`; delete `_drift_sweeps_item`
+    Mutations: delete the encryption key item from `_checklist`; delete `_drift_sweeps_item`
     from it; append a `gate ruleset` todo item to it; revert `_adoption_item`'s closing
     two lines to the bare `Then run this script again.`
     """
@@ -2311,7 +2311,7 @@ def test_the_checklist_of_a_configured_public_repository(monkeypatch, tmp_path, 
         ENGINE_POLICIES: MAIN_POLICY,
         ENGINE_SECRETS: {"secrets": [{"name": KEY}]},
         ENGINE_RULES: NO_CUSTOM_RULES,
-        REPO_KEY_LIST: [{"name": "SHIPMATE_PLAN_PASSPHRASE"}],
+        REPO_KEY_LIST: [{"name": "SHIPMATE_ENCRYPTION_KEY"}],
         "repos/o/r/environments/dev-eu-plan": {"deployment_branch_policy": None},
         "repos/o/r/environments/dev-eu-apply": REVIEWED_APPLY,
         "repos/o/r/environments/dev-eu-apply/deployment-branch-policies": MAIN_POLICY,
@@ -2414,16 +2414,16 @@ def test_the_checklist_reports_an_enabled_custom_rule(monkeypatch, tmp_path, cap
     assert items["custom deployment protection rules on shipmate-engine"][0] == "todo"
 
 
-def test_the_passphrase_is_read_from_the_repository_secrets():
+def test_the_encryption_key_is_read_from_the_repository_secrets():
     """Mutations: read `engine_secrets` for it; put `(optional)` back in the item label."""
-    item = "SHIPMATE_PLAN_PASSPHRASE repository secret"
-    placed = ctx(repo_secrets={"SHIPMATE_PLAN_PASSPHRASE"})
-    assert onboard._passphrase_item(placed) == ("ok", item, [])
-    assert onboard._passphrase_item(ctx()) == (
+    item = "SHIPMATE_ENCRYPTION_KEY repository secret"
+    placed = ctx(repo_secrets={"SHIPMATE_ENCRYPTION_KEY"})
+    assert onboard._encryption_key_item(placed) == ("ok", item, [])
+    assert onboard._encryption_key_item(ctx()) == (
         "todo",
         item,
         [
-            "gh secret set SHIPMATE_PLAN_PASSPHRASE",
+            "gh secret set SHIPMATE_ENCRYPTION_KEY",
             "An organization secret of that name is not visible to this read.",
         ],
     )

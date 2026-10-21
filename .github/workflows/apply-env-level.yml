@@ -6,7 +6,7 @@ on:
       head_sha: { required: true, type: string }
       runs_on: { required: true, type: string }
     secrets:
-      SHIPMATE_PLAN_PASSPHRASE:
+      SHIPMATE_ENCRYPTION_KEY:
         required: false
       SHIPMATE_APP_PRIVATE_KEY:
         required: false
@@ -53,7 +53,7 @@ jobs:
     concurrency: &wave-concurrency
       group: apply-${{ matrix.environment }}-${{ matrix.stack }}
       cancel-in-progress: false
-    name: &wave-name apply / ${{ matrix.stack }} / ${{ matrix.environment }}
+    name: &wave-name ${{ matrix.environment }} / ${{ matrix.stack }}
     # wave1..wave7 alias this list, so an edit here changes all eight waves. A change for one
     # wave needs that wave's `steps:` written out in full instead of `*wave-steps`.
     steps: &wave-steps
@@ -77,7 +77,7 @@ jobs:
           env: ${{ matrix.environment }}
           plan-run-id: ${{ matrix.plan_run_id }}
           plan-sha256: ${{ matrix.plan_sha256 }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+          encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
   wave1:
     needs: [wave0]
     if: ${{ !failure() && !cancelled() && !contains(join(needs.*.result, ','), 'cancelled') && toJSON(fromJSON(inputs.waves_json).wave1) != '[]' }}

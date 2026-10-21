@@ -52,7 +52,7 @@ for a runner that never arrives.
 state is restored from the path `tofu init` records before each drift cell
 plans; a remote backend owns its state and the restore is skipped
 ([`../CONTRACT.md`](../CONTRACT.md) §State backend). The cached state is
-encrypted with `SHIPMATE_PLAN_PASSPHRASE`, so a drift file whose stacks use a
+encrypted with `SHIPMATE_ENCRYPTION_KEY`, so a drift file whose stacks use a
 local backend maps that secret in the `drift` job's `secrets:`; without it each
 cell refuses at `Initialize the stack` (its `Restore state` step).
 

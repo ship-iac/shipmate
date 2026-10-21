@@ -29,7 +29,7 @@ def test_the_workflow_call_secrets_are_exactly_these():
     secrets of their own holds no `SHIPMATE_SECRETS` to pass at all."""
     assert workflow_yaml(WF)["on"]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
-        "SHIPMATE_PLAN_PASSPHRASE": {"required": False},
+        "SHIPMATE_ENCRYPTION_KEY": {"required": False},
         "SHIPMATE_SECRETS": {"required": False},
     }
 
@@ -121,14 +121,21 @@ def test_the_cell_binds_the_environment_detect_resolved():
     assert workflow_jobs(WF)["plan"]["environment"] == "${{ matrix.env_binding }}"
 
 
+def test_the_cell_job_name_is_the_cell_grammar():
+    """`summary-comment` and `gate-state` name a plan cell's check by
+    `apply-gate.plan_check_name`, `plan / <env> / <stack>`, which exists only while this
+    job's `name:` renders `<env> / <stack>`. Mutation: swap the two matrix keys."""
+    assert workflow_jobs(WF)["plan"]["name"] == "${{ matrix.environment }} / ${{ matrix.stack }}"
+
+
 def test_the_cell_passes_this_whole_with_block():
     """The whole mapping against a hand-written constant, not the keys this file happens to
     reason about elsewhere: a key checked one at a time relocates the hole to whichever key is
     not named, and a dropped `with:` line reaches a composite action as the empty string rather
     than as an error. plan-cell refuses an empty `expected-head` and an empty
-    `plan-passphrase`, but only once a run reaches the cell.
+    `encryption-key`, but only once a run reaches the cell.
 
-    Mutations: `plan-passphrase` deleted, and `expected-head: ${{ github.sha }}`.
+    Mutations: `encryption-key` deleted, and `expected-head: ${{ github.sha }}`.
     """
     assert step_using(WF, "plan", "actions/plan-cell")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
@@ -137,7 +144,7 @@ def test_the_cell_passes_this_whole_with_block():
         "stack": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",
         "expected-head": "${{ needs.facts.outputs.head-sha }}",
-        "plan-passphrase": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
+        "encryption-key": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
     }
 
 

@@ -707,15 +707,15 @@ def _reconcile_shim(ctx):
         print(diff, end="")
 
 
-def _passphrase_item(ctx):
-    item = "SHIPMATE_PLAN_PASSPHRASE repository secret"
-    if "SHIPMATE_PLAN_PASSPHRASE" in ctx["repo_secrets"]:
+def _encryption_key_item(ctx):
+    item = "SHIPMATE_ENCRYPTION_KEY repository secret"
+    if "SHIPMATE_ENCRYPTION_KEY" in ctx["repo_secrets"]:
         return "ok", item, []
     return (
         "todo",
         item,
         [
-            "gh secret set SHIPMATE_PLAN_PASSPHRASE",
+            "gh secret set SHIPMATE_ENCRYPTION_KEY",
             "An organization secret of that name is not visible to this read.",
         ],
     )
@@ -1303,7 +1303,7 @@ def _checklist(ctx):
     ungated = ec.ungated_envs(ctx["table"] or {})
     gated = [env for env in ctx["envs"] if env not in ctx["unresolved"] and env not in ungated]
     reviewed = [ec.env_names(env, False)["apply"] for env in gated if env not in ctx["shared"]]
-    items = [_passphrase_item(ctx), _table_item(ctx)]
+    items = [_encryption_key_item(ctx), _table_item(ctx)]
     items.append(_app_item(ctx))
     items += _custom_rule_items(ctx)
     items += _actions_settings_items(ctx)

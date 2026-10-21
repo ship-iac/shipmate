@@ -271,7 +271,7 @@ as above, and step 5 runs in every consumer repository.
   `apply / <stack> / <env>` check (create pending, complete on apply), the
   aggregate `shipmate / gate` commit status, the sticky plan comment, the
   `shipmate doctor` sticky report, the apply result comments, and drift
-  issues. The plan matrix job's own `shipmate / <stack> / <env>` auto check-run stays
+  issues. The plan matrix job's own `plan / <env> / <stack>` auto check-run stays
   on the `github-actions` identity — it's the job's own check-run, not
   something a separate API call creates, so there's nothing for the App to
   author there. On an on-demand plan the App does author a copy of it: a
@@ -384,7 +384,7 @@ actual work here:
   for the plan comment: reading author-produced data is not executing it, and no
   new secret enters the job. Re-rendering the plan there instead of
   hashing it was rejected for exactly this reason — the render needs the plan
-  artifact decrypted, which would put `SHIPMATE_PLAN_PASSPHRASE` in the job that
+  artifact decrypted, which would put `SHIPMATE_ENCRYPTION_KEY` in the job that
   holds the App key.
 - The *token* minted from the key is still readable in plaintext by any step
   in the job that mints it — the environment

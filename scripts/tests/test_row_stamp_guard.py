@@ -133,7 +133,7 @@ def test_the_deploy_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
         tmp_path,
         monkeypatch,
         cells=[tdd._cell("stacks/app")],
-        checks=[_apply_check("stacks/app")],
+        checks=[_apply_check("stacks/app", cells=1)],
         table=_TABLE,
     )
     assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
@@ -171,7 +171,9 @@ def test_the_targeted_apply_rows_resolve_the_apply_tier(monkeypatch, tmp_path):
     Mutations: pass `"plan"` at that call site; drop its `stamp_rows` wrapper.
     """
     out = tad._apply_env(monkeypatch, tmp_path, table=_TABLE)
-    tad._stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    tad._stub_apply(
+        monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
+    )
     tad.ad.main()
     assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"] == [
         {

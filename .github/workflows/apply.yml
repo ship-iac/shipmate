@@ -16,7 +16,7 @@ on:
       # declaration rejects the call: "Secret ... is required, but not provided while calling".
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
-      SHIPMATE_PLAN_PASSPHRASE: { required: false }
+      SHIPMATE_ENCRYPTION_KEY: { required: false }
 jobs:
   # A human cannot make github.actor a bot login, so this rejects a human dispatch that would skip
   # scripts/authorize; it admits any bot with actions:write. Its own job so `summary` can refuse
@@ -144,9 +144,8 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
 
   envlevel0:
-    # Display name only (the job ids stay `envlevel*`): a called workflow's jobs display as
-    # `<caller job> / <this name> / <wave job>`, and GHA cannot suppress a level -- so each level
-    # is named for the env-level it fans out instead of repeating the verb the wave job carries.
+    # `apply-gate.is_cell_job` matches a wave job as `L<n> / <env> / <stack>`, so this `L<n>` name
+    # is load-bearing: renaming it strands apply checks pending. deploy.yml repeats it.
     name: L0
     # `guard` and `review` are listed so their failures reach `!failure()`: otherwise a failed one
     # skips `detect`, whose outputs then read as '' -- which `!= 'true'` fans out on, over
@@ -167,7 +166,7 @@ jobs:
       # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
       # load-time error, unlike an undeclared action input, which is silently ignored.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
   envlevel1:

@@ -10,8 +10,16 @@ section below names the SHA the release tags.
 
 ## Unreleased
 
+### Changed — BREAKING
+
+- **Caller jobs are named for their verb and every cell job name ends in the stack: plan checks read `plan / <env> / <stack>` (and `plan / facts`, `plan / detect`, `plan / summary`), apply and deploy cell jobs `<caller> / L<n> / <env> / <stack>` without the inner `apply`, drift cells `sweep / <env> / <stack>` and unlock cells `unlock / <env> / <stack>`.** In `shipmate.yml` set `name: plan` on the `plan` job, `name: comment` on `comment-ops` and `name: deploy` on `deploy`, and in each drift file `name: sweep` on the `drift` job (`scripts/repin` diffs `shipmate.yml` only); then push a commit to each open pull request so its plan checks carry the new names.
+- **The secret `SHIPMATE_PLAN_PASSPHRASE` is renamed `SHIPMATE_ENCRYPTION_KEY`; it encrypts plan artifacts and cached local state.** Run `gh secret set SHIPMATE_ENCRYPTION_KEY` with the old secret's value (the same value keeps cached state readable), delete `SHIPMATE_PLAN_PASSPHRASE`, and rename the mapping under `secrets:` in `shipmate.yml` and in every drift file (`scripts/repin` diffs `shipmate.yml` only). A cell refuses a GitHub variable named `SHIPMATE_PLAN_PASSPHRASE`, as it does one named `SHIPMATE_ENCRYPTION_KEY`.
+
 ### Fixed
 
+- **The missing-encryption-key refusal reads `SHIPMATE_ENCRYPTION_KEY is not set or is empty`, since it also fires on an empty value.**
+- **The shared-head apply refusal names each cell's plan run beside its pull request, and the partial-publish refusal offers re-running the plan run's failed jobs only when every named run published fewer apply checks than its one planned cell count.**
+- **A drift sweep fails its `detect` job when it cannot read the default branch or reads it empty, instead of skipping every sweep job green.**
 - **Plan, apply and drift cells run `tofu show` inside `terramate run`, so a `run.env` `TF_DATA_DIR` reaches it.**
 - **A failed `tofu init` is annotated with OpenTofu's first error; the `gh cache delete` remedy appears only for a provider install failure after a cache hit.**
 - **A plan run whose `summary` finds that a newer plan run holds the gate ends green at its hold step with the newer-run refusal as a notice, so re-running a cancelled autoplan clears its checks; a newer run that takes the gate while the re-run publishes can still fail it.**
@@ -24,6 +32,8 @@ section below names the SHA the release tags.
 - **Repository-settings warnings (gate ruleset, review rule, `CODEOWNERS`) no longer post a plan comment for a pull request that changes nothing; a plan comment names the count of the other `doctor` warnings and links the run.**
 - **The plan and apply result comments group their cells under one `#### <env>: N cells, <counts>` heading per environment, in apply order (the `needs` levels, ties by name), with changed, failed and blocked cells first; a cell line under a heading no longer repeats `(<env>)`.**
 - **The footer link of a comment-ops reply reads `comment run` instead of `run`, since it links the run that handled the comment.**
+- **The `shipmate.yml` fence in `docs/getting-started.md` carries shorter comments, each keeping its reason.**
+- **`docs/hardening.md` row 12 and its allowed-actions list name the engine's pattern `ship-iac/shipmate/*@*`, as `scripts/onboard` prints it, and `CONTRACT.md` §Consumption names `ship-iac/shipmate` in place of `<owner>/shipmate`.**
 
 ## [0.49.1] — 2026-10-18
 

@@ -11,7 +11,7 @@ that declares `workflow_call`. The engine's own `push`-triggered workflows (`ci.
 `manifest-load.yml`) run only in the engine repository, under its settings, so what they use
 is never resolved against a consumer's list and does not belong on it.
 
-A `$/` reference resolves in the engine repository and passes with the `<owner>/shipmate/*@*`
+A `$/` reference resolves in the engine repository and passes with the `ship-iac/shipmate/*@*`
 entry consumers already list (measured), so it needs no additional allowlist pattern. A `./`
 reference resolves in the running workspace, never a third party's. Both are excluded here.
 
@@ -107,5 +107,5 @@ def test_hardening_fence_lists_onboard_allowed_patterns():
     """Mutations: leave `astral-sh/setup-uv@*` in the fence, or swap two fence lines -> red."""
     match = _ALLOWED_FENCE.search((ENGINE / "docs" / "hardening.md").read_text(encoding="utf-8"))
     assert match, "no code fence under the hardening.md 'Allowed actions' bullet"
-    lines = [line.strip().replace("<owner>", "ship-iac") for line in match["body"].splitlines()]
+    lines = [line.strip() for line in match["body"].splitlines()]
     assert lines == list(onboard.ALLOWED_PATTERNS)

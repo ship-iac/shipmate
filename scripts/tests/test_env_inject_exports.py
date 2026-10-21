@@ -324,17 +324,26 @@ def test_shipmate_vars_is_lifted_out_of_the_enumeration():
             ),
         ),
         (
-            "SHIPMATE_PLAN_PASSPHRASE",
+            "SHIPMATE_ENCRYPTION_KEY",
             (
-                "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable, and it must be a "
+                "::error::SHIPMATE_ENCRYPTION_KEY is set as a GitHub variable, and it must be a "
                 "secret, not a variable. Its value is readable by anyone who can see the "
                 "repository. "
-                "Delete the variable, choose a new passphrase, and set it as a secret, for example "
-                "with gh secret set SHIPMATE_PLAN_PASSPHRASE."
+                "Delete the variable, choose a new encryption key, and set it as a secret, for "
+                "example with gh secret set SHIPMATE_ENCRYPTION_KEY."
+            ),
+        ),
+        (
+            "SHIPMATE_PLAN_PASSPHRASE",
+            (
+                "::error::SHIPMATE_PLAN_PASSPHRASE is set as a GitHub variable. Its value is "
+                "readable by anyone who can see the repository. Delete the variable, and if "
+                "SHIPMATE_ENCRYPTION_KEY holds that value, choose a new encryption key and set "
+                "it with gh secret set SHIPMATE_ENCRYPTION_KEY."
             ),
         ),
     ],
-    ids=["secrets", "app-key", "plan-passphrase"],
+    ids=["secrets", "app-key", "encryption-key", "plan-passphrase"],
 )
 def test_a_secret_set_as_a_variable_is_refused(name, expected):
     """`SHIPMATE_SECRETS` is a secret and `SHIPMATE_VARS` a variable, same shape and adjacent
@@ -366,12 +375,12 @@ def test_every_declared_engine_secret_is_refused_as_a_variable():
     where the `SHIPMATE_` prefix skips it silently. The declared set is compared whole, so a
     derivation that finds no workflow reds rather than passing as an empty subset.
 
-    Mutations: drop `SHIPMATE_PLAN_PASSPHRASE` from `_NEVER_VARIABLES`; point the derivation
+    Mutations: drop `SHIPMATE_ENCRYPTION_KEY` from `_NEVER_VARIABLES`; point the derivation
     at an empty directory; re-add `SHIPMATE_SLACK_WEBHOOK: { required: false }` to `deploy.yml`.
     """
     engine_secrets = {
         "SHIPMATE_APP_PRIVATE_KEY",
-        "SHIPMATE_PLAN_PASSPHRASE",
+        "SHIPMATE_ENCRYPTION_KEY",
         "SHIPMATE_SECRETS",
     }
     assert _declared_engine_secrets() == engine_secrets

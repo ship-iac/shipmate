@@ -13,8 +13,8 @@ inputs:
   plan-sha256:
     description: sha256 of the reviewed plan text, recorded on the apply check by the trusted summary job. The apply re-renders the stored plan and refuses if it does not match.
     required: true
-  plan-passphrase:
-    description: Passphrase to decrypt the .otplan artifact and the cached local state, and to encrypt the saved state; must match plan-cell's. Required; empty refuses the apply.
+  encryption-key:
+    description: Encryption key to decrypt the .otplan artifact and the cached local state, and to encrypt the saved state; must match plan-cell's. Required; empty refuses the apply.
     required: false
     default: ""
   tf-vars:
@@ -104,7 +104,7 @@ runs:
       shell: bash
       env:
         STACK: ${{ inputs.stack }}
-        PLAN_PASSPHRASE: ${{ inputs.plan-passphrase }}
+        ENCRYPTION_KEY: ${{ inputs.encryption-key }}
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" decrypt "$STACK/stack.otplan"
@@ -152,7 +152,7 @@ runs:
         stack: ${{ inputs.stack }}
         env: ${{ inputs.env }}
         slug: ${{ steps.ids.outputs.slug }}
-        plan-passphrase: ${{ inputs.plan-passphrase }}
+        encryption-key: ${{ inputs.encryption-key }}
 
     - name: Verify the stored plan renders as the reviewed plan text
       id: plan-digest
@@ -213,7 +213,7 @@ runs:
         env: ${{ inputs.env }}
         mode: save
         path: ${{ steps.init.outputs.state-path }}
-        passphrase: ${{ inputs.plan-passphrase }}
+        encryption-key: ${{ inputs.encryption-key }}
 
     - name: Warn that the applied state was not saved
       id: lost-save

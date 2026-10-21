@@ -234,8 +234,8 @@ def test_a_mixed_run_renders_every_status_in_one_comment():
     Mutation: append a `gate: pending until every environment is applied` line to
     `_footer_parts` -- red."""
     jobs = [
-        _job("wave0 / apply / stacks/app / dev-eu", "https://gh/job/app-eu"),
-        _job("wave0 / apply / stacks/db / dev-eu", "https://gh/job/db-eu"),
+        _job("apply / L0 / dev-eu / stacks/app", "https://gh/job/app-eu"),
+        _job("apply / L0 / dev-eu / stacks/db", "https://gh/job/db-eu"),
     ]
     rows = [
         _row(),
@@ -828,7 +828,7 @@ def test_a_256_cell_all_blocked_run_falls_back_to_the_compact_form():
                 apply_text=None,
             )
         )
-        jobs.append(_job(f"wave0 / apply / {path} / {env}", _JOB_URL.format(23456789000 + i)))
+        jobs.append(_job(f"apply / L0 / {env} / {path}", _JOB_URL.format(23456789000 + i)))
     body = ac.build_comment(rows, jobs, RUN_URL, [], [], env, "failure", head_sha=SHA)
     assert len(body) <= ac.sc.HARD_CAP
     lines = body.split("\n")
@@ -876,7 +876,7 @@ def test_a_256_environment_run_groups_its_footer_lines_in_the_compact_form():
     explicit = [f"explicit-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
-        _job(f"wave0 / apply / stacks/app / {e}", _JOB_URL.format(23456789000 + i))
+        _job(f"apply / L0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
     ]
     body = ac.build_comment(
@@ -1190,22 +1190,22 @@ def test_load_cells_reads_apply_text_only_when_present(tmp_path):
 
 def test_job_url_suffix_match_against_caller_prefixed_job_name():
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("wave0 (matrix) / apply / stacks/app / dev-eu", "https://gh/job/1")]
+    jobs = [_job("apply / L0 / dev-eu / stacks/app", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
 def test_job_url_falls_back_to_run_url_when_no_job_matches():
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("wave0 / apply / stacks/db / dev-us", "https://gh/job/1")]
+    jobs = [_job("apply / L0 / dev-us / stacks/db", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
 def test_job_url_does_not_false_match_on_bare_endswith():
-    # A job named "...reapply / stacks/app / dev-eu" must not match the target
-    # "apply / stacks/app / dev-eu" through a naive str.endswith; only a `/`-boundary
-    # suffix counts.
-    row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("reapply / stacks/app / dev-eu", "https://gh/job/should-not-match")]
+    """A job named "apply / L0 / dev-eu / stacks/app" must not match env `eu`'s cell job
+    "eu / stacks/app" through a naive str.endswith; only a ` / `-boundary suffix counts.
+    Mutation: `apply-gate.is_cell_job` becomes a bare `endswith` of `<env> / <stack>`."""
+    row = _row(environment="eu", stack="stacks/app")
+    jobs = [_job("apply / L0 / dev-eu / stacks/app", "https://gh/job/should-not-match")]
     assert ac._job_url(row, jobs, RUN_URL) == RUN_URL
 
 
@@ -1527,24 +1527,37 @@ def test_check_name_grammar_matches_apply_cells_construction():
     assert rows == [_row(environment="dev-eu", stack="stacks/app", status="unrecorded")]
 
 
-def test_wave_job_name_matches_the_apply_check_grammar():
-    """Coupling: `_job_url` resolves a row's log link by matching the apply check name as a `/
-    `-boundary suffix of the run's job names, which works only because every wave job's `name:` is
-    byte-identical to that check name. Nothing else enforces it, and a rename downgrades every link
-    to the run URL -- the documented degradation, so no test fails on it.
+def test_every_env_level_job_is_named_for_its_level():
+    """`apply-gate.is_cell_job` requires the `L<n>` segment, so every env-level job of
+    `apply.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id, one per level
+    up to `waves.MAX_ENV_LEVELS`, compared whole. Mutation: rename deploy.yml's `name: L0` to
+    `level 0`."""
+    expected = {f"envlevel{n}": f"L{n}" for n in range(wv.MAX_ENV_LEVELS)}
+    for wf in ("apply.yml", "deploy.yml"):
+        jobs = workflow_yaml(wf)["jobs"]
+        names = {j: v.get("name") for j, v in jobs.items() if j.startswith("envlevel")}
+        assert names == expected, f"{wf}: {names}"
 
-    Mutation: change the `apply / ...` literal on wave0's `name: &wave-name`, or replace one wave's
+
+def test_wave_job_name_matches_the_cell_job_grammar():
+    """Coupling: `_job_url` and `apply-complete` find a cell's wave job by matching
+    `apply-gate.is_cell_job`'s `L<n> / <env> / <stack>` as the whole job name or a suffix after
+    a ` / ` boundary, which works only because every wave job's `name:` renders `<env> /
+    <stack>` and the env-level job holding it is named `L<n>`. Nothing else enforces it, and a
+    rename downgrades every link to the run URL and leaves every apply check pending.
+
+    Mutation: swap the two matrix keys on wave0's `name: &wave-name`, or replace one wave's
     `name: *wave-name` or `steps: *wave-steps` with a variant, or feed apply-cell's `stack:` from
-    another matrix key."""
+    another matrix key, or rename deploy.yml's `name: L0` to `level 0`."""
     jobs = workflow_yaml("apply-env-level.yml")["jobs"]
-    expected = "apply / ${{ matrix.stack }} / ${{ matrix.environment }}"
+    expected = "${{ matrix.environment }} / ${{ matrix.stack }}"
     # Width from waves.MAX_WAVES, so a bump cannot leave this asserting the old count.
     max_waves = wv.MAX_WAVES
     waves = [f"wave{i}" for i in range(max_waves)]
     names = [jobs[w].get("name") for w in waves]
     assert names == [expected] * max_waves, (
         f"all {max_waves} wave job display names must stay byte-identical to the "
-        "'apply / <stack path> / <env>' check-name grammar -- scripts/apply-comment's "
+        "'<env> / <stack path>' cell-job grammar -- scripts/apply-comment's "
         f"_job_url matches it as a job-name suffix (got: {sorted(set(names))})"
     )
     # The two literals agree only if the wave job hands apply-cell the same matrix keys it
@@ -1558,13 +1571,14 @@ def test_wave_job_name_matches_the_apply_check_grammar():
     assert wired == [("${{ matrix.stack }}", "${{ matrix.environment }}")] * max_waves, (
         "every wave job must pass apply-cell the same matrix keys its display name "
         "renders (`stack: ${{ matrix.stack }}`, `env: ${{ matrix.environment }}`) -- "
-        "apply-cell builds the check name from those two inputs, so a different "
-        f"source for either silently breaks the name/job-name equality (got: {sorted(set(wired))})"
+        "apply-cell builds the check name from those two inputs, so a different source "
+        f"for either silently breaks the check-name/job-name match (got: {sorted(set(wired))})"
     )
-    # The reader's half, exercised: a nested-display job name built from that grammar
-    # must resolve, for the row's own stack and environment.
+    # The reader's half, exercised: a nested-display job name built from deploy.yml's own
+    # level name and that grammar must resolve, for the row's own stack and environment.
+    level = workflow_yaml("deploy.yml")["jobs"]["envlevel0"]["name"]
     row = _row(environment="dev-eu", stack="stacks/app")
-    jobs = [_job("post-merge / L0 / apply / stacks/app / dev-eu", "https://gh/job/1")]
+    jobs = [_job(f"deploy / {level} / dev-eu / stacks/app", "https://gh/job/1")]
     assert ac._job_url(row, jobs, RUN_URL) == "https://gh/job/1"
 
 
@@ -2035,7 +2049,7 @@ def test_the_compact_form_keeps_every_blocker_and_its_remedy():
     explicit = [f"explicit-environment-{i:03}-eu-west-1-prod" for i in range(256)]
     rows = [_row(environment=e, stack="stacks/app", apply_text=None) for e in envs]
     jobs = [
-        _job(f"wave0 / apply / stacks/app / {e}", _JOB_URL.format(23456789000 + i))
+        _job(f"apply / L0 / {e} / stacks/app", _JOB_URL.format(23456789000 + i))
         for i, e in enumerate(envs)
     ]
     waiting = [

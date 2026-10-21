@@ -9,7 +9,7 @@ on:
       # `shipmate-engine` and the cells bind `<env>-plan`, so a required declaration would fail
       # at load time for every consumer who scopes a key to an environment instead of the repo.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
-      SHIPMATE_PLAN_PASSPHRASE: { required: false }
+      SHIPMATE_ENCRYPTION_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
 # Floor, not a default to inherit from: every job here declares its own block, so a job that
 # loses its block gets nothing rather than everything the caller granted.
@@ -94,7 +94,7 @@ jobs:
     # Resolved by `scripts/env-config`'s `resolve` from the default branch's table, so branch
     # content cannot choose it. Do not compute a binding here.
     environment: ${{ matrix.env_binding }}
-    name: ${{ matrix.stack }} / ${{ matrix.environment }}
+    name: ${{ matrix.environment }} / ${{ matrix.stack }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -114,7 +114,7 @@ jobs:
           stack: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
           expected-head: ${{ needs.facts.outputs.head-sha }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+          encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
 
   # Holds the App key, as `gate-hold` does. Neither checks anything out, so neither runs consumer
   # repository content: that makes `pull_request_target` safe here. Its own `if:` decides trust,
