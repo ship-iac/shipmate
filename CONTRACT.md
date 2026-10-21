@@ -2244,8 +2244,14 @@ Structure, in order: the marker, the header `### shipmate plan`, a blank
 line, the verdict line, a blank line, the doctor line and a blank line when
 `doctor` counted a warning, the unmanaged line and a blank line when
 the pull request changes an unmanaged stack, the lost pairs line and a blank
-line when it untags a stack / environment pair, one line or fold-out per planned
-stack × environment, sorted by environment then stack. The plan body has no
+line when it untags a stack / environment pair, then per environment its
+heading and one line or fold-out per planned stack in it. The environments
+follow `detect`'s `env_order` output, apply order: the env-levels of the
+table's `needs`, ties broken by name. An environment the output does not name
+follows them by name, and an empty or invalid output (the invalid one warns)
+orders every environment by name. In each environment the changed cells come
+first, then the rest, each group sorted by stack, so the fold-outs sit together
+above the unchanged lines. The plan body has no
 footer and no help hint, whether or not `doctor` warned: both verdicts are
 normal results and the verdict links the run. The held body above ends with the
 hint. `doctor` records its decision once, as its `warned` output, which the
@@ -2284,7 +2290,11 @@ and `lost` outputs, which the same rule reads.
   too long to list here.` A drift sweep and a run with no pull-request base
   have no such line. On both lines each name is escaped like a cell line's
   stack, `@` included.
-- **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
+- **Environment heading.** `#### <env>: N cells, M change`, with a blank line
+  on both sides, `<env>` escaped like a cell line's.
+- **Cell line.** `<circle> <stack>: <state> <a href="<url>">plan</a>`, under its
+  environment's heading; the held body's lines and a plan cell's own step
+  summary line name the environment, `<circle> <stack> (<env>): <state>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the
   counts rather than by a severity colour. `<state>` is `no changes`, or for a
@@ -2310,9 +2320,10 @@ GitHub caps issue-comment bodies at 65,536 characters. The comment is built
 to a smaller budget: each changed cell's fold-out degrades, in order, full
 plan → truncated plan (cut at a line boundary, with a link to the check run
 carrying the full text) → the cell's bare line. The space every remaining
-cell's bare line needs is reserved up front, so an early giant plan cannot
-starve a later cell, and every cell keeps its line and its link. If even the
-bare lines alone cannot fit the cap, the summary fails loud rather than posting
+cell's bare line and every environment heading need is reserved up front, so
+an early giant plan cannot starve a later cell, and every cell keeps its line
+and its link. If even the bare lines alone cannot fit the cap, the summary
+fails loud rather than posting
 a truncated comment. Plan text is emitted only inside a backtick
 fence computed to be longer than any backtick run in the text —
 author-controlled plan output cannot escape the fence.
@@ -2419,7 +2430,7 @@ plain code fence, cut at 4,000 characters and fenced longer than any backtick
 run in it. A `detect` that failed without an `::error::` renders no fence.
 
 - **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
-  apply` for a bare one; the row lines and the footer lines name the
+  apply` for a bare one; the environment headings and the footer lines name the
   environments.
 - **Verdict line.** With rows: one count per display status, in the order
   `N failed`, `N not recorded`, `N not attempted`, `N blocked`, `N applied`,
@@ -2438,8 +2449,15 @@ run in it. A `detect` that failed without an `::error::` renders no fence.
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
-- **Row line.** `<circle> <stack> (<env>): <state> <a href="<url>">logs</a>`,
-  one per expected cell, sorted by environment then stack:
+- **Environment heading.** `#### <env>: N cells, <counts>`, `<counts>` the
+  verdict line's counts for that environment's rows, with a blank line on both
+  sides, one per environment in the plan comment's order, from `apply-detect`'s
+  `env_order` output (a bare apply orders every environment with an apply
+  check on the head, a targeted one names its environment).
+- **Row line.** `<circle> <stack>: <state> <a href="<url>">logs</a>`, one per
+  expected cell, under its environment's heading. Every row but a not
+  attempted one comes first, then the not attempted rows, each group sorted by
+  stack:
 
   | Display status | Circle | `<state>` |
   | --- | --- | --- |
@@ -2621,9 +2639,11 @@ decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
 character instead of aborting the render. Terminal escape sequences (colour
 codes and similar) are stripped from that text as it is read, since the apply
 output is tofu's own and is not required to be colour-free. Every remaining
-row's bare line is reserved up front. When even the bare lines exceed the cap,
-the comment falls back to a compact form: every row keeps its line and its
-`logs` link, a blocked row's state reads `blocked` without its reason, and,
+row's bare line and every environment heading is reserved up front. When even
+the bare lines exceed the cap, the comment falls back to a compact form with no
+headings: every row keeps its line, which then names its environment
+(`<circle> <stack> (<env>): <state>`), and its `logs` link, a blocked row's
+state reads `blocked` without its reason, and,
 when a row is blocked, one note follows the row lines:
 
 `blocked: each blocked cell's reason is in its logs.`

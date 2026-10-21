@@ -52,6 +52,10 @@ inputs:
     description: "apply-detect's `refusal` output: the first error of the `::error::` message that failed detect (a refusal or a failed tool or API call) on one line, empty when detect raised none. Non-empty, the comment shows it in a code fence under the verdict line; empty leaves the comment unchanged."
     required: false
     default: ""
+  env-order:
+    description: "apply-detect's `env_order` output: JSON [env, ...] in apply order. The comment puts one heading per environment in this order, and any environment it does not name after them by name. Empty (detect refused) orders every environment by name; a value that is not a list of names does too, and warns."
+    required: false
+    default: ""
   results:
     description: "join(needs.*.result, ',') from the caller; any result other than success or skipped renders the verdict failed."
     required: true
@@ -155,6 +159,7 @@ runs:
         SHIPMATE_REVIEW_NOT_REQUIRED_ENVS: ${{ inputs.review-not-required-envs }}
         SHIPMATE_WAITING_CELLS: ${{ inputs.waiting-cells }}
         SHIPMATE_DETECT_REFUSAL: ${{ inputs.detect-refusal }}
+        SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
         SHIPMATE_CHECKS: checks.jsonl
         SHIPMATE_APP_ID: ${{ inputs.app-id }}
         SHIPMATE_HEAD_SHA: ${{ inputs.head-sha }}

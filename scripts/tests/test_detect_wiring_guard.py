@@ -100,6 +100,7 @@ _APPLY_DETECT_OUTPUTS = {
     "applied_ungated_envs": "${{ steps.d.outputs.applied_ungated_envs }}",
     "review_not_required_envs": "${{ steps.d.outputs.review_not_required_envs }}",
     "waiting_cells": "${{ steps.d.outputs.waiting_cells }}",
+    "env_order": "${{ steps.d.outputs.env_order }}",
     "refusal": "${{ steps.d.outputs.refusal }}",
 }
 
@@ -189,7 +190,8 @@ def test_the_deploy_detect_checkout_takes_the_full_history():
 
 def test_the_apply_detect_job_outputs_exactly_these_expressions():
     """Mutations: change `envlevel1_empty` to read `steps.d.outputs.envlevel0_empty`; delete
-    `refusal`, so the apply comment never names a detect refusal."""
+    `refusal`, so the apply comment never names a detect refusal; delete `env_order`, so it
+    orders environments by name."""
     assert workflow_yaml("apply.yml")["jobs"]["detect"]["outputs"] == _APPLY_DETECT_OUTPUTS
 
 
@@ -285,6 +287,14 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
         ),
         "value": "${{ steps.d.outputs.waiting_cells }}",
     },
+    "env_order": {
+        "description": (
+            "JSON list of every environment the apply checks on the head name, in apply order "
+            "(the env-levels of the table's `needs`, ties by name); the targeted form names its "
+            "one environment. Read by the apply result comment to order its environment headings."
+        ),
+        "value": "${{ steps.d.outputs.env_order }}",
+    },
     "refusal": {
         "description": (
             "The first error of the `::error::` message that failed the step (a refusal or a "
@@ -300,5 +310,5 @@ _APPLY_DETECT_ACTION_OUTPUTS = {
 
 def test_the_apply_detect_action_declares_exactly_these_outputs():
     """Mutations: delete the `waiting_cells` output from `actions/apply-detect/action.yml`;
-    delete its `refusal` output."""
+    delete its `refusal` output; delete its `env_order` output."""
     assert action_yaml("apply-detect")["outputs"] == _APPLY_DETECT_ACTION_OUTPUTS

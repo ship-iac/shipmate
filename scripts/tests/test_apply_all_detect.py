@@ -561,7 +561,11 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
     dev-us is skipped: a held env stops its successors exactly like an explicit one.
 
     Mutation: `stopped = pending_envs & set(explicit)` -- dev-us leaves `skipped_envs` and
-    applies, red."""
+    applies, red.
+
+    `env_order` names every environment with a pending cell, the held and the skipped ones too,
+    level 1 last. Mutation: compute it over `runnable` -- `["dev-eu"]`, red. Mutation: sort it by
+    name in `waves.env_sequence` -- dev-us second, red."""
     parsed = _run_main(
         tmp_path,
         monkeypatch,
@@ -576,6 +580,7 @@ def test_main_holds_unlisted_envs_and_skips_their_successors(tmp_path, monkeypat
     assert json.loads(parsed["applied_ungated_envs"]) == ["dev-eu"]
     assert json.loads(parsed["excluded_envs"]) == []
     assert json.loads(parsed["skipped_envs"]) == ["dev-us"]
+    assert parsed["env_order"] == '["dev-eu", "prod-eu", "dev-us"]'
 
 
 def test_main_skips_only_the_successors_of_a_pending_explicit_env(tmp_path, monkeypatch):

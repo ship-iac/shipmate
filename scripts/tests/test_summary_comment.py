@@ -32,7 +32,7 @@ _COUNT_KEYS = ("add", "change", "destroy", "import", "forget")
 
 
 def _bare_app(url):
-    return f'🟡 stacks/app (dev-eu): +1 ~0 -0 <a href="{url}">plan</a>'
+    return f'🟡 stacks/app: +1 ~0 -0 <a href="{url}">plan</a>'
 
 
 def _cell(**kw):
@@ -231,6 +231,19 @@ def test_cell_line_escapes_author_controlled_names():
     )
 
 
+def test_cell_line_without_an_env_names_none():
+    """A line under its environment's heading. Mutation: rendering `({_md_name(env)})` for a
+    None `env` -- `(None)`."""
+    assert sc.cell_line("🟢", "a", None, "no changes", "https://u", "plan") == (
+        '🟢 a: no changes <a href="https://u">plan</a>'
+    )
+
+
+def test_env_heading_names_the_env_its_cell_count_and_tally():
+    """Mutation: `_md_escape` for `_md_name` -- a live `@v`."""
+    assert sc.env_heading("e@v<x>", 3, "1 change") == "#### e@<!-- -->v&lt;x&gt;: 3 cells, 1 change"
+
+
 def test_cell_line_names_mention_nobody():
     """Mutation: `_md_escape` for `_md_name` on the stack in `cell_line` -- a live `@acme`.
     Mutation: the same on the env -- a live `@v`."""
@@ -342,14 +355,17 @@ def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
     ]
     assert sc.build_comment(cells, CHECKS, RUN_URL, SHA)[0] == (
         HEAD + f"🟡 1 of 3 cells change {AT}\n\n"
-        f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   one\n```\n</details>\n\n"
-        '🟢 stacks/db (dev-eu): no changes <a href="https://gh/run/1">plan</a>\n'
-        '🟢 stacks/dns (dev-eu): no changes <a href="https://gh/run/1">plan</a>'
+        "#### dev-eu: 3 cells, 1 change\n\n"
+        f"<details><summary>{_bare_app('https://ck/app-eu')}</summary>\n\n```diff\n+   one\n```\n"
+        "</details>\n\n"
+        '🟢 stacks/db: no changes <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/dns: no changes <a href="https://gh/run/1">plan</a>'
     )
 
 
-def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
-    """Mutation: sorting by `(stack, environment)` puts stacks/app (prod) first."""
+def test_without_an_env_order_environments_sort_by_name(tmp_path):
+    """Mutation: dropping `sorted` from the environments `order` does not name -- `prod`, the
+    first read, comes first."""
     _write_cell(
         tmp_path,
         _cell(environment="prod"),
@@ -361,14 +377,82 @@ def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
         "No changes. Your infrastructure matches the configuration.\n",
     )
     checks = {"shipmate / stacks/app / prod": {"html_url": "https://ck/app-prod"}}
-    body = sc.build_comment(sc.load_cells(str(tmp_path)), checks, RUN_URL, SHA)[0]
+    cells = sc.load_cells(str(tmp_path))
+    cells.reverse()
+    body = sc.build_comment(cells, checks, RUN_URL, SHA)[0]
     assert body == (
         HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
-        '🟢 stacks/db (dev): no changes <a href="https://gh/run/1">plan</a>\n\n'
-        '<details><summary>🟡 stacks/app (prod): +1 ~0 -0 <a href="https://ck/app-prod">plan</a>'
+        "#### dev: 1 cells, 0 change\n\n"
+        '🟢 stacks/db: no changes <a href="https://gh/run/1">plan</a>\n\n'
+        "#### prod: 1 cells, 1 change\n\n"
+        '<details><summary>🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-prod">plan</a>'
         "</summary>\n\n```diff\n+   resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n```\n"
         "</details>"
     )
+
+
+def test_environments_follow_the_env_order_not_their_names():
+    """`live` needs `staging`, so detect's order puts the level-1 `live` second although it sorts
+    first by name; `extra`, which the order does not name, follows by name.
+
+    Mutation: ignoring `order` in `by_env` (`envs = []`), which sorts every environment by name
+    -- `extra` and `live` lead, red."""
+    cells = [
+        (_cell(stack="stacks/a", environment="live", changed=False), None),
+        (_cell(stack="stacks/b", environment="extra", changed=False), None),
+        (_cell(stack="stacks/c", environment="staging", changed=False), None),
+    ]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA, order=["staging", "live"])[0]
+    assert body == (
+        HEAD + f"🟢 no changes {AT}\n\n"
+        "#### staging: 1 cells, 0 change\n\n"
+        '🟢 stacks/c: no changes <a href="https://gh/run/1">plan</a>\n\n'
+        "#### live: 1 cells, 0 change\n\n"
+        '🟢 stacks/a: no changes <a href="https://gh/run/1">plan</a>\n\n'
+        "#### extra: 1 cells, 0 change\n\n"
+        '🟢 stacks/b: no changes <a href="https://gh/run/1">plan</a>'
+    )
+
+
+def test_a_changed_cell_leads_its_environment():
+    """Three unchanged cells sort before `stacks/d` by name; the changed one still comes first.
+
+    Mutation: sorting each environment's cells by stack alone -- `stacks/d` last, red."""
+    cells = [(_cell(stack=f"stacks/{s}", changed=False), None) for s in ("a", "b", "c")] + [
+        (_cell(stack="stacks/d"), None)
+    ]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert body == (
+        HEAD + f"🟡 1 of 4 cells change {AT}\n\n"
+        "#### dev-eu: 4 cells, 1 change\n\n"
+        '🟡 stacks/d: +1 ~0 -0 <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/a: no changes <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/b: no changes <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/c: no changes <a href="https://gh/run/1">plan</a>'
+    )
+
+
+_BAD_ENV_ORDER = (
+    "::warning::env-order is not a JSON list of environment names; the comment orders its "
+    "environments by name\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected", "out"),
+    [
+        ("", [], ""),
+        ('["b", "a"]', ["b", "a"], ""),
+        ("not json", [], _BAD_ENV_ORDER),
+        ('{"b": 1}', [], _BAD_ENV_ORDER),
+        ('["b", 1]', [], _BAD_ENV_ORDER),
+    ],
+)
+def test_env_order_reads_a_list_of_names_and_warns_on_anything_else(raw, expected, out, capsys):
+    """Mutations: dropping the element check -- `["b", 1]` passes; warning on an empty value --
+    the first case prints."""
+    assert sc.env_order(raw) == expected
+    assert capsys.readouterr().out == out
 
 
 def test_zero_cells_render_header_and_verdict_only():
@@ -377,12 +461,14 @@ def test_zero_cells_render_header_and_verdict_only():
 
 
 def _bare(i):
-    return f'🟡 s{i:03} (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">plan</a>'
+    return f'🟡 s{i:03}: +1 ~0 -0 <a href="https://gh/run/1">plan</a>'
 
 
-def _fold_out_rows(body, verdict):
+def _fold_out_rows(body, verdict, heading):
     """The plan rows of the body's first fold-out (cell 0's, truncated), and what follows it."""
-    opening = HEAD + verdict + f"\n\n<details><summary>{_bare(0)}</summary>\n\n```diff\n"
+    opening = (
+        HEAD + f"{verdict}\n\n{heading}\n\n<details><summary>{_bare(0)}</summary>\n\n```diff\n"
+    )
     trailer = "\n```\n\n_Truncated, [full plan in the check run](https://gh/run/1)._\n</details>"
     assert body.startswith(opening)
     rows, rest = body[len(opening) :].split(trailer, 1)
@@ -397,7 +483,9 @@ def test_a_256_cell_fan_out_of_oversized_plans_keeps_every_cell_line():
     cells = [(_cell(stack=f"s{i:03}"), giant) for i in range(256)]
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
-    rows, rest = _fold_out_rows(body, f"🟡 256 of 256 cells change {AT}")
+    rows, rest = _fold_out_rows(
+        body, f"🟡 256 of 256 cells change {AT}", "#### dev-eu: 256 cells, 256 change"
+    )
     assert set(rows) == {"+   r"}
     assert rest == "\n\n" + "\n".join(_bare(i) for i in range(1, 256))
 
@@ -412,10 +500,25 @@ def test_an_early_giant_plan_cannot_drop_a_later_cells_line():
     ]
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
-    rows, rest = _fold_out_rows(body, f"🟡 2 of 3 cells change {AT}")
+    rows, rest = _fold_out_rows(
+        body, f"🟡 2 of 3 cells change {AT}", "#### dev-eu: 3 cells, 2 change"
+    )
     assert set(rows) == {"+   r"}
-    assert rest == (
-        "\n\n" + _bare(1) + '\n🟢 s002 (dev-eu): no changes <a href="https://gh/run/1">plan</a>'
+    assert rest == ("\n\n" + _bare(1) + '\n🟢 s002: no changes <a href="https://gh/run/1">plan</a>')
+
+
+def test_headings_are_reserved_before_a_fold_out_is_sized():
+    """One giant plan in the first environment, then 300 one-cell environments whose headings
+    the fold-out must leave room for.
+
+    Mutation: summing `reserve` over the cell entries alone sizes the fold-out over the headings
+    -- the body passes HARD_CAP and `build_comment` refuses, red."""
+    cells = [(_cell(stack="s000", environment="a000"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1))]
+    cells += [(_cell(stack="s", environment=f"e{i:03}", changed=False), None) for i in range(300)]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert len(body) <= sc.SIZE_BUDGET
+    assert body.endswith(
+        '#### e299: 1 cells, 0 change\n\n🟢 s: no changes <a href="https://gh/run/1">plan</a>'
     )
 
 
@@ -599,7 +702,10 @@ def test_the_unmanaged_line_is_counted_before_a_fold_out_is_sized():
     without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     body = sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged"))[0]
     line = _LEAD.format(1) + ": stacks/unmanaged"
-    assert body.startswith(HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n<details>")
+    assert body.startswith(
+        HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n#### dev-eu: 1 cells, 1 change\n\n"
+        "<details>"
+    )
     assert len(without) <= sc.SIZE_BUDGET and len(body) <= sc.SIZE_BUDGET
     assert abs(len(body) - len(without)) < 6
 
@@ -797,9 +903,7 @@ def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path
         "its counts render as ?\n"
     )
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
-    assert '🟡 stacks/app (dev-eu): +? ~? -? <a href="https://gh/run/1">plan</a>' in (
-        body.splitlines()
-    )
+    assert '🟡 stacks/app: +? ~? -? <a href="https://gh/run/1">plan</a>' in (body.splitlines())
 
 
 def test_the_warning_escapes_a_newline_in_an_untrusted_name(tmp_path, capsys):
@@ -999,13 +1103,14 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_UNMANAGED": "${{ inputs.unmanaged-stacks }}",
         "SHIPMATE_LOST_ENV_TAGS": "${{ inputs.lost-env-tags }}",
+        "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
         "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
         "SHIPMATE_DOCTOR_WARNINGS": "${{ steps.doctor.outputs.warnings }}",
     }
-    # Mutation: `required: true` on any of the three (GitHub does not enforce it, but it
+    # Mutation: `required: true` on any of the four (GitHub does not enforce it, but it
     # misdocuments a draft run).
-    for name in ("unmanaged-stacks", "lost-env-tags", "planned-cell-names"):
+    for name in ("unmanaged-stacks", "lost-env-tags", "planned-cell-names", "env-order"):
         decl = load_workflow_text(src)["inputs"][name]
         assert {k: v for k, v in decl.items() if k != "description"} == {
             "required": False,
@@ -1389,10 +1494,21 @@ def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     run = "https://gh/o/r/actions/runs/1"
     assert body == (
-        HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n"
+        HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n#### dev-eu: 1 cells, 1 change\n\n"
         f"<details><summary>{_bare_app(run)}</summary>\n\n```diff\n+   resource added\n\n"
         "Plan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>"
     )
+
+
+def test_main_orders_environments_by_the_env_order_input(tmp_path, monkeypatch):
+    """Mutation: drop the `SHIPMATE_ENV_ORDER` read from `main` -- `live` first by name, red."""
+    monkeypatch.setenv("SHIPMATE_ENV_ORDER", '["staging", "live"]')
+    _run_main(tmp_path, monkeypatch, [_cell(environment="live"), _cell(environment="staging")])
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert [line for line in body.splitlines() if line.startswith("#### ")] == [
+        "#### staging: 1 cells, 1 change",
+        "#### live: 1 cells, 1 change",
+    ]
 
 
 _FIXTURES = pathlib.Path(__file__).parent / "fixtures"

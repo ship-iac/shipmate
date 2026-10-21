@@ -40,6 +40,7 @@ outputs:
   applied_ungated_envs: { description: "Bare apply only: JSON list of envs applied without an approving review because their entry holds `gated: false`. The targeted form writes none.", value: "${{ steps.d.outputs.applied_ungated_envs }}" }
   review_not_required_envs: { description: "JSON list of gated envs authorized under a null review decision, because the pull request's review state required none, else [].", value: "${{ steps.d.outputs.review_not_required_envs }}" }
   waiting_cells: { description: "JSON list of cells left pending because a cell they run after (CONTRACT.md §Fan-out) is pending and not applying this run, each with that cell; both forms.", value: "${{ steps.d.outputs.waiting_cells }}" }
+  env_order: { description: "JSON list of every environment the apply checks on the head name, in apply order (the env-levels of the table's `needs`, ties by name); the targeted form names its one environment. Read by the apply result comment to order its environment headings.", value: "${{ steps.d.outputs.env_order }}" }
   refusal: { description: "The first error of the `::error::` message that failed the step (a refusal or a failed tool or API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails, and read by the apply result comment. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.", value: "${{ steps.d.outputs.refusal }}" }
 runs:
   using: composite

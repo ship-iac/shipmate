@@ -78,6 +78,14 @@ inputs:
       one naming other than min(N, 10) pairs, renders none and warns.
     required: false
     default: ""
+  env-order:
+    description: >-
+      build-matrix's `env_order` output: JSON [env, ...] in apply order. The plan comment puts
+      one heading per environment in this order, and any environment it does not name after
+      them by name. Empty (detect skipped or refused) orders every environment by name; a value
+      that is not a list of names does too, and warns.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
@@ -252,6 +260,7 @@ runs:
         # line, invalid renders none and warns. None touches `count`, `pending` or the gate.
         SHIPMATE_UNMANAGED: ${{ inputs.unmanaged-stacks }}
         SHIPMATE_LOST_ENV_TAGS: ${{ inputs.lost-env-tags }}
+        SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
         # The cells named in `missing`: none unless detect succeeded, since a fmt or codegen
         # failure still carries a full list.
         SHIPMATE_PLANNED_CELLS_NAMES: ${{ inputs.planned-cell-names }}

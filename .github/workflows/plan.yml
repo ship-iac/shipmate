@@ -52,6 +52,7 @@ jobs:
       lost: ${{ steps.matrix.outputs.lost }}
       refusal: ${{ steps.matrix.outputs.refusal }}
       cells: ${{ steps.matrix.outputs.cells }}
+      env_order: ${{ steps.matrix.outputs.env_order }}
     steps:
       # Both triggers check out something else by default -- the base branch under
       # `pull_request_target`, the dispatch ref under `workflow_dispatch`. Naming the head SHA is
@@ -159,6 +160,7 @@ jobs:
           github-vars: ${{ toJSON(vars) }}
           unmanaged-stacks: ${{ needs.detect.outputs.unmanaged }}
           lost-env-tags: ${{ needs.detect.outputs.lost }}
+          env-order: ${{ needs.detect.outputs.env_order }}
 
   # Holds the gate when the per-head group evicts a pending `summary`; it writes outside the group,
   # since a hold only closes the gate. A `summary` whose fork `if:` refused the head is `skipped`,

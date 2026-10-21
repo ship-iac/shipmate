@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the apply result comment: a verdict line, then one line or fold-out per cell.
+"""Build the apply result comment: a verdict line, then per environment a heading and its cells.
 
 Reads the run's jobs listing as JSON Lines on stdin (one object per line,
 keys `name`/`html_url`, as emitted by `gh api --paginate .../jobs --jq
@@ -419,15 +419,8 @@ def _state(row):
     return word
 
 
-def _cell_line(row, url):
-    return sc.cell_line(
-        _STATUS[row["status"]][0],
-        row["stack"],
-        row["environment"],
-        _state(row),
-        url,
-        "logs",
-    )
+def _cell_line(row, url, env=None):
+    return sc.cell_line(_STATUS[row["status"]][0], row["stack"], env, _state(row), url, "logs")
 
 
 def _job_url(row, jobs, run_url):
@@ -476,6 +469,11 @@ def _empty_verdict(failed_run, held, waiting):
     return "🟢", "no pending applies"
 
 
+def _tally_tokens(n):
+    """`N <word>` per status of the Counter `n` in `_STATUS` order, zero counts omitted."""
+    return [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
+
+
 def _verdict(rows, failed_run, held, head_sha, run_url, waiting=()):
     """(circle, line): the line under the header and its circle. With rows: a count per
     status in `_STATUS` order, zero counts omitted, led by a bare `failed` when the run failed
@@ -494,7 +492,7 @@ def _verdict(rows, failed_run, held, head_sha, run_url, waiting=()):
         circle, text = _empty_verdict(failed_run, held, waiting)
     else:
         n = collections.Counter(r["status"] for r in rows)
-        tokens = [f"{n[s]} {word}" for s, (_, word) in _STATUS.items() if n[s]]
+        tokens = _tally_tokens(n)
         if failed_run and not (n["failed"] or n["blocked"]):
             tokens.insert(0, "failed")
         circles = [_STATUS[s][0] for s in n]
@@ -694,21 +692,22 @@ def _tail(notes, parts, hint):
     return "\n\n".join(p for p in ("\n".join(n for n in notes if n), "\n".join(parts), hint) if p)
 
 
-def _compact(head, rows, urls, bares, notes, parts, hint):
+def _compact(head, rows, urls, notes, parts, hint):
     """The hard-cap fallback, tried only after the normal render overflows HARD_CAP: every row's
-    bare line with a blocked row's state shortened to `blocked` and `_BLOCKED_NOTE` leading the
-    notes when a row is blocked, above the grouped footer `parts`. A blocked reason is the one
-    free text a bare line carries, and the footer lines grow with the environments the
-    dispositions name, so a 256-cell run that is all blocked, or whose dispositions name hundreds
-    of environments, can overflow in the normal form and fit in this one."""
+    line, naming its environment and under no heading, with a blocked row's state shortened to
+    `blocked` and `_BLOCKED_NOTE` leading the notes when a row is blocked, above the grouped
+    footer `parts`. A blocked reason is the one free text a bare line carries, and the footer
+    lines grow with the environments the dispositions name, so a 256-cell run that is all
+    blocked, or whose dispositions name hundreds of environments, can overflow in the normal
+    form and fit in this one."""
     if any(r["status"] == "blocked" for r in rows):
         notes = (_BLOCKED_NOTE, *notes)
     circle, word = _STATUS["blocked"]
     lines = [
         sc.cell_line(circle, r["stack"], r["environment"], word, u, "logs")
         if r["status"] == "blocked"
-        else b
-        for r, u, b in zip(rows, urls, bares, strict=True)
+        else _cell_line(r, u, r["environment"])
+        for r, u in zip(rows, urls, strict=True)
     ]
     return "\n\n".join(p for p in (head, "\n".join(lines), _tail(notes, parts, hint)) if p)
 
@@ -725,19 +724,21 @@ def build_comment(
     head_sha="",
     waiting=(),
     refusal="",
+    order=(),
 ):
-    """Assemble the comment under SIZE_BUDGET: header, verdict, every row in order (a fold-out
-    for an applied, failed or unrecorded row with output, else its bare line), the notes, the
-    footer lines, and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it
-    is header, verdict, footer lines and footer. A non-empty `refusal`, the first error of the
-    `::error::` that failed detect on one line, sits in `sc.reason_fence` directly under the
-    verdict.
+    """Assemble the comment under SIZE_BUDGET: header, verdict, per environment in `sc.by_env`
+    order of `order` its `sc.env_heading` (`N cells, ` and the verdict's counts) and its rows,
+    every row but a not attempted one first (a fold-out for an applied, failed or unrecorded row
+    with output, else its bare line, which names no environment), the notes, the footer lines,
+    and `footer_hint`'s footer, which is empty under a 🟢 verdict. With no rows it is header,
+    verdict, footer lines and footer. A non-empty `refusal`, the first error of the `::error::`
+    that failed detect on one line, sits in `sc.reason_fence` directly under the verdict.
 
-    Every row is guaranteed its bare line: the space all remaining rows' bare lines need is
-    reserved up front, together, so an early giant apply.txt cannot starve a later row. When
-    even the bare lines overflow HARD_CAP, `_compact` renders them without the blocked reasons
-    and with one footer line per disposition and one per waiting blocker; past that a SystemExit
-    names the cause."""
+    Every row is guaranteed its bare line: the space all headings and remaining rows' bare lines
+    need is reserved up front, together, so an early giant apply.txt cannot starve a later row.
+    When even the bare lines overflow HARD_CAP, `_compact` renders them without headings or the
+    blocked reasons and with one footer line per disposition and one per waiting blocker; past
+    that a SystemExit names the cause."""
     circle, verdict = _verdict(rows, _results_failed(results_csv), held, head_sha, run_url, waiting)
     head = f"{sc.header('apply', env_name)}\n\n{verdict}"
     if refusal:
@@ -752,15 +753,23 @@ def build_comment(
     dispositions = (excluded, skipped, held, waiting)
     parts = _footer_parts(*dispositions)
     tail = _tail(notes, parts, hint)
-    urls = [_job_url(r, jobs, run_url) for r in rows]
-    bares = [_cell_line(r, u) for r, u in zip(rows, urls, strict=True)]
+    # (bare line, row, url); a heading has no row.
+    entries = []
+    for env, group in sc.by_env(rows, order, lambda r: r["status"] != "not_attempted"):
+        tally = ", ".join(_tally_tokens(collections.Counter(r["status"] for r in group)))
+        entries.append((sc.env_heading(env, len(group), tally), None, None))
+        for r in group:
+            url = _job_url(r, jobs, run_url)
+            entries.append((_cell_line(r, url), r, url))
+    rows = [r for _, r, _ in entries if r is not None]
+    urls = [u for _, r, u in entries if r is not None]
     used = len(head) + len(tail) + 4
-    reserve = sum(len(b) + 2 for b in bares)
+    reserve = sum(len(b) + 2 for b, _, _ in entries)
     sections = []
-    for r, url, bare in zip(rows, urls, bares, strict=True):
+    for bare, r, url in entries:
         reserve -= len(bare) + 2
         section = bare
-        if r["status"] in _SECTION_STATUSES:
+        if r is not None and r["status"] in _SECTION_STATUSES:
             section = render_apply_section(
                 bare, r["apply_text"], url, sc.SIZE_BUDGET - used - reserve - 2
             )
@@ -770,7 +779,7 @@ def build_comment(
     # Past SIZE_BUDGET every row is already its bare line; only the compact form is smaller.
     if len(body) > sc.HARD_CAP:
         parts = _footer_parts(*dispositions, compact=True)
-        body = _compact(head, rows, urls, bares, notes, parts, hint)
+        body = _compact(head, rows, urls, notes, parts, hint)
     # Stack/env display names are author-controlled, so fail loud rather than let GitHub 422
     # the POST on an oversized body.
     if len(body) > sc.HARD_CAP:
@@ -810,6 +819,7 @@ def main():
         os.environ.get("SHIPMATE_HEAD_SHA", ""),
         json.loads(os.environ.get("SHIPMATE_WAITING_CELLS") or "[]"),
         os.environ.get("SHIPMATE_DETECT_REFUSAL", ""),
+        sc.env_order(os.environ.get("SHIPMATE_ENV_ORDER", "")),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

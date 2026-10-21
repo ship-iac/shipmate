@@ -433,6 +433,8 @@ def bare_main():
         applied_ungated_envs=json.dumps(applied_ungated),
         review_not_required_envs=json.dumps(no_review_required),
         waiting_cells=json.dumps(waiting),
+        # Over `cells`, not `runnable`: the comment lists excluded, held and waiting cells too.
+        env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
     )
 
 
@@ -499,6 +501,7 @@ def main():
         head_sha=head,
         review_not_required_envs=json.dumps(no_review_required),
         waiting_cells=json.dumps(waiting),
+        env_order=json.dumps([env]),
     )
 
 

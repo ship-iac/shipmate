@@ -70,6 +70,9 @@ outputs:
   refusal:
     description: The first error of the `::error::` message that failed the step (a refusal or a failed tool or API call), without the prefix, its lines joined into one; empty when the step raised none. Set although the step fails, and read by the trusted summary job for the gate description. Branch-controlled text (it can name a stack path), so a reader passes it through `env:`.
     value: ${{ steps.build.outputs.refusal }}
+  env_order:
+    description: 'JSON [env, ...]: every environment the matrix''s cells name, in apply order (the env-levels of the table''s `needs`, ties by name). Read by the plan summary to order the comment''s environment headings.'
+    value: ${{ steps.build.outputs.env_order }}
 runs:
   using: composite
   steps:

@@ -22,6 +22,7 @@ section below names the SHA the release tags.
 - **OpenTofu 1.13.1 replaces 1.12.4.** A plan made on 1.12.4 is refused at apply, so push a commit to each open pull request to re-plan it.
 - **A plan comment for a run that planned no cell headlines `⚪ nothing planned` instead of `🟢 no changes`.**
 - **Repository-settings warnings (gate ruleset, review rule, `CODEOWNERS`) no longer post a plan comment for a pull request that changes nothing; a plan comment names the count of the other `doctor` warnings and links the run.**
+- **The plan and apply result comments group their cells under one `#### <env>: N cells, <counts>` heading per environment, in apply order (the `needs` levels, ties by name), with changed, failed and blocked cells first; a cell line under a heading no longer repeats `(<env>)`.**
 
 ## [0.49.1] — 2026-10-18
 

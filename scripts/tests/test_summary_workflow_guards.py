@@ -47,6 +47,7 @@ EXPECTED_SUMMARY_WITH = {
     "github-vars": "${{ toJSON(vars) }}",
     "unmanaged-stacks": "${{ needs.detect.outputs.unmanaged }}",
     "lost-env-tags": "${{ needs.detect.outputs.lost }}",
+    "env-order": "${{ needs.detect.outputs.env_order }}",
 }
 #: `detect`'s whole outputs map: `unmanaged`, `refusal` and `cells` are what the `with:` above
 #: passes on.
@@ -59,6 +60,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "lost": "${{ steps.matrix.outputs.lost }}",
     "refusal": "${{ steps.matrix.outputs.refusal }}",
     "cells": "${{ steps.matrix.outputs.cells }}",
+    "env_order": "${{ steps.matrix.outputs.env_order }}",
 }
 EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary", "gate-hold"]
 
@@ -112,7 +114,8 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop the `lost-env-tags:` line -> the comment never names a lost pair.
     Mutation: drop the action's `lost-env-tags` input -> its input names differ.
     Mutation: drop `detect`'s `refusal` output -> the gate never names a detect error.
-    Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named."""
+    Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named.
+    Mutation: drop the `env-order:` line -> the comment orders environments by name."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1

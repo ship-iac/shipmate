@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the sticky plan comment: a verdict line, then one line or fold-out per cell.
+"""Build the sticky plan comment: a verdict line, then per environment a heading and its cells.
 
 Reads the plan matrix jobs' auto check-runs (named `shipmate / <stack> / <env>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
@@ -20,9 +20,9 @@ Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
-The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `header`, `provenance`,
-`footer`, `footer_hint`, `tally`, `_join`) lives here because apply-comment and doctor already
-load this module.
+The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `env_heading`, `env_order`,
+`by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `_join`) lives here because
+apply-comment and doctor already load this module.
 
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface,
 and shows only where the reader has something to do: under a refusal or a failure, under an
@@ -186,11 +186,53 @@ def link(url, text):
 
 
 def cell_line(circle, stack, env, state, url=None, text=""):
-    """`<circle> <stack> (<env>): <state>`, then a space and `link(url, text)` unless `url` is
-    None. `stack` and `env` are `_md_name`d here; `state` is the caller's and must already be
-    safe (a blocked reason is escaped by its caller)."""
-    line = f"{circle} {_md_name(stack)} ({_md_name(env)}): {state}"
+    """`<circle> <stack> (<env>): <state>`, without ` (<env>)` when `env` is None (a line under
+    its environment's `env_heading`), then a space and `link(url, text)` unless `url` is None.
+    `stack` and `env` are `_md_name`d here; `state` is the caller's and must already be safe (a
+    blocked reason is escaped by its caller)."""
+    where = "" if env is None else f" ({_md_name(env)})"
+    line = f"{circle} {_md_name(stack)}{where}: {state}"
     return line if url is None else f"{line} {link(url, text)}"
+
+
+def env_heading(env, n, tally):
+    """`#### <env>: N cells, <tally>`: the line above an environment's cell lines, `env`
+    `_md_name`d."""
+    return f"#### {_md_name(env)}: {n} cells, {tally}"
+
+
+def env_order(raw):
+    """The environments of detect's `env_order` output `raw`, a JSON list of strings in apply
+    order; `[]` when empty, and `[]` with one warning when it is not that shape."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        value = None
+    if isinstance(value, list) and all(isinstance(e, str) for e in value):
+        return value
+    print(
+        "::warning::env-order is not a JSON list of environment names; the comment orders its "
+        "environments by name"
+    )
+    return []
+
+
+def by_env(items, order, first, cell=lambda item: item):
+    """`[(env, items)]`: `items` grouped by `cell(item)["environment"]`, the environments `order`
+    names in its order, then the rest by name; in each, the items `first` holds for, then the
+    others, each sorted by stack."""
+    groups = {}
+    for item in items:
+        groups.setdefault(cell(item)["environment"], []).append(item)
+    envs = [e for e in dict.fromkeys(order) if e in groups]
+    envs += sorted(set(groups) - set(envs))
+
+    def key(item):
+        return not first(cell(item)), cell(item)["stack"]
+
+    return [(env, sorted(groups[env], key=key)) for env in envs]
 
 
 def header(verb, env=""):
@@ -259,7 +301,7 @@ def state(cell):
 
 
 def _plan_line(cell, url):
-    return cell_line(emoji(cell), cell["stack"], cell["environment"], state(cell), url, "plan")
+    return cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
 
 
 def fold(line, body, limit, trailer, cut, lang="diff"):
@@ -392,32 +434,51 @@ def doctor_line(warnings, run_url):
     return f"⚠️ shipmate doctor found {warnings} warning(s) in this run: see [the run]({run_url})"
 
 
+_BLOCKS = ("<details>", "#### ")
+
+
 def _join(sections):
-    """One newline between consecutive bare lines, a blank line on both sides of a fold-out:
-    without the blank line after `</details>`, the next line stays inside the HTML block and
-    its link renders literally."""
+    """One newline between consecutive bare lines, a blank line on both sides of a fold-out or
+    an `env_heading`: without the blank line after `</details>`, the next line stays inside the
+    HTML block and its link renders literally."""
     out = sections[:1]
     for prev, cur in itertools.pairwise(sections):
-        fold = prev.startswith("<details>") or cur.startswith("<details>")
+        fold = prev.startswith(_BLOCKS) or cur.startswith(_BLOCKS)
         out.append("\n\n" if fold else "\n")
         out.append(cur)
     return "".join(out)
 
 
-def build_comment(cells, checks, run_url, head_sha, unmanaged=None, lost=None, warnings=0):
+def _entries(cells, order, checks, run_url):
+    """`(bare line, cell, plan text, url)` per heading and cell, in comment order; a heading has
+    no cell."""
+    entries = []
+    for env, group in by_env(cells, order, lambda c: c["changed"], cell=lambda ct: ct[0]):
+        n = sum(1 for c, _ in group if c["changed"])
+        entries.append((env_heading(env, len(group), f"{n} change"), None, None, None))
+        for c, text in group:
+            url = check_url(c, checks, run_url)
+            entries.append((_plan_line(c, url), c, text, url))
+    return entries
+
+
+def build_comment(
+    cells, checks, run_url, head_sha, unmanaged=None, lost=None, warnings=0, order=()
+):
     """Assemble the comment under SIZE_BUDGET: marker, header, verdict, `doctor_line` of
     `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line of `lost` when
-    each count is not zero, every cell in
-    order (a fold-out for a changed cell with plan text, else its bare line). No footer: the
-    verdict links the run, and neither plan verdict asks anything. Every cell is guaranteed its
-    bare line: the space all remaining cells' bare lines need is reserved up front, so an early
-    giant plan cannot starve a later cell. Each of the three lines yields, with a warning, when the
-    bare lines leave it no room under HARD_CAP. Returns `(body, unmanaged_named, lost_named)`,
-    each flag saying whether that line is in `body`."""
+    each count is not zero, then per environment in `by_env` order of `order` its `env_heading`
+    (`N cells, M change`) and its cells, changed first (a fold-out for a changed cell with plan
+    text, else its bare line, which names no environment). No footer: the verdict links the
+    run, and neither plan verdict asks anything. Every cell is guaranteed its bare line: the
+    space all headings and remaining cells' bare lines need is reserved up front, so an early
+    giant plan cannot starve a later cell. Each of the three lines yields, with a warning, when
+    the headings and bare lines leave it no room under HARD_CAP. Returns `(body,
+    unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
-    urls = [check_url(c, checks, run_url) for c in meta]
-    bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
+    entries = _entries(cells, order, checks, run_url)
+    bares = [e[0] for e in entries]
     named = []
     for line, what in (
         (doctor_line(warnings, run_url), "shipmate doctor warnings"),
@@ -438,10 +499,10 @@ def build_comment(cells, checks, run_url, head_sha, unmanaged=None, lost=None, w
     used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
-    for (c, text), url, bare in zip(cells, urls, bares, strict=True):
+    for bare, c, text, url in entries:
         reserve -= len(bare) + 2
         section = bare
-        if c["changed"]:
+        if c is not None and c["changed"]:
             section = render_section(bare, text, url, SIZE_BUDGET - used - reserve - 2)
         sections.append(section)
         used += len(section) + 2
@@ -664,6 +725,7 @@ def main():
         unmanaged,
         lost,
         int(warnings) if warnings.isdecimal() else 0,
+        env_order(os.environ.get("SHIPMATE_ENV_ORDER", "")),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

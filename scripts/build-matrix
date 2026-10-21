@@ -754,6 +754,7 @@ def main():
         cells=json.dumps(tree),
         unmanaged=json.dumps(named),
         lost=lost,
+        env_order=json.dumps(wv.env_sequence(order, {c["environment"] for c in cells})),
     )
     listing = ", ".join(f"{c['environment']}/{c['stack']}" for c in cells) or "(none)"
     print(f"{len(cells)} cell(s): {listing}")
