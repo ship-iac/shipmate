@@ -10,8 +10,8 @@ inputs:
   slug:
     description: The stack path with `/` replaced by `-`, the key the state artifact is stored under.
     required: true
-  plan-passphrase:
-    description: SHIPMATE_PLAN_PASSPHRASE, forwarded to actions/state to decrypt the restored local state. Empty refuses the restore, which runs only for a local backend.
+  encryption-key:
+    description: SHIPMATE_ENCRYPTION_KEY, forwarded to actions/state to decrypt the restored local state. Empty refuses the restore, which runs only for a local backend.
     required: false
     default: ""
 outputs:
@@ -90,4 +90,4 @@ runs:
         env: ${{ inputs.env }}
         mode: restore
         path: ${{ steps.locate-state.outputs.path }}
-        passphrase: ${{ inputs.plan-passphrase }}
+        encryption-key: ${{ inputs.encryption-key }}

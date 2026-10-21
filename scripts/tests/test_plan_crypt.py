@@ -18,7 +18,7 @@ STATE = b'{"version":4,"serial":1}'
 KEY = "state/app-net/dev-eu/123-1"
 NON_ASCII = "korrekt hæst ✓"
 UNSET = (
-    "::error::SHIPMATE_PLAN_PASSPHRASE is not set; it is required to encrypt and decrypt plan "
+    "::error::SHIPMATE_ENCRYPTION_KEY is not set; it is required to encrypt and decrypt plan "
     "artifacts and local state. Set the secret and forward it to the shipmate workflows."
 )
 _RUNNER = (
@@ -48,8 +48,8 @@ def _write(tmp_path, data=PLAIN):
     return f
 
 
-def _encrypted(tmp_path, monkeypatch, data, kind="plan", passphrase=NON_ASCII):
-    monkeypatch.setenv("PLAN_PASSPHRASE", passphrase)
+def _encrypted(tmp_path, monkeypatch, data, kind="plan", key=NON_ASCII):
+    monkeypatch.setenv("ENCRYPTION_KEY", key)
     f = _write(tmp_path, data)
     if kind == "plan":
         pcx.encrypt(str(f))
@@ -62,16 +62,16 @@ def _unauthenticated(kind, path):
     if kind == "plan":
         return (
             f"::error::plan artifact `{path}` failed authentication: it was encrypted with another "
-            "passphrase (a rotated one, or different values on <env>-plan and <env>-apply), or it "
-            "is corrupt, truncated or altered. Nothing was applied. docs/troubleshooting.md "
+            "encryption key (a rotated one, or different values on <env>-plan and <env>-apply), or "
+            "it is corrupt, truncated or altered. Nothing was applied. docs/troubleshooting.md "
             "section `plan artifact ... failed authentication` gives each remedy."
         )
     return (
         "::error::state cache entry `state/app-net/dev-eu/123-1` failed authentication: it was "
-        "saved with another passphrase (a rotated one, or different values on <env>-plan and "
+        "saved with another encryption key (a rotated one, or different values on <env>-plan and "
         "<env>-apply), or it is corrupt, truncated, altered or copied under another stack's or "
         "environment's key. tofu was not run. docs/troubleshooting.md section `state cache entry "
-        "... failed authentication` tells the causes apart. Fix a passphrase with the secret: "
+        "... failed authentication` tells the causes apart. Fix an encryption key with the secret: "
         "deleting an intact entry loses the state it holds."
     )
 
@@ -122,10 +122,10 @@ def _repository(monkeypatch):
     monkeypatch.setenv("GITHUB_REPOSITORY", "ship-iac/sample")
 
 
-def test_encrypt_without_passphrase_refuses(tmp_path, monkeypatch):
-    """Mutations: make encrypt's empty-passphrase branch `return` (the old no-op); drop `and
+def test_encrypt_without_encryption_key_refuses(tmp_path, monkeypatch):
+    """Mutations: make encrypt's empty-key branch `return` (the old no-op); drop `and
     local state` from the refusal."""
-    monkeypatch.delenv("PLAN_PASSPHRASE", raising=False)
+    monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
     f = _write(tmp_path)
     with pytest.raises(SystemExit) as exc:
         pcx.encrypt(str(f))
@@ -136,7 +136,7 @@ def test_encrypt_without_passphrase_refuses(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("kind", "data"), [("plan", PLAIN), ("state", STATE), ("plan", b""), ("state", b"")]
 )
-def test_round_trip_with_a_non_ascii_passphrase(tmp_path, monkeypatch, kind, data):
+def test_round_trip_with_a_non_ascii_encryption_key(tmp_path, monkeypatch, kind, data):
     """Mutations: `decrypt=False` in `_decrypt`'s openssl call, and the body is encrypted twice;
     `return` before `_encrypt`'s `_replace`, and the file stays plaintext; `MIN_LEN` one higher,
     and an empty plaintext's file refuses."""
@@ -183,7 +183,7 @@ def test_decrypt_accepts_a_hand_built_v1_file(tmp_path, monkeypatch, kind, scope
     head = b"shipmate-crypt-v1\n" + salt + body
     tagged = len(scope).to_bytes(4, "big") + scope + head
     f = _write(tmp_path, head + hmac.new(mac_key, tagged, "sha256").digest())
-    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    monkeypatch.setenv("ENCRYPTION_KEY", NON_ASCII)
     _decrypt(kind, f)
     assert f.read_bytes() == PLAIN
 
@@ -231,7 +231,7 @@ def test_a_state_entry_restored_under_a_newer_key_of_its_prefix_decrypts(tmp_pat
 def test_cli_encrypt_state_round_trips_through_decrypt_state(tmp_path, monkeypatch):
     """Mutation: route main's `encrypt-state` to `encrypt`, and the entry carries the plan
     label."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    monkeypatch.setenv("ENCRYPTION_KEY", NON_ASCII)
     f = _write(tmp_path, STATE)
     pcx.main(["plan-crypt", "encrypt-state", str(f), KEY])
     pcx.main(["plan-crypt", "decrypt-state", str(f), KEY])
@@ -255,14 +255,14 @@ def test_a_flipped_byte_fails_authentication_before_openssl(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize("kind", KINDS)
-def test_a_wrong_passphrase_fails_authentication_and_keeps_the_ciphertext(
+def test_a_wrong_encryption_key_fails_authentication_and_keeps_the_ciphertext(
     tmp_path, monkeypatch, kind
 ):
     """Mutation: drop the tag compare in `_decrypt`, and openssl's garbage replaces the
     ciphertext."""
     f = _encrypted(tmp_path, monkeypatch, PLAIN, kind)
     ciphertext = f.read_bytes()
-    monkeypatch.setenv("PLAN_PASSPHRASE", "wrong donkey")
+    monkeypatch.setenv("ENCRYPTION_KEY", "wrong donkey")
     with pytest.raises(SystemExit) as exc:
         _decrypt(kind, f)
     assert exc.value.code == _unauthenticated(kind, f)
@@ -304,7 +304,7 @@ def test_a_file_without_the_v1_header_fails_authentication(tmp_path, monkeypatch
         "salted": b"Salted__" + bytes(range(64)),
     }[case]
     f = _write(tmp_path, data)
-    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    monkeypatch.setenv("ENCRYPTION_KEY", NON_ASCII)
     calls = _record_openssl(monkeypatch)
     with pytest.raises(SystemExit) as exc:
         _decrypt(kind, f)
@@ -432,7 +432,7 @@ def test_encrypt_openssl_failure_names_no_re_run(tmp_path, monkeypatch):
 
     Mutation: append `_RUNNER` to encrypt's message.
     """
-    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    monkeypatch.setenv("ENCRYPTION_KEY", NON_ASCII)
     _failing_openssl(monkeypatch, subprocess.CalledProcessError(1, ["openssl"]))
     f = _write(tmp_path)
     with pytest.raises(SystemExit) as exc:
@@ -472,45 +472,45 @@ def test_a_temp_file_that_cannot_be_removed_is_named(tmp_path, monkeypatch, caps
     )
 
 
-def test_decrypt_plan_without_passphrase_refuses(tmp_path, monkeypatch):
-    """Mutation: delete `_decrypt`'s `_require_passphrase` call."""
+def test_decrypt_plan_without_encryption_key_refuses(tmp_path, monkeypatch):
+    """Mutation: delete `_decrypt`'s `_require_encryption_key` call."""
     f = _encrypted(tmp_path, monkeypatch, PLAIN)
-    monkeypatch.delenv("PLAN_PASSPHRASE", raising=False)
+    monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(f))
     assert exc.value.code == UNSET
 
 
-def test_decrypt_state_without_passphrase_refuses(tmp_path, monkeypatch):
-    """Mutation: delete `_decrypt`'s `_require_passphrase` call."""
+def test_decrypt_state_without_encryption_key_refuses(tmp_path, monkeypatch):
+    """Mutation: delete `_decrypt`'s `_require_encryption_key` call."""
     f = _encrypted(tmp_path, monkeypatch, STATE, "state")
-    monkeypatch.delenv("PLAN_PASSPHRASE", raising=False)
+    monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt_state(str(f), KEY)
     assert exc.value.code == UNSET
 
 
-def test_cli_require_without_passphrase_refuses(monkeypatch):
+def test_cli_require_without_encryption_key_refuses(monkeypatch):
     """Mutation: delete main's `require` branch, and it prints the usage error instead."""
-    monkeypatch.delenv("PLAN_PASSPHRASE", raising=False)
+    monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
     with pytest.raises(SystemExit) as exc:
         pcx.main(["plan-crypt", "require"])
     assert exc.value.code == UNSET
 
 
-def test_cli_require_with_passphrase_passes(monkeypatch):
-    """Mutation: `if _passphrase():` in `_require_passphrase`, which refuses every caller."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+def test_cli_require_with_encryption_key_passes(monkeypatch):
+    """Mutation: `if _encryption_key():` in `_require_encryption_key`, refusing every caller."""
+    monkeypatch.setenv("ENCRYPTION_KEY", NON_ASCII)
     assert pcx.main(["plan-crypt", "require"]) is None
 
 
-def test_plan_cell_requires_the_passphrase_before_init():
+def test_plan_cell_requires_the_encryption_key_before_init():
     """Its position is pinned in test_cell_step_order.py. Mutations: delete the step; drop its
-    `PLAN_PASSPHRASE` env line, and every plan refuses."""
-    assert step_by("plan-cell", name="Require the plan passphrase") == {
-        "name": "Require the plan passphrase",
+    `ENCRYPTION_KEY` env line, and every plan refuses."""
+    assert step_by("plan-cell", name="Require the encryption key") == {
+        "name": "Require the encryption key",
         "shell": "bash",
-        "env": {"PLAN_PASSPHRASE": "${{ inputs.plan-passphrase }}"},
+        "env": {"ENCRYPTION_KEY": "${{ inputs.encryption-key }}"},
         "run": 'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-crypt" require',
     }
 
@@ -532,7 +532,7 @@ def _os_error(path):
 
 def test_decrypt_a_missing_artifact_prints_an_error_not_a_traceback(tmp_path, monkeypatch):
     """Mutation: drop the `except OSError` around `_decrypt`'s read."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    monkeypatch.setenv("ENCRYPTION_KEY", NON_ASCII)
     missing = tmp_path / "absent.otplan"
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt(str(missing))
@@ -548,7 +548,7 @@ def test_decrypt_a_missing_artifact_prints_an_error_not_a_traceback(tmp_path, mo
 def test_decrypt_state_a_missing_entry_prints_an_error_not_a_traceback(tmp_path, monkeypatch):
     """Mutations: drop the `except OSError` around `_decrypt`'s read; drop `the restore may not
     have written the file` from decrypt_state's refusal."""
-    monkeypatch.setenv("PLAN_PASSPHRASE", NON_ASCII)
+    monkeypatch.setenv("ENCRYPTION_KEY", NON_ASCII)
     missing = tmp_path / "absent.tfstate"
     with pytest.raises(SystemExit) as exc:
         pcx.decrypt_state(str(missing), KEY)

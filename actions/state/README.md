@@ -22,9 +22,9 @@ key rather than colliding with the immutable original, which
 Invalid `mode` fails loud: the action validates `mode` is exactly `restore`
 or `save` before anything else, so a typo cannot silently skip both steps.
 
-**State is encrypted at rest with `passphrase`**, the consumer's
-`SHIPMATE_PLAN_PASSPHRASE`, through `scripts/plan-crypt` (the same cipher as
-the plan artifact). An empty `passphrase` refuses both modes before any cache
+**State is encrypted at rest with `encryption-key`**, the consumer's
+`SHIPMATE_ENCRYPTION_KEY`, through `scripts/plan-crypt` (the same cipher as
+the plan artifact). An empty `encryption-key` refuses both modes before any cache
 call.
 
 - Save: the file is encrypted in place, then saved. An absent or 0-byte file is
@@ -35,7 +35,7 @@ call.
   miss; `apply-cell` reads `saved` and fails the cell when an apply ran.
 - Restore: a matched entry is authenticated, then decrypted in place, before
   tofu reads it. A cache miss restores nothing and runs no decrypt. An entry
-  that fails authentication (another passphrase, a corrupt, truncated or altered
+  that fails authentication (another encryption key, a corrupt, truncated or altered
   entry, or one copied under another stack's or environment's key) fails it
   naming the matched cache key and no command: `docs/troubleshooting.md` tells
   the causes apart. An openssl or disk failure on the runner fails it too;

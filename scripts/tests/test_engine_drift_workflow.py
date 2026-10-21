@@ -44,14 +44,14 @@ def test_the_workflow_call_inputs_are_exactly_these():
 
 
 def test_the_workflow_call_secrets_are_exactly_these():
-    """`SHIPMATE_PLAN_PASSPHRASE` is `required: false`: an environment-scoped secret resolves
+    """`SHIPMATE_ENCRYPTION_KEY` is `required: false`: an environment-scoped secret resolves
     empty at the caller, so `required: true` would reject a legitimate call, and
     `actions/state` refuses the empty value at run time. Mutations: re-add
-    `SHIPMATE_SLACK_WEBHOOK: { required: false }`; drop `SHIPMATE_PLAN_PASSPHRASE`."""
+    `SHIPMATE_SLACK_WEBHOOK: { required: false }`; drop `SHIPMATE_ENCRYPTION_KEY`."""
     assert workflow_yaml(WF)["on"]["workflow_call"]["secrets"] == {
         "SHIPMATE_APP_PRIVATE_KEY": {"required": False},
         "SHIPMATE_SECRETS": {"required": False},
-        "SHIPMATE_PLAN_PASSPHRASE": {"required": False},
+        "SHIPMATE_ENCRYPTION_KEY": {"required": False},
     }
 
 
@@ -183,14 +183,14 @@ def test_the_cell_passes_this_whole_with_block():
     checked one at a time leaves the hole wherever it does not look. An empty `env` here plans
     every cell against the wrong environment and fails nothing.
 
-    Mutations: `env` deleted, and a `state-path:` key added back; `plan-passphrase` deleted,
+    Mutations: `env` deleted, and a `state-path:` key added back; `encryption-key` deleted,
     and every local-state restore refuses.
     """
     assert step_using(WF, "drift", "actions/drift-cell")["with"] == {
         "tf-vars": "${{ toJSON(matrix.tf_vars) }}",
         "github-vars": "${{ toJSON(vars) }}",
         "consumer-secrets": "${{ secrets.SHIPMATE_SECRETS }}",
-        "plan-passphrase": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
+        "encryption-key": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
         "stack": "${{ matrix.stack }}",
         "env": "${{ matrix.environment }}",
     }

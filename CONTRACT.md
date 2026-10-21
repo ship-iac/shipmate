@@ -850,12 +850,12 @@ the repository root, or none:
 - **A path** — a local backend. The cell restores that path through
   `actions/state` before it plans or applies, and `apply-cell` saves it after the
   apply (`plan-cell` and `drift-cell` restore only; neither writes state). The
-  cached file is encrypted with `SHIPMATE_PLAN_PASSPHRASE` (§Plan artifact
+  cached file is encrypted with `SHIPMATE_ENCRYPTION_KEY` (§Plan artifact
   encryption), because any workflow run, a fork's pull request included, can
-  restore a default-branch cache entry. An empty passphrase refuses the restore
+  restore a default-branch cache entry. An empty encryption key refuses the restore
   and the save. An entry that fails authentication and an openssl
   or disk failure on the runner each fail the restore naming the matched cache
-  key, so tofu never reads it and the cell skips its save. A passphrase
+  key, so tofu never reads it and the cell skips its save. An encryption key
   rotation, different values on `<env>-plan` and `<env>-apply`, a corrupt,
   truncated or altered entry, and one copied under another stack's or
   environment's key each fail authentication; `docs/troubleshooting.md`
@@ -1691,7 +1691,7 @@ The consumer's workflow is one file, `.github/workflows/shipmate.yml`: four
 triggers, and five jobs each gated on the event with an `if:` and each calling
 one engine reusable workflow, SHA-pinned. Top-level `permissions: {}`; every job
 declares its own. The plan job passes `SHIPMATE_APP_PRIVATE_KEY`,
-`SHIPMATE_PLAN_PASSPHRASE` and `SHIPMATE_SECRETS` by name (never
+`SHIPMATE_ENCRYPTION_KEY` and `SHIPMATE_SECRETS` by name (never
 `secrets: inherit`) and one input, `runs_on`.
 Everything a `uses:` line reaches is engine-owned,
 SHA-pinned YAML.
@@ -2824,11 +2824,11 @@ reaches the process.
   `SHIPMATE_VARS` is a deliberate act with one meaning, and a silent drop leaves
   the author debugging the wrong thing. Three enumerated names are **refused**
   rather than skipped: `SHIPMATE_SECRETS`, `SHIPMATE_APP_PRIVATE_KEY` and
-  `SHIPMATE_PLAN_PASSPHRASE`, secrets set on the variable surface. Skipping one
+  `SHIPMATE_ENCRYPTION_KEY`, secrets set on the variable surface. Skipping one
   would export nothing while its value sat world-readable in the repository UI,
   and the engine's own namespace has no legitimate reading as a consumer
   variable. The refusal says to delete the variable, rotate what it held, and
-  set the secret. A rotated `SHIPMATE_PLAN_PASSPHRASE` no longer decrypts a
+  set the secret. A rotated `SHIPMATE_ENCRYPTION_KEY` no longer decrypts a
   local backend's cached state (§Plan artifact encryption, "Rotation").
 - **Name validation.** Every envelope key must match `[A-Za-z_][A-Za-z0-9_]*`.
   `$GITHUB_ENV` is written in heredoc form, so a key holding a newline would
@@ -2943,11 +2943,11 @@ engine, and both are equally visible in the plan artifact — the machine plan
 
 The reviewed machine plan file (`stack.otplan`) is encrypted at rest in the
 uploaded artifact. `plan-cell` (in `plan.yml`) encrypts the plan with its
-required `plan-passphrase` input before upload, in the shipmate-crypt-v1 format
+required `encryption-key` input before upload, in the shipmate-crypt-v1 format
 `scripts/plan-crypt` defines: the 18-byte header `shipmate-crypt-v1` and a
 newline, a 16-byte random salt, the output of `openssl enc -aes-256-ctr -pbkdf2
 -iter 1 -md sha256 -nosalt`, and an HMAC-SHA256 tag over the three. One
-PBKDF2-HMAC-SHA256 derivation of 600,000 iterations over the passphrase and the
+PBKDF2-HMAC-SHA256 derivation of 600,000 iterations over the encryption key and the
 salt yields the cipher key, which reaches openssl in its environment and never
 on the command line, and the tag key, each labelled with the file's kind, plan
 or state, so neither authenticates as the other. A state entry's tag also
@@ -2958,11 +2958,11 @@ decrypt verifies the tag before openssl reads the file, and a plan artifact
 that fails refuses at `Decrypt reviewed plan artifact`, before any apply step,
 and a cached state entry at the state restore (§State backend). `apply-cell`
 decrypts the plan after download on every apply path: both paths pass it as
-the `SHIPMATE_PLAN_PASSPHRASE` secret into the
+the `SHIPMATE_ENCRYPTION_KEY` secret into the
 reusable `apply-env-level.yml` workflow — via the engine `deploy.yml` for the
 merge-deploy path, and via the engine `apply.yml` for the targeted and bare
 forms. The same cipher and secret encrypt a local backend's cached state
-(§State backend). Consumers set `SHIPMATE_PLAN_PASSPHRASE` as a repository or
+(§State backend). Consumers set `SHIPMATE_ENCRYPTION_KEY` as a repository or
 organization secret and forward it by name in the `secrets:` block of their
 `shipmate.yml`'s `plan`, `deploy` and `apply` jobs and of each drift file's
 `drift` job. Never `secrets: inherit`: it hands the engine the caller's whole
@@ -2975,8 +2975,8 @@ environment, and a plan cell names its own plan environment. The same value on b
 
 - **As a variable**, every cell refuses it by name (`scripts/env-inject`).
 - **As a secret on `shipmate-engine`**, no plan or apply cell binds that
-  environment, so the passphrase resolves to empty on both sides and every plan
-  cell refuses at `Require the plan passphrase`, before it initializes the
+  environment, so the encryption key resolves to empty on both sides and every plan
+  cell refuses at `Require the encryption key`, before it initializes the
   stack.
 - **As a secret on `<env>-apply` alone**, every plan cell in that environment
   refuses the same way, so no apply ever has a plan.
@@ -2994,12 +2994,12 @@ name one and read it.
 Unlike the App private key, this secret must be readable wherever plans are
 produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
-- **Required.** An empty or unset passphrase refuses: `plan-cell` before it
+- **Required.** An empty or unset encryption key refuses: `plan-cell` before it
   initializes the stack, `apply-cell` before the decrypt, and `actions/state`
   before any cache call. No plan artifact uploads unencrypted.
 - **Fail-safe on mismatch.** An artifact that is not a whole shipmate-crypt-v1
   file whose tag verifies fails authentication and refuses naming the causes
-  (another passphrase, a rotated one or different values on `<env>-plan` and
+  (another encryption key, a rotated one or different values on `<env>-plan` and
   `<env>-apply`, or a corrupt, truncated or altered artifact)
   and points to `docs/troubleshooting.md` for each remedy; the engine cannot
   tell them apart. An openssl or disk failure on the runner refuses and tells
@@ -3017,10 +3017,10 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
   published text comes from `sensitive` marking (see Secrets in published output, above).
 - **Both sides must agree.** `plan-cell` (encrypt) and `apply-cell` (decrypt)
   run at the commit of the engine reference that called them, which
-  §Consumption's one-change rule keeps the same on both paths; the passphrase
+  §Consumption's one-change rule keeps the same on both paths; the encryption key
   must match on both too. A mismatch surfaces as the fail-safe above, not a
   silent wrong apply.
-- **Rotation.** A new passphrase cannot decrypt anything the old one encrypted:
+- **Rotation.** A new encryption key cannot decrypt anything the old one encrypted:
   outstanding plans refuse in the apply cell (the fail-safe above), and every
   cached local-state entry refuses its restore. `docs/troubleshooting.md` gives
   the remedies under each refusal's heading.

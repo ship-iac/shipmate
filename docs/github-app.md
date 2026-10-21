@@ -384,7 +384,7 @@ actual work here:
   for the plan comment: reading author-produced data is not executing it, and no
   new secret enters the job. Re-rendering the plan there instead of
   hashing it was rejected for exactly this reason — the render needs the plan
-  artifact decrypted, which would put `SHIPMATE_PLAN_PASSPHRASE` in the job that
+  artifact decrypted, which would put `SHIPMATE_ENCRYPTION_KEY` in the job that
   holds the App key.
 - The *token* minted from the key is still readable in plaintext by any step
   in the job that mints it — the environment

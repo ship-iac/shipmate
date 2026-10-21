@@ -16,7 +16,7 @@ on:
       # declaration rejects the call: "Secret ... is required, but not provided while calling".
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
-      SHIPMATE_PLAN_PASSPHRASE: { required: false }
+      SHIPMATE_ENCRYPTION_KEY: { required: false }
 jobs:
   # A human cannot make github.actor a bot login, so this rejects a human dispatch that would skip
   # scripts/authorize; it admits any bot with actions:write. Its own job so `summary` can refuse
@@ -167,7 +167,7 @@ jobs:
       # `./` callee is read at this commit, and mapping a secret it does not declare is a hard
       # load-time error, unlike an undeclared action input, which is silently ignored.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
   envlevel1:

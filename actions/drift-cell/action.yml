@@ -7,8 +7,8 @@ inputs:
   env:
     description: Environment name, e.g. dev-eu.
     required: true
-  plan-passphrase:
-    description: SHIPMATE_PLAN_PASSPHRASE, which decrypts the cached local state. Empty refuses the state restore, which runs only for a local backend.
+  encryption-key:
+    description: SHIPMATE_ENCRYPTION_KEY, which decrypts the cached local state. Empty refuses the state restore, which runs only for a local backend.
     required: false
     default: ""
   tf-vars:
@@ -52,7 +52,7 @@ runs:
         stack: ${{ inputs.stack }}
         env: ${{ inputs.env }}
         slug: ${{ steps.ids.outputs.slug }}
-        plan-passphrase: ${{ inputs.plan-passphrase }}
+        encryption-key: ${{ inputs.encryption-key }}
 
     - name: Check the provider cache
       id: provider-cache-files

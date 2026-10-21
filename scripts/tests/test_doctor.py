@@ -1353,7 +1353,7 @@ _SHIPMATE_WF = (
     "    permissions: { contents: read, pull-requests: read, id-token: write }\n"
     "    secrets:\n"
     "      SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}\n"
-    "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
+    "      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}\n"
     "  comment-ops:\n"
     "    name: comment\n"
     "    if: github.event_name == 'issue_comment'\n"
@@ -3550,7 +3550,7 @@ def test_a_name_deeper_in_the_block_is_not_the_jobs_name():
 
     Mutation: `job.get("name") or _mapping(job.get("with")).get("name") or job_id` in
     `_shim_job_name_finding`."""
-    anchor = "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
+    anchor = "      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}\n"
     text = (
         _SHIPMATE_WF.replace("  plan:\n", "  shipmate:\n", 1)
         .replace("    name: plan\n", "", 1)
@@ -3819,8 +3819,8 @@ _WF_NO_PR_NUMBER = _SHIPMATE_WF.replace(
     "        default: ''\n",
     "",
 ).replace(
-    "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n",
-    "      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}\n"
+    "      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}\n",
+    "      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}\n"
     "    with:\n"
     "      pr_number: ${{ github.event.inputs.pr_number }}\n",
     1,
@@ -4028,7 +4028,7 @@ def test_the_documented_workflow_file_is_dispatchable_and_correctly_named(monkey
     """The oracle for false positives and for the page: the file consumers paste, verbatim,
     through the probe that reads `shipmate.yml`.
 
-    Mutations: rename the fence's job `name:` away from `shipmate`; delete its
+    Mutations: rename the fence's `plan` job `name:` away from `plan`; delete its
     `workflow_dispatch:` trigger; edit one routing `if:`.
     """
     responses = _fork_responses({"shipmate.yml": _documented_workflow_file()})

@@ -112,7 +112,7 @@ _CALL = {
         "stack": "${{ inputs.stack }}",
         "env": "${{ inputs.env }}",
         "slug": "${{ steps.ids.outputs.slug }}",
-        "plan-passphrase": "${{ inputs.plan-passphrase }}",
+        "encryption-key": "${{ inputs.encryption-key }}",
     },
 }
 
@@ -169,7 +169,7 @@ def test_cell_init_exposes_the_restore_key_and_inits_own_outcome():
 @pytest.mark.parametrize("cell", _CELLS)
 def test_each_cell_initializes_through_cell_init_under_id_init(cell):
     """Mutations: change one cell's call `id` to `cell-init`; pass `env: ${{ inputs.stack }}`;
-    swap the `env:` and `slug:` values; drop one cell's `plan-passphrase` line, and its state
+    swap the `env:` and `slug:` values; drop one cell's `encryption-key` line, and its state
     restore refuses."""
     assert step_by(cell, name="Initialize the stack") == _CALL
 

@@ -609,7 +609,7 @@ no split of its own.
   constraint is not negotiable, so treat a plan environment as readable by anyone
   with push access: a plan cell runs `terramate`/`tofu` over branch code, which
   is arbitrary code execution with whatever that environment holds. Read-only,
-  blast-radius-free credentials only. Assume `SHIPMATE_PLAN_PASSPHRASE` is
+  blast-radius-free credentials only. Assume `SHIPMATE_ENCRYPTION_KEY` is
   readable by the same people for the same reason, and with it every plan
   artifact and cached state entry.
 
@@ -934,7 +934,7 @@ included, because it compares the policy names against the default branch alone.
 ## What the engine receives from your repository
 
 The documented file's jobs pass three secrets by name:
-`SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_PLAN_PASSPHRASE` wherever the callee
+`SHIPMATE_APP_PRIVATE_KEY`, `SHIPMATE_ENCRYPTION_KEY` wherever the callee
 writes or reads an encrypted plan artifact or encrypted local state (the `plan`,
 `deploy` and `apply` jobs, and each drift file's `drift` job; `unlock` passes
 neither engine secret), and `SHIPMATE_SECRETS` on every job whose callee runs a
@@ -1083,7 +1083,7 @@ nothing keeping a fork out of a plan cell depends on it.
 `pull_request_target` does not sandbox a fork's run: nothing is withheld from
 it, so a plan cell reached by a fork would read the plan environment's
 variables *and its secrets* (engine `plan.yml` passes `secrets.SHIPMATE_SECRETS`
-and `secrets.SHIPMATE_PLAN_PASSPHRASE` into `actions/plan-cell`), and would hold
+and `secrets.SHIPMATE_ENCRYPTION_KEY` into `actions/plan-cell`), and would hold
 the cell's resolved role's cloud credentials — `aws.plan`, or `aws.apply` in a
 shared environment (the `plan` job's `configure-aws-credentials` step assumes
 `matrix.role_arn` when the environment names one) — while executing
@@ -1215,10 +1215,10 @@ for exactly the exposure control 1 exists to limit.
   request. Nothing verifies a restored provider archive: the lock file verifies
   provider packages, not the archive around them. A restored state entry
   carries an HMAC tag (`CONTRACT.md` §Plan artifact encryption), which detects
-  corruption, an entry written without the passphrase, and an entry moved under
+  corruption, an entry written without the encryption key, and an entry moved under
   another stack's or environment's key. It does not detect an older entry of
   the same stack and environment saved again under a newer key (a rollback),
-  nor anything code that runs with the passphrase writes: code in an apply cell
+  nor anything code that runs with the encryption key writes: code in an apply cell
   holds it, so an entry it saves verifies like any other.
   Plan and unlock runs cannot save (`cache-mode: read`). Reaching this takes
   write access and such an environment, or the App private key, which can
@@ -1229,8 +1229,8 @@ for exactly the exposure control 1 exists to limit.
   exposure: any workflow run, a fork's pull request included, can restore a
   `state/` entry, anyone who can read the repository's Actions runs can download
   a plan artifact, and both are ciphertext under
-  `SHIPMATE_PLAN_PASSPHRASE` (`CONTRACT.md` §Plan artifact encryption). Whoever
-  holds the passphrase reads both (§7–9).
+  `SHIPMATE_ENCRYPTION_KEY` (`CONTRACT.md` §Plan artifact encryption). Whoever
+  holds the encryption key reads both (§7–9).
 - **Unconditional OIDC minting in every cell-running job.** GHA's `permissions:`
   cannot be an expression, so `id-token: write` on the wave, unlock, plan and
   drift jobs is not gated on a role resolving — every consumer, cloud or not, runs

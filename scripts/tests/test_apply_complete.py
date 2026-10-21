@@ -102,8 +102,12 @@ def test_a_job_present_without_a_conclusion_is_unresolved_not_dropped():
 def test_a_cell_with_no_matching_job_at_all_is_unmatched_not_unresolved():
     # Skip-propagation: an earlier wave failing skips wave1..wave7, and GitHub never expands a
     # skipped job's matrix, so those cells get no job row at all. Retrying cannot help, so they
-    # are named rather than retried.
-    jobs = [job("L0 / dev-eu / stacks/dns", "success")]
+    # are named rather than retried. The skipped wave lists one row under its unexpanded name.
+    # Mutation: `to_complete` also counts every skipped job as the cell's.
+    jobs = [
+        job("L0 / dev-eu / stacks/dns", "success"),
+        job("deploy / L1 / ${{ matrix.environment }} / ${{ matrix.stack }}", "skipped"),
+    ]
     assert apply_complete.to_complete(SNAP, jobs) == ([1], [], ["stacks/app / dev-eu"], [])
 
 

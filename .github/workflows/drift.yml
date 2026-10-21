@@ -9,7 +9,7 @@ on:
     secrets:
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
       SHIPMATE_SECRETS: { required: false }
-      SHIPMATE_PLAN_PASSPHRASE: { required: false }
+      SHIPMATE_ENCRYPTION_KEY: { required: false }
 # Floor, not a default to inherit from: see plan.yml.
 permissions: {}
 jobs:
@@ -71,7 +71,7 @@ jobs:
           tf-vars: ${{ toJSON(matrix.tf_vars) }}
           github-vars: ${{ toJSON(vars) }}
           consumer-secrets: ${{ secrets.SHIPMATE_SECRETS }}
-          plan-passphrase: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+          encryption-key: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
           stack: ${{ matrix.stack }}
           env: ${{ matrix.environment }}
 

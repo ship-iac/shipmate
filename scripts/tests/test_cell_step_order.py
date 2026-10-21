@@ -29,7 +29,7 @@ _EXPECTED = {
     "plan-cell": [
         "Stack slug",
         "Record the planned commit",
-        "Require the plan passphrase",
+        "Require the encryption key",
         "Inject identity variables",
         "Initialize the stack",
         "Plan",

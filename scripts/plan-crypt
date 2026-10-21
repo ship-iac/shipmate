@@ -8,7 +8,7 @@ restore) can never drift. The openssl flags and the key derivation live ONLY her
 Format shipmate-crypt-v1: MAGIC || salt || body || tag.
 
 - MAGIC is `shipmate-crypt-v1\\n` (18 bytes); a later format bumps the digit.
-- salt is 16 random bytes. master = PBKDF2-HMAC-SHA256(passphrase, salt, 600,000
+- salt is 16 random bytes. master = PBKDF2-HMAC-SHA256(encryption key, salt, 600,000
   iterations, 32 bytes); enc_key and mac_key are HMAC-SHA256(master, "shipmate-crypt-v1
   <kind> enc") and HMAC-SHA256(master, "shipmate-crypt-v1 <kind> mac"), where <kind> is
   `plan` or `state`, so a file of one kind never authenticates as the other.
@@ -19,7 +19,7 @@ Format shipmate-crypt-v1: MAGIC || salt || body || tag.
   bytes. scope is empty for a plan and the cache prefix (`state/<stack>/<env>/`) for a
   state entry, so an entry copied under another stack's or environment's key refuses.
 
-The passphrase comes from the PLAN_PASSPHRASE env var and is required: every operation
+The encryption key comes from the ENCRYPTION_KEY env var and is required: every operation
 refuses when it is empty or unset.
 
 AES-256-CTR is unauthenticated: a wrong key or a damaged byte decrypts to garbage WITH
@@ -49,15 +49,15 @@ _RUNNER = (
     "Re-run the job, which clears a transient hosted-runner disk failure, or fix a self-hosted "
     "runner's openssl or disk."
 )
-ENV_VAR = "PLAN_PASSPHRASE"  # name of the env var carrying the secret (not the secret itself)
+ENV_VAR = "ENCRYPTION_KEY"  # name of the env var carrying the secret (not the secret itself)
 
 
-def _passphrase():
+def _encryption_key():
     return os.environ.get(ENV_VAR, "")
 
 
 def _keys(salt, kind):
-    master = hashlib.pbkdf2_hmac("sha256", os.fsencode(_passphrase()), salt, ITERATIONS)
+    master = hashlib.pbkdf2_hmac("sha256", os.fsencode(_encryption_key()), salt, ITERATIONS)
     label = f"shipmate-crypt-v1 {kind} ".encode()
     enc_key = hmac.new(master, label + b"enc", "sha256").digest()
     mac_key = hmac.new(master, label + b"mac", "sha256").digest()
@@ -121,10 +121,10 @@ def _replace(path, transform, failure):
                 )
 
 
-def _require_passphrase():
-    if not _passphrase():
+def _require_encryption_key():
+    if not _encryption_key():
         raise SystemExit(
-            "::error::SHIPMATE_PLAN_PASSPHRASE is not set; it is required to encrypt and "
+            "::error::SHIPMATE_ENCRYPTION_KEY is not set; it is required to encrypt and "
             "decrypt plan artifacts and local state. Set the secret and forward it to the "
             "shipmate workflows."
         )
@@ -133,7 +133,7 @@ def _require_passphrase():
 def _encrypt(path, kind, scope):
     """The encrypt both artifact kinds share. `_keys` binds `kind` through the HMAC labels and
     `_tag` binds `scope`, as `_decrypt` reads them."""
-    _require_passphrase()
+    _require_encryption_key()
     # No remedy here: a plan cell re-plans, and whether an apply cell's state save may be
     # re-run depends on whether its apply ran. docs/troubleshooting.md splits the cases.
     failure = (
@@ -155,7 +155,7 @@ def _encrypt(path, kind, scope):
 
 
 def encrypt(path):
-    """Encrypt a plan artifact in place as shipmate-crypt-v1, or refuse without a passphrase."""
+    """Encrypt a plan artifact in place as shipmate-crypt-v1, or refuse without a key."""
     _encrypt(path, "plan", "")
 
 
@@ -166,7 +166,7 @@ def encrypt_state(path, cache_key):
 
 def _decrypt(path, kind, scope, *, unreadable, unauthenticated, failure):
     """The decrypt both artifact kinds share; each caller supplies its refusals."""
-    _require_passphrase()
+    _require_encryption_key()
     try:
         with open(path, "rb") as fh:
             data = fh.read()
@@ -184,8 +184,8 @@ def _decrypt(path, kind, scope, *, unreadable, unauthenticated, failure):
 def decrypt(path):
     """Decrypt a plan artifact in place, or refuse before tofu can read it.
 
-    Refuses without a passphrase, on an artifact that cannot be read, on one that fails
-    authentication (another passphrase, corruption, truncation or alteration), and when
+    Refuses without an encryption key, on an artifact that cannot be read, on one that fails
+    authentication (another encryption key, corruption, truncation or alteration), and when
     openssl or the disk fails on the runner, leaving the ciphertext in place. Never prints
     the file.
     """
@@ -200,7 +200,7 @@ def decrypt(path):
         ),
         unauthenticated=(
             f"::error::plan artifact `{path}` failed authentication: it was encrypted with "
-            "another passphrase (a rotated one, or different values on <env>-plan and "
+            "another encryption key (a rotated one, or different values on <env>-plan and "
             "<env>-apply), or it is corrupt, truncated or altered. Nothing was applied. "
             "docs/troubleshooting.md section `plan artifact ... failed authentication` gives "
             "each remedy."
@@ -216,7 +216,7 @@ def decrypt_state(path, cache_key):
     """Decrypt a restored state cache entry in place, or refuse before tofu can read it.
 
     Refuses as `decrypt` does, naming the cache key. An authentication failure names no delete
-    command, because the refusal cannot tell corruption from a wrong passphrase. Never prints
+    command, because the refusal cannot tell corruption from a wrong encryption key. Never prints
     the file's contents.
     """
     prefix = _state_scope(cache_key)
@@ -231,12 +231,12 @@ def decrypt_state(path, cache_key):
         ),
         unauthenticated=(
             f"::error::state cache entry `{cache_key}` failed authentication: it was saved with "
-            "another passphrase (a rotated one, or different values on <env>-plan and "
+            "another encryption key (a rotated one, or different values on <env>-plan and "
             "<env>-apply), or it is corrupt, truncated, altered or copied under another stack's "
             "or environment's key. tofu was not run. "
             "docs/troubleshooting.md section `state cache entry ... failed authentication` tells "
-            "the causes apart. Fix a passphrase with the secret: deleting an intact entry loses "
-            "the state it holds."
+            "the causes apart. Fix an encryption key with the secret: deleting an intact entry "
+            "loses the state it holds."
         ),
         failure=(
             f"::error::state cache entry `{cache_key}` could not be decrypted: openssl or the "
@@ -253,7 +253,7 @@ USAGE = (
 
 def main(argv):
     if argv[1:] == ["require"]:
-        _require_passphrase()
+        _require_encryption_key()
     elif len(argv) == 4 and argv[1] in ("encrypt-state", "decrypt-state"):
         (encrypt_state if argv[1] == "encrypt-state" else decrypt_state)(argv[2], argv[3])
     elif len(argv) == 3 and argv[1] in ("encrypt", "decrypt"):

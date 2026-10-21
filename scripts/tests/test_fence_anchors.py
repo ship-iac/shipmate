@@ -11,7 +11,7 @@ from _shipmate import load_workflow_text
 RUNNER = "ubuntu-26.04-arm"
 ENGINE_SECRETS = {
     "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-    "SHIPMATE_PLAN_PASSPHRASE": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
+    "SHIPMATE_ENCRYPTION_KEY": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
     "SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}",
 }
 

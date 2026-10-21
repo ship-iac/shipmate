@@ -7,7 +7,7 @@ on:
       # Consumers pass this by name: `vars` reach a called workflow automatically, secrets do not,
       # and no environment supplies it (the waves bind the env's apply environment). Without it
       # every env-level apply refuses at its decrypt.
-      SHIPMATE_PLAN_PASSPHRASE: { required: false }
+      SHIPMATE_ENCRYPTION_KEY: { required: false }
       # Feeds the `summary` job's App-token mint for the gate write. An empty key fails loud in
       # gate-refresh's `Verify the App key arrived`, before the mint.
       SHIPMATE_APP_PRIVATE_KEY: { required: false }
@@ -57,7 +57,7 @@ jobs:
     secrets: &envlevel-secrets
       # Declare a new secret in apply-env-level.yml first: see the envlevel0 job in apply.yml.
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
-      SHIPMATE_PLAN_PASSPHRASE: ${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}
+      SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
 
   envlevel1:

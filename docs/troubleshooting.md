@@ -804,19 +804,19 @@ Two locks this verb does not reach:
   nothing here waits on a lock or releases one it did not probe: check with
   whoever is running it before forcing anything.
 
-### `SHIPMATE_PLAN_PASSPHRASE is not set`, or `SHIPMATE_PLAN_PASSPHRASE is empty`
+### `SHIPMATE_ENCRYPTION_KEY is not set`, or `SHIPMATE_ENCRYPTION_KEY is empty`
 
-The cell received no passphrase. It encrypts every plan artifact and a local
+The cell received no encryption key. It encrypts every plan artifact and a local
 backend's cached state, so nothing proceeds without it
 ([`../CONTRACT.md`](../CONTRACT.md) §Plan artifact encryption):
 
-- `SHIPMATE_PLAN_PASSPHRASE is not set` comes from `scripts/plan-crypt`: a plan
-  cell at `Require the plan passphrase`, before it initializes the stack, or an
+- `SHIPMATE_ENCRYPTION_KEY is not set` comes from `scripts/plan-crypt`: a plan
+  cell at `Require the encryption key`, before it initializes the stack, or an
   apply cell at `Decrypt reviewed plan artifact`.
-- `shipmate/actions/state: SHIPMATE_PLAN_PASSPHRASE is empty` comes from a local
+- `shipmate/actions/state: SHIPMATE_ENCRYPTION_KEY is empty` comes from a local
   backend's state restore or save, which is where a drift cell refuses.
 
-Set `SHIPMATE_PLAN_PASSPHRASE` as a repository or organization secret, or as the
+Set `SHIPMATE_ENCRYPTION_KEY` as a repository or organization secret, or as the
 same value on both `<env>-plan` and `<env>-apply`, and map it by name in the
 `secrets:` block of `shipmate.yml`'s `plan`, `deploy` and `apply` jobs and of
 each drift file's `drift` job. A secret on `shipmate-engine` or on one half of a
@@ -828,11 +828,11 @@ split environment alone reaches the wrong cells
 An apply cell refused its reviewed plan at `Decrypt reviewed plan artifact`,
 before openssl or any apply step read it, and its `apply / <stack> / <env>`
 check stays pending. The tag the plan cell wrote does not verify under the
-apply side's passphrase. The engine cannot tell the causes apart:
+apply side's encryption key. The engine cannot tell the causes apart:
 
-- **The passphrase was rotated after the plan.** Re-plan.
+- **The encryption key was rotated after the plan.** Re-plan.
 - **The plan and apply sides read different values**, for example different
-  `SHIPMATE_PLAN_PASSPHRASE` secrets on `<env>-plan` and `<env>-apply`. A
+  `SHIPMATE_ENCRYPTION_KEY` secrets on `<env>-plan` and `<env>-apply`. A
   re-plan alone fails the same way. Make the two equal, then re-plan. On a
   local backend, set `<env>-plan`'s value to `<env>-apply`'s and never the
   reverse, because apply cells saved the cached state; on a remote backend
@@ -1032,19 +1032,19 @@ or a full disk.
 
 A local backend's restore matched a cache entry whose tag does not verify, and
 refused before openssl or tofu read it. The refusal names no delete command:
-the engine cannot tell a wrong passphrase from a damaged entry, and deleting an
-intact entry loses the state it holds. A wrong passphrase is fixed by the
+the engine cannot tell a wrong encryption key from a damaged entry, and deleting an
+intact entry loses the state it holds. A wrong encryption key is fixed by the
 secret, never by deleting. Check the causes in this order:
 
-- **The passphrase changed after the entry was saved.** Evidence: a
-  `SHIPMATE_PLAN_PASSPHRASE` placement (organization, repository, `<env>-plan`
+- **The encryption key changed after the entry was saved.** Evidence: a
+  `SHIPMATE_ENCRYPTION_KEY` placement (organization, repository, `<env>-plan`
   or `<env>-apply`) updated after the entry's `createdAt` in
   `gh cache list --key <key> --json key,createdAt`. `gh secret list`, with
   `--org <org>` or `--env <environment>`, shows each placement's update time.
   Every older entry under the prefix was saved with the old value too. Set the
   old value back.
 - **The plan and apply sides read different values.** Evidence: `<env>-plan`
-  and `<env>-apply` each hold their own `SHIPMATE_PLAN_PASSPHRASE`. An apply
+  and `<env>-apply` each hold their own `SHIPMATE_ENCRYPTION_KEY`. An apply
   cell saved the entry and a plan or drift cell restores it. Set
   `<env>-plan`'s value to `<env>-apply`'s, never the reverse, then re-plan or
   re-run the drift sweep.

@@ -54,11 +54,11 @@ def local_action(name):
 
 _APP_KEY = {"SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}"}
 _CONSUMER_SECRETS = {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
-_APP_KEY_AND_PASSPHRASE = {
+_APP_KEY_AND_ENCRYPTION_KEY = {
     "SHIPMATE_APP_PRIVATE_KEY": "${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}",
-    "SHIPMATE_PLAN_PASSPHRASE": "${{ secrets.SHIPMATE_PLAN_PASSPHRASE }}",
+    "SHIPMATE_ENCRYPTION_KEY": "${{ secrets.SHIPMATE_ENCRYPTION_KEY }}",
 }
-_APP_KEY_PASSPHRASE_AND_SECRETS = {**_APP_KEY_AND_PASSPHRASE, **_CONSUMER_SECRETS}
+_APP_KEY_ENCRYPTION_KEY_AND_SECRETS = {**_APP_KEY_AND_ENCRYPTION_KEY, **_CONSUMER_SECRETS}
 
 #: The whole `secrets:` block every caller of an engine reusable workflow must write, keyed by
 #: callee file name. Hand-written, never derived from the callee's own declarations: a guard that
@@ -73,12 +73,12 @@ _APP_KEY_PASSPHRASE_AND_SECRETS = {**_APP_KEY_AND_PASSPHRASE, **_CONSUMER_SECRET
 #: is the entry taking no consumer envelope. Every other callee runs a cell, and
 #: `SHIPMATE_SECRETS` is how a consumer's own secrets reach it.
 ENGINE_CALL_SECRETS = {
-    "plan.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
-    "drift.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
+    "plan.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
+    "drift.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     "comment-ops.yml": _APP_KEY,
-    "apply.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
-    "deploy.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
-    "apply-env-level.yml": _APP_KEY_PASSPHRASE_AND_SECRETS,
+    "apply.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
+    "deploy.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
+    "apply-env-level.yml": _APP_KEY_ENCRYPTION_KEY_AND_SECRETS,
     # Unlock reads no plan artifact and mints no App token, so the consumer envelope is the
     # whole block: `unlock-cell` runs `tofu init`, which a consumer's backend may configure
     # from a plain TF_VAR_*.
