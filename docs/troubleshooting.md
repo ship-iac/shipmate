@@ -1199,11 +1199,12 @@ gate has nothing to green over. Recover either way:
 A head that already carried a `shipmate / gate` status when the draft run
 reached it keeps that status; the draft status is written only on a head with
 none. A draft marked ready while its draft run is in flight does not keep the
-draft status: the ready run waits in the `plan-<pr>` concurrency group behind
-the draft run and plans after it. A run for a push made before the pull request
-was marked ready that reaches the group after the ready run still cancels it,
-and plans nothing, because its event says the pull request is a draft. Comment
-`shipmate plan` to recover.
+draft status unless a run for a push made before it was marked ready reaches the
+`plan-<pr>` concurrency group after the ready run. Otherwise the ready run waits
+behind the draft run and plans after it. That late push run cancels the ready
+run and plans nothing, because its event says the pull request is a draft;
+comment `shipmate plan` to recover (the gate's "mark it ready" remedy does not
+apply: the pull request is already ready).
 
 **A pending apply check nothing will complete.** `gate-refresh` greens the gate
 only when every shipmate-App-authored check on that commit whose name begins

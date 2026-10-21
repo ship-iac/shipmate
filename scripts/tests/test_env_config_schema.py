@@ -166,9 +166,10 @@ def test_a_flag_that_is_not_true_or_false_refuses(key, written, found):
     a person and would resolve as unset. For `explicit` that is the fail-open case: the
     environment lands on a bare `shipmate apply`.
 
-    Mutations: normalise the flag case-insensitively in `load_config` -- the `True` and
-    `FALSE` cases validate; drop the `isinstance` check from `_check_bool` -- every case
-    validates; or drop one key from `_FLAGS` -- that key's cases validate.
+    Mutations: normalise the value case-insensitively in `_normalise_bool` -- the `True` and
+    `FALSE` cases validate, and `test_three_independent_errors_refuse_as_three_lines` loses its
+    `gated` line; drop the `isinstance` check from `_check_bool` -- every case validates; or
+    drop one key from `_FLAGS` -- that key's cases validate.
     """
     text = f"layout: folder\nenvironments:\n  dev-eu:\n    {key}: {written}\n"
     with pytest.raises(SystemExit) as excinfo:
@@ -505,9 +506,9 @@ def test_a_referenced_max_parallel_refuses_before_the_variable_is_read(written):
     """`max_parallel` is written into the file, and the malformed-value refusal quotes what it
     found, so a reference anywhere in it refuses before it resolves.
 
-    Mutations: delete the reference refusal in `load_config` -- "direct" validates as 7 and the
-    nested rows quote the resolved value; test only the value itself with `_is_reference` -- the
-    nested rows quote the resolved value.
+    Mutations: delete the `max_parallel` reference refusal in `_normalise_settings` -- "direct"
+    validates as 7 and the nested rows quote the resolved value; test only the value itself with
+    `_is_reference` there -- the nested rows quote the resolved value.
     """
     text = f"layout: folder\nmax_parallel: {written}\n"
     with pytest.raises(SystemExit) as excinfo:
@@ -524,8 +525,8 @@ def test_a_referenced_max_parallel_refuses_before_the_variable_is_read(written):
 @pytest.mark.parametrize(("written", "value"), [("true", True), ("false", False)])
 def test_command_hints_reads_the_table(written, value):
     """Mutation: drop `command_hints` from `_TOP_KEYS` -- both rows refuse as an unknown key;
-    drop the bool conversion in `load_config` -- both rows refuse; return `False` unconditionally
-    -- "true" reads False."""
+    drop the bool conversion in `_normalise_bool` -- both rows refuse quoting the string; return
+    `False` unconditionally -- "true" reads False."""
     table = env_config.validate_structure(
         env_config.parse_table(f"layout: folder\ncommand_hints: {written}\n")
     )
@@ -572,8 +573,9 @@ def test_a_referenced_command_hints_refuses_before_the_variable_is_read(written)
     """`command_hints` is read from the default branch's file alone, so a reference anywhere in
     it refuses before it resolves.
 
-    Mutation: delete the reference refusal in `load_config` -- "direct" resolves to the string
-    "true" and refuses quoting it, the nested rows quote the resolved value.
+    Mutation: delete the reference refusal in `_normalise_bool` -- "direct" resolves to the
+    string "true" and refuses quoting it, the nested rows quote the resolved value, and every
+    row of `test_a_referenced_flag_refuses_before_the_variable_is_read` reddens too.
     """
     text = f"layout: folder\ncommand_hints: {written}\n"
     with pytest.raises(SystemExit) as excinfo:
