@@ -95,32 +95,36 @@ def load_config(text):
     return parsed
 
 
-#: The top-level settings that accept no variable reference, each with its refusal's remedy.
-_UNREFERENCED = {
-    "max_parallel": "Write the number into the file.",
-    "command_hints": "Write true or false into the file.",
-}
-
-
 def _normalise_settings(parsed):
-    for key, remedy in _UNREFERENCED.items():
-        if any(_is_reference(node) for _, node in _walk(parsed.get(key), key)):
-            raise SystemExit(
-                f"::error::{key} holds a variable reference, and it accepts none. {remedy}"
-            )
-    if parsed.get("command_hints") in ("true", "false"):
-        parsed["command_hints"] = parsed["command_hints"] == "true"
+    if any(_is_reference(node) for _, node in _walk(parsed.get("max_parallel"), "max_parallel")):
+        raise SystemExit(
+            "::error::max_parallel holds a variable reference, and it accepts none. Write the "
+            "number into the file."
+        )
+    _normalise_bool(
+        parsed,
+        "command_hints",
+        "::error::command_hints holds a variable reference, and it accepts none. Write true or "
+        "false into the file.",
+    )
 
 
 def _normalise_flags(env, entry):
     for key in _FLAGS:
-        if any(_is_reference(node) for _, node in _walk(entry.get(key), key)):
-            raise SystemExit(
-                f"::error::environments.{env}.{key} holds a variable reference; a flag accepts "
-                "no variable reference. Write true or false."
-            )
-        if entry.get(key) in ("true", "false"):
-            entry[key] = entry[key] == "true"
+        _normalise_bool(
+            entry,
+            key,
+            f"::error::environments.{env}.{key} holds a variable reference; a flag accepts "
+            "no variable reference. Write true or false.",
+        )
+
+
+def _normalise_bool(mapping, key, refusal):
+    """Refuses a reference anywhere in `mapping[key]`, then turns `true`/`false` into a bool."""
+    if any(_is_reference(node) for _, node in _walk(mapping.get(key), key)):
+        raise SystemExit(refusal)
+    if mapping.get(key) in ("true", "false"):
+        mapping[key] = mapping[key] == "true"
 
 
 def _is_reference(value):
@@ -416,10 +420,12 @@ def _check_flags(entry, env, errors):
     resolves as unset; for `explicit` that puts the environment on a bare `shipmate apply`.
     """
     for key in _FLAGS:
-        if key in entry and not isinstance(entry[key], bool):
-            errors.append(
-                f"::error::environments.{env}.{key} must be true or false, got {entry[key]!r}."
-            )
+        _check_bool(entry, key, f"environments.{env}.{key}", errors)
+
+
+def _check_bool(mapping, key, label, errors):
+    if key in mapping and not isinstance(mapping[key], bool):
+        errors.append(f"::error::{label} must be true or false, got {mapping[key]!r}.")
 
 
 def shared_envs(table):
@@ -479,17 +485,10 @@ def command_hints(table):
     """Whether the plan comment ends with its command section: the table's `command_hints`,
     else `False`. A non-bool value refuses here too, with `validate_structure`'s message."""
     errors = []
-    _check_command_hints(table, errors)
+    _check_bool(table, "command_hints", "command_hints", errors)
     if errors:
         raise SystemExit(errors[0])
     return table.get("command_hints", False)
-
-
-def _check_command_hints(table, errors):
-    if "command_hints" in table and not isinstance(table["command_hints"], bool):
-        errors.append(
-            f"::error::command_hints must be true or false, got {table['command_hints']!r}."
-        )
 
 
 def explicit_envs(table):
@@ -1060,7 +1059,7 @@ def validate_structure(table):
             f"::error::layout is {table['layout']!r}; it must be one of {', '.join(_LAYOUTS)}."
         )
     _check_max_parallel(table, errors)
-    _check_command_hints(table, errors)
+    _check_bool(table, "command_hints", "command_hints", errors)
     identities = table.get("identities", {})
     with _gather(errors) as shape:
         _mapping(identities, "identities")

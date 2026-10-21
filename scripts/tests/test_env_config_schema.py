@@ -167,7 +167,7 @@ def test_a_flag_that_is_not_true_or_false_refuses(key, written, found):
     environment lands on a bare `shipmate apply`.
 
     Mutations: normalise the flag case-insensitively in `load_config` -- the `True` and
-    `FALSE` cases validate; drop the `isinstance` check from `_check_flags` -- every case
+    `FALSE` cases validate; drop the `isinstance` check from `_check_bool` -- every case
     validates; or drop one key from `_FLAGS` -- that key's cases validate.
     """
     text = f"layout: folder\nenvironments:\n  dev-eu:\n    {key}: {written}\n"
@@ -189,7 +189,7 @@ def test_a_referenced_flag_refuses_before_the_variable_is_read(key, written):
     pull request comment, so a reference anywhere in a flag refuses before it resolves: the
     variable's value is never quoted.
 
-    Mutations: delete the reference refusal in `_normalise_flags` -- every row's flag refusal
+    Mutations: delete the reference refusal in `_normalise_bool` -- every row's flag refusal
     quotes `sentinel-value`; test only the flag itself with `_is_reference` -- the nested rows
     do.
     """
@@ -544,9 +544,9 @@ def test_a_non_bool_command_hints_refuses(written, shown):
     """Only the two YAML spellings turn into a bool; anything else reads as set to a person and
     would resolve as unset.
 
-    Mutation: accept a string in `_check_command_hints` (`isinstance(..., (bool, str))`) -- the
-    two string rows pass; drop `_check_command_hints` from `validate_structure` -- every row
-    passes."""
+    Mutation: accept a string in `_check_bool` (`isinstance(..., (bool, str))`) -- the two
+    string rows pass; drop the `command_hints` `_check_bool` call from `validate_structure`
+    -- every row passes."""
     value = env_config.load_config(f"layout: folder\ncommand_hints: {written}\n")["command_hints"]
     assert _refusal({"layout": "folder", "command_hints": value}) == (
         f"::error::command_hints must be true or false, got {shown}."
@@ -556,7 +556,7 @@ def test_a_non_bool_command_hints_refuses(written, shown):
 def test_command_hints_refuses_an_unvalidated_bad_value():
     """A reader that skips `validate_structure` must not read the string "false" as on.
 
-    Mutation: drop the `_check_command_hints` call in `command_hints` -- it returns "false",
+    Mutation: drop the `_check_bool` call in `command_hints` -- it returns "false",
     which is truthy."""
     with pytest.raises(SystemExit) as excinfo:
         env_config.command_hints({"command_hints": "false"})
