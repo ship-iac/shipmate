@@ -81,7 +81,7 @@ two source-derived tests, `test_apply_comment.py::test_wave_job_name_matches_the
 `test_apply_comment.py::test_every_env_level_job_is_named_for_its_level` (every
 `L<n>` name in `apply.yml` and `deploy.yml`), because a rename of either would degrade
 every link to the run URL silently — that fallback being the designed behaviour, no
-observable would fail.
+observable would fail — and leave every apply check pending.
 
 `scripts/apply-complete` is the second reader: given the pre-flight snapshot of
 check ids a run may complete, it reads each snapshotted `apply / <stack> / <env>`
@@ -2835,14 +2835,15 @@ reaches the process.
   the author debugging the wrong thing. Four enumerated names are **refused**
   rather than skipped: `SHIPMATE_SECRETS`, `SHIPMATE_APP_PRIVATE_KEY` and
   `SHIPMATE_ENCRYPTION_KEY`, secrets set on the variable surface, and
-  `SHIPMATE_PLAN_PASSPHRASE`, because a variable of that name would expose an
-  encryption key. Skipping one
-  would export nothing while its value sat world-readable in the repository UI,
-  and the engine's own namespace has no legitimate reading as a consumer
-  variable. The refusal says to delete the variable, rotate what it held, and
-  set the secret; for `SHIPMATE_PLAN_PASSPHRASE`, to choose a new
-  `SHIPMATE_ENCRYPTION_KEY` if it holds that value. A rotated `SHIPMATE_ENCRYPTION_KEY` no longer decrypts a
-  local backend's cached state (§Plan artifact encryption, "Rotation").
+  `SHIPMATE_PLAN_PASSPHRASE`, because a variable of that name can hold an
+  encryption key. Skipping one would export nothing while its value sat
+  world-readable in the repository UI, and the engine's own namespace has no
+  legitimate reading as a consumer variable. The refusal for each of the first
+  three says to delete the variable, rotate what it held and set the secret; for
+  `SHIPMATE_PLAN_PASSPHRASE` it says to delete the variable and, if it holds the
+  current `SHIPMATE_ENCRYPTION_KEY` value, choose a new one. A rotated
+  `SHIPMATE_ENCRYPTION_KEY` no longer decrypts a local backend's cached state
+  (§Plan artifact encryption, "Rotation").
 - **Name validation.** Every envelope key must match `[A-Za-z_][A-Za-z0-9_]*`.
   `$GITHUB_ENV` is written in heredoc form, so a key holding a newline would
   inject further assignments; this is the trust boundary, so a bad key is

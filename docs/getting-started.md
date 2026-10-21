@@ -912,10 +912,10 @@ a cell; the run fails telling you to rotate what it held. A
 variable is refused too, each with its own message: rotate the key and set it as
 a secret on `shipmate-engine`; choose a new encryption key and set it as a
 repository or organization secret; and, because a `SHIPMATE_PLAN_PASSPHRASE`
-variable would expose an encryption key, delete it and choose a new
-`SHIPMATE_ENCRYPTION_KEY` if it holds that value (a new encryption key cannot
-decrypt cached local state: [`../CONTRACT.md`](../CONTRACT.md) §Plan artifact
-encryption, "Rotation"). The other direction cannot be
+variable can hold an encryption key, delete it and choose a new
+`SHIPMATE_ENCRYPTION_KEY` if it holds that value. In both encryption-key cases
+the new key cannot decrypt cached local state ([`../CONTRACT.md`](../CONTRACT.md)
+§Plan artifact encryption, "Rotation"). The other direction cannot be
 caught: `SHIPMATE_VARS` set as a secret is never read — nothing maps it into a
 cell — so the keys simply never appear, with no error anywhere.
 

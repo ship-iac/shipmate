@@ -1529,9 +1529,10 @@ def test_check_name_grammar_matches_apply_cells_construction():
 
 def test_every_env_level_job_is_named_for_its_level():
     """`apply-gate.is_cell_job` requires the `L<n>` segment, so every env-level job of
-    `apply.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id. Hand-written
-    whole value. Mutation: rename deploy.yml's `name: L0` to `level 0`."""
-    expected = {"envlevel0": "L0", "envlevel1": "L1", "envlevel2": "L2", "envlevel3": "L3"}
+    `apply.yml` and `deploy.yml` must be named `L<n>` for its `envlevel<n>` id, one per level
+    up to `waves.MAX_ENV_LEVELS`, compared whole. Mutation: rename deploy.yml's `name: L0` to
+    `level 0`."""
+    expected = {f"envlevel{n}": f"L{n}" for n in range(wv.MAX_ENV_LEVELS)}
     for wf in ("apply.yml", "deploy.yml"):
         jobs = workflow_yaml(wf)["jobs"]
         names = {j: v.get("name") for j, v in jobs.items() if j.startswith("envlevel")}

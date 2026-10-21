@@ -21,7 +21,7 @@ Bumping it needs, per new level N:
 - `envlevelN_waves`/`_empty` outputs in actions/deploy-detect/action.yml and
   actions/apply-detect/action.yml;
 - the same two slots in the `detect` job `outputs:` of .github/workflows/apply.yml
-  and .github/workflows/deploy.yml, and an `envlevelN` job in each;
+  and .github/workflows/deploy.yml, and an `envlevelN` job in each, named `L<N>`;
 - an `envlevelN-waves` input on apply.yml's `summary` step and on
   actions/apply-summary/action.yml, with its `SHIPMATE_ENVLEVELN_WAVES` env line.
 
