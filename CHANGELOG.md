@@ -29,6 +29,7 @@ section below names the SHA the release tags.
 - **Repository-settings warnings (gate ruleset, review rule, `CODEOWNERS`) no longer post a plan comment for a pull request that changes nothing; a plan comment names the count of the other `doctor` warnings and links the run.**
 - **The plan and apply result comments group their cells under one `#### <env>: N cells, <counts>` heading per environment, in apply order (the `needs` levels, ties by name), with changed, failed and blocked cells first; a cell line under a heading no longer repeats `(<env>)`.**
 - **The footer link of a comment-ops reply reads `comment run` instead of `run`, since it links the run that handled the comment.**
+- **The `shipmate.yml` fence in `docs/getting-started.md` carries shorter comments, each keeping its reason.**
 
 ## [0.49.1] — 2026-10-18
 

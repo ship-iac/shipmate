@@ -469,10 +469,8 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      # Every input is optional except the verb, and that is deliberate: one schema serves
-      # three verbs, and GitHub reads an empty value for a `required: true` input as not
-      # provided and answers HTTP 422 before the run starts. The engine validates instead —
-      # `pr-facts` refuses a plan with no number, `apply-detect` an apply with no ref.
+      # Only verb is required: one schema serves three verbs, and GitHub answers 422 to an
+      # empty required input. The engine refuses a plan with no number, an apply with no ref.
       verb:
         description: What to run (plan, apply or unlock)
         type: choice
@@ -490,28 +488,22 @@ on:
         description: Pull request number (plan and apply)
         required: false
         default: ''
-# Floor, not a default to inherit: every job below declares its own block, so a job that
-# loses one gets nothing rather than everything the file granted.
+# Deny by default: each job grants its own permissions, so a job that loses its block gets none.
 permissions: {}
 jobs:
-  # `name: plan` is not decoration: GitHub names a called workflow's check runs
-  # `<caller job> / <callee job>`, so this is what makes the plan cells
-  # `plan / <env> / <stack>` — the names the plan comment's links resolve.
+  # Names the plan checks `plan / <env> / <stack>` (`<caller job> / <callee job>`),
+  # the names the plan comment links to.
   plan:
     name: plan
-    # `github.event.inputs` is the form readable under either trigger, unlike the `inputs`
-    # context, and `plan` also runs under one that is not `workflow_dispatch`; the
-    # concurrency group below relies on the same thing. `apply` and `unlock` are
-    # dispatch-only and keep `inputs.`, because only that form applies a declared default,
-    # which is what makes an omitted `environment` key read as the empty string.
+    # `github.event.inputs` reads under pull_request_target too, and the concurrency group
+    # relies on it. apply and unlock use `inputs.*`, the only form that applies declared
+    # defaults, so an omitted `environment` reads as ''.
     if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
     concurrency:
-      # `github.event.inputs` is readable under either trigger, unlike the `inputs` context.
       group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
       cancel-in-progress: true
     uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
-    # Not optional — a callee's permissions are capped by this job's, and granting less kills
-    # the run at startup with no job and no log.
+    # Required: the callee is capped by these; fewer kills the run with no log.
     permissions:
       contents: read
       pull-requests: read
@@ -519,18 +511,16 @@ jobs:
     secrets: &engine-secrets
       SHIPMATE_APP_PRIVATE_KEY: ${{ secrets.SHIPMATE_APP_PRIVATE_KEY }}
       SHIPMATE_ENCRYPTION_KEY: ${{ secrets.SHIPMATE_ENCRYPTION_KEY }}
-      # Not a no-op when you hold no repository secret of that name: the envelope normally
-      # lives on `<env>-plan` / `<env>-apply`, so this expression resolves empty and the
-      # mapping is what makes the environment's value reachable. Delete it and nothing arrives.
+      # Keep even without a repository secret: it passes the `<env>-plan` / `<env>-apply`
+      # environment's envelope through. Delete it and nothing arrives.
       SHIPMATE_SECRETS: ${{ secrets.SHIPMATE_SECRETS }}
-    # Runner for this file's engine jobs except the nine on ubuntu-slim (docs/aws.md §Runner
-    # choice); each `*runner` repeats it, drift files set their own. ubuntu-latest selects x64.
+    # Runner for engine jobs but the nine on ubuntu-slim (docs/aws.md §Runner choice);
+    # `*runner` reuses it, drift files set their own. ubuntu-latest for x64.
     with:
       runs_on: &runner ubuntu-26.04-arm
   comment-ops:
     name: comment
-    # `issue_comment` fires on issues too; the engine's own `ops` job carries that filter, so
-    # this one only has to select the event.
+    # The engine drops comments on issues; this only selects the event.
     if: github.event_name == 'issue_comment'
     uses: ship-iac/shipmate/.github/workflows/comment-ops.yml@<engine-sha>  # see the latest release
     permissions:
@@ -543,8 +533,7 @@ jobs:
     with:
       runs_on: *runner
   deploy:
-    # Display only: the run's job path reads
-    # `shipmate / deploy / L<n> / <env> / <stack>`.
+    # Display name: `shipmate / deploy / L<n> / <env> / <stack>`.
     name: deploy
     if: github.event_name == 'push'
     concurrency:
