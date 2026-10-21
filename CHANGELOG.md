@@ -10,6 +10,8 @@ section below names the SHA the release tags.
 
 ## [0.50.0] — 2026-10-21
 
+Tags `5e8bde1`.
+
 ### Changed — BREAKING
 
 - **Caller jobs are named for their verb and every cell job name ends in the stack: plan checks read `plan / <env> / <stack>` (and `plan / facts`, `plan / detect`, `plan / summary`), apply and deploy cell jobs `<caller> / L<n> / <env> / <stack>` without the inner `apply`, drift cells `sweep / <env> / <stack>` and unlock cells `unlock / <env> / <stack>`.** In `shipmate.yml` set `name: plan` on the `plan` job, `name: comment` on `comment-ops` and `name: deploy` on `deploy`, and in each drift file `name: sweep` on the `drift` job (`scripts/repin` diffs `shipmate.yml` only); then push a commit to each open pull request so its plan checks carry the new names.
