@@ -53,6 +53,14 @@ def test_engine_secrets_are_chosen_once_and_unlock_keeps_its_own():
     assert jobs["unlock"]["secrets"] == {"SHIPMATE_SECRETS": "${{ secrets.SHIPMATE_SECRETS }}"}
 
 
+def test_a_ready_plan_run_queues_behind_the_run_in_flight():
+    """Mutation: `cancel-in-progress` restored to `true`."""
+    assert _jobs("shipmate")["plan"]["concurrency"] == {
+        "group": "plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}",
+        "cancel-in-progress": "${{ github.event.action != 'ready_for_review' }}",
+    }
+
+
 def test_drift_runs_on_the_default_runner():
     """Mutation: the drift fence's `runs_on:` line deleted."""
     assert (_jobs("shipmate drift")["drift"].get("with") or {}).get("runs_on") == RUNNER

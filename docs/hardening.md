@@ -1263,7 +1263,8 @@ for exactly the exposure control 1 exists to limit.
   allowed to do. `needs`, `explicit`, `gated`, `max_parallel` and `command_hints` are not on this list:
   they live in `.github/shipmate-config.yml`, read from the default branch with the
   rest of it, so a branch can neither reorder its own apply waves,
-  drop its own exclusion, exempt itself from review nor raise its own fan-out.
+  drop its own exclusion, exempt itself from review, raise its own fan-out nor
+  change what its own plan comment shows.
 - **The gate is an assertion, not a proof.** The App identity and pull request
   approvals are out of a push-capable developer's reach only because control 16
   keeps the App private key on the `shipmate-engine` environment, unreadable

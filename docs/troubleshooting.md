@@ -1198,11 +1198,9 @@ gate has nothing to green over. Recover either way:
 
 A head that already carried a `shipmate / gate` status when the draft run
 reached it keeps that status; the draft status is written only on a head with
-none. A draft marked ready within seconds of a push can keep the draft status:
-the ready run shares the `plan-<pr>` concurrency group with the draft run, and
-if the ready run is the one cancelled, no plan follows. Which of the two runs
-the group cancels in that race is not verified. Comment `shipmate plan` to
-recover.
+none. A draft marked ready within seconds of a push does not keep the draft
+status: the ready run queues in the `plan-<pr>` concurrency group behind the
+draft run and plans after it.
 
 **A pending apply check nothing will complete.** `gate-refresh` greens the gate
 only when every shipmate-App-authored check on that commit whose name begins
@@ -1254,8 +1252,11 @@ a `shipmate apply` replies "no reviewed plan for the current PR head".
 
 "Re-run failed jobs" on the plan run is safe only when that run is the newest
 plan run of the head. The re-run re-enters the `plan-<pr>` concurrency group,
-whose `cancel-in-progress: true` cancels a newer run in flight, or the newer run
-cancels it. A re-run summary publishes no apply check its own run already
+which cancels the run in progress when the arriving run's event is not
+`ready_for_review`: the re-run cancels a newer run in flight, or the newer run
+cancels it. A `ready_for_review` run waits instead, and a later arrival still
+replaces a waiting run; whether a re-run of a `ready_for_review` run waits is not
+verified. A re-run summary publishes no apply check its own run already
 published, so it leaves alone a check an apply completed or is completing. It
 refuses before writing anything when a newer plan run holds the gate or published
 apply checks on the head, and ends green with that refusal as a notice. A re-run of a plan job whose artifact upload succeeded
@@ -1558,13 +1559,17 @@ or cancelled on the head.
 
 After the newer plan run has finished, re-run the cancelled run:
 `gh run rerun <id>`. Not before: the re-run re-enters the `plan-<pr>`
-concurrency group, whose `cancel-in-progress: true` cancels a newer run still in
-flight. When the newer run holds the gate or published apply checks on the
+concurrency group, which cancels the run in progress when the arriving run's
+event is not `ready_for_review`, so the re-run cancels a newer run still in
+flight. Whether a re-run of a `ready_for_review` run waits instead is not
+verified. When the newer run holds the gate or published apply checks on the
 head, the re-run's `summary` writes nothing and ends green at its hold step,
 with a notice naming that run ("plan run <id> holds the gate of <sha> and is
 newer than this run", or "plan run <id>, newer than this run (<id>), published
 apply checks on this head"). A plan run of the same pull request that starts
-while the re-run is in flight cancels the re-run, as it cancelled the autoplan.
+while the re-run is in flight cancels the re-run, as it cancelled the autoplan;
+a `ready_for_review` run waits for the re-run instead, and a later arrival still
+replaces a waiting run.
 Whatever the re-run ends with, pushing a commit after the newer plan run has
 finished clears the red checks: a new head carries only fresh checks.
 

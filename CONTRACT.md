@@ -2303,12 +2303,12 @@ Comment `shipmate help` for every command.
 ```
 
 The held body and a body with no changed cell never carry it. The held body
-above ends with the hint. `doctor` records its decision once, as its `warned` output, which the
-post-or-skip rule reads, and its `warnings` output, the count the doctor line
-shows: both leave out the repository-settings probes' warnings, a settings
-probe that could not run included, and count any other probe that could not
-run when its note is a warning. When `doctor` fails, the
-doctor step writes `warned=false` and `warnings=0`. The build step records
+above ends with the hint. `doctor` records its decision once, as its `warned`
+output, which the post-or-skip rule reads, and its `warnings` output, the count
+the doctor line shows: both leave out the repository-settings probes' warnings,
+a settings probe that could not run included, and count any other probe that
+could not run when its note is a warning. When `doctor` fails, the doctor step
+writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
 
@@ -2376,8 +2376,8 @@ cell's bare line and every environment heading need is reserved up front, so
 an early giant plan cannot starve a later cell, and every cell keeps its line
 and its link. The command section is left out before any of these steps: it is
 added after every cell is sized, only when the whole body with it stays within
-the budget, and never shrinks a cell; leaving it out warns nothing. If even the bare lines alone cannot fit the cap, the summary
-fails loud rather than posting
+the budget, and never shrinks a cell; leaving it out warns nothing. If even the
+bare lines alone cannot fit the cap, the summary fails loud rather than posting
 a truncated comment. Plan text is emitted only inside a backtick
 fence computed to be longer than any backtick run in the text —
 author-controlled plan output cannot escape the fence.

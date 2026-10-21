@@ -537,8 +537,10 @@ def test_command_hints_defaults_to_false():
     assert env_config.command_hints({}) is False
 
 
-@pytest.mark.parametrize("written", ["yes", "1", "[true]"])
-def test_a_non_bool_command_hints_refuses(written):
+@pytest.mark.parametrize(
+    ("written", "shown"), [("yes", "'yes'"), ("1", "'1'"), ("[true]", "['true']")]
+)
+def test_a_non_bool_command_hints_refuses(written, shown):
     """Only the two YAML spellings turn into a bool; anything else reads as set to a person and
     would resolve as unset.
 
@@ -547,7 +549,7 @@ def test_a_non_bool_command_hints_refuses(written):
     passes."""
     value = env_config.load_config(f"layout: folder\ncommand_hints: {written}\n")["command_hints"]
     assert _refusal({"layout": "folder", "command_hints": value}) == (
-        f"::error::command_hints must be true or false, got {value!r}."
+        f"::error::command_hints must be true or false, got {shown}."
     )
 
 

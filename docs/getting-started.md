@@ -354,8 +354,9 @@ and `environments`, caps how many cells one plan or drift sweep runs at once ([`
 §Environment table). Each plan and drift sweep running at the same time takes
 up to `max_parallel` cells, so stagger drift crons ([`drift.md`](drift.md)
 §"What it costs").
-`command_hints: true` ends each plan comment with a changed cell with a folded
-section naming `shipmate apply` and `shipmate help`; it is off when absent.
+`command_hints: true` ends each plan comment with a changed cell, on a pull
+request that is not a draft, with a folded section naming `shipmate apply` and
+`shipmate help`; it is off when absent.
 
 **What each environment and ordering key does.** Four are keys of an `environments` entry;
 `after` is a Terramate stack attribute (`after = [...]` in the stack block). In the
@@ -503,7 +504,8 @@ jobs:
     if: github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && github.event.inputs.verb == 'plan')
     concurrency:
       group: plan-${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-      cancel-in-progress: true
+      # A ready run waits for the run in flight instead of cancelling it.
+      cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
     uses: ship-iac/shipmate/.github/workflows/plan.yml@<engine-sha>  # see the latest release
     # Required: the callee is capped by these; fewer kills the run with no log.
     permissions:

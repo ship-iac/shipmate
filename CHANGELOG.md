@@ -15,6 +15,10 @@ section below names the SHA the release tags.
 - `scripts/repin --write-fence` writes the release's fence over a differing `shipmate.yml`, keeping its trigger branch.
 - `command_hints: true` in `.github/shipmate-config.yml` ends each plan comment with a changed cell with a folded `shipmate commands` section.
 
+### Changed
+
+- The fence's `plan` job no longer cancels a run in flight when the pull request is marked ready for review; the ready run queues behind it. Re-pin `shipmate.yml` with `scripts/repin <consumer> vX.Y.Z --write-fence`, which takes the new fence.
+
 ### Fixed
 
 - A plan's `detect` that fails on unformatted HCL or stale generated code annotates each file with its remedy, and the held gate and comment name the files and the command to run instead of "change detection did not succeed".
