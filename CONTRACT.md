@@ -2200,7 +2200,8 @@ the publish hold (below). In order, blank lines between the parts:
   recorded the error, `recorded by attempt <n> of this run` sits between the
   line and the fence. A cell whose artifact did not arrive or carries an empty
   error shows its line alone. The cell's plan job also carries an `::error::`
-  annotation with it. For the autoplan that job is the linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
+  annotation with it. For the autoplan that job is the linked check and
+  `shipmate doctor` harvests it. An on-demand `shipmate plan`
   keeps it on its own run: `doctor` reads only the autoplan's cell checks and
   the App-mirrored head check carries no annotations. A drift or apply cell's
   failed init, and a drift cell's failed plan, annotate the same way;
