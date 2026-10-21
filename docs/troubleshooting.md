@@ -1537,8 +1537,8 @@ with a notice naming that run ("plan run <id> holds the gate of <sha> and is
 newer than this run", or "plan run <id>, newer than this run (<id>), published
 apply checks on this head"). A plan run of the same pull request that starts
 while the re-run is in flight cancels the re-run, as it cancelled the autoplan.
-Then comment `shipmate plan` or push rather than re-running again: a second
-re-run fails a plan cell whose artifact the first re-run uploaded (409).
+Whatever the re-run ends with, pushing a commit after the newer plan run has
+finished clears the red checks: a new head carries only fresh checks.
 
 ### Fork pull request refused
 
