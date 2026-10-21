@@ -6,12 +6,11 @@ the first failure while the other render is still writing into the workspace.
 
 The step body runs unmodified, with `terramate`, `tofu` and `python3` replaced by bash functions:
 bash resolves a function before PATH, and a function behind `&` runs in a subshell like the binary
-would. The `python3` stub runs the real `drop-routine-lines` with the interpreter under test,
-touches `classified` for `plan-classify`, and fails any other call. The `terramate` stub drops
-the wrapper's arguments up to `--`, writes terramate's two routine stderr lines and runs the
-rest. The lines are copied from a raw capture of
-`terramate run ... -- tofu show -no-color stack.otplan` stderr (Terramate 0.17.1, OpenTofu
-1.13.1, Windows, redirected to a file); the `-json` render's second line names its own command.
+would. The `python3` stub touches `classified` for `plan-classify` and fails any other call.
+The `terramate` stub drops the wrapper's arguments up to `--` and runs the rest; without
+`--quiet` among them it first writes terramate's two routine stderr lines, copied from a raw
+capture of `terramate run ... -- tofu show -no-color stack.otplan` stderr (Terramate 0.17.1,
+OpenTofu 1.13.1, Windows, redirected to a file).
 """
 
 import os
@@ -23,14 +22,6 @@ from _loader import ACTIONS, bash_only, load_script, run_lines, run_step, step_b
 
 _TEXT = "plan text\n"
 _JSON = '{"format_version":"1.2"}\n'
-_TM_TEXT = (
-    "terramate: Entering stack in /stacks/dns\n"
-    'terramate: Executing command "tofu show -no-color stack.otplan"\n'
-)
-_TM_JSON = (
-    "terramate: Entering stack in /stacks/dns\n"
-    'terramate: Executing command "tofu show -json stack.otplan"\n'
-)
 
 #: The `-json` arm sleeps before writing, so a step that returns without awaiting it leaves
 #: plan.json incomplete. It drops its stderr first: an inherited pipe would hold subprocess.run
@@ -38,9 +29,11 @@ _TM_JSON = (
 #: json error is written first.
 _STUBS = r"""
 terramate() {
-  while [ $# -gt 0 ] && [ "$1" != -- ] ; do shift ; done
+  quiet=
+  while [ $# -gt 0 ] && [ "$1" != -- ] ; do [ "$1" = --quiet ] && quiet=1 ; shift ; done
   [ $# -gt 0 ] || return 97 ; shift
-  printf 'terramate: Entering stack in /stacks/dns\nterramate: Executing command "%s"\n' "$*" >&2
+  [ -n "$quiet" ] ||
+    printf 'terramate: Entering stack in /stacks/dns\nterramate: Executing command "%s"\n' "$*" >&2
   "$@"
 }
 tofu() {
@@ -56,7 +49,6 @@ tofu() {
 }
 python3() {
   case "${1##*/}" in
-    drop-routine-lines) command "$PYTHON" "$@" ;;
     plan-classify) touch "$RUNNER_TEMP/classified" ;;
     *) return 97 ;;
   esac
@@ -73,7 +65,6 @@ def _run(tmp_path, fail, text=True):
         "STACK": "stacks/app",
         "RUNNER_TEMP": str(runner_temp),
         "GITHUB_ACTION_PATH": str(ACTIONS / "plan-cell"),
-        "PYTHON": sys.executable,
         "FAIL": fail,
     }
     return run_step(tmp_path, body, env, text=text)
@@ -99,18 +90,19 @@ def test_both_renders_succeed_and_plan_txt_is_the_text_render_whole(tmp_path):
 @bash_only
 def test_a_clean_render_prints_a_warning_once_without_terramate_routine_lines(tmp_path):
     """Both renders write the same warning, with a byte that is not UTF-8. Mutations: delete the
-    success-path `drop-routine-lines` line (the warning never prints); filter `show-json.err` too
-    (the warning prints twice)."""
+    success-path `cat show-text.err` line (the warning never prints); `cat show-json.err` too
+    (the warning prints twice); drop `--quiet` from the text render line (the routine lines
+    print)."""
     r = _run(tmp_path, "warn", text=False)
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
     assert r.stderr == b"Warning: bad \xff byte\n"
 
 
-def test_a_clean_render_filters_the_text_render_stderr_then_classifies():
-    """Mutations: filter `show-json.err` instead; delete the `drop-routine-lines` line; delete the
+def test_a_clean_render_prints_the_text_render_stderr_then_classifies():
+    """Mutations: print `show-json.err` instead; delete the `cat show-text.err` line; delete the
     `plan-classify` line -- each red."""
     assert run_lines(step_by("plan-cell", id="plan"))[-2:] == [
-        'python3 "$GITHUB_ACTION_PATH/../../scripts/drop-routine-lines" < show-text.err >&2',
+        "cat show-text.err >&2",
         'python3 "$GITHUB_ACTION_PATH/../../scripts/plan-classify"',
     ]
 
@@ -130,7 +122,7 @@ def test_a_failing_text_render_fails_the_step_after_the_json_render_finished(tmp
     (the text error never prints)."""
     r = _run(tmp_path, "text")
     assert r.returncode != 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
-    assert r.stderr == _TM_TEXT + "text error\n" + _TM_JSON
+    assert r.stderr == "text error\n"
     assert _read(tmp_path, "plan.json") == _JSON
     assert not (tmp_path / "rt" / "classified").exists()
 
@@ -138,10 +130,11 @@ def test_a_failing_text_render_fails_the_step_after_the_json_render_finished(tmp
 @bash_only
 def test_two_failing_renders_print_their_errors_text_first(tmp_path):
     """Mutations: drop the `2> show-json.err` redirect -- the json error prints first; drop the
-    `cat` -- neither error prints."""
+    `cat` -- neither error prints; drop `--quiet` from the json render line -- its routine lines
+    print."""
     r = _run(tmp_path, "both")
     assert r.returncode != 0
-    assert r.stderr == _TM_TEXT + "text error\n" + _TM_JSON + "json error\n"
+    assert r.stderr == "text error\njson error\n"
 
 
 pcs = load_script("plan-cell-summary")

@@ -34,6 +34,7 @@ from _loader import ACTIONS, action_steps
 _WRAPPER = [
     "terramate",
     "run",
+    "--quiet",
     "--disable-safeguards=git-out-of-sync",
     "--no-recursive",
     "-C",

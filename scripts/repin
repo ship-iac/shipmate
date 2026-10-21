@@ -25,9 +25,9 @@ every file as it was:
 5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
    it, on the branch named by the consumer's `shipmate.yml` line `    branches: [X]` directly
    under `  push:` when that is the only such line, `X` is a single plain branch name, and
-   the push block holds nothing else. Any other shape renders on `main`, so a list, a
-   wildcard, a flow mapping or a `paths:` filter shows in the diff. A single branch other
-   than the default is `onboard`'s to report, not this script's.
+   the push block holds nothing else but blank and comment lines. Any other shape renders on
+   `main`, so a list, a wildcard, a flow mapping or a `paths:` filter shows in the diff. A
+   single branch other than the default is `onboard`'s to report, not this script's.
 
 It then writes each changed file, prints `updated <file>` or `unchanged <file>` for every file
 it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
@@ -36,9 +36,10 @@ It does not commit.
 `--write-fence`, in any position, then writes the rendered fence over a differing
 `shipmate.yml`, in its line endings, and prints `wrote shipmate.yml from the <tag> fence`. It
 keeps the file's push branch and replaces every other local edit, a changed `runs_on` or
-secret mapping included, so read the printed diff first. When `shipmate.yml` is absent or its
-push trigger holds anything but one plain branch, it prints `not writing shipmate.yml: <why>`
-before the rest of the output and writes nothing more.
+secret mapping included, so read the printed diff first. When `shipmate.yml` is absent, or
+differs and its push trigger holds anything but one plain branch, it prints
+`not writing shipmate.yml: <why>` after the `updated`/`unchanged` lines, then the diff (or
+`shipmate.yml absent`), and writes nothing more.
 
 Exit codes: 0 every engine ref pinned to the tag and `shipmate.yml` matches the fence or was
 written from it; 2 every engine ref pinned and `shipmate.yml` differs or is absent; 1 a
@@ -63,9 +64,12 @@ _PIN = re.compile(rf'({_SLUG}/[^@ \t"]+)@[0-9a-f]{{40}}("?)({_LABEL})?')
 #: Case-insensitive, unlike `_PIN`: GitHub resolves `Ship-IaC/shipmate` too, so a variant the
 #: rewrite leaves alone still refuses as a leftover.
 _REF = re.compile(rf'(?i:{_SLUG})/([^@ \t"]+)@')
-#: The next non-blank line sits at indent 2 or less: a `paths:`, `tags:` or `branches-ignore:`
-#: line under `push:` makes the trigger more than one branch.
-_TRIGGER = re.compile(r"^  push:\n    branches: \[([^\]\n]*)\]$(?!\n(?:[ \t]*\n)*   )", re.M)
+#: The next line that is not blank or a comment sits at indent 2 or less: a `paths:`, `tags:` or
+#: `branches-ignore:` line under `push:` makes the trigger more than one branch.
+_TRIGGER = re.compile(
+    r"^  push:\n    branches: \[([^\]\n]*)\]$(?!\n(?:[ \t]*(?:#[^\n]*)?\n)*[ \t]{3,}[^ \t\n#])",
+    re.M,
+)
 _FLAG = "--write-fence"
 
 

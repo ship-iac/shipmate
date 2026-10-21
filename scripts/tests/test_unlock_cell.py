@@ -28,7 +28,9 @@ from _loader import ACTIONS, action_steps, action_yaml, bash_only, run_step, ste
 
 _ACTION = ACTIONS / "unlock-cell" / "action.yml"
 
-_WRAPPER = 'terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" --'
+_WRAPPER = (
+    'terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" --'
+)
 
 #: Every `terramate run` the cell is expected to make, in order. Whole lines, because a window
 #: inside them asserts nothing about either edge and the flags at both edges are the load-bearing

@@ -738,6 +738,49 @@ def test_write_fence_refuses_a_trigger_with_a_paths_filter(engine, tmp_path, mon
     assert on_disk(wf) == {"shipmate.yml": shim}
 
 
+@pytest.mark.parametrize("comment", ["# infra only", "  # infra only"])
+def test_write_fence_refuses_a_paths_filter_behind_a_comment(
+    engine, tmp_path, monkeypatch, capsys, comment
+):
+    """A comment line between `branches: [main]` and `paths:` hides nothing. Mutation: the
+    lookahead `(?!\\n(?:[ \\t]*\\n)*   )` -- the comment ends the push block, the file is written
+    and loses its `paths:` line."""
+    shim = _fence_shim("main", f"{engine.sha} # v1.2.3", "\n").replace(
+        b"    branches: [main]\n", f"    branches: [main]\n{comment}\n    paths: [x]\n".encode()
+    )
+    wf = consumer(tmp_path, {"shipmate.yml": shim})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\n"
+        "unchanged shipmate.yml\n"
+        "not writing shipmate.yml: its push trigger must hold one plain branch and nothing else\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -2,6 +2,8 @@\n"
+        " on:\n"
+        "   push:\n"
+        "     branches: [main]\n"
+        f"+{comment}\n"
+        "+    paths: [x]\n"
+        " jobs:\n"
+        "   plan:\n"
+        f"     uses: {WF}/plan.yml@<pin>\n"
+    )
+    assert on_disk(wf) == {"shipmate.yml": shim}
+
+
+def test_write_fence_skips_a_whitespace_only_line_after_the_branch(engine, tmp_path, monkeypatch):
+    """A line of four spaces, then `  workflow_dispatch:`: the push block is still one branch.
+    Mutation: drop `[^ \\t\\n#]` from `_TRIGGER`'s lookahead -- the four spaces read as an
+    indented line, the trigger is refused and nothing is written."""
+    shim = _fence_shim("develop", f"{engine.sha} # v1.2.3", "\n").replace(
+        b"    branches: [develop]\n", b"    branches: [develop]\n    \n  workflow_dispatch:\n"
+    )
+    wf = consumer(tmp_path, {"shipmate.yml": shim})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
+    assert on_disk(wf) == {"shipmate.yml": _fence_shim("develop", f"{engine.sha} # v1.2.3", "\n")}
+
+
 def test_write_fence_reads_only_the_push_trigger(engine, tmp_path, monkeypatch, capsys):
     """A flow-mapping push trigger beside a `pull_request` block's `branches: [develop]`.
     Mutation: drop `  push:\\n` from `_TRIGGER` -- `develop` reads as the push branch and the

@@ -167,7 +167,7 @@ runs:
         # nothing. After `init`: inside `terramate run` the render reads init's data directory
         # (`TF_DATA_DIR` from run.env) and, where the plan file lacks schemas, init's providers.
         rendered="$RUNNER_TEMP/rendered-plan.txt"
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -no-color stack.otplan > "$rendered"
+        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu show -no-color stack.otplan > "$rendered"
         # Digested from stdin, not by name: sha256sum escapes a path containing a backslash and
         # prefixes the whole line with one, which would never equal the recorded digest.
         actual=$(sha256sum < "$rendered" | cut -d' ' -f1)
@@ -194,7 +194,7 @@ runs:
         # No `-auto-approve`: inert on a stored plan, and its absence is a backstop. Were
         # `stack.otplan` lost, `-input=false` fails "Error asking for approval", where
         # `-auto-approve` would re-plan from branch content and apply that unattended.
-        terramate run --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
+        terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C "$STACK" -- tofu apply -input=false stack.otplan 2>&1 | tee "$RUNNER_TEMP/apply.txt"
         status="${PIPESTATUS[0]}"
         set -e
         echo "::endgroup::"
@@ -272,19 +272,6 @@ runs:
       run: |
         set -euo pipefail
         python3 "$GITHUB_ACTION_PATH/../../scripts/apply-cell-summary"
-
-    - name: Drop terramate's routine lines from the posted log
-      # Reviewer-facing only: the job log keeps the lines. A step of its own, so a failed filter
-      # cannot change the apply step's status; the posted log then keeps them too.
-      if: always()
-      continue-on-error: true
-      shell: bash
-      run: |
-        set -euo pipefail
-        log="$RUNNER_TEMP/apply.txt"
-        [ -f "$log" ] || exit 0
-        python3 "$GITHUB_ACTION_PATH/../../scripts/drop-routine-lines" < "$log" > "$log.tmp"
-        mv "$log.tmp" "$log"
 
     - name: Upload apply summary
       # Reviewer-facing only (continue-on-error): a failed upload drops the cell's output from the

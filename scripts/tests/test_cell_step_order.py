@@ -69,7 +69,6 @@ _EXPECTED = {
         "Check the provider cache",
         "Save provider cache",
         "Compose cell summary",
-        "Drop terramate's routine lines from the posted log",
         "Upload apply summary",
     ],
 }

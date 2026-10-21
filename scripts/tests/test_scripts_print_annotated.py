@@ -25,7 +25,6 @@ SCRIPTS_EXPECTED = [
     "doctor",
     "drift-cell-summary",
     "drift-issues",
-    "drop-routine-lines",
     "env-config",
     "env-inject",
     "gate-config",

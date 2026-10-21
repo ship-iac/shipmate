@@ -1000,7 +1000,7 @@ same cell. So the two are bound to each other rather than trusted individually:
 the trusted `summary` job takes `sha256` over the whole `plan.txt` it downloaded
 and records the digest on each apply check, and the apply re-renders the stored
 plan with the command that wrote the file
-(`terramate run --disable-safeguards=git-out-of-sync --no-recursive -C <stack>
+(`terramate run --quiet --disable-safeguards=git-out-of-sync --no-recursive -C <stack>
 -- tofu show -no-color stack.otplan`) and refuses any difference.
 The digest covers the file, not the excerpt: the comment embeds a capped prefix
 (`CONTRACT.md` §Plan comment), so on a large plan a reviewer sees less than what

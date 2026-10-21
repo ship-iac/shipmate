@@ -10,7 +10,8 @@ byte changed: `fmt-two-files.stdout`'s `\\` separators became `/`, and in
 
 Every case drives `main` through `run_annotated`, with `subprocess.run` replaced by a double that
 takes the call the script makes and fails on any other argv, and compares the whole stderr and
-the whole `refusal` output against hand-written constants.
+the whole `refusal` output against hand-written constants. The raw-output echo on stdout is
+pinned once, with the stop-commands token made deterministic.
 """
 
 import pathlib
@@ -47,8 +48,10 @@ FMT_TWELVE = (
     "12 file(s) not formatted; run terramate fmt and commit the result: f01.hcl, f02.hcl, "
     "f03.hcl, f04.hcl, f05.hcl, f06.hcl, f07.hcl, f08.hcl, f09.hcl, f10.hcl, and 2 more"
 )
+#: The parse error's two lines as the generic error's detail: each indented two spaces.
 PARSE_ERROR = (
-    "Error: unable to parse configuration%0A> /home/runner/work/ex/ex/stacks/dns/globals.tm.hcl"
+    "  Error: unable to parse configuration%0A  > "
+    "/home/runner/work/ex/ex/stacks/dns/globals.tm.hcl"
     ":4,9-10: HCL syntax error: loading from /home/runner/work/ex/ex/stacks: loading from "
     "/home/runner/work/ex/ex/stacks/dns: There is no closing brace for this block before the end "
     "of the file. This may be caused by incorrect brace nesting elsewhere in this file."
@@ -76,9 +79,10 @@ def _twelve_unformatted():
     return 1, b"".join(b"f%02d.hcl\n" % i for i in range(1, 13)), b""
 
 
-def _check(monkeypatch, tmp_path, capsys, fmt, generate):
-    """(exit code or None, stderr, `refusal` or None when no output was written) of one run;
-    `fmt` and `generate` are each an (exit, stdout, stderr) answer or an exception to raise."""
+def _run(monkeypatch, tmp_path, capsys, fmt, generate):
+    """(exit code or None, captured stdout and stderr, `refusal` or None when no output was
+    written) of one run; `fmt` and `generate` are each an (exit, stdout, stderr) answer or an
+    exception to raise."""
     answers = {FMT: fmt, GENERATE: generate}
     calls = []
 
@@ -103,7 +107,13 @@ def _check(monkeypatch, tmp_path, capsys, fmt, generate):
         code = exc.code
     assert calls == [FMT, GENERATE]
     refusal = github_outputs(outputs)["refusal"] if outputs.exists() else None
-    return code, capsys.readouterr().err, refusal
+    return code, capsys.readouterr(), refusal
+
+
+def _check(monkeypatch, tmp_path, capsys, fmt, generate):
+    """`_run`, keeping stderr alone of the captured output."""
+    code, captured, refusal = _run(monkeypatch, tmp_path, capsys, fmt, generate)
+    return code, captured.err, refusal
 
 
 def test_two_unformatted_files_each_get_an_annotation_and_one_summary(
@@ -210,7 +220,7 @@ def test_a_parse_error_is_the_generic_error_for_both(monkeypatch, tmp_path, caps
     assert result == (
         1,
         f"::error::{fmt}%0A{PARSE_ERROR}\n::error::{generate}%0A{PARSE_ERROR}\n",
-        f"{fmt} {PARSE_ERROR.replace('%0A', ' ')}",
+        f"{fmt} {PARSE_ERROR.replace('%0A  ', ' ').lstrip()}",
     )
 
 
@@ -221,7 +231,7 @@ def test_a_file_line_before_any_stack_is_the_generic_error(monkeypatch, tmp_path
     result = _check(monkeypatch, tmp_path, capsys, _capture("fmt-clean"), (2, report, b""))
     assert result == (
         1,
-        f"::error::{first}%0A\t[~] _variables.tf%0A- /stacks/app%0A\t[~] main.tf\n",
+        f"::error::{first}%0A  \t[~] _variables.tf%0A  - /stacks/app%0A  \t[~] main.tf\n",
         f"{first} [~] _variables.tf - /stacks/app [~] main.tf",
     )
 
@@ -232,7 +242,7 @@ def test_non_utf8_stderr_is_the_generic_error(monkeypatch, tmp_path, capsys):
     result = _check(
         monkeypatch, tmp_path, capsys, (1, b"", b"Error: \xff bad\n"), _capture("generate-clean")
     )
-    assert result == (1, f"::error::{first}%0AError: � bad\n", f"{first} Error: � bad")
+    assert result == (1, f"::error::{first}%0A  Error: � bad\n", f"{first} Error: � bad")
 
 
 def test_a_missing_terramate_is_the_generic_error_for_both(monkeypatch, tmp_path, capsys):
@@ -257,7 +267,7 @@ def test_generate_exit_1_with_empty_stdout_is_the_generic_error(monkeypatch, tmp
     result = _check(
         monkeypatch, tmp_path, capsys, _capture("fmt-clean"), (1, b"", b"Error: boom\n")
     )
-    assert result == (1, f"::error::{first}%0AError: boom\n", f"{first} Error: boom")
+    assert result == (1, f"::error::{first}%0A  Error: boom\n", f"{first} Error: boom")
 
 
 def test_generate_exit_2_with_nothing_parsed_still_fails(monkeypatch, tmp_path, capsys):
@@ -266,7 +276,54 @@ def test_generate_exit_2_with_nothing_parsed_still_fails(monkeypatch, tmp_path, 
     result = _check(
         monkeypatch, tmp_path, capsys, _capture("fmt-clean"), (2, b"something else\n", b"")
     )
-    assert result == (1, f"::error::{first}%0Asomething else\n", f"{first} something else")
+    assert result == (1, f"::error::{first}%0A  something else\n", f"{first} something else")
+
+
+def test_a_detail_line_starting_with_an_error_command_stays_in_one_annotation(
+    monkeypatch, tmp_path, capsys
+):
+    """A tool line starting `::error::` would otherwise start an annotation of its own and spend
+    the step's budget. Mutation: append the detail lines without the two-space indent -- red."""
+    first = "terramate generate exited 1; run it locally to see why"
+    result = _check(monkeypatch, tmp_path, capsys, _capture("fmt-clean"), (1, b"", b"::error::x\n"))
+    assert result == (1, f"::error::{first}%0A  ::error::x\n", f"{first} ::error::x")
+
+
+def test_an_fmt_file_list_with_stderr_is_the_generic_error(monkeypatch, tmp_path, capsys):
+    """Mutation: drop `or err` from `_fmt`'s guard -- red, `a.hcl` annotated as unformatted."""
+    first = "terramate fmt exited 1; run it locally to see why"
+    result = _check(
+        monkeypatch, tmp_path, capsys, (1, b"a.hcl\n", b"Error: boom\n"), _capture("generate-clean")
+    )
+    assert result == (1, f"::error::{first}%0A  Error: boom\n", f"{first} Error: boom")
+
+
+def test_each_commands_raw_output_is_echoed_in_a_group_with_workflow_commands_stopped(
+    monkeypatch, tmp_path, capsys
+):
+    """A file name is branch-controlled, so the echo must not run a workflow command it holds.
+    Mutations: drop the `::stop-commands::` line or its resume line; drop `err` from the echo;
+    drop `::endgroup::` -- each red."""
+    monkeypatch.setattr(hc.secrets, "token_hex", lambda n: f"tok{n}")
+    report = b"- /stacks/app\n\t[~] ::warning::x.tf"
+    code, captured, _ = _run(
+        monkeypatch, tmp_path, capsys, (1, b"::warning::a.hcl\n", b""), (2, report, b"warn\n")
+    )
+    assert code == 1
+    assert captured.out == (
+        "::group::terramate fmt --check\n"
+        "::stop-commands::tok16\n"
+        "::warning::a.hcl\n"
+        "::tok16::\n"
+        "::endgroup::\n"
+        "::group::terramate generate --detailed-exit-code\n"
+        "::stop-commands::tok16\n"
+        "- /stacks/app\n"
+        "\t[~] ::warning::x.tf\n"
+        "warn\n"
+        "::tok16::\n"
+        "::endgroup::\n"
+    )
 
 
 #: `detect`'s whole step list. `checks` has no `if:`: it runs only when `matrix`, which holds

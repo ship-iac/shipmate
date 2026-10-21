@@ -2,13 +2,17 @@
 """Check that the checkout's HCL is formatted and its generated code current.
 
 Runs `terramate fmt --check`, then `terramate generate --detailed-exit-code`, always both, from
-the checkout root. Each file `fmt` lists, and each file `generate` reports stale, gets an
-`::error file=<path>::` annotation naming its remedy; then each failing command gets one
-`::error::` summary naming the remedy and the files: `fmt`'s first, so the step output `refusal`
-is the first failing command's summary. A tool exit this cannot read is the generic
-`terramate <subcommand> exited <code>` error with the tool's output under it, and a `terramate`
-that does not start is `terramate <subcommand> did not start` with the OS error under it: never
-exit 0 and never a traceback. Exits 1 when either command failed.
+the checkout root. Each command's raw stdout and stderr go to stdout first, in a
+`::group::<command>` with workflow commands stopped by a random token, so a branch-controlled
+file name cannot run one. Each file `fmt` lists (exit 1, empty stderr), and each file `generate`
+reports stale, gets an `::error file=<path>::` annotation naming its remedy; then each failing
+command gets one `::error::` summary naming the remedy and the first `LISTED` files: `fmt`'s
+first, so the step output `refusal` is the first failing command's summary. A tool exit this
+cannot read is the generic `terramate <subcommand> exited <code>` error with the tool's output
+under it, each line indented two spaces so a line starting `::error::` cannot become an
+annotation of its own, and a `terramate` that does not start is
+`terramate <subcommand> did not start` with the OS error under it: never exit 0 and never a
+traceback. Exits 1 when either command failed.
 
 GitHub keeps 10 error annotations per step, so the per-file annotations stop at 10 less the
 summaries, `fmt`'s files first, and every summary keeps its annotation.
@@ -19,6 +23,7 @@ is harmless there.
 
 import posixpath
 import re
+import secrets
 import subprocess
 import sys
 
@@ -29,15 +34,17 @@ GENERATE = ["terramate", "generate", "--detailed-exit-code"]
 _STACK = re.compile(r"- (/.*)")
 _FILE = re.compile(r"\t\[[+~-]\] (.+)")
 _ERROR = "\terror: "
+LISTED = 10
 
 
-def _fmt(code, out):
-    """(summary, [(path, message)]) for `fmt --check`'s file list, or None when it lists none."""
+def _fmt(code, out, err):
+    """(summary, [(path, message)]) for `fmt --check`'s file list, or None when it lists none or
+    wrote to stderr."""
     paths = [ln for ln in out.splitlines() if ln]
-    if code != 1 or not paths:
+    if code != 1 or not paths or err:
         return None
     summary = f"{len(paths)} file(s) not formatted; run terramate fmt and commit the result: "
-    return summary + named(paths, 10), [(p, "not formatted; run terramate fmt") for p in paths]
+    return summary + named(paths, LISTED), [(p, "not formatted; run terramate fmt") for p in paths]
 
 
 def _stale_files(lines):
@@ -54,7 +61,7 @@ def _stale_files(lines):
     return files
 
 
-def _generate(code, out):
+def _generate(code, out, _err):
     """(summary, [(path, message)]) for a stale or failed `generate` report, or None when the
     report holds nothing this reads."""
     lines = out.splitlines()
@@ -63,7 +70,7 @@ def _generate(code, out):
         if files:
             summary = f"{len(files)} generated file(s) stale; run terramate generate and commit "
             return (
-                summary + f"the result: {named(files, 10)}",
+                summary + f"the result: {named(files, LISTED)}",
                 [(f, "generated code is stale; run terramate generate") for f in files],
             )
     if code == 1:
@@ -74,6 +81,15 @@ def _generate(code, out):
     return None
 
 
+def _echo(argv, out, err):
+    token = secrets.token_hex(16)
+    raw = "".join(t if t.endswith("\n") else t + "\n" for t in (out, err) if t)
+    sys.stdout.write(
+        f"::group::{' '.join(argv)}\n::stop-commands::{token}\n{raw}::{token}::\n::endgroup::\n"
+    )
+    sys.stdout.flush()
+
+
 def _check(argv, read):
     """(summary or None, [(path, message)]) of one command."""
     try:
@@ -81,16 +97,16 @@ def _check(argv, read):
         p = subprocess.run(argv, capture_output=True)  # noqa: S603
     except OSError as e:
         return f"terramate {argv[1]} did not start; run it locally to see why\n{e}", []
-    if p.returncode == 0:
-        return None, []
     out = p.stdout.decode("utf-8", "replace")
     err = p.stderr.decode("utf-8", "replace")
-    found = read(p.returncode, out)
+    _echo(argv, out, err)
+    if p.returncode == 0:
+        return None, []
+    found = read(p.returncode, out, err)
     if found:
         return found
-    detail = (err or out).rstrip("\n")
-    summary = f"terramate {argv[1]} exited {p.returncode}; run it locally to see why"
-    return summary + (f"\n{detail}" if detail else ""), []
+    detail = "".join(f"\n  {ln}" for ln in (err or out).rstrip("\n").splitlines())
+    return f"terramate {argv[1]} exited {p.returncode}; run it locally to see why{detail}", []
 
 
 def main():
