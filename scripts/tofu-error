@@ -17,9 +17,9 @@ cause.
 attempt}` from `STACK`, `ENV`, the first `Error:` diagnostic of `$RUNNER_TEMP/plan-run.txt` if it
 exists, else of `$RUNNER_TEMP/init.txt` if it exists, unescaped, and `GITHUB_RUN_ATTEMPT`. No log
 or no diagnostic writes an empty `error`. plan-cell runs it when an attempt fails inside
-plan-cell, so the file holds the cell's `init` or `plan` error from its latest such attempt. A
-failure at another plan-cell step (planned commit, passphrase, identity variables, render,
-encrypt) records an empty error. When an attempt uploads no error file (it failed before
+plan-cell, so the file holds the cell's `init` or `plan` error from its latest such attempt.
+Any other plan-cell failure, one whose `init` and `plan` logs hold no OpenTofu `Error:`
+diagnostic, records an empty error. When an attempt uploads no error file (it failed before
 plan-cell ran: checkout, setup, credentials; it was cancelled or timed out; or the error write or
 upload step failed), the cell keeps the error an earlier attempt recorded, if any. Other
 arguments are refused.

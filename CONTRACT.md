@@ -2191,12 +2191,12 @@ the publish hold (below). In order, blank lines between the parts:
   removed and cut at 1,000 characters, in a plain backtick fence longer than any
   backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it:
   the first OpenTofu `Error:` diagnostic in the cell's `init` or `plan` log from
-  its latest attempt that failed inside plan-cell. A failure at another
-  plan-cell step (planned commit, passphrase, identity variables, render,
-  encrypt) records an empty error. When an attempt uploads no error file (it
-  failed before plan-cell ran: checkout, setup, credentials; it was cancelled
-  or timed out; or the error write or upload step failed), the cell keeps the
-  error an earlier attempt recorded, if any. When an earlier attempt of this run
+  its latest attempt that failed inside plan-cell. Any other plan-cell failure,
+  one whose `init` and `plan` logs hold no OpenTofu `Error:` diagnostic,
+  records an empty error. When an attempt uploads no error file (it failed
+  before plan-cell ran: checkout, setup, credentials; it was cancelled or timed
+  out; or the error write or upload step failed), the cell keeps the error an
+  earlier attempt recorded, if any. When an earlier attempt of this run
   recorded the error, `recorded by attempt <n> of this run` sits between the
   line and the fence. A cell whose artifact did not arrive or carries an empty
   error shows its line alone. The cell's plan job also carries an `::error::`
