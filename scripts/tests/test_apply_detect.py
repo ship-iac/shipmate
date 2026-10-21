@@ -86,7 +86,7 @@ def _lines(*checks):
     return [json.dumps(c) for c in checks]
 
 
-_APP_CHECK = _apply_check("stacks/app", plan_run="111", plan_sha256="a" * 64)
+_APP_CHECK = _apply_check("stacks/app", plan_run="111", plan_sha256="a" * 64, cells=1)
 
 
 def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
@@ -95,7 +95,9 @@ def test_each_cell_carries_the_plan_run_and_digest_its_own_check_names():
     # the plan text reviewed for IT -- one shared digest would let a sibling's text vouch for
     # this cell's plan. Mutation: write `"plan_sha256": run` in `with_plan_runs` -- the
     # digests become run ids, red.
-    lines = _lines(_APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256="b" * 64))
+    lines = _lines(
+        _APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256="b" * 64, cells=1)
+    )
     out = ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
     assert out == [
         {
@@ -120,7 +122,9 @@ def test_a_cell_with_a_plan_run_but_no_digest_refuses_with_its_own_message():
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(
             _TWO_CELLS,
-            _lines(_APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256=None)),
+            _lines(
+                _APP_CHECK, _apply_check("stacks/dns", plan_run="222", plan_sha256=None, cells=1)
+            ),
             APP_ID,
             pr_number=PR_NUMBER,
         )
@@ -323,7 +327,7 @@ def test_apply_path_never_enrols_a_slug_alike_stack(monkeypatch, tmp_path):
     # The same property through the real entry point: a second construction that slugged its
     # way from a check name back to a path would enrol `a/b` here.
     out = _apply_env(monkeypatch, tmp_path)
-    _stub_apply(monkeypatch, {"a/b": set(), "a-b": set()}, [_apply_check("a-b")])
+    _stub_apply(monkeypatch, {"a/b": set(), "a-b": set()}, [_apply_check("a-b", cells=1)])
     ad.main()
     assert [c["stack"] for c in json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]] == [
         "a-b"
@@ -335,7 +339,7 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
     # hand-written constant, so any added gh api call -- a run lookup, an artifact listing --
     # reddens here.
     out = _apply_env(monkeypatch, tmp_path)
-    urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
+    urls = _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", cells=1)])
     ad.main()
     assert (
         len(json.loads(github_outputs(out)["envlevel0_waves"])["wave0"]) == 1
@@ -346,7 +350,7 @@ def test_apply_path_makes_no_run_lookup_at_all(monkeypatch, tmp_path):
 def test_a_targeted_apply_reads_the_tag_metadata_once(monkeypatch, tmp_path):
     """Mutation: call `bm.tags_of(paths)` without the map -- two reads."""
     out = _apply_env(monkeypatch, tmp_path)
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", cells=1)])
     reads = []
 
     def all_tags():
@@ -368,7 +372,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(monkeypatch, tmp_
         monkeypatch,
         {"stacks/app": set()},
         [
-            _apply_check("stacks/app"),
+            _apply_check("stacks/app", cells=1),
             _check(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
         ],
     )
@@ -386,7 +390,7 @@ def test_a_record_less_completed_check_does_not_block_the_rest(monkeypatch, tmp_
         monkeypatch,
         {"stacks/app": set(), "stacks/dns": set()},
         [
-            _apply_check("stacks/app", plan_run="42"),
+            _apply_check("stacks/app", plan_run="42", cells=1),
             _check(name="apply / stacks/dns / dev-eu", external_id="b" * 64),
         ],
     )
@@ -406,7 +410,9 @@ def test_a_failed_apply_check_stays_re_appliable(monkeypatch, tmp_path):
         {"stacks/app": set()},
         [
             _check(
-                name="apply / stacks/app / dev-eu", conclusion="failure", external_id=_record("42")
+                name="apply / stacks/app / dev-eu",
+                conclusion="failure",
+                external_id=_record("42", cells=1),
             )
         ],
     )
@@ -421,7 +427,9 @@ def test_main_emits_the_dag_shape_notice(monkeypatch, tmp_path, capsys):
     # decision refuses the run, and this test is about the notice.
     _apply_env(monkeypatch, tmp_path)
     _stub_apply(
-        monkeypatch, {"stacks/a": set(), "stacks/b": {"stacks/a"}}, [_apply_check("stacks/a")]
+        monkeypatch,
+        {"stacks/a": set(), "stacks/b": {"stacks/a"}},
+        [_apply_check("stacks/a", cells=1)],
     )
     ad.main()
     assert (
@@ -462,7 +470,10 @@ def test_main_reads_the_run_graph_through_build_matrix(monkeypatch, tmp_path):
     Either way the listing is requested before the refusal."""
     _apply_env(monkeypatch, tmp_path)
     urls = _stub_apply(
-        monkeypatch, {"a": set(), "b": set()}, [_apply_check("a")], run_graph_capture("cycle-two")
+        monkeypatch,
+        {"a": set(), "b": set()},
+        [_apply_check("a", cells=1)],
+        run_graph_capture("cycle-two"),
     )
     with pytest.raises(SystemExit) as exc:
         ad.main()
@@ -577,7 +588,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
     _stub_apply(
         monkeypatch,
         {"stacks/app": set(), "stacks/unrelated": set()},
-        [_apply_check("stacks/app", plan_run="42")],
+        [_apply_check("stacks/app", plan_run="42", cells=1)],
     )
     monkeypatch.setattr(
         ad.bm,
@@ -605,7 +616,9 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
 def test_main_refuses_a_workset_stack_the_metadata_lacks(tmp_path, monkeypatch):
     """Mutation: index `all_tags()` with `.get(p, [])` in `main` -- the cell plans untagged."""
     _apply_env(monkeypatch, tmp_path)
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    _stub_apply(
+        monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
+    )
     monkeypatch.setattr(ad.bm, "all_tags", lambda: {})
     with pytest.raises(SystemExit) as e:
         ad.main()
@@ -765,7 +778,9 @@ def test_main_exempts_an_env_whose_entry_is_ungated(monkeypatch, tmp_path):
         table=_gate("dev-eu"),
         SHIPMATE_REVIEW_DECISION="REVIEW_REQUIRED",
     )
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    _stub_apply(
+        monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
+    )
     ad.main()
     assert json.loads(github_outputs(out)["envlevel0_waves"])["wave0"][0]["stack"] == "stacks/app"
 
@@ -799,7 +814,9 @@ def test_apply_path_loads_the_environment_table_exactly_once(monkeypatch, tmp_pa
     -- the count becomes 2."""
     reads = []
     _apply_env(monkeypatch, tmp_path, reads=reads)
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    _stub_apply(
+        monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
+    )
     ad.main()
     assert len(reads) == 1
 
@@ -823,7 +840,9 @@ def test_main_names_a_gated_env_applied_with_no_review_required(
     NONE/gated and APPROVED cases swap and go red.
     Mutation: drop its ungated check -- the NONE/ungated case names dev-eu and goes red."""
     out = _apply_env(monkeypatch, tmp_path, table=table, SHIPMATE_REVIEW_DECISION=decision)
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    _stub_apply(
+        monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
+    )
     ad.main()
     assert json.loads(github_outputs(out)["review_not_required_envs"]) == expected
 
@@ -838,7 +857,9 @@ def test_main_writes_the_whole_output_file_verbatim(monkeypatch, tmp_path):
     Mutation: pass `{env: ["_"]}` as the order to `env_level_waves` -- the cells land in
     `envlevel1`."""
     out = _apply_env(monkeypatch, tmp_path)
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42")])
+    _stub_apply(
+        monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", plan_run="42", cells=1)]
+    )
     ad.main()
     empty = (
         '{"wave0": [], "wave1": [], "wave2": [], "wave3": [], "wave4": [], "wave5": [], '
@@ -885,24 +906,26 @@ def test_main_notice_counts_every_padded_wave(monkeypatch, tmp_path, capsys):
 
 
 def test_a_record_for_another_or_no_pull_request_refuses_naming_each():
-    """`stacks/app` records PR 7 and `stacks/dns` records none; both are named with what they
-    record. Mutation: skip records without `pr` (`and pr and pr != pr_number`) -- the
-    `stacks/dns` entry drops, red."""
+    """`stacks/app` records PR 7 and `stacks/dns` records none; both are named with their plan
+    run and what they record. Mutations: skip records without `pr` (`and pr and pr !=
+    pr_number`) -- the `stacks/dns` entry drops, red; drop `plan run {run}, ` from the entry
+    -- red."""
     lines = _lines(
-        _apply_check("stacks/app", pr="7", cells=2), _apply_check("stacks/dns", pr=None, cells=2)
+        _apply_check("stacks/app", plan_run="41", pr="7", cells=2),
+        _apply_check("stacks/dns", plan_run="42", pr=None, cells=2),
     )
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number="8")
     assert str(exc_info.value) == foreign_message(
-        "apply / stacks/app / dev-eu (pull request #7), "
-        "apply / stacks/dns / dev-eu (records no pull request)"
+        "apply / stacks/app / dev-eu (plan run 41, pull request #7), "
+        "apply / stacks/dns / dev-eu (plan run 42, records no pull request)"
     )
 
 
 def test_a_record_with_no_plan_run_refuses_before_its_pull_request_is_compared():
     """`stacks/app` records PR 7 and no plan run: the run refusal speaks first, as the digest
     one does. Mutation: raise the foreign-record refusal before the missing-run one -- red."""
-    lines = _lines(_apply_check("stacks/app", plan_run=None, pr="7"))
+    lines = _lines(_apply_check("stacks/app", plan_run=None, pr="7", cells=1))
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number="8")
     assert str(exc_info.value) == (
@@ -917,7 +940,7 @@ def test_a_record_with_no_plan_run_refuses_before_its_pull_request_is_compared()
 def test_no_pull_request_number_never_compares_a_record():
     """Deploy's call: post-merge the head comes from `commits/{sha}/pulls`, so a record naming
     PR 7 applies. Mutation: drop `pr_number is not None and` -- red."""
-    lines = _lines(_apply_check("stacks/app", pr="7"))
+    lines = _lines(_apply_check("stacks/app", pr="7", cells=1))
     assert ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=None) == [
         {
             "stack": "stacks/app",
@@ -935,7 +958,7 @@ def test_a_pull_request_number_is_compared_whole(recorded, dispatched):
     with pytest.raises(SystemExit):
         ad.with_plan_runs(
             _TWO_CELLS[:1],
-            _lines(_apply_check("stacks/app", pr=recorded)),
+            _lines(_apply_check("stacks/app", pr=recorded, cells=1)),
             APP_ID,
             pr_number=dispatched,
         )
@@ -946,63 +969,74 @@ _DNS = "apply / stacks/dns / dev-eu"
 
 
 def test_a_run_that_published_part_of_its_checks_refuses():
-    """Run 42 planned two cells and published one check. Mutation: delete the
-    `refuse_incomplete` call in `with_plan_runs` -- the cell applies, red."""
+    """Run 42 planned two cells and published one check, so its summary job stopped
+    mid-publish and a re-run is offered. Mutations: delete the `refuse_incomplete` call in
+    `with_plan_runs` -- the cell applies, red; never offer the re-run (`if False:` for the
+    `all(...)` test in `refuse_incomplete`) -- red."""
     lines = _lines(_apply_check("stacks/app", plan_run="42", cells=2))
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == partial_message(
-        f"plan run 42 published 1 apply check for 2 planned cells, holding back {_APP}"
+        f"plan run 42 published 1 apply check for 2 planned cells, holding back {_APP}",
+        rerun=True,
     )
 
 
 def test_a_run_whose_records_declare_no_count_refuses():
-    """A record published before the count existed. Mutation: count an empty declared tuple
-    as complete in `apply-gate.incomplete_runs` (`counts[run] not in ({len(named)}, {None})`)
-    -- the cell applies, red."""
+    """A record published before the count existed; no re-run is offered. Mutations: count an
+    empty declared tuple as complete in `apply-gate.incomplete_runs` (`counts[run] not in
+    ({len(named)}, {None})`) -- the cell applies, red; always offer the re-run (`if True:` for
+    the `all(...)` test in `refuse_incomplete`) -- red."""
     lines = _lines(_apply_check("stacks/app", plan_run="42", cells=None))
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == partial_message(
-        f"plan run 42 records no planned cell count on its apply checks, holding back {_APP}"
+        f"plan run 42 records no planned cell count on its apply checks, holding back {_APP}",
+        rerun=False,
     )
 
 
 def test_a_run_whose_records_disagree_on_the_count_refuses():
-    """Mutation: `if counts:` for `if len(counts) == 1:` in `_fact` -- the fact reads
-    `published 2 apply checks for 2 planned cells`, red."""
+    """Both counts exceed the two published checks, yet no fact says a job failed, so no re-run
+    is offered. Mutations: `if counts:` for `if len(counts) == 1:` in `_fact` -- the fact reads
+    `published 2 apply checks for 3 planned cells`, red; drop `len(counts) == 1 and` from
+    `_stopped_publishing` -- the re-run clause appears, red."""
     lines = _lines(
-        _apply_check("stacks/app", plan_run="42", cells=2),
-        _apply_check("stacks/dns", plan_run="42", cells=3, id=2),
+        _apply_check("stacks/app", plan_run="42", cells=3),
+        _apply_check("stacks/dns", plan_run="42", cells=4, id=2),
     )
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == partial_message(
-        "plan run 42 records disagreeing planned cell counts (2, 3) on its apply checks, "
-        f"holding back {_APP}, {_DNS}"
+        "plan run 42 records disagreeing planned cell counts (3, 4) on its apply checks, "
+        f"holding back {_APP}, {_DNS}",
+        rerun=False,
     )
 
 
 def test_a_run_with_one_uncounted_record_says_so():
-    """Run 42's two records: one declares 2 cells, one no count. Mutations: drop the
-    uncounted branch from `_fact` -- `published 2 apply checks for 2 planned cells`, red; drop
-    `'some of '` -- red."""
+    """Run 42's two records: one declares 3 cells, one no count, so no re-run is offered.
+    Mutations: drop the uncounted branch from `_fact` -- `published 2 apply checks for 3
+    planned cells`, red; drop `'some of '` -- red; drop `not uncounted and` from
+    `_stopped_publishing` -- the re-run clause appears, red."""
     lines = _lines(
-        _apply_check("stacks/app", plan_run="42", cells=2),
+        _apply_check("stacks/app", plan_run="42", cells=3),
         _apply_check("stacks/dns", plan_run="42", cells=None, id=2),
     )
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS, lines, APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == partial_message(
         "plan run 42 records no planned cell count on some of its apply checks, "
-        f"holding back {_APP}, {_DNS}"
+        f"holding back {_APP}, {_DNS}",
+        rerun=False,
     )
 
 
 def test_two_incomplete_runs_are_named_in_the_plural():
-    """Run 41 published one check of two cells; run 42 published two of one. Mutations:
-    always render `it` and `run` in `refuse_incomplete` -- red; drop the singular from `_n` --
-    `1 planned cells`, red."""
+    """Run 41 published one check of two cells; run 42 published two of one, so no re-run is
+    offered. Mutations: always render `it` and `run` in `refuse_incomplete` -- red; drop the
+    singular from `_n` -- `1 planned cells`, red; `any` for `all` in `refuse_incomplete` --
+    red; `!=` for `<` in `_stopped_publishing` -- red."""
     lines = _lines(
         _apply_check("stacks/app", plan_run="41", cells=2, id=1),
         _apply_check("stacks/dns", plan_run="42", cells=1, id=2),
@@ -1013,6 +1047,7 @@ def test_two_incomplete_runs_are_named_in_the_plural():
     assert str(exc_info.value) == partial_message(
         f"plan run 41 published 1 apply check for 2 planned cells, holding back {_APP}; "
         f"plan run 42 published 2 apply checks for 1 planned cell, holding back {_DNS}",
+        rerun=False,
         several=True,
     )
 
@@ -1024,7 +1059,7 @@ def test_another_pull_requests_record_refuses_before_an_incomplete_run():
     lines = _lines(_apply_check("stacks/app", plan_run="42", pr="7", cells=2))
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS[:1], lines, APP_ID, pr_number=PR_NUMBER)
-    assert str(exc_info.value) == foreign_message(f"{_APP} (pull request #7)")
+    assert str(exc_info.value) == foreign_message(f"{_APP} (plan run 42, pull request #7)")
 
 
 def test_a_same_head_re_plan_that_drops_a_cell_does_not_deadlock():
@@ -1100,7 +1135,8 @@ def test_a_newer_incomplete_run_refuses_a_cell_of_an_older_complete_one():
     with pytest.raises(SystemExit) as exc_info:
         ad.with_plan_runs(_TWO_CELLS[1:], lines, APP_ID, pr_number=PR_NUMBER)
     assert str(exc_info.value) == partial_message(
-        f"plan run 10 published 1 apply check for 2 planned cells, holding back {_DNS}"
+        f"plan run 10 published 1 apply check for 2 planned cells, holding back {_DNS}",
+        rerun=True,
     )
 
 
@@ -1123,10 +1159,12 @@ def test_records_for_this_pull_request_pass():
 def test_main_refuses_a_pending_cell_recorded_for_another_pull_request(monkeypatch, tmp_path):
     """Mutation: pass `pr_number=None` to `with_plan_runs` in `main` -- red."""
     _apply_env(monkeypatch, tmp_path)
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", pr="7")])
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", pr="7", cells=1)])
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
-    assert str(exc_info.value) == foreign_message("apply / stacks/app / dev-eu (pull request #7)")
+    assert str(exc_info.value) == foreign_message(
+        "apply / stacks/app / dev-eu (plan run 123456, pull request #7)"
+    )
 
 
 def test_main_never_consults_an_applied_cells_record(monkeypatch, tmp_path):
@@ -1138,8 +1176,8 @@ def test_main_never_consults_an_applied_cells_record(monkeypatch, tmp_path):
         monkeypatch,
         {"stacks/app": set(), "stacks/dns": set()},
         [
-            _apply_check("stacks/app"),
-            _check(name="apply / stacks/dns / dev-eu", external_id=_record("42", pr="7")),
+            _apply_check("stacks/app", cells=1),
+            _check(name="apply / stacks/dns / dev-eu", external_id=_record("42", pr="7", cells=1)),
         ],
     )
     ad.main()
@@ -1152,7 +1190,7 @@ def test_main_refuses_an_unusable_pull_request_number(monkeypatch, tmp_path):
     """Mutation: read `SHIPMATE_PR_NUMBER` unvalidated in `main` -- the foreign-record refusal
     names `#12a` instead, red."""
     _apply_env(monkeypatch, tmp_path, SHIPMATE_PR_NUMBER="12a")
-    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app")])
+    _stub_apply(monkeypatch, {"stacks/app": set()}, [_apply_check("stacks/app", cells=1)])
     with pytest.raises(SystemExit) as exc_info:
         ad.main()
     assert str(exc_info.value) == (
@@ -1193,7 +1231,7 @@ def test_a_cell_waits_on_a_pending_upstream_in_another_environment(monkeypatch, 
 def test_a_completed_upstream_in_another_environment_does_not_hold_a_cell(monkeypatch, tmp_path):
     """Mutation: drop the `not in completed_names` filter from `pending_tuples`, so every
     check name counts -- the completed `dns/dev-us` holds `platform`."""
-    checks = [_apply_check("stacks/platform"), _check(name="apply / stacks/dns / dev-us")]
+    checks = [_apply_check("stacks/platform", cells=1), _check(name="apply / stacks/dns / dev-us")]
     assert _zigzag(monkeypatch, tmp_path, checks) == (["stacks/platform"], "[]")
 
 
@@ -1219,7 +1257,7 @@ def test_a_waiting_cell_whose_check_records_no_plan_run_does_not_refuse(monkeypa
     refusal fires."""
     checks = [
         _check(name="apply / stacks/platform / dev-eu", status="queued", conclusion=None),
-        _apply_check("stacks/dns", "dev-us"),
+        _apply_check("stacks/dns", "dev-us", cells=1),
     ]
     assert _zigzag(monkeypatch, tmp_path, checks) == ([], _PLATFORM_WAITS)
 

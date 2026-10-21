@@ -117,7 +117,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
         envs=["dev-eu"],
         decision="APPROVED",
         checks=[
-            _apply_check("stacks/app", "dev-eu"),
+            _apply_check("stacks/app", "dev-eu", cells=1),
             check_run(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
         ],
     )
@@ -310,7 +310,7 @@ def test_main_wires_the_tag_map_into_the_cells(tmp_path, monkeypatch):
         monkeypatch,
         envs=["dev-eu"],
         decision="APPROVED",
-        checks=[_apply_check("stacks/app", "dev-eu", plan_run="42")],
+        checks=[_apply_check("stacks/app", "dev-eu", plan_run="42", cells=1)],
         tags={"stacks/app": ["env/dev-eu", "workload/net-edge"]},
     )
     assert json.loads(parsed["envlevel0_waves"])["wave0"] == [
@@ -366,7 +366,7 @@ def test_main_never_enrols_a_slug_alike_stack(tmp_path, monkeypatch):
         decision="APPROVED",
         tree={"dev-eu": ["a/b", "a-b"]},
         tags={"a/b": [], "a-b": []},
-        checks=[_apply_check("a-b", "dev-eu")],
+        checks=[_apply_check("a-b", "dev-eu", cells=1)],
     )
     assert [c["stack"] for c in wave_cells(aad.wv, parsed)] == ["a-b"]
 
@@ -381,8 +381,8 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
         envs=["dev-eu", "dev-us"],
         decision="APPROVED",
         checks=[
-            _apply_check("stacks/app", "dev-eu", plan_run="111"),
-            _apply_check("stacks/app", "dev-us", plan_run="222"),
+            _apply_check("stacks/app", "dev-eu", plan_run="111", cells=1),
+            _apply_check("stacks/app", "dev-us", plan_run="222", cells=1),
         ],
     )
     assert sorted((c["environment"], c["plan_run_id"]) for c in wave_cells(aad.wv, parsed)) == [
@@ -403,8 +403,8 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, m
             envs=["dev-eu", "dev-us"],
             decision="APPROVED",
             checks=[
-                _apply_check("stacks/app", "dev-eu", plan_run="42"),
-                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None),
+                _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
+                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None, cells=1),
             ],
         )
     assert str(exc_info.value) == (
@@ -429,8 +429,8 @@ def test_a_refused_bare_apply_writes_the_refusal_output_whole(tmp_path, monkeypa
             envs=["dev-eu", "dev-us"],
             decision="APPROVED",
             checks=[
-                _apply_check("stacks/app", "dev-eu", plan_run="42"),
-                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None),
+                _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
+                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None, cells=1),
             ],
         )
     assert exc_info.value.code == 1
@@ -461,7 +461,7 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
             envs=["dev-eu", "dev-us"],
             decision="APPROVED",
             checks=[
-                _apply_check("stacks/app", "dev-eu", plan_run="42"),
+                _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
                 check_run(
                     name="apply / stacks/app / dev-us",
                     status="queued",
@@ -492,7 +492,8 @@ def test_main_refuses_a_run_that_published_part_of_its_checks(tmp_path, monkeypa
         )
     assert str(exc_info.value) == partial_message(
         "plan run 42 published 1 apply check for 2 planned cells, holding back "
-        "apply / stacks/app / dev-eu"
+        "apply / stacks/app / dev-eu",
+        rerun=True,
     )
 
 
@@ -505,7 +506,7 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
         envs=["dev-eu", "dev-us"],
         decision="APPROVED",
         checks=[
-            _apply_check("stacks/app", "dev-eu", plan_run="42"),
+            _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
             check_run(name="apply / stacks/app / dev-us", external_id="b" * 64),
         ],
     )
@@ -523,7 +524,7 @@ def test_main_lets_a_record_less_check_in_an_excluded_env_through(tmp_path, monk
         explicit=["prod-eu"],
         decision="APPROVED",
         checks=[
-            _apply_check("stacks/app", "dev-eu", plan_run="42"),
+            _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
             check_run(
                 name="apply / stacks/app / prod-eu",
                 status="queued",
@@ -549,7 +550,7 @@ def test_main_keeps_a_failed_apply_check_re_appliable(tmp_path, monkeypatch):
             check_run(
                 name="apply / stacks/app / dev-eu",
                 conclusion="failure",
-                external_id=_record("42"),
+                external_id=_record("42", cells=1),
             )
         ],
     )
@@ -944,9 +945,11 @@ def test_main_refuses_a_runnable_cell_recorded_for_another_pull_request(tmp_path
             monkeypatch,
             envs=["dev-eu"],
             decision="APPROVED",
-            checks=[_apply_check("stacks/app", "dev-eu", pr="7")],
+            checks=[_apply_check("stacks/app", "dev-eu", pr="7", cells=1)],
         )
-    assert str(exc_info.value) == foreign_message("apply / stacks/app / dev-eu (pull request #7)")
+    assert str(exc_info.value) == foreign_message(
+        "apply / stacks/app / dev-eu (plan run 123456, pull request #7)"
+    )
 
 
 def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
@@ -967,7 +970,9 @@ def test_main_binds_only_the_cells_this_run_applies(tmp_path, monkeypatch):
         },
         checks=[
             _apply_check("stacks/app", "dev-eu", cells=3),
-            check_run(name="apply / stacks/dns / dev-eu", external_id=_record("42", pr="7")),
+            check_run(
+                name="apply / stacks/dns / dev-eu", external_id=_record("42", pr="7", cells=1)
+            ),
             _apply_check("stacks/app", "dev-us", pr="7", cells=3),
             _apply_check("stacks/app", "prod-eu", pr="7", cells=3),
         ],
@@ -1159,7 +1164,7 @@ def test_main_never_refuses_over_a_completed_upstream(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         [
-            _apply_check("stacks/platform", "dev-eu"),
+            _apply_check("stacks/platform", "dev-eu", cells=1),
             check_run(name="apply / stacks/dns / dev-us"),
         ],
         order={"dev-us": ["dev-eu"]},

@@ -55,7 +55,7 @@ def check_run(**kw):
     return base
 
 
-def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, cells=1):
+def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells):
     """An `external_id` record as pending-checks writes it. `plan_sha256=None` omits the
     digest, `pr=None` the pull request, `cells=None` the run's planned cell count."""
     record = {"fingerprint": "a" * 64, "plan_run": plan_run}
@@ -69,21 +69,21 @@ def _record(plan_run, plan_sha256=PLAN_SHA, pr=PR_NUMBER, cells=1):
 
 
 def _apply_check(
-    stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, pr=PR_NUMBER, cells=1, **kw
+    stack, env="dev-eu", plan_run="123456", plan_sha256=PLAN_SHA, pr=PR_NUMBER, *, cells, **kw
 ):
     """A pending App-authored apply check carrying its plan-run record."""
     return check_run(
         name=f"apply / {stack} / {env}",
         status="queued",
         conclusion=None,
-        external_id=_record(plan_run, plan_sha256, pr, cells),
+        external_id=_record(plan_run, plan_sha256, pr, cells=cells),
         **kw,
     )
 
 
 def foreign_message(listed):
-    """The refusal a detect raises when `listed` check runs record a plan made on a pull
-    request other than `PR_NUMBER`."""
+    """The refusal a detect raises when `listed` check runs, each named with its plan run,
+    record a plan made on a pull request other than `PR_NUMBER`."""
     return (
         f"::error::apply aborted: the plan recorded for {listed} was not made on pull request "
         "#8, so this apply is refused. Re-plan on this pull request (push or comment `shipmate "
@@ -92,17 +92,23 @@ def foreign_message(listed):
     )
 
 
-def partial_message(listed, *, several=False):
+def partial_message(listed, *, rerun, several=False):
     """The refusal a detect raises when the runs and held-back cells `listed` name published
-    only part of a run's apply checks; `several` when `listed` names more than one run."""
+    only part of a run's apply checks; `rerun` when every run published fewer checks than its
+    one planned count, `several` when `listed` names more than one run."""
     it, runs = ("they", "runs") if several else ("it", "run")
+    remedy = (
+        f"Re-run the failed jobs of the plan {runs} (not all jobs), then apply again; if the "
+        "refusal remains, push"
+        if rerun
+        else "Push"
+    )
     return (
         f"::error::apply aborted: {listed}: the published apply checks do not match the cells "
-        f"{it} planned, so an ordering among them can be lost. Re-run the failed jobs of the "
-        f"plan {runs} (not all jobs), then apply again; if the refusal remains, push a commit to "
-        "the pull request, which plans and publishes every cell afresh, then apply again; if "
-        "that pull request has already merged, a new pull request touching these stacks plans "
-        "and applies them."
+        f"{it} planned, so an ordering among them can be lost. {remedy} a commit to the pull "
+        "request, which plans and publishes every cell afresh, then apply again; if that pull "
+        "request has already merged, a new pull request touching these stacks plans and "
+        "applies them."
     )
 
 

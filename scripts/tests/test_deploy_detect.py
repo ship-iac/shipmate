@@ -231,7 +231,7 @@ def test_main_reads_the_head_listing_once_and_makes_no_plan_run_lookup(tmp_path,
         tmp_path,
         monkeypatch,
         cells=[_cell("stacks/app")],
-        checks=[_apply_check("stacks/app")],
+        checks=[_apply_check("stacks/app", cells=1)],
         urls=urls,
     )
     assert len(wave_cells(dd.wv, parsed)) == 1  # Not vacuous: a cell exists.
@@ -250,7 +250,7 @@ def test_main_refuses_a_malformed_merged_head_before_any_api_read(tmp_path, monk
             tmp_path,
             monkeypatch,
             cells=[_cell("stacks/app")],
-            checks=[_apply_check("stacks/app")],
+            checks=[_apply_check("stacks/app", cells=1)],
             urls=urls,
             head="1/../../x",
         )
@@ -271,8 +271,8 @@ def test_main_gives_each_cell_the_plan_run_its_own_check_names(tmp_path, monkeyp
         monkeypatch,
         cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
         checks=[
-            _apply_check("stacks/app", "dev-eu", plan_run="111"),
-            _apply_check("stacks/app", "dev-us", plan_run="222"),
+            _apply_check("stacks/app", "dev-eu", plan_run="111", cells=1),
+            _apply_check("stacks/app", "dev-us", plan_run="222", cells=1),
         ],
     )
     assert sorted((c["environment"], c["plan_run_id"]) for c in wave_cells(dd.wv, parsed)) == [
@@ -292,8 +292,8 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_text_digest(tmp_path, m
             monkeypatch,
             cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
             checks=[
-                _apply_check("stacks/app", "dev-eu", plan_run="42"),
-                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None),
+                _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
+                _apply_check("stacks/app", "dev-us", plan_run="43", plan_sha256=None, cells=1),
             ],
         )
     assert str(exc_info.value) == (
@@ -321,7 +321,8 @@ def test_main_refuses_a_run_that_declares_more_cells_than_it_published(tmp_path,
         )
     assert str(exc_info.value) == partial_message(
         "plan run 42 published 2 apply checks for 3 planned cells, holding back "
-        "apply / stacks/app / dev-eu, apply / stacks/dns / dev-eu"
+        "apply / stacks/app / dev-eu, apply / stacks/dns / dev-eu",
+        rerun=True,
     )
 
 
@@ -335,7 +336,7 @@ def test_main_refuses_a_cell_whose_check_records_no_plan_run(tmp_path, monkeypat
             monkeypatch,
             cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
             checks=[
-                _apply_check("stacks/app", "dev-eu", plan_run="42"),
+                _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
                 _check(
                     name="apply / stacks/app / dev-us",
                     status="queued",
@@ -361,7 +362,7 @@ def test_main_lets_a_record_less_completed_check_through(tmp_path, monkeypatch):
         monkeypatch,
         cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/app", "dev-us")],
         checks=[
-            _apply_check("stacks/app", "dev-eu", plan_run="42"),
+            _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
             _check(name="apply / stacks/app / dev-us", external_id="b" * 64),
         ],
     )
@@ -377,7 +378,7 @@ def test_main_notice_reports_the_no_op_evidence(tmp_path, monkeypatch, capsys):
         monkeypatch,
         cells=[_cell("stacks/app", "dev-eu"), _cell("stacks/dns", "dev-eu")],
         checks=[
-            _apply_check("stacks/app", "dev-eu", plan_run="42"),
+            _apply_check("stacks/app", "dev-eu", plan_run="42", cells=1),
             _check(name="apply / stacks/dns / dev-eu"),
         ],
     )
@@ -398,7 +399,7 @@ def test_a_forged_completed_check_does_not_mark_a_cell_applied(tmp_path, monkeyp
         monkeypatch,
         cells=[_cell("stacks/app")],
         checks=[
-            _apply_check("stacks/app"),
+            _apply_check("stacks/app", cells=1),
             _check(name="apply / stacks/app / dev-eu", id=2, app={"id": 15368}),
         ],
     )
@@ -413,7 +414,7 @@ def test_main_emits_the_dag_shape_notice(tmp_path, monkeypatch, capsys):
         tmp_path,
         monkeypatch,
         cells=[_cell("stacks/a")],
-        checks=[_apply_check("stacks/a")],
+        checks=[_apply_check("stacks/a", cells=1)],
         deps={"stacks/a": set(), "stacks/b": {"stacks/a"}},
     )
     assert (
@@ -497,7 +498,7 @@ def test_main_unpacks_the_real_compute_cells_return(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         cells=[],
-        checks=[_apply_check("stacks/app")],
+        checks=[_apply_check("stacks/app", cells=1)],
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
     )
@@ -515,7 +516,7 @@ def test_a_deploy_reads_the_tag_metadata_once(tmp_path, monkeypatch):
         tmp_path,
         monkeypatch,
         cells=[],
-        checks=[_apply_check("stacks/app")],
+        checks=[_apply_check("stacks/app", cells=1)],
         stacks={"stacks/app": ["env/dev-eu"]},
         deps={"stacks/app": set()},
         tag_reads=reads,
@@ -528,7 +529,10 @@ def test_deploy_passes_no_workload_map(tmp_path, monkeypatch):
     workload map and pass it to `env_config` -- the spy records `{"dev-eu": frozenset()}`."""
     seen = spy_env_config(monkeypatch, dd.bm)
     _run_main(
-        tmp_path, monkeypatch, cells=[_cell("stacks/app")], checks=[_apply_check("stacks/app")]
+        tmp_path,
+        monkeypatch,
+        cells=[_cell("stacks/app")],
+        checks=[_apply_check("stacks/app", cells=1)],
     )
     assert seen == [None]
 
@@ -650,7 +654,7 @@ def test_a_refusal_with_no_other_cell_names_none(tmp_path, monkeypatch):
             tmp_path,
             monkeypatch,
             cells=[],
-            checks=[_apply_check("stacks/gone")],
+            checks=[_apply_check("stacks/gone", cells=1)],
             stacks={"stacks/gone": []},
             deps={"stacks/gone": set()},
         )
@@ -728,7 +732,7 @@ def test_main_deploys_past_an_unmanaged_stack_with_no_open_apply_check(tmp_path,
         tmp_path,
         monkeypatch,
         cells=[],
-        checks=[_apply_check("stacks/app"), _check(name="apply / stacks/gone / dev-eu")],
+        checks=[_apply_check("stacks/app", cells=1), _check(name="apply / stacks/gone / dev-eu")],
         stacks={"stacks/app": ["env/dev-eu"], "stacks/gone": []},
         deps={"stacks/app": set(), "stacks/gone": set()},
     )

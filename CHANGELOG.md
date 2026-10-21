@@ -18,6 +18,7 @@ section below names the SHA the release tags.
 ### Fixed
 
 - **The missing-encryption-key refusal reads `SHIPMATE_ENCRYPTION_KEY is not set or is empty`, since it also fires on an empty value.**
+- **The shared-head apply refusal names each cell's plan run beside its pull request, and the partial-publish refusal offers re-running the plan run's failed jobs only when every named run published fewer apply checks than its one planned cell count.**
 - **A drift sweep fails its `detect` job when it cannot read the default branch or reads it empty, instead of skipping every sweep job green.**
 - **Plan, apply and drift cells run `tofu show` inside `terramate run`, so a `run.env` `TF_DATA_DIR` reaches it.**
 - **A failed `tofu init` is annotated with OpenTofu's first error; the `gh cache delete` remedy appears only for a provider install failure after a cache hit.**

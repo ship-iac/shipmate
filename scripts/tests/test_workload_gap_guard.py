@@ -103,7 +103,7 @@ def test_the_deploy_refuses_over_the_pending_cells_only(monkeypatch, tmp_path):
         tmp_path,
         monkeypatch,
         cells=[tdd._cell("stacks/app"), tdd._cell("stacks/dns")],
-        checks=[_apply_check("stacks/app"), _done("stacks/dns")],
+        checks=[_apply_check("stacks/app", cells=1), _done("stacks/dns")],
         table=trs._TABLE,
     )
     assert calls == [
@@ -132,7 +132,7 @@ def test_the_targeted_apply_refuses_over_the_pending_cells_only(monkeypatch, tmp
     tad._stub_apply(
         monkeypatch,
         {"stacks/app": set(), "stacks/dns": set()},
-        [_apply_check("stacks/app", plan_run="42"), _done("stacks/dns")],
+        [_apply_check("stacks/app", plan_run="42", cells=1), _done("stacks/dns")],
     )
     tad.ad.main()
     assert calls == [
@@ -224,7 +224,7 @@ def test_the_bare_apply_refuses_over_the_runnable_cells_only(monkeypatch, tmp_pa
 @pytest.mark.parametrize("pending", [True, False], ids=["pending", "completed"])
 def test_the_deploy_refuses_an_outside_tag_only_on_a_pending_cell(monkeypatch, tmp_path, pending):
     """Mutation: pass `cells` instead of `pending` -- the completed case refuses."""
-    check = _apply_check("stacks/app") if pending else _done("stacks/app")
+    check = _apply_check("stacks/app", cells=1) if pending else _done("stacks/app")
 
     def run():
         return tdd._run_main(
@@ -249,7 +249,7 @@ def test_the_targeted_apply_refuses_an_outside_tag_only_on_a_pending_cell(
 ):
     """Mutation: pass `cells` instead of `pending` -- the completed case refuses."""
     out = tad._apply_env(monkeypatch, tmp_path, table=_GAP)
-    check = _apply_check("stacks/app", plan_run="42") if pending else _done("stacks/app")
+    check = _apply_check("stacks/app", plan_run="42", cells=1) if pending else _done("stacks/app")
     tad._stub_apply(monkeypatch, {"stacks/app": set()}, [check])
     if pending:
         with pytest.raises(SystemExit) as exc:

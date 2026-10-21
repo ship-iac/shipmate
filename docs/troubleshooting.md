@@ -544,10 +544,12 @@ cannot see, so the apply is refused ([`../CONTRACT.md`](../CONTRACT.md)
 §Apply-match fingerprint). When the summary job failed partway, its gate hold
 stays too, so the pull request cannot merge over the missing checks.
 
-If the plan run's summary job failed, re-run that run's failed jobs, then apply
-again: the re-run keeps the run id, and its summary job publishes only the apply
-checks the run has not yet published. Do not use "Re-run all jobs", which can
-plan a different cell set and over-count.
+When every run the message names published fewer apply checks than its one
+planned cell count, its summary job stopped partway, and the message says to
+re-run that run's failed jobs, then apply again: the re-run keeps the run id,
+and its summary job publishes only the apply checks the run has not yet
+published. Do not use "Re-run all jobs", which can plan a different cell set and
+over-count.
 
 Otherwise, or if the refusal remains, push a commit to the pull request: the new
 head's plan run plans and publishes every cell afresh, and the apply proceeds
@@ -1466,7 +1468,8 @@ The same step refuses, also before any wave:
 
 The apply detect refused every cell it would apply whose
 `apply / <stack> / <env>` check records a different pull request, or none, and
-nothing applied. Each check records the pull request its plan run planned; two
+nothing applied. Each cell is named with the plan run and the pull request its
+check records. Each check records the pull request its plan run planned; two
 open pull requests can share one head commit, and only the newest plan on that
 commit decides which of them may apply. Re-plan on this pull request (push, or
 comment `shipmate plan`), then comment the apply again. A cell whose check
