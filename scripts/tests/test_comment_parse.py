@@ -355,7 +355,7 @@ _HELP = (
     "`doctor` and `help` are read-only, and `plan` changes no infrastructure. `help` answers "
     "anyone; `doctor` and `plan` require write access to this repository.\n"
     "\n"
-    "[run](https://github.com/org/repo/actions/runs/7777)"
+    "[comment run](https://github.com/org/repo/actions/runs/7777)"
 )
 
 
