@@ -463,7 +463,7 @@ before any wave starts.
 
 ### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
 
-A plan cell fails on its very first step, before `terramate` runs, so the cell
+A plan cell fails before `terramate` runs, so the cell
 produces no plan and its `shipmate / <stack> / <env>` check does not go green.
 The failing plan job leaves `shipmate / gate` held red with
 `shipmate / <stack> / <env> has no plan summary; fix its plan or re-plan`, or

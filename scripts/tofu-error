@@ -17,9 +17,10 @@ cause.
 attempt}` from `STACK`, `ENV`, the first `Error:` diagnostic of `$RUNNER_TEMP/plan-run.txt` if it
 exists, else of `$RUNNER_TEMP/init.txt` if it exists, unescaped, and `GITHUB_RUN_ATTEMPT`. No log
 or no diagnostic writes an empty `error`. plan-cell runs it when an attempt fails inside
-plan-cell, so the file holds the cell's `init` or `plan` error from its latest such attempt; a
-failure elsewhere (render, encrypt, job setup) records an empty error or none. The held plan
-comment labels the error with its attempt when an earlier attempt recorded it. Other arguments
+plan-cell, so the file holds the cell's `init` or `plan` error from its latest such attempt. A
+failure at another plan-cell step (render, encrypt) records an empty error; a failure before
+plan-cell runs (job setup) records none, so an earlier attempt's error shows, labelled: the held
+plan comment labels the error with its attempt when an earlier attempt recorded it. Other arguments
 are refused.
 
 The text is author-controlled (a stack's config and provider output), so it
