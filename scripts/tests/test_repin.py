@@ -336,10 +336,20 @@ def test_a_missing_workflows_directory_is_refused(engine, tmp_path, monkeypatch,
     assert capsys.readouterr().out == f"v1.2.3 -> {engine.sha}\n"
 
 
+USAGE = "usage: python <engine>/scripts/repin <consumer> <tag> [--write-fence]"
+
+
 def test_a_usage_error_exits_1(monkeypatch, capsys):
     """Exit 2 means only "written, the shim differs", so a usage error is a string `SystemExit`.
-    Mutation: delete the `len(sys.argv)` check -- the unpacking raises `ValueError`."""
-    assert run(monkeypatch, "only-one") == "usage: python <engine>/scripts/repin <consumer> <tag>"
+    Mutation: delete the `len(args)` check -- the unpacking raises `ValueError`."""
+    assert run(monkeypatch, "only-one") == USAGE
+    assert capsys.readouterr().out == ""
+
+
+def test_an_unknown_flag_is_a_usage_error(engine, monkeypatch, capsys):
+    """Mutation: drop the `flags - {_FLAG}` test -- `--bogus` is ignored and the run goes on to
+    resolve the tag."""
+    assert run(monkeypatch, "consumer", TAG, "--bogus") == USAGE
     assert capsys.readouterr().out == ""
 
 
@@ -626,3 +636,136 @@ def test_an_absent_shim_is_reported_and_exits_2(engine, tmp_path, monkeypatch, c
             f"    uses: {WF}/drift.yml@{engine.sha} # v1.2.3\r\n"
         ).encode()
     }
+
+
+def _edited(branch, sep):
+    """A shim on `branch` pinned to `OLD`, with a `with:` line the fence lacks."""
+    pin = f"plan.yml@{OLD}{sep}".encode()
+    return _fence_shim(branch, OLD, sep).replace(pin, pin + f"    with: {{x: 1}}{sep}".encode())
+
+
+def test_write_fence_prints_the_diff_then_writes_the_fence(engine, tmp_path, monkeypatch, capsys):
+    """An LF shim on `main` with a local `with:` line; a second run finds nothing to write.
+    Mutation: skip printing the diff when the fence is written -- the output lacks the diff."""
+    wf = consumer(tmp_path, {"shipmate.yml": _edited("main", "\n")})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\n"
+        "updated shipmate.yml\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -5,6 +5,7 @@\n"
+        " jobs:\n"
+        "   plan:\n"
+        f"     uses: {WF}/plan.yml@<pin>\n"
+        "+    with: {x: 1}\n"
+        "   apply:\n"
+        f"     uses: {WF}/apply.yml@<pin>\n"
+        "   deploy:\n"
+        "wrote shipmate.yml from the v1.2.3 fence; every line above that differed is replaced\n"
+    )
+    fence = _fence_shim("main", f"{engine.sha} # v1.2.3", "\n")
+    assert on_disk(wf) == {"shipmate.yml": fence}
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\nunchanged shipmate.yml\nshipmate.yml matches the v1.2.3 fence\n"
+    )
+    assert on_disk(wf) == {"shipmate.yml": fence}
+
+
+def test_write_fence_keeps_the_push_branch(engine, tmp_path, monkeypatch, capsys):
+    """The flag first, a shim on `develop`. Mutation: render on `main` whatever the trigger
+    names -- the written file holds `branches: [main]`."""
+    wf = consumer(tmp_path, {"shipmate.yml": _edited("develop", "\n")})
+    assert run(monkeypatch, "--write-fence", str(tmp_path / "consumer"), TAG) == 0
+    assert on_disk(wf) == {"shipmate.yml": _fence_shim("develop", f"{engine.sha} # v1.2.3", "\n")}
+
+
+def test_write_fence_keeps_crlf(engine, tmp_path, monkeypatch, capsys):
+    """Mutation: write `rendered` as it is, dropping the CRLF branch -- the file comes back LF."""
+    wf = consumer(tmp_path, {"shipmate.yml": _edited("main", "\r\n")})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 0
+    assert on_disk(wf) == {"shipmate.yml": _fence_shim("main", f"{engine.sha} # v1.2.3", "\r\n")}
+
+
+def test_write_fence_refuses_a_wildcard_trigger(engine, tmp_path, monkeypatch, capsys):
+    """Mutation: write without the `plain` test -- the fence on `main` replaces `'**'`."""
+    shim = _fence_shim("'**'", f"{engine.sha} # v1.2.3", "\n")
+    wf = consumer(tmp_path, {"shipmate.yml": shim})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\n"
+        "unchanged shipmate.yml\n"
+        "not writing shipmate.yml: its push trigger is not one plain branch\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -1,7 +1,7 @@\n"
+        " name: shipmate\n"
+        " on:\n"
+        "   push:\n"
+        "-    branches: [main]\n"
+        "+    branches: ['**']\n"
+        " jobs:\n"
+        "   plan:\n"
+        f"     uses: {WF}/plan.yml@<pin>\n"
+    )
+    assert on_disk(wf) == {"shipmate.yml": shim}
+
+
+def test_write_fence_reads_only_the_push_trigger(engine, tmp_path, monkeypatch, capsys):
+    """A flow-mapping push trigger beside a `pull_request` block's `branches: [develop]`.
+    Mutation: drop `  push:\\n` from `_TRIGGER` -- `develop` reads as the push branch and the
+    file is written."""
+    sha = engine.sha
+    shim = (
+        "name: shipmate\non:\n  push: {branches: [release/*]}\n  pull_request:\n"
+        f"    branches: [develop]\njobs:\n  plan:\n    uses: {WF}/plan.yml@{sha} # v1.2.3\n"
+        f"  apply:\n    uses: {WF}/apply.yml@{sha} # v1.2.3\n"
+        f"  deploy:\n    uses: {WF}/deploy.yml@{sha} # v1.2.3\n"
+    ).encode()
+    wf = consumer(tmp_path, {"shipmate.yml": shim})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {sha}\n"
+        "unchanged shipmate.yml\n"
+        "not writing shipmate.yml: its push trigger is not one plain branch\n"
+        "--- shipmate.yml (fence)\n"
+        "+++ shipmate.yml\n"
+        "@@ -1,7 +1,8 @@\n"
+        " name: shipmate\n"
+        " on:\n"
+        "-  push:\n"
+        "-    branches: [main]\n"
+        "+  push: {branches: [release/*]}\n"
+        "+  pull_request:\n"
+        "+    branches: [develop]\n"
+        " jobs:\n"
+        "   plan:\n"
+        f"     uses: {WF}/plan.yml@<pin>\n"
+    )
+    assert on_disk(wf) == {"shipmate.yml": shim}
+
+
+def test_write_fence_creates_no_absent_shim(engine, tmp_path, monkeypatch, capsys):
+    """Mutation: write the fence when `shipmate.yml` is absent -- the file appears."""
+    wf = consumer(tmp_path, {"other.yml": GOOD})
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == 2
+    assert capsys.readouterr().out == (
+        f"v1.2.3 -> {engine.sha}\nupdated other.yml\n"
+        "not writing shipmate.yml: it is absent\nshipmate.yml absent\n"
+    )
+    assert on_disk(wf) == {"other.yml": _pinned(engine.sha).encode()}
+
+
+def test_write_fence_writes_nothing_on_a_refusal(engine, tmp_path, monkeypatch, capsys):
+    """A differing shim on `main` calling a workflow the tag lacks. Mutation: write the fence
+    before `_check_callees` -- the shim is replaced and the run still refuses."""
+    gone = f"  gone:\n    uses: {WF}/gone.yml@{OLD}\n".encode()
+    files = {"shipmate.yml": _edited("main", "\n") + gone}
+    wf = consumer(tmp_path, files)
+    assert run(monkeypatch, str(tmp_path / "consumer"), TAG, "--write-fence") == (
+        "engine workflows missing at v1.2.3, so their pins would not resolve: make the "
+        "consumer-file edit its CHANGELOG names:\n.github/workflows/gone.yml"
+    )
+    assert capsys.readouterr().out == f"v1.2.3 -> {engine.sha}\n"
+    assert on_disk(wf) == files

@@ -2,9 +2,10 @@
 log only.
 
 The filter is reviewer-facing: apply-cell runs it in a step of its own after the apply, so it
-cannot change the apply step's status, and the job log keeps the lines. The routine lines here
-follow a raw capture of `terramate run ... -- tofu show -no-color stack.otplan` stderr
-(Terramate 0.17.1, Windows, redirected to a file), as in `test_plan_cell_render.py`.
+cannot change the apply step's status, and the job log keeps the lines. Only the two
+routine-line prefixes here come from a raw capture of `terramate run ... -- tofu show -no-color
+stack.otplan` stderr (Terramate 0.17.1, Windows, redirected to a file), as in
+`test_plan_cell_render.py`.
 """
 
 import os
