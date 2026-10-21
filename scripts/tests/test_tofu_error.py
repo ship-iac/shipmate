@@ -259,6 +259,7 @@ def _cell_error(tmp_path, monkeypatch, init, plan):
     monkeypatch.setenv("RUNNER_TEMP", str(temp))
     monkeypatch.setenv("STACK", "stacks/a")
     monkeypatch.setenv("ENV", "dev")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     te.main(["cell-error"])
     assert not (tmp_path / "cell-error.json").exists()
     out = temp / "cell-error.json"
@@ -268,11 +269,12 @@ def _cell_error(tmp_path, monkeypatch, init, plan):
 def test_cell_error_reads_the_plan_that_failed_after_a_clean_init(tmp_path, monkeypatch):
     """Written under `RUNNER_TEMP`, never the workspace a pull request controls. Mutations: write
     to the working directory -- red; read `init.txt` before `plan-run.txt` -- an empty `error`;
-    swap `stack` and `environment` -- red; write `command_data(error)` -- red."""
+    swap `stack` and `environment` -- red; write `command_data(error)` -- red; drop `attempt` --
+    red."""
     got = _cell_error(tmp_path, monkeypatch, CLEAN_INIT.encode(), PLAN_ERROR.encode())
     assert got == (
         '{"stack": "stacks/a", "environment": "dev", '
-        '"error": "Error: plan broke\\n\\non main.tf line 1"}'
+        '"error": "Error: plan broke\\n\\non main.tf line 1", "attempt": "2"}'
     )
 
 
@@ -280,7 +282,9 @@ def test_cell_error_reads_the_init_when_the_plan_never_ran(tmp_path, monkeypatch
     """Mutation: read `plan-run.txt` without checking it exists -- FileNotFoundError."""
     got = _cell_error(tmp_path, monkeypatch, _fixture("init_error_backend_ansi.txt"), None)
     error = BACKEND.removeprefix("::error::").removesuffix("\n")
-    assert got == json.dumps({"stack": "stacks/a", "environment": "dev", "error": error})
+    assert got == json.dumps(
+        {"stack": "stacks/a", "environment": "dev", "error": error, "attempt": "2"}
+    )
 
 
 def test_a_failed_cell_without_a_diagnostic_writes_an_empty_error(tmp_path, monkeypatch):
@@ -288,15 +292,15 @@ def test_a_failed_cell_without_a_diagnostic_writes_an_empty_error(tmp_path, monk
 
     Mutation: skip writing when `first_error` is empty -- no file, red."""
     got = _cell_error(tmp_path, monkeypatch, b"terramate: stack not found\n", None)
-    assert got == '{"stack": "stacks/a", "environment": "dev", "error": ""}'
+    assert got == '{"stack": "stacks/a", "environment": "dev", "error": "", "attempt": "2"}'
 
 
 def test_a_re_run_failing_before_init_writes_an_empty_error(tmp_path, monkeypatch):
-    """No log in this job's `RUNNER_TEMP`: the empty error replaces the earlier attempt's.
+    """No log in this job's `RUNNER_TEMP`: an empty error.
 
     Mutation: read `init.txt` without checking it exists -- FileNotFoundError, red."""
     got = _cell_error(tmp_path, monkeypatch, None, None)
-    assert got == '{"stack": "stacks/a", "environment": "dev", "error": ""}'
+    assert got == '{"stack": "stacks/a", "environment": "dev", "error": "", "attempt": "2"}'
 
 
 #: Hand-written: plan-cell's whole cell-error steps.
@@ -326,7 +330,7 @@ UPLOAD_CELL_ERROR = {
 
 
 def test_plan_cell_writes_and_uploads_its_error_after_any_failure():
-    """Any failed attempt, at any step, replaces the cell's earlier error, a failure before init
+    """A failure at any plan-cell step writes and uploads the cell's error, a failure before init
     included. Mutations: restore the outcome-gated `if:` (`failure() && (init failed || plan
     failed)`) -- red; drop `failure()` -- red (GitHub then adds `success()`, so neither step
     runs after a failure); rename the artifact `cell-error.<slug>.<env>` -- red; drop

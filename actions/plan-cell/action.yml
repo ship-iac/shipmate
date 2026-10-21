@@ -28,13 +28,25 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Stack slug
+      id: ids
+      shell: bash
+      # First, a pure string transform, so a failure at any later step uploads its cell
+      # error under this cell's name. Author-controlled $STACK via env, so injection-safe.
+      env:
+        STACK: ${{ inputs.stack }}
+      run: |
+        slug=$(printf '%s' "$STACK" | tr / -)
+        [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
+        echo "slug=$slug" >> "$GITHUB_OUTPUT"
+
     - name: Record the planned commit
       id: planned
       shell: bash
       env:
         EXPECTED_HEAD: ${{ inputs.expected-head }}
-      # First step on purpose: later steps run author-controlled HCL and provider binaries through
-      # terramate, so a rev-parse after it reports whatever git state that content left behind.
+      # Before every step that runs author-controlled HCL and provider binaries through terramate,
+      # so the rev-parse cannot report git state that content left behind.
       run: |
         set -euo pipefail
         if [ -z "${EXPECTED_HEAD:-}" ]; then
@@ -63,17 +75,6 @@ runs:
         SHIPMATE_SECRETS: ${{ inputs.consumer-secrets }}
         STACK: ${{ inputs.stack }}
       run: python3 "$GITHUB_ACTION_PATH/../../scripts/env-inject"
-
-    - name: Stack slug
-      id: ids
-      shell: bash
-      # Author-controlled $STACK via env (never interpolated), so injection-safe.
-      env:
-        STACK: ${{ inputs.stack }}
-      run: |
-        slug=$(printf '%s' "$STACK" | tr / -)
-        [[ "$slug" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::stack path produced invalid slug"; exit 1; }
-        echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
     - name: Initialize the stack
       id: init
@@ -208,7 +209,8 @@ runs:
           plan.txt
         retention-days: 7
 
-    # RUNNER_TEMP is per job: any failed attempt, at any step, replaces this cell's earlier error.
+    # The first init or plan `Error:` of this attempt (RUNNER_TEMP is per job), empty when the
+    # failure was elsewhere; the held comment labels an earlier attempt's error with its attempt.
     - name: Write cell error
       if: ${{ failure() }}
       shell: bash

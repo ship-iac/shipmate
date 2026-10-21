@@ -15,7 +15,7 @@ section below names the SHA the release tags.
 - **Plan, apply and drift cells run `tofu show` inside `terramate run`, so a `run.env` `TF_DATA_DIR` reaches it.**
 - **A failed `tofu init` is annotated with OpenTofu's first error; the `gh cache delete` remedy appears only for a provider install failure after a cache hit.**
 - **A plan run whose `summary` finds that a newer plan run holds the gate ends green at its hold step with the newer-run refusal as a notice, so re-running a cancelled autoplan clears its checks; a newer run that takes the gate while the re-run publishes can still fail it.**
-- **A held plan comment shows each failed cell's first OpenTofu error in a fence under its line, the one its latest failed attempt recorded: any failed attempt replaces the previous.**
+- **A held plan comment shows each failed cell's first OpenTofu `Error:` from its `init` or `plan` log in a fence under its line, from the cell's latest attempt that failed inside plan-cell, labelled `recorded by attempt <n> of this run` when an earlier attempt recorded it. A failure elsewhere (render, encrypt, job setup) records an empty error or none.**
 
 ### Changed
 

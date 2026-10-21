@@ -2189,11 +2189,12 @@ the publish hold (below). In order, blank lines between the parts:
   the same. When `tofu init` or `tofu plan` failed with an `Error:` diagnostic,
   the cell's line is followed by the first one (from `init` or `plan`), colour
   removed and cut at 1,000 characters, in a plain backtick fence longer than any
-  backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it;
-  every failed attempt of a cell, at any step, uploads one, its error empty
-  when the attempt printed no `Error:` diagnostic, and replaces the previous.
-  An error shows when the cell's latest failed attempt recorded one; a cell
-  that did not re-run keeps its own. A cell whose artifact did not arrive or
+  backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it:
+  the first OpenTofu `Error:` diagnostic in the cell's `init` or `plan` log from
+  its latest attempt that failed inside plan-cell. A failure elsewhere (render,
+  encrypt, job setup) records an empty error or none. When an earlier attempt
+  of this run recorded the error, `recorded by attempt <n> of this run` sits
+  between the line and the fence. A cell whose artifact did not arrive or
   carries an empty error shows its line alone. The cell's plan job
   also carries an `::error::` annotation with it. For the autoplan that job is the
   linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`

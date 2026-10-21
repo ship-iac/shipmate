@@ -368,7 +368,7 @@ def reason_fence(text, cap=REASON_CAP):
     return fence(text, _fence_of(text), lang="")
 
 
-def held_comment(reason, missing, checks, run_url, head_sha, errors=None):
+def held_comment(reason, missing, checks, run_url, head_sha, errors=None, attempt=""):
     """The comment of a held gate: marker, header, `🔴 the gate is held` and `provenance`, then
     `reason` (the gate description before its 140-character cut, at most `REASON_CAP`
     characters) in a plain fence, then one line per cell of `missing` (`{stack, environment}`
@@ -376,8 +376,9 @@ def held_comment(reason, missing, checks, run_url, head_sha, errors=None):
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
     and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `no
     plan summary read`: its plan matrix job did not succeed or the summary download failed. A
-    cell's non-empty entry in `errors` (`cell_errors`), its first OpenTofu error, follows its
-    line in a plain fence cut at `CELL_ERROR_CAP`."""
+    cell's entry in `errors` (`cell_errors`), `(error, recorded attempt)`, follows its line when
+    the error is not empty: `recorded by attempt <n> of this run` when `<n>` is set and is not
+    `attempt`, this run's attempt, then the error in a plain fence cut at `CELL_ERROR_CAP`."""
     errors = errors or {}
     parts = [
         f"{MARKER}\n{header('plan')}",
@@ -391,7 +392,10 @@ def held_comment(reason, missing, checks, run_url, head_sha, errors=None):
             lines.append(
                 cell_line("🔴", c["stack"], c["environment"], "no plan summary read", url, "plan")
             )
-            if error := errors.get((c["stack"], c["environment"])):
+            error, recorded = errors.get((c["stack"], c["environment"]), ("", ""))
+            if error:
+                if recorded and recorded != attempt:
+                    lines.append(f"recorded by attempt {_md_escape(recorded)} of this run")
                 lines.append(reason_fence(error, CELL_ERROR_CAP))
         if len(missing) > HELD_CELL_NAMES:
             more = len(missing) - HELD_CELL_NAMES
@@ -653,15 +657,14 @@ def _named_output(raw, input_name, key, noun):
     return None
 
 
-CELL_ERROR_KEYS = {"stack", "environment", "error"}
+CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
 
 
 def cell_errors(errors_dir):
-    """`{(stack, environment): error}` from every `cell-error.json` under `errors_dir`, which
-    plan-cell writes for every failed attempt of a cell, its error empty without a diagnostic, so
-    each holds the cell's latest failed attempt's error. Recursive, as `cell_summaries`. The
-    errors are reviewer-facing only, so a file that is not a JSON object of exactly those three
-    strings is skipped, with one warning."""
+    """`{(stack, environment): (error, attempt)}` from every `cell-error.json` under `errors_dir`,
+    which plan-cell writes when an attempt of a cell fails, with the attempt that wrote it.
+    Recursive, as `cell_summaries`. The errors are reviewer-facing only, so a file that is not a
+    JSON object of exactly those four strings is skipped, with one warning."""
     out, bad = {}, False
     for p in sorted(glob.glob(os.path.join(errors_dir, "**", "cell-error.json"), recursive=True)):
         try:
@@ -674,13 +677,13 @@ def cell_errors(errors_dir):
             and set(e) == CELL_ERROR_KEYS
             and all(type(v) is str for v in e.values())
         ):
-            out[(e["stack"], e["environment"])] = e["error"]
+            out[(e["stack"], e["environment"])] = (e["error"], e["attempt"])
         else:
             bad = True
     if bad:
         print(
-            "::warning::a cell error file is not a JSON object of stack, environment and error "
-            "strings; the held plan comment shows no error for its cell"
+            "::warning::a cell error file is not a JSON object of stack, environment, error and "
+            "attempt strings; the held plan comment shows no error for its cell"
         )
     return out
 
@@ -693,6 +696,7 @@ def _held_main(checks, url):
         url,
         os.environ.get("HEAD_SHA", ""),
         cell_errors(os.environ.get("CELL_ERRORS", "cell-errors")),
+        os.environ.get("GITHUB_RUN_ATTEMPT", ""),
     )
     with open("held.md", "w", encoding="utf-8") as fh:
         fh.write(body)

@@ -13,12 +13,14 @@ set, only when any `Error:` diagnostic's title starts with `INSTALL_FAILED`, and
 otherwise: a backend or credential failure is not the cache's, and its own diagnostic names the
 cause.
 
-`tofu-error cell-error` writes `$RUNNER_TEMP/cell-error.json`, `{stack, environment, error}`
-from `STACK`, `ENV` and the first diagnostic of `$RUNNER_TEMP/plan-run.txt` if it exists, else of
-`$RUNNER_TEMP/init.txt` if it exists, unescaped. No log or no diagnostic writes an empty `error`.
-plan-cell runs it for every failed attempt, so the held plan comment shows the error the cell's
-latest failed attempt recorded: any failed attempt replaces the previous. Other arguments are
-refused.
+`tofu-error cell-error` writes `$RUNNER_TEMP/cell-error.json`, `{stack, environment, error,
+attempt}` from `STACK`, `ENV`, the first `Error:` diagnostic of `$RUNNER_TEMP/plan-run.txt` if it
+exists, else of `$RUNNER_TEMP/init.txt` if it exists, unescaped, and `GITHUB_RUN_ATTEMPT`. No log
+or no diagnostic writes an empty `error`. plan-cell runs it when an attempt fails inside
+plan-cell, so the file holds the cell's `init` or `plan` error from its latest such attempt; a
+failure elsewhere (render, encrypt, job setup) records an empty error or none. The held plan
+comment labels the error with its attempt when an earlier attempt recorded it. Other arguments
+are refused.
 
 The text is author-controlled (a stack's config and provider output), so it
 prints only through `command_data`: a raw newline would start a second workflow
@@ -78,7 +80,12 @@ def cell_error():
     temp = pathlib.Path(os.environ["RUNNER_TEMP"])
     logs = [temp / name for name in ("plan-run.txt", "init.txt") if (temp / name).exists()]
     error = first_error(_decode(logs[0].read_bytes())) if logs else ""
-    cell = {"stack": os.environ["STACK"], "environment": os.environ["ENV"], "error": error}
+    cell = {
+        "stack": os.environ["STACK"],
+        "environment": os.environ["ENV"],
+        "error": error,
+        "attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+    }
     # Outside the workspace: a `cell-error.json` the pull request commits must not upload.
     with open(temp / "cell-error.json", "w", encoding="utf-8") as fh:
         json.dump(cell, fh)
