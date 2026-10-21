@@ -487,7 +487,7 @@ def build_comment(
     ):
         # The smallest body with the line; past HARD_CAP it goes, so the refusal below keeps
         # its one cause. In `head`, the line is counted in `used` before any fold-out is sized.
-        if line and len("\n\n".join(p for p in (head, line, "\n".join(bares)) if p)) > HARD_CAP:
+        if line and len("\n\n".join(p for p in (head, line, _join(bares)) if p)) > HARD_CAP:
             print(
                 "::warning::the plan comment's cell lines leave no room under the 65,536-char "
                 f"comment cap for the {what} line; it was left out"

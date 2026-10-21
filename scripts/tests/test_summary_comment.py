@@ -729,6 +729,30 @@ def test_the_unmanaged_line_yields_to_cell_lines_near_the_hard_cap(capsys):
     assert capsys.readouterr().out == _NO_ROOM
 
 
+def test_the_unmanaged_line_yields_near_the_hard_cap_across_many_environments(capsys):
+    """130 one-cell environments: each heading's blank lines are part of the body, so the
+    pre-check must count them.
+
+    Mutation: `"\\n".join(bares)` for `_join(bares)` in the pre-check undercounts two characters
+    per heading, keeps the line and raises "cell lines alone exceed", red."""
+    cells = [
+        (_cell(stack=f"stacks/{'s' * 400}", environment=f"e{i:03}", changed=False), None)
+        for i in range(130)
+    ]
+    pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
+    assert pad > 0
+    cells[0][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert len(without) == sc.HARD_CAP - 10
+    capsys.readouterr()
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged")) == (
+        without,
+        False,
+        False,
+    )
+    assert capsys.readouterr().out == _NO_ROOM
+
+
 def test_load_cells_reads_json_and_plan_text_sorted(tmp_path):
     a = tmp_path / "cell-summary.dev-us.stacks-db"
     a.mkdir()
