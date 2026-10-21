@@ -32,7 +32,7 @@ _COUNT_KEYS = ("add", "change", "destroy", "import", "forget")
 
 
 def _bare_app(url):
-    return f'🟡 stacks/app (dev-eu): +1 ~0 -0 <a href="{url}">plan</a>'
+    return f'🟡 stacks/app: +1 ~0 -0 <a href="{url}">plan</a>'
 
 
 def _cell(**kw):
@@ -231,6 +231,23 @@ def test_cell_line_escapes_author_controlled_names():
     )
 
 
+def test_cell_line_without_an_env_names_none():
+    """A line under its environment's heading. Mutation: rendering `({_md_name(env)})` for a
+    None `env` -- `(None)`."""
+    assert sc.cell_line("🟢", "a", None, "no changes", "https://u", "plan") == (
+        '🟢 a: no changes <a href="https://u">plan</a>'
+    )
+
+
+def test_env_heading_names_the_env_its_cell_count_and_tally():
+    """Mutations: `_md_escape` for `_md_name` -- a live `@v`; always `cells` -- the one-cell
+    case, red."""
+    assert sc.env_heading("e@v<x>", 3, "1 changed") == (
+        "#### e@<!-- -->v&lt;x&gt;: 3 cells, 1 changed"
+    )
+    assert sc.env_heading("dev", 1, "0 changed") == "#### dev: 1 cell, 0 changed"
+
+
 def test_cell_line_names_mention_nobody():
     """Mutation: `_md_escape` for `_md_name` on the stack in `cell_line` -- a live `@acme`.
     Mutation: the same on the env -- a live `@v`."""
@@ -273,10 +290,26 @@ def test_footer_with_and_without_the_help_hint():
     assert sc.footer(RUN_URL, hint=False) == "[run](https://gh/run/1)"
 
 
+def test_verdict_of_zero_cells_is_nothing_planned():
+    """Mutation: dropping the empty-cells branch in `verdict` renders `🟢 no changes`."""
+    assert sc.verdict([], SHA, RUN_URL) == (
+        "⚪ nothing planned at [0123456](https://gh/o/r/commit/"
+        "0123456789abcdef0123456789abcdef01234567) in [run #7](https://gh/run/1)"
+    )
+
+
+def test_verdict_of_one_unchanged_cell_is_no_changes():
+    """Mutation: `if not cells` -> `if not any(c["changed"] for c in cells)` renders
+    `⚪ nothing planned`."""
+    assert sc.verdict([_cell(changed=False)], SHA, RUN_URL) == (
+        "🟢 no changes at [0123456](https://gh/o/r/commit/"
+        "0123456789abcdef0123456789abcdef01234567) in [run #7](https://gh/run/1)"
+    )
+
+
 def test_verdict_reads_the_cells_only():
     """Mutation: counting every cell as changing (`n = len(cells)`) renders `3 of 3`."""
     unchanged = _cell(changed=False)
-    assert sc.verdict([], SHA, RUN_URL) == f"🟢 no changes {AT}"
     assert sc.verdict([unchanged, unchanged], SHA, RUN_URL) == f"🟢 no changes {AT}"
     assert (
         sc.verdict([unchanged, _cell(), unchanged], SHA, RUN_URL) == f"🟡 1 of 3 cells change {AT}"
@@ -326,14 +359,17 @@ def test_a_fold_out_has_a_blank_line_on_both_sides_and_bare_lines_one_newline():
     ]
     assert sc.build_comment(cells, CHECKS, RUN_URL, SHA)[0] == (
         HEAD + f"🟡 1 of 3 cells change {AT}\n\n"
-        f"<details><summary>{_BARE_APP}</summary>\n\n```diff\n+   one\n```\n</details>\n\n"
-        '🟢 stacks/db (dev-eu): no changes <a href="https://gh/run/1">plan</a>\n'
-        '🟢 stacks/dns (dev-eu): no changes <a href="https://gh/run/1">plan</a>'
+        "#### dev-eu: 3 cells, 1 changed\n\n"
+        f"<details><summary>{_bare_app('https://ck/app-eu')}</summary>\n\n```diff\n+   one\n```\n"
+        "</details>\n\n"
+        '🟢 stacks/db: no changes <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/dns: no changes <a href="https://gh/run/1">plan</a>'
     )
 
 
-def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
-    """Mutation: sorting by `(stack, environment)` puts stacks/app (prod) first."""
+def test_without_an_env_order_environments_sort_by_name(tmp_path):
+    """Mutation: dropping `sorted` from the environments `order` does not name -- `prod`, the
+    first read, comes first."""
     _write_cell(
         tmp_path,
         _cell(environment="prod"),
@@ -345,28 +381,98 @@ def test_the_whole_comment_orders_cells_by_environment_then_stack(tmp_path):
         "No changes. Your infrastructure matches the configuration.\n",
     )
     checks = {"shipmate / stacks/app / prod": {"html_url": "https://ck/app-prod"}}
-    body = sc.build_comment(sc.load_cells(str(tmp_path)), checks, RUN_URL, SHA)[0]
+    cells = sc.load_cells(str(tmp_path))
+    cells.reverse()
+    body = sc.build_comment(cells, checks, RUN_URL, SHA)[0]
     assert body == (
         HEAD + f"🟡 1 of 2 cells change {AT}\n\n"
-        '🟢 stacks/db (dev): no changes <a href="https://gh/run/1">plan</a>\n\n'
-        '<details><summary>🟡 stacks/app (prod): +1 ~0 -0 <a href="https://ck/app-prod">plan</a>'
+        "#### dev: 1 cell, 0 changed\n\n"
+        '🟢 stacks/db: no changes <a href="https://gh/run/1">plan</a>\n\n'
+        "#### prod: 1 cell, 1 changed\n\n"
+        '<details><summary>🟡 stacks/app: +1 ~0 -0 <a href="https://ck/app-prod">plan</a>'
         "</summary>\n\n```diff\n+   resource\n\nPlan: 1 to add, 0 to change, 0 to destroy.\n```\n"
         "</details>"
     )
 
 
+def test_environments_follow_the_env_order_not_their_names():
+    """`live` needs `staging`, so detect's order puts the level-1 `live` second although it sorts
+    first by name; `extra`, which the order does not name, follows by name.
+
+    Mutation: ignoring `order` in `by_env` (`envs = []`), which sorts every environment by name
+    -- `extra` and `live` lead, red."""
+    cells = [
+        (_cell(stack="stacks/a", environment="live", changed=False), None),
+        (_cell(stack="stacks/b", environment="extra", changed=False), None),
+        (_cell(stack="stacks/c", environment="staging", changed=False), None),
+    ]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA, order=["staging", "live"])[0]
+    assert body == (
+        HEAD + f"🟢 no changes {AT}\n\n"
+        "#### staging: 1 cell, 0 changed\n\n"
+        '🟢 stacks/c: no changes <a href="https://gh/run/1">plan</a>\n\n'
+        "#### live: 1 cell, 0 changed\n\n"
+        '🟢 stacks/a: no changes <a href="https://gh/run/1">plan</a>\n\n'
+        "#### extra: 1 cell, 0 changed\n\n"
+        '🟢 stacks/b: no changes <a href="https://gh/run/1">plan</a>'
+    )
+
+
+def test_a_changed_cell_leads_its_environment():
+    """Three unchanged cells sort before `stacks/d` by name; the changed one still comes first.
+
+    Mutation: sorting each environment's cells by stack alone -- `stacks/d` last, red."""
+    cells = [(_cell(stack=f"stacks/{s}", changed=False), None) for s in ("a", "b", "c")] + [
+        (_cell(stack="stacks/d"), None)
+    ]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert body == (
+        HEAD + f"🟡 1 of 4 cells change {AT}\n\n"
+        "#### dev-eu: 4 cells, 1 changed\n\n"
+        '🟡 stacks/d: +1 ~0 -0 <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/a: no changes <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/b: no changes <a href="https://gh/run/1">plan</a>\n'
+        '🟢 stacks/c: no changes <a href="https://gh/run/1">plan</a>'
+    )
+
+
+_BAD_ENV_ORDER = (
+    "::warning::env-order is not a JSON list of environment names; the comment orders its "
+    "environments by name\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected", "out"),
+    [
+        ("", [], ""),
+        ('["b", "a"]', ["b", "a"], ""),
+        ("not json", [], _BAD_ENV_ORDER),
+        ('{"b": 1}', [], _BAD_ENV_ORDER),
+        ('["b", 1]', [], _BAD_ENV_ORDER),
+    ],
+)
+def test_env_order_reads_a_list_of_names_and_warns_on_anything_else(raw, expected, out, capsys):
+    """Mutations: dropping the element check -- `["b", 1]` passes; warning on an empty value --
+    the first case prints."""
+    assert sc.env_order(raw) == expected
+    assert capsys.readouterr().out == out
+
+
 def test_zero_cells_render_header_and_verdict_only():
     """Mutation: appending `footer(run_url)` reddens it."""
-    assert sc.build_comment([], {}, RUN_URL, SHA)[0] == HEAD + f"🟢 no changes {AT}"
+    assert sc.build_comment([], {}, RUN_URL, SHA)[0] == HEAD + f"⚪ nothing planned {AT}"
 
 
 def _bare(i):
-    return f'🟡 s{i:03} (dev-eu): +1 ~0 -0 <a href="https://gh/run/1">plan</a>'
+    return f'🟡 s{i:03}: +1 ~0 -0 <a href="https://gh/run/1">plan</a>'
 
 
-def _fold_out_rows(body, verdict):
+def _fold_out_rows(body, verdict, heading):
     """The plan rows of the body's first fold-out (cell 0's, truncated), and what follows it."""
-    opening = HEAD + verdict + f"\n\n<details><summary>{_bare(0)}</summary>\n\n```diff\n"
+    opening = (
+        HEAD + f"{verdict}\n\n{heading}\n\n<details><summary>{_bare(0)}</summary>\n\n```diff\n"
+    )
     trailer = "\n```\n\n_Truncated, [full plan in the check run](https://gh/run/1)._\n</details>"
     assert body.startswith(opening)
     rows, rest = body[len(opening) :].split(trailer, 1)
@@ -381,7 +487,9 @@ def test_a_256_cell_fan_out_of_oversized_plans_keeps_every_cell_line():
     cells = [(_cell(stack=f"s{i:03}"), giant) for i in range(256)]
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
-    rows, rest = _fold_out_rows(body, f"🟡 256 of 256 cells change {AT}")
+    rows, rest = _fold_out_rows(
+        body, f"🟡 256 of 256 cells change {AT}", "#### dev-eu: 256 cells, 256 changed"
+    )
     assert set(rows) == {"+   r"}
     assert rest == "\n\n" + "\n".join(_bare(i) for i in range(1, 256))
 
@@ -396,10 +504,25 @@ def test_an_early_giant_plan_cannot_drop_a_later_cells_line():
     ]
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     assert len(body) <= sc.SIZE_BUDGET
-    rows, rest = _fold_out_rows(body, f"🟡 2 of 3 cells change {AT}")
+    rows, rest = _fold_out_rows(
+        body, f"🟡 2 of 3 cells change {AT}", "#### dev-eu: 3 cells, 2 changed"
+    )
     assert set(rows) == {"+   r"}
-    assert rest == (
-        "\n\n" + _bare(1) + '\n🟢 s002 (dev-eu): no changes <a href="https://gh/run/1">plan</a>'
+    assert rest == ("\n\n" + _bare(1) + '\n🟢 s002: no changes <a href="https://gh/run/1">plan</a>')
+
+
+def test_headings_are_reserved_before_a_fold_out_is_sized():
+    """One giant plan in the first environment, then 300 one-cell environments whose headings
+    the fold-out must leave room for.
+
+    Mutation: summing `reserve` over the cell entries alone sizes the fold-out over the headings
+    -- the body passes HARD_CAP and `build_comment` refuses, red."""
+    cells = [(_cell(stack="s000", environment="a000"), "  + r\n" * (sc.SIZE_BUDGET // 6 + 1))]
+    cells += [(_cell(stack="s", environment=f"e{i:03}", changed=False), None) for i in range(300)]
+    body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert len(body) <= sc.SIZE_BUDGET
+    assert body.endswith(
+        '#### e299: 1 cell, 0 changed\n\n🟢 s: no changes <a href="https://gh/run/1">plan</a>'
     )
 
 
@@ -446,9 +569,55 @@ def test_a_pull_request_changing_only_an_unmanaged_stack_names_it_under_the_verd
 
     Mutation: dropping the line when `cells` is empty reddens it."""
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/[new]")) == (
-        HEAD + f"🟢 no changes {AT}\n\n" + _LEAD.format(1) + ": stacks/&#91;new&#93;",
+        HEAD + f"⚪ nothing planned {AT}\n\n" + _LEAD.format(1) + ": stacks/&#91;new&#93;",
         True,
         False,
+    )
+
+
+def test_the_doctor_line_sits_under_the_verdict_above_the_unmanaged_line():
+    """Mutation: put the line after the unmanaged line -- red."""
+    assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "stacks/x"), None, 2) == (
+        HEAD
+        + f"⚪ nothing planned {AT}\n\n"
+        + "⚠️ shipmate doctor found 2 warning(s) beyond repository settings in this run: see [the run](https://gh/run/1)\n\n"
+        + _LEAD.format(1)
+        + ": stacks/x",
+        True,
+        False,
+    )
+
+
+def test_the_doctor_line_yields_to_cell_lines_near_the_hard_cap(capsys):
+    """Mutation: leave the doctor line out of the HARD_CAP pre-check -- the refusal raises."""
+    cells = [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(130)]
+    pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
+    cells[0][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    capsys.readouterr()
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, None, None, 1) == (without, False, False)
+    assert capsys.readouterr().out == (
+        "::warning::the plan comment's cell lines leave no room under the 65,536-char comment "
+        "cap for the shipmate doctor warnings line; it was left out\n"
+    )
+
+
+@pytest.mark.parametrize(("raw", "line"), [("", False), ("0", False), ("x", False), ("3", True)])
+def test_main_renders_the_doctor_line_from_the_doctor_warnings_count(
+    tmp_path, monkeypatch, raw, line
+):
+    """Anything but a positive count renders no line.
+
+    Mutation: render the line when the count is 0 -- red (the empty and `0` cases).
+    Mutation: `int(warnings)` without the `isdecimal` guard -- red (`x` crashes)."""
+    monkeypatch.setenv("SHIPMATE_DOCTOR_WARNINGS", raw)
+    _run_main(tmp_path, monkeypatch, [])
+    doctor = (
+        "\n\n⚠️ shipmate doctor found 3 warning(s) beyond repository settings in this run: see "
+        "[the run](https://gh/o/r/actions/runs/1)"
+    )
+    assert (tmp_path / "comment.md").read_text(encoding="utf-8") == (
+        HEAD + f"⚪ nothing planned {MAIN_AT}" + (doctor if line else "")
     )
 
 
@@ -467,7 +636,7 @@ def test_the_lost_pairs_line_follows_the_unmanaged_line_and_mentions_nobody():
     lost = {"count": 12, "pairs": ["@acme/ops/y / prod", *(f"s{i:02} / dev" for i in range(9))]}
     assert sc.build_comment([], {}, RUN_URL, SHA, _named(1, "@acme/admins/x"), lost) == (
         HEAD
-        + f"🟢 no changes {AT}\n\n"
+        + f"⚪ nothing planned {AT}\n\n"
         + _LEAD.format(1)
         + ": @<!-- -->acme/admins/x\n\n"
         + _LOST_LEAD.format(12)
@@ -537,7 +706,10 @@ def test_the_unmanaged_line_is_counted_before_a_fold_out_is_sized():
     without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
     body = sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged"))[0]
     line = _LEAD.format(1) + ": stacks/unmanaged"
-    assert body.startswith(HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n<details>")
+    assert body.startswith(
+        HEAD + f"🟡 1 of 1 cells change {AT}\n\n{line}\n\n#### dev-eu: 1 cell, 1 changed\n\n"
+        "<details>"
+    )
     assert len(without) <= sc.SIZE_BUDGET and len(body) <= sc.SIZE_BUDGET
     assert abs(len(body) - len(without)) < 6
 
@@ -547,6 +719,30 @@ def test_the_unmanaged_line_yields_to_cell_lines_near_the_hard_cap(capsys):
 
     Mutation: always adding the line raises that refusal."""
     cells = [(_cell(stack=f"stacks/{'s' * 400}{i:03}", changed=False), None) for i in range(130)]
+    pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
+    assert pad > 0
+    cells[0][0]["stack"] += "p" * pad
+    without = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
+    assert len(without) == sc.HARD_CAP - 10
+    capsys.readouterr()
+    assert sc.build_comment(cells, {}, RUN_URL, SHA, _named(1, "stacks/unmanaged")) == (
+        without,
+        False,
+        False,
+    )
+    assert capsys.readouterr().out == _NO_ROOM
+
+
+def test_the_unmanaged_line_yields_near_the_hard_cap_across_many_environments(capsys):
+    """130 one-cell environments: each heading's blank lines are part of the body, so the
+    pre-check must count them.
+
+    Mutation: `"\\n".join(bares)` for `_join(bares)` in the pre-check undercounts two characters
+    per heading, keeps the line and raises "cell lines alone exceed", red."""
+    cells = [
+        (_cell(stack=f"stacks/{'s' * 400}", environment=f"e{i:03}", changed=False), None)
+        for i in range(130)
+    ]
     pad = sc.HARD_CAP - 10 - len(sc.build_comment(cells, {}, RUN_URL, SHA)[0])
     assert pad > 0
     cells[0][0]["stack"] += "p" * pad
@@ -735,9 +931,7 @@ def test_a_cell_without_plan_text_renders_question_marks_and_warns_once(tmp_path
         "its counts render as ?\n"
     )
     body = sc.build_comment(cells, {}, RUN_URL, SHA)[0]
-    assert '🟡 stacks/app (dev-eu): +? ~? -? <a href="https://gh/run/1">plan</a>' in (
-        body.splitlines()
-    )
+    assert '🟡 stacks/app: +? ~? -? <a href="https://gh/run/1">plan</a>' in (body.splitlines())
 
 
 def test_the_warning_escapes_a_newline_in_an_untrusted_name(tmp_path, capsys):
@@ -855,29 +1049,26 @@ def test_the_upsert_step_maps_exactly_these_env_vars():
     }
 
 
-#: The doctor step's whole shell body, hand-written: doctor's result is read here once, as the
-#: `warned` output, and warnings count while notices do not.
+#: The doctor step's whole shell body, hand-written: doctor writes `warned` and `warnings`
+#: itself, and the step writes them only when doctor fails.
 _DOCTOR_RUN = [
     "set -euo pipefail",
     'if python3 "$GITHUB_ACTION_PATH/../../scripts/doctor" > doctor.txt; then',
     "cat doctor.txt",
     "else",
     'echo "::warning::doctor probes errored; settings-drift check skipped"',
+    'echo "warned=false" >> "$GITHUB_OUTPUT"',
+    'echo "warnings=0" >> "$GITHUB_OUTPUT"',
     "fi",
-    "warned=false",
-    "if [ -s doctor.txt ] && grep -q '^::warning' doctor.txt; then",
-    "warned=true",
-    "fi",
-    'echo "warned=$warned" >> "$GITHUB_OUTPUT"',
 ]
 
 
-def test_doctor_runs_before_the_upsert_and_records_warned_once():
-    """The upsert reads `warned` to post a comment with nothing planned, so the doctor step must
-    run before it, under the id it names.
+def test_doctor_runs_before_the_build_and_the_upsert():
+    """The build reads `warnings` and the upsert reads `warned`, so the doctor step must run
+    before both, under the id they name.
 
-    Mutation: grep `^::notice` instead of `^::warning` -- red.
-    Mutation: move the doctor step after `Upsert sticky comment` -- red.
+    Mutation: drop the `warnings=0` echo -- red.
+    Mutation: move the doctor step after `Build comment + gate state` -- red.
     Mutation: rename the step's `id: doctor` -- red."""
     doctor = step_by(
         "summary", name="Doctor: settings-drift warnings (annotations only, never blocks)"
@@ -885,7 +1076,7 @@ def test_doctor_runs_before_the_upsert_and_records_warned_once():
     assert doctor["id"] == "doctor"
     assert run_lines(doctor) == _DOCTOR_RUN
     names = [s.get("name") for s in action_steps("summary")]
-    assert names.index(doctor["name"]) < names.index("Upsert sticky comment")
+    assert names.index(doctor["name"]) < names.index("Build comment + gate state")
 
 
 def _run_main(tmp_path, monkeypatch, cells, stdin=""):
@@ -931,7 +1122,7 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         run_lines(build)
     )
     # Mutation: dropping `HEAD_SHA` renders every verdict `at an unknown commit`. Mutation:
-    # binding `SHIPMATE_DOCTOR_WARNED` again -- a plan comment reads nothing from doctor.
+    # binding `SHIPMATE_DOCTOR_WARNINGS` to `steps.doctor.outputs.warned` -- no line renders.
     # Mutation: mapping `unmanaged-stacks` or `lost-env-tags` to another env name. Mutation:
     # dropping `SHIPMATE_PLANNED_CELLS_NAMES` or `SHIPMATE_DETECT_RESULT` -- `missing` is always
     # empty.
@@ -940,12 +1131,14 @@ def test_main_writes_the_count_and_pending_outputs_the_action_reads(tmp_path, mo
         "HEAD_SHA": "${{ inputs.head-sha }}",
         "SHIPMATE_UNMANAGED": "${{ inputs.unmanaged-stacks }}",
         "SHIPMATE_LOST_ENV_TAGS": "${{ inputs.lost-env-tags }}",
+        "SHIPMATE_ENV_ORDER": "${{ inputs.env-order }}",
         "SHIPMATE_PLANNED_CELLS_NAMES": "${{ inputs.planned-cell-names }}",
         "SHIPMATE_DETECT_RESULT": "${{ inputs.detect-result }}",
+        "SHIPMATE_DOCTOR_WARNINGS": "${{ steps.doctor.outputs.warnings }}",
     }
-    # Mutation: `required: true` on any of the three (GitHub does not enforce it, but it
+    # Mutation: `required: true` on any of the four (GitHub does not enforce it, but it
     # misdocuments a draft run).
-    for name in ("unmanaged-stacks", "lost-env-tags", "planned-cell-names"):
+    for name in ("unmanaged-stacks", "lost-env-tags", "planned-cell-names", "env-order"):
         decl = load_workflow_text(src)["inputs"][name]
         assert {k: v for k, v in decl.items() if k != "description"} == {
             "required": False,
@@ -994,7 +1187,7 @@ def test_main_names_the_unmanaged_stacks_without_touching_the_gate_outputs(
     assert capsys.readouterr().out == out
     line = "\n\n" + _LEAD.format(1) + ": stacks/x" if flag == "true" else ""
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
-    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + line
+    assert body == HEAD + f"⚪ nothing planned {MAIN_AT}" + line
 
 
 _BAD_LOST = (
@@ -1028,7 +1221,7 @@ def test_main_names_the_lost_pairs_without_touching_the_gate_outputs(
     assert capsys.readouterr().out == out
     line = "\n\n" + _LOST_LEAD.format(1) + ": stacks/x / dev" if flag == "true" else ""
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
-    assert body == HEAD + f"🟢 no changes {MAIN_AT}" + line
+    assert body == HEAD + f"⚪ nothing planned {MAIN_AT}" + line
 
 
 def test_main_reports_an_unmanaged_line_left_out_at_the_hard_cap(tmp_path, monkeypatch, capsys):
@@ -1179,13 +1372,14 @@ def test_held_comment_caps_its_cell_lines_and_its_reason():
     assert lines[-3] == "and 2 more cells have no plan summary"
 
 
-def _held_main(tmp_path, monkeypatch, mode):
+def _held_main(tmp_path, monkeypatch, mode, missing=(_A_DEV,)):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "out.txt"))
     monkeypatch.setenv("HEAD_SHA", SHA)
     monkeypatch.setenv("SHIPMATE_COMMENT_MODE", mode)
     monkeypatch.setenv("SHIPMATE_HOLD_REASON", "the reason")
-    monkeypatch.setenv("SHIPMATE_MISSING", json.dumps([_A_DEV]))
+    monkeypatch.setenv("SHIPMATE_MISSING", json.dumps(list(missing)))
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
     listing = '{"name": "shipmate / stacks/a / dev", "html_url": "https://gh/c/a", "id": 1}\n'
     monkeypatch.setattr(sc.sys, "stdin", io.StringIO(listing))
     sc.main()
@@ -1202,6 +1396,127 @@ def test_main_held_mode_writes_only_the_held_body(tmp_path, monkeypatch):
         '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>\n\n' + HINT
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == ["held.md"]
+
+
+def _cell_error(path, stack, environment, error, attempt="2"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"stack": stack, "environment": environment, "error": error, "attempt": attempt}
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+_HELD_TOP = HEAD + f"🔴 the gate is held {MAIN_AT}\n\n```\nthe reason\n```\n\n"
+_ROW_A_DEV = '🔴 stacks/a (dev): no plan summary read <a href="https://gh/c/a">plan</a>'
+
+
+def test_main_held_mode_shows_a_cell_error_under_its_row(tmp_path, monkeypatch, capsys):
+    """One matching artifact downloads with no per-artifact folder, so the file sits at the top.
+    Mutations: read the errors from `cells` -- no fence; fence the error before the row -- red."""
+    _cell_error(tmp_path / "cell-errors" / "cell-error.json", "stacks/a", "dev", "Error: boom")
+    _held_main(tmp_path, monkeypatch, "held")
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        _HELD_TOP + f"{_ROW_A_DEV}\n```\nError: boom\n```\n\n" + HINT
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_main_held_mode_shows_no_fence_for_an_empty_cell_error(tmp_path, monkeypatch, capsys):
+    """A failed cell with no `Error:` diagnostic uploads an empty error. Mutation: fence an error
+    whenever the cell has an entry (`is not None`) -- an empty fence under the row, red."""
+    _cell_error(tmp_path / "cell-errors" / "cell-error.json", "stacks/a", "dev", "")
+    _held_main(tmp_path, monkeypatch, "held")
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        _HELD_TOP + f"{_ROW_A_DEV}\n\n" + HINT
+    )
+    assert capsys.readouterr().out == ""
+
+
+def test_main_held_mode_labels_an_error_an_earlier_attempt_recorded(tmp_path, monkeypatch):
+    """Attempt 2 of the cell did not re-record, so attempt 1's error arrives under an attempt-2
+    summary: it shows, labelled. Mutation: drop the label -- the fence follows the row, red."""
+    _cell_error(tmp_path / "cell-errors" / "cell-error.json", "stacks/a", "dev", "Error: old", "1")
+    _held_main(tmp_path, monkeypatch, "held")
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        _HELD_TOP
+        + f"{_ROW_A_DEV}\nrecorded by attempt 1 of this run\n```\nError: old\n```\n\n"
+        + HINT
+    )
+
+
+def test_an_attempt_label_is_escaped_and_omitted_when_empty():
+    """Mutations: drop `_md_escape` on the attempt -- a raw `<b>`, red; label an empty attempt --
+    `recorded by attempt  of this run`, red."""
+    row = f'🔴 stacks/a (dev): no plan summary read <a href="{RUN_URL}">plan</a>'
+    for recorded, label in (("<b>", "recorded by attempt &lt;b&gt; of this run\n"), ("", "")):
+        errors = {("stacks/a", "dev"): ("E", recorded)}
+        body = sc.held_comment("r", [_A_DEV], {}, RUN_URL, SHA, errors, "2")
+        assert body.split("\n\n")[3] == f"{row}\n{label}```\nE\n```"
+
+
+def test_main_held_mode_shows_each_environment_its_own_error(tmp_path, monkeypatch):
+    """The same stack failing in two environments, one folder per artifact. Mutation: key
+    `cell_errors` on the stack only -- both rows show one error."""
+    errors = tmp_path / "cell-errors"
+    _cell_error(errors / "cell-error.dev.stacks-a" / "cell-error.json", "stacks/a", "dev", "E1")
+    _cell_error(errors / "cell-error.prod.stacks-a" / "cell-error.json", "stacks/a", "prod", "E2")
+    _held_main(tmp_path, monkeypatch, "held", [_A_DEV, {**_A_DEV, "environment": "prod"}])
+    assert (tmp_path / "held.md").read_text(encoding="utf-8") == (
+        _HELD_TOP
+        + f"{_ROW_A_DEV}\n```\nE1\n```\n"
+        + '🔴 stacks/a (prod): no plan summary read <a href="https://gh/o/r/actions/runs/1">plan</a>\n'
+        + "```\nE2\n```\n\n"
+        + HINT
+    )
+
+
+def test_held_comment_fences_an_error_past_its_longest_backtick_run():
+    """Mutations: a fixed three-backtick fence -- the error closes it; cut at `REASON_CAP`
+    instead of `CELL_ERROR_CAP` -- 4,000 characters."""
+    error = "Error: x`````y" + "z" * 5000
+    body = sc.held_comment("r", [_A_DEV], {}, RUN_URL, SHA, {("stacks/a", "dev"): (error, "")})
+    assert body.split("\n\n")[3:] == [
+        (
+            f'🔴 stacks/a (dev): no plan summary read <a href="{RUN_URL}">plan</a>\n'
+            f"``````\n{error[:1000]}\n``````"
+        ),
+        HINT,
+    ]
+
+
+def test_the_held_body_with_every_error_at_its_cap_stays_under_hard_cap():
+    """Ten cells, each error and the reason one backtick run at its cap, so each renders as about
+    three times its text (a fence of n + 1 backticks on each side). Mutation: drop the
+    `CELL_ERROR_CAP` cut -- ten 20,000-character runs."""
+    missing = [{"stack": f"stacks/s{i:02}", "environment": "dev"} for i in range(12)]
+    errors = {(c["stack"], "dev"): ("`" * 20_000, "1") for c in missing}
+    body = sc.held_comment("`" * 20_000, missing, {}, RUN_URL, SHA, errors)
+    assert len(body) < sc.HARD_CAP
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "not json",
+        "[]",
+        '{"stack": "stacks/a", "environment": "dev", "error": 1, "attempt": "2"}',
+        '{"stack": "stacks/a", "environment": "dev", "error": "E", "attempt": 2}',
+        '{"stack": "stacks/a", "environment": "dev"}',
+        '{"stack": "stacks/a", "environment": "dev", "error": "E", "attempt": "2", "extra": "x"}',
+    ],
+    ids=["not-json", "list", "int-error", "int-attempt", "two-keys", "five-keys"],
+)
+def test_a_malformed_cell_error_is_skipped_with_one_warning(tmp_path, capsys, raw):
+    """A well-formed sibling still reads. Mutations: drop the key-set check -- `two-keys`
+    raises, `five-keys` reads; drop the string check -- `int-error` reads; catch no
+    `ValueError` -- `not-json` raises; warn per file -- two warnings."""
+    for d in ("x", "y"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "cell-error.json").write_text(raw, encoding="utf-8")
+    _cell_error(tmp_path / "z" / "cell-error.json", "stacks/b", "prod", "E")
+    assert sc.cell_errors(str(tmp_path)) == {("stacks/b", "prod"): ("E", "2")}
+    assert capsys.readouterr().out == (
+        "::warning::a cell error file is not a JSON object of stack, environment, error and "
+        "attempt strings; the held plan comment shows no error for its cell\n"
+    )
 
 
 def test_main_refuses_an_unknown_comment_mode(tmp_path, monkeypatch):
@@ -1243,10 +1558,21 @@ def test_main_writes_the_whole_comment_linking_this_run_at_the_head_sha(
     body = (tmp_path / "comment.md").read_text(encoding="utf-8")
     run = "https://gh/o/r/actions/runs/1"
     assert body == (
-        HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n"
+        HEAD + f"🟡 1 of 1 cells change {MAIN_AT}\n\n#### dev-eu: 1 cell, 1 changed\n\n"
         f"<details><summary>{_bare_app(run)}</summary>\n\n```diff\n+   resource added\n\n"
         "Plan: 1 to add, 0 to change, 0 to destroy.\n```\n</details>"
     )
+
+
+def test_main_orders_environments_by_the_env_order_input(tmp_path, monkeypatch):
+    """Mutation: drop the `SHIPMATE_ENV_ORDER` read from `main` -- `live` first by name, red."""
+    monkeypatch.setenv("SHIPMATE_ENV_ORDER", '["staging", "live"]')
+    _run_main(tmp_path, monkeypatch, [_cell(environment="live"), _cell(environment="staging")])
+    body = (tmp_path / "comment.md").read_text(encoding="utf-8")
+    assert [line for line in body.splitlines() if line.startswith("#### ")] == [
+        "#### staging: 1 cell, 1 changed",
+        "#### live: 1 cell, 1 changed",
+    ]
 
 
 _FIXTURES = pathlib.Path(__file__).parent / "fixtures"

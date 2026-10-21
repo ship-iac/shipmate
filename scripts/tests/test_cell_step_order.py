@@ -27,10 +27,10 @@ _EXPECTED = {
         "Restore state",
     ],
     "plan-cell": [
+        "Stack slug",
         "Record the planned commit",
         "Require the plan passphrase",
         "Inject identity variables",
-        "Stack slug",
         "Initialize the stack",
         "Plan",
         "Render + classify plan",
@@ -40,6 +40,8 @@ _EXPECTED = {
         "Upload plan artifact",
         "Write cell summary",
         "Upload cell summary",
+        "Write cell error",
+        "Upload cell error",
     ],
     "drift-cell": [
         "Inject identity variables",

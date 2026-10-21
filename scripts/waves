@@ -155,6 +155,13 @@ def env_levels(order, envs):
     return {e: level[e] for e in envs}
 
 
+def env_sequence(order, envs):
+    """`envs` in apply order: by `env_levels` over `order`, ties broken by name. The order the
+    plan and apply comments list environments in."""
+    level = env_levels(order, envs)
+    return sorted(envs, key=lambda e: (level[e], e))
+
+
 def env_level_waves(cells, order, deps):
     """Return a list of MAX_ENV_LEVELS dicts, each {wave0..wave7: [cells]}.
 

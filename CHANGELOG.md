@@ -14,10 +14,15 @@ section below names the SHA the release tags.
 
 - **Plan, apply and drift cells run `tofu show` inside `terramate run`, so a `run.env` `TF_DATA_DIR` reaches it.**
 - **A failed `tofu init` is annotated with OpenTofu's first error; the `gh cache delete` remedy appears only for a provider install failure after a cache hit.**
+- **A plan run whose `summary` finds that a newer plan run holds the gate ends green at its hold step with the newer-run refusal as a notice, so re-running a cancelled autoplan clears its checks; a newer run that takes the gate while the re-run publishes can still fail it.**
+- **A held plan comment shows each failed cell's first OpenTofu `Error:` from its `init` or `plan` log in a fence under its line, from the cell's latest attempt that failed inside plan-cell, labelled `recorded by attempt <n> of this run` when an earlier attempt recorded it. Any other plan-cell failure, one whose `init` and `plan` logs hold no OpenTofu `Error:` diagnostic, records an empty error. When an attempt uploads no error file (it failed before plan-cell ran: checkout, setup, credentials; it was cancelled or timed out; or the error write or upload step failed), the cell keeps the error an earlier attempt recorded, if any.**
 
 ### Changed
 
 - **OpenTofu 1.13.1 replaces 1.12.4.** A plan made on 1.12.4 is refused at apply, so push a commit to each open pull request to re-plan it.
+- **A plan comment for a run that planned no cell headlines `⚪ nothing planned` instead of `🟢 no changes`.**
+- **Repository-settings warnings (gate ruleset, review rule, `CODEOWNERS`) no longer post a plan comment for a pull request that changes nothing; a plan comment names the count of the other `doctor` warnings and links the run.**
+- **The plan and apply result comments group their cells under one `#### <env>: N cells, <counts>` heading per environment, in apply order (the `needs` levels, ties by name), with changed, failed and blocked cells first; a cell line under a heading no longer repeats `(<env>)`.**
 
 ## [0.49.1] — 2026-10-18
 

@@ -155,15 +155,18 @@ def test_the_detect_actions_install_first(action):
     assert action_steps(action)[0] == {"uses": _USES}
 
 
-def test_summary_installs_directly_before_doctor_and_its_gate_step_stays_unconditional():
+def test_summary_installs_directly_before_doctor_and_its_gate_step_skips_only_when_superseded():
     """A failing step before `Create/refresh gate` would skip it, and the install never fails.
-    Mutation: move the step after `Doctor`."""
+    Both skip only on a superseded run, which writes nothing.
+    Mutations: move the step after `Doctor`; add `&& inputs.on-demand == 'true'` to the gate
+    step's `if:`."""
+    not_superseded = "${{ steps.hold.outputs.superseded != 'true' }}"
     steps = action_steps("summary")
     names = [s.get("name") for s in steps]
     doctor = names.index("Doctor: settings-drift warnings (annotations only, never blocks)")
-    assert steps[doctor - 1] == {"uses": _USES}
+    assert steps[doctor - 1] == {"uses": _USES, "if": not_superseded}
     gate = steps[names.index("Create/refresh gate")]
-    assert "if" not in gate
+    assert gate["if"] == not_superseded
 
 
 def test_comment_ops_installs_for_its_parsing_routes_before_any_parsing_step():

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the sticky plan comment: a verdict line, then one line or fold-out per cell.
+"""Build the sticky plan comment: a verdict line, then per environment a heading and its cells.
 
 Reads the plan matrix jobs' auto check-runs (named `shipmate / <stack> / <env>`) as JSON
 Lines on stdin (as emitted by `gh api --paginate ... --jq '.check_runs[]'`) and
@@ -9,8 +9,9 @@ GITHUB_OUTPUT; `missing` is a JSON list of the `{stack, environment}` planned ce
 cell summary, empty unless detect succeeded and `planned-cell-names` is a valid list.
 
 With `SHIPMATE_COMMENT_MODE=held` it writes the held comment (`held_comment`) to held.md instead,
-reads no cell summary and writes nothing to GITHUB_OUTPUT; any other non-empty value refuses. The
-mode is read in `main`, so loading this module stays free of side effects.
+reads no cell summary, only the `cell-error.json` files under $CELL_ERRORS (default
+`cell-errors`), and writes nothing to GITHUB_OUTPUT; any other non-empty value refuses. The mode is
+read in `main`, so loading this module stays free of side effects.
 
 GitHub rejects issue-comment bodies over 65,536 characters. SIZE_BUDGET
 leaves headroom below that cap; each changed cell's fold-out degrades
@@ -19,15 +20,16 @@ Plan text is emitted only inside a backtick fence computed to be longer than
 any backtick run in the text, so author-controlled plan output cannot escape
 the fence (the comment-body injection surface).
 
-The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `header`, `provenance`,
-`footer`, `footer_hint`, `tally`, `_join`) lives here because apply-comment and doctor already
-load this module.
+The shared comment frame (`CIRCLES`, `worst`, `link`, `cell_line`, `env_heading`, `env_order`,
+`by_env`, `header`, `provenance`, `footer`, `footer_hint`, `tally`, `_join`) lives here because
+apply-comment and doctor already load this module.
 
 `FOOTER_HINT` points at the comment commands, which have no other pull-request-visible surface,
 and shows only where the reader has something to do: under a refusal or a failure, under an
 apply or doctor verdict that is not 🟢. A plan comment carries it only when the gate is held.
 """
 
+import glob
 import html
 import itertools
 import json
@@ -183,11 +185,53 @@ def link(url, text):
 
 
 def cell_line(circle, stack, env, state, url=None, text=""):
-    """`<circle> <stack> (<env>): <state>`, then a space and `link(url, text)` unless `url` is
-    None. `stack` and `env` are `_md_name`d here; `state` is the caller's and must already be
-    safe (a blocked reason is escaped by its caller)."""
-    line = f"{circle} {_md_name(stack)} ({_md_name(env)}): {state}"
+    """`<circle> <stack> (<env>): <state>`, without ` (<env>)` when `env` is None (a line under
+    its environment's `env_heading`), then a space and `link(url, text)` unless `url` is None.
+    `stack` and `env` are `_md_name`d here; `state` is the caller's and must already be safe (a
+    blocked reason is escaped by its caller)."""
+    where = "" if env is None else f" ({_md_name(env)})"
+    line = f"{circle} {_md_name(stack)}{where}: {state}"
     return line if url is None else f"{line} {link(url, text)}"
+
+
+def env_heading(env, n, tally):
+    """`#### <env>: 1 cell, <tally>` or `#### <env>: N cells, <tally>`: the line above an
+    environment's cell lines, `env` `_md_name`d."""
+    return f"#### {_md_name(env)}: {n} cell{'' if n == 1 else 's'}, {tally}"
+
+
+def env_order(raw):
+    """The environments of detect's `env_order` output `raw`, a JSON list of strings in apply
+    order; `[]` when empty, and `[]` with one warning when it is not that shape."""
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        value = None
+    if isinstance(value, list) and all(isinstance(e, str) for e in value):
+        return value
+    print(
+        "::warning::env-order is not a JSON list of environment names; the comment orders its "
+        "environments by name"
+    )
+    return []
+
+
+def by_env(items, order, first, cell=lambda item: item):
+    """`[(env, items)]`: `items` grouped by `cell(item)["environment"]`, the environments `order`
+    names in its order, then the rest by name; in each, the items `first` holds for, then the
+    others, each sorted by stack."""
+    groups = {}
+    for item in items:
+        groups.setdefault(cell(item)["environment"], []).append(item)
+    envs = [e for e in dict.fromkeys(order) if e in groups]
+    envs += sorted(set(groups) - set(envs))
+
+    def key(item):
+        return not first(cell(item)), cell(item)["stack"]
+
+    return [(env, sorted(groups[env], key=key)) for env in envs]
 
 
 def header(verb, env=""):
@@ -256,7 +300,7 @@ def state(cell):
 
 
 def _plan_line(cell, url):
-    return cell_line(emoji(cell), cell["stack"], cell["environment"], state(cell), url, "plan")
+    return cell_line(emoji(cell), cell["stack"], None, state(cell), url, "plan")
 
 
 def fold(line, body, limit, trailer, cut, lang="diff"):
@@ -296,9 +340,11 @@ def render_section(line, plan_text, url, limit):
 
 
 def verdict(cells, head_sha, run_url):
-    """The line under the header: `🟢 no changes` when no cell changes (zero cells included),
-    else `🟡 N of M cells change`, then `provenance`. It reads the cells only: every failed
-    plan job holds the gate, and a held gate posts `held_comment` instead."""
+    """The line under the header: `⚪ nothing planned` for zero cells, `🟢 no changes` when no
+    cell changes, else `🟡 N of M cells change`, then `provenance`. It reads the cells only:
+    every failed plan job holds the gate, and a held gate posts `held_comment` instead."""
+    if not cells:
+        return f"⚪ nothing planned {provenance(head_sha, run_url)}"
     circle = worst(emoji(c) for c in cells)
     if circle == "🟢":
         return f"🟢 no changes {provenance(head_sha, run_url)}"
@@ -308,41 +354,49 @@ def verdict(cells, head_sha, run_url):
 
 #: The most cell lines the held comment names before it counts the rest.
 HELD_CELL_NAMES = 10
+#: The cell error file is an artifact, and an all-backtick error of n characters renders as about
+#: 3n (a fence of n + 1 backticks on each side), so the read side cuts too: ten errors at
+#: `REASON_CAP` would pass HARD_CAP.
+CELL_ERROR_CAP = 1000
 
 
-def reason_fence(text):
-    """`text` cut to `REASON_CAP` characters in a plain fence sized by `_fence_of`, so
+def reason_fence(text, cap=REASON_CAP):
+    """`text` cut to `cap` characters in a plain fence sized by `_fence_of`, so
     author-controlled text such as a stack path shows verbatim, where `_md_name`'s mention guard
     would show as written."""
-    text = text[:REASON_CAP]
+    text = text[:cap]
     return fence(text, _fence_of(text), lang="")
 
 
-def held_comment(reason, missing, checks, run_url, head_sha):
+def held_comment(reason, missing, checks, run_url, head_sha, errors=None, attempt=""):
     """The comment of a held gate: marker, header, `🔴 the gate is held` and `provenance`, then
     `reason` (the gate description before its 140-character cut, at most `REASON_CAP`
     characters) in a plain fence, then one line per cell of `missing` (`{stack, environment}`
     pairs) linking its plan check, then `FOOTER_HINT`. At most `HELD_CELL_NAMES` cell lines,
     then a count. The fence shows `reason` verbatim: it can name author-controlled stack paths,
     and `_md_name`'s mention guard would show as written inside a fence. A cell's state is `no
-    plan summary read`: its plan matrix job did not succeed or the summary download failed."""
+    plan summary read`: its plan matrix job did not succeed or the summary download failed. A
+    cell's entry in `errors` (`cell_errors`), `(error, recorded attempt)`, follows its line when
+    the error is not empty: `recorded by attempt <n> of this run` when `<n>` is set and is not
+    `attempt`, this run's attempt, then the error in a plain fence cut at `CELL_ERROR_CAP`."""
+    errors = errors or {}
     parts = [
         f"{MARKER}\n{header('plan')}",
         f"🔴 the gate is held {provenance(head_sha, run_url)}",
         reason_fence(reason),
     ]
     if missing:
-        lines = [
-            cell_line(
-                "🔴",
-                c["stack"],
-                c["environment"],
-                "no plan summary read",
-                check_url(c, checks, run_url),
-                "plan",
+        lines = []
+        for c in missing[:HELD_CELL_NAMES]:
+            url = check_url(c, checks, run_url)
+            lines.append(
+                cell_line("🔴", c["stack"], c["environment"], "no plan summary read", url, "plan")
             )
-            for c in missing[:HELD_CELL_NAMES]
-        ]
+            error, recorded = errors.get((c["stack"], c["environment"]), ("", ""))
+            if error:
+                if recorded and recorded != attempt:
+                    lines.append(f"recorded by attempt {_md_escape(recorded)} of this run")
+                lines.append(reason_fence(error, CELL_ERROR_CAP))
         if len(missing) > HELD_CELL_NAMES:
             more = len(missing) - HELD_CELL_NAMES
             lines.append(f"and {more} more cells have no plan summary")
@@ -379,39 +433,71 @@ def names_line(value, key, lead):
     return line or f"{lead}; their {key} are too long to list here."
 
 
+def doctor_line(warnings, run_url):
+    """The line naming `warnings` doctor warnings with a link to the run their annotations are
+    on; empty when there are none."""
+    if not warnings:
+        return ""
+    return (
+        f"⚠️ shipmate doctor found {warnings} warning(s) beyond repository settings in this run: "
+        f"see [the run]({run_url})"
+    )
+
+
+_BLOCKS = ("<details>", "#### ")
+
+
 def _join(sections):
-    """One newline between consecutive bare lines, a blank line on both sides of a fold-out:
-    without the blank line after `</details>`, the next line stays inside the HTML block and
-    its link renders literally."""
+    """One newline between consecutive bare lines, a blank line on both sides of a fold-out or
+    an `env_heading`: without the blank line after `</details>`, the next line stays inside the
+    HTML block and its link renders literally."""
     out = sections[:1]
     for prev, cur in itertools.pairwise(sections):
-        fold = prev.startswith("<details>") or cur.startswith("<details>")
+        fold = prev.startswith(_BLOCKS) or cur.startswith(_BLOCKS)
         out.append("\n\n" if fold else "\n")
         out.append(cur)
     return "".join(out)
 
 
-def build_comment(cells, checks, run_url, head_sha, unmanaged=None, lost=None):
-    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, the unmanaged paths line of
-    `unmanaged` and the lost pairs line of `lost` when each count is not zero, every cell in
-    order (a fold-out for a changed cell with plan text, else its bare line). No footer: the
-    verdict links the run, and neither plan verdict asks anything. Every cell is guaranteed its
-    bare line: the space all remaining cells' bare lines need is reserved up front, so an early
-    giant plan cannot starve a later cell. Each of the two lines yields, with a warning, when the
-    bare lines leave it no room under HARD_CAP. Returns `(body, unmanaged_named, lost_named)`,
-    each flag saying whether that line is in `body`."""
+def _entries(cells, order, checks, run_url):
+    """`(bare line, cell, plan text, url)` per heading and cell, in comment order; a heading has
+    no cell."""
+    entries = []
+    for env, group in by_env(cells, order, lambda c: c["changed"], cell=lambda ct: ct[0]):
+        n = sum(1 for c, _ in group if c["changed"])
+        entries.append((env_heading(env, len(group), f"{n} changed"), None, None, None))
+        for c, text in group:
+            url = check_url(c, checks, run_url)
+            entries.append((_plan_line(c, url), c, text, url))
+    return entries
+
+
+def build_comment(
+    cells, checks, run_url, head_sha, unmanaged=None, lost=None, warnings=0, order=()
+):
+    """Assemble the comment under SIZE_BUDGET: marker, header, verdict, `doctor_line` of
+    `warnings`, the unmanaged paths line of `unmanaged` and the lost pairs line of `lost` when
+    each count is not zero, then per environment in `by_env` order of `order` its `env_heading`
+    (`N cells, M change`) and its cells, changed first (a fold-out for a changed cell with plan
+    text, else its bare line, which names no environment). No footer: the verdict links the
+    run, and neither plan verdict asks anything. Every cell is guaranteed its bare line: the
+    space all headings and remaining cells' bare lines need is reserved up front, so an early
+    giant plan cannot starve a later cell. Each of the three lines yields, with a warning, when
+    the headings and bare lines leave it no room under HARD_CAP. Returns `(body,
+    unmanaged_named, lost_named)`, each flag saying whether that line is in `body`."""
     meta = [c for c, _ in cells]
     head = f"{MARKER}\n{header('plan')}\n\n{verdict(meta, head_sha, run_url)}"
-    urls = [check_url(c, checks, run_url) for c in meta]
-    bares = [_plan_line(c, u) for c, u in zip(meta, urls, strict=True)]
+    entries = _entries(cells, order, checks, run_url)
+    bares = [e[0] for e in entries]
     named = []
     for line, what in (
+        (doctor_line(warnings, run_url), "shipmate doctor warnings"),
         (names_line(unmanaged, "paths", UNMANAGED_LEAD), "unmanaged stacks"),
         (names_line(lost, "pairs", LOST_LEAD), "lost stack / environment pairs"),
     ):
         # The smallest body with the line; past HARD_CAP it goes, so the refusal below keeps
         # its one cause. In `head`, the line is counted in `used` before any fold-out is sized.
-        if line and len("\n\n".join(p for p in (head, line, "\n".join(bares)) if p)) > HARD_CAP:
+        if line and len("\n\n".join(p for p in (head, line, _join(bares)) if p)) > HARD_CAP:
             print(
                 "::warning::the plan comment's cell lines leave no room under the 65,536-char "
                 f"comment cap for the {what} line; it was left out"
@@ -423,10 +509,10 @@ def build_comment(cells, checks, run_url, head_sha, unmanaged=None, lost=None):
     used = len(head) + 4
     reserve = sum(len(b) + 2 for b in bares)
     sections = []
-    for (c, text), url, bare in zip(cells, urls, bares, strict=True):
+    for bare, c, text, url in entries:
         reserve -= len(bare) + 2
         section = bare
-        if c["changed"]:
+        if c is not None and c["changed"]:
             section = render_section(bare, text, url, SIZE_BUDGET - used - reserve - 2)
         sections.append(section)
         used += len(section) + 2
@@ -439,7 +525,7 @@ def build_comment(cells, checks, run_url, head_sha, unmanaged=None, lost=None):
             "::error::the plan comment's cell lines alone exceed the 65,536-char comment "
             "cap, shorten stack/env display names"
         )
-    return body, *named
+    return body, *named[1:]
 
 
 _STR_KEYS = ("stack", "environment")
@@ -571,6 +657,37 @@ def _named_output(raw, input_name, key, noun):
     return None
 
 
+CELL_ERROR_KEYS = {"stack", "environment", "error", "attempt"}
+
+
+def cell_errors(errors_dir):
+    """`{(stack, environment): (error, attempt)}` from every `cell-error.json` under `errors_dir`,
+    which plan-cell writes when an attempt of a cell fails, with the attempt that wrote it.
+    Recursive, as `cell_summaries`. The errors are reviewer-facing only, so a file that is not a
+    JSON object of exactly those four strings is skipped, with one warning."""
+    out, bad = {}, False
+    for p in sorted(glob.glob(os.path.join(errors_dir, "**", "cell-error.json"), recursive=True)):
+        try:
+            with open(p, encoding="utf-8") as fh:
+                e = json.load(fh)
+        except (OSError, ValueError):
+            e = None
+        if (
+            isinstance(e, dict)
+            and set(e) == CELL_ERROR_KEYS
+            and all(type(v) is str for v in e.values())
+        ):
+            out[(e["stack"], e["environment"])] = (e["error"], e["attempt"])
+        else:
+            bad = True
+    if bad:
+        print(
+            "::warning::a cell error file is not a JSON object of stack, environment, error and "
+            "attempt strings; the held plan comment shows no error for its cell"
+        )
+    return out
+
+
 def _held_main(checks, url):
     body = held_comment(
         os.environ.get("SHIPMATE_HOLD_REASON", ""),
@@ -578,6 +695,8 @@ def _held_main(checks, url):
         checks,
         url,
         os.environ.get("HEAD_SHA", ""),
+        cell_errors(os.environ.get("CELL_ERRORS", "cell-errors")),
+        os.environ.get("GITHUB_RUN_ATTEMPT", ""),
     )
     with open("held.md", "w", encoding="utf-8") as fh:
         fh.write(body)
@@ -607,8 +726,17 @@ def main():
         "pairs",
         "lost stack / environment pair",
     )
+    # Reviewer-facing only: anything but doctor's count renders no line.
+    warnings = os.environ.get("SHIPMATE_DOCTOR_WARNINGS", "")
     body, named, lost_named = build_comment(
-        cells, checks, url, os.environ.get("HEAD_SHA", ""), unmanaged, lost
+        cells,
+        checks,
+        url,
+        os.environ.get("HEAD_SHA", ""),
+        unmanaged,
+        lost,
+        int(warnings) if warnings.isdecimal() else 0,
+        env_order(os.environ.get("SHIPMATE_ENV_ORDER", "")),
     )
     with open("comment.md", "w", encoding="utf-8") as fh:
         fh.write(body)

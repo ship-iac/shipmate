@@ -1350,7 +1350,8 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
 
 
 def test_build_matrix_action_declares_the_outputs_the_gate_reads():
-    """Mutation: delete the `refusal` output -- the gate never names a detect error."""
+    """Mutation: delete the `refusal` output -- the gate never names a detect error.
+    Mutation: delete the `env_order` output -- the plan comment orders environments by name."""
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
     # name -> wiring; descriptions are prose and deliberately not pinned.
@@ -1364,6 +1365,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
         "lost": "${{ steps.build.outputs.lost }}",
         "refusal": "${{ steps.build.outputs.refusal }}",
+        "env_order": "${{ steps.build.outputs.env_order }}",
     }
 
 
@@ -2431,7 +2433,24 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         "cells": '[{"environment": "dev-eu", "stack": "stacks/app"}]',
         "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
         "lost": "",
+        "env_order": '["dev-eu"]',
     }
+
+
+def test_the_env_order_output_follows_the_needs_levels_not_the_names(monkeypatch, tmp_path):
+    """`live` needs `staging`, so it is on env-level 1 and comes second although it sorts first by
+    name.
+
+    Mutation: sort by name alone in `waves.env_sequence` -- `["live", "staging"]`, red."""
+    outputs, _ = _run_main(
+        monkeypatch,
+        tmp_path,
+        _PR_ENV,
+        cells=(("stacks/app", "live"), ("stacks/app", "staging")),
+        head_sha="cafe1234",
+        table={"layout": "folder", "environments": {"live": {"needs": ["staging"]}, "staging": {}}},
+    )
+    assert outputs["env_order"] == '["staging", "live"]'
 
 
 def _git(*args):

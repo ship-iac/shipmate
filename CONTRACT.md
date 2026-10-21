@@ -1269,7 +1269,8 @@ too — the two are separate statements, since a run that has not finished has
 recorded nothing yet while a run that could not be read may have recorded
 plenty.
 
-The plan comment carries no doctor findings (see §Plan comment). Instead,
+The plan comment carries no doctor findings; the plan body carries only their
+count (see §Plan comment). Instead,
 `actions/summary` runs `scripts/doctor` on every plan run and emits its
 findings as workflow-command annotations, verbatim:
 
@@ -2186,9 +2187,21 @@ the publish hold (below). In order, blank lines between the parts:
   cells are `detect`'s planned `cells` the run read no summary for: a cell whose
   plan matrix job did not succeed and a cell whose summary download failed read
   the same. When `tofu init` or `tofu plan` failed with an `Error:` diagnostic,
-  the cell's plan job carries an `::error::` annotation with the first one,
-  colour removed and cut at 1,000 characters. For the autoplan that job is the
-  linked check and `shipmate doctor` harvests it. An on-demand `shipmate plan`
+  the cell's line is followed by the first one (from `init` or `plan`), colour
+  removed and cut at 1,000 characters, in a plain backtick fence longer than any
+  backtick run in it. The cell's `cell-error.<env>.<slug>` artifact carries it:
+  the first OpenTofu `Error:` diagnostic in the cell's `init` or `plan` log from
+  its latest attempt that failed inside plan-cell. Any other plan-cell failure,
+  one whose `init` and `plan` logs hold no OpenTofu `Error:` diagnostic,
+  records an empty error. When an attempt uploads no error file (it failed
+  before plan-cell ran: checkout, setup, credentials; it was cancelled or timed
+  out; or the error write or upload step failed), the cell keeps the error an
+  earlier attempt recorded, if any. When an earlier attempt of this run
+  recorded the error, `recorded by attempt <n> of this run` sits between the
+  line and the fence. A cell whose artifact did not arrive or carries an empty
+  error shows its line alone. The cell's plan job also carries an `::error::`
+  annotation with it. For the autoplan that job is the linked check and
+  `shipmate doctor` harvests it. An on-demand `shipmate plan`
   keeps it on its own run: `doctor` reads only the autoplan's cell checks and
   the App-mirrored head check carries no annotations. A drift or apply cell's
   failed init, and a drift cell's failed plan, annotate the same way;
@@ -2217,13 +2230,16 @@ applies that no longer exist. With no comment yet, none is posted — a docs-onl
 or engine-pin-bump pull request carries no shipmate comment — with two
 exceptions. A run where `doctor` emitted a warning still posts: doctor's
 findings are annotations with no file/line, so they render only on the run page
-(see §Comment-ops), and this comment's verdict links that run from the
+(see §Comment-ops), and this comment's doctor line links that run from the
 pull request. `::notice::`
 findings do not trigger the exception: they are informational, and would put a
-comment on every quiet run. A run whose comment carries the unmanaged line also
-posts: a pull request that changes only stacks with no `env/*` tag plans nothing,
-and the comment is where it says so. When the line is left out for size (below),
-this exception does not apply.
+comment on every quiet run. Nor do warnings from the repository-settings probes
+(the gate ruleset, the review rule and `CODEOWNERS`): they hold until an admin
+changes the settings, so they would put a comment on every quiet pull request.
+`shipmate doctor` and the run page still report them. A run whose comment
+carries the unmanaged line also posts: a pull request that changes only stacks
+with no `env/*` tag plans nothing, and the comment is where it says so. When
+the line is left out for size (below), this exception does not apply.
 
 An existing comment is edited in place on every plan run but a draft autoplan, a
 cancelled plan job and a run whose pull request moved to a newer head (comment
@@ -2234,26 +2250,45 @@ App name, which a consumer org may have had to slug differently than
 trail of previous plans for the PR.
 
 Structure, in order: the marker, the header `### shipmate plan`, a blank
-line, the verdict line, a blank line, the unmanaged line and a blank line when
+line, the verdict line, a blank line, the doctor line and a blank line when
+`doctor` counted a warning, the unmanaged line and a blank line when
 the pull request changes an unmanaged stack, the lost pairs line and a blank
-line when it untags a stack / environment pair, one line or fold-out per planned
-stack × environment, sorted by environment then stack. The plan body has no
+line when it untags a stack / environment pair, then per environment its
+heading and one line or fold-out per planned stack in it. The environments
+follow `detect`'s `env_order` output, apply order: the env-levels of the
+table's `needs`, ties broken by name. An environment the output does not name
+follows them by name, and an empty or invalid output (the invalid one warns)
+orders every environment by name. In each environment the changed cells come
+first, then the rest, each group sorted by stack, so the fold-outs sit together
+above the unchanged lines. The plan body has no
 footer and no help hint, whether or not `doctor` warned: both verdicts are
 normal results and the verdict links the run. The held body above ends with the
-hint. The doctor step records its decision once, as its
-`warned` output, which the post-or-skip rule reads; the build step records
+hint. `doctor` records its decision once, as its `warned` output, which the
+post-or-skip rule reads, and its `warnings` output, the count the doctor line
+shows: both leave out the repository-settings probes' warnings, a settings
+probe that could not run included, and count any other probe that could not
+run when its note is a warning. When `doctor` fails, the
+doctor step writes `warned=false` and `warnings=0`. The build step records
 whether the unmanaged line and the lost pairs line rendered, as its `unmanaged`
 and `lost` outputs, which the same rule reads.
 
-- **Verdict line.** `🟢 no changes` when no cell changes (zero cells
-  included), else `🟡 N of M cells change`, then
+- **Verdict line.** `⚪ nothing planned` when the run planned no cell,
+  `🟢 no changes` when no cell changes, else `🟡 N of M cells change`, then
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)`. `<sha7>` is the first
   seven characters of the planned head commit and `<commit url>` is
   `<server>/<owner>/<repo>/commit/<sha>`; `<n>` is the run number and
   `<run url>` the run's page. When that commit is not a 40-character lowercase
   hex SHA the line ends `at an unknown commit in [run #<n>](<run url>)`. The
   line reads the cells only: every failed plan job holds the gate, and a held
-  gate posts the held body instead.
+  gate posts the held body instead. With no cell, the skipped `plan` matrix
+  job's check shows its name expression literally
+  (`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped), a
+  platform behaviour no `if:` or `name:` change removes.
+- **Doctor line.** `⚠️ shipmate doctor found N warning(s) beyond repository
+  settings in this run: see [the run](<run url>)`, under any verdict. `N`
+  leaves out the repository-settings warnings the linked run also shows. When
+  the cell lines leave it no room under the 65,536-character cap, it is left
+  out with a warning.
 - **Unmanaged line.** `⚪ N changed stack(s) carry no env/* tag and are not
   managed by shipmate: <paths>`, naming at most ten paths within 1,000
   characters, then `, and M more`. When not even the first path fits, it ends
@@ -2267,7 +2302,11 @@ and `lost` outputs, which the same rule reads.
   too long to list here.` A drift sweep and a run with no pull-request base
   have no such line. On both lines each name is escaped like a cell line's
   stack, `@` included.
-- **Cell line.** `<circle> <stack> (<env>): <state> <a href="<url>">plan</a>`.
+- **Environment heading.** `#### <env>: N cells, M changed` (`1 cell` for one),
+  with a blank line on both sides, `<env>` escaped like a cell line's.
+- **Cell line.** `<circle> <stack>: <state> <a href="<url>">plan</a>`, under its
+  environment's heading; the held body's lines and a plan cell's own step
+  summary line name the environment, `<circle> <stack> (<env>): <state>`.
   The circle is 🟢 for no changes and 🟡 for changes, deliberately two-state: a
   destroy count also covers ordinary replacements, so impact is carried by the
   counts rather than by a severity colour. `<state>` is `no changes`, or for a
@@ -2293,9 +2332,10 @@ GitHub caps issue-comment bodies at 65,536 characters. The comment is built
 to a smaller budget: each changed cell's fold-out degrades, in order, full
 plan → truncated plan (cut at a line boundary, with a link to the check run
 carrying the full text) → the cell's bare line. The space every remaining
-cell's bare line needs is reserved up front, so an early giant plan cannot
-starve a later cell, and every cell keeps its line and its link. If even the
-bare lines alone cannot fit the cap, the summary fails loud rather than posting
+cell's bare line and every environment heading need is reserved up front, so
+an early giant plan cannot starve a later cell, and every cell keeps its line
+and its link. If even the bare lines alone cannot fit the cap, the summary
+fails loud rather than posting
 a truncated comment. Plan text is emitted only inside a backtick
 fence computed to be longer than any backtick run in the text —
 author-controlled plan output cannot escape the fence.
@@ -2352,8 +2392,10 @@ since. It refuses before writing anything when a newer plan run of the same
 head holds the gate ("plan run <id> holds the gate of <sha> and is newer than
 this run") or published apply checks there ("plan run <id>, newer than this run
 (<id>), published apply checks on this head"), so an older run never overwrites
-a newer run's gate or checks. Its apply-check publish and its final gate write
-each read the statuses again and refuse the same way, writing nothing, when a
+a newer run's gate or checks. That refusal is a notice, and the `summary` job
+ends green and runs none of its later steps, so a re-run of a cancelled autoplan
+clears its checks. Its apply-check publish and its final gate write
+each read the statuses again and refuse, writing nothing and failing the job, when a
 newer run of the same head holds the gate by then (that run's `summary` was
 evicted, and `gate-hold` writes outside the job's concurrency group); a failed
 read writes nothing either, so the publish hold stands. A final `pending` gate is followed
@@ -2400,7 +2442,7 @@ plain code fence, cut at 4,000 characters and fenced longer than any backtick
 run in it. A `detect` that failed without an `::error::` renders no fence.
 
 - **Header.** `### shipmate apply <env>` for a targeted run, `### shipmate
-  apply` for a bare one; the row lines and the footer lines name the
+  apply` for a bare one; the environment headings and the footer lines name the
   environments.
 - **Verdict line.** With rows: one count per display status, in the order
   `N failed`, `N not recorded`, `N not attempted`, `N blocked`, `N applied`,
@@ -2419,8 +2461,16 @@ run in it. A `detect` that failed without an `::error::` renders no fence.
   `🟢 no pending applies`. The line ends
   `at [<sha7>](<commit url>) in [run #<n>](<run url>)` for the pull request
   head, as the plan comment's does.
-- **Row line.** `<circle> <stack> (<env>): <state> <a href="<url>">logs</a>`,
-  one per expected cell, sorted by environment then stack:
+- **Environment heading.** `#### <env>: N cells, <counts>` (`1 cell` for one),
+  `<counts>` the verdict line's counts for that environment's rows, with a
+  blank line on both sides, one per environment in the plan comment's order,
+  from `apply-detect`'s `env_order` output (a bare apply orders every
+  environment with an apply check on the head, a targeted one names its
+  environment).
+- **Row line.** `<circle> <stack>: <state> <a href="<url>">logs</a>`, one per
+  expected cell, under its environment's heading. Every row but a not
+  attempted one comes first, then the not attempted rows, each group sorted by
+  stack:
 
   | Display status | Circle | `<state>` |
   | --- | --- | --- |
@@ -2602,9 +2652,11 @@ decoded permissively: a non-UTF-8 byte anywhere in it becomes a replacement
 character instead of aborting the render. Terminal escape sequences (colour
 codes and similar) are stripped from that text as it is read, since the apply
 output is tofu's own and is not required to be colour-free. Every remaining
-row's bare line is reserved up front. When even the bare lines exceed the cap,
-the comment falls back to a compact form: every row keeps its line and its
-`logs` link, a blocked row's state reads `blocked` without its reason, and,
+row's bare line and every environment heading is reserved up front. When even
+the bare lines exceed the cap, the comment falls back to a compact form with no
+headings: every row keeps its line, which then names its environment
+(`<circle> <stack> (<env>): <state>`), and its `logs` link, a blocked row's
+state reads `blocked` without its reason, and,
 when a row is blocked, one note follows the row lines:
 
 `blocked: each blocked cell's reason is in its logs.`
@@ -2657,12 +2709,12 @@ reviewed plan. plan-cell and apply-cell use a byte-identical algorithm
 variable names only — never values.
 
 The same shape carries the planned commit. `plan-cell` reads
-`git rev-parse HEAD` as its first step — before any repository content
-executes — refuses an `expected-head` input that is empty or that it did not
-check out, and ships the observed commit as `planned-head.txt` inside
-`plan.<env>.<slug>`. The file is materialised from the captured step output
-immediately before upload rather than when it is read: between the two,
-`terramate` executes author-controlled HCL and provider binaries, which can
+`git rev-parse HEAD` before any step that runs repository content, refuses an
+`expected-head` input that is empty or that it did not check out, and ships the
+observed commit as `planned-head.txt` inside `plan.<env>.<slug>`. The file is
+materialised from the captured step output immediately before upload rather
+than when it is read: between the two, `terramate` executes
+author-controlled HCL and provider binaries, which can
 rewrite a file at repo root but not an emitted step output. `apply-cell` moves
 the record out of the consumer's checkout into `$RUNNER_TEMP` before reading it
 — the action runs inside the consumer's own checkout and must leave no stray
@@ -2993,7 +3045,7 @@ and `plan-cell`'s text render and `apply-cell`'s are the same command, which the
 plan-text binding (§Apply-match fingerprint) rests on. Terramate 0.17.1 writes
 its own lines to stderr only (measured), so a render's stdout is tofu's alone,
 but the render depends on `run.env`: a value that differs between the plan and
-apply jobs changes the render and refuses the apply.
+apply jobs can change the render, and a changed render refuses the apply.
 
 A consumer repository therefore needs no `script` blocks and no
 `terramate.config.experiments = ["scripts"]`. `init` always passes

@@ -11,14 +11,27 @@ runner's own "Process completed with exit code" annotation and nothing else.
 corrupt restored provider cache entry `<key>`, naming the repository when `GITHUB_REPOSITORY` is
 set, only when any `Error:` diagnostic's title starts with `INSTALL_FAILED`, and nothing
 otherwise: a backend or credential failure is not the cache's, and its own diagnostic names the
-cause. Other arguments are refused.
+cause.
+
+`tofu-error cell-error` writes `$RUNNER_TEMP/cell-error.json`, `{stack, environment, error,
+attempt}` from `STACK`, `ENV`, the first `Error:` diagnostic of `$RUNNER_TEMP/plan-run.txt` if it
+exists, else of `$RUNNER_TEMP/init.txt` if it exists, unescaped, and `GITHUB_RUN_ATTEMPT`. No log
+or no diagnostic writes an empty `error`. plan-cell runs it when an attempt fails inside
+plan-cell, so the file holds the cell's `init` or `plan` error from its latest such attempt.
+Any other plan-cell failure, one whose `init` and `plan` logs hold no OpenTofu `Error:`
+diagnostic, records an empty error. When an attempt uploads no error file (it failed before
+plan-cell ran: checkout, setup, credentials; it was cancelled or timed out; or the error write or
+upload step failed), the cell keeps the error an earlier attempt recorded, if any. Other
+arguments are refused.
 
 The text is author-controlled (a stack's config and provider output), so it
 prints only through `command_data`: a raw newline would start a second workflow
 command.
 """
 
+import json
 import os
+import pathlib
 import sys
 
 from _shipmate import _load, command_data, run_annotated
@@ -60,11 +73,35 @@ def first_error(text):
     return "\n".join(block).strip()[:CAP]
 
 
+def _decode(data):
+    # Provider output is not guaranteed UTF-8; a strict decode would lose the diagnostic.
+    return data.decode("utf-8", errors="replace")
+
+
+def cell_error():
+    temp = pathlib.Path(os.environ["RUNNER_TEMP"])
+    logs = [temp / name for name in ("plan-run.txt", "init.txt") if (temp / name).exists()]
+    error = first_error(_decode(logs[0].read_bytes())) if logs else ""
+    cell = {
+        "stack": os.environ["STACK"],
+        "environment": os.environ["ENV"],
+        "error": error,
+        "attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
+    }
+    # Outside the workspace: a `cell-error.json` the pull request commits must not upload.
+    with open(temp / "cell-error.json", "w", encoding="utf-8") as fh:
+        json.dump(cell, fh)
+
+
 def main(argv=()):
+    if list(argv) == ["cell-error"]:
+        cell_error()
+        return
     if argv and (len(argv) != 2 or argv[0] != "cache-entry"):
-        raise SystemExit(f"::error::usage: tofu-error [cache-entry <key>] (got {list(argv)})")
-    # Provider output is not guaranteed UTF-8; a strict decode would lose the annotation.
-    text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+        raise SystemExit(
+            f"::error::usage: tofu-error [cache-entry <key> | cell-error] (got {list(argv)})"
+        )
+    text = _decode(sys.stdin.buffer.read())
     if not argv:
         if error := first_error(text):
             print(f"::error::{command_data(error)}")

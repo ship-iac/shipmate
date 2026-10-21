@@ -463,7 +463,7 @@ before any wave starts.
 
 ### `plan-cell needs the expected-head input`, or `The plan would describe a tree nobody reviewed`
 
-A plan cell fails on its very first step, before `terramate` runs, so the cell
+A plan cell fails before `terramate` runs, so the cell
 produces no plan and its `shipmate / <stack> / <env>` check does not go green.
 The failing plan job leaves `shipmate / gate` held red with
 `shipmate / <stack> / <env> has no plan summary; fix its plan or re-plan`, or
@@ -1228,7 +1228,7 @@ whose `cancel-in-progress: true` cancels a newer run in flight, or the newer run
 cancels it. A re-run summary publishes no apply check its own run already
 published, so it leaves alone a check an apply completed or is completing. It
 refuses before writing anything when a newer plan run holds the gate or published
-apply checks on the head. A re-run of a plan job whose artifact upload succeeded
+apply checks on the head, and ends green with that refusal as a notice. A re-run of a plan job whose artifact upload succeeded
 fails, because the uploads are not `overwrite:` and 409.
 
 `gate-refresh` refuses to green a held gate from apply checks alone: the apply
@@ -1475,11 +1475,14 @@ record's pull request.
 
 ### A pull request planned zero cells
 
-No `shipmate / <stack> / <env>` checks appear, no plan comment is posted — unless
-there is
-already a plan comment to keep current, `doctor` raised a warning on that
-run, or the pull request changes a stack with no `env/*` tag, any of which still
-posts one — and the gate goes green over no work.
+No per-cell `shipmate / <stack> / <env>` checks appear, no plan comment is
+posted — unless there is already a plan comment to keep current, `doctor`
+raised a warning on that run outside the repository-settings probes, or the
+pull request changes a stack with no `env/*` tag, any of which still posts one,
+headlined `⚪ nothing planned` — and the gate goes green over no work.
+The skipped plan job's one check shows its name expression literally,
+`shipmate / ${{ matrix.stack }} / ${{ matrix.environment }}`, skipped; GitHub
+renders a skipped matrix job that way.
 
 Change detection is `terramate list --changed`, so a pull request that touches
 no stack's own files and changes no generated `.tf` — an engine-pin bump, a docs
@@ -1514,6 +1517,25 @@ run — with the expression to write, unless what it found was a job count other
 than one — and the run is in the Actions tab, linked from the dispatch reply on
 the pull request when that reply carries a link. Reconcile the job against the
 fence in [`getting-started.md`](getting-started.md) §The workflow file.
+
+### A cancelled autoplan left red checks on the pull request
+
+A newer plan run of the same pull request cancelled the autoplan, and the
+autoplan's checks (`shipmate / detect`, `shipmate / summary`,
+`shipmate / gate-hold`, the `shipmate / <stack> / <env>` matrix check) stay red
+or cancelled on the head.
+
+After the newer plan run has finished, re-run the cancelled run:
+`gh run rerun <id>`. Not before: the re-run re-enters the `plan-<pr>`
+concurrency group, whose `cancel-in-progress: true` cancels a newer run still in
+flight. When the newer run holds the gate or published apply checks on the
+head, the re-run's `summary` writes nothing and ends green at its hold step,
+with a notice naming that run ("plan run <id> holds the gate of <sha> and is
+newer than this run", or "plan run <id>, newer than this run (<id>), published
+apply checks on this head"). A newer run that takes the gate while the re-run
+is publishing still fails the re-run's
+`Create apply checks (pending / no-changes)` or `Create/refresh gate` step.
+That red is harmless: the newer run owns the gate.
 
 ### Fork pull request refused
 

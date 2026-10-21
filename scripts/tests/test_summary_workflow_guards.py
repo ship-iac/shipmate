@@ -47,6 +47,7 @@ EXPECTED_SUMMARY_WITH = {
     "github-vars": "${{ toJSON(vars) }}",
     "unmanaged-stacks": "${{ needs.detect.outputs.unmanaged }}",
     "lost-env-tags": "${{ needs.detect.outputs.lost }}",
+    "env-order": "${{ needs.detect.outputs.env_order }}",
 }
 #: `detect`'s whole outputs map: `unmanaged`, `refusal` and `cells` are what the `with:` above
 #: passes on.
@@ -59,6 +60,7 @@ EXPECTED_DETECT_OUTPUTS = {
     "lost": "${{ steps.matrix.outputs.lost }}",
     "refusal": "${{ steps.matrix.outputs.refusal }}",
     "cells": "${{ steps.matrix.outputs.cells }}",
+    "env_order": "${{ steps.matrix.outputs.env_order }}",
 }
 EXPECTED_JOB_IDS = ["facts", "detect", "plan", "summary", "gate-hold"]
 
@@ -112,7 +114,8 @@ def test_the_workflow_passes_exactly_these_values_to_the_summary_action():
     Mutation: drop the `lost-env-tags:` line -> the comment never names a lost pair.
     Mutation: drop the action's `lost-env-tags` input -> its input names differ.
     Mutation: drop `detect`'s `refusal` output -> the gate never names a detect error.
-    Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named."""
+    Mutation: drop the `planned-cell-names:` line -> no cell with no plan summary is ever named.
+    Mutation: drop the `env-order:` line -> the comment orders environments by name."""
     job, _ = _summary_job()
     call = [s for s in job["steps"] if "actions/summary" in str(s.get("uses", ""))]
     assert len(call) == 1
@@ -141,3 +144,24 @@ def test_the_summary_action_always_downloads_and_tolerates_a_failed_download():
     `if: ${{ inputs.planned-cells != '0' }}`.
     """
     assert step_by("summary", name="Download plan cell summaries") == EXPECTED_DOWNLOAD_STEP
+
+
+#: The whole cell-error download step, as parsed.
+EXPECTED_CELL_ERROR_DOWNLOAD_STEP = {
+    "name": "Download cell errors",
+    "if": (
+        "${{ steps.hold.outputs.superseded != 'true'"
+        " && steps.gate.outputs.comment_mode == 'held' }}"
+    ),
+    "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+    "continue-on-error": True,
+    "with": {"pattern": "cell-error.*", "path": "cell-errors"},
+}
+
+
+def test_the_summary_action_downloads_cell_errors_where_the_held_render_reads_them():
+    """Reviewer-facing only, so a failed download continues: the gate reads none of it. `path` is
+    `cell_errors`' default directory. Only the held render reads them. Mutations: drop
+    `continue-on-error`; change `path`; change `pattern` to `cell-summary.*`; drop the
+    `comment_mode` clause."""
+    assert step_by("summary", name="Download cell errors") == EXPECTED_CELL_ERROR_DOWNLOAD_STEP
