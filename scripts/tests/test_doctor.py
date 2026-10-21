@@ -2837,7 +2837,8 @@ def test_the_config_valid_row_keeps_the_onboard_placeholder():
     assert doctor._finding_row(doctor.NOTICE, doctor.CONFIG_VALID) == (
         f"- {doctor._LEVEL_EMOJI[doctor.NOTICE]} `.github/shipmate-config.yml` at the commit "
         "under examination parses, and passes every check a file can be judged on by itself: "
-        "its top-level keys, `layout`, `max_parallel`, the identities and the environment "
+        "its top-level keys, `layout`, `max_parallel`, `command_hints`, the identities and the "
+        "environment "
         "entries. Not checked here, for want of a plan matrix and a whole-tree environment "
         "scan: `tf_vars`-layout coverage of the planned environments, entries that no stack "
         "tags, workload tags "
@@ -5791,7 +5792,7 @@ def test_a_refusal_naming_twelve_errors_shows_ten_and_counts_the_rest(monkeypatc
     monkeypatch.setattr(doctor, "_gh_json", lambda path: responses[path])
     unknown = (
         "{} is not a setting this engine implements. .github/shipmate-config.yml holds "
-        "layout, identities, environments, max_parallel."
+        "layout, identities, environments, max_parallel, command_hints."
     )
     shown = " ".join(unknown.format(f"k{n:02}") for n in range(1, 11))
     assert doctor._config_warnings(_ctx()) == [
@@ -5908,7 +5909,8 @@ def test_a_valid_verdict_names_the_checks_it_did_not_run(monkeypatch):
             (
                 "`.github/shipmate-config.yml` at the commit under examination parses, and passes "
                 "every check a file can be judged on by itself: its top-level keys, "
-                "`layout`, `max_parallel`, the identities and the environment entries. Not "
+                "`layout`, `max_parallel`, `command_hints`, the identities and the environment "
+                "entries. Not "
                 "checked here, for want of a plan matrix and a whole-tree environment scan: "
                 "`tf_vars`-layout coverage of "
                 "the planned environments, entries "

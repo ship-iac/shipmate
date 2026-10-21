@@ -46,7 +46,8 @@ inputs:
   is-draft:
     description: >-
       '"true"' when the pull request is a draft. With on-demand not "true", the run planned
-      nothing and the gate is written pending with the draft reason.
+      nothing and the gate is written pending with the draft reason. A plan comment on a draft
+      carries no command section.
     required: false
     default: ""
   app-id:
@@ -84,6 +85,14 @@ inputs:
       one heading per environment in this order, and any environment it does not name after
       them by name. Empty (detect skipped or refused) orders every environment by name; a value
       that is not a list of names does too, and warns.
+    required: false
+    default: ""
+  command-hints:
+    description: >-
+      build-matrix's `command_hints` output, read from the default branch's table. `true` ends
+      the plan comment with a folded section naming `shipmate apply` and `shipmate help`, when a
+      cell changed and the pull request is not a draft. Anything else (empty when detect is
+      skipped) leaves it out.
     required: false
     default: ""
 runs:
@@ -261,6 +270,8 @@ runs:
         SHIPMATE_UNMANAGED: ${{ inputs.unmanaged-stacks }}
         SHIPMATE_LOST_ENV_TAGS: ${{ inputs.lost-env-tags }}
         SHIPMATE_ENV_ORDER: ${{ inputs.env-order }}
+        SHIPMATE_COMMAND_HINTS: ${{ inputs.command-hints }}
+        SHIPMATE_IS_DRAFT: ${{ inputs.is-draft }}
         # The cells named in `missing`: none unless detect succeeded, since a fmt or codegen
         # failure still carries a full list.
         SHIPMATE_PLANNED_CELLS_NAMES: ${{ inputs.planned-cell-names }}

@@ -1351,7 +1351,8 @@ def test_build_matrix_action_hands_the_script_the_names_it_reads():
 
 def test_build_matrix_action_declares_the_outputs_the_gate_reads():
     """Mutation: delete the `refusal` output -- the gate never names a detect error.
-    Mutation: delete the `env_order` output -- the plan comment orders environments by name."""
+    Mutation: delete the `env_order` output -- the plan comment orders environments by name.
+    Mutation: delete the `command_hints` output -- the plan comment never shows its commands."""
     # `count` is what the trusted summary job measures its evidence against, so
     # a rename or a rewire here is a silent hole in the gate. Hand-written,
     # name -> wiring; descriptions are prose and deliberately not pinned.
@@ -1361,6 +1362,7 @@ def test_build_matrix_action_declares_the_outputs_the_gate_reads():
         "empty": "${{ steps.build.outputs.empty }}",
         "count": "${{ steps.build.outputs.count }}",
         "max_parallel": "${{ steps.build.outputs.max_parallel }}",
+        "command_hints": "${{ steps.build.outputs.command_hints }}",
         "cells": "${{ steps.build.outputs.cells }}",
         "unmanaged": "${{ steps.build.outputs.unmanaged }}",
         "lost": "${{ steps.build.outputs.lost }}",
@@ -2430,6 +2432,7 @@ def test_a_pull_request_plan_writes_its_changed_unmanaged_stacks(monkeypatch, tm
         "empty": "false",
         "count": "1",
         "max_parallel": "10",
+        "command_hints": "false",
         "cells": '[{"environment": "dev-eu", "stack": "stacks/app"}]',
         "unmanaged": '{"count": 1, "paths": ["stacks/new"]}',
         "lost": "",
@@ -2451,6 +2454,21 @@ def test_the_env_order_output_follows_the_needs_levels_not_the_names(monkeypatch
         table={"layout": "folder", "environments": {"live": {"needs": ["staging"]}, "staging": {}}},
     )
     assert outputs["env_order"] == '["staging", "live"]'
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [({"layout": "folder", "command_hints": True}, "true"), ({"layout": "folder"}, "false")],
+    ids=["set", "unset"],
+)
+def test_detect_writes_the_tables_command_hints(monkeypatch, tmp_path, table, expected):
+    """The plan summary reads this output to end the comment with its command section.
+
+    Mutation: `write_outputs(command_hints=False)` -- "set" reads "false"; write
+    `command_hints=True` -- "unset" reads "true"."""
+    outputs, _ = _run_main(monkeypatch, tmp_path, _PR_ENV, head_sha="cafe1234", table=table)
+    assert outputs["count"] == "1"  # Not vacuous: a cell exists.
+    assert outputs["command_hints"] == expected
 
 
 def _git(*args):

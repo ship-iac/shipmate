@@ -742,6 +742,7 @@ def main():
     pairs = warn_lost_env_tags(sweep, base, unmanaged, tree)
     # Before the write: a refusal after `matrix=` would leave a matrix with no cap.
     cap = ec.max_parallel(table)
+    hints = ec.command_hints(table)
     named = {"count": len(unmanaged), "paths": unmanaged[:UNMANAGED_NAMES]}
     lost = ""
     if pairs is not None:
@@ -751,6 +752,7 @@ def main():
         empty=not cells,
         count=len(cells),
         max_parallel=cap,
+        command_hints=hints,
         cells=json.dumps(tree),
         unmanaged=json.dumps(named),
         lost=lost,
