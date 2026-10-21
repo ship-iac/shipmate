@@ -3050,7 +3050,7 @@ produced, which is any branch; `docs/hardening.md` #7–9 says to treat it so.
 
 The engine names the `tofu` command every cell runs; a consumer repository
 supplies stacks, generated `.tf`, and Terramate metadata, never the command
-line. Cells call `terramate run --disable-safeguards=git-out-of-sync
+line. Cells call `terramate run --quiet --disable-safeguards=git-out-of-sync
 --no-recursive -C <stack> -- tofu …`, so Terramate contributes the stack working
 directory, its `run.env`, and the safeguard policy only:
 

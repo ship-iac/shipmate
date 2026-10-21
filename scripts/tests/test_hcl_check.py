@@ -10,11 +10,13 @@ byte changed: `fmt-two-files.stdout`'s `\\` separators became `/`, and in
 
 Every case drives `main` through `run_annotated`, with `subprocess.run` replaced by a double that
 takes the call the script makes and fails on any other argv, and compares the whole stderr and
-the whole `refusal` output against hand-written constants. The raw-output echo on stdout is
-pinned once, with the stop-commands token made deterministic.
+the whole `refusal` output against hand-written constants. The raw-output echo on stderr is
+pinned whole once, with the stop-commands token made deterministic, and cut from the rest.
 """
 
+import os
 import pathlib
+import re
 import types
 
 import pytest
@@ -63,6 +65,7 @@ EVAL_ERROR = (
     '34,23-28: eval expression: This object does not have an attribute named "nope".'
 )
 MISSING = "[Errno 2] No such file or directory: 'terramate'"
+_ECHO = re.compile(r"::group::.*?::endgroup::\n", re.S)
 
 
 def _capture(name):
@@ -79,10 +82,15 @@ def _twelve_unformatted():
     return 1, b"".join(b"f%02d.hcl\n" % i for i in range(1, 13)), b""
 
 
-def _run(monkeypatch, tmp_path, capsys, fmt, generate):
+def _run(monkeypatch, tmp_path, capsys, fmt, generate, exists=None):
     """(exit code or None, captured stdout and stderr, `refusal` or None when no output was
     written) of one run; `fmt` and `generate` are each an (exit, stdout, stderr) answer or an
-    exception to raise."""
+    exception to raise. `exists` stands in for `isfile`; by default every non-empty line of
+    `fmt`'s stdout names a file."""
+    if exists is None:
+        listed = set() if isinstance(fmt, BaseException) else set(fmt[1].decode().splitlines())
+        exists = listed.__contains__
+    monkeypatch.setattr(hc, "isfile", exists)
     answers = {FMT: fmt, GENERATE: generate}
     calls = []
 
@@ -110,10 +118,11 @@ def _run(monkeypatch, tmp_path, capsys, fmt, generate):
     return code, capsys.readouterr(), refusal
 
 
-def _check(monkeypatch, tmp_path, capsys, fmt, generate):
-    """`_run`, keeping stderr alone of the captured output."""
-    code, captured, refusal = _run(monkeypatch, tmp_path, capsys, fmt, generate)
-    return code, captured.err, refusal
+def _check(monkeypatch, tmp_path, capsys, fmt, generate, exists=None):
+    """`_run`, keeping stderr alone of the captured output, less the raw-output echo groups that
+    `test_each_commands_raw_output_is_echoed_in_a_group_with_workflow_commands_stopped` pins."""
+    code, captured, refusal = _run(monkeypatch, tmp_path, capsys, fmt, generate, exists)
+    return code, _ECHO.sub("", captured.err), refusal
 
 
 def test_two_unformatted_files_each_get_an_annotation_and_one_summary(
@@ -246,7 +255,8 @@ def test_non_utf8_stderr_is_the_generic_error(monkeypatch, tmp_path, capsys):
 
 
 def test_a_missing_terramate_is_the_generic_error_for_both(monkeypatch, tmp_path, capsys):
-    """Mutation: drop the `OSError` handler -- red, a FileNotFoundError traceback."""
+    """Mutations: drop the `OSError` handler -- red, a FileNotFoundError traceback; append the
+    OS error without the two-space indent -- red."""
 
     def missing():
         return FileNotFoundError(2, "No such file or directory", "terramate")
@@ -256,7 +266,7 @@ def test_a_missing_terramate_is_the_generic_error_for_both(monkeypatch, tmp_path
     result = _check(monkeypatch, tmp_path, capsys, missing(), missing())
     assert result == (
         1,
-        f"::error::{fmt}%0A{MISSING}\n::error::{generate}%0A{MISSING}\n",
+        f"::error::{fmt}%0A  {MISSING}\n::error::{generate}%0A  {MISSING}\n",
         f"{fmt} {MISSING}",
     )
 
@@ -289,28 +299,61 @@ def test_a_detail_line_starting_with_an_error_command_stays_in_one_annotation(
     assert result == (1, f"::error::{first}%0A  ::error::x\n", f"{first} ::error::x")
 
 
-def test_an_fmt_file_list_with_stderr_is_the_generic_error(monkeypatch, tmp_path, capsys):
-    """Mutation: drop `or err` from `_fmt`'s guard -- red, `a.hcl` annotated as unformatted."""
-    first = "terramate fmt exited 1; run it locally to see why"
+def test_an_fmt_file_list_with_a_stderr_warning_still_annotates_each_file(
+    monkeypatch, tmp_path, capsys
+):
+    """Real files under the cwd, and the real `isfile`. Mutation: skip reading the file list when
+    stderr is not empty -- red, the generic error."""
+    monkeypatch.chdir(tmp_path)
+    for name in ("stacks/app/globals.tm.hcl", "stacks/dns/globals.tm.hcl"):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("", encoding="utf-8")
+    rc, out, _ = _capture("fmt-two-files")
     result = _check(
-        monkeypatch, tmp_path, capsys, (1, b"a.hcl\n", b"Error: boom\n"), _capture("generate-clean")
+        monkeypatch,
+        tmp_path,
+        capsys,
+        (rc, out, b"Warning: deprecated\n"),
+        _capture("generate-clean"),
+        exists=os.path.isfile,
     )
-    assert result == (1, f"::error::{first}%0A  Error: boom\n", f"{first} Error: boom")
+    assert result == (1, FMT_TWO_FILES + f"::error::{FMT_TWO}\n", FMT_TWO)
+
+
+def test_an_fmt_stdout_line_that_is_not_a_file_is_the_generic_error(monkeypatch, tmp_path, capsys):
+    """Mutation: drop the `isfile` test from `_fmt` -- red, `not a file` annotated."""
+    first = "terramate fmt exited 1; run it locally to see why"
+    out = b"stacks/app/globals.tm.hcl\nnot a file\n"
+    result = _check(
+        monkeypatch,
+        tmp_path,
+        capsys,
+        (1, out, b""),
+        _capture("generate-clean"),
+        exists=lambda p: p == "stacks/app/globals.tm.hcl",
+    )
+    assert result == (
+        1,
+        f"::error::{first}%0A  stacks/app/globals.tm.hcl%0A  not a file\n",
+        f"{first} stacks/app/globals.tm.hcl not a file",
+    )
 
 
 def test_each_commands_raw_output_is_echoed_in_a_group_with_workflow_commands_stopped(
     monkeypatch, tmp_path, capsys
 ):
-    """A file name is branch-controlled, so the echo must not run a workflow command it holds.
-    Mutations: drop the `::stop-commands::` line or its resume line; drop `err` from the echo;
-    drop `::endgroup::` -- each red."""
+    """A file name is branch-controlled, so the echo must not run a workflow command it holds,
+    and the runner reads stdout and stderr apart, so the echo shares the annotations' stream and
+    closes before them. Mutations: drop the `::stop-commands::` line or its resume line; drop
+    `err` from the echo; drop `::endgroup::`; write the echo to stdout -- each red."""
     monkeypatch.setattr(hc.secrets, "token_hex", lambda n: f"tok{n}")
     report = b"- /stacks/app\n\t[~] ::warning::x.tf"
     code, captured, _ = _run(
         monkeypatch, tmp_path, capsys, (1, b"::warning::a.hcl\n", b""), (2, report, b"warn\n")
     )
     assert code == 1
-    assert captured.out == (
+    assert captured.out == ""
+    assert captured.err == (
         "::group::terramate fmt --check\n"
         "::stop-commands::tok16\n"
         "::warning::a.hcl\n"
@@ -323,6 +366,12 @@ def test_each_commands_raw_output_is_echoed_in_a_group_with_workflow_commands_st
         "warn\n"
         "::tok16::\n"
         "::endgroup::\n"
+        f"::error file=%3A%3Awarning%3A%3Aa.hcl::{FMT_LINE}\n"
+        f"::error file=stacks/app/%3A%3Awarning%3A%3Ax.tf::{STALE_LINE}\n"
+        "::error::1 file(s) not formatted; run terramate fmt and commit the result: "
+        "::warning::a.hcl\n"
+        "::error::1 generated file(s) stale; run terramate generate and commit the result: "
+        "stacks/app/::warning::x.tf\n"
     )
 
 

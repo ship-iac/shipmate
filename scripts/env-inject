@@ -348,6 +348,7 @@ def check_run_env(table, pairs, environ, run=subprocess.run):
         [
             "terramate",
             "run",
+            "--quiet",
             "--disable-safeguards=git-out-of-sync",
             "--no-recursive",
             "-C",

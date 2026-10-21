@@ -58,7 +58,11 @@ BLOCKS = {
     "apply-detect": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "build-matrix": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
     "gate-status": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",
-    "hcl-check": "if __name__ == '__main__':\n    run_annotated(main, refusal_output=True)",
+    "hcl-check": (
+        "if __name__ == '__main__':\n"
+        "    utf8_output()\n"
+        "    run_annotated(main, refusal_output=True)"
+    ),
     "plan-classify": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",
     "plan-crypt": "if __name__ == '__main__':\n    run_annotated(main, sys.argv)",
     "plan-cell-summary": "if __name__ == '__main__':\n    run_annotated(main, sys.argv[1:])",

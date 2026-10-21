@@ -25,9 +25,11 @@ every file as it was:
 5. The `shipmate` fence of `docs/getting-started.md` at `<sha>` renders as `onboard` renders
    it, on the branch named by the consumer's `shipmate.yml` line `    branches: [X]` directly
    under `  push:` when that is the only such line, `X` is a single plain branch name, and
-   the push block holds nothing else but blank and comment lines. Any other shape renders on
-   `main`, so a list, a wildcard, a flow mapping or a `paths:` filter shows in the diff. A
-   single branch other than the default is `onboard`'s to report, not this script's.
+   the push block holds nothing else. Blank, whitespace-only and comment lines after the
+   `branches:` line are skipped; a comment between `  push:` and that line, or after its `]`,
+   makes the trigger not plain. Any other shape renders on `main`, so a list, a wildcard, a
+   flow mapping or a `paths:` filter shows in the diff. A single branch other than the default
+   is `onboard`'s to report, not this script's.
 
 It then writes each changed file, prints `updated <file>` or `unchanged <file>` for every file
 it read, and prints the diff from the rendered fence to `shipmate.yml`, pins masked.
